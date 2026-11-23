@@ -288,6 +288,8 @@ export function autoFixCopy(
     return `Off. Turn on to let ${thread} fix failed checks, review comments, and merge conflicts, up to ${attempts} tries each.`;
   }
   if (state.status === "stopped") {
+    if (state.reason === "ready")
+      return `Babysitting finished. ${state.readyHeadSha ? state.readyHeadSha.slice(0, 12) : "The observed head"} met your merge conditions.`;
     if (state.reason === "attempt-limit") {
       return `Stopped after ${attempts} tries on the same failure. Look at the thread, then turn it on again.`;
     }
@@ -311,6 +313,8 @@ export function autoFixCopy(
           : "tried to wake the thread, which refused the turn";
     return `On. Last ${result} ${formatUpdatedAt(state.lastWake.at)} (try ${state.lastWake.attempt} of ${attempts}).`;
   }
+  if (state.babysit)
+    return `Babysitting until ${state.babysit.checks} checks pass, reviews are clear, and the branch can merge${state.babysit.requiredLabel ? ` with the label “${state.babysit.requiredLabel}”` : ""}.`;
   return `On. Watching for failed checks, review comments, and merge conflicts for ${thread}.`;
 }
 
@@ -337,6 +341,8 @@ export function switchRefusalCopy(
           : "the GitHub command is unavailable";
     return `${name} did not change: ${reason}.`;
   }
+  if (outcome.reason === "already-active")
+    return "Auto-fix is already active for this pull request. Stop it before starting with different rules.";
   const reason =
     outcome.reason === "not-authorized"
       ? "only a local Octant window with access to this Project can change it"

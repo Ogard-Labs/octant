@@ -91,6 +91,7 @@ import {
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
+import { PullRequestBabysitDialog } from "./PullRequestBabysitDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController } from "./useCodeController";
@@ -510,7 +511,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     threadId: view === undefined ? props.threadId : view.thread.id,
     ...(providerFamily === undefined ? {} : { providerFamily }),
   });
+  const [babysitThread, setBabysitThread] = useState<CodeThreadId>();
+  const canBabysit =
+    view?.thread.lifecycle === "active" &&
+    !serverCheckout &&
+    codeClient?.queryProjectPullRequestSwitches !== undefined &&
+    codeClient.setProjectPullRequestAutoFix !== undefined;
   const slash = useComposerSlashCommands({
+    threadCommands: canBabysit
+      ? [
+          {
+            id: "babysit-pr",
+            title: "/babysit",
+            detail: "Fix a linked pull request until it meets your conditions",
+            keywords: ["pr-babysit", "checks", "review", "merge"],
+            group: "Actions",
+            action: { kind: "run", run: () => setBabysitThread(props.threadId) },
+          },
+        ]
+      : [],
     textarea: () => textareaRef.current,
     draft,
     onDraftChange: (next) => {
@@ -2524,6 +2543,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             />
           </SelectionThreadScope>
         )}
+        <OctantDialogPresence>
+          {canBabysit && babysitThread === props.threadId && view !== undefined ? (
+            <PullRequestBabysitDialog
+              key={props.threadId}
+              client={codeClient}
+              projectId={view.thread.projectId}
+              threadId={props.threadId}
+              onClose={() => setBabysitThread(undefined)}
+            />
+          ) : null}
+        </OctantDialogPresence>
         <OctantDialogPresence>
           {rewind !== undefined ? (
             <RewindDialog

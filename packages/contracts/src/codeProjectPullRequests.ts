@@ -81,6 +81,7 @@ export const MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS = 8;
  */
 export const CodeProjectPullRequestQuery = Schema.Struct({
   version: Schema.Literal(1),
+  threadId: Schema.optional(CodeThreadId),
 }).annotations(strict);
 export type CodeProjectPullRequestQuery = typeof CodeProjectPullRequestQuery.Type;
 
@@ -403,7 +404,7 @@ const CodeProjectPullRequestActionTarget = {
   number: Schema.Int.pipe(Schema.positive()),
 } as const;
 
-const CodeProjectPullRequestLabel = Schema.String.pipe(
+export const CodeProjectPullRequestLabel = Schema.String.pipe(
   Schema.filter(
     (value) =>
       value.length >= 1 &&

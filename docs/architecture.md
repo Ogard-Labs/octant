@@ -3937,6 +3937,23 @@ CI or reviewers should be woken, not left polling; maintainer request,
   starts the host records `thread.external-content-ingested@1` on the thread
   (label `pull-request-auto-fix`), so the taint rules apply; when that mark is
   refused, no turn is sent.
+- **Babysit a pull request.** Choosing `/babysit` in a Code thread opens its
+  linked pull requests. The person selects one and starts Auto-fix with a
+  completion rule. From the Pull requests list, a row offers the same controls
+  and a choice of repairing thread when several are linked. Each PR keeps its
+  own rules and stop state, including when several belong to the same thread. It handles required checks by default, or every reported
+  check if selected (this choice waits for at least one check to report).
+  The person can also require a named GitHub label. A
+  missing approval or label waits for the person. A branch GitHub requires
+  to be up to date receives a follow-up to merge its base. New top-level
+  comments and submitted review notes from people or bots go to the same
+  thread for triage once per GitHub ID. The host stops
+  babysitting when it observes an open, non-draft, mergeable head with
+  passing selected checks, cleared repository gates, no current unresolved
+  review threads and the requested label. It confirms the head after the
+  detail reads and records completion with a thread follow-up naming that
+  head. The person's rules replay with the Auto-fix switch. A person can
+  reopen the command to inspect or stop it. Merging uses its own controls.
 - **Auto-fix limits.** A failure is a check name, a review thread id, or the
   base conflict. Each started wake spends one attempt on every failure it
   carried; at most three attempts per failure, or the number in Settings ›

@@ -14,6 +14,7 @@ import {
   ArrowLeft,
   Check,
   GitPullRequest,
+  Eye,
   GitPullRequestDraft,
   Link2,
   ListFilter,
@@ -33,7 +34,8 @@ import {
   writeStoredValue,
 } from "../threadBoard/threadBoardState";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OverviewBabysitDialog, type BabysitClient } from "./PullRequestBabysitDialog";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import {
   OctantMenuCheckboxItem,
@@ -123,6 +125,7 @@ interface AgentForgeChoices {
 }
 
 export interface CodeProjectPullRequestsProps {
+  readonly babysitClient?: BabysitClient;
   readonly load: (query: CodeProjectPullRequestQuery) => Promise<CodeProjectPullRequestView>;
   readonly refresh: (
     command: CodeProjectPullRequestRefreshCommand,
@@ -183,6 +186,7 @@ type WorkspaceState =
 
 export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   const [workspace, setWorkspace] = useState<WorkspaceState>({ status: "loading" });
+  const [watchKey, setWatchKey] = useState<string>();
   const [search, setSearch] = useState("");
   const storage = props.storage ?? defaultBoardStorage();
   const [sort, setSort] = useState<PullRequestSort>(
@@ -326,6 +330,15 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
     filterPullRequests(matchingSearch, filters, props.viewerLogin),
     repositories,
   );
+  const watchRow =
+    watchKey === undefined
+      ? undefined
+      : scopedRows.find((row) => projectPullRequestKey(row) === watchKey);
+  const watchAction =
+    props.babysitClient?.queryProjectPullRequestSwitches &&
+    props.babysitClient.setProjectPullRequestAutoFix
+      ? setWatchKey
+      : undefined;
   const selectedKey = props.renderDetail === undefined ? props.selectedRowKey : pickedKey;
   const selectedRow =
     selectedKey === undefined
@@ -514,6 +527,14 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         </>
       ) : null}
 
+      {watchRow && props.babysitClient ? (
+        <OverviewBabysitDialog
+          key={watchKey}
+          row={watchRow}
+          client={props.babysitClient}
+          onClose={() => setWatchKey(undefined)}
+        />
+      ) : null}
       {view === undefined ? (
         workspace.status === "error" ? (
           <OctantAlert className="code-project-pull-requests__status" tone="warning">
@@ -674,6 +695,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                     void runRefresh({ kind: "refresh-project", projectId: group.projectId })
                   }
                   onSelectRow={selectRow}
+                  onBabysit={watchAction}
                   project={connectedProjects.find(
                     (project) => String(project.projectId) === String(group.projectId),
                   )}
@@ -703,6 +725,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                     void runRefresh({ kind: "refresh-project", projectId: project.projectId })
                   }
                   onSelectRow={selectRow}
+                  onBabysit={watchAction}
                   project={project}
                   rows={[]}
                   selectedRowKey={selectedKey}
@@ -722,6 +745,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             <>
               <PullRequestRows
                 onSelectRow={selectRow}
+                onBabysit={watchAction}
                 qualifyRepository={qualifyRepository}
                 rows={dock ? visibleRows : visibleRows.slice(0, shown)}
                 selectedRowKey={selectedKey}
@@ -1168,6 +1192,7 @@ function RepositoryGroup(props: {
   readonly onRefresh: () => void;
   readonly emptyCopy?: string;
   readonly selectedRowKey: string | undefined;
+  readonly onBabysit: ((key: string) => void) | undefined;
   readonly onSelectRow: ((row: CodeProjectPullRequestRow) => void) | undefined;
   readonly backgroundRefresh?: ProjectSetting;
   readonly backgroundRefreshState?: CodeProjectPullRequestBackgroundRefreshState;
@@ -1226,6 +1251,7 @@ function RepositoryGroup(props: {
       ) : (
         <PullRequestRows
           onSelectRow={props.onSelectRow}
+          onBabysit={props.onBabysit}
           qualifyRepository={false}
           rows={props.rows}
           selectedRowKey={props.selectedRowKey}
@@ -1238,6 +1264,7 @@ function RepositoryGroup(props: {
 function PullRequestRows(props: {
   readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
   readonly selectedRowKey: string | undefined;
+  readonly onBabysit: ((key: string) => void) | undefined;
   readonly onSelectRow: ((row: CodeProjectPullRequestRow) => void) | undefined;
   /** Name the owner too: the list spans repositories and no group head says it. */
   readonly qualifyRepository: boolean;
@@ -1257,7 +1284,7 @@ function PullRequestRows(props: {
       {props.rows.map((row) => {
         const rowKey = projectPullRequestKey(row);
         return (
-          <li key={rowKey}>
+          <li key={rowKey} className={props.onBabysit ? "pr-page__watch-row" : undefined}>
             <PullRequestRow
               onSelect={select}
               qualifyRepository={props.qualifyRepository}
@@ -1265,6 +1292,15 @@ function PullRequestRows(props: {
               rowKey={rowKey}
               selected={props.selectedRowKey === rowKey}
             />
+            {props.onBabysit && row.state !== "closed" && row.state !== "merged" && (
+              <OctantIconButton
+                type="button"
+                label={`Babysit ${row.repositoryOwner}/${row.repositoryName}#${row.number}`}
+                onClick={() => props.onBabysit?.(rowKey)}
+              >
+                <Eye aria-hidden="true" size={16} />
+              </OctantIconButton>
+            )}
           </li>
         );
       })}

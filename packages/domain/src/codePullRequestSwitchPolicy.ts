@@ -4,6 +4,7 @@ import {
   CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES,
   MAX_CODE_PROJECT_PULL_REQUEST_WATCH_SIGNALS,
   type CodeProjectPullRequestAutoFixFailure,
+  type PullRequestBabysitRules,
   type CodeProjectPullRequestAutoFixPauseReason,
   type CodeProjectPullRequestAutoFixRecorded,
   type CodeProjectPullRequestAutoFixStopReason,
@@ -41,6 +42,9 @@ export type PullRequestAutoFixFold =
       readonly status: "on";
       readonly threadId: string;
       readonly enabledAt: string;
+      readonly babysit?: PullRequestBabysitRules;
+      /** Each finding sent for the current head, even if another wake sent different findings. */
+      readonly handled?: { readonly headSha: string; readonly failures: ReadonlySet<string> };
       /** Started wakes per failure identity since the switch was last turned on. */
       readonly attempts: ReadonlyMap<string, number>;
       readonly lastWake?: PullRequestAutoFixWakeFold;
@@ -49,6 +53,7 @@ export type PullRequestAutoFixFold =
       readonly status: "stopped";
       readonly threadId: string;
       readonly reason: CodeProjectPullRequestAutoFixStopReason;
+      readonly readyHeadSha?: string;
       readonly stoppedAt: string;
     };
 
@@ -165,6 +170,7 @@ export function applyPullRequestSwitchEvent(
         threadId: String(threadId),
         enabledAt: event.occurredAt,
         attempts: new Map(),
+        ...(change.babysit === undefined ? {} : { babysit: change.babysit }),
       },
     };
   }
@@ -176,18 +182,26 @@ export function applyPullRequestSwitchEvent(
         status: "stopped",
         threadId: String(threadId),
         reason: change.reason,
+        ...(change.readyHeadSha === undefined ? {} : { readyHeadSha: change.readyHeadSha }),
         stoppedAt: event.occurredAt,
       },
     };
   }
   if (fold.autoFix.status !== "on") return fold;
   const attempts = new Map(fold.autoFix.attempts);
+  const handled =
+    fold.autoFix.babysit && change.result === "started"
+      ? new Set(
+          fold.autoFix.handled?.headSha === change.headSha ? fold.autoFix.handled.failures : [],
+        )
+      : undefined;
   // Only a wake that started a turn spent an attempt; a refused one never
   // reached the agent.
   if (change.result === "started") {
     for (const failure of change.failures) {
       const identity = failureIdentity(failure);
       attempts.set(identity, (attempts.get(identity) ?? 0) + 1);
+      handled?.add(identity);
     }
   }
   return {
@@ -195,6 +209,7 @@ export function applyPullRequestSwitchEvent(
     autoFix: {
       ...fold.autoFix,
       attempts,
+      ...(handled ? { handled: { headSha: change.headSha, failures: handled } } : {}),
       lastWake: {
         at: event.occurredAt,
         headSha: change.headSha,
@@ -209,6 +224,7 @@ export function applyPullRequestSwitchEvent(
 export interface PullRequestAutoFixObservation {
   readonly state: "open" | "merged" | "closed";
   readonly headSha: string;
+  readonly babysitReady?: boolean;
   readonly failures: ReadonlyArray<CodeProjectPullRequestAutoFixFailure>;
 }
 
@@ -247,7 +263,18 @@ export function decidePullRequestAutoFix(input: {
   if (fold.status !== "on") return { kind: "idle" };
   if (observation.state === "merged") return { kind: "stop", reason: "merged" };
   if (observation.state === "closed") return { kind: "stop", reason: "closed" };
-  if (observation.failures.length === 0) return { kind: "idle" };
+  if (observation.failures.length === 0) {
+    if (fold.babysit && observation.babysitReady && !input.turnActive) {
+      return { kind: "stop", reason: "ready" };
+    }
+    return { kind: "idle" };
+  }
+  const handled = fold.handled;
+  const failures =
+    handled?.headSha === observation.headSha
+      ? observation.failures.filter((failure) => !handled.failures.has(failureIdentity(failure)))
+      : observation.failures;
+  if (failures.length === 0) return { kind: "idle" };
   if (
     fold.lastWake !== undefined &&
     fold.lastWake.result === "started" &&
@@ -257,14 +284,14 @@ export function decidePullRequestAutoFix(input: {
     return { kind: "idle" };
   }
   const spent = Math.max(
-    ...observation.failures.map((failure) => fold.attempts.get(failureIdentity(failure)) ?? 0),
+    ...failures.map((failure) => fold.attempts.get(failureIdentity(failure)) ?? 0),
   );
   if (spent >= (input.maxAttempts ?? CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS)) {
     return { kind: "stop", reason: "attempt-limit" };
   }
   if (input.turnActive) return { kind: "paused", reason: "turn-active" };
   if (input.personTyping) return { kind: "paused", reason: "person-typing" };
-  return { kind: "wake", attempt: spent + 1, failures: observation.failures };
+  return { kind: "wake", attempt: spent + 1, failures };
 }
 
 export function watchSignalIdentity(signal: CodeProjectPullRequestWatchSignal): string {

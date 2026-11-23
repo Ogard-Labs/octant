@@ -35,6 +35,81 @@ async function chooseFromAddMenu(user: ReturnType<typeof userEvent.setup>, name:
   await user.click(await screen.findByRole("menuitem", { name }));
 }
 
+describe("Babysitting a pull request", () => {
+  it("requires an explicit PR when one thread is linked to two, and reads the selected target", async () => {
+    const user = userEvent.setup();
+    const target = { projectId, repositoryOwner: "octant", repositoryName: "app", number: 42 };
+    const second = { ...target, repositoryName: "cli" };
+    const read = vi.fn().mockResolvedValue({ autoFix: { status: "off" } });
+    const client = {
+      ...controller().client,
+      queryProjectPullRequests: vi.fn().mockResolvedValue({
+        rows: [target, second].map((pr) => ({
+          ...pr,
+          state: "open",
+          title: pr.repositoryName,
+          linkedThreads: [{ threadId }],
+        })),
+      }),
+      queryProjectPullRequestSwitches: read,
+      setProjectPullRequestAutoFix: vi.fn(),
+    };
+    render(<CodeThreadWorkspace controller={controller({ client })} threadId={threadId} />);
+    await user.type(screen.getByLabelText("Follow-up message"), "/babysit{Enter}");
+    const chooser = await screen.findByRole("combobox", { name: "Linked pull request" });
+    expect(read).not.toHaveBeenCalled();
+    await user.click(chooser);
+    await user.click(await screen.findByRole("option", { name: /octant\/cli#42/ }));
+    await screen.findByRole("button", { name: "Start babysitting" });
+    expect(read).toHaveBeenCalledWith(second);
+    await user.click(chooser);
+    await user.click(await screen.findByRole("option", { name: /octant\/app#42/ }));
+    await waitFor(() => expect(read).toHaveBeenLastCalledWith(target));
+    expect(client.setProjectPullRequestAutoFix).not.toHaveBeenCalled();
+  });
+
+  it("starts and stops from the composer with the person's checks and label on this thread's PR", async () => {
+    const user = userEvent.setup();
+    const target = { projectId, repositoryOwner: "octant", repositoryName: "app", number: 42 };
+    const babysit = { checks: "all", requiredLabel: "qa" };
+    const set = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "applied",
+        view: { autoFix: { status: "on", threadId, babysit } },
+      })
+      .mockResolvedValueOnce({ status: "applied", view: { autoFix: { status: "off" } } });
+    const client = {
+      ...controller().client,
+      queryProjectPullRequests: vi.fn().mockResolvedValue({
+        rows: [
+          { ...target, state: "open", title: "Linked change", linkedThreads: [{ threadId }] },
+          {
+            ...target,
+            number: 43,
+            state: "open",
+            title: "Other change",
+            linkedThreads: [{ threadId: anotherThreadId }],
+          },
+        ],
+      }),
+      queryProjectPullRequestSwitches: vi.fn().mockResolvedValue({ autoFix: { status: "off" } }),
+      setProjectPullRequestAutoFix: set,
+    };
+    const code = controller({ client });
+    render(<CodeThreadWorkspace controller={code} threadId={threadId} />);
+    await user.type(screen.getByLabelText("Follow-up message"), "/babysit{Enter}");
+    const dialog = within(await screen.findByRole("dialog", { name: "Babysit a pull request" }));
+    await user.click(await dialog.findByRole("checkbox", { name: /all checks/ }));
+    await user.type(dialog.getByLabelText("Required label (optional)"), "qa");
+    await user.click(dialog.getByRole("button", { name: "Start babysitting" }));
+    expect(set).toHaveBeenCalledWith({ kind: "enable", target, threadId, babysit });
+    await user.click(await dialog.findByRole("button", { name: "Stop babysitting" }));
+    expect(set).toHaveBeenCalledWith({ kind: "disable", target, threadId });
+    expect(code.sendFollowUp).not.toHaveBeenCalled();
+  });
+});
+
 describe("Code plan proposals", () => {
   it.each([0, 503])(
     "keeps plan retry reachable after an initial read fails with %s",

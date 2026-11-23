@@ -204,6 +204,58 @@ function renderWorkspace(
 }
 
 describe("CodeProjectPullRequests", () => {
+  it("starts babysitting the chosen PR from the list in the selected linked thread", async () => {
+    const user = userEvent.setup();
+    const otherThread = "20000000-0000-4000-8000-000000000002";
+    const base = view().rows[0]!;
+    const snapshot = view({
+      rows: [
+        {
+          ...base,
+          linkedThreads: [...base.linkedThreads, { threadId: otherThread, title: "Repair thread" }],
+        },
+        { ...base, number: 13, linkedThreads: [] },
+      ],
+    });
+    const read = vi.fn().mockResolvedValue({ autoFix: { status: "off" } });
+    const write = vi.fn().mockResolvedValue({
+      status: "applied",
+      view: { autoFix: { status: "on", threadId: otherThread, babysit: { checks: "required" } } },
+    });
+    render(
+      <CodeProjectPullRequests
+        load={async () => snapshot}
+        refresh={async () => snapshot}
+        babysitClient={{
+          queryProjectPullRequestSwitches: read,
+          setProjectPullRequestAutoFix: write,
+        }}
+      />,
+    );
+    const action = await screen.findByRole("button", { name: "Babysit octant/octant#12" });
+    expect(read).not.toHaveBeenCalled();
+    await user.click(action);
+    expect(screen.queryByRole("button", { name: "Start babysitting" })).toBeNull();
+    await user.click(screen.getByRole("combobox", { name: "Repairing Code thread" }));
+    await user.click(await screen.findByRole("option", { name: "Repair thread" }));
+    await user.click(await screen.findByRole("button", { name: "Start babysitting" }));
+    expect(write).toHaveBeenCalledExactlyOnceWith({
+      kind: "enable",
+      threadId: otherThread,
+      target: {
+        projectId: projectA,
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+        number: 12,
+      },
+      babysit: { checks: "required" },
+    });
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Babysit octant/octant#13" }));
+    expect(await screen.findByText(/Link a Code thread to this pull request/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Start babysitting" })).toBeNull();
+  });
+
   it("loads the cached snapshot on open and does not refresh GitHub", async () => {
     const { load, refresh } = renderWorkspace();
 

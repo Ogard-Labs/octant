@@ -134,6 +134,147 @@ describe("forge switch port", () => {
     expect(observation.failures[1]?.detail).toContain("rev: Rename this");
   });
 
+  it("only reports a ready head with complete review data, passing selected checks and the person's label", async () => {
+    let label = "needs-qa";
+    let pending = false;
+    let baseState = "CLEAN";
+    let more = false;
+    let headMoved = false;
+    let draft = false;
+    let reads = 0;
+    const { port: forge } = port((args) => {
+      if (args[1] === "view") {
+        reads++;
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            state: "OPEN",
+            headRefOid: headMoved && reads > 1 ? "b2" : "a1",
+            baseRefName: "main",
+            isDraft: draft,
+            mergeable: "MERGEABLE",
+            mergeStateStatus: baseState,
+            labels: [{ name: label }],
+          }),
+        };
+      }
+      if (args.some((arg) => arg.includes("reviews(last:"))) {
+        return { exitCode: 0, stdout: JSON.stringify({ reviews: [], comments: [] }) };
+      }
+      if (args[1] === "checks") {
+        const bucket = pending && !args.includes("--required") ? "pending" : "pass";
+        return { exitCode: 0, stdout: JSON.stringify([{ name: "optional-job", bucket }]) };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  nodes: [],
+                  pageInfo: { hasNextPage: more, endCursor: null },
+                },
+              },
+            },
+          },
+        }),
+      };
+    });
+    const observe = (checks: "all" | "required" = "all") =>
+      forge.observe(request, signal, {
+        failures: true,
+        activity: false,
+        babysit: { checks, requiredLabel: "qa" },
+      });
+    expect(await observe()).toMatchObject({ babysitReady: false });
+    label = "QA";
+    pending = true;
+    expect(await observe()).toMatchObject({ babysitReady: false });
+    expect(await observe("required")).toMatchObject({ babysitReady: true });
+    pending = false;
+    draft = true;
+    expect(await observe()).toMatchObject({ babysitReady: false });
+    draft = false;
+    baseState = "UNKNOWN";
+    expect(await observe()).toMatchObject({ babysitReady: false });
+    baseState = "BEHIND";
+    expect(await observe()).toMatchObject({
+      babysitReady: false,
+      failures: [{ failure: { kind: "behind" } }],
+    });
+    baseState = "CLEAN";
+    more = true;
+    expect(await observe()).toEqual({ status: "unavailable" });
+    more = false;
+    expect(await observe()).toMatchObject({ babysitReady: true });
+    headMoved = true;
+    reads = 0;
+    expect(await observe()).toEqual({ status: "unavailable" });
+  });
+
+  it("reads failed CI jobs on a GitHub CLI that lacks JSON check output", async () => {
+    const { port: forge, run } = port((args) => {
+      if (args[1] === "checks") return { exitCode: 1, stdout: "", stderr: "unknown flag: --json" };
+      if (args[1] === "view" && args[0] === "pr")
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            state: "OPEN",
+            headRefOid: "a1",
+            baseRefName: "main",
+            mergeable: "MERGEABLE",
+            isDraft: false,
+            mergeStateStatus: "UNSTABLE",
+          }),
+        };
+      if (args[0] === "run") return { exitCode: 0, stdout: "Tests failed." };
+      if (args.includes("--jq")) return { exitCode: 0, stdout: '{"reviews":[],"comments":[]}' };
+      const pageInfo = { hasNextPage: false, endCursor: null };
+      const commit = {
+        oid: "a1",
+        statusCheckRollup: {
+          contexts: {
+            nodes: [
+              {
+                __typename: "CheckRun",
+                name: "test",
+                isRequired: true,
+                status: "COMPLETED",
+                conclusion: "FAILURE",
+                detailsUrl: "https://github.com/octant/octant/actions/runs/1/job/22",
+              },
+              {
+                __typename: "StatusContext",
+                context: "optional",
+                state: "FAILURE",
+                isRequired: false,
+              },
+            ],
+            pageInfo,
+          },
+        },
+      };
+      const pr = args.some((arg) => arg.includes("potentialMergeCommit"))
+        ? { commits: { nodes: [{ commit }] }, potentialMergeCommit: null }
+        : { reviewThreads: { nodes: [], pageInfo } };
+      return { exitCode: 0, stdout: JSON.stringify({ data: { repository: { pullRequest: pr } } }) };
+    });
+    expect(
+      await forge.observe(request, signal, {
+        activity: false,
+        failures: true,
+        babysit: { checks: "required" },
+      }),
+    ).toMatchObject({
+      babysitReady: false,
+      failures: [{ failure: { kind: "check", key: "test" }, detail: "Tests failed." }],
+    });
+    expect(run.mock.calls.map(([args]) => args)).toContainEqual(
+      expect.arrayContaining(["--job", "22"]),
+    );
+  });
+
   it("finds an unresolved review thread that sits past the first page", async () => {
     const pageOf = (nodes: unknown[], endCursor: string | null) =>
       JSON.stringify({
