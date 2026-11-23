@@ -60,7 +60,7 @@ function setup(overrides: Partial<PrivateListenerLifecycleController> = {}) {
     ...overrides,
   };
   const setting = {
-    load: vi.fn(() => undefined),
+    load: vi.fn((): ReturnType<PrivateListenerSettingPort["load"]> => undefined),
     save: vi.fn(),
     clear: vi.fn(),
   } satisfies PrivateListenerSettingPort;
@@ -152,6 +152,22 @@ describe("private listener administration routes", () => {
     expect(response?.status).toBe(200);
     expect(await response?.json()).toEqual({ status: readyStatus() });
     expect(control.status).toHaveBeenCalledOnce();
+  });
+
+  it("answers the status with the remembered endpoint an off status cannot name", async () => {
+    const { handle, setting } = setup();
+    setting.load.mockReturnValue({
+      hostname: "100.64.0.7",
+      port: 8455,
+      origin: "https://100.64.0.7:8455",
+      tls: "self-made",
+    });
+    const response = await handle(request("/api/desktop/private-listener/status"));
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({
+      status: disabledStatus(),
+      saved: { hostname: "100.64.0.7", port: 8455 },
+    });
   });
 
   it("enables the private listener from a validated config and never echoes the key", async () => {

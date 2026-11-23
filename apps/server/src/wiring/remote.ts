@@ -52,7 +52,7 @@ import { conversationInputSource } from "./conversationInputs";
 import type { ThreadPartsDestination, ThreadPartsSource } from "../hub/movedThreadParts";
 import { managedWorktreeRoot } from "../code/managedWorktreeService";
 import { purgeThreadArtifacts, removeMirrorFiles } from "../persistence/threadArtifactPurge";
-import { readHostIdentity } from "../persistence/remoteAccessProjection";
+import { readHostIdentity, readRemoteAccessPaused } from "../persistence/remoteAccessProjection";
 import { AgentProfileService } from "../agentProfileService";
 import { createProvisionHostPorts } from "../hub/provisionHostPorts";
 import { ProvisionService } from "../hub/provisionService";
@@ -2543,6 +2543,7 @@ export function wireRemote(deps: RemoteDependencies) {
     service: agentAccessService,
     session: agentSessionDependencies,
     version,
+    remoteAccessPaused: () => readRemoteAccessPaused(persistence.connection),
   });
   // This loopback server serves the agent endpoint to an MCP client on this
   // computer; only a request here is ever judged as coming from loopback.

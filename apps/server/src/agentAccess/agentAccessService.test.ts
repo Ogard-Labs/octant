@@ -15,7 +15,10 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { agentProofPayload } from "@octant/domain";
-import { createAgentAccessListenerRouteHandler } from "./agentAccessRoutes";
+import {
+  createAgentAccessListenerRouteHandler,
+  type AgentAccessListenerRouteOptions,
+} from "./agentAccessRoutes";
 import { AgentEventRoutes } from "./agentEventRoutes";
 import { AgentEventWebhooks } from "./agentEventWebhooks";
 import { AgentMilestoneEvents } from "./agentMilestoneEvents";
@@ -419,7 +422,10 @@ describe("agent grants", () => {
 });
 
 describe("the agent endpoint for an MCP client on this computer", () => {
-  function endpoint(service: AgentAccessService, events?: AgentEventRoutes) {
+  function endpoint(
+    service: AgentAccessService,
+    options?: Pick<AgentAccessListenerRouteOptions, "remoteAccessPaused" | "events">,
+  ) {
     const dispatched: Array<string> = [];
     const session: AgentSessionDependencies = {
       service,
@@ -436,7 +442,7 @@ describe("the agent endpoint for an MCP client on this computer", () => {
       service,
       session,
       version: "test",
-      ...(events === undefined ? {} : { events }),
+      ...options,
     });
     return { routes, dispatched };
   }
@@ -612,6 +618,61 @@ describe("the agent endpoint for an MCP client on this computer", () => {
       id: 7,
       error: { code: -32602, message: "Unknown tool: start_work" },
     });
+    expect(dispatched).toEqual([]);
+  });
+
+  it("refuses a call whose body was still uploading when access was paused, before its tool runs", async () => {
+    const { service, clock } = harness();
+    const grantId = created(
+      service.execute(
+        { kind: "create", draft: { name: "Editor", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const { pair, fingerprint } = confirmedKey(service, grantId);
+    let paused = false;
+    const { routes, dispatched } = endpoint(service, {
+      remoteAccessPaused: () => paused,
+    });
+
+    const text = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: { name: "read_thread", arguments: { threadId: crypto.randomUUID() } },
+    });
+    const body = new TextEncoder().encode(text);
+    // The pause lands between the halves of the upload: whatever the gateway
+    // read before it arrived, the route judges it again once it has.
+    const streamed = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(body.subarray(0, 10));
+        paused = true;
+        controller.enqueue(body.subarray(10));
+        controller.close();
+      },
+    });
+    nonce += 1;
+    const init: RequestInit & { duplex: "half" } = {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-agent-proof": proof({
+          grantId,
+          fingerprint,
+          privateKey: pair.privateKey,
+          at: clock.now,
+          nonce: `paused-${String(nonce).padStart(4, "0")}`,
+          body,
+        }),
+      },
+      body: streamed,
+      duplex: "half",
+    };
+    const response = await routes(new Request("http://127.0.0.1:4800/api/agent-access/mcp", init), {
+      sourceClass: "lan-private",
+    });
+    expect(response?.status).toBe(403);
     expect(dispatched).toEqual([]);
   });
 });

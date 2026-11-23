@@ -5,6 +5,7 @@ import {
   initializeResult,
   type ToolAnswer,
 } from "@octant/cli/agent-tools";
+import { remoteAccessPausedResponse } from "../remote/remoteHttpAuthentication";
 import type { RemoteRouteFacts } from "../remoteRoutePolicy";
 import type { AgentAccessService } from "./agentAccessService";
 import {
@@ -37,6 +38,13 @@ export interface AgentAccessListenerRouteOptions {
   readonly version: string;
   readonly pollIntervalMs?: number;
   readonly events?: AgentEventRoutes;
+  /**
+   * Whether remote access is paused, read again once a request's body has
+   * arrived: the pause may have been made while it was still uploading,
+   * after the gateway read it. The loopback server never passes this; an
+   * MCP client on this computer is not remote access.
+   */
+  readonly remoteAccessPaused?: () => boolean;
 }
 
 /**
@@ -72,6 +80,12 @@ export function createAgentAccessListenerRouteHandler(
     }
     const bytes = await readBody(request, MAX_AGENT_MCP_BODY_BYTES);
     if (bytes === undefined) return Response.json({ error: "too-large" }, { status: 413 });
+    // Judged again now the upload has arrived, before the request's grant is
+    // read and any tool runs: a pause made while this body streamed refuses
+    // it here, the same answer the gateway would have given.
+    if (sourceClass !== "loopback" && options.remoteAccessPaused?.() === true) {
+      return remoteAccessPausedResponse();
+    }
 
     if (url.pathname === AGENT_ACCESS_LISTENER_ROUTES.claim) {
       const claimed = options.service.claim(parseJson(new TextDecoder().decode(bytes)));
@@ -177,6 +191,9 @@ export function createAgentAccessListenerRouteHandler(
     if (typeof name !== "string" || !agentToolList(policy).some((tool) => tool["name"] === name)) {
       return rpc(failure(id, -32602, `Unknown tool: ${String(name)}`));
     }
+    // A grant revoked while the body uploaded, or since it was read, aborts
+    // the signal the tool run binds to; refuse before the tool runs.
+    if (authenticated.signal.aborted) return unauthorized();
     const signal = AbortSignal.any([authenticated.signal, request.signal]);
     const call = callAgentTool(name, asObject(params?.["arguments"]) ?? {}, {
       openSession: async () => createAgentSession({ grant, signal, deps: options.session }),

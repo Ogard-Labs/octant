@@ -322,14 +322,15 @@ describe("pausing and resuming remote access from this computer", () => {
             body: {
               status: {
                 state: "disabled",
-                hostname: "100.64.0.7",
-                port: 8455,
+                hostname: null,
+                port: null,
                 origin: null,
                 exposureClass: null,
                 certificateFingerprint: null,
                 certificateSource: null,
                 tlsPin: null,
               },
+              saved: { hostname: "100.64.0.7", port: 8455 },
             },
           }
         : {

@@ -234,19 +234,31 @@ async function runRemoteAccessPauseCommand(
 /**
  * The enable command the host's remembered setting would run again, or one
  * with placeholders when the host never ran it: a bare
- * `octant listener enable` refuses for want of --hostname and --port.
+ * `octant listener enable` refuses for want of --hostname and --port. The
+ * saved setting is the source: a disabled listener's live status names no
+ * address at all.
  */
 async function listenerOffMessage(input: RunRemoteAccessCliCommandInput): Promise<string> {
   const status = await input.session.send({
     path: "/api/desktop/private-listener/status",
     method: "GET",
   });
-  const listener = status.status === 200 ? listenerStatusOf(status.body) : undefined;
+  const saved = savedListenerEndpointOf(status.body);
   const enable =
-    listener !== undefined && listener.hostname !== null && listener.port !== null
-      ? `octant listener enable --hostname ${listener.hostname} --port ${String(listener.port)}`
+    saved !== undefined
+      ? `octant listener enable --hostname ${saved.hostname} --port ${String(saved.port)}`
       : "octant listener enable --hostname <lan-or-tailscale-address> --port <port>";
   return `Remote access answers only while the remote listener is on. Start it with \`${enable}\`, then try again; a pause is kept until you resume it.\n`;
+}
+
+/** The endpoint the host remembers enabling, from the listener status answer. */
+function savedListenerEndpointOf(
+  body: unknown,
+): { readonly hostname: string; readonly port: number } | undefined {
+  const saved = fieldOf(body, "saved");
+  const hostname = fieldOf(saved, "hostname");
+  const port = fieldOf(saved, "port");
+  return typeof hostname === "string" && typeof port === "number" ? { hostname, port } : undefined;
 }
 
 export const DEFAULT_PAIR_LISTENER_PORT = 8443;

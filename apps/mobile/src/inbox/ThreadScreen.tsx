@@ -12,12 +12,9 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   chatAttemptStatusLabel,
   mobileAttachmentOffer,
-  readRemoteSessionStanding,
   setMobileUsageResume,
-  RESTRICTED_REMOTE_SESSION,
   type MobileAttachmentSource,
   type MobileInboxRow,
-  type RemoteSessionStanding,
 } from "@octant/client-runtime";
 import { useConnectionStatus } from "@octant/client-runtime/use-connection-status";
 import { presentStaleHostSecurity } from "@octant/domain";
@@ -75,6 +72,7 @@ import {
   MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS,
   enteredMobileForeground,
 } from "./threadRefreshPolicy";
+import { useRemoteSessionStanding } from "./useRemoteSessionStanding";
 
 // Shown while the host is unreachable, whether the app's connection or the
 // chat event stream noticed first.
@@ -124,20 +122,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const [surface, setSurface] = useState<RemoteThreadSurfaceKind>("chat");
   // The surfaces on offer come from the shared remote matrix, so a host that
   // would refuse one never has it shown here.
-  // What the host says this phone's session is, asked per host. Until it
-  // answers, and whenever it does not, the session is shown as restricted.
-  const [standing, setStanding] = useState<RemoteSessionStanding>(RESTRICTED_REMOTE_SESSION);
-  useEffect(() => {
-    setStanding(RESTRICTED_REMOTE_SESSION);
-    if (transport === undefined || offlineDemo) return;
-    let current = true;
-    void readRemoteSessionStanding(transport).then((answer) => {
-      if (current) setStanding(answer);
-    });
-    return () => {
-      current = false;
-    };
-  }, [transport, offlineDemo]);
+  const standing = useRemoteSessionStanding(transport, offlineDemo);
   const surfaces = useMemo(
     () => listMobileThreadSurfaces({ mode: selected?.mode ?? "chat", session: standing }),
     [selected?.mode, standing],
@@ -283,12 +268,17 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const threadAttachments = mode === "work" ? work : mode === "code" ? code : chat;
   const pendingAttachments = threadAttachments.pendingAttachments;
   const attachFrom = (source: MobileAttachmentSource) => {
-    if (offlineDemo) return;
+    if (offlineDemo || !composerAccess.editable) return;
     setAttachOpen(false);
     void threadAttachments.attach(source, attachmentOffer);
   };
+  // A read-only pairing has no composer, so it has nothing to attach to either.
+  const composerAccess = conversationComposerAccess(surfaces);
   const attachProps =
-    !offlineDemo && staleGate.allowProductMutations && attachmentOffer.sources.length > 0
+    !offlineDemo &&
+    composerAccess.editable &&
+    staleGate.allowProductMutations &&
+    attachmentOffer.sources.length > 0
       ? { onPressAttach: () => setAttachOpen(true) }
       : {};
   const followUpComposerCopy =
@@ -389,7 +379,6 @@ export function ThreadScreen(props: ThreadScreenProps) {
       onPress: () => void usageResume(mode, thread, { kind: "schedule", turnId: stopped.turnId }),
     };
   })();
-  const composerAccess = conversationComposerAccess(surfaces);
   const composerEditable =
     composerAccess.editable &&
     (mode === "chat"
