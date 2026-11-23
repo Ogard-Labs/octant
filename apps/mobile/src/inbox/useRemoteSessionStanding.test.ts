@@ -133,6 +133,18 @@ describe("useRemoteSessionStanding", () => {
     );
   });
 
+  it("stands as the person in the offline demo, asking nothing", async () => {
+    const harness = render(undefined, true);
+    await harness.mount();
+    await act(async () => {
+      emit("background");
+      emit("active");
+    });
+    // No host exists to ask; the sample session acts as the person.
+    expect(appStateListeners.size).toBe(0);
+    expect(harness.output()).toBe(JSON.stringify({ actsAsHostPerson: true }));
+  });
+
   it("falls back to read-only reach when a standing reread fails on wake", async () => {
     let paused = false;
     const { transport: session } = transport(() =>

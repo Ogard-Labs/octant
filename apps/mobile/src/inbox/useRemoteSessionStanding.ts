@@ -22,8 +22,14 @@ export function useRemoteSessionStanding(
 ): RemoteSessionStanding {
   const [standing, setStanding] = useState<RemoteSessionStanding>(RESTRICTED_REMOTE_SESSION);
   useEffect(() => {
+    // The offline demo has no host to ask or to refuse: its sample session
+    // acts as the person, the only answer the fail-closed rule is exempt for.
+    if (offlineDemo) {
+      setStanding({ actsAsHostPerson: true });
+      return;
+    }
     setStanding(RESTRICTED_REMOTE_SESSION);
-    if (transport === undefined || offlineDemo) return;
+    if (transport === undefined) return;
     let current = true;
     const reread = () => {
       void readRemoteSessionStanding(transport).then((answer) => {

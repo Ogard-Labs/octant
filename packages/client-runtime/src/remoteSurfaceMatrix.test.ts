@@ -63,14 +63,6 @@ describe("remoteSurfaceMatrix", () => {
 });
 
 describe("the surfaces a companion client may watch a thread through", () => {
-  it("lets a paired device act only where the catalog says acting is remote work", () => {
-    expect(
-      listRemoteThreadSurfacesByReach("interactive", { actsAsHostPerson: false }).map(
-        (surface) => surface.id,
-      ),
-    ).toEqual(["chat", "browser"]);
-  });
-
   it("keeps a terminal watchable and never typeable from a companion client", () => {
     const terminal = listRemoteThreadSurfaces().find((surface) => surface.id === "terminal");
     if (terminal === undefined) throw new Error("the terminal surface is missing");

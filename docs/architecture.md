@@ -18907,6 +18907,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   administration route without PEMs, or `octant listener enable` without
   `--cert` and `--key`), a certificate the host makes itself. A pasted
   certificate always wins, and the self-made key then stays unused on disk.
+  A bare `octant listener enable` reuses the host's saved listener settings —
+  address, port, and the certificate and key already stored, pasted or
+  self-made — and refuses, naming `--hostname` and `--port`, when no
+  listener settings have been saved; explicit flags still replace the
+  saved values for this run and the next.
   - **Key and certificate.** The self-made key is its own ECDSA P-256 key, not
     the host identity key, which signs the remote hello and whose rotation
     revokes every device. The certificate is a self-signed X.509 v3 leaf for
