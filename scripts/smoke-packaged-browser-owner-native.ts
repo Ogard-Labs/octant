@@ -492,7 +492,11 @@ process.once("SIGINT", () => finish(false));`,
       let revealSequence = 0;
       let pickerAttempted = false;
       let pickerBoundaryEntered = false;
-      const native = async (operation: string, value = ""): Promise<string> => {
+      const native = async (
+        operation: string,
+        value = "",
+        retriedRead = false,
+      ): Promise<string> => {
         if (pickerBoundaryEntered)
           throw Error("Picker discovery permits no further named reads or input.");
         if (
@@ -585,8 +589,25 @@ process.once("SIGINT", () => finish(false));`,
           decoded.treeTruncated !== false ||
           decoded.treeReadErrors !== 0 ||
           !Array.isArray(decoded.interactiveControls)
-        )
+        ) {
+          // Chromium can rebuild the AX tree immediately after focus. Retry
+          // one transient read only when the decoder confirms the action was
+          // refused before dispatch. Typing and uncertain actions never retry.
+          if (
+            !retriedRead &&
+            (operation === "click" || operation === "reveal") &&
+            decoded.treeTruncated === false &&
+            Array.isArray(decoded.treeNativeErrors) &&
+            decoded.treeNativeErrors.length === 1 &&
+            decoded.treeNativeErrors[0] === -25202 &&
+            record(decoded.action) &&
+            decoded.action.status === "refused"
+          ) {
+            await pause(150);
+            return native(operation, value, true);
+          }
           throw Error("Native SDK control tree is incomplete.");
+        }
         if (fillsField) {
           if (
             !record(decoded.action) ||
