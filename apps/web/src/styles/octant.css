@@ -4816,6 +4816,25 @@ octant-composer-input.composer-input[disabled] {
 .composer-chip__meta {
   color: var(--oct-meta);
 }
+/* The @model picker's search sits at the top of the typeahead list, as a row of
+   the list rather than a form field inside it. */
+.subagent-model-picker__search,
+.subagent-model-picker__search:focus,
+.subagent-model-picker__search:focus-visible {
+  display: block;
+  width: 100%;
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border: 0;
+  border-bottom: 1px solid var(--oct-border);
+  border-radius: 0;
+  background: none;
+  color: var(--oct-fg);
+  font: inherit;
+  outline: none;
+}
+.subagent-model-picker__search::placeholder {
+  color: var(--oct-meta);
+}
 /* The box's one line: attach, the prompt, the microphone, send. The
    controls ride the prompt's last line, so they stay put as the prompt grows
    upward. */

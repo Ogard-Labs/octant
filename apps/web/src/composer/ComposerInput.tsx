@@ -334,10 +334,16 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       end: value.length,
     });
     const composingRef = useRef(false);
-    const historyRef = useRef<{ entries: Array<Snapshot>; index: number; at: number }>({
+    const historyRef = useRef<{
+      entries: Array<Snapshot>;
+      index: number;
+      at: number;
+      typing: boolean;
+    }>({
       entries: [{ value, caret: value.length }],
       index: 0,
       at: 0,
+      typing: false,
     });
     const keysRef = useRef(new WeakMap<HTMLElement, string>());
     const keyCounterRef = useRef(0);
@@ -391,26 +397,30 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       setChipHosts(render(root, modelRef.current, keysRef.current, nextKey));
     };
 
-    const remember = (snapshot: Snapshot, coalesce: boolean) => {
+    // Only a run of plain typing undoes as one step; a line break, a paste, a
+    // chip added or removed, or an undo each stand alone, as in a text field.
+    const remember = (snapshot: Snapshot, typing: boolean) => {
       const history = historyRef.current;
       const now = Date.now();
       const entries = history.entries.slice(0, history.index + 1);
-      if (coalesce && entries.length > 1 && now - history.at < TYPING_COALESCE_MS) {
+      const coalesce =
+        typing && history.typing && entries.length > 1 && now - history.at < TYPING_COALESCE_MS;
+      if (coalesce) {
         entries[entries.length - 1] = snapshot;
       } else {
         entries.push(snapshot);
       }
       while (entries.length > MAX_HISTORY) entries.shift();
-      historyRef.current = { entries, index: entries.length - 1, at: now };
+      historyRef.current = { entries, index: entries.length - 1, at: now, typing };
     };
 
-    const emit = (next: string, caret: number, options: { readonly coalesce: boolean }) => {
+    const emit = (next: string, caret: number, options: { readonly typing: boolean }) => {
       const root = rootRef.current;
       if (root === null) return;
       modelRef.current = next;
       pendingRef.current = { start: caret, end: caret };
       lastSelectionRef.current = { start: caret, end: caret };
-      remember({ value: next, caret }, options.coalesce);
+      remember({ value: next, caret }, options.typing);
       onChangeRef.current?.({ target: root, currentTarget: root });
       tick();
     };
@@ -419,7 +429,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       const { start, end } = currentSelection(root);
       const current = modelRef.current;
       emit(`${current.slice(0, start)}${text}${current.slice(end)}`, start + text.length, {
-        coalesce: false,
+        typing: false,
       });
     };
 
@@ -428,7 +438,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       const index = history.index + direction;
       const snapshot = history.entries[index];
       if (snapshot === undefined) return;
-      historyRef.current = { ...history, index, at: 0 };
+      historyRef.current = { ...history, index, at: 0, typing: false };
       modelRef.current = snapshot.value;
       pendingRef.current = { start: snapshot.caret, end: snapshot.caret };
       onChangeRef.current?.({ target: root, currentTarget: root });
@@ -526,7 +536,9 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         const next = serialize(root);
         const caret = readSelection(root)?.start ?? next.length;
         if (next === modelRef.current) return;
-        emit(next, caret, { coalesce: true });
+        const chipsChanged =
+          findSubagentModelTags(next).length !== findSubagentModelTags(modelRef.current).length;
+        emit(next, caret, { typing: !chipsChanged });
       };
       // A test (or a caller) that assigns `value` and fires `change`, as it
       // would on a text field, reaches `onChange` here; browsers never fire
