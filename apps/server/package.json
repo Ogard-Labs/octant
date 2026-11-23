@@ -50,6 +50,7 @@
     "jpeg-js": "0.4.4",
     "katex": "0.18.9",
     "node-pty": "catalog:",
+    "omggif": "1.0.10",
     "playwright-core": "catalog:",
     "pngjs": "7.0.0",
     "yaml": "catalog:"
@@ -58,6 +59,7 @@
     "@octant/client-runtime": "workspace:*",
     "@types/better-sqlite3": "catalog:",
     "@types/bun": "catalog:",
+    "@types/omggif": "1.0.5",
     "@types/pngjs": "6.0.5",
     "tsdown": "0.22.5",
     "typescript": "catalog:",

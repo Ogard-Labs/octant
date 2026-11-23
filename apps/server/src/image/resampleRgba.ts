@@ -34,6 +34,46 @@ export function resampleRgba(source: RgbaImage, width: number, height: number): 
 }
 
 /**
+ * `resampleRgba` that lets the event loop run between rows of work, so a
+ * render from a large source does not hold the host for a whole pass. Every
+ * `yieldEveryRows`th row ends with a macrotask boundary.
+ */
+export async function resampleRgbaYielding(
+  source: RgbaImage,
+  width: number,
+  height: number,
+  yieldEveryRows = 128,
+): Promise<Uint8ClampedArray> {
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) {
+    throw new Error(`Cannot resample to ${String(width)}×${String(height)}.`);
+  }
+  if (source.data.byteLength !== source.width * source.height * 4) {
+    throw new Error(
+      `An ${String(source.width)}×${String(source.height)} image needs ${String(source.width * source.height * 4)} bytes, got ${String(source.data.byteLength)}.`,
+    );
+  }
+  const yieldNow = () => new Promise<void>((resolve) => setImmediate(resolve));
+  const premultiplied = premultiply(source);
+  const narrowed = await resampleHorizontalYielding(
+    premultiplied,
+    source.width,
+    source.height,
+    width,
+    yieldEveryRows,
+    yieldNow,
+  );
+  const sampled = await resampleVerticalYielding(
+    narrowed,
+    width,
+    source.height,
+    height,
+    yieldEveryRows,
+    yieldNow,
+  );
+  return unPremultiply(sampled, width, height);
+}
+
+/**
  * Straight-alpha bytes to premultiplied floats. Floats, not bytes, so
  * repeated weighted sums keep their precision through both passes.
  */
@@ -91,6 +131,52 @@ function resampleVertical(
   const column = new Float32Array(srcH * 4);
   const sampled = new Float32Array(dstH * 4);
   for (let x = 0; x < width; x += 1) {
+    for (let y = 0; y < srcH; y += 1) {
+      column.set(input.subarray((y * width + x) * 4, (y * width + x) * 4 + 4), y * 4);
+    }
+    resampleLine(column, sampled, srcH, dstH);
+    for (let y = 0; y < dstH; y += 1) {
+      out.set(sampled.subarray(y * 4, y * 4 + 4), (y * width + x) * 4);
+    }
+  }
+  return out;
+}
+
+/** `resampleHorizontal` yielding `yieldNow` every `yieldEveryRows` source rows. */
+async function resampleHorizontalYielding(
+  input: Float32Array,
+  srcW: number,
+  srcH: number,
+  dstW: number,
+  yieldEveryRows: number,
+  yieldNow: () => Promise<void>,
+): Promise<Float32Array> {
+  if (srcW === dstW) return input;
+  const out = new Float32Array(srcH * dstW * 4);
+  const sampled = new Float32Array(dstW * 4);
+  for (let y = 0; y < srcH; y += 1) {
+    if (y !== 0 && y % yieldEveryRows === 0) await yieldNow();
+    resampleLine(input.subarray(y * srcW * 4, (y + 1) * srcW * 4), sampled, srcW, dstW);
+    out.set(sampled, y * dstW * 4);
+  }
+  return out;
+}
+
+/** `resampleVertical` yielding `yieldNow` every `yieldEveryRows` output columns. */
+async function resampleVerticalYielding(
+  input: Float32Array,
+  width: number,
+  srcH: number,
+  dstH: number,
+  yieldEveryRows: number,
+  yieldNow: () => Promise<void>,
+): Promise<Float32Array> {
+  if (srcH === dstH) return input;
+  const out = new Float32Array(dstH * width * 4);
+  const column = new Float32Array(srcH * 4);
+  const sampled = new Float32Array(dstH * 4);
+  for (let x = 0; x < width; x += 1) {
+    if (x !== 0 && x % yieldEveryRows === 0) await yieldNow();
     for (let y = 0; y < srcH; y += 1) {
       column.set(input.subarray((y * width + x) * 4, (y * width + x) * 4 + 4), y * 4);
     }

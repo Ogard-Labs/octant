@@ -1153,6 +1153,7 @@ describe("desktop packaging boundary", () => {
       "@jsquash/webp",
       "pngjs",
       "jpeg-js",
+      "omggif",
     ]);
     expect(() =>
       validatePackagedPayload([

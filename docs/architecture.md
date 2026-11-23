@@ -8034,8 +8034,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   the person a card naming the path (Auto's reviewer does not answer it), and
   Accept edits and Full access write at once; for Code the stricter of the
   journaled and running posture applies, so a session-only grant still asks.
-  On macOS the same tool's `icon-set` operation turns a finished image of the
-  thread into an icon set under a directory of that folder: an Xcode
+  On every host the same tool's `icon-set` operation turns a finished image
+  of the thread into an icon set under a directory of that folder: an Xcode
   `AppIcon.appiconset` for iOS (one 1024 universal icon) or macOS (ten sizes),
   Android `mipmap-*` launcher icons and a 512 Play Store icon, or web favicons,
   a 180 Apple touch icon and 192 and 512 manifest icons, with the asset
@@ -8043,8 +8043,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `/usr/bin/sips` resizes it (an argument array, never a shell, in a private
   temporary directory that is always removed). Every other host resizes in
   pure JavaScript through the same seam and the same checks: `pngjs` decodes
-  PNG and encodes the outputs, `jpeg-js` decodes JPEG, and `@jsquash/webp`
-  decodes WebP through libwebp's WebAssembly module, with an in-repo
+  PNG and encodes the outputs, `jpeg-js` decodes JPEG, `@jsquash/webp`
+  decodes WebP through libwebp's WebAssembly module, and `omggif` decodes a
+  GIF's first frame, with an in-repo
   premultiplied-alpha resampler (area-average for big shrinks, Lanczos-3
   otherwise) and no image library of the platform's own. The source must be
   square and at least 1024 pixels. For

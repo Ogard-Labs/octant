@@ -116,6 +116,11 @@ export interface ImageIconSetPort {
     readonly bytes: Uint8Array;
     readonly mime: string;
     readonly target: MediaIconSetTarget;
+    /**
+     * Asked before each output is rendered; a returned reason stops the set,
+     * so a stop or a level drop lands between outputs, not after the render.
+     */
+    readonly beforeOutput?: () => string | undefined;
   }) => Promise<IconSetRenderOutcome>;
   /** Whether a new file can be created at this path under the turn's folder, without writing. */
   readonly check: (
@@ -462,6 +467,12 @@ async function executeHostIconSet(
     bytes: read.bytes,
     mime: found.artifact.mime,
     target: request.target,
+    beforeOutput: () =>
+      request.signal?.aborted === true
+        ? "The turn was stopped."
+        : save.posture() === "refuse"
+          ? "Plan mode cannot save files."
+          : undefined,
   });
   if (rendered.status === "refused") return { status: "refused", error: rendered.reason };
   if (request.signal?.aborted) return { status: "not-saved" };

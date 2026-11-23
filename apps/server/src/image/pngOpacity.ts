@@ -59,6 +59,24 @@ export function pngWithoutAlpha(bytes: Uint8Array): PngOpacity {
   };
 }
 
+/**
+ * The colour-description chunks a source carried, spliced into a PNG the
+ * host re-encoded from it: the profile, gamma, chromaticities and sRGB
+ * intent travel with the image so the icon keeps the colour the source
+ * declared. A source that is not a readable PNG declares none, so the
+ * re-encode is returned as it is.
+ */
+export function carryPngColour(source: Uint8Array, png: Uint8Array): Uint8Array {
+  const parsed = parsePng(source);
+  if (parsed === undefined || parsed.colour.length === 0 || !hasSignature(png)) return png;
+  const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  // Colour chunks belong before IDAT; right after the leading IHDR is always
+  // one such place.
+  const ihdrEnd = 8 + 12 + view.getUint32(8);
+  if (ihdrEnd >= png.byteLength) return png;
+  return concat([png.subarray(0, ihdrEnd), ...parsed.colour, png.subarray(ihdrEnd)]);
+}
+
 function parsePng(bytes: Uint8Array):
   | {
       readonly width: number;

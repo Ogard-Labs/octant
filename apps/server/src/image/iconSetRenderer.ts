@@ -151,6 +151,12 @@ const SOURCE_EXTENSION: Readonly<Record<string, string>> = {
  */
 export interface IconSetResizer {
   measure(): Promise<{ readonly width: number; readonly height: number } | undefined>;
+  /**
+   * Whether the decoded source shows any transparency, where the resizer
+   * reads pixels itself. Absent on resizers that cannot answer — the caller
+   * then checks each output instead.
+   */
+  opaque?(): Promise<boolean | undefined>;
   png(pixels: number): Promise<Uint8Array | undefined>;
 }
 
@@ -200,6 +206,12 @@ export async function renderIconSetWithResizer(input: {
   /** A private directory the host owns; each render uses its own child. */
   readonly workDirectory: string;
   readonly resizer: IconSetResizerFactory;
+  /**
+   * Asked before each output is rendered; a returned reason stops the set.
+   * The caller reads the turn's Stop and the thread's access level again
+   * through it, so neither is taken only after the whole render.
+   */
+  readonly beforeOutput?: () => string | undefined;
 }): Promise<IconSetRenderOutcome> {
   let scratch: string | undefined;
   try {
@@ -232,12 +244,22 @@ export async function renderIconSetWithResizer(input: {
         reason: `Icon sets need an image at least 1024×1024; this one is ${String(width)}×${String(height)}.`,
       };
     }
+    // Where the resizer reads pixels itself, a transparent source is refused
+    // on the decoded raster before any output is rendered.
+    if (input.target === "apple-ios" && (await resizer.opaque?.()) === false) {
+      return {
+        status: "refused",
+        reason: "iOS app icons must not be transparent; generate one with an opaque background.",
+      };
+    }
     const files: IconSetFile[] = [];
     // Each size is rendered once and reused, since several paths share one.
     const rendered = new Map<number, Uint8Array>();
     for (const spec of ICON_SET_SPECS[input.target]) {
       let bytes = rendered.get(spec.pixels);
       if (bytes === undefined) {
+        const hold = input.beforeOutput?.();
+        if (hold !== undefined) return { status: "refused", reason: hold };
         const size = String(spec.pixels);
         const png = await resizer.png(spec.pixels);
         if (png === undefined) {
@@ -333,6 +355,7 @@ export function hostIconSetRenderer(input: {
   readonly bytes: Uint8Array;
   readonly mime: string;
   readonly target: MediaIconSetTarget;
+  readonly beforeOutput?: () => string | undefined;
 }) => Promise<IconSetRenderOutcome> {
   const platform = input.platform ?? process.platform;
   const sipsExists = input.sipsExists ?? (() => existsSync(SIPS_PATH));

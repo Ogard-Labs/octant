@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { encode as encodeJpeg } from "jpeg-js";
+import { GifWriter } from "omggif";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
@@ -42,7 +43,11 @@ function pngHeader(width: number, height: number): Uint8Array {
 }
 
 /** A valid PNG of one colour: RGB, or RGBA with every pixel at `alpha`. */
-function solidPng(size: number, alpha?: number): Uint8Array {
+function solidPng(
+  size: number,
+  alpha?: number,
+  extra?: ReadonlyArray<{ readonly type: string; readonly data: Uint8Array }>,
+): Uint8Array {
   const channels = alpha === undefined ? 3 : 4;
   const crcTable = Array.from({ length: 256 }, (_, n) => {
     let c = n;
@@ -76,6 +81,7 @@ function solidPng(size: number, alpha?: number): Uint8Array {
   const parts = [
     Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),
+    ...(extra ?? []).map(({ type, data }) => chunk(type, data)),
     chunk("IDAT", new Uint8Array(deflateSync(raw))),
     chunk("IEND", new Uint8Array()),
   ];
@@ -86,6 +92,20 @@ function solidPng(size: number, alpha?: number): Uint8Array {
     offset += part.byteLength;
   }
   return png;
+}
+
+/** The chunk types a PNG carries, in order — how a re-encode's colour chunks are checked. */
+function pngChunkTypes(bytes: Uint8Array): string[] {
+  const types: string[] = [];
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 8;
+  while (offset + 8 <= bytes.byteLength) {
+    const length = view.getUint32(offset);
+    types.push(String.fromCharCode(...bytes.subarray(offset + 4, offset + 8)));
+    if (offset + 8 + length + 4 > bytes.byteLength) break;
+    offset += 12 + length;
+  }
+  return types;
 }
 
 /** Stands in for `sips`: answers the probe and writes a PNG of the asked size for each resize. */
@@ -392,6 +412,77 @@ describe("icon set rendering in pure JavaScript", () => {
       status: "refused",
       reason: "The image's size could not be read.",
     });
+  });
+
+  it("refuses an iOS icon whose decoded source shows even faint transparency", async () => {
+    const rendered = await render()({
+      bytes: solidPng(1024, 254),
+      mime: "image/png",
+      target: "apple-ios",
+    });
+    expect(rendered).toEqual({
+      status: "refused",
+      reason: expect.stringMatching(/must not be transparent/),
+    });
+  });
+
+  it("makes every web icon from a GIF source's first frame", async () => {
+    const size = 1024;
+    const gif: number[] = [];
+    const writer = new GifWriter(gif, size, size, { loop: 0 });
+    writer.addFrame(0, 0, size, size, new Array<number>(size * size).fill(0), {
+      palette: [0x1e78c8, 0x000000],
+    });
+    const rendered = await render()({
+      bytes: new Uint8Array(gif.slice(0, writer.end())),
+      mime: "image/gif",
+      target: "web",
+    });
+    if (rendered.status !== "rendered") throw new Error(rendered.reason);
+    expect(rendered.files.map((file) => pngDimensions(file.bytes)?.width)).toEqual(
+      ICON_SET_SPECS.web.map((spec) => spec.pixels),
+    );
+  });
+
+  it("carries the source PNG's colour chunks into every output", async () => {
+    const colour = [
+      { type: "gAMA", data: Uint8Array.from([0, 0, 0xcf, 0x7a]) },
+      {
+        type: "cHRM",
+        data: Uint8Array.from([
+          0, 0, 0x7a, 0x26, 0, 0, 0x80, 0x84, 0, 0, 0xfa, 0, 0, 0, 0x80, 0xe8, 0, 0, 0x75, 0x30, 0,
+          0, 0xea, 0x60, 0, 0, 0x3a, 0x98, 0, 0, 0x17, 0x70,
+        ]),
+      },
+      { type: "sRGB", data: Uint8Array.from([0]) },
+    ];
+    const rendered = await render()({
+      bytes: solidPng(1024, undefined, colour),
+      mime: "image/png",
+      target: "web",
+    });
+    if (rendered.status !== "rendered") throw new Error(rendered.reason);
+    for (const file of rendered.files.filter((candidate) => candidate.path.endsWith(".png"))) {
+      const types = pngChunkTypes(file.bytes);
+      for (const { type } of colour) expect(types).toContain(type);
+    }
+  });
+
+  it("stops a large source's render when the caller's stop lands between outputs", async () => {
+    let checks = 0;
+    const rendered = await render()({
+      bytes: solidPng(2048),
+      mime: "image/png",
+      target: "web",
+      beforeOutput: () => {
+        checks += 1;
+        return checks === 1 ? undefined : "The turn was stopped.";
+      },
+    });
+    // The first size rendered; the stop refused the second, so nothing more
+    // was made and no file is handed back.
+    expect(checks).toBe(2);
+    expect(rendered).toEqual({ status: "refused", reason: "The turn was stopped." });
   });
 });
 
