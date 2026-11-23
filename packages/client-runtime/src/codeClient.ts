@@ -67,6 +67,8 @@ import {
   type CodeCheckoutId,
   type CodeCommand,
   CodeCommandResult,
+  CodeWorktreeCreationFrame,
+  type CodeWorktreeCreationProgress,
   type CodeEvidenceContentId,
   CodeEvidenceReference,
   type CodeEvidenceBatchRequest,
@@ -200,7 +202,11 @@ export interface CodeClient {
   /** Message search over the Code threads the host lists for this window. */
   searchTranscript(query: string): Promise<CodeTranscriptSearch>;
   thread(threadId: CodeThreadId, signal?: AbortSignal): Promise<CodeThreadView>;
-  execute(command: CodeCommand, signal?: AbortSignal): Promise<CodeCommandResult>;
+  execute(
+    command: CodeCommand,
+    signal?: AbortSignal,
+    onWorktreeProgress?: (progress: CodeWorktreeCreationProgress) => void,
+  ): Promise<CodeCommandResult>;
   executeOperation(
     command: CodeOperationCommand,
     signal?: AbortSignal,
@@ -490,24 +496,38 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         decodeThreadView,
       );
     },
-    async execute(command, signal) {
+    async execute(command, signal, onWorktreeProgress) {
       let validated: CodeCommand;
       try {
         validated = decodeCodeCommand(command);
       } catch {
         throw invalidCommand();
       }
-      return request(
+      const progress =
+        validated.kind === "create-managed-code-thread" ? onWorktreeProgress : undefined;
+      const response = await requestRaw(
         fetch,
         new URL("/api/code/commands", options.baseUrl).toString(),
         {
           method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
+          headers: {
+            ...headers,
+            "content-type": "application/json",
+            ...(progress === undefined ? {} : { accept: "application/x-ndjson" }),
+          },
           body: JSON.stringify(validated),
           ...(signal === undefined ? {} : { signal }),
         },
-        decodeHostAnswer(CodeCommandResult),
       );
+      if (
+        progress !== undefined &&
+        validated.kind === "create-managed-code-thread" &&
+        response.ok &&
+        response.headers.get("content-type")?.split(";", 1)[0] === "application/x-ndjson"
+      ) {
+        return readWorktreeCreation(response, validated.threadId, progress);
+      }
+      return readJsonAnswer(response, decodeHostAnswer(CodeCommandResult));
     },
     async executeOperation(command, signal) {
       let validated: CodeOperationCommand;
@@ -1596,7 +1616,50 @@ async function request<T>(
   init: RequestInit,
   decode: (value: unknown) => T,
 ): Promise<T> {
-  const response = await requestRaw(fetch, url, init);
+  return readJsonAnswer(await requestRaw(fetch, url, init), decode);
+}
+
+async function readWorktreeCreation(
+  response: Response,
+  threadId: CodeThreadId,
+  progress: (progress: CodeWorktreeCreationProgress) => void,
+): Promise<CodeCommandResult> {
+  const reader = response.body?.getReader();
+  if (reader === undefined) throw malformedResponse();
+  const decoder = new TextDecoder();
+  const decodeFrame = decodeHostAnswer(CodeWorktreeCreationFrame);
+  let buffer = "";
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      let newline = buffer.indexOf("\n");
+      while (newline >= 0) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        if (utf8ByteLength(line) > MAX_CODE_NDJSON_LINE_BYTES) throw malformedResponse();
+        const frame = decodeFrame(JSON.parse(line));
+        if (frame.kind === "failure") throw new CodeClientFailure(frame.failure);
+        if (frame.kind === "result") {
+          if (frame.result.thread.id !== threadId) throw malformedResponse();
+          return frame.result;
+        }
+        progress(frame.progress);
+        newline = buffer.indexOf("\n");
+      }
+      if (utf8ByteLength(buffer) > MAX_CODE_NDJSON_LINE_BYTES) throw malformedResponse();
+    }
+  } catch (error) {
+    if (error instanceof CodeClientFailure) throw error;
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+  throw malformedResponse();
+}
+
+async function readJsonAnswer<T>(response: Response, decode: (value: unknown) => T): Promise<T> {
   let body: unknown;
   try {
     body = await response.json();

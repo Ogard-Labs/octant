@@ -2,6 +2,7 @@ import { useDroppedFolderMentions } from "../../composer/useDroppedFolderMention
 import { attachAllowingFiles } from "../../composer/attachmentMediaType";
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
 import type { AutoReview } from "../autoReview";
+import { WorktreeLaunchContext, WorktreeLaunchProgress } from "../WorktreeLaunchProgress";
 import {
   mentionChipsFromDraft,
   mentionChipsToDraft,
@@ -339,6 +340,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerIdRef = useRef(globalThis.crypto.randomUUID());
+  const launches = useContext(WorktreeLaunchContext)?.launches;
   useEffect(() => {
     const update = props.hostBridge?.updateCodeOperationApprovalAnchor;
     if (update === undefined || props.projectId === undefined) return;
@@ -940,6 +942,16 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       />
     </>
   ) : null;
+  const worktreeLaunch =
+    workspace !== "managed-worktree" || launches === undefined
+      ? undefined
+      : Array.from(launches.values()).findLast(
+          (launch) =>
+            launch.composerId === composerIdRef.current &&
+            launch.projectId === props.projectId &&
+            launch.target === undefined &&
+            (props.creating === true ? launch.blocked !== true : launch.blocked === true),
+        );
   const environmentControl = (
     <HostSelector
       presentation="environment"
@@ -1054,7 +1066,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                         ),
                       },
                     ]),
-              ...(props.creating
+              ...(props.creating && worktreeLaunch === undefined
                 ? [
                     {
                       key: "first-turn",
@@ -1287,6 +1299,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           />
         </div>
 
+        {worktreeLaunch === undefined ? null : (
+          <WorktreeLaunchProgress key={worktreeLaunch.threadId} launch={worktreeLaunch} />
+        )}
         {props.projectSetup}
 
         {/* Settings for what the composer starts (a new coordinator's) belong

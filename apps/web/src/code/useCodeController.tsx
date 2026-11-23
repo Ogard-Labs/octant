@@ -29,6 +29,7 @@ import type {
   CodeNavigation,
   CodeCommand,
   CodeCommandResult,
+  CodeWorktreeCreationProgress,
   CodeFailure,
   CodeCheckoutId,
   CodeExternalEditor,
@@ -2291,14 +2292,20 @@ export function useCodeController(options: CodeControllerOptions) {
   }, [applyNavigationRefresh, client, nextNavigationRead]);
 
   const execute = useCallback(
-    async (command: CodeCommand, signal?: AbortSignal): Promise<CodeCommandResult | undefined> => {
+    async (
+      command: CodeCommand,
+      signal?: AbortSignal,
+      onWorktreeProgress?: (progress: CodeWorktreeCreationProgress) => void,
+    ): Promise<CodeCommandResult | undefined> => {
       clearFailure();
       lastExecuteError.current = undefined;
       try {
         const result =
-          signal === undefined
-            ? await client.execute(command)
-            : await client.execute(command, signal);
+          onWorktreeProgress !== undefined
+            ? await client.execute(command, signal, onWorktreeProgress)
+            : signal === undefined
+              ? await client.execute(command)
+              : await client.execute(command, signal);
         if (!mounted.current) return undefined;
         // Update the ref immediately so a sequential command awaited right
         // after this one (such as saving bounds and done-when in one dialog

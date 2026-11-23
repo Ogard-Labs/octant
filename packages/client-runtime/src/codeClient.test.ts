@@ -5,6 +5,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { decodeCodeProviderFileReviewRequest } from "@octant/contracts/code-provider-file-review";
 import { decodeProjectId } from "@octant/contracts/projects";
+import { decodeCodeCommand } from "@octant/contracts/code";
 import {
   CodeClientFailure,
   CodeClientSnapshotRequiredError,
@@ -68,6 +69,63 @@ function frame(sequence: number) {
 }
 
 describe("code client", () => {
+  it("reports managed worktree progress and accepts the same command's result from an older host", async () => {
+    const receiptId = "80000000-0000-4000-8000-000000000002";
+    const resolvedHead = "a".repeat(40);
+    const result = {
+      kind: "managed-thread-created",
+      thread,
+      checkout: {
+        id: ids.checkout,
+        kind: "managed-worktree",
+        repositoryId,
+        availability: "available",
+        head: { kind: "branch", name: thread.deliveryTarget.branchIntent, oid: resolvedHead },
+        ownershipReceiptId: receiptId,
+        observedAt: now,
+      },
+      provenance: { receiptId, mode: "local", branch: "development", resolvedHead },
+    };
+    const command = decodeCodeCommand({
+      kind: "create-managed-code-thread",
+      threadId: ids.thread,
+      projectId: ids.project,
+      bindingRevisionId: ids.bindingRevision,
+      title: thread.title,
+      providerInstanceId: thread.providerInstanceId,
+      modelId: thread.modelId,
+      executionPolicy: thread.executionPolicy,
+      permissionPersistence: thread.permissionPersistence,
+      deliveryTarget: thread.deliveryTarget,
+      sourceBranch: "development",
+      startFromOrigin: false,
+    });
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('{"kind":"progress","progr'));
+        controller.enqueue(encoder.encode('ess":{"phase":"checkout","sourceMs":12}}\n'));
+        controller.enqueue(encoder.encode(`${JSON.stringify({ kind: "result", result })}\n`));
+        controller.close();
+      },
+    });
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(stream, { headers: { "content-type": "application/x-ndjson" } }),
+      )
+      .mockResolvedValueOnce(Response.json(result));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+    const progress = vi.fn();
+    await expect(client.execute(command, undefined, progress)).resolves.toEqual(result);
+    expect(progress).toHaveBeenCalledExactlyOnceWith({ phase: "checkout", sourceMs: 12 });
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({ headers: { accept: "application/x-ndjson" } });
+    progress.mockClear();
+    await expect(client.execute(command, undefined, progress)).resolves.toEqual(result);
+    expect(progress).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("authenticates bounded provider checkpoint reads and rejects injected session authority", async () => {
     const fetch = vi.fn(async () =>
       Response.json({ status: "refused", reason: "cold-unavailable" }),

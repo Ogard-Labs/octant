@@ -7,6 +7,7 @@ import {
   type ProjectMemoryProposalClient,
 } from "../projects/ProjectMemoryProposalPrompt";
 import { ProviderCloudSessions } from "./ProviderCloudSessions";
+import { WorktreeLaunchContext, WorktreeLaunchProgress } from "./WorktreeLaunchProgress";
 import { CoordinatorWorkerCards, type CoordinatorWorkersSource } from "./CoordinatorWorkersPanel";
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
@@ -50,6 +51,7 @@ import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import {
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -376,6 +378,7 @@ export interface CodeThreadWorkspaceProps {
  * Overview/Git/Terminal remain secondary surfaces opened from the thread toolbar.
  */
 export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
+  const worktreeLaunch = useContext(WorktreeLaunchContext)?.launches.get(props.threadId);
   const continuation = useContinuationInputPolicy("code", String(props.threadId), props.serverUrl);
   const view =
     props.controller.activeView?.thread.id === props.threadId
@@ -1165,6 +1168,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // The first prompt can be in flight before this surface reads its journal
   // entry. Keep it visible without adding queued messages to the transcript.
   const awaitedPrompt = messages.length === 0 ? firstPromptInFlight : undefined;
+  const earlier = props.controller.earlierConversation;
+  const firstUserMessage =
+    worktreeLaunch === undefined || (earlier !== undefined && earlier !== "none-left")
+      ? undefined
+      : messages.find((message) => message.role === "user" && message.sourceThreadId === undefined);
+  const launchProgress =
+    worktreeLaunch?.target === undefined ? null : (
+      <WorktreeLaunchProgress
+        key={worktreeLaunch.threadId}
+        launch={worktreeLaunch}
+        firstMessageSent={firstUserMessage !== undefined}
+      />
+    );
   const pendingMessage =
     awaitedPrompt === undefined ? null : (
       <article aria-label="Your message" className="code-thread-workspace__message turn-user">
@@ -1173,6 +1189,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         </div>
       </article>
     );
+  const transcriptTrail =
+    messages.length === 0 && (pendingMessage !== null || launchProgress !== null) ? (
+      <>
+        {pendingMessage}
+        {launchProgress}
+      </>
+    ) : null;
   // An unreachable history is not an empty thread. Treating it as one puts the
   // new-thread copy and the project scaffolds under a banner that says this
   // thread's own turns are missing, and offers to scaffold into a checkout that
@@ -1845,7 +1868,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           </OctantAlert>
         ) : null}
 
-        {messages.length === 0 && pendingMessage === null ? (
+        {messages.length === 0 && transcriptTrail === null ? (
           <div
             className="code-thread-workspace__conversation transcript-scroll"
             role="log"
@@ -1895,6 +1918,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             <TranscriptWindow
               trail={
                 <>
+                  {transcriptTrail}
                   <CredentialRequests
                     key={String(props.threadId)}
                     threadId={String(props.threadId)}
@@ -2480,6 +2504,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         )}
                       </TurnActionMenu>
                     </article>
+                    {message === firstUserMessage ? launchProgress : null}
                     <SteeredChildResults
                       providerGroups={providerGroups}
                       steered={message.steeredResults}
@@ -2519,7 +2544,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               }}
               restoreKey={String(props.threadId)}
               role="region"
-              {...(pendingMessage === null ? {} : { trail: pendingMessage })}
             />
           </SelectionThreadScope>
         )}

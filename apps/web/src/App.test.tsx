@@ -2,6 +2,8 @@ import {
   decodeBindingRevisionId,
   decodeWorkThread,
   decodeCodeThreadId,
+  decodeCodeCheckoutIdentity,
+  decodeCodeThread,
   decodeWorkspaceOperation,
   decodeThreadBoardPullRequestSummary,
   decodeCodeProjectPullRequestDetailView,
@@ -656,6 +658,96 @@ describe("App", () => {
     ).toBeVisible();
     await waitFor(() => expect(codeApi.putEvidence).toHaveBeenCalled());
     expect(screen.queryByText("Starting the first turn…")).not.toBeInTheDocument();
+  });
+
+  it("moves managed-worktree progress from the draft to below the first prompt", async () => {
+    await Promise.all([
+      import("./environment/CodeThreadEnvironment"),
+      import("./code/CodeWorkspaceTab"),
+      import("./code/CodeWorkspace"),
+    ]);
+    const user = userEvent.setup();
+    const base = codes();
+    const original = await base.thread(codeThreadId);
+    const releaseCheckout = deferred<void>();
+    const pendingStart = deferred<Awaited<ReturnType<CodeClient["putEvidence"]>>>();
+    let view = original;
+    const codeApi: CodeClient = {
+      ...base,
+      thread: vi.fn(async () => view),
+      putEvidence: vi.fn(() => pendingStart.promise),
+      execute: vi.fn<CodeClient["execute"]>(async (command, signal, progress) => {
+        if (command.kind === "prepare-code-project-checkout") {
+          return {
+            kind: "checkout-prepared",
+            bindingRevisionId: original.thread.bindingRevisionId,
+            checkout: original.checkout,
+          };
+        }
+        if (command.kind !== "create-managed-code-thread") return base.execute(command, signal);
+        progress?.({ phase: "source" });
+        progress?.({ phase: "checkout", sourceMs: 42 });
+        await releaseCheckout.promise;
+        const receiptId = "90000000-0000-4000-8000-000000000001";
+        const resolvedHead = "a".repeat(40);
+        const checkout = decodeCodeCheckoutIdentity({
+          ...original.checkout,
+          kind: "managed-worktree",
+          ownershipReceiptId: receiptId,
+        });
+        if (checkout.kind !== "managed-worktree") throw new Error("Expected a managed checkout");
+        const thread = decodeCodeThread({
+          ...original.thread,
+          id: command.threadId,
+          title: command.title,
+        });
+        view = { ...original, thread, checkout };
+        progress?.({ phase: "ready", checkoutMs: 83 });
+        return {
+          kind: "managed-thread-created",
+          thread,
+          checkout,
+          provenance: {
+            receiptId: checkout.ownershipReceiptId,
+            mode: "local",
+            branch: "main",
+            resolvedHead,
+          },
+        };
+      }),
+    };
+    render(
+      <App
+        codeClient={codeApi}
+        contextClient={contextClient()}
+        hostClient={hostClient() as never}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeDraftShellBootstrap(projectId))}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: /^Where this thread works/ }));
+    await user.click(await screen.findByRole("radio", { name: /New worktree/ }));
+    await user.keyboard("{Escape}");
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Check the new branch");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    const draftProgress = await screen.findByRole("list", { name: "Worktree setup stages" });
+    expect(draftProgress).toHaveTextContent("Done · 42 ms");
+    expect(draftProgress).toHaveTextContent("Check out filesRunning");
+
+    releaseCheckout.resolve();
+    const pane = await screen.findByRole("region", {
+      name: "Workspace pane: Check the new branch",
+    });
+    const prompt = await within(pane).findByRole("article", { name: "Your message" });
+    const progress = await within(pane).findByRole("list", { name: "Worktree setup stages" });
+    expect(
+      prompt.compareDocumentPosition(progress) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(progress).toHaveTextContent("Done · 83 ms");
   });
 
   it("restores the first prompt after evidence storage throws in an opened Code task", async () => {
