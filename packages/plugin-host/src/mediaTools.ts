@@ -24,6 +24,7 @@ import {
   MAX_IMAGE_VARIANTS,
   MAX_LOOK_QUESTION_CHARACTERS,
   MAX_PROVIDER_TOOL_RESULT_BYTES,
+  MAX_VIDEO_PROMPT_CHARACTERS,
   MAX_VIDEO_REFERENCES,
   SPEECH_SYNTHESIS_FORMATS,
   SPEECH_SYNTHESIS_MAX_TEXT_CHARACTERS,
@@ -1179,9 +1180,13 @@ function parseVideoToolInput(inputJson: string): ParsedVideoInput {
     }
   }
   if (operation !== "generate") return { error: "The operation must be generate or save." };
-  const prompt = raw["prompt"];
-  if (typeof prompt !== "string" || prompt.trim().length === 0) {
+  const promptInput = raw["prompt"];
+  const prompt = typeof promptInput === "string" ? promptInput.trim() : "";
+  if (prompt.length === 0) {
     return { error: "Describe the clip in prompt." };
+  }
+  if (prompt.length > MAX_VIDEO_PROMPT_CHARACTERS) {
+    return { error: "The video prompt exceeded the length limit." };
   }
   const references =
     raw["references"] === undefined
@@ -1217,7 +1222,7 @@ function parseVideoToolInput(inputJson: string): ParsedVideoInput {
   try {
     return {
       operation: "generate",
-      prompt: prompt.trim(),
+      prompt,
       references,
       ...(firstFrame === undefined ? {} : { firstFrame }),
       ...(lastFrame === undefined ? {} : { lastFrame }),

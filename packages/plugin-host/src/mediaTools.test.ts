@@ -6,6 +6,7 @@ import {
   decodeProviderModelId,
   decodeVideoClipId,
   decodeVideoJobId,
+  MAX_VIDEO_PROMPT_CHARACTERS,
 } from "@octant/contracts";
 import {
   MEDIA_TOOL_CONTRIBUTION_KIND,
@@ -653,6 +654,24 @@ describe("octant_create_video", () => {
     }
     expect(generate).not.toHaveBeenCalled();
     expect(saveClip).not.toHaveBeenCalled();
+  });
+
+  it("returns a refusal before quoting a prompt that exceeds the video limit after trimming", async () => {
+    const { port, generate } = videoPort();
+    const tools = CREATE_VIDEO_MEDIA_TOOL_PLUGIN.createTools(port);
+    const prompt = "x".repeat(MAX_VIDEO_PROMPT_CHARACTERS);
+    const oversized = await tools?.execute({
+      name: CREATE_VIDEO_TOOL_NAME,
+      inputJson: JSON.stringify({ prompt: ` ${prompt}x ` }),
+    });
+    expect(oversized?.isError).toBe(true);
+    expect(generate).not.toHaveBeenCalled();
+
+    await tools?.execute({
+      name: CREATE_VIDEO_TOOL_NAME,
+      inputJson: JSON.stringify({ prompt: ` ${prompt} ` }),
+    });
+    expect(generate).toHaveBeenCalledWith(expect.objectContaining({ prompt }));
   });
 
   it("explains that a Chat thread has no folder to save a clip into", async () => {
