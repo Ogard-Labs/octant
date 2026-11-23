@@ -533,6 +533,35 @@ describe("octant agent mcp", () => {
     await server.end();
   });
 
+  it("lets a tool-only client follow an already-running turn without sending a prompt", async () => {
+    const fake = host();
+    vi.spyOn(agentThreads, "openAgentThreadById").mockResolvedValue({
+      kind: "opened",
+      mode: "code",
+    });
+    const work = thread("code");
+    await work.port.send("The existing turn");
+    const send = vi.spyOn(work.port, "send");
+    const read = work.port.read;
+    let reads = 0;
+    vi.spyOn(agentThreads, "agentThreadPort").mockReturnValue({
+      ...work.port,
+      read: async () => {
+        reads += 1;
+        if (reads === 2) work.finish("Done");
+        return await read();
+      },
+    });
+    const server = serve(fake);
+    const followed = await server.call("read_thread", { threadId, wait: true, timeoutSeconds: 2 });
+    expect(followed.value).toMatchObject({
+      status: "idle",
+      turns: [{ outcome: "completed", reply: "Done" }],
+    });
+    expect(send).not.toHaveBeenCalled();
+    await server.end();
+  });
+
   it("keeps a Chat send's window open until the send answers, which is when its turn ends", async () => {
     const fake = host();
     const sendAnswers = Promise.withResolvers<void>();

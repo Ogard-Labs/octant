@@ -181,6 +181,63 @@ describe("the agent bridge", () => {
     expect(answers.find((answer) => answer.id === 2)?.error?.code).toBe(-32001);
   });
 
+  it("relays an event stream over stdio and cancels it with its request id", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-agent-bridge-"));
+    directories.push(directory);
+    const out = join(directory, "agent.json");
+    await runAgentAccessJoin({
+      command: { action: "join", code: connectionCode, out, label: "laptop" },
+      fetch: async () => ({ status: 202, contentType: "application/json", body: "{}" }),
+      stdout: sink(),
+      stderr: sink(),
+    });
+    const connection = decodeAgentConnectionFile(JSON.parse(readFileSync(out, "utf8")));
+    const delivered = Promise.withResolvers<void>();
+    const stdout = sink();
+    async function* requests() {
+      yield (
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 9,
+          method: "events/stream",
+          params: {
+            name: "thread.turn_settled",
+            _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" },
+          },
+        }) + "\n"
+      );
+      await delivered.promise;
+      expect(stdout.text()).toContain("notifications/events/active");
+      yield '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":9}}\n';
+    }
+    await runAgentMcpBridge({
+      connection,
+      input: requests(),
+      stdout,
+      stderr: sink(),
+      fetch: async (request) => {
+        expect(request.headers).toMatchObject({
+          "mcp-protocol-version": "2026-07-28",
+          "mcp-method": "events/stream",
+          "mcp-name": "thread.turn_settled",
+        });
+        const signal = request.signal;
+        if (signal === undefined || request.onEvent === undefined)
+          throw new Error("Expected an event stream");
+        const cancelled = new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+        request.onEvent(
+          'event: message\ndata: {"jsonrpc":"2.0","method":"notifications/events/active"}',
+        );
+        delivered.resolve();
+        await cancelled;
+        expect(signal.aborted).toBe(true);
+        return { status: 200, contentType: "text/event-stream", body: "" };
+      },
+    });
+  });
+
   it("reaches the host on this computer over loopback with only the signed proof, and refuses any other address", async () => {
     const received: Array<{ readonly url: string; readonly headers: IncomingHttpHeaders }> = [];
     const server = createServer((request, response) => {

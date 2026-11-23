@@ -41,13 +41,34 @@ export async function runAgentMcpBridge(ports: AgentMcpBridgePorts): Promise<num
   const privateKey = createPrivateKey(ports.connection.privateKey);
   const now = ports.now ?? Date.now;
   const inFlight = new Set<Promise<void>>();
+  const streams = new Map<string | number, AbortController>();
   const write = (message: unknown) => ports.stdout.write(`${JSON.stringify(message)}\n`);
   for await (const message of messagesFrom(ports.input)) {
     if (message.kind === "malformed") {
       write(message.answer);
       continue;
     }
-    const { id, body } = message;
+    const { id, body, method, params } = message;
+    if (method === "notifications/cancelled") {
+      const requestId = params?.["requestId"];
+      if (typeof requestId === "string" || typeof requestId === "number")
+        streams.get(requestId)?.abort();
+      continue;
+    }
+    const controller =
+      method === "events/stream" && id !== undefined ? new AbortController() : undefined;
+    if (controller !== undefined && id !== undefined) {
+      streams.get(id)?.abort();
+      streams.set(id, controller);
+    }
+    const metadata = params?.["_meta"];
+    const protocol =
+      typeof metadata === "object" &&
+      metadata !== null &&
+      "io.modelcontextprotocol/protocolVersion" in metadata
+        ? metadata["io.modelcontextprotocol/protocolVersion"]
+        : undefined;
+    const name = params?.["name"];
     const signed = signedHeaders(ports.connection, privateKey, body, now());
     const forwarded = listener({
       path: AGENT_MCP_PATH,
@@ -55,10 +76,24 @@ export async function runAgentMcpBridge(ports: AgentMcpBridgePorts): Promise<num
         "content-type": "application/json",
         accept: "application/json, text/event-stream",
         [AGENT_PROOF_HEADER]: signed,
+        ...(typeof protocol === "string" && typeof method === "string"
+          ? { "mcp-protocol-version": protocol, "mcp-method": method }
+          : {}),
+        ...(typeof name === "string" ? { "mcp-name": visibleHeader(name) } : {}),
       },
       body,
+      ...(controller === undefined
+        ? {}
+        : {
+            signal: controller.signal,
+            onEvent: (frame: string) => {
+              if (controller.signal.aborted) return;
+              for (const answer of answersIn("text/event-stream", frame)) write(answer);
+            },
+          }),
     })
       .then((response) => {
+        if (controller?.signal.aborted === true) return;
         if (response.status === 202) return;
         if (response.status === 200) {
           for (const answer of answersIn(response.contentType, response.body)) write(answer);
@@ -74,18 +109,33 @@ export async function runAgentMcpBridge(ports: AgentMcpBridgePorts): Promise<num
               "Octant's limit for this agent is reached for now; try again in a minute.",
             ),
           );
-        } else write(failure(id, -32603, `Octant answered ${response.status}.`));
+        } else {
+          const [answer] = answersIn(response.contentType, response.body);
+          write(answer ?? failure(id, -32603, `Octant answered ${response.status}.`));
+        }
       })
       .catch((error: unknown) => {
+        if (controller?.signal.aborted === true) return;
         const reason = error instanceof Error ? error.message : String(error);
         ports.stderr.write(`${reason}\n`);
         if (id !== undefined) write(failure(id, -32603, `Octant could not be reached: ${reason}`));
+      })
+      .finally(() => {
+        if (id !== undefined && controller !== undefined && streams.get(id) === controller)
+          streams.delete(id);
       });
     inFlight.add(forwarded);
     void forwarded.finally(() => inFlight.delete(forwarded));
   }
+  for (const stream of streams.values()) stream.abort();
   await Promise.all(inFlight);
   return 0;
+}
+
+function visibleHeader(name: string): string {
+  return /^[\x21-\x7e]+$/.test(name) && !name.startsWith("=?base64?")
+    ? name
+    : `=?base64?${Buffer.from(name).toString("base64")}?=`;
 }
 
 /** The proof header for one request body, signed with this machine's key. */
