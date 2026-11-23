@@ -202,20 +202,24 @@ export class RoutineProposalService {
         readonly proposal: RoutineAgentRequest;
         readonly settle: (outcome: RoutineAskOutcome) => void;
       }
+    | { readonly status: "answer-unrecorded" }
     | undefined {
     const key = String(proposalId);
     const pending = this.#pending.get(key);
     if (pending === undefined || String(pending.windowId) !== String(windowId)) return undefined;
     this.#pending.delete(key);
-    this.#options.onChanged?.();
     try {
       pending.answered();
     } catch {
       // The call could not be put back on record, so the answer must not
-      // act: a restart would read the routine's change as never started.
-      pending.settle({ status: "not-created", message: "The routine was not changed." });
-      return undefined;
+      // act: a restart would read the routine's change as never started. The
+      // request goes back on the waiting list, so a later answer can record
+      // it, and the person sees a failure rather than the card vanishing.
+      this.#pending.set(key, pending);
+      this.#options.onChanged?.();
+      return { status: "answer-unrecorded" };
     }
+    this.#options.onChanged?.();
     return { proposal: pending.view, settle: pending.settle };
   }
 

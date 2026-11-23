@@ -789,6 +789,17 @@ async function handleProposalDecision(
       origin,
     );
   }
+  if ("status" in claimed) {
+    // The answer could not be journaled, so nothing acts on it; the proposal
+    // stays waiting and the card reports the failure instead of vanishing.
+    return jsonResponse(
+      decodeRoutineProposalDecisionResult(
+        commandFailure("blocked", "The answer could not be saved; nothing was changed. Try again."),
+      ),
+      200,
+      origin,
+    );
+  }
   if (decision.decision === "decline") {
     claimed.settle({ status: "declined" });
     return jsonResponse(
