@@ -89,7 +89,12 @@ function VideoClipCard(props: {
     const load = async () => {
       try {
         const ticket = await client.clipUrl(job.id);
-        if (!live) return;
+        if (!live) {
+          // The load outlived the card: its blob is still allocated and no
+          // later cleanup will see it.
+          if (ticket.url.startsWith("blob:")) URL.revokeObjectURL(ticket.url);
+          return;
+        }
         setSrc(ticket.url);
         setFailed(false);
         // A fresh ticket before this one runs out, so a long watch keeps seeking.
@@ -109,6 +114,21 @@ function VideoClipCard(props: {
       });
     };
   }, [client, job.id, ready]);
+
+  // The ticket URL is cross-origin from a packaged window (a file:// page on
+  // the loopback host), where the `download` attribute is ignored; the clip
+  // is fetched into a same-origin blob first, as the image card's Download
+  // does. A remote session's URL is already a same-origin blob.
+  async function download() {
+    if (src === undefined) return;
+    const blob = await fetch(src).then((response) => response.blob());
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "clip.mp4";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
 
   const label = `${String(job.options.durationSeconds)} s · ${job.options.resolution} · ${job.options.aspectRatio}`;
   return (
@@ -138,7 +158,16 @@ function VideoClipCard(props: {
             )}
           </span>
         ) : ready && src !== undefined ? (
-          <a className="thread-video-clips__download" download="clip.mp4" href={src}>
+          <a
+            className="thread-video-clips__download"
+            download="clip.mp4"
+            href={src}
+            onClick={(event) => {
+              if (src.startsWith("blob:")) return;
+              event.preventDefault();
+              void download();
+            }}
+          >
             Download
           </a>
         ) : null}

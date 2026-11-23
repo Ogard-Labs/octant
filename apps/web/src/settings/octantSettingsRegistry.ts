@@ -1143,7 +1143,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
     {
       ...octantSettingsNavigation.voice,
       keywords:
-        "voice speech microphone dictation transcription speech to text text to speech read aloud whisper tts stt image generation image provider profiles openai image gpt-image gemini image black forest labs flux ideogram custom image sources provider api key recraft openai-compatible bring your own endpoint",
+        "voice speech microphone dictation transcription speech to text text to speech read aloud whisper tts stt image generation image provider profiles openai image gpt-image gemini image black forest labs flux ideogram custom image sources provider api key recraft openai-compatible bring your own endpoint video generation video clip video provider profiles gemini video",
       settings: [
         {
           id: settingId("transcription"),
