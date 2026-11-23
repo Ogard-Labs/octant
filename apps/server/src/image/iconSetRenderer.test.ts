@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { encode as encodeJpeg } from "jpeg-js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
@@ -280,6 +282,116 @@ describe("icon set rendering", () => {
         sipsExists: () => true,
       }),
     ).toBeTypeOf("function");
+  });
+});
+
+describe("icon set rendering in pure JavaScript", () => {
+  const render = () =>
+    hostIconSetRenderer({
+      workDirectory: workDirectory(),
+      platform: "linux",
+      sipsExists: () => false,
+    });
+
+  /** A JPEG source encoded in the test, so no fixture file is checked in. */
+  function solidJpeg(size: number): Uint8Array {
+    const data = new Uint8Array(size * size * 4);
+    for (let index = 0; index < data.length; index += 4) {
+      data[index] = 30;
+      data[index + 1] = 90;
+      data[index + 2] = 200;
+      data[index + 3] = 255;
+    }
+    return new Uint8Array(
+      encodeJpeg({ data: Buffer.from(data), width: size, height: size }, 90).data,
+    );
+  }
+
+  /** A WebP source encoded through libwebp's WebAssembly module, as decoding is. */
+  async function solidWebp(size: number): Promise<Uint8Array> {
+    const encoder = await import("@jsquash/webp/encode.js");
+    const wasm = createRequire(import.meta.url).resolve("@jsquash/webp/codec/enc/webp_enc.wasm");
+    await encoder.init({ wasmBinary: new Uint8Array(readFileSync(wasm)).buffer });
+    const data = new Uint8ClampedArray(size * size * 4);
+    for (let index = 0; index < data.length; index += 4) {
+      data[index] = 30;
+      data[index + 1] = 90;
+      data[index + 2] = 200;
+      data[index + 3] = 255;
+    }
+    return new Uint8Array(
+      await encoder.default({ data, width: size, height: size, colorSpace: "srgb" }),
+    );
+  }
+
+  it.each([
+    ["image/png", () => Promise.resolve(solidPng(1024))],
+    ["image/jpeg", () => Promise.resolve(solidJpeg(1024))],
+    ["image/webp", () => solidWebp(1024)],
+  ] as const)("makes every web icon from a %s source", async (mime, bytes) => {
+    const rendered = await render()({ bytes: await bytes(), mime, target: "web" });
+    if (rendered.status !== "rendered") throw new Error(rendered.reason);
+    expect(rendered.files.map((file) => [file.path, pngDimensions(file.bytes)?.width])).toEqual(
+      ICON_SET_SPECS.web.map((spec) => [spec.path, spec.pixels]),
+    );
+  });
+
+  it("carries the Android launcher alternates its caller refuses beside", async () => {
+    const rendered = await render()({
+      bytes: solidPng(1024),
+      mime: "image/png",
+      target: "android",
+    });
+    if (rendered.status !== "rendered") throw new Error(rendered.reason);
+    const launcher = rendered.files.find((file) => file.path === "mipmap-hdpi/ic_launcher.png");
+    expect(launcher?.conflicts).toContain("mipmap-hdpi/ic_launcher.webp");
+  });
+
+  it("refuses an iOS icon that shows any transparency", async () => {
+    const rendered = await render()({
+      bytes: solidPng(1024, 128),
+      mime: "image/png",
+      target: "apple-ios",
+    });
+    expect(rendered).toEqual({
+      status: "refused",
+      reason: expect.stringMatching(/must not be transparent/),
+    });
+  });
+
+  it("refuses a source smaller than the minimum", async () => {
+    const rendered = await render()({ bytes: solidPng(512), mime: "image/png", target: "web" });
+    expect(rendered).toEqual({
+      status: "refused",
+      reason: expect.stringMatching(/at least 1024/),
+    });
+  });
+
+  it("refuses a non-square source", async () => {
+    const width = 1024;
+    const height = 768;
+    const data = new Uint8Array(width * height * 4).fill(255);
+    const rendered = await render()({
+      bytes: new Uint8Array(encodeJpeg({ data: Buffer.from(data), width, height }, 90).data),
+      mime: "image/jpeg",
+      target: "web",
+    });
+    expect(rendered).toEqual({
+      status: "refused",
+      reason: expect.stringMatching(/square/),
+    });
+  });
+
+  it("refuses a source whose bytes are no image it reads", async () => {
+    const rendered = await render()({
+      bytes: new Uint8Array([1, 2, 3, 4]),
+      mime: "image/png",
+      target: "web",
+    });
+    expect(rendered).toEqual({
+      status: "refused",
+      reason: "The image's size could not be read.",
+    });
   });
 });
 

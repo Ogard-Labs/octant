@@ -505,6 +505,9 @@ describe("desktop packaging boundary", () => {
       "apps/server/node_modules/node-pty/build/Release/pty.node",
       "apps/server/node_modules/playwright-core/package.json",
       "apps/server/node_modules/yaml/package.json",
+      "apps/server/node_modules/@jsquash/webp/codec/dec/webp_dec.wasm",
+      "apps/server/node_modules/pngjs/package.json",
+      "apps/server/node_modules/jpeg-js/package.json",
     ]);
     expect(REQUIRED_NIGHTLY_STAGED_PACKAGED_FILES).toEqual(["apps/desktop/dist/nightlyClient.mjs"]);
     expect(MAX_DESKTOP_BOOTSTRAP_BYTES).toBe(256 * 1_024);
@@ -1147,6 +1150,9 @@ describe("desktop packaging boundary", () => {
       "node-pty",
       "playwright-core",
       "yaml",
+      "@jsquash/webp",
+      "pngjs",
+      "jpeg-js",
     ]);
     expect(() =>
       validatePackagedPayload([

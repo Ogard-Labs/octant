@@ -8039,11 +8039,15 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `AppIcon.appiconset` for iOS (one 1024 universal icon) or macOS (ten sizes),
   Android `mipmap-*` launcher icons and a 512 Play Store icon, or web favicons,
   a 180 Apple touch icon and 192 and 512 manifest icons, with the asset
-  catalog's `Contents.json` where Xcode needs one. macOS's own `/usr/bin/sips`
-  resizes it (an argument array, never a shell, in a private temporary
-  directory that is always removed), so Octant adds no image library; a host
-  without `sips` is not offered the operation at all, and a portable resizer
-  is a follow-up. The source must be square and at least 1024 pixels. For
+  catalog's `Contents.json` where Xcode needs one. On macOS the system's own
+  `/usr/bin/sips` resizes it (an argument array, never a shell, in a private
+  temporary directory that is always removed). Every other host resizes in
+  pure JavaScript through the same seam and the same checks: `pngjs` decodes
+  PNG and encodes the outputs, `jpeg-js` decodes JPEG, and `@jsquash/webp`
+  decodes WebP through libwebp's WebAssembly module, with an in-repo
+  premultiplied-alpha resampler (area-average for big shrinks, Lanczos-3
+  otherwise) and no image library of the platform's own. The source must be
+  square and at least 1024 pixels. For
   iOS it must show no transparency, since App Store Connect rejects an icon
   with an alpha channel; an image whose alpha channel is opaque everywhere, as
   image models often write, is saved without it. Every target path is checked

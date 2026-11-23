@@ -230,6 +230,11 @@ export const EXTERNAL_RUNTIME_PACKAGES = [
   "@anthropic-ai/claude-agent-sdk",
   "playwright-core",
   "yaml",
+  // The icon-set resizer's decoders off macOS: the WebAssembly module ships
+  // inside the package, which only staged-whole packages keep.
+  "@jsquash/webp",
+  "pngjs",
+  "jpeg-js",
 ] as const;
 
 export const PACKAGED_RUNTIME_IMPORTS = [
@@ -239,6 +244,9 @@ export const PACKAGED_RUNTIME_IMPORTS = [
   "node-pty",
   "playwright-core",
   "yaml",
+  "@jsquash/webp",
+  "pngjs",
+  "jpeg-js",
 ] as const;
 
 /** Staged app payload shared by every desktop packaging target. */
@@ -273,6 +281,9 @@ export const REQUIRED_STAGED_PACKAGED_FILES = [
   "apps/server/node_modules/node-pty/build/Release/pty.node",
   "apps/server/node_modules/playwright-core/package.json",
   "apps/server/node_modules/yaml/package.json",
+  "apps/server/node_modules/@jsquash/webp/codec/dec/webp_dec.wasm",
+  "apps/server/node_modules/pngjs/package.json",
+  "apps/server/node_modules/jpeg-js/package.json",
 ] as const;
 
 /** Flavor-specific code Stable cannot reach and therefore must not ship. */
