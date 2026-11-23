@@ -3,7 +3,11 @@ import { UtcTimestamp } from "./events";
 import { ShieldDecision } from "./shield";
 import { ToolOutsideContentMark } from "./shieldWatcherMark";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
-import { MAX_THREAD_TOOL_STEP_SUMMARY_BYTES, ThreadPublishedPage } from "./threadToolSteps";
+import {
+  MAX_THREAD_TOOL_STEP_SUMMARY_BYTES,
+  ThreadCanvasPreviewReceipt,
+  ThreadPublishedPage,
+} from "./threadToolSteps";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -55,6 +59,8 @@ export const ThreadToolStep = Schema.Struct({
   outsideContent: Schema.optional(ToolOutsideContentMark),
   /** The routine the call set up, when it was the call that created one. */
   routine: Schema.optional(ThreadRoutineReceipt),
+  /** The Canvas version the call previewed, when it was a Canvas preview. */
+  canvasPreview: Schema.optional(ThreadCanvasPreviewReceipt),
   /** Present only on a terminal state of a call whose bounds were trusted. */
   timing: Schema.optional(ThreadCallTiming),
 }).annotations(strict);

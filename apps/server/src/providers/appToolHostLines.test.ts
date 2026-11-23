@@ -137,6 +137,14 @@ describe("appToolHostLines", () => {
     expect(canvas?.text).not.toMatch(/report|deck|document/i);
   });
 
+  it("tells every runtime that findings with numbers become an inline Canvas above the reply", () => {
+    const [canvas] = appToolHostLines(offered("octant_canvas"));
+    expect(canvas?.text).toContain("findings carry numbers, a trend, or a comparison");
+    expect(canvas?.text).toContain("above your reply");
+    expect(canvas?.text).not.toMatch(/below/);
+    expect(CANVAS_DELIVERY_INSTRUCTIONS).toContain("inline Canvas summary drawn above your reply");
+  });
+
   it("keeps Project memory to this Project's facts and says nothing of the person's preferences", () => {
     const [memory] = appToolHostLines(offered("octant_memory"));
     expect(memory?.text).toContain("this Project");

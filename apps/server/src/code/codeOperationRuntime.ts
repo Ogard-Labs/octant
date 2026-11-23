@@ -8113,6 +8113,9 @@ function normalizedOperationEvent(
       ...(event.status === "completed" && event.routine !== undefined
         ? { routine: event.routine }
         : {}),
+      ...(event.status === "completed" && event.canvasPreview !== undefined
+        ? { canvasPreview: event.canvasPreview }
+        : {}),
       // An app-managed call that ended carries the bounds the host measured
       // around its execute call; a provider-ended call has none and keeps
       // the stamp-derived interval.

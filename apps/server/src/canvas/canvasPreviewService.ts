@@ -84,6 +84,7 @@ export type CanvasPreviewOutcome =
   | {
       readonly kind: "preview";
       readonly canvasId: string;
+      readonly versionId: string;
       readonly sequence: number;
       readonly width: number;
       readonly warnings: ReadonlyArray<CanvasPreviewWarning>;
@@ -98,9 +99,19 @@ export type CanvasPreviewOutcome =
   | { readonly kind: "busy" }
   | { readonly kind: "rate-limited" };
 
-/** The drawn width a named layout asks for. */
-const INLINE_WIDTH = 380;
+/**
+ * The drawn width a named layout asks for. Inline is the thread's default
+ * column (`--oct-thread-measure`), so the height an inline preview measures is
+ * the height a reader sees; at the 380 px it once used, a summary that fit the
+ * column measured about twice as tall.
+ */
+const INLINE_WIDTH = 760;
 const SIDEBAR_WIDTH = 720;
+/**
+ * How tall the thread draws an inline Canvas whole before it fades the rest
+ * (`.thread-canvas__body` in `apps/web/src/styles/canvas-inline.css`).
+ */
+export const CANVAS_INLINE_SHOWN_WHOLE_HEIGHT = 1_200;
 /** A preview is at least a phone and never wider than the image ceiling allows. */
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 1_200;
@@ -196,6 +207,7 @@ export function createCanvasPreviewService(
         const base = {
           kind: "preview",
           canvasId: String(version.version.canvasId),
+          versionId: String(version.version.versionId),
           sequence: version.version.sequence,
           width,
           warnings,
@@ -238,9 +250,19 @@ export function createCanvasPreviewService(
                   : "render-failed",
           };
         }
+        const pastCap: ReadonlyArray<CanvasPreviewWarning> =
+          presentation === "inline" && rendered.height > CANVAS_INLINE_SHOWN_WHOLE_HEIGHT
+            ? [
+                {
+                  kind: "inline-past-cap",
+                  height: rendered.height,
+                  cap: CANVAS_INLINE_SHOWN_WHOLE_HEIGHT,
+                },
+              ]
+            : [];
         const measured = {
           ...base,
-          warnings: [...warnings, ...canvasPreviewDesignWarnings(rendered.designs)],
+          warnings: [...warnings, ...canvasPreviewDesignWarnings(rendered.designs), ...pastCap],
         };
         if (!request.imagesInToolResults) {
           return { ...measured, imageOmitted: "provider-cannot-take-images" };

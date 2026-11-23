@@ -39,7 +39,7 @@ const ABOUT_OCTANT = [
   "- The access level decides which actions the person approves first. Plan mode is read-only: investigate and propose, change nothing.",
   "- Project memory is the Project's curated notes; they reach every thread in the Project. When a memory tool is offered, keep durable facts and decisions there; below Full access the person approves each change unless the Project lets agents write it.",
   "- Skills the person turned on arrive as instructions. When a skill tool is offered, load a skill whose description fits the task before you start it.",
-  "- When octant_canvas is offered, put substantial deliverables (reports, plans, comparisons, designs) in a Canvas document. When octant_agents is offered, helper agents can take delegated parts of a task.",
+  "- When octant_canvas is offered, put substantial deliverables (reports, plans, designs) in a Canvas document, and lead findings that carry numbers in an inline Canvas summary above your reply. When octant_agents is offered, helper agents can take delegated parts of a task.",
 ].join("\n");
 
 const MODE: Readonly<Record<OctantMode, string>> = {

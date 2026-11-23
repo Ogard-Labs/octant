@@ -1900,6 +1900,9 @@ function foldTurnFrame(
         ? {}
         : { outsideContent: frame.event.outsideContent }),
       ...(frame.event.routine === undefined ? {} : { routine: frame.event.routine }),
+      ...(frame.event.canvasPreview === undefined
+        ? {}
+        : { canvasPreview: frame.event.canvasPreview }),
       ...(timing === undefined ? {} : { timing }),
     };
     if (existing === -1) appendStep(builder, step);

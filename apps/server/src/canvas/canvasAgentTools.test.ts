@@ -2085,6 +2085,18 @@ describe("createCanvasAgentTools", () => {
       }
     });
 
+    it("asks for an inline summary of findings drawn above the reply, which then adds only what the summary does not say", () => {
+      for (const set of [tools().set, boundTools("work").set, boundTools("code").set]) {
+        const description = set.definitions[0]?.description ?? "";
+        expect(description).toContain(
+          "a summary of findings that carry numbers, a trend, or a comparison",
+        );
+        expect(description).toContain("above your reply");
+        expect(description).toContain("reply with only what it does not already say");
+        expect(description).not.toMatch(/below your reply|refer to it as below/);
+      }
+    });
+
     it("lists the thread's Canvases with the sequence a revision must name", async () => {
       const threadReferenceCards = vi.fn(() => [{ canvasId: "canvas-1", title: "Plan" }]);
       const get = vi.fn(() => ({
@@ -2202,6 +2214,36 @@ describe("createCanvasAgentTools", () => {
       expect(outcome.isError).toBe(true);
       expect(outcome.result).toEqual({ error: "That Canvas is unavailable." });
     });
+  });
+});
+
+describe("an inline Canvas's result", () => {
+  it("tells the agent the Canvas is drawn above its reply, so the reply adds only what it does not show", async () => {
+    const { set } = tools({
+      canvas: {
+        create: vi.fn(() => ({
+          kind: "accepted" as const,
+          card: { canvasId: "canvas-1", versionId: "version-1", presentation: "inline" },
+        })),
+        revise: vi.fn(),
+        get: vi.fn(() => ({ kind: "unavailable" })),
+      },
+    });
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Where CI time goes",
+        presentation: "inline",
+        blocks: [diagram],
+      }),
+    });
+
+    expect(outcome.isError).not.toBe(true);
+    const result = outcome.result as { presentation: string; whereShown?: string };
+    expect(result.presentation).toBe("inline");
+    expect(result.whereShown).toContain("above your reply");
+    expect(result.whereShown).toContain("reply with only what it does not already say");
   });
 });
 
@@ -2469,6 +2511,33 @@ describe("Canvas preview through the tool", () => {
       preview: { preview: vi.fn(async (request: unknown) => preview(request as never)) },
     }).set;
   }
+
+  it("hands the tool row a reference to the version it drew, never the picture", async () => {
+    const set = previewPort(
+      () => true,
+      () => ({
+        kind: "preview",
+        canvasId: previewCanvasId,
+        versionId: "version-3",
+        sequence: 3,
+        width: 760,
+        height: 420,
+        warnings: [],
+        image: { mimeType: "image/png" as const, data: "AAAA" },
+      }),
+    );
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "preview", canvasId: previewCanvasId }),
+    });
+    expect(outcome.isError).not.toBe(true);
+    expect(outcome.canvasPreview).toEqual({
+      canvasId: previewCanvasId,
+      versionId: "version-3",
+      sequence: 3,
+    });
+    expect(JSON.stringify(outcome.canvasPreview)).not.toContain("AAAA");
+  });
 
   it("reports the warnings and the reason a model that cannot take images got no picture", async () => {
     const set = previewPort(

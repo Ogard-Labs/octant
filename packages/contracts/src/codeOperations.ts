@@ -14,7 +14,7 @@ import { HarnessRetryEventFields } from "./harnessRetry";
 import { AccountMoveTextHandoffCause, ContextHandoffOmissions } from "./contextHandoff";
 import { ProviderChildActivityEvent } from "./providers";
 import { ProviderNativeSessionId } from "./providerNativeSession";
-import { ThreadPublishedPage } from "./threadToolSteps";
+import { ThreadCanvasPreviewReceipt, ThreadPublishedPage } from "./threadToolSteps";
 import { ThreadCallTiming } from "./threadToolStepList";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
 import { ThreadBoardFinishedMark } from "./finishedReceipt";
@@ -1950,6 +1950,8 @@ const ToolEvent = Schema.Struct({
   outsideContent: Schema.optional(ToolOutsideContentMark),
   /** The routine the call set up; the transcript shows what was created. */
   routine: Schema.optional(ThreadRoutineReceipt),
+  /** The Canvas version the call previewed; the row draws that version. */
+  canvasPreview: Schema.optional(ThreadCanvasPreviewReceipt),
   /** Present only on a terminal state of a call whose bounds were trusted. */
   timing: Schema.optional(ThreadCallTiming),
 }).annotations(strict);
@@ -2593,6 +2595,7 @@ export const CodeConversationStep = Schema.Union(
     published: Schema.optional(ThreadPublishedPage),
     outsideContent: Schema.optional(ToolOutsideContentMark),
     routine: Schema.optional(ThreadRoutineReceipt),
+    canvasPreview: Schema.optional(ThreadCanvasPreviewReceipt),
     /** Present only on a completed step whose bounds were trusted. */
     timing: Schema.optional(ThreadCallTiming),
   }).annotations(strict),

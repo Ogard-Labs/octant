@@ -27,7 +27,16 @@ deck, dashboard, web page, design or mockup, diagram, or prototype), and any
 reply that needs headings, tables, or charts or runs past a few paragraphs, is
 a Canvas with a one- or two-sentence reply pointing at it; what is read once
 (a short answer, a one-off snippet or command, a clarifying question,
-conversation) stays in the reply. When in doubt the agent makes the Canvas
+conversation) stays in the reply. Findings that carry numbers, a trend, or a
+comparison (a CI timing review, a benchmark, a cost breakdown) lead with an
+inline Canvas summary, a few metrics and one to three charts, drawn above the
+reply; the reply then says only what the summary does not (the reasons, what
+to do, the caveats) and does not describe it, and a longer report may still
+sit in the sidebar beside it. The same trigger is in the turn's delivery
+instructions, the `octant_canvas` routing line every runtime receives, and
+the inline result's `whereShown`, and tests hold the four to the same words,
+because a rule stated in one place and contradicted in another was what left
+summaries as prose or behind a sidebar row. When in doubt the agent makes the Canvas
 rather than asking, because a person who wanted the document otherwise had to
 ask twice, and one who wanted text can say so once. The description also asks
 for a finished look: typed blocks for data, a design frame only for the look.
@@ -348,8 +357,8 @@ the request, not the placement: every reader (the card projection, the agent's
 result, `preview`, the dock offer, and the thread) places a Canvas by
 `effectiveCanvasPresentation`, and only the preview-card choice reads the
 recorded request. The agent is told to put a visualization
-that answers the current question inline and to leave longer documents in the
-sidebar. Recording the request rather than `sidebar` is what lets the thread
+that answers the current question, or a summary of findings, inline and to
+leave longer documents in the sidebar. Recording the request rather than `sidebar` is what lets the thread
 tell a refused inline request from a Canvas the author placed in the sidebar,
 which stays a row; a host that predates this recorded `sidebar`, so such a
 Canvas stays a row there. The refusal bounds only the author's unprompted request: a
@@ -358,11 +367,25 @@ reaches the server
 (see [Canvas documents, designs, and prototypes](../architecture.md#canvas-documents-designs-and-prototypes)).
 A revise without a choice keeps the current presentation.
 
+**Why inline stays typed blocks and static designs.** An inline summary could
+have been agent-written HTML drawn as a page of its own, scripts and network
+included, as some agent workspaces do. Octant keeps the inline form to typed
+blocks and the `document` design, whose frames run no script unless the
+design declares it, load nothing, and keep the network off: a page the agent
+writes freely would be an outside-content surface inside the thread, outside
+the [Canvas HTML frames threat model](../security/canvas-html-frames-threat-model.md).
+Typed blocks also keep what a picture cannot: the reader's theme, the
+disclosed data table, tooltips, revision, share, and export. The typed
+catalogue already draws such a summary (metric tiles, a stacked bar, a bar
+list), and a static document design carries a bespoke look when the blocks
+cannot.
+
 ## Preview and placement in the thread
 
 `preview` returns a picture and a layout reading of one shipped version. Its
 input is the `canvasId`, an optional `version` (a sequence), a `width`
-(`inline`, `sidebar`, or 320–1200 px) and a `theme` (`light` or `dark`). The
+(`inline`, the thread's default 760 px column; `sidebar`; or 320–1200 px) and
+a `theme` (`light` or `dark`). The
 layout warnings are computed from the document and the target width alone and
 are typed values — a clipped label, a legend over its row, an empty series,
 and ink below its contrast target — so a
@@ -406,7 +429,19 @@ passes its time budget, each remaining design gets a `design-not-measured`
 warning rather than being left out as if it were clean. A design with a frame
 that did not answer gets the same warning, beside the warnings of its frames
 that did. The budget is checked before each frame, so a frame it does not
-reach counts as one that did not answer. A running design runs in the preview as
+reach counts as one that did not answer. An inline Canvas drawn taller than
+the thread shows whole (1,200 px, `CANVAS_INLINE_SHOWN_WHOLE_HEIGHT`) gets an
+`inline-past-cap` warning with its drawn height and the cap, measured in the
+drawn page, so a summary is not cut off behind **Show the whole Canvas**
+unseen; a model shown no picture of a Canvas without a design gets no such
+reading, since no page was drawn. A preview's result also hands the tool row
+a reference to the version it drew (`canvasPreview`: the Canvas id, version
+id, and sequence), journaled on the call's step like a routine receipt
+(`ThreadCanvasPreviewReceipt`); the picture the agent was shown is never
+journaled. Opening that row in Chat, Work, or Code draws the version as an
+inert miniature, read under the window's own Canvas authority, captioned with
+its version, so a person can see what the agent checked; a window that cannot
+read the Canvas sees a plain line instead. A running design runs in the preview as
 it does for a reader: the host builds its page with `renderCanvasDesignPage`,
 answers it at a path under the preview page's own origin with the page
 route's headers, and the preview page draws it in a frame sandboxed to
@@ -447,8 +482,10 @@ Chat marks a reader by this same rule, not on every Canvas tool result.
 A thread reference card reports the effective presentation and the first
 version's time (`canvasCreatedAt`). A Canvas that has outgrown the bound, by a
 revision or a person's edit, is listed as `sidebar`.
-The renderer places every Canvas after the last row of the turn the person
-opened at or before `canvasCreatedAt`. An inline one is drawn there read-only:
+The renderer places every Canvas in the turn the person opened at or before
+`canvasCreatedAt`: inside the turn's last reply, between its tool rows and its
+text, so a summary reads before the words that add to it; a turn with no
+reply yet keeps it after its last row. An inline one is drawn there read-only:
 it gets no layout, plan, comment or action runtime, so nothing drawn inline can
 journal a version; a board pans and zooms but its nodes do not move, and a
 running design's bridge can only resize its frame, report an error, or keep it

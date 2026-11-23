@@ -1,30 +1,47 @@
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 
-/** One turn of a transcript: when the person's message opened it, and the row it ends on. */
+/**
+ * One turn of a transcript: when the person's message opened it, the row it
+ * ends on, and its last reply row when it has one.
+ */
 export interface ThreadTurnSpan {
   readonly startedAt: string;
   readonly endKey: string;
+  readonly replyKey?: string;
 }
 
 /**
  * The turns of a transcript, read from its rows in order. A row that opens a
  * turn carries the time the person's message was accepted; every other row
  * belongs to the turn before it. Rows ahead of the first turn are skipped.
+ * `isReply` marks the agent's reply rows, so a caller can place what the turn
+ * made above its last reply rather than after rows that follow it.
  */
 export function threadTurnSpans<T>(
   rows: ReadonlyArray<T>,
   key: (row: T) => string,
   turnStartedAt: (row: T) => string | undefined,
+  isReply?: (row: T) => boolean,
 ): ReadonlyArray<ThreadTurnSpan> {
   const spans: ThreadTurnSpan[] = [];
   for (const row of rows) {
     const startedAt = turnStartedAt(row);
     if (startedAt !== undefined) {
-      spans.push({ startedAt, endKey: key(row) });
+      // A row may open a turn and hold its reply too, as a Chat turn does.
+      spans.push({
+        startedAt,
+        endKey: key(row),
+        ...(isReply?.(row) === true ? { replyKey: key(row) } : {}),
+      });
       continue;
     }
     const last = spans.at(-1);
-    if (last !== undefined) spans[spans.length - 1] = { ...last, endKey: key(row) };
+    if (last === undefined) continue;
+    spans[spans.length - 1] = {
+      ...last,
+      endKey: key(row),
+      ...(isReply?.(row) === true ? { replyKey: key(row) } : {}),
+    };
   }
   return spans;
 }
@@ -36,7 +53,10 @@ export interface ThreadTurnPlacement<T> {
   readonly placed: ReadonlySet<string>;
 }
 
-export type ThreadCanvasPlacement = ThreadTurnPlacement<CanvasThreadReferenceCard>;
+export interface ThreadCanvasPlacement extends ThreadTurnPlacement<CanvasThreadReferenceCard> {
+  /** Canvases to draw inside the reply row with this key, above its text. */
+  readonly beforeReply: ReadonlyMap<string, ReadonlyArray<CanvasThreadReferenceCard>>;
+}
 
 /**
  * Place each item at the end of the turn that made it: the last turn the
@@ -66,20 +86,28 @@ export function placeByTurn<T>(
 }
 
 /**
- * Place each Canvas at the end of the turn that wrote it. An inline Canvas is
- * drawn there and any other is a row that opens it, so a thread with many
- * Canvases never grows a bar above its composer. A Canvas the transcript
- * cannot place (no creation time from an older host, or turns not loaded
- * yet) stays in the card list.
+ * Place each Canvas in the turn that wrote it: above the turn's last reply,
+ * so a summary reads before the words that add to it, or after the turn's
+ * last row while it has no reply yet. An inline Canvas is drawn there and any
+ * other is a row that opens it, so a thread with many Canvases never grows a
+ * bar above its composer. A Canvas the transcript cannot place (no creation
+ * time from an older host, or turns not loaded yet) stays in the card list.
  */
 export function placeThreadCanvases(
   turns: ReadonlyArray<ThreadTurnSpan>,
   cards: ReadonlyArray<CanvasThreadReferenceCard>,
 ): ThreadCanvasPlacement {
-  return placeByTurn(
-    turns,
+  const replyKeys = new Set(turns.flatMap((turn) => turn.replyKey ?? []));
+  const placement = placeByTurn(
+    turns.map((turn) => ({ startedAt: turn.startedAt, endKey: turn.replyKey ?? turn.endKey })),
     cards,
     (card) => (card.canvasCreatedAt === undefined ? undefined : String(card.canvasCreatedAt)),
     (card) => String(card.canvasId),
   );
+  const byRow = new Map<string, ReadonlyArray<CanvasThreadReferenceCard>>();
+  const beforeReply = new Map<string, ReadonlyArray<CanvasThreadReferenceCard>>();
+  for (const [key, placed] of placement.byRow) {
+    (replyKeys.has(key) ? beforeReply : byRow).set(key, placed);
+  }
+  return { byRow, beforeReply, placed: placement.placed };
 }

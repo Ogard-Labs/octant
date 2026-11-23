@@ -70,7 +70,12 @@ import type {
   ImageGenerationClient,
   ThreadImageResults,
 } from "@octant/client-runtime/image-generation-client";
-import type { ImageArtifactRecord, ImageGenerationProfileView, ImageJob } from "@octant/contracts";
+import type {
+  ImageArtifactRecord,
+  ImageGenerationProfileView,
+  ImageJob,
+  ThreadCanvasPreviewReceipt,
+} from "@octant/contracts";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
@@ -114,6 +119,7 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
+import { CanvasPreviewMiniature } from "../canvas/CanvasPreviewMiniature";
 import {
   ThreadArtifactsConfirm,
   ThreadArtifactsOffer,
@@ -1097,6 +1103,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       messages,
       (message) => message.id,
       (message) => (message.role === "user" ? message.at : undefined),
+      (message) => message.role === "assistant",
     ),
     threadCanvases.cards,
   );
@@ -2312,6 +2319,29 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                   message.status === "interrupted"
                                 }
                                 {...subagentWindowProp(subagentWindows.get(message.id))}
+                                {...(canvasClient === undefined
+                                  ? {}
+                                  : {
+                                      canvasPreview: (preview: ThreadCanvasPreviewReceipt) => (
+                                        <CanvasPreviewMiniature
+                                          client={canvasClient}
+                                          preview={preview}
+                                        />
+                                      ),
+                                    })}
+                              />
+                            )}
+                            {/* The turn's Canvases sit between its steps and its
+                            reply, so a summary reads first and the reply adds to
+                            it rather than introducing it. */}
+                            {canvasClient === undefined ? null : (
+                              <ThreadCanvases
+                                cards={canvasPlacement.beforeReply.get(message.id)}
+                                client={canvasClient}
+                                {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+                                {...(props.canvasOpenLabel === undefined
+                                  ? {}
+                                  : { openLabel: props.canvasOpenLabel })}
                               />
                             )}
                             {/* An assistant reply is markdown — a plan arrives as a

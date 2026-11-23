@@ -92,6 +92,19 @@ export const ThreadPublishedPage = Schema.Struct({
 export type ThreadPublishedPage = typeof ThreadPublishedPage.Type;
 
 /**
+ * The Canvas version an agent's `preview` call drew, kept on that call's step
+ * so the transcript can show what the agent checked. Only the reference is
+ * kept: the step draws the version itself, read under the window's own
+ * Canvas authority, and the picture the agent was shown is never journaled.
+ */
+export const ThreadCanvasPreviewReceipt = Schema.Struct({
+  canvasId: boundedNonEmptyText(255),
+  versionId: boundedNonEmptyText(255),
+  sequence: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type ThreadCanvasPreviewReceipt = typeof ThreadCanvasPreviewReceipt.Type;
+
+/**
  * How a Work or Code thread delivers a document it makes: as a Canvas, or
  * with the runtime's own artifact tool, which publishes it to the person's
  * account with the model's provider (Claude artifacts). Absent on a thread
