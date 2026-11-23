@@ -1,6 +1,6 @@
 // Temporary rendered-QA scenes for the device access level controls. Not committed.
 import type { PairedDeviceAdministrationClient } from "@octant/client-runtime/paired-device-administration-client";
-import type { RemoteSessionBridge } from "@octant/client-runtime";
+import type { RemoteConnection, RemoteSessionBridge } from "@octant/client-runtime";
 import type { ReactNode } from "react";
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
 import { RemoteDeviceSelfPanel } from "../remote/RemoteDeviceSelfPanel";
@@ -118,7 +118,11 @@ const pairedClient: PairedDeviceAdministrationClient = {
 };
 
 function sessionBridge(accessLevel: "full" | "read-only"): RemoteSessionBridge {
-  const state = { kind: "ready", hostId: pending.hostId, displayName: "Mac" };
+  const state = {
+    kind: "ready" as const,
+    hostId: pending.hostId,
+    displayName: "Mac",
+  };
   const metadata = {
     deviceId: "22222222-2222-4222-8222-222222222222",
     deviceLabel: "This browser",
@@ -132,14 +136,56 @@ function sessionBridge(accessLevel: "full" | "read-only"): RemoteSessionBridge {
     actsAsHostPerson: accessLevel === "full",
     accessLevel,
   };
+  const session = {
+    hostId: pending.hostId,
+    deviceId: metadata.deviceId,
+    sessionId: "s",
+    credentialGeneration: 1,
+    origin: pending.origin,
+    protocolVersion: 1,
+    authenticationVersion: 1,
+    capabilityDigest: "d".repeat(64),
+    csrfToken: "csrf",
+    issuedAt: "2026-08-18T08:00:00.000Z",
+    idleExpiresAt: "2026-08-18T09:15:00.000Z",
+    absoluteExpiresAt: "2026-08-18T10:00:00.000Z",
+  };
+  const connection: RemoteConnection = {
+    state: () => "ready",
+    onStateChange: () => () => undefined,
+    connect: async () => undefined,
+    reconnect: async () => undefined,
+    disconnect: () => undefined,
+    refresh: async () => undefined,
+    renewIfSpent: async () => undefined,
+    session: () => session,
+    deviceIdentity: () => ({
+      hostId: pending.hostId,
+      deviceId: metadata.deviceId,
+      credentialGeneration: 1,
+      hostKeyFingerprint: "e".repeat(64),
+    }),
+    updateFetch: () => undefined,
+    authenticatedFetch: async () => Response.json(metadata),
+    issueServerProxySession: async () => session,
+  };
   return {
     getState: () => state,
     subscribe: () => () => undefined,
-    connection: () => ({
-      session: () => ({ sessionId: "s" }),
-      authenticatedFetch: async () => Response.json(metadata),
+    connect: () => undefined,
+    resume: () => undefined,
+    forgetDeviceKey: async () => undefined,
+    stageDeviceKeyRotation: async () => ({
+      publicKeyPem: "pem",
+      fingerprint: "f".repeat(64),
+      sign: async () => "signature",
+      adopt: async () => undefined,
+      discard: async () => undefined,
     }),
-  } as never;
+    reconnect: () => undefined,
+    disconnect: () => undefined,
+    connection: () => connection,
+  };
 }
 
 export const ACCESS_LEVEL_RENDERERS: ReadonlyArray<{

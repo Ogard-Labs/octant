@@ -74,3 +74,19 @@ export function browserSurfaceStatusNote(input: {
   const where = input.url ?? "this page";
   return input.stale ? `${where} · the Mac has moved on since this picture` : where;
 }
+
+/**
+ * Whether the phone's composer may add to the conversation. A device paired
+ * Read only watches: the thread lists, but nothing it sends would land, so
+ * the composer says so rather than taking a reply the host then refuses.
+ */
+export function conversationComposerAccess(
+  surfaces: ReadonlyArray<MobileThreadSurfaceOption>,
+): { readonly editable: boolean; readonly reason?: string } {
+  const reach = surfaces.find((surface) => surface.id === "chat")?.reach ?? "unavailable";
+  if (reach === "interactive") return { editable: true };
+  return {
+    editable: false,
+    reason: "Watching only. Replying to this thread stays on the Mac.",
+  };
+}

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   browserSurfaceReachNote,
   browserSurfaceStatusNote,
+  conversationComposerAccess,
   listMobileThreadSurfaces,
 } from "./threadSurfacePresentation";
 
@@ -12,6 +13,21 @@ describe("the surfaces a thread offers on the phone", () => {
       { id: "browser", label: "Browser", reach: "interactive" },
     ]);
     expect(listMobileThreadSurfaces({ mode: "chat" })[0]?.label).toBe("Chat");
+  });
+
+  it("disables the composer with a reason when the pairing only lets the device watch", () => {
+    const watching = listMobileThreadSurfaces({
+      mode: "chat",
+      session: { actsAsHostPerson: false, accessLevel: "read-only" },
+    });
+    expect(watching.find((surface) => surface.id === "chat")?.reach).toBe("read-only");
+    const access = conversationComposerAccess(watching);
+    expect(access.editable).toBe(false);
+    expect(access.reason).toContain("Watching only");
+
+    expect(
+      conversationComposerAccess(listMobileThreadSurfaces({ mode: "chat" })).editable,
+    ).toBe(true);
   });
 
   it("offers nothing this device cannot draw, however far the host would let it reach", () => {

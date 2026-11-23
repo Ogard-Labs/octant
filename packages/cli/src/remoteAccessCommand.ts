@@ -214,7 +214,7 @@ async function runRemoteAccessPauseCommand(
   if (response.status !== expected || typeof paused !== "boolean") {
     input.stderr.write(
       response.status === 503
-        ? "Remote access answers only while the remote listener is on. Start it with `octant listener enable`, then try again; a pause is kept until you resume it.\n"
+        ? await listenerOffMessage(input)
         : `${failureMessage(response, "Octant refused to change remote access.")}\n`,
     );
     return 1;
@@ -229,6 +229,24 @@ async function runRemoteAccessPauseCommand(
         : "Remote access resumed.\n",
   );
   return 0;
+}
+
+/**
+ * The enable command the host's remembered setting would run again, or one
+ * with placeholders when the host never ran it: a bare
+ * `octant listener enable` refuses for want of --hostname and --port.
+ */
+async function listenerOffMessage(input: RunRemoteAccessCliCommandInput): Promise<string> {
+  const status = await input.session.send({
+    path: "/api/desktop/private-listener/status",
+    method: "GET",
+  });
+  const listener = status.status === 200 ? listenerStatusOf(status.body) : undefined;
+  const enable =
+    listener !== undefined && listener.hostname !== null && listener.port !== null
+      ? `octant listener enable --hostname ${listener.hostname} --port ${String(listener.port)}`
+      : "octant listener enable --hostname <lan-or-tailscale-address> --port <port>";
+  return `Remote access answers only while the remote listener is on. Start it with \`${enable}\`, then try again; a pause is kept until you resume it.\n`;
 }
 
 export const DEFAULT_PAIR_LISTENER_PORT = 8443;
@@ -774,6 +792,8 @@ function pairingFailureMessage(response: LocalControlResponse, fallback: string)
 
 interface ListenerStatusOutput {
   readonly state: string;
+  readonly hostname: string | null;
+  readonly port: number | null;
   readonly origin: string | null;
   readonly exposureClass: string | null;
   readonly certificateFingerprint: string | null;
@@ -786,6 +806,8 @@ interface ListenerStatusOutput {
 function listenerStatusOf(body: unknown): ListenerStatusOutput | undefined {
   const status = fieldOf(body, "status");
   const state = fieldOf(status, "state");
+  const hostname = fieldOf(status, "hostname");
+  const port = fieldOf(status, "port");
   const origin = fieldOf(status, "origin");
   const exposureClass = fieldOf(status, "exposureClass");
   const certificateFingerprint = fieldOf(status, "certificateFingerprint");
@@ -804,6 +826,9 @@ function listenerStatusOf(body: unknown): ListenerStatusOutput | undefined {
   }
   if (
     typeof state !== "string" ||
+    // A host from before the remembered setting was reported sends neither.
+    !(hostname === undefined || nullableString(hostname)) ||
+    !(port === undefined || port === null || typeof port === "number") ||
     !nullableString(origin) ||
     !nullableString(exposureClass) ||
     !nullableString(certificateFingerprint) ||
@@ -814,6 +839,8 @@ function listenerStatusOf(body: unknown): ListenerStatusOutput | undefined {
   }
   return {
     state,
+    hostname: hostname ?? null,
+    port: port ?? null,
     origin,
     exposureClass,
     certificateFingerprint,

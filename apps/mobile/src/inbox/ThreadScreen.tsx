@@ -29,7 +29,10 @@ import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel
 import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard";
 import { ServiceOfferCard } from "../surfaces/ServiceOfferCard";
 import { WorkRequestCards } from "../surfaces/WorkRequestCards";
-import { listMobileThreadSurfaces } from "../surfaces/threadSurfacePresentation";
+import {
+  conversationComposerAccess,
+  listMobileThreadSurfaces,
+} from "../surfaces/threadSurfacePresentation";
 import {
   MOBILE_COPY,
   MOBILE_TAB_LABELS,
@@ -386,13 +389,15 @@ export function ThreadScreen(props: ThreadScreenProps) {
       onPress: () => void usageResume(mode, thread, { kind: "schedule", turnId: stopped.turnId }),
     };
   })();
+  const composerAccess = conversationComposerAccess(surfaces);
   const composerEditable =
-    mode === "chat"
+    composerAccess.editable &&
+    (mode === "chat"
       ? staleGate.allowProductMutations && chat.activeAttempt === undefined
       : staleGate.allowProductMutations &&
         !workTurnLive &&
         !codeTurnLive &&
-        (mode === "code" || work.thread !== undefined);
+        (mode === "code" || work.thread !== undefined));
   const appendToDraft = useCallback(
     (text: string) => setPrompt((draft) => appendTranscript(draft, text)),
     [],
@@ -786,6 +791,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 : MOBILE_COPY.working
             }
             editable={composerEditable}
+            footerHint={composerAccess.reason}
             modelLabel={modelLabel}
             onChangeText={setPrompt}
             onPressModel={() => setModelOpen(true)}
@@ -809,7 +815,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
               : MOBILE_COPY.turnRunning
           }
           editable={composerEditable}
-          footerHint={followUpComposerCopy?.footerHint}
+          footerHint={composerAccess.reason ?? followUpComposerCopy?.footerHint}
           modelLabel={
             selected.mode === "work" && work.thread !== undefined
               ? mobileModelLabel(models.options, String(work.thread.modelId))

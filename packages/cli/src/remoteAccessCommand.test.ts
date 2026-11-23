@@ -309,7 +309,41 @@ describe("pausing and resuming remote access from this computer", () => {
       body: { category: "unavailable", message: "Local device administration is unavailable." },
     }));
     expect(await test.run({ action: "remote-access-pause", paused: false })).toBe(1);
-    expect(test.err.join("")).toContain("octant listener enable");
+    expect(test.err.join("")).toContain(
+      "octant listener enable --hostname <lan-or-tailscale-address> --port <port>",
+    );
+  });
+
+  it("names the remembered address and port in the enable command it suggests", async () => {
+    const test = fixture((request) =>
+      request.path === "/api/desktop/private-listener/status"
+        ? {
+            status: 200,
+            body: {
+              status: {
+                state: "disabled",
+                hostname: "100.64.0.7",
+                port: 8455,
+                origin: null,
+                exposureClass: null,
+                certificateFingerprint: null,
+                certificateSource: null,
+                tlsPin: null,
+              },
+            },
+          }
+        : {
+            status: 503,
+            body: {
+              category: "unavailable",
+              message: "Local device administration is unavailable.",
+            },
+          },
+    );
+    expect(await test.run({ action: "remote-access-pause", paused: false })).toBe(1);
+    expect(test.err.join("")).toContain(
+      "octant listener enable --hostname 100.64.0.7 --port 8455",
+    );
   });
 });
 
