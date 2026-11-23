@@ -1004,6 +1004,7 @@ export function startOctantServer(
       onCodeTurnCancelled,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      isPersonPairedDeviceCurrent,
       narrationForTurn,
       transcriptionForTurn,
       imageDescriber,

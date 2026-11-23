@@ -290,13 +290,17 @@ export function autoFixCopy(
   if (state.status === "stopped") {
     if (state.reason === "ready")
       return `Babysitting finished. ${state.readyHeadSha ? state.readyHeadSha.slice(0, 12) : "The observed head"} met your merge conditions.`;
+    if (state.reason === "needs-help")
+      return "The repair turn finished and the same commit still has unresolved failures. Review the thread before restarting.";
+    if (state.reason === "feedback-limit")
+      return "The watch reached its feedback turn limit. Review the new feedback before restarting.";
     if (state.reason === "attempt-limit") {
       return `Stopped after ${attempts} tries on the same failure. Look at the thread, then turn it on again.`;
     }
     if (state.reason === "merged") return "Stopped: the pull request merged.";
     if (state.reason === "closed") return "Stopped: the pull request was closed.";
     if (state.reason === "authority-lost") {
-      return "Stopped: this Project is no longer connected to the pull request's repository.";
+      return "The watch stopped because it lost access to the project or the paired device session.";
     }
     return "Stopped: the thread is archived or no longer available.";
   }

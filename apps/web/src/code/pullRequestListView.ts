@@ -215,9 +215,11 @@ export function babysitProgress(row: CodeProjectPullRequestRow) {
     "repair-branch": "Branch needs an update",
     repository: "Waiting for repository rules",
     ready: `Ready at ${watch.readyHeadSha?.slice(0, 12) ?? "observed head"}`,
+    "needs-help": "Repair needs your help",
+    "feedback-limit": "Feedback turn limit reached",
     "attempt-limit": "Repair limit reached",
     "thread-unavailable": "Repairing thread unavailable",
-    "authority-lost": "Project access lost",
+    "authority-lost": "Watch access lost",
   };
   const owner = row.linkedThreads.find(
     (thread) => String(thread.threadId) === String(watch.threadId),
@@ -249,6 +251,8 @@ export function filterPullRequests(
           "label",
           "ready",
           "attempt-limit",
+          "feedback-limit",
+          "needs-help",
           "thread-unavailable",
           "authority-lost",
         ].includes(row.babysit.status)

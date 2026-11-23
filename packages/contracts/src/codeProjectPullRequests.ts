@@ -611,6 +611,8 @@ export const PullRequestBabysitStatus = Schema.Literal(
   "repository",
   "ready",
   "attempt-limit",
+  "feedback-limit",
+  "needs-help",
   "thread-unavailable",
   "authority-lost",
 );

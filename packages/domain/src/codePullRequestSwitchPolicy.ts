@@ -47,6 +47,7 @@ export type PullRequestAutoFixFold =
       readonly handled?: { readonly headSha: string; readonly failures: ReadonlySet<string> };
       /** Started wakes per failure identity since the switch was last turned on. */
       readonly attempts: ReadonlyMap<string, number>;
+      readonly feedbackWakes: number;
       readonly lastWake?: PullRequestAutoFixWakeFold;
     }
   | {
@@ -171,6 +172,7 @@ export function applyPullRequestSwitchEvent(
         threadId: String(threadId),
         enabledAt: event.occurredAt,
         attempts: new Map(),
+        feedbackWakes: 0,
         ...(change.babysit === undefined ? {} : { babysit: change.babysit }),
       },
     };
@@ -213,6 +215,13 @@ export function applyPullRequestSwitchEvent(
     autoFix: {
       ...fold.autoFix,
       attempts,
+      feedbackWakes:
+        fold.autoFix.feedbackWakes +
+        (fold.autoFix.babysit &&
+        change.result === "started" &&
+        change.failures.some((failure) => failure.kind === "feedback")
+          ? 1
+          : 0),
       ...(handled ? { handled: { headSha: change.headSha, failures: handled } } : {}),
       lastWake: {
         at: event.occurredAt,
@@ -247,7 +256,8 @@ export type PullRequestAutoFixDecision =
  *
  * - A merged or closed pull request stops it.
  * - No failure, or the same failures on the same head it already woke a turn
- *   for, is idle: the agent is on it, or nothing changed since. A wake that
+ *   for, is idle in ordinary Auto-fix. A babysitter hands remaining failures
+ *   to the person once the repairing thread is quiet. A wake that
  *   never started a turn (refused, or never sent) is tried again, because
  *   the reason is usually transient.
  * - A failure that already spent the attempt limit stops it, so a fix that
@@ -262,6 +272,7 @@ export function decidePullRequestAutoFix(input: {
   readonly personTyping: boolean;
   /** Attempts per failure from Settings; absent is the default three. */
   readonly maxAttempts?: number;
+  readonly maxFeedbackWakes?: number;
 }): PullRequestAutoFixDecision {
   const { fold, observation } = input;
   if (fold.status !== "on") return { kind: "idle" };
@@ -278,7 +289,18 @@ export function decidePullRequestAutoFix(input: {
     handled?.headSha === observation.headSha
       ? observation.failures.filter((failure) => !handled.failures.has(failureIdentity(failure)))
       : observation.failures;
-  if (failures.length === 0) return { kind: "idle" };
+  if (failures.length === 0) {
+    return fold.babysit && !input.turnActive && !input.personTyping
+      ? { kind: "stop", reason: "needs-help" }
+      : { kind: "idle" };
+  }
+  if (
+    fold.babysit &&
+    failures.some((failure) => failure.kind === "feedback") &&
+    fold.feedbackWakes >= (input.maxFeedbackWakes ?? CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES)
+  ) {
+    return { kind: "stop", reason: "feedback-limit" };
+  }
   if (
     fold.lastWake !== undefined &&
     fold.lastWake.result === "started" &&

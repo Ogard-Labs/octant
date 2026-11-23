@@ -19,6 +19,7 @@ import {
   type PullRequestAutoFixThreads,
   type PullRequestSwitchAuthority,
   type PullRequestSwitchForge,
+  type PullRequestSwitchLimits,
 } from "./codeProjectPullRequestSwitchService";
 import type {
   GhAutoFixFailureDetail,
@@ -86,6 +87,7 @@ function fixture(
     readonly methods?: Partial<Record<CodeProjectPullRequestMergeMethod, boolean>>;
     readonly linked?: ReadonlyArray<string>;
     readonly authorize?: PullRequestSwitchAuthority["authorizePullRequest"];
+    readonly limits?: () => PullRequestSwitchLimits;
     readonly localWindows?: () => ReadonlyArray<typeof windowId>;
     readonly threadPullRequests?: ReadonlyArray<typeof target>;
   } = {},
@@ -123,10 +125,12 @@ function fixture(
       order.push("turn");
       return true;
     }),
+    readFollowUp: vi.fn<NonNullable<PullRequestAutoFixThreads["readFollowUp"]>>(),
     notifyPerson: vi.fn<PullRequestAutoFixThreads["notifyPerson"]>(async () => undefined),
   };
   const create = () =>
     new CodeProjectPullRequestSwitchService({
+      ...(options.limits && { limits: options.limits }),
       ...(options.localWindows ? { localWindows: options.localWindows } : {}),
       authority: {
         authorizePullRequest:
@@ -173,6 +177,59 @@ const MERGE_WHEN_READY = "code.project-pull-request-merge-when-ready-recorded@1"
 const AUTO_FIX = "code.project-pull-request-auto-fix-recorded@1";
 
 describe("Babysit from a Code thread", () => {
+  it("revalidates a paired owner's session on a headless host and stops on revocation", async () => {
+    const f = fixture({ localWindows: () => [] });
+    let current = true;
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: { checks: "required" } },
+      "user",
+      undefined,
+      () => current,
+    );
+    await f.service.tick(signal);
+    expect(f.forge.observe).toHaveBeenCalledTimes(1);
+    current = false;
+    await f.service.tick(signal);
+    expect(f.forge.observe).toHaveBeenCalledTimes(1);
+    expect((await f.service.query(windowId, target)).autoFix).toMatchObject({
+      status: "stopped",
+      reason: "authority-lost",
+    });
+  });
+  it("stops a recovered babysitter when its authorizing project is archived", async () => {
+    const f = fixture({ localWindows: () => [windowId] });
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: { checks: "required" } },
+      "user",
+    );
+    const restored = f.restart();
+    await restored.tick(signal);
+    f.setAuthority("not-authorized");
+    await restored.tick(signal);
+    f.setAuthority("authorized");
+    await restored.tick(signal);
+    expect(f.forge.observe).toHaveBeenCalledTimes(1);
+    expect((await restored.query(windowId, target)).autoFix).toMatchObject({
+      status: "stopped",
+      reason: "authority-lost",
+    });
+  });
+  it("preserves an active babysitter's rules on a plain Auto-fix enable", async () => {
+    const f = fixture();
+    const rules = { checks: "all", requiredLabel: "qa" } as const;
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: rules },
+      "user",
+    );
+    expect(
+      await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user"),
+    ).toEqual({ status: "refused", reason: "already-active" });
+    expect((await f.service.query(windowId, target)).autoFix).toMatchObject({ babysit: rules });
+    expect(f.recorded(AUTO_FIX)).toHaveLength(1);
+  });
   it("resumes only an enrolled babysitter once the local project connection returns", async () => {
     let windows: ReadonlyArray<typeof windowId> = [];
     const f = fixture({ localWindows: () => windows });
@@ -322,6 +379,132 @@ describe("Babysit from a Code thread", () => {
       status: "on",
       threadId,
       babysit: secondRules,
+    });
+  });
+
+  it("keeps every unacknowledged ready PR in the thread, including matching numbers in different repositories", async () => {
+    const f = fixture();
+    let followUp: ReturnType<typeof f.threads.readFollowUp>;
+    f.threads.readFollowUp.mockImplementation(() => followUp);
+    f.threads.notifyPerson.mockImplementation(async (_thread, reason) => {
+      followUp = { state: "open", origin: "automatic", reason };
+    });
+    const enable = async (repositoryName: string) =>
+      f.service.setAutoFix(
+        windowId,
+        {
+          kind: "enable",
+          threadId,
+          target: decodeCodeProjectPullRequestSwitchTarget({ ...target, repositoryName }),
+          babysit: { checks: "all" },
+        },
+        "user",
+      );
+    await enable("first");
+    await enable("second");
+    f.observe(observed({ babysitReady: true, headSha: "aaaa" }));
+    await f.service.tick(signal);
+    expect(followUp?.reason).toContain("octant/first#12 ready to merge at aaaa");
+    expect(followUp?.reason).toContain("octant/second#12 ready to merge at aaaa");
+    await enable("first");
+    f.observe(observed({ babysitReady: true, headSha: "bbbb" }));
+    await f.service.tick(signal);
+    expect(followUp?.reason).not.toContain("first#12 ready to merge at aaaa");
+    expect(followUp?.reason).toContain("first#12 ready to merge at bbbb");
+    followUp = { state: "completed", origin: "automatic", reason: followUp!.reason };
+    await enable("third");
+    await f.service.tick(signal);
+    expect(followUp?.reason).toContain("third#12");
+    expect(followUp?.reason).not.toContain("second#12");
+  });
+
+  it("notifies once when the thread finishes without clearing its same-head failure", async () => {
+    const f = fixture();
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", threadId, target, babysit: { checks: "required" } },
+      "user",
+    );
+    f.observe(observed({ failures: [lint] }));
+    await f.service.tick(signal);
+    f.setTurnActive(true);
+    await f.service.tick(signal);
+    expect(f.threads.notifyPerson).not.toHaveBeenCalled();
+    f.setTurnActive(false);
+    await f.service.tick(signal);
+    await f.restart().tick(signal);
+    expect(f.threads.notifyPerson).toHaveBeenCalledExactlyOnceWith(
+      threadId,
+      expect.stringContaining("unresolved failures"),
+    );
+    expect((await f.service.query(windowId, target)).autoFix).toMatchObject({
+      status: "stopped",
+      reason: "needs-help",
+    });
+  });
+
+  it("hands back fresh feedback after the configured budget survives restart", async () => {
+    const f = fixture({ limits: () => ({ watchWakes: 1, watchDays: 3, autoFixAttempts: 3 }) });
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", threadId, target, babysit: { checks: "required" } },
+      "user",
+    );
+    const feedback = (id: string) =>
+      observed({
+        activity: {
+          checks: "passed",
+          failedChecks: [],
+          conflicting: false,
+          reviews: [],
+          comments: [
+            { author: "bot", id, at: "2026-10-31T10:00:10Z", body: "Review this change." },
+          ],
+        },
+      });
+    f.observe(feedback("first"));
+    await f.service.tick(signal);
+    const restored = f.restart();
+    await restored.query(windowId, target);
+    f.observe(feedback("second"));
+    await restored.tick(signal);
+    await restored.tick(signal);
+    expect(f.threads.startTurn).toHaveBeenCalledTimes(1);
+    expect(f.threads.notifyPerson).toHaveBeenCalledExactlyOnceWith(
+      threadId,
+      expect.stringContaining("feedback turn limit"),
+    );
+    expect((await restored.query(windowId, target)).autoFix).toMatchObject({
+      status: "stopped",
+      reason: "feedback-limit",
+    });
+  });
+
+  it("requires fresh paired authority on reconnect and checks it again before acting on a forge read", async () => {
+    const f = fixture({ localWindows: () => [] });
+    let current = true;
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", threadId, target, babysit: { checks: "required" } },
+      "user",
+      undefined,
+      () => current,
+    );
+    const restored = f.restart();
+    await restored.query(windowId, target);
+    await restored.tick(signal);
+    expect(f.forge.observe).not.toHaveBeenCalled();
+    await restored.query(windowId, target, () => current);
+    f.forge.observe.mockImplementationOnce(async () => {
+      current = false;
+      return observed({ failures: [lint] });
+    });
+    await restored.tick(signal);
+    expect(f.forge.observe).toHaveBeenCalledTimes(1);
+    expect(f.threads.startTurn).not.toHaveBeenCalled();
+    expect((await restored.query(windowId, target)).autoFix).toMatchObject({
+      status: "stopped",
+      reason: "authority-lost",
     });
   });
 

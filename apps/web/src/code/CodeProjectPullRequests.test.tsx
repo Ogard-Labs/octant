@@ -320,6 +320,18 @@ describe("CodeProjectPullRequests", () => {
       rows: [
         { ...row, babysit: { threadId, status: "approval" } },
         { ...row, number: 13, title: "Second PR", babysit: { threadId, status: "checks" } },
+        {
+          ...row,
+          number: 14,
+          title: "Stalled repair",
+          babysit: { threadId, status: "needs-help" },
+        },
+        {
+          ...row,
+          number: 15,
+          title: "Feedback limit",
+          babysit: { threadId, status: "feedback-limit" },
+        },
       ],
     });
     renderWorkspace({ load: async () => snapshot });
@@ -328,6 +340,8 @@ describe("CodeProjectPullRequests", () => {
     await user.click(screen.getByRole("button", { name: /^Needs me/ }));
     expect(screen.getByText("List active pull requests")).toBeVisible();
     expect(screen.queryByText("Second PR")).toBeNull();
+    expect(screen.getByText("Stalled repair")).toBeVisible();
+    expect(screen.getByText("Feedback limit")).toBeVisible();
   });
 
   it("loads the cached snapshot on open and does not refresh GitHub", async () => {

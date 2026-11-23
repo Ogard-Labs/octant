@@ -30,6 +30,7 @@ import {
   type CodeProjectPullRequestSwitchesView,
   type CodeProjectPullRequestAutoFixPauseReason,
   type CodeThreadId,
+  type CodeThreadFollowUp,
   type PullRequestSwitchKind,
   type CodeProjectPullRequestView,
   type PullRequestBabysitStatus,
@@ -174,6 +175,9 @@ export interface PullRequestAutoFixThreads {
   ): boolean;
   /** Starts one turn carrying the text; true when the thread admitted it. */
   startTurn(threadId: CodeThreadId, text: string): Promise<boolean>;
+  readFollowUp?(
+    threadId: CodeThreadId,
+  ): Pick<CodeThreadFollowUp, "state" | "origin" | "reason"> | undefined;
   /** Tells the person, on the thread, that Auto-fix or a watch stopped and why. */
   notifyPerson(threadId: CodeThreadId, reason: string): Promise<void>;
 }
@@ -212,6 +216,10 @@ export class CodeProjectPullRequestSwitchService
    * can rediscover a current local window with the same Project and PR link.
    */
   readonly #vouchingWindows = new Map<string, WindowId>();
+  readonly #babysitScopes = new Map<
+    string,
+    { windowId: WindowId; deviceCurrent?: () => boolean }
+  >();
   readonly #babysitProgress = new Map<string, PullRequestBabysitStatus>();
   readonly #localWindows: (() => ReadonlyArray<WindowId>) | undefined;
   #ticking = false;
@@ -298,6 +306,7 @@ export class CodeProjectPullRequestSwitchService
   async query(
     windowId: WindowId,
     target: CodeProjectPullRequestSwitchTarget,
+    deviceCurrent?: () => boolean,
   ): Promise<CodeProjectPullRequestSwitchesView> {
     const authority = await this.#authority.authorizePullRequest(windowId, target);
     if (authority.status !== "authorized") {
@@ -305,7 +314,18 @@ export class CodeProjectPullRequestSwitchService
     }
     const resolved = this.#resolveIdentity(authority.canonicalTarget ?? target);
     const fold = this.#fold(resolved.target);
-    if (fold.autoFix.status === "on" || fold.watch.status === "on") {
+    if (
+      fold.autoFix.status === "on" &&
+      fold.autoFix.babysit &&
+      authority.linkedThreadIds.includes(fold.autoFix.threadId) &&
+      !this.#babysitScopes.has(resolved.key) &&
+      (deviceCurrent
+        ? deviceCurrent()
+        : (this.#localWindows?.().some((id) => String(id) === String(windowId)) ?? true))
+    ) {
+      this.#babysitScopes.set(resolved.key, { windowId, ...(deviceCurrent && { deviceCurrent }) });
+    }
+    if ((fold.autoFix.status === "on" && !fold.autoFix.babysit) || fold.watch.status === "on") {
       this.#vouchingWindows.set(resolved.key, windowId);
     }
     return this.#view(fold);
@@ -386,6 +406,7 @@ export class CodeProjectPullRequestSwitchService
     command: CodeProjectPullRequestAutoFixCommand,
     initiator: "user" | "agent",
     actor: EventActor = localActor("local-user"),
+    deviceCurrent?: () => boolean,
   ): Promise<CodeProjectPullRequestSwitchOutcome> {
     if (initiator !== "user") return { status: "refused", reason: "not-authorized" };
     const authority = await this.#authority.authorizePullRequest(windowId, command.target);
@@ -395,6 +416,7 @@ export class CodeProjectPullRequestSwitchService
     if (authority.status === "disconnected") {
       return { status: "unavailable", reason: "disconnected" };
     }
+    if (deviceCurrent && !deviceCurrent()) return { status: "refused", reason: "not-authorized" };
     const resolved = this.#resolveIdentity(authority.canonicalTarget ?? command.target);
     const canonicalTarget = resolved.target;
     const fold = this.#fold(canonicalTarget);
@@ -418,8 +440,9 @@ export class CodeProjectPullRequestSwitchService
     if (this.#threads.inspect(command.threadId).status !== "available") {
       return { status: "refused", reason: "thread-not-linked" };
     }
-    if (command.babysit !== undefined && fold.autoFix.status === "on") {
+    if (fold.autoFix.status === "on" && (fold.autoFix.babysit || command.babysit)) {
       if (
+        !command.babysit ||
         fold.autoFix.threadId !== String(command.threadId) ||
         fold.autoFix.babysit?.checks !== command.babysit.checks ||
         fold.autoFix.babysit.requiredLabel !== command.babysit.requiredLabel
@@ -437,7 +460,15 @@ export class CodeProjectPullRequestSwitchService
         actor,
       );
     }
-    this.#vouchingWindows.set(resolved.key, windowId);
+    if (command.babysit) {
+      if (!this.#babysitScopes.has(resolved.key))
+        this.#babysitScopes.set(resolved.key, {
+          windowId,
+          ...(deviceCurrent && { deviceCurrent }),
+        });
+    } else {
+      this.#vouchingWindows.set(resolved.key, windowId);
+    }
     return {
       status: "applied",
       ...(command.babysit && fold.autoFix.status === "on" ? { alreadyActive: true as const } : {}),
@@ -819,7 +850,13 @@ export class CodeProjectPullRequestSwitchService
     }
     for (const key of waitingOnKeysToClear) this.#waitingOn.delete(key);
     for (const key of pausedKeysToClear) this.#paused.delete(key);
+    const mergedScope = this.#babysitScopes.get(mergedKey);
     for (const event of committedEvents) this.#apply(event);
+    if (mergedKey !== survivingKey) {
+      this.#babysitScopes.delete(mergedKey);
+      if (decision.autoFix === "keep-on" && mergedScope && !this.#babysitScopes.has(survivingKey))
+        this.#babysitScopes.set(survivingKey, mergedScope);
+    }
 
     const mergedWindow = this.#vouchingWindows.get(mergedKey);
     this.#vouchingWindows.delete(mergedKey);
@@ -937,55 +974,73 @@ export class CodeProjectPullRequestSwitchService
     readonly canonicalTarget?: CodeProjectPullRequestSwitchTarget;
     readonly pullRequestNodeId?: string;
   }> {
-    const quiet = { autoFix: false, watch: false };
-    if (fold.autoFix.status !== "on" && fold.watch.status !== "on") return quiet;
+    const babysitting = fold.autoFix.status === "on" && !!fold.autoFix.babysit;
+    const babysitAuthority = babysitting ? await this.#authorizeBabysitter(fold, key) : undefined;
+    const plainAutoFix = fold.autoFix.status === "on" && !babysitting;
     const windowId = this.#vouchingWindows.get(key);
-    const windows =
-      fold.autoFix.status === "on" && fold.autoFix.babysit ? this.#localWindows?.() : undefined;
-    if (windows && (windowId === undefined || !windows.includes(windowId))) {
-      // Local window IDs expire. Rediscover this PR's project and exact linked thread.
-      // A co-located ordinary watch still needs its own original window.
-      for (const candidate of windows) {
-        const found = await this.#authority
-          .authorizePullRequest(candidate, fold.target)
-          .catch(() => undefined);
-        if (
-          found?.status === "authorized" &&
-          fold.autoFix.status === "on" &&
-          found.linkedThreadIds.includes(fold.autoFix.threadId)
-        ) {
-          return {
-            autoFix: true,
-            watch: false,
-            ...(found.canonicalTarget ? { canonicalTarget: found.canonicalTarget } : {}),
-            ...(found.pullRequestNodeId ? { pullRequestNodeId: found.pullRequestNodeId } : {}),
-          };
-        }
-      }
-      return quiet;
-    }
-    if (windowId === undefined) return quiet;
-    const authority = await this.#authority.authorizePullRequest(windowId, fold.target);
-    if (authority.status === "not-authorized") {
-      if (fold.autoFix.status === "on") {
+    const authority =
+      windowId !== undefined && (plainAutoFix || fold.watch.status === "on")
+        ? await this.#authority.authorizePullRequest(windowId, fold.target)
+        : undefined;
+    if (authority?.status === "not-authorized") {
+      const current = this.#fold(fold.target);
+      if (plainAutoFix && fold.autoFix.status === "on" && current.autoFix === fold.autoFix)
         this.#stopAutoFix(fold.target, decodeCodeThreadId(fold.autoFix.threadId), "authority-lost");
-      }
-      if (fold.watch.status === "on") await this.#stopWatch(fold.target, "authority-lost");
+      if (fold.watch.status === "on" && current.watch === fold.watch)
+        await this.#stopWatch(fold.target, "authority-lost");
       this.#vouchingWindows.delete(key);
-      return quiet;
     }
-    if (authority.status === "disconnected") return quiet;
+    const ordinary = authority?.status === "authorized" ? authority : undefined;
+    const source = babysitAuthority ?? ordinary;
     return {
       autoFix:
-        fold.autoFix.status === "on" && authority.linkedThreadIds.includes(fold.autoFix.threadId),
-      watch: fold.watch.status === "on" && authority.linkedThreadIds.includes(fold.watch.threadId),
-      ...(authority.canonicalTarget === undefined
-        ? {}
-        : { canonicalTarget: authority.canonicalTarget }),
-      ...(authority.pullRequestNodeId === undefined
-        ? {}
-        : { pullRequestNodeId: authority.pullRequestNodeId }),
+        !!babysitAuthority ||
+        (!!ordinary &&
+          plainAutoFix &&
+          fold.autoFix.status === "on" &&
+          ordinary.linkedThreadIds.includes(fold.autoFix.threadId)),
+      watch:
+        !!ordinary &&
+        fold.watch.status === "on" &&
+        ordinary.linkedThreadIds.includes(fold.watch.threadId),
+      ...(source?.canonicalTarget && { canonicalTarget: source.canonicalTarget }),
+      ...(source?.pullRequestNodeId && { pullRequestNodeId: source.pullRequestNodeId }),
     };
+  }
+
+  async #authorizeBabysitter(fold: PullRequestSwitchFold, key: string) {
+    const autoFix = fold.autoFix;
+    if (autoFix.status !== "on" || !autoFix.babysit) return;
+    const owner = this.#babysitScopes.get(key);
+    const windows = this.#localWindows?.();
+    const hasOwner =
+      owner &&
+      (owner.deviceCurrent !== undefined ||
+        !windows ||
+        windows.some((id) => String(id) === String(owner.windowId)));
+    const candidates = hasOwner ? [owner.windowId] : (windows ?? []);
+    for (const candidate of candidates) {
+      const authority =
+        owner?.deviceCurrent && !owner.deviceCurrent()
+          ? { status: "not-authorized" as const }
+          : await this.#authority
+              .authorizePullRequest(candidate, fold.target)
+              .catch(() => undefined);
+      if (this.#fold(fold.target).autoFix !== autoFix || this.#babysitScopes.get(key) !== owner)
+        return;
+      if (hasOwner && authority?.status === "not-authorized") {
+        this.#stopAutoFix(fold.target, decodeCodeThreadId(autoFix.threadId), "authority-lost");
+        return;
+      }
+      if (
+        authority?.status === "authorized" &&
+        authority.linkedThreadIds.includes(autoFix.threadId)
+      ) {
+        if (!hasOwner) this.#babysitScopes.set(key, { windowId: candidate });
+        return authority;
+      }
+    }
+    return;
   }
 
   #observeMergeWhenReady(
@@ -1019,6 +1074,11 @@ export class CodeProjectPullRequestSwitchService
     const fold = this.#fold(canonicalTarget).autoFix;
     if (fold.status !== "on") return;
     const threadId = decodeCodeThreadId(fold.threadId);
+    const deviceCurrent = this.#babysitScopes.get(key)?.deviceCurrent;
+    if (fold.babysit && deviceCurrent && !deviceCurrent()) {
+      this.#stopAutoFix(canonicalTarget, threadId, "authority-lost");
+      return;
+    }
     const thread = this.#threads.inspect(threadId);
     if (thread.status === "gone") {
       this.#stopAutoFix(canonicalTarget, threadId, "thread-unavailable");
@@ -1069,6 +1129,7 @@ export class CodeProjectPullRequestSwitchService
       turnActive: thread.turnActive,
       personTyping: this.#personTyping(threadId),
       maxAttempts: this.#limits().autoFixAttempts,
+      maxFeedbackWakes: this.#limits().watchWakes,
     });
     if (decision.kind === "paused") {
       this.#paused.set(key, decision.reason);
@@ -1083,19 +1144,34 @@ export class CodeProjectPullRequestSwitchService
         decision.reason,
         decision.reason === "ready" ? observation.headSha : undefined,
       );
-      if (decision.reason === "ready") {
+      const ref = `${canonicalTarget.repositoryOwner}/${canonicalTarget.repositoryName}#${canonicalTarget.number}`;
+      let notice: string | undefined;
+      if (decision.reason === "ready")
+        notice = `ready to merge at ${observation.headSha.slice(0, 12)}`;
+      if (decision.reason === "needs-help")
+        notice =
+          "the repair turn finished with unresolved failures on the same commit. Review the thread before restarting.";
+      if (decision.reason === "feedback-limit")
+        notice =
+          "the feedback turn limit was reached. Review the remaining feedback before restarting.";
+      if (decision.reason === "attempt-limit")
+        notice = `Auto-fix stopped after ${this.#limits().autoFixAttempts} attempts on the same failure.`;
+      if (notice) {
+        // One durable follow-up per thread. Keep each PR's most recent handoff until acknowledged.
+        const heading = "Pull request updates\n";
+        const previous = this.#threads.readFollowUp?.(threadId);
+        const lines =
+          previous?.state === "open" &&
+          previous.origin === "automatic" &&
+          previous.reason.startsWith(heading)
+            ? previous.reason
+                .slice(heading.length)
+                .split("\n")
+                .filter((line) => !line.toLowerCase().startsWith(ref.toLowerCase() + " "))
+            : [];
+        lines.push(`${ref} ${notice}`);
         await this.#threads
-          .notifyPerson(
-            threadId,
-            `Pull request #${canonicalTarget.number} met your babysit conditions at ${observation.headSha.slice(0, 12)} and is ready to merge.`,
-          )
-          .catch(() => undefined);
-      } else if (decision.reason === "attempt-limit") {
-        await this.#threads
-          .notifyPerson(
-            threadId,
-            `Auto-fix stopped on pull request #${canonicalTarget.number} after ${this.#limits().autoFixAttempts} attempts on the same failure.`,
-          )
+          .notifyPerson(threadId, heading + lines.join("\n"))
           .catch(() => undefined);
       }
       return;
@@ -1401,6 +1477,11 @@ export class CodeProjectPullRequestSwitchService
         if (!this.#paused.has(canonicalKey)) this.#paused.set(canonicalKey, paused);
         this.#paused.delete(legacyKey);
       }
+      const scope = this.#babysitScopes.get(legacyKey);
+      if (scope) {
+        if (!this.#babysitScopes.has(canonicalKey)) this.#babysitScopes.set(canonicalKey, scope);
+        this.#babysitScopes.delete(legacyKey);
+      }
       const vouching = this.#vouchingWindows.get(legacyKey);
       if (vouching !== undefined) {
         if (!this.#vouchingWindows.has(canonicalKey)) {
@@ -1426,6 +1507,8 @@ export class CodeProjectPullRequestSwitchService
   #apply(event: PullRequestSwitchEvent): void {
     const resolved = this.#resolveIdentity(event.record.target);
     const current = this.#folds.get(resolved.key) ?? emptyPullRequestSwitchFold(resolved.target);
+    if (event.kind === "auto-fix" && event.record.change.kind !== "woke")
+      this.#babysitScopes.delete(resolved.key);
     this.#folds.set(resolved.key, {
       ...applyPullRequestSwitchEvent(current, event),
       target: resolved.target,

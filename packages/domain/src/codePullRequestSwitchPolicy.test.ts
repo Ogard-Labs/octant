@@ -53,6 +53,65 @@ function woke(
 const quiet = { turnActive: false, personTyping: false };
 
 describe("pull-request Auto-fix policy", () => {
+  const babysit: PullRequestSwitchEvent = {
+    kind: "auto-fix",
+    occurredAt: enabled.occurredAt,
+    record: { target, threadId, change: { kind: "enabled", babysit: { checks: "required" } } },
+  };
+  it("hands back a green babysat head only after the repairing turn ends", () => {
+    const observation = { state: "open", headSha: "a1", failures: [], babysitReady: true } as const;
+    const fold = replay([babysit]).autoFix;
+    expect(decidePullRequestAutoFix({ fold, observation, ...quiet, turnActive: true })).toEqual({
+      kind: "idle",
+    });
+    expect(decidePullRequestAutoFix({ fold, observation, ...quiet })).toEqual({
+      kind: "stop",
+      reason: "ready",
+    });
+    expect(
+      decidePullRequestAutoFix({ fold: replay([enabled]).autoFix, observation, ...quiet }),
+    ).toEqual({ kind: "idle" });
+  });
+
+  it("bounds feedback turns across heads and fresh comment IDs, counting each started batch once", () => {
+    const feedback = (key: string) => ({ kind: "feedback", key }) as const;
+    const decide = (events: PullRequestSwitchEvent[], next: string) =>
+      decidePullRequestAutoFix({
+        fold: replay([babysit, ...events]).autoFix,
+        observation: { state: "open", headSha: "c", failures: [feedback(next)] },
+        ...quiet,
+        maxFeedbackWakes: 2,
+      });
+    const first = woke("a", [feedback("one"), feedback("two")], 1);
+    expect(decide([first, woke("b", [feedback("three")], 1, "refused")], "four").kind).toBe("wake");
+    expect(decide([first, woke("b", [feedback("three")], 1)], "four")).toEqual({
+      kind: "stop",
+      reason: "feedback-limit",
+    });
+  });
+
+  it("hands back outstanding failures after a babysit turn finishes on the same head", () => {
+    const fold = replay([babysit, woke("a1", [lint], 1)]).autoFix;
+    const observation = { state: "open", headSha: "a1", failures: [lint] } as const;
+    expect(decidePullRequestAutoFix({ fold, observation, ...quiet, turnActive: true }).kind).toBe(
+      "idle",
+    );
+    expect(decidePullRequestAutoFix({ fold, observation, ...quiet })).toEqual({
+      kind: "stop",
+      reason: "needs-help",
+    });
+    expect(
+      decidePullRequestAutoFix({
+        fold,
+        observation: { ...observation, failures: [lint, review] },
+        ...quiet,
+      }),
+    ).toMatchObject({ kind: "wake", failures: [review] });
+    expect(
+      decidePullRequestAutoFix({ fold, observation: { ...observation, headSha: "a2" }, ...quiet })
+        .kind,
+    ).toBe("wake");
+  });
   it("wakes the thread for a new failure as its first attempt", () => {
     const decision = decidePullRequestAutoFix({
       fold: replay([enabled]).autoFix,

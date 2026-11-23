@@ -135,6 +135,8 @@ export type CodeProjectPullRequestMergeWhenReadyState =
 /** Why Auto-fix stopped on its own. */
 export const CodeProjectPullRequestAutoFixStopReason = Schema.Literal(
   "attempt-limit",
+  "feedback-limit",
+  "needs-help",
   "ready",
   "merged",
   "closed",

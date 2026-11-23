@@ -3951,12 +3951,17 @@ CI or reviewers should be woken, not left polling; maintainer request,
   missing approval or label waits for the person. A branch GitHub requires
   to be up to date receives a follow-up to merge its base. New top-level
   comments and submitted review notes from people or bots go to the same
-  thread for triage once per GitHub ID. The host stops
+  thread for triage once per GitHub ID. Each started turn carrying new feedback
+  spends one of the **Wakes per pull-request watch** set in Settings for this
+  enrollment, including after restart. When more feedback arrives at the limit,
+  or a finished repair leaves only previously handled failures on the same head,
+  the watch stops and requests a human follow-up in **Needs me**. The host stops
   babysitting when it observes an open, non-draft, mergeable head with
   passing selected checks, cleared repository gates, no current unresolved
   review threads and the requested label. It confirms the head after the
   detail reads and records completion with a thread follow-up naming that
-  head. The person's rules replay with the Auto-fix switch. A person can
+  head. A thread's open PR follow-up keeps the latest handoff for each repository
+  and PR until acknowledged. The person's rules replay with the Auto-fix switch. A person can
   reopen the command to inspect or stop it. Merging uses its own controls.
 - **Auto-fix limits.** A failure is a check name, a review thread id, or the
   base conflict. Each started wake spends one attempt on every failure it
@@ -3977,7 +3982,11 @@ CI or reviewers should be woken, not left polling; maintainer request,
   at the click; a revoked GitHub login or a thread that no longer links to
   the pull request holds Auto-fix quiet. After restart, babysitting resumes on
   a host pass when a registered local window can authorize the saved Project,
-  repository, PR and repairing thread. Other Auto-fix sessions wait for a window
+  repository, PR and repairing thread. The host remembers the recovered scope
+  and stops the watch if it loses project authority. A host-person-paired device
+  can also authorize the watch by opening its controls. Its exact device session
+  must remain current, including on a host with no local window.
+  Other Auto-fix sessions wait for a window
   to reopen the PR review. Turning it on again starts a fresh attempt count.
 - **Watch.** The pull-request tool's `watch` (rules above) binds the
   thread's own open pull request, the one linked to it on the board, to that
