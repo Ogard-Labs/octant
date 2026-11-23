@@ -191,27 +191,30 @@ describe("the app pairing code", () => {
       }
     }
     vi.stubGlobal("URL", PatternOnlyUrl);
-
-    for (const origin of [
-      "https://user@100.101.102.103:8443",
-      "https://evil.example@100.101.102.103",
-      "https://100.101.102.103:8443:9443",
-      "https://100.101.102.103:99999",
-      "https://100.101.102.103:08443",
-      "https://100.101.102.103:443",
-      "https://Mac.tailnet.ts.net",
-      "https://100.101.102.103:8443?x=1",
-    ]) {
-      expect(readPairingCode(rawCode(JSON.stringify({ ...contents, origin })))).toEqual({
-        status: "refused",
-        reason: "damaged",
-      });
-    }
-    for (const origin of [contents.origin, "https://[fd7a:115c:a1e0::1]:8443"]) {
-      expect(readPairingCode(rawCode(JSON.stringify({ ...contents, origin })))).toEqual({
-        status: "read",
-        contents: { ...contents, origin },
-      });
+    try {
+      for (const origin of [
+        "https://user@100.101.102.103:8443",
+        "https://evil.example@100.101.102.103",
+        "https://100.101.102.103:8443:9443",
+        "https://100.101.102.103:99999",
+        "https://100.101.102.103:08443",
+        "https://100.101.102.103:443",
+        "https://Mac.tailnet.ts.net",
+        "https://100.101.102.103:8443?x=1",
+      ]) {
+        expect(readPairingCode(rawCode(JSON.stringify({ ...contents, origin })))).toEqual({
+          status: "refused",
+          reason: "damaged",
+        });
+      }
+      for (const origin of [contents.origin, "https://[fd7a:115c:a1e0::1]:8443"]) {
+        expect(readPairingCode(rawCode(JSON.stringify({ ...contents, origin })))).toEqual({
+          status: "read",
+          contents: { ...contents, origin },
+        });
+      }
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 
