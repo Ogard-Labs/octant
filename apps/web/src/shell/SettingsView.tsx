@@ -3879,16 +3879,20 @@ function privacyThreadsFromSettings(props: SettingsViewProps): ReadonlyArray<Pri
  */
 function changeNoticeLocalActionsOf(
   hostBridge: OctantHostBridge | undefined,
-  administration: Pick<RemoteAccessAdministrationBridge, "revokeRemoteDevice"> | undefined,
+  administration:
+    | Pick<RemoteAccessAdministrationBridge, "revokeRemoteDevice" | "undoAccessChangeNotice">
+    | undefined,
   agentAccess: AgentAccessAdministrationBridge | undefined,
 ): { readonly localActions?: ChangeNoticeLocalActions } {
   if (hostBridge === undefined || administration === undefined || agentAccess === undefined) {
     return {};
   }
+  // An older build's bridge has no Undo; it stays absent so the action
+  // refuses rather than removing the key outright.
+  const undoAccessChangeNotice = administration.undoAccessChangeNotice;
   return {
     localActions: {
-      removeProviderApiKey: (instanceId, keyId) =>
-        hostBridge.removeProviderApiKey(instanceId, keyId),
+      ...(undoAccessChangeNotice === undefined ? {} : { undoAccessChangeNotice }),
       revokeDevice: (deviceId) => administration.revokeRemoteDevice(deviceId),
       endAgentGrant: async (grantId) => {
         const answer = await agentAccess.agentAccessRequest({

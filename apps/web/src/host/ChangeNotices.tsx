@@ -10,12 +10,17 @@ import { describeNotice, useChangeNotices, type ChangeNoticeAction } from "./cha
 
 /**
  * A local window's own controls for the changes the host takes from a window
- * only through the desktop bridge: removing a provider key, revoking a paired
+ * only through the desktop bridge: undoing a key change, revoking a paired
  * device, ending an agent grant. Each throws when the host refuses it. A paired
  * device has none and acts through the notice routes.
  */
 export interface ChangeNoticeLocalActions {
-  readonly removeProviderApiKey: (providerInstanceId: string, keyId: string) => Promise<void>;
+  /**
+   * The host's own journaled Undo of a notice's key change, through the
+   * desktop bridge. Absent on an older build, where Undo refuses rather than
+   * falling back to an ordinary key removal.
+   */
+  readonly undoAccessChangeNotice?: (noticeId: string) => Promise<void>;
   readonly revokeDevice: (deviceId: string) => Promise<unknown>;
   readonly endAgentGrant: (grantId: string) => Promise<void>;
 }
@@ -162,7 +167,12 @@ async function actLocally(
       if (notice.keyId === undefined) {
         return "This provider's keys changed again since, so Undo could remove the wrong key. Check its keys in Settings.";
       }
-      await local.removeProviderApiKey(notice.providerInstanceId, notice.keyId);
+      if (local.undoAccessChangeNotice === undefined) {
+        return "This build cannot undo a key change from a window; act on the host itself.";
+      }
+      // The host journals the Undo, dismissal included: nothing more to ask.
+      await local.undoAccessChangeNotice(notice.noticeId);
+      return undefined;
     } else if (notice.actor.kind === "agent") {
       await local.endAgentGrant(notice.actor.grantId);
     } else {

@@ -18648,17 +18648,17 @@ approval-gated` command that undoes it. The terminal shows no one-time
     the key pool's journaled remove of exactly the added key, refused once the
     provider's keys changed again. A replaced key has no Undo, since the
     earlier key is not kept. Revoke uses the device revoke or the agent
-    grant's revoke. The change feed's `access-activity` and `change-notices`
-    A key's Undo and Revoke stand in for routes that take a window only with
-    the desktop bridge secret, so from a window the notice routes need it too
-    and refuse a window capability alone. A desktop window runs them through
-    its own key, device and grant controls, which the desktop sends with the
-    secret, after a fresh read shows the notice still current (the read names
-    the added key's pool id only while Undo can still remove exactly it), and
-    then dismisses the notice. A device paired at Full uses the notice routes
-    on its own session.
-    topics refresh both without a reload. Notices stay in the app: none is
-    sent to a phone's push path or by email.
+    grant's revoke. A key's Undo and Revoke stand in for routes that take a
+    window only with the desktop bridge secret, so from a window the notice
+    routes need it too and refuse a window capability alone. A desktop window
+    runs a key's Undo through the notice route the desktop sends with the
+    secret, and the revoke through its own device and grant controls, after a
+    fresh read shows the notice still current (the read names the added key's
+    pool id only while Undo can still remove exactly it). A device paired at
+    Full uses the notice routes on its own session. The change feed's
+    `access-activity` and `change-notices` topics refresh both without a
+    reload. Notices stay in the app: none is sent to a phone's push path or
+    by email.
   - **What a person-paired device does.** As a local window does, with no
     owner unlock: sets a thread, a Project, or the default to Full access and
     starts a Work or Code thread there; changes a Project's access, actions,

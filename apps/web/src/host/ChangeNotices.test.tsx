@@ -86,7 +86,7 @@ describe("change notices", () => {
     expect(screen.getByRole("button", { name: "End Build bot's access" })).toBeTruthy();
   });
 
-  it("from a window, removes an added key and revokes the device through this computer's own controls", async () => {
+  it("from a window, undoes an added key by its notice and revokes the device through this computer's own controls", async () => {
     const keyId = "00000000-0000-4000-8000-000000000a11";
     const added: ChangeNotice = {
       kind: "provider-key-added",
@@ -99,7 +99,7 @@ describe("change notices", () => {
     };
     const { value, acted } = client([added]);
     const local = {
-      removeProviderApiKey: vi.fn(async () => undefined),
+      undoAccessChangeNotice: vi.fn(async () => undefined),
       revokeDevice: vi.fn(async () => undefined),
       endAgentGrant: vi.fn(async () => undefined),
     };
@@ -107,9 +107,10 @@ describe("change notices", () => {
     expect(await screen.findByText("Ada's phone added a key for Anthropic")).toBeTruthy();
 
     await userEvent.click(screen.getByRole("button", { name: "Undo" }));
-    await waitFor(() =>
-      expect(local.removeProviderApiKey).toHaveBeenCalledWith(added.providerInstanceId, keyId),
-    );
+    // The host's own Undo is asked with the notice id alone: no key id, no
+    // ordinary removal, and no dismissal — its journal records both.
+    await waitFor(() => expect(local.undoAccessChangeNotice).toHaveBeenCalledWith(added.noticeId));
+    expect(local.undoAccessChangeNotice).toHaveBeenCalledTimes(1);
     await userEvent.click(screen.getByRole("button", { name: "Revoke Ada's phone" }));
     await userEvent.click(screen.getByRole("button", { name: "Revoke device" }));
     await waitFor(() =>
@@ -117,10 +118,34 @@ describe("change notices", () => {
         raised.actor.kind === "device" ? raised.actor.deviceId : "",
       ),
     );
-    // The host's notice routes only record the dismissal; neither change goes through them.
-    expect(acted).toEqual([
-      ["dismiss", added.noticeId],
-      ["dismiss", added.noticeId],
-    ]);
+    // Only the revoke's dismissal goes through the notice routes.
+    expect(acted).toEqual([["dismiss", added.noticeId]]);
+  });
+
+  it("shows the refusal and leaves the notice when a window's Undo is refused", async () => {
+    const added: ChangeNotice = {
+      kind: "provider-key-added",
+      noticeId: "00000000-0000-4000-8000-000000000c04",
+      at: "2026-11-22T20:03:00.000Z",
+      actor: raised.actor,
+      providerInstanceId: "00000000-0000-4000-8000-000000000f01",
+      providerName: "Anthropic",
+      keyId: "00000000-0000-4000-8000-000000000a12",
+    };
+    const { value, acted } = client([added]);
+    const local = {
+      undoAccessChangeNotice: vi.fn(async () => {
+        throw new Error("That notice is gone or was already handled.");
+      }),
+      revokeDevice: vi.fn(async () => undefined),
+      endAgentGrant: vi.fn(async () => undefined),
+    };
+    render(<ChangeNotices client={value} localActions={local} />);
+    expect(await screen.findByText("Ada's phone added a key for Anthropic")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(await screen.findByText("That notice is gone or was already handled.")).toBeTruthy();
+    // The refusal dismissed nothing: no route action ran at all.
+    expect(acted).toEqual([]);
   });
 });

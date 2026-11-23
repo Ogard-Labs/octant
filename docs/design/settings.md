@@ -144,9 +144,10 @@ each change notice, a paired device or an agent raising a thread's level or
 adding or replacing a provider key, is a row naming who changed what, with
 **Undo**, **Revoke** the device (or **End** the agent's access) and
 **Dismiss**; a replaced key's row has no Undo and says the earlier key is not
-kept, and a refused action shows the host's reason. On a window, the
-key's Undo and the revoke run through this computer's own key, device and
-grant controls. A window's notice stack
+kept, and a refused action shows the host's reason. On a window, a key's
+Undo runs through the notice route this computer's desktop sends with its
+secret, and the revoke through this computer's own device and grant
+controls. A window's notice stack
 shows the newest notice with **Review**, which opens this section, and a
 browser paired at Full shows the notices beside its new-device alerts. The
 rule is in [Architecture: Security and authority](../architecture.md#security-and-authority).

@@ -155,6 +155,8 @@ export interface RemoteAccessAdministrationBridge {
   ) => Promise<void>;
   readonly getRemoteAccessPaused?: () => Promise<boolean>;
   readonly setRemoteAccessPaused?: (paused: boolean) => Promise<boolean>;
+  /** The host's own journaled Undo of a change notice; absent on a host build without it. */
+  readonly undoAccessChangeNotice?: (noticeId: string) => Promise<void>;
   readonly denyRemotePairingRequest: (
     ticketId: string,
     reasonCode: string,
@@ -282,6 +284,9 @@ export function remoteAccessAdministrationOf(
           getRemoteAccessPaused: bridge.getRemoteAccessPaused,
           setRemoteAccessPaused: bridge.setRemoteAccessPaused,
         }),
+    ...(bridge.undoAccessChangeNotice === undefined
+      ? {}
+      : { undoAccessChangeNotice: bridge.undoAccessChangeNotice }),
   };
 }
 
