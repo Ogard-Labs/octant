@@ -18630,9 +18630,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     name, or the host itself for an expiry. A change notice is derived when a
     paired device or an agent grant's session (a `remote-device` actor; an
     agent grant acts under its scope id) raised a thread's level strictly up
-    the level order (`guardrail.level-lowered@1` at thread scope whose new
-    level holds the old one and more, so a move between Auto and Accept edits
-    is not one) or added or replaced a provider key (a `provider-key`
+    the level order (`guardrail.access-raised@1` at thread scope, beside the
+    lowering `guardrail.level-lowered@1`, and every other direction under
+    `guardrail.level-changed@1`; a move between Auto and Accept edits is not
+    one) or added or replaced a provider key (a `provider-key`
     request that records `keyChange`, `added` with the key's random pool id
     or `replaced`, completed as `stored`; never the key). A window's own
     change raises none. `GET /api/change-notices` shows the undismissed ones

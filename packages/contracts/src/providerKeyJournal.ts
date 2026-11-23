@@ -67,9 +67,12 @@ export const ProviderKeyJournalRecord = Schema.Union(
      */
     keyIds: Schema.optional(Schema.Array(ApiKeyId)),
     /**
-     * A hash of the stored pool after the change, covering the key ids and
-     * the active key, so the same Undo refuses an edit the journal never
-     * saw. Missing on events journaled before it was recorded.
+     * The pool's non-secret identity after the change: key ids, the active
+     * key, and each key's opaque secret-revision marker — never anything
+     * derived from a secret. A change notice's Undo holds the pool to it,
+     * so an edit the journal never saw refuses. Events journaled when it
+     * still held a secret-derived hash decode but match no current
+     * fingerprint, so their Undo refuses too.
      */
     fingerprint: Schema.optional(Schema.String),
   }).annotations(strict),

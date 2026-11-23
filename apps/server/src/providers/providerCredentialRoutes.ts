@@ -35,6 +35,7 @@ import type { EventActor, ProviderInstance, ProviderInstanceId, WindowId } from 
 import {
   addApiKey,
   ApiKeyPoolError,
+  apiKeyPoolFingerprint,
   credentialStoreFailureCauseOf,
   listApiKeys,
   moveApiKey,
@@ -707,8 +708,10 @@ export async function removeProviderApiKey(
     readonly actor: EventActor;
     /**
      * The pool state the change notice recorded when it was journaled: the
-     * key ids and the stored-value fingerprint after the change the notice
-     * describes. Revalidated inside the serialized operation — a change that
+     * key ids and the pool's non-secret identity fingerprint after the
+     * change the notice describes — key ids, the active key, and each key's
+     * opaque secret-revision marker, nothing derived from a secret.
+     * Revalidated inside the serialized operation — a change that
      * landed since, journaled or a desktop edit the journal never saw,
      * changes the pool first and refuses the Undo.
      */
@@ -782,10 +785,7 @@ async function changeApiKeys(
     const expected = request.kind === "remove" ? request.expected : undefined;
     if (expected !== undefined) {
       const ids = stored === undefined ? [] : listApiKeys(stored).map((key) => key.id);
-      const fingerprint =
-        stored === undefined
-          ? undefined
-          : createHash("sha256").update(stored, "utf8").digest("hex");
+      const fingerprint = stored === undefined ? undefined : apiKeyPoolFingerprint(stored);
       if (
         ids.length !== expected.keyIds.length ||
         ids.some((id, index) => id !== expected.keyIds[index]) ||
@@ -859,7 +859,7 @@ async function changeApiKeys(
       recorder.complete(
         "stored",
         listApiKeys(next).map((key) => key.id),
-        createHash("sha256").update(next, "utf8").digest("hex"),
+        apiKeyPoolFingerprint(next),
       );
     }
     void options.reprobe(windowId, target.instance).catch(() => undefined);

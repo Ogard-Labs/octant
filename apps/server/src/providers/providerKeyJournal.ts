@@ -45,7 +45,8 @@ export interface ProviderKeyChangeRecorder {
   /**
    * Records the outcome. Best effort: a missing outcome is settled at the
    * next host start. `keyIds` is the pool's key ids after a `stored` change,
-   * and `fingerprint` its stored-value hash, so a change notice's Undo can
+   * and `fingerprint` its non-secret identity — key ids, the active key, and
+   * each key's opaque secret-revision marker — so a change notice's Undo can
    * hold the pool to them.
    */
   readonly complete: (

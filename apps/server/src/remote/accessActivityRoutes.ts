@@ -72,7 +72,10 @@ export interface AccessActivityRouteDependencies {
     readonly keyId: string;
     readonly scopeId: WindowId;
     readonly actor: EventActor;
-    readonly expected?: { readonly keyIds: ReadonlyArray<string> };
+    readonly expected?: {
+      readonly keyIds: ReadonlyArray<string>;
+      readonly fingerprint?: string;
+    };
   }) => Promise<Outcome>;
   /** Revokes a paired device through the device administration's revoke. */
   readonly revokeDevice: (deviceId: string, actor: EventActor) => Outcome;

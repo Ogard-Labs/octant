@@ -15,6 +15,7 @@ import type {
   StableHostId,
 } from "@octant/contracts/remote-access";
 import { afterEach, describe, expect, it } from "vitest";
+import { setActiveApiKey } from "@octant/host-runtime";
 import { AGENT_ACCESS_ORIGIN, createRemoteDevicePrincipal } from "../clientPrincipal";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
@@ -27,6 +28,13 @@ import {
   createAccessActivityRouteHandler,
   type AccessActivityRouteDependencies,
 } from "./accessActivityRoutes";
+import {
+  createProviderCredentialRouteHandler,
+  removeProviderApiKey,
+  type ProviderCredentialRouteOptions,
+} from "../providers/providerCredentialRoutes";
+import { providerKeyJournal } from "../providers/providerKeyJournal";
+import { decodeProviderInstance } from "@octant/contracts";
 
 const now = "2026-11-22T20:00:00.000Z";
 const hostId = "11111111-1111-4111-8111-111111111111";
@@ -558,6 +566,122 @@ describe("change notices", () => {
         expected: { keyIds },
       },
     ]);
+  });
+
+  it("refuses a key Undo pressed through the route once the pool the notice recorded changed", async () => {
+    const target = host();
+    pair(target, phone, "Ada's phone", local);
+    const provider = decodeProviderInstance({
+      id: providerId,
+      displayName: "Anthropic",
+      driverKind: "openai-compatible",
+      configuration: {
+        kind: "openai-compatible-http",
+        baseUrl: "https://gateway.example/v1/",
+        authentication: "bearer",
+        protocol: "auto",
+        manualModelIds: ["model-a"],
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const stored = new Map<string, string>();
+    const authority = new WindowAuthorityStore();
+    authority.register({ windowId, capability, now: 0 });
+    const credentialOptions: ProviderCredentialRouteOptions = {
+      desktopBridgeSecret: bridgeSecret,
+      windowAuthorityStore: authority,
+      readProviderInstances: () => [provider],
+      readRemovedProviderInstanceIds: () => [],
+      journal: providerKeyJournal({
+        journal: target.journal,
+        connection: target.connection,
+        uuid: () => randomUUID(),
+        now: () => now,
+      }),
+      reprobe: async () => undefined,
+      removeProvider: async () => ({ kind: "removed" }),
+      credentials: {
+        store: {
+          has: async (id) => stored.has(id),
+          set: async (id, value) => {
+            stored.set(id, value);
+          },
+          delete: async (id) => {
+            stored.delete(id);
+          },
+        },
+        readStored: async (id) => stored.get(id) ?? "",
+      },
+    };
+    // A real key change by a paired device, journaled and stored by the key
+    // routes themselves, is what raises the notice.
+    const keyHandle = createProviderCredentialRouteHandler(credentialOptions);
+    const secret = "sk-test-0123456789";
+    const first = (await (
+      await keyHandle(
+        fromDevice(
+          "/api/providers/credentials/keys/add",
+          phone,
+          {},
+          {
+            instance: providerId,
+            credential: secret,
+          },
+        ),
+      )
+    )?.json()) as { key: { id: string } };
+    const noticed = (await (
+      await keyHandle(
+        fromDevice(
+          "/api/providers/credentials/keys/add",
+          phone,
+          {},
+          {
+            instance: providerId,
+            credential: `${secret}-2`,
+          },
+        ),
+      )
+    )?.json()) as { key: { id: string } };
+    const { handler } = routes(target, {
+      removeKey: (input) =>
+        removeProviderApiKey(credentialOptions, {
+          instanceId: input.instanceId,
+          keyId: input.keyId,
+          windowId: input.scopeId,
+          actor: input.actor,
+          ...(input.expected === undefined ? {} : { expected: input.expected }),
+        }),
+    });
+    const listed = await notices(handler, fromWindow(CHANGE_NOTICES_PATH));
+    const notice = listed.find(
+      (candidate) => candidate.kind === "provider-key-added" && candidate.keyId === noticed.key.id,
+    );
+    if (notice === undefined) throw new Error("the added key raised no notice");
+
+    // A desktop edit the journal never saw keeps the same key ids under a
+    // different active key: only the recorded pool identity can refuse it.
+    stored.set(providerId, setActiveApiKey(stored.get(providerId) ?? "", first.key.id));
+    const refused = await handler(
+      fromDesktopBridge(CHANGE_NOTICE_ACTION_PATHS.undo, { noticeId: notice.noticeId }),
+    );
+    expect(refused?.status).toBe(409);
+    expect(stored.get(providerId)).toContain(noticed.key.id);
+
+    // Nothing a provider-key row records is derived from the secret.
+    const rows = target.connection
+      .prepare(`SELECT payload_json FROM event_journal WHERE event_name = ?`)
+      .all("provider-key.recorded@1") as ReadonlyArray<{ payload_json: string }>;
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.payload_json).not.toContain(secret);
+      expect(row.payload_json).not.toContain(`${secret}-2`);
+      expect(row.payload_json).not.toMatch(/"fingerprint"\s*:\s*"[0-9a-f]{64}"/);
+    }
   });
 
   it("reads a notice past a lookback full of unrelated rows", async () => {

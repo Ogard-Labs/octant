@@ -41,6 +41,13 @@ export interface ApiKeyEntry {
   readonly id: string;
   readonly label: string;
   readonly secret: string;
+  /**
+   * An opaque marker bumped whenever the key's secret is replaced. It is
+   * identity only — never derived from the secret — so a pool fingerprint
+   * for a change notice's Undo can change without holding anything
+   * secret-derived. Keys stored before it existed count as revision 1.
+   */
+  readonly rotation?: number;
 }
 
 /** What the desktop may show about a key. The secret never leaves the host. */
@@ -128,6 +135,7 @@ export function addApiKey(
     id: globalThis.crypto.randomUUID(),
     label,
     secret: input.secret.trim(),
+    rotation: 1,
   };
   const next = writePool([...entries, key], key.id);
   return { stored: next, key: { id: key.id, label: key.label, active: true } };
@@ -152,7 +160,14 @@ export function replaceApiKeySecret(stored: string, keyId: string, secret: strin
   requireKnownKey(state.entries, keyId);
   const newId = globalThis.crypto.randomUUID();
   const entries = state.entries.map((entry) =>
-    entry.id === keyId ? { id: newId, label: entry.label, secret: secret.trim() } : entry,
+    entry.id === keyId
+      ? {
+          id: newId,
+          label: entry.label,
+          secret: secret.trim(),
+          rotation: (entry.rotation ?? 0) + 1,
+        }
+      : entry,
   );
   const active = activeIdOf(state);
   return writePool(entries, active === keyId ? newId : active);
@@ -221,6 +236,19 @@ export function selectApiKey(
         : soonest,
     undefined,
   );
+}
+
+/**
+ * The pool's identity as a change notice's Undo holds it: the active key id
+ * and each key's id with its opaque secret-revision marker, in list order.
+ * Nothing secret-derived is in it — a journal row carrying an older
+ * secret-derived hash never matches this shape, so such a notice's Undo
+ * refuses. `pool@2` names the identity shape, not the pool's version.
+ */
+export function apiKeyPoolFingerprint(stored: string): string {
+  const state = readEditablePool(stored);
+  const keys = state.entries.map((entry) => `${entry.id}~${entry.rotation ?? 1}`).join(",");
+  return `pool@2|${activeIdOf(state) ?? ""}|${keys}`;
 }
 
 export interface KeyRejection {
@@ -330,7 +358,15 @@ function parsePool(stored: string): PoolState | undefined {
     ) {
       throw new ApiKeyPoolError("corrupt");
     }
-    return { id: key.id, label: key.label, secret: key.secret };
+    if (key.rotation !== undefined && (!Number.isInteger(key.rotation) || key.rotation < 1)) {
+      throw new ApiKeyPoolError("corrupt");
+    }
+    return {
+      id: key.id,
+      label: key.label,
+      secret: key.secret,
+      ...(key.rotation === undefined ? {} : { rotation: key.rotation }),
+    };
   });
   assertPool(entries);
   return { entries, active: typeof parsed.active === "string" ? parsed.active : undefined };
@@ -343,7 +379,12 @@ function writePool(entries: readonly ApiKeyEntry[], activeId: string | undefined
     kind: KIND,
     version: VERSION,
     active,
-    keys: entries.map(({ id, label, secret }) => ({ id, label, secret })),
+    keys: entries.map(({ id, label, secret, rotation }) => ({
+      id,
+      label,
+      secret,
+      rotation: rotation ?? 1,
+    })),
   });
   if (new TextEncoder().encode(encoded).byteLength > MAX_POOL_BYTES) {
     throw new ApiKeyPoolError("too-large");

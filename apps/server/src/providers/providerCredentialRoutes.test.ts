@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   decodeEventActor,
@@ -6,7 +5,7 @@ import {
   decodeWindowId,
   type ProviderInstance,
 } from "@octant/contracts";
-import { addApiKey, setActiveApiKey } from "@octant/host-runtime";
+import { addApiKey, apiKeyPoolFingerprint, setActiveApiKey } from "@octant/host-runtime";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import type { ProviderKeyReference } from "./credentialBrokerClient";
 import type { ProviderKeyJournal } from "./providerKeyJournal";
@@ -787,9 +786,7 @@ describe("host-local provider key pool routes", () => {
     // The notice holds the pool to the state it recorded when the change was
     // journaled — the same key ids under a different active key are a
     // different pool.
-    const fingerprint = createHash("sha256")
-      .update(stored.get(GATEWAY_ID) ?? "", "utf8")
-      .digest("hex");
+    const fingerprint = apiKeyPoolFingerprint(stored.get(GATEWAY_ID) ?? "");
     stored.set(GATEWAY_ID, setActiveApiKey(stored.get(GATEWAY_ID) ?? "", first.key.id));
     const undone = await removeProviderApiKey(options, {
       instanceId: GATEWAY_ID,
