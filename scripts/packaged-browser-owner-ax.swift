@@ -1254,6 +1254,9 @@ var nativeReadErrors = Set<Int32>()
 var next = 0
 var depthLimited = false
 var labelsLimited = false
+// Opening Settings can put more than 512 nodes in the owned window. A complete
+// walk is still required before a control is selected or an action dispatched.
+let treeNodeLimit = 1024
 let treeDeadline = Date().addingTimeInterval(3)
 func label(_ node: AXUIElement, _ attribute: CFString) -> String {
     var value: CFTypeRef?
@@ -1301,7 +1304,7 @@ func cgBounds(_ row: [String: Any]) -> CGRect? {
     guard values.allSatisfy({ $0.isFinite }), values[2] > 0, values[3] > 0 else { return nil }
     return CGRect(x: values[0], y: values[1], width: values[2], height: values[3])
 }
-while next < pending.count, next < 512, Date() < treeDeadline {
+while next < pending.count, next < treeNodeLimit, Date() < treeDeadline {
     let (node, depth, parentIsToast, parentIsEndpointDialog) = pending[next]
     next += 1
     guard visited.insert(CFHash(node)).inserted else { continue }
@@ -1421,7 +1424,7 @@ while next < pending.count, next < 512, Date() < treeDeadline {
     let childrenRead = AXUIElementCopyAttributeValue(node, kAXChildrenAttribute as CFString, &childrenValue)
     if childrenRead == .success {
         if let children = childrenValue as? [AXUIElement] {
-            pending.append(contentsOf: children.prefix(max(0, 512 - pending.count)).map { ($0, depth + 1, isToast, isEndpointDialog) })
+            pending.append(contentsOf: children.prefix(max(0, treeNodeLimit - pending.count)).map { ($0, depth + 1, isToast, isEndpointDialog) })
         } else { readErrors += 1 }
     } else if childrenRead != .attributeUnsupported && childrenRead != .noValue {
         readErrors += 1
@@ -1438,7 +1441,7 @@ let candidateWindows = (nativeWindows ?? []).compactMap { row -> [String: Any]? 
             "layer": row[kCGWindowLayer as String] ?? NSNull(),
             "matchesStagedBundle": matchingIds.contains(owner.int32Value)]
 }
-let truncated = depthLimited || labelsLimited || next < pending.count || pending.count >= 512
+let truncated = depthLimited || labelsLimited || next < pending.count || pending.count >= treeNodeLimit
 var action: [String: Any] = ["status": "not-requested"]
 if mode == "click" || mode == "reveal" || fillsFixtureField {
     action = ["status": "refused", "method": fillsFixtureField ? "fixed-nonsecret-fixture-field" : mode == "click" ? "native-click" : "AXScrollToVisible", "matches": pressTargets.count, "requestedTitle": requestedTitle]
@@ -1814,7 +1817,7 @@ let evidence: [String: Any] = [
     "quitHintTitleSeen": quitHintTitleSeen, "quitHintDetailSeen": quitHintDetailSeen,
     "quitToastBranches": quitToastBranches,
     "treeDepthLimited": depthLimited, "treeLabelsLimited": labelsLimited,
-    "treeNodeLimited": pending.count >= 512,
+    "treeNodeLimited": pending.count >= treeNodeLimit,
     "treeTimeLimited": next < pending.count && Date() >= treeDeadline,
     "cgMetadataAvailable": nativeWindows != nil, "candidateWindowOwners": candidateWindows,
 ]
