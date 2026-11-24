@@ -124,7 +124,7 @@ import type { ChatThread, ChatThreadId, ChatTurnId } from "@octant/contracts/cha
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useChatController } from "../chat/useChatController";
 import type { ChatController, ChatReadCursorStore } from "../chat/useChatController";
-import type { CodeController } from "../code/useCodeController";
+import type { CodeController, CodeThreadRestOutcome } from "../code/useCodeController";
 import { useCodeThreadController, type CodeThreadControllers } from "../code/codeThreadControllers";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
@@ -471,7 +471,7 @@ export interface WorkspaceViewProps {
   readonly renderThreadPullRequest?: (input: {
     readonly threadId: CodeThreadId;
     readonly pullRequest: ThreadBoardPullRequestIdentity;
-    readonly onUnlink: () => void;
+    readonly onUnlink: () => Promise<CodeThreadRestOutcome>;
   }) => React.ReactNode;
   readonly onPinCanvasInFocusZone?: (request: {
     readonly canvasId: CanvasId;
@@ -1681,7 +1681,7 @@ function renderCodeTab(
     return props.renderThreadPullRequest({
       threadId: tab.threadId,
       pullRequest,
-      onUnlink: () => void codeController.unlinkPullRequest(tab.threadId, pullRequest),
+      onUnlink: () => codeController.unlinkPullRequest(tab.threadId, pullRequest),
     });
   }
   const project = resolveCodeTabProject(tab, props);

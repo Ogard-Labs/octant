@@ -1403,7 +1403,7 @@ describe("WorkspaceView pull request a thread worked on", () => {
     );
     const renderThreadPullRequest = vi.fn(
       (input: Parameters<NonNullable<WorkspaceViewProps["renderThreadPullRequest"]>>[0]) => (
-        <button onClick={input.onUnlink} type="button">
+        <button onClick={() => void input.onUnlink()} type="button">
           {`Unlink #${String(input.pullRequest.number)}`}
         </button>
       ),

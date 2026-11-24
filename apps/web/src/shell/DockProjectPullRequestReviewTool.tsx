@@ -23,6 +23,7 @@ import type {
 } from "@octant/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CodeLineNotesSendResult } from "../code/CodeLineNotes";
+import type { CodeThreadRestOutcome } from "../code/useCodeController";
 import type { ProjectPullRequestPersonAction } from "../code/ProjectPullRequestActions";
 import { ProjectPullRequestReviewPane } from "../code/ProjectPullRequestReviewPane";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -66,7 +67,7 @@ export interface DockProjectPullRequestReviewToolProps {
   ) => Promise<CodeLineNotesSendResult>;
   readonly pullRequestReviewClient?: PullRequestReviewClient;
   /** Offered in the page's More actions when the pull request is open in a thread. */
-  readonly onUnlinkFromThread?: () => void;
+  readonly onUnlinkFromThread?: () => Promise<CodeThreadRestOutcome>;
 }
 
 /**

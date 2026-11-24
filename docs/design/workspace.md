@@ -3714,7 +3714,9 @@ actions menu starts with **Unlink from this thread**, which journals the
 person's unlink on the thread: the thread stops listing the pull request and
 stops being one of its linked threads (for babysitting and line notes too)
 until the thread touches it again, whatever the branch or an earlier
-operation said. Only a person may unlink; a routine is refused (maintainer
+operation said, and across a repository rename. The thread keeps its newest 50
+unlinks; an older one lapses. The page says when the unlink is done or why it
+was refused. Only a person may unlink; a routine is refused (maintainer
 decision, 2026-11-24). A "…" menu beside the row (More for pull request
 #N), shown on hover and keyboard focus and always on touch, offers Open on
 GitHub and Copy link. The list is the host's cached reading: opening the strip
@@ -3726,9 +3728,9 @@ An open or draft pull request ends with the one next step it waits on, by
 what blocks it first: **Resolve ↗** while it has conflicts, which opens its
 conflicts on GitHub; **Fix ↗** while its checks fail, which opens its checks on
 GitHub; and **Merge** once it is ready to merge, which opens the pull request,
-whose Merge asks for the method before it acts. A merged or closed pull
-request offers none (maintainer decision,
-2026-11-24).
+whose Merge asks for the method before it acts. A pull request already in the
+merge queue or set to merge on its own offers no Merge, and a merged or closed
+one offers no step (maintainer decision, 2026-11-24).
 The Project's own open pull requests stay under Delivery (maintainer request,
 2026-11-16).
 **The thread's issues.** Under its pull requests, a small "Issues" caption lists
