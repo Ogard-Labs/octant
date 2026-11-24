@@ -580,7 +580,10 @@ export interface WorkspaceViewProps {
     autoReviewer: import("@octant/contracts/shield").AutoReviewer | undefined,
   ) => Promise<boolean>;
   readonly onAgentMemoryWritesChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
-  readonly onImageGenerationAskAgain?: (projectId: ProjectId) => Promise<boolean>;
+  readonly onGenerationAskAgain?: (
+    projectId: ProjectId,
+    media: "image" | "video",
+  ) => Promise<boolean>;
   readonly onBrandKitChange?: (
     projectId: ProjectId,
     brandKit: CanvasDesignBrand,
@@ -3069,9 +3072,9 @@ function renderNonCodeTab(
           {...(props.onAgentMemoryWritesChange === undefined
             ? {}
             : { onAgentMemoryWritesChange: props.onAgentMemoryWritesChange })}
-          {...(props.onImageGenerationAskAgain === undefined
+          {...(props.onGenerationAskAgain === undefined
             ? {}
-            : { onImageGenerationAskAgain: props.onImageGenerationAskAgain })}
+            : { onGenerationAskAgain: props.onGenerationAskAgain })}
           {...(props.onBrandKitChange === undefined
             ? {}
             : { onBrandKitChange: props.onBrandKitChange })}

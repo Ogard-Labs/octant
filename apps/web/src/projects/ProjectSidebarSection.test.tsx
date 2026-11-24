@@ -65,6 +65,13 @@ const chatProjectB = {
   type: "chat",
 } as ProjectSummary;
 
+/** The info card loads on the first approach to a row, so it can open a moment before its content. */
+async function findThreadDetails(): Promise<HTMLElement> {
+  const card = await screen.findByRole("group", { name: "Thread details" });
+  await waitFor(() => expect(card).not.toBeEmptyDOMElement());
+  return card;
+}
+
 describe("ProjectSidebarSection chat thread nesting", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -2816,7 +2823,7 @@ describe("ProjectSidebarSection row property visibility", () => {
     );
     await chooseArrangement(user, "Activity feed");
     await user.hover(screen.getByRole("button", { name: /Alternate plan/ }));
-    const details = await screen.findByRole("group", { name: "Thread details" });
+    const details = await findThreadDetails();
     expect(details).toHaveTextContent("Forked from Planning");
     expect(details).not.toHaveTextContent("no longer available");
   });
@@ -2837,7 +2844,7 @@ describe("ProjectSidebarSection row property visibility", () => {
     // had a menu, so a feed with GitHub authority showed no pull requests.
     expect(within(row).getByText("#12 open")).toBeVisible();
     await user.hover(row);
-    const details = await screen.findByRole("group", { name: "Thread details" });
+    const details = await findThreadDetails();
     expect(details).toHaveTextContent("Planning");
     expect(details).toHaveTextContent("feature/sidebar");
     await user.unhover(row);

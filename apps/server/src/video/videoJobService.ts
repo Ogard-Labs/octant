@@ -75,6 +75,8 @@ const FIRST_POLL_MS = 5_000;
 const MAX_POLL_MS = 30_000;
 /** How long the host waits on a provider's stop once a job's time has run out. */
 const VIDEO_TIMEOUT_CLEANUP_MS = 15_000;
+/** How often a partial or failed catalog read is retried per profile. */
+const VIDEO_DISCOVERY_RETRY_MS = 60_000;
 
 /** A failed status check can leave the already accepted job's outcome unknown. */
 function pollFailureLeavesJobUnconfirmed(failure: ProviderFailure): boolean {
@@ -96,6 +98,7 @@ function pollFailureLeavesJobUnconfirmed(failure: ProviderFailure): boolean {
 function startMayHaveReachedProvider(failure: ProviderFailure): boolean {
   return failure.category === "unavailable";
 }
+
 /** How often a removal the provider refused is tried again while the host runs. */
 export const VIDEO_REMOVAL_RETRY_MS = 15 * 60 * 1000;
 
@@ -136,6 +139,8 @@ export type VideoQuote =
       readonly status: "ready";
       readonly driverKind: VideoDriverKind;
       readonly profileName: string;
+      /** Who receives and bills the clip, from the driver; never the editable alias. */
+      readonly providerName: string;
       readonly model: VideoModelCapabilities;
       readonly estimate: VideoCostEstimate;
     }
@@ -222,6 +227,18 @@ export class VideoJobService {
   readonly #terminalWaiters = new Map<string, Array<(job: VideoJob) => void>>();
   readonly #inputs = new Map<string, { readonly prompt: string } & VideoJobInputs>();
   readonly #closing = new AbortController();
+  /**
+   * Each profile version's declared models, as last read from its adapter. A
+   * read the adapter could not complete — fewer models than the profile asks
+   * for — is offered but not trusted, so a later call reads again.
+   */
+  readonly #declared = new Map<
+    string,
+    { readonly models: ReadonlyArray<VideoModelCapabilities>; readonly complete: boolean }
+  >();
+  readonly #declaring = new Set<string>();
+  /** When each profile's catalog was last read, bounding a retry to 60 s. */
+  readonly #discoveryReadAt = new Map<string, number>();
   #active = 0;
   #removalTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -256,11 +273,61 @@ export class VideoJobService {
       const adapter = this.#adapterFor(candidate);
       if (adapter === undefined) continue;
       const models = await this.#modelsOf(adapter);
-      if (models !== undefined && models.length > 0) {
-        ready.push({ instance: candidate, models });
+      if (models !== undefined) {
+        this.#declared.set(declaredKey(candidate), {
+          models,
+          complete: models.length >= modelAllowlistOf(candidate.configuration).length,
+        });
+        if (models.length > 0) ready.push({ instance: candidate, models });
       }
     }
     return ready;
+  }
+
+  /**
+   * The ready profiles as last read, without waiting: a turn decides whether
+   * to offer the video tool synchronously. A profile version not read yet is
+   * read in the background and offered from the next turn; `quote` still
+   * reads the adapter before anything is reserved or sent.
+   */
+  readyProfilesNow(): ReadonlyArray<{
+    readonly instance: ProviderInstance;
+    readonly models: ReadonlyArray<VideoModelCapabilities>;
+  }> {
+    const ready: Array<{
+      readonly instance: ProviderInstance;
+      readonly models: ReadonlyArray<VideoModelCapabilities>;
+    }> = [];
+    for (const candidate of this.#candidateInstances()) {
+      const adapter = this.#adapterFor(candidate);
+      if (adapter === undefined) continue;
+      const key = declaredKey(candidate);
+      const entry = this.#declared.get(key);
+      if (entry !== undefined && entry.models.length > 0) {
+        ready.push({ instance: candidate, models: entry.models });
+      }
+      if (
+        (entry === undefined || !entry.complete) &&
+        !this.#declaring.has(key) &&
+        this.#now() - (this.#discoveryReadAt.get(key) ?? 0) >= VIDEO_DISCOVERY_RETRY_MS
+      ) {
+        this.#declaring.add(key);
+        this.#discoveryReadAt.set(key, this.#now());
+        const wanted = modelAllowlistOf(candidate.configuration).length;
+        void adapter
+          .models()
+          .then((models) => this.#declared.set(key, { models, complete: models.length >= wanted }))
+          .catch(() => undefined)
+          .finally(() => this.#declaring.delete(key));
+      }
+    }
+    return ready;
+  }
+
+  /** A finished clip's bytes, for a save under the turn's folder. */
+  async readClip(job: VideoJob): Promise<Uint8Array | undefined> {
+    if (job.status !== "completed" || job.clip === undefined) return undefined;
+    return this.#options.clips.readAll(job.scopeId, job.clip.clipId);
   }
 
   /**
@@ -342,6 +409,10 @@ export class VideoJobService {
       status: "ready",
       driverKind,
       profileName: instance.displayName,
+      // The driver is present: `#adapterFor` built this adapter from it.
+      providerName:
+        this.#drivers.find((candidate) => candidate.driverKind === driverKind)?.providerName ??
+        driverKind,
       model,
       estimate,
     };
@@ -478,6 +549,8 @@ export class VideoJobService {
    * still owed is tried again.
    */
   async recover(): Promise<void> {
+    // Reads each profile's models in the background so the first turn can offer the tool.
+    this.readyProfilesNow();
     await this.#options.clips.recover();
     if (this.#closing.signal.aborted) return;
     for (const job of this.#options.projection.listUnfinished()) {
@@ -1181,10 +1254,7 @@ export class VideoJobService {
     const driver = this.#drivers.find((candidate) => candidate.driverKind === instance.driverKind);
     if (driver === undefined) return undefined;
     const configuration: object = instance.configuration;
-    const modelIds =
-      "modelAllowlist" in configuration && Array.isArray(configuration.modelAllowlist)
-        ? (configuration.modelAllowlist as ReadonlyArray<ProviderModelId>)
-        : [];
+    const modelIds = modelAllowlistOf(configuration);
     const adapter = driver.create({
       profile: { instanceId: instance.id, modelIds },
       ports: makeVideoGenerationPorts({
@@ -1227,4 +1297,14 @@ function settleWithKnownPrice(
     : settleVideoCostUsdMicros(price, estimate, usage, job.options, {
         imageCount: job.imageCount,
       });
+}
+
+function declaredKey(instance: ProviderInstance): string {
+  return `${String(instance.id)}:${String(instance.version)}`;
+}
+
+function modelAllowlistOf(configuration: object): ReadonlyArray<ProviderModelId> {
+  return "modelAllowlist" in configuration && Array.isArray(configuration.modelAllowlist)
+    ? (configuration.modelAllowlist as ReadonlyArray<ProviderModelId>)
+    : [];
 }

@@ -1,6 +1,7 @@
 import {
   decodeProjectId,
   decodeThreadBoardPullRequestSummaries,
+  decodeThreadNavigationPullRequestSummaries,
   type ThreadBoardPullRequestSummaries,
 } from "@octant/contracts";
 import { render, screen, within } from "@testing-library/react";
@@ -151,6 +152,23 @@ describe("EnvironmentThreadPullRequests", () => {
     expect(screen.getByText("4 more not shown")).toBeVisible();
     rerender(<EnvironmentThreadPullRequests summaries={summaries([summary(1)])} />);
     expect(screen.queryByText(/more not shown/)).not.toBeInTheDocument();
+  });
+
+  it("folds a thread's pull requests past ten behind Show more and back behind Show less", async () => {
+    const user = userEvent.setup();
+    const many = decodeThreadNavigationPullRequestSummaries({
+      items: Array.from({ length: 16 }, (_, index) => summary(index + 1)),
+      hiddenCount: 2,
+    });
+    render(<EnvironmentThreadPullRequests summaries={many} />);
+
+    expect(screen.getAllByRole("listitem")).toHaveLength(10);
+    expect(screen.queryByText(/more not shown/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show more (6)" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(16);
+    expect(screen.getByText("2 more not shown")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Show less" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(10);
   });
 
   it("keeps the row and its menu as sibling controls, never a button inside a button", () => {

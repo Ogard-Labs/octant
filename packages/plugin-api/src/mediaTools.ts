@@ -23,6 +23,8 @@ import type {
   ProviderToolImage,
   SpeechSynthesisFormat,
   SpeechTranscriptionLanguage,
+  VideoClipId,
+  VideoJobId,
 } from "@octant/contracts";
 
 export const MEDIA_TOOL_CONTRIBUTION_KIND = "media-tool" as const;
@@ -154,7 +156,11 @@ export interface MediaImageDescriptionHostPort {
 }
 
 export type MediaImageReferenceInput =
-  | { readonly kind: "attachment" }
+  | {
+      readonly kind: "attachment";
+      /** One named attachment of the latest message; absent names the whole set. */
+      readonly name?: string;
+    }
   | { readonly kind: "browser-capture"; readonly captureId: BrowserCaptureId }
   | { readonly kind: "file"; readonly relativePath: string }
   | { readonly kind: "generated-image"; readonly attachmentId: ImageArtifactId };
@@ -258,6 +264,73 @@ export interface MediaImageGenerationHostPort {
   readonly iconSet?: (input: MediaImageIconSetRequest) => Promise<MediaImageIconSetOutcome>;
 }
 
+export interface MediaVideoGenerateRequest {
+  readonly prompt: string;
+  readonly profileInstanceId?: ProviderInstanceId;
+  readonly modelId?: ProviderModelId;
+  /** Absent options take the model's own defaults; the host checks every option against what the model declares. */
+  readonly durationSeconds?: number;
+  readonly resolution?: string;
+  readonly aspectRatio?: string;
+  readonly audio?: boolean;
+  readonly firstFrame?: MediaImageReferenceInput;
+  readonly lastFrame?: MediaImageReferenceInput;
+  readonly references: ReadonlyArray<MediaImageReferenceInput>;
+  readonly signal?: AbortSignal;
+}
+
+export type MediaVideoGenerateOutcome =
+  | {
+      readonly status: "completed";
+      readonly jobId: VideoJobId;
+      readonly clipId: VideoClipId;
+      readonly modelId: ProviderModelId;
+      readonly profileInstanceId: ProviderInstanceId;
+      readonly durationSeconds: number;
+      readonly resolution: string;
+      readonly sizeBytes: number;
+    }
+  | {
+      /** Still running after the call's wait; the clip appears in the thread when done. */
+      readonly status: "generating";
+      readonly jobId: VideoJobId;
+      readonly modelId: ProviderModelId;
+      readonly profileInstanceId: ProviderInstanceId;
+    }
+  | {
+      readonly status: "cancelled";
+      readonly jobId?: VideoJobId;
+      readonly reason?: "aborted" | "declined" | "job-cancelled";
+    }
+  | { readonly status: "failed"; readonly jobId: VideoJobId; readonly message: string }
+  | { readonly status: "refused"; readonly error: string };
+
+export type MediaVideoSaveRequest = {
+  readonly relativePath: string;
+  readonly signal?: AbortSignal;
+} & ({ readonly clipId: VideoClipId } | { readonly jobId: VideoJobId });
+
+export type MediaVideoSaveOutcome =
+  | { readonly status: "saved"; readonly relativePath: string }
+  | { readonly status: "not-saved" }
+  | { readonly status: "refused"; readonly error: string };
+
+/** Host-mediated video generation and confined folder saving, provider-neutral. */
+export interface MediaVideoGenerationHostPort {
+  /** Live check: at least one ready video profile is available for this turn. */
+  readonly isAvailable: () => boolean;
+  /** Live turn-level refusal reason (for example Plan mode); undefined allows calls. */
+  readonly refusal?: () => string | undefined;
+  /**
+   * The ready models and the options each declares, in plain words, so the
+   * tool can tell the agent what it may ask for. The host still checks every call.
+   */
+  readonly describeModels: () => string;
+  readonly generate: (input: MediaVideoGenerateRequest) => Promise<MediaVideoGenerateOutcome>;
+  /** Absent when the thread has no working folder (for example Chat). */
+  readonly save?: (input: MediaVideoSaveRequest) => Promise<MediaVideoSaveOutcome>;
+}
+
 /**
  * Capability-scoped turn port issued by the host to media tool plugins.
  * Capabilities omitted on this port are unavailable for the turn.
@@ -268,6 +341,7 @@ export interface MediaToolHostPort {
   readonly narration?: MediaNarrationHostPort;
   readonly imageDescription?: MediaImageDescriptionHostPort;
   readonly imageGeneration?: MediaImageGenerationHostPort;
+  readonly videoGeneration?: MediaVideoGenerationHostPort;
   /** Host-owned teardown for a shared turn port; individual `MediaToolSet.close()` calls do not invoke it. */
   readonly close?: () => Promise<void>;
 }

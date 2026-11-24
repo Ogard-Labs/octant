@@ -59,6 +59,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".host-selector__dot",
   ".browser-workspace__server-dot",
   ".environment-thread-pr__checks",
+  ".thread-row-info-card__pr-checks",
   '.dock-tile__control[data-active="true"]::after',
   '.code-diff-pane__controls .octant-menu__trigger[data-active="true"]::after',
   ".computers-card__dot",

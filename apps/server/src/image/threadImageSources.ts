@@ -11,7 +11,11 @@ import { sniffGeneratedImageMediaType } from "./generatedImageStore";
 import type { EnqueueImageJobInput } from "./imageJobService";
 
 export type ImageSourceRequest =
-  | { readonly kind: "attachment" }
+  | {
+      readonly kind: "attachment";
+      /** One named attachment of the latest message; absent names the whole set. */
+      readonly name?: string;
+    }
   | {
       readonly kind: "browser-capture";
       readonly captureId: ReturnType<typeof decodeBrowserCaptureId>;
@@ -24,6 +28,8 @@ export type ImageSourceRequest =
 
 export interface ImageSource {
   readonly label: string;
+  /** The upload's own file name when the source is an attachment. */
+  readonly name?: string;
   readonly size: number;
   readonly signedIn?: true;
   readonly read: () => Promise<Uint8Array | undefined>;
@@ -42,9 +48,10 @@ type DescribedSource = { readonly reference: ImageOfferReference; readonly sourc
 
 export function parseImageSourceRequests(
   value: unknown,
+  max: number = MAX_IMAGE_REFERENCES,
 ): ReadonlyArray<ImageSourceRequest> | Refused {
-  if (!Array.isArray(value) || value.length > MAX_IMAGE_REFERENCES) {
-    return { error: "Use at most four image references." };
+  if (!Array.isArray(value) || value.length > max) {
+    return { error: `Use at most ${max} image references.` };
   }
   const requests: ImageSourceRequest[] = [];
   for (const item of value as ReadonlyArray<unknown>) {
@@ -56,6 +63,14 @@ export function parseImageSourceRequests(
     try {
       if (kind === "attachment" && Object.keys(fields).length === 0) {
         requests.push({ kind });
+      } else if (
+        kind === "attachment" &&
+        Object.keys(fields).length === 1 &&
+        typeof fields.name === "string" &&
+        fields.name.trim().length > 0 &&
+        fields.name.length <= MAX_IMAGE_REFERENCE_LABEL_LENGTH
+      ) {
+        requests.push({ kind, name: fields.name.trim() });
       } else if (kind === "browser-capture" && Object.keys(fields).length === 1) {
         requests.push({ kind, captureId: decodeBrowserCaptureId(fields.captureId) });
       } else if (kind === "generated-image" && Object.keys(fields).length === 1) {
@@ -83,10 +98,23 @@ export function parseImageSourceRequests(
   return requests;
 }
 
+// The agent names the upload's own file ("logo.png"), while an attachment's
+// label is display-prefixed ("your attached photo logo.png"); matching the
+// name by equality keeps it from also claiming "new logo.png", and the label
+// remains a fallback for sources that carry no name.
+function namedAttachments(
+  sources: ReadonlyArray<ImageSource>,
+  name: string,
+): ReadonlyArray<ImageSource> {
+  const byName = sources.filter((image) => image.name === name);
+  return byName.length > 0 ? byName : sources.filter((image) => image.label === name);
+}
+
 export async function describeImageSources(
   requests: ReadonlyArray<ImageSourceRequest>,
   ports: ThreadImageSources | undefined,
   generated: (id: string) => ImageSource | undefined,
+  max: number = MAX_IMAGE_REFERENCES,
 ): Promise<ReadonlyArray<DescribedSource> | Refused> {
   const results: DescribedSource[] = [];
   let total = 0;
@@ -99,9 +127,12 @@ export async function describeImageSources(
           : request.kind === "generated-image"
             ? generated(String(request.attachmentId))
             : undefined;
+    const attachments = ports?.latestAttachments() ?? [];
     const sources =
       request.kind === "attachment"
-        ? (ports?.latestAttachments() ?? [])
+        ? request.name === undefined
+          ? attachments
+          : namedAttachments(attachments, request.name)
         : source === undefined
           ? []
           : [source];
@@ -109,13 +140,15 @@ export async function describeImageSources(
       return {
         error:
           request.kind === "attachment"
-            ? "The latest message on this thread has no attached images."
+            ? request.name === undefined
+              ? "The latest message on this thread has no attached images."
+              : `No attachment named "${request.name}" is on this thread's latest message.`
             : "An image reference is unavailable on this thread.",
       };
     }
     for (const image of sources) {
-      if (results.length === MAX_IMAGE_REFERENCES) {
-        return { error: "Use at most four image references, including any parent image." };
+      if (results.length === max) {
+        return { error: `Use at most ${max} image references, including any parent image.` };
       }
       total += image.size;
       if (

@@ -132,9 +132,10 @@ import {
   type WorkBoardRuntimeActivity,
 } from "../work/workThreadBoardService";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
-import { saveGeneratedImageUnder } from "../image/generatedImageSave";
+import { saveGeneratedImageUnder, writeConfinedNewFileUnder } from "../image/generatedImageSave";
 import { hostIconSetsUnder } from "../image/iconSetRenderer";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import { createThreadVideoAgentTools } from "../video/videoAgentTools";
 import type { NarrationForTurn } from "../speech/narrationTool";
 import type { TranscriptionForTurn } from "../speech/transcriptionTool";
 import { attachedImageSources, workspaceImageSources } from "../image/threadImageSourcePorts";
@@ -188,6 +189,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "browserModelBindings"
     | "codeSessionAuthority"
     | "imageGenerationOffers"
+    | "videoOffers"
     | "isPairedDeviceScope"
     | "isRestrictedDeviceScope"
     | "liveTurns"
@@ -241,6 +243,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "gitObservationPort"
     | "goalService"
     | "keptImageChoices"
+    | "keptVideoChoices"
     | "projectMemoryAccess"
     | "projectService"
     | "workProjectStatusFiles"
@@ -260,6 +263,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "chatAttachmentStore"
     | "configuredDriverOptions"
     | "imageJobService"
+    | "videoJobService"
     | "probeProviderForThreads"
     | "refreshStandaloneSkills"
     | "verifyModelToolsOnFirstUse"
@@ -349,7 +353,9 @@ export function wireWork(deps: WorkDependencies) {
     githubIssueContextService,
     goalService,
     imageGenerationOffers,
+    videoOffers,
     imageJobService,
+    videoJobService,
     linearIssueContextService,
     liveTurns,
     managedWorktreeReceipts,
@@ -405,6 +411,7 @@ export function wireWork(deps: WorkDependencies) {
     personMemoryAccess,
     octantInstructions,
     keptImageChoices,
+    keptVideoChoices,
     projectMemoryAccess,
     machineChangeFeed,
   } = deps;
@@ -987,6 +994,20 @@ export function wireWork(deps: WorkDependencies) {
               root: currentRoot,
               allowed: speechTurnAllowed,
             });
+        const workImageSources = {
+          latestAttachments: () =>
+            attachedImageSources(
+              workTurnProjection
+                .listForThread(input.thread.id)
+                .findLast((turn) => turn.delivery === undefined)?.attachments ?? [],
+              (attachment) => workAttachments.read(input.thread.id, attachment),
+            ),
+          ...workspaceImageSources({
+            threadId: decodeBrowserThreadId(String(input.thread.id)),
+            browserCaptures,
+            root: currentRoot,
+          }),
+        };
         // A routine can generate an image only where its Project keeps a choice.
         const imageTools = !browserSupported
           ? undefined
@@ -1001,20 +1022,7 @@ export function wireWork(deps: WorkDependencies) {
               fullAccess: () =>
                 runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
               jobs: imageJobService,
-              imageSources: {
-                latestAttachments: () =>
-                  attachedImageSources(
-                    workTurnProjection
-                      .listForThread(input.thread.id)
-                      .findLast((turn) => turn.delivery === undefined)?.attachments ?? [],
-                    (attachment) => workAttachments.read(input.thread.id, attachment),
-                  ),
-                ...workspaceImageSources({
-                  threadId: decodeBrowserThreadId(String(input.thread.id)),
-                  browserCaptures,
-                  root: currentRoot,
-                }),
-              },
+              imageSources: workImageSources,
               listInstances: () => persistence.readProviderInstances(),
               readImageGenerationCustomSources: () =>
                 (persistence.readShellSettings()?.settings ?? defaultShellSettings())
@@ -1042,6 +1050,35 @@ export function wireWork(deps: WorkDependencies) {
               // Plan changes nothing on the host or outside it, and a
               // generation calls a paid provider and stores the image.
               refusal: () => runningLevel().imageRefusal,
+            });
+        // Video follows the image rules: the same kept choice per Project, the
+        // same Full access rule, the same save at the turn's level, and Plan
+        // refuses, since a clip calls a paid provider and stores the clip.
+        const videoTools = !browserSupported
+          ? undefined
+          : createThreadVideoAgentTools({
+              windowId: input.windowId,
+              unattended: isRoutineHostScope(input.windowId),
+              threadKind: "work-thread",
+              scopeId: decodeImageGenerationScopeId(String(input.thread.id)),
+              offers: videoOffers,
+              kept: keptVideoChoices,
+              fullAccess: () =>
+                runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
+              jobs: videoJobService,
+              recordExternalContentIngestion: (input) =>
+                externalContentIngestionStore.record(input),
+              imageSources: workImageSources,
+              imageJobs: imageJobService,
+              save: {
+                posture: () => runningLevel().imageSave,
+                write: (relativePath, bytes) =>
+                  writeConfinedNewFileUnder({ root: input.projectRoot, relativePath, bytes }),
+              },
+              refusal: () =>
+                runningLevel().imageRefusal === undefined
+                  ? undefined
+                  : "Plan mode cannot make video clips. Leave Plan mode to make one.",
             });
         // Sees images: a thread whose model cannot read images may ask for one
         // to be described, from its own attachments or its own folder.
@@ -1178,6 +1215,7 @@ export function wireWork(deps: WorkDependencies) {
           computer === undefined &&
           canvasTools === undefined &&
           imageTools === undefined &&
+          videoTools === undefined &&
           narration === undefined &&
           transcription === undefined &&
           lookTools === undefined
@@ -1193,6 +1231,7 @@ export function wireWork(deps: WorkDependencies) {
           agentsTools,
           canvasTools,
           imageTools,
+          videoTools,
           narration,
           transcription,
           lookTools,

@@ -3,7 +3,9 @@ import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import type { MobileRemoteTransport } from "@octant/client-runtime";
 import {
   createMobileServiceOfferClient,
+  describeVideoOffer,
   imageOfferModelChoices,
+  videoOfferChoices,
   type ServiceOfferClient,
 } from "@octant/client-runtime/service-offer-client";
 import {
@@ -11,6 +13,7 @@ import {
   type ServiceOffer,
   type ServiceOfferDecision,
   type ServiceOffersResponse,
+  type VideoClipOptions,
 } from "@octant/contracts";
 import { useTheme } from "../../design-system";
 import { ApprovalDecisionButtons } from "../approvals/ApprovalDecisionButtons";
@@ -76,6 +79,19 @@ function OfferCard(props: {
       ? imageOfferModelChoices(props.profiles ?? [], offer.suggested, references !== undefined)
       : [];
   const choice = choices.find((candidate) => candidate.id === selected) ?? choices[0];
+  const [videoOptions, setVideoOptions] = useState<VideoClipOptions>();
+  const [videoPicking, setVideoPicking] = useState<VideoOptionField>();
+  const video =
+    offer.kind === "video-generate"
+      ? (() => {
+          const options = videoOptions ?? offer.options;
+          return {
+            options,
+            choices: videoOfferChoices(offer),
+            described: describeVideoOffer(offer, options),
+          };
+        })()
+      : undefined;
   const unavailable = props.stale || busy;
 
   async function decide(answer: ServiceOfferDecision) {
@@ -89,7 +105,9 @@ function OfferCard(props: {
         answer.decision === "generate" ||
         answer.decision === "save" ||
         answer.decision === "transcribe" ||
-        answer.decision === "narrate"
+        answer.decision === "narrate" ||
+        answer.decision === "video-generate" ||
+        answer.decision === "video-save"
           ? await decideWithConfirmation({
               authenticator: props.authenticator ?? deviceAuthenticator,
               reason: "approve",
@@ -112,9 +130,12 @@ function OfferCard(props: {
   const text = { ...mobileTypography.caption, color: colors.textSecondary };
   const cancel = () => void decide({ offerId: offer.offerId, decision: "cancel" });
   const canRemember =
-    offer.kind !== "save" &&
-    references === undefined &&
-    (offer.kind !== "narrate" || offer.canRemember !== false);
+    offer.kind === "video-generate"
+      ? offer.canRemember
+      : offer.kind !== "save" &&
+        offer.kind !== "video-save" &&
+        references === undefined &&
+        (offer.kind !== "narrate" || offer.canRemember !== false);
   const approve = () => {
     if (offer.kind === "transcribe")
       void decide({ offerId: offer.offerId, decision: "transcribe", rememberForThread: remember });
@@ -125,6 +146,15 @@ function OfferCard(props: {
         rememberForThread: canRemember && remember,
       });
     else if (offer.kind === "save") void decide({ offerId: offer.offerId, decision: "save" });
+    else if (offer.kind === "video-save")
+      void decide({ offerId: offer.offerId, decision: "video-save" });
+    else if (offer.kind === "video-generate" && video !== undefined)
+      void decide({
+        offerId: offer.offerId,
+        decision: "video-generate",
+        options: video.options,
+        rememberForThread: canRemember && remember,
+      });
     else if (choice !== undefined) {
       void decide({
         offerId: offer.offerId,
@@ -138,7 +168,9 @@ function OfferCard(props: {
   };
   const rememberLabel =
     "Don't ask again in this " +
-    (offer.kind === "generate" && props.inProject ? "Project" : "thread");
+    ((offer.kind === "generate" || offer.kind === "video-generate") && props.inProject
+      ? "Project"
+      : "thread");
   return (
     <View style={[styles.card, { borderColor: colors.border }]} testID="mobile-service-offer">
       <Text style={[mobileTypography.body, { color: colors.textPrimary }]}>
@@ -150,10 +182,78 @@ function OfferCard(props: {
               ? offer.fileCount === undefined
                 ? "Save this image as a new file?"
                 : `Save an icon set as ${String(offer.fileCount)} new files in this directory?`
-              : "Generate this image?"}
+              : offer.kind === "video-generate"
+                ? "Make this video clip?"
+                : offer.kind === "video-save"
+                  ? "Save this video clip as a new file?"
+                  : "Generate this image?"}
       </Text>
-      <Text style={text}>{offer.kind === "generate" ? offer.prompt : offer.relativePath}</Text>
-      {offer.kind === "transcribe" ? (
+      <Text style={text}>
+        {offer.kind === "generate" || offer.kind === "video-generate"
+          ? offer.prompt
+          : offer.relativePath}
+      </Text>
+      {offer.kind === "video-generate" ? (
+        video === undefined ? null : (
+          <>
+            {offer.images.map((image, index) => (
+              <Text key={index} style={text}>
+                {VIDEO_IMAGE_ROLES[image.role]}: {image.label}
+                {image.signedIn === true ? " (signed-in page)" : ""} · sent to {offer.providerName}
+              </Text>
+            ))}
+            <Text style={text}>
+              {offer.profileName} · {offer.model.displayName}
+            </Text>
+            {VIDEO_OPTION_FIELDS.map((field) => (
+              <Pressable
+                key={field}
+                accessibilityRole="button"
+                disabled={unavailable || videoFieldChoices(video.choices, field).length < 2}
+                onPress={() => setVideoPicking(field)}
+                style={styles.choice}
+              >
+                <Text style={[mobileTypography.body, { color: colors.textPrimary }]}>
+                  {videoFieldLabel(field, video.options[field])}
+                </Text>
+              </Pressable>
+            ))}
+            <ModelPickerSheet
+              visible={videoPicking !== undefined}
+              onClose={() => setVideoPicking(undefined)}
+              options={
+                videoPicking === undefined
+                  ? []
+                  : videoFieldChoices(video.choices, videoPicking).map((value) => ({
+                      id: String(value),
+                      label: videoFieldLabel(videoPicking, value),
+                    }))
+              }
+              selectedId={
+                videoPicking === undefined ? undefined : String(video.options[videoPicking])
+              }
+              onSelect={(id) => {
+                if (videoPicking !== undefined)
+                  setVideoOptions({ ...video.options, ...videoFieldValue(videoPicking, id) });
+                setVideoPicking(undefined);
+              }}
+            />
+            <Text style={text}>{video.described.price}</Text>
+            {video.described.stop === undefined ? null : (
+              <Text style={text}>{video.described.stop}</Text>
+            )}
+            <Text style={text}>{video.described.retention}</Text>
+            {video.described.refusal === undefined ? null : (
+              <Text style={text}>{video.described.refusal}</Text>
+            )}
+          </>
+        )
+      ) : offer.kind === "video-save" ? (
+        <Text style={text}>
+          {(offer.sizeBytes / 1_000_000).toFixed(1)} MB · The clip saves under the thread’s folder
+          without replacing a file.
+        </Text>
+      ) : offer.kind === "transcribe" ? (
         <Text style={text}>
           {offer.sizeBytes.toLocaleString()} bytes · Sent to {offer.endpointName} ({offer.modelId}).
           Your provider may charge for transcription.
@@ -228,13 +328,16 @@ function OfferCard(props: {
         </View>
       ) : null}
       <ApprovalDecisionButtons
-        allowDisabled={offer.kind === "generate" && choice === undefined}
+        allowDisabled={
+          (offer.kind === "generate" && choice === undefined) ||
+          (video !== undefined && !video.described.approvable)
+        }
         allowLabel={
           offer.kind === "transcribe"
             ? "Transcribe"
             : offer.kind === "narrate"
               ? "Narrate"
-              : offer.kind === "save"
+              : offer.kind === "save" || offer.kind === "video-save"
                 ? "Save"
                 : "Generate"
         }
@@ -244,9 +347,11 @@ function OfferCard(props: {
             ? "Don't transcribe"
             : offer.kind === "narrate"
               ? "Don't narrate"
-              : offer.kind === "save"
+              : offer.kind === "save" || offer.kind === "video-save"
                 ? "Don't save"
-                : "Cancel"
+                : offer.kind === "video-generate"
+                  ? "Don't make it"
+                  : "Cancel"
         }
         onAllow={approve}
         onDeny={cancel}
@@ -266,6 +371,61 @@ function OfferCard(props: {
       ) : null}
     </View>
   );
+}
+
+type VideoOptionField = keyof VideoClipOptions;
+const VIDEO_OPTION_FIELDS: ReadonlyArray<VideoOptionField> = [
+  "durationSeconds",
+  "resolution",
+  "aspectRatio",
+  "audio",
+];
+const VIDEO_IMAGE_ROLES = {
+  "first-frame": "First frame",
+  "last-frame": "Last frame",
+  reference: "Reference",
+} as const;
+
+function videoFieldChoices(
+  choices: ReturnType<typeof videoOfferChoices>,
+  field: VideoOptionField,
+): ReadonlyArray<string | number | boolean> {
+  switch (field) {
+    case "durationSeconds":
+      return choices.durations;
+    case "resolution":
+      return choices.resolutions;
+    case "aspectRatio":
+      return choices.aspectRatios;
+    case "audio":
+      return choices.audio;
+  }
+}
+
+function videoFieldLabel(field: VideoOptionField, value: string | number | boolean): string {
+  switch (field) {
+    case "durationSeconds":
+      return `Length ${String(value)} s`;
+    case "resolution":
+      return `Resolution ${String(value)}`;
+    case "aspectRatio":
+      return `Aspect ratio ${String(value)}`;
+    case "audio":
+      return value === true ? "With audio" : "No audio";
+  }
+}
+
+function videoFieldValue(field: VideoOptionField, id: string): Partial<VideoClipOptions> {
+  switch (field) {
+    case "durationSeconds":
+      return { durationSeconds: Number(id) };
+    case "resolution":
+      return { resolution: id };
+    case "aspectRatio":
+      return { aspectRatio: id };
+    case "audio":
+      return { audio: id === "true" };
+  }
 }
 
 const styles = StyleSheet.create({
