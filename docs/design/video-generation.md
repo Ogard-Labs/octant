@@ -176,7 +176,8 @@ activation ladder.
      a 401/403 is expected for some keys: the host then records that the
      provider's own expiry ends the copy, remembers the refusal for that
      profile version while it runs so later jobs skip the DELETE, and never
-     retries it. Any other failure stays owed on the retry loop, but only
+     retries it. A successful response confirms removal only when every
+     output's deletion result confirms success. Any other failure stays owed
      until the copy's own expiry has passed. With request history off, fal
      keeps a queue result for one hour, so the fal driver's resume window is
      one hour.

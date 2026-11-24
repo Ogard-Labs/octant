@@ -60,6 +60,7 @@ function script(): (request: VideoHttpRequest) => Response {
       return Response.json(schema(endpoint, endpoint.endsWith("image-to-video")));
     }
     if (url.hostname === "api.fal.ai") {
+      if (request.method === "DELETE") return Response.json({ cdn_delete_results: [] });
       return Response.json({
         prices: [
           { endpoint_id: "fal-ai/veo3.1", unit_price: 0.4, unit: "second", currency: "USD" },
@@ -142,7 +143,11 @@ describe("fal video driver", () => {
 
   it("sends exactly one DELETE for the request's stored payloads when the host asks", async () => {
     const recorder = ports((request) =>
-      request.method === "DELETE" ? new Response(null, { status: 204 }) : script()(request),
+      request.method === "DELETE"
+        ? Response.json({
+            cdn_delete_results: [{ link: "https://v3b.fal.media/files/clip.mp4", exception: null }],
+          })
+        : script()(request),
     );
     const adapter = falVideoDriver.create({ profile, ports: recorder.ports });
     const started = await adapter.start({
@@ -158,6 +163,76 @@ describe("fal video driver", () => {
     expect(deletions).toHaveLength(1);
     expect(deletions[0]?.url).toBe(`https://api.fal.ai/v1/models/requests/${requestId}/payloads`);
     expect(deletions[0]?.auth).toEqual({ header: "authorization", scheme: "Key" });
+  });
+
+  it.each(["pricing", "schema"] as const)(
+    "stops a clip while its fal %s discovery request is reading",
+    async (stage) => {
+      const control = new AbortController();
+      const reading = Promise.withResolvers<void>();
+      const requests: Array<VideoHttpRequest> = [];
+      const adapter = falVideoDriver.create({
+        profile,
+        ports: {
+          ...ports(script()).ports,
+          request: async (request) => {
+            requests.push(request);
+            const inPricing = new URL(request.url).pathname.endsWith("/pricing");
+            if (inPricing !== (stage === "pricing")) return script()(request);
+            reading.resolve();
+            const signal = request.signal;
+            if (signal === undefined) return script()(request);
+            return new Promise((_resolve, reject) =>
+              signal.addEventListener(
+                "abort",
+                () => reject({ category: "interrupted", message: "Stopped." }),
+                { once: true },
+              ),
+            );
+          },
+        },
+      });
+      const pending = adapter.start({
+        modelId: veo,
+        prompt: "A boat",
+        options,
+        references: [],
+        signal: control.signal,
+      });
+      await reading.promise;
+      control.abort();
+      expect(await pending).toMatchObject({
+        status: "failed",
+        providerFailure: { category: "interrupted" },
+      });
+      expect(requests).toHaveLength(stage === "pricing" ? 1 : 2);
+      expect(requests.every((request) => request.signal === control.signal)).toBe(true);
+    },
+  );
+
+  it("retries removal when fal reports that a CDN file could not be deleted", async () => {
+    const respond = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        Response.json({
+          cdn_delete_results: [
+            { link: "https://v3b.fal.media/files/preview.png", exception: null },
+            { link: "https://v3b.fal.media/files/clip.mp4", exception: "Deletion failed" },
+          ],
+        }),
+      )
+      .mockImplementationOnce(() =>
+        Response.json({
+          cdn_delete_results: [{ link: "https://v3b.fal.media/files/clip.mp4", exception: null }],
+        }),
+      );
+    const adapter = falVideoDriver.create({ profile, ports: ports(respond).ports });
+    const remoteId = `fal-ai/veo3.1#${requestId}`;
+    expect(await adapter.forget(remoteId)).toMatchObject({
+      status: "failed",
+      providerFailure: { category: "unavailable" },
+    });
+    expect(await adapter.forget(remoteId)).toEqual({ status: "removed" });
   });
 
   it("asks fal to keep no request history and to expire its copy, in the endpoint's own fields", async () => {

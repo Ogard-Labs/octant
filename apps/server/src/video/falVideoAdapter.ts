@@ -459,7 +459,7 @@ interface QueueUrls {
 }
 
 function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGenerationPorts) {
-  let declared: Promise<FalEndpoints> | undefined;
+  let declared: FalEndpoints | undefined;
   /** Routes fal's submit answer returned, per request id; ids are reconstructed otherwise. */
   const remembered = new Map<string, QueueUrls>();
   const urlsFor = (remoteId: string): QueueUrls | undefined =>
@@ -473,7 +473,8 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
     remembered.set(remoteId, urls);
   };
 
-  const readEndpoints = async (): Promise<FalEndpoints> => {
+  const readEndpoints = async (signal?: AbortSignal): Promise<FalEndpoints> => {
+    const withSignal = signal === undefined ? {} : { signal };
     const ids = profile.modelIds.map(String).filter((id) => ENDPOINT_PATTERN.test(id));
     if (ids.length === 0) return { endpoints: [] };
     let failure: ProviderFailure | undefined;
@@ -481,7 +482,12 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
     try {
       const url = new URL(`${PLATFORM_BASE_URL}/models/pricing`);
       url.searchParams.set("endpoint_id", ids.join(","));
-      const response = await ports.request({ url: url.toString(), method: "GET", auth: AUTH });
+      const response = await ports.request({
+        url: url.toString(),
+        method: "GET",
+        auth: AUTH,
+        ...withSignal,
+      });
       const listed = response.ok ? jsonField(await readVideoJson(response), "prices") : undefined;
       prices = Array.isArray(listed) ? listed : [];
     } catch (error) {
@@ -491,10 +497,16 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
     const endpoints: Array<FalEndpoint> = [];
     const reasons: Array<string> = [];
     for (const endpointId of ids) {
+      if (signal?.aborted === true) break;
       try {
         const url = new URL(SCHEMA_URL);
         url.searchParams.set("endpoint_id", endpointId);
-        const response = await ports.request({ url: url.toString(), method: "GET", auth: AUTH });
+        const response = await ports.request({
+          url: url.toString(),
+          method: "GET",
+          auth: AUTH,
+          ...withSignal,
+        });
         if (!response.ok) {
           // A missing endpoint is a configuration problem for that endpoint,
           // not an outage that hides the endpoints that do exist.
@@ -543,11 +555,11 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
     return failure === undefined ? { endpoints } : { endpoints, failure };
   };
 
-  /** Read once per adapter; a read that failed is tried again on the next call. */
-  const endpoints = async (): Promise<FalEndpoints> => {
-    declared ??= readEndpoints();
-    const read = await declared;
-    if (read.failure !== undefined) declared = undefined;
+  // Reuse completed discovery without tying a new start to another call's signal.
+  const endpoints = async (signal?: AbortSignal): Promise<FalEndpoints> => {
+    if (declared !== undefined) return declared;
+    const read = await readEndpoints(signal);
+    if (read.failure === undefined && signal?.aborted !== true) declared = read;
     return read;
   };
 
@@ -558,7 +570,7 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
       const early = refuseOutsideDeclaration([], request);
       if (early !== undefined) return { status: "failed", providerFailure: early };
     }
-    const read = await endpoints();
+    const read = await endpoints(request.signal);
     const known = read.endpoints;
     // The endpoint is the profile's but could not be read: say why, rather
     // than calling it undeclared.
@@ -748,10 +760,26 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
         url: `${PLATFORM_BASE_URL}/models/requests/${requestId}/payloads`,
         method: "DELETE",
         auth: AUTH,
+        signal: AbortSignal.timeout(60_000),
       });
       // A 404 means the request is already gone, which is the same outcome.
-      if (response.ok || response.status === 404) return { status: "removed" };
-      return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
+      if (response.status === 404) return { status: "removed" };
+      if (!response.ok)
+        return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
+      const results = jsonField(await readVideoJson(response), "cdn_delete_results");
+      if (
+        Array.isArray(results) &&
+        results.every(
+          (file) =>
+            typeof jsonField(file, "link") === "string" && jsonField(file, "exception") === null,
+        )
+      ) {
+        return { status: "removed" };
+      }
+      return {
+        status: "failed",
+        providerFailure: videoFailure("unavailable", "fal did not confirm every output deletion."),
+      };
     } catch (error) {
       return { status: "failed", providerFailure: asFailure(error) };
     }

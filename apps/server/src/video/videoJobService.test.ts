@@ -427,6 +427,42 @@ describe("video jobs", () => {
     expect(spend.settle).not.toHaveBeenCalled();
   });
 
+  it("bills nothing when Stop follows a discovery read before the clip was sent", async () => {
+    const discovering = Promise.withResolvers<void>();
+    const discoveryUrl = "https://video.example.test/discovery";
+    const { service, fetched, spend } = harness({
+      start: async (ports, request) => {
+        await ports.request({
+          url: discoveryUrl,
+          method: "GET",
+          auth: { header: "authorization", scheme: "Bearer" },
+          signal: request.signal,
+        });
+        return new Promise((resolve) => {
+          request.signal.addEventListener(
+            "abort",
+            () =>
+              resolve({
+                status: "failed",
+                providerFailure: { category: "interrupted", message: "Stopped." },
+              }),
+            { once: true },
+          );
+          discovering.resolve();
+        });
+      },
+    });
+    const job = await enqueue(service);
+    await discovering.promise;
+    service.stop(job.id);
+    const done = await service.whenTerminal(job.id);
+    expect(done?.status).toBe("cancelled");
+    expect(done?.settledCostUsdMicros).toBeUndefined();
+    expect(fetched).toEqual([discoveryUrl]);
+    expect(spend.abandon).toHaveBeenCalledOnce();
+    expect(spend.settle).not.toHaveBeenCalled();
+  });
+
   it("releases the reservation when a start times out before fetching with its key", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const reading = Promise.withResolvers<void>();
