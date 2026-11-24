@@ -35,6 +35,8 @@ export function latestTurnTasks(
     if (turn?.activity === undefined) continue;
     const { tasks } = splitTurnTasks(turn.activity);
     if (tasks.length > 0) return { tasks, running: turn.running };
+    // The newest list was cleared: there is no current list, older ones are history.
+    if (turn.activity.tasksCleared === true) return undefined;
   }
   return undefined;
 }
@@ -166,8 +168,9 @@ export function applyActivityEvent(
     };
   }
   if (event.kind === "task-progress") {
+    const { tasksCleared: _cleared, ...rest } = activity;
     return {
-      ...activity,
+      ...rest,
       rows: upsert(activity.rows, {
         kind: "task",
         id: event.taskId,
@@ -179,7 +182,13 @@ export function applyActivityEvent(
   }
   if (event.kind === "task-list") {
     const rows = restateTaskRows(activity.rows, event.taskIds);
-    return rows === activity.rows ? activity : { ...activity, rows };
+    // An empty restatement is the provider clearing its list (OpenCode sends
+    // one), which is not the same as a turn that never wrote one: the Tasks
+    // panel must stop there rather than fall back to an older turn's list.
+    const cleared = event.taskIds.length === 0 ? { tasksCleared: true as const } : {};
+    return rows === activity.rows && event.taskIds.length > 0
+      ? activity
+      : { ...activity, rows, ...cleared };
   }
   if (event.kind === "file-change") {
     const path = String(event.path);

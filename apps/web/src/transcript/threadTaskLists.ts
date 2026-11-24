@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useSyncExternalStore } from "react";
 import type { ThreadTaskProgress } from "./ThreadTasksPanel";
 
 /**
@@ -8,29 +8,20 @@ import type { ThreadTaskProgress } from "./ThreadTasksPanel";
  * the host a second time and drawing a different version of the same list.
  *
  * Renderer state only: it holds what is on screen and nothing the journal
- * does not already have. A thread's entry goes when its view unmounts.
+ * does not already have. A view's entry goes when it unmounts.
+ *
+ * Entries are kept per view, since one thread can be open in two panes and
+ * closing one must not clear the list the other shows, and each is stamped
+ * when published, so the panel follows the freshest view rather than
+ * whichever pane happened to mount last. The shell bundle carries this
+ * module (Chat's dock offers Tasks from it), so it is kept small.
  */
-// Keyed by thread, then by the view that published, since one thread can be
-// open in two panes and closing one must not clear the list the other shows.
-const lists = new Map<string, Map<symbol, ThreadTaskProgress>>();
+const views = new Map<string, readonly [string, ThreadTaskProgress, number]>();
 const listeners = new Set<() => void>();
+let stamp = 0;
 
 function notify(): void {
   for (const listener of listeners) listener();
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
-function publish(threadId: string, view: symbol, progress: ThreadTaskProgress | undefined): void {
-  const views = lists.get(threadId) ?? new Map<symbol, ThreadTaskProgress>();
-  if (progress === undefined) views.delete(view);
-  else views.set(view, progress);
-  if (views.size === 0) lists.delete(threadId);
-  else lists.set(threadId, views);
-  notify();
 }
 
 /** Publishes a thread's newest task list while its view is mounted. */
@@ -38,15 +29,33 @@ export function usePublishThreadTaskList(
   threadId: string,
   progress: ThreadTaskProgress | undefined,
 ): void {
-  const [view] = useState(() => Symbol("thread view"));
-  useEffect(() => publish(threadId, view, progress), [threadId, view, progress]);
-  useEffect(() => () => publish(threadId, view, undefined), [threadId, view]);
+  const view = useId();
+  useEffect(() => {
+    if (progress === undefined) return undefined;
+    views.set(view, [threadId, progress, (stamp += 1)]);
+    notify();
+    return () => {
+      views.delete(view);
+      notify();
+    };
+  }, [view, threadId, progress]);
 }
 
-/** The newest task list the thread's view shows, or nothing when it shows none. */
+/** The freshest task list any view of the thread shows, or nothing when none shows one. */
 export function useThreadTaskList(threadId: string): ThreadTaskProgress | undefined {
-  return useSyncExternalStore(subscribe, () => {
-    const views = lists.get(threadId);
-    return views === undefined ? undefined : [...views.values()].at(-1);
-  });
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    () => {
+      let freshest: readonly [string, ThreadTaskProgress, number] | undefined;
+      for (const entry of views.values()) {
+        if (entry[0] === threadId && (freshest === undefined || entry[2] > freshest[2])) {
+          freshest = entry;
+        }
+      }
+      return freshest?.[1];
+    },
+  );
 }

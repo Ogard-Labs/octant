@@ -80,6 +80,8 @@ export interface TurnActivity {
    * act on background work the turn started. Absent when it never did.
    */
   readonly runtimeTurns?: number;
+  /** The provider cleared its task list in this turn and has not written a new one. */
+  readonly tasksCleared?: true;
 }
 
 export const EMPTY_TURN_ACTIVITY: TurnActivity = { rows: [], reasoning: "" };

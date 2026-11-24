@@ -174,20 +174,22 @@ function LiveTurnStatus(props: { readonly startedAt: string; readonly step: stri
   const seconds = useElapsedSeconds(props.startedAt);
   const step = props.step === undefined || props.step.length === 0 ? undefined : props.step;
   return (
-    <p className="turn-live-line">
-      <LoaderCircle aria-hidden="true" size={12} />
-      <span>Working</span>
-      {seconds === undefined ? null : (
-        <>
-          <span aria-hidden="true">·</span>
-          <span className="turn-live-line__elapsed">{formatDuration(seconds)}</span>
-        </>
-      )}
-      {step === undefined ? null : <span aria-hidden="true">·</span>}
-      <span aria-live="polite" className="turn-live-line__step" role="status">
-        {step}
+    <div className="turn-header" data-outcome="running">
+      <span className="turn-header__status turn-header__status--live">
+        <LoaderCircle aria-hidden="true" size={12} />
+        <span>Working</span>
+        {seconds === undefined ? null : (
+          <>
+            <span aria-hidden="true">·</span>
+            <span className="turn-header__elapsed">{formatDuration(seconds)}</span>
+          </>
+        )}
+        {step === undefined ? null : <span aria-hidden="true">·</span>}
+        <span aria-live="polite" className="turn-header__step" role="status">
+          {step}
+        </span>
       </span>
-    </p>
+    </div>
   );
 }
 

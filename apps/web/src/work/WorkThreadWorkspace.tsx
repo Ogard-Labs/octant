@@ -1028,10 +1028,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const [loaded, setLoaded] = useState<WorkLoadedTurns>(NO_LOADED_TURNS);
   const turns = loaded.turns;
   // The newest turn's task list, for the Tasks dock panel: the provider
-  // restates its whole plan as a turn proceeds, so older lists are history.
+  // restates its whole plan as a turn proceeds, so older lists are history,
+  // and a list it cleared (an empty one) means there is no current list.
   const latestTasks = useMemo(() => {
-    const turn = turns.findLast((candidate) => (candidate.tasks?.length ?? 0) > 0);
-    if (turn?.tasks === undefined) return undefined;
+    const turn = turns.findLast((candidate) => candidate.tasks !== undefined);
+    if (turn?.tasks === undefined || turn.tasks.length === 0) return undefined;
     return {
       running: turn.status === "accepted" || turn.status === "running",
       tasks: turn.tasks.map(threadTaskRow),

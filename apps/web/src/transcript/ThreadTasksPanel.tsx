@@ -47,6 +47,14 @@ function taskIcon(state: ThreadTaskRow["state"]): ReactNode {
   }
 }
 
+const TASK_STATE_WORDS: Readonly<Record<ThreadTaskRow["state"], string>> = {
+  pending: "not started",
+  running: "in progress",
+  waiting: "waiting",
+  completed: "done",
+  failed: "failed",
+};
+
 /**
  * How a task is named: its running wording while the turn is writing and the
  * task is in hand, its plain wording otherwise, so a stopped turn never
@@ -143,6 +151,8 @@ export function ThreadTasksPanel(props: ThreadTasksPanelProps) {
               </span>
               <span className="thread-tasks__mark">{taskIcon(task.state)}</span>
               <span className="thread-tasks__summary">{taskWording(task, running)}</span>
+              {/* The mark is drawn for the eye only, so the state is said in words. */}
+              <span className="sr-only">, {TASK_STATE_WORDS[task.state]}</span>
             </li>
           ))}
         </ol>

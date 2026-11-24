@@ -1,3 +1,4 @@
+import "./tasks-dock.css";
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { useThreadTaskList } from "../transcript/threadTaskLists";

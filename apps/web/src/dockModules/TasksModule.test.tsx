@@ -62,3 +62,25 @@ it("keeps the list while another pane still shows the thread after one closes", 
   rerender(<TasksModule subject={{ mode: "chat", threadId: "thread-a" }} />);
   expect(screen.getByText("No task list yet")).toBeVisible();
 });
+
+it("follows the pane that published last, whichever pane mounted first", () => {
+  const done: ThreadTaskProgress = {
+    running: false,
+    tasks: settled.tasks.map((task) => ({ ...task, state: "completed" as const })),
+  };
+  const { rerender } = render(
+    <>
+      <ThreadView key="left" tasks={settled} threadId="thread-a" />
+      <ThreadView key="right" tasks={settled} threadId="thread-a" />
+      <TasksModule subject={{ mode: "code", threadId: "thread-a" }} />
+    </>,
+  );
+  rerender(
+    <>
+      <ThreadView key="left" tasks={done} threadId="thread-a" />
+      <ThreadView key="right" tasks={settled} threadId="thread-a" />
+      <TasksModule subject={{ mode: "code", threadId: "thread-a" }} />
+    </>,
+  );
+  expect(screen.getByText("2 of 2 tasks completed")).toBeVisible();
+});

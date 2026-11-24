@@ -35,6 +35,23 @@ describe("ThreadTasksPanel", () => {
     expect(screen.getByRole("list", { name: "Task list" }).children).toHaveLength(3);
   });
 
+  it("tells a screen reader each task's own state, not only the count", () => {
+    render(
+      <ThreadTasksPanel
+        tasks={{
+          running: true,
+          tasks: [
+            { id: "t1", state: "completed", summary: "Update parser" },
+            { id: "t2", state: "pending", summary: "Run tests" },
+          ],
+        }}
+      />,
+    );
+    const items = screen.getByRole("list", { name: "Task list" }).children;
+    expect(items[0]).toHaveTextContent(/Update parser, done$/);
+    expect(items[1]).toHaveTextContent(/Run tests, not started$/);
+  });
+
   it("names the task in its running wording only while the turn is running", () => {
     const tasks = [
       {

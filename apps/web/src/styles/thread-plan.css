@@ -377,13 +377,6 @@
   list-style: none;
 }
 
-/* The Tasks dock tool is a panel a person opened to read the whole list, and
-   the dock scrolls as one, so the transcript's height bound would only hide
-   the tail of the list behind a second scroll. */
-.tasks-dock .thread-tasks__list {
-  max-height: none;
-}
-
 .thread-tasks__list > li {
   display: grid;
   grid-template-columns: auto 16px minmax(0, 1fr);

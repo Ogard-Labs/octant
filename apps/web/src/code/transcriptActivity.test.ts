@@ -9,7 +9,12 @@ import {
   activeRowCount,
   settledTurnActivitySummary,
 } from "../transcript/turnActivity";
-import { appendReasoning, applyActivityEvent, splitTurnTasks } from "./transcriptActivity";
+import {
+  appendReasoning,
+  applyActivityEvent,
+  latestTurnTasks,
+  splitTurnTasks,
+} from "./transcriptActivity";
 
 function tool(state: "started" | "running" | "completed" | "failed"): CodeOperationEvent {
   return {
@@ -384,6 +389,37 @@ describe("transcript activity", () => {
       const badRow = malformed.rows.find((r) => r.kind === "tool");
       expect(badRow && "durationMs" in badRow ? badRow.durationMs : undefined).toBeUndefined();
     });
+  });
+
+  it("ends the search for the newest list at a list the provider cleared", () => {
+    const earlier = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
+      kind: "task-progress",
+      taskId: "t1",
+      state: "running",
+      summary: "Run tests",
+    } as CodeOperationEvent);
+    const written = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
+      kind: "task-progress",
+      taskId: "t2",
+      state: "running",
+      summary: "Fix parser",
+    } as CodeOperationEvent);
+    const cleared = applyActivityEvent(written, {
+      kind: "task-list",
+      taskIds: [],
+    } as CodeOperationEvent);
+    expect(
+      latestTurnTasks([
+        { activity: earlier, running: false },
+        { activity: cleared, running: true },
+      ]),
+    ).toBeUndefined();
+    expect(
+      latestTurnTasks([
+        { activity: earlier, running: false },
+        { activity: applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("completed")), running: true },
+      ]),
+    ).toEqual({ running: false, tasks: earlier.rows });
   });
 
   it("leaves a turn that journaled no tasks with no task list", () => {

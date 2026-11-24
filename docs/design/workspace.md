@@ -3125,8 +3125,10 @@ exactly Review, Terminal, Browser, Files and Side chat. The dock can host
 Review, Pull requests (open rows for a Code thread's Project), Files, Document
 (only once a turn has written one), Browser, Terminal, Canvas, Plan (only for a
 real plan artifact), Delivery (only for a configured target), Agents (when
-children exist or explicitly invoked), Artifacts (a Work or Code thread in a
-Project on this host), Simulator, and Side chat. A Markdown or
+children exist or explicitly invoked), Tasks (opened by the person; see
+[Thread view: Plans and task lists](thread-view.md#plans-and-task-lists)),
+Artifacts (a Work or Code thread in a Project on this host), Simulator, and
+Side chat. A Markdown or
 text file a Code turn creates or rewrites, and a Canvas a Work or Code turn
 authors, open in the dock beside the transcript once, the first time they appear: the
 offer never moves focus from the composer, a rewrite never reopens a tab, and a
@@ -4015,7 +4017,10 @@ sidebar showing, and records nothing else.
 ### Mode-specific utility chrome
 
 Chat admits only the Agents dock when helpers exist, it was explicitly requested,
-or its tab is retained; see the [workspace rule](#subagents).
+or its tab is retained; see the [workspace rule](#subagents). It also admits
+the Tasks dock tool while the thread shows a task list, or while its tab is
+retained, so More tools can offer it; nothing opens it for the person
+(maintainer decision, 2026-11-24).
 Chat has no bottom panel. With the dock closed, the conversation uses the available
 workspace width. A Chat
 Canvas opens as a content tab beside the thread (**Open Canvas**). Work shares
