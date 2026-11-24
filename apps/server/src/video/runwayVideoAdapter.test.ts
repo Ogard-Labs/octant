@@ -184,6 +184,41 @@ describe("Runway video driver", () => {
     expect(await adapter.poll(taskId, new AbortController().signal)).toEqual({ status: "running" });
   });
 
+  it.each([undefined, 60])(
+    "keeps the charge for a completed clip with invalid bytes and %s credits",
+    async (credits) => {
+      const recorder = ports(() => Response.json(succeeded({ cost: { credits } })));
+      const adapter = runwayVideoDriver.create({
+        profile,
+        ports: {
+          ...recorder.ports,
+          fetchApprovedVideoUrl: async () => ({ bytes: png.bytes }),
+        },
+      });
+      expect(await adapter.poll(taskId, new AbortController().signal)).toEqual({
+        status: "failed",
+        providerFailure: {
+          category: "protocol",
+          message: "Runway returned a clip that is not an MP4.",
+        },
+        billed: true,
+        ...(credits === undefined ? {} : { usage: { costUsdMicros: 600_000 } }),
+      });
+    },
+  );
+
+  it("keeps the charge when a successful task has no clip address", async () => {
+    const adapter = runwayVideoDriver.create({
+      profile,
+      ports: ports(() => Response.json(succeeded({ output: [] }))).ports,
+    });
+    expect(await adapter.poll(taskId, new AbortController().signal)).toMatchObject({
+      status: "failed",
+      billed: true,
+      usage: { costUsdMicros: 600_000 },
+    });
+  });
+
   it("never puts an id Runway did not shape into a URL path", async () => {
     const recorder = ports(script());
     const adapter = runwayVideoDriver.create({ profile, ports: recorder.ports });

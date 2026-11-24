@@ -699,6 +699,7 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
         return { status: "failed", providerFailure: classifyVideoHttpFailure(result) };
       }
       const units = Number(result.headers.get("x-fal-billable-units"));
+      const usage = Number.isFinite(units) && units > 0 ? { billedSeconds: units } : undefined;
       const videoUrl = jsonField(await readVideoJson(result), "video", "url");
       if (typeof videoUrl !== "string" || !falDownloadAllowed(videoUrl)) {
         return {
@@ -717,12 +718,14 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
         return {
           status: "failed",
           providerFailure: videoFailure("protocol", "fal returned a clip that is not an MP4."),
+          billed: true,
+          ...(usage === undefined ? {} : { usage }),
         };
       }
       return {
         status: "completed",
         video: { bytes: fetched.bytes, mediaType: "video/mp4" },
-        ...(Number.isFinite(units) && units > 0 ? { usage: { billedSeconds: units } } : {}),
+        ...(usage === undefined ? {} : { usage }),
       };
     } catch (error) {
       return { status: "failed", providerFailure: asFailure(error) };

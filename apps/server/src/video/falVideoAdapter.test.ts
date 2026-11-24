@@ -646,6 +646,41 @@ describe("fal video driver", () => {
     expect(fetched).toBe(0);
   });
 
+  it.each([undefined, "8"])(
+    "keeps the charge for a completed clip with invalid bytes and %s billable units",
+    async (units) => {
+      const recorder = ports((request) => {
+        if (new URL(request.url).pathname.endsWith("/status")) {
+          return Response.json({ status: "COMPLETED" });
+        }
+        return Response.json(
+          { video: { url: "https://v3b.fal.media/files/clip.mp4" } },
+          {
+            headers: units === undefined ? {} : { "x-fal-billable-units": units },
+          },
+        );
+      });
+      const adapter = falVideoDriver.create({
+        profile,
+        ports: {
+          ...recorder.ports,
+          fetchApprovedVideoUrl: async () => ({ bytes: new Uint8Array([0]) }),
+        },
+      });
+      expect(
+        await adapter.poll(`fal-ai/veo3.1#${requestId}`, new AbortController().signal),
+      ).toEqual({
+        status: "failed",
+        providerFailure: {
+          category: "protocol",
+          message: "fal returned a clip that is not an MP4.",
+        },
+        billed: true,
+        ...(units === undefined ? {} : { usage: { billedSeconds: 8 } }),
+      });
+    },
+  );
+
   it("keeps to the imports a third-party video plugin could make", () => {
     const source = readFileSync(join(import.meta.dirname, "falVideoAdapter.ts"), "utf8");
     const specifiers = [

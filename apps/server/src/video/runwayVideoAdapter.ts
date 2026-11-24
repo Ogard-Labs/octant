@@ -248,12 +248,14 @@ async function poll(
         };
       }
       case "SUCCEEDED": {
+        const billing = { billed: true as const, ...(usage === undefined ? {} : { usage }) };
         const output = jsonField(payload, "output");
         const first = Array.isArray(output) ? output[0] : undefined;
         if (typeof first !== "string" || !first.startsWith("https://")) {
           return {
             status: "failed",
             providerFailure: videoFailure("protocol", "Runway returned no clip address."),
+            ...billing,
           };
         }
         const fetched = await ports.fetchApprovedVideoUrl({
@@ -267,6 +269,7 @@ async function poll(
           return {
             status: "failed",
             providerFailure: videoFailure("protocol", "Runway returned a clip that is not an MP4."),
+            ...billing,
           };
         }
         return {
