@@ -1,5 +1,5 @@
 import "../styles/environment-details.css";
-import { useId } from "react";
+import { useId, useState } from "react";
 import type {
   ThreadBoardPullRequestIdentity,
   ThreadBoardPullRequestSummaries,
@@ -157,6 +157,12 @@ async function copyText(text: string): Promise<void> {
 }
 
 /**
+ * Rows shown before the list folds. A thread that worked through dozens of
+ * pull requests would otherwise push every other Environment row out of view.
+ */
+const FOLDED_PULL_REQUESTS = 10;
+
+/**
  * The thread's own pull requests over its life (open, draft, merged, closed),
  * one two-line row each, inside the Changes section so the delivery history
  * sits beside the changes it came from. The Delivery section's Pull requests
@@ -164,15 +170,19 @@ async function copyText(text: string): Promise<void> {
  */
 export function EnvironmentThreadPullRequests(props: EnvironmentThreadPullRequestsProps) {
   const captionId = useId();
+  const [showingAll, setShowingAll] = useState(false);
   const summaries = props.summaries;
   if (summaries === undefined || summaries.items.length === 0) return null;
+  const folds = summaries.items.length > FOLDED_PULL_REQUESTS;
+  const shown =
+    folds && !showingAll ? summaries.items.slice(0, FOLDED_PULL_REQUESTS) : summaries.items;
   return (
     <div aria-labelledby={captionId} className="environment-thread-prs" role="group">
       <p className="environment-card__caption" id={captionId}>
         Pull requests
       </p>
       <ul className="environment-thread-prs__list">
-        {summaries.items.map((summary) => (
+        {shown.map((summary) => (
           <ThreadPullRequestRow
             key={`${String(summary.identity.projectId)}:${summary.identity.repositoryOwner}/${summary.identity.repositoryName}#${String(summary.identity.number)}`}
             onOpen={props.onOpen}
@@ -181,7 +191,22 @@ export function EnvironmentThreadPullRequests(props: EnvironmentThreadPullReques
           />
         ))}
       </ul>
-      {summaries.hiddenCount === 0 ? null : (
+      {/* As the sidebar folds a long thread list: one quiet row that opens the
+          rest and folds it back. */}
+      {folds ? (
+        <OctantButton
+          aria-expanded={showingAll}
+          className="environment-link environment-thread-prs__fold window-no-drag"
+          onClick={() => setShowingAll((current) => !current)}
+          type="button"
+          variant="bare"
+        >
+          {showingAll
+            ? "Show less"
+            : `Show more (${String(summaries.items.length - FOLDED_PULL_REQUESTS)})`}
+        </OctantButton>
+      ) : null}
+      {(folds && !showingAll) || summaries.hiddenCount === 0 ? null : (
         <p className="environment-thread-prs__more">
           {`${String(summaries.hiddenCount)} more not shown`}
         </p>

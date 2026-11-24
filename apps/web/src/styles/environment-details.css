@@ -448,6 +448,15 @@
   }
 }
 
+.environment-thread-prs__fold {
+  justify-content: flex-start;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 var(--environment-row-inset);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
 .environment-thread-prs__more {
   margin: 0;
   padding: var(--oct-space-1) var(--environment-row-inset);

@@ -576,21 +576,31 @@ export function useProjectController(options: ProjectControllerOptions) {
   }
 
   /**
-   * Drop the image model the Project's agents use without asking, so the next
-   * image call shows its card again. The server accepts it only from a window
+   * Drop the model the Project's agents use for this media kind without asking,
+   * so its next generation shows a card. The server accepts it only from a window
    * on the host.
    */
-  async function askAgainForImageGeneration(projectId: ProjectId): Promise<boolean> {
+  async function askAgainForGeneration(
+    projectId: ProjectId,
+    media: "image" | "video",
+  ): Promise<boolean> {
     const project = projectById.get(projectId);
     if (project === undefined) return false;
-    if (project.imageGenerationChoice === undefined) return true;
+    if (
+      (media === "image" ? project.imageGenerationChoice : project.videoGenerationChoice) ===
+      undefined
+    )
+      return true;
     return execute(
       {
         kind: "change-project-image-generation-choice",
         projectId,
         expectedVersion: project.version,
+        ...(media === "video" ? { media } : {}),
       },
-      "Agents now ask before generating an image in this Project.",
+      media === "image"
+        ? "Agents now ask before generating an image in this Project."
+        : "Agents now ask before generating a video in this Project.",
     );
   }
 
@@ -1186,7 +1196,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setProviderPolicy,
     setNativeProviders,
     setAgentMemoryWrites,
-    askAgainForImageGeneration,
+    askAgainForGeneration,
     setBrandKit,
     setDesignSystem,
     setDesktopRecipe,

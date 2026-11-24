@@ -23,6 +23,11 @@ export interface OctantPreviewCardProps {
    * the row itself covered the sidebar's neighbouring rows or the transcript's head.
    */
   readonly besideSidebar?: boolean;
+  /**
+   * Called when the pointer or keyboard focus reaches the trigger, before the
+   * delay has run: the moment to start loading content that loads on demand.
+   */
+  readonly onApproach?: () => void;
 }
 
 function beside(trigger: Element | null) {
@@ -54,6 +59,8 @@ export function OctantPreviewCard(props: OctantPreviewCardProps) {
       <PreviewCardTrigger
         closeDelay={150}
         delay={props.delay ?? 350}
+        onFocus={props.onApproach}
+        onPointerEnter={props.onApproach}
         ref={trigger}
         render={props.children}
       />
