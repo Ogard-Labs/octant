@@ -36,7 +36,9 @@ export function ZenRoot(props: ZenRootProps) {
 
   useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent): void {
-      if (props.enabled === false) return;
+      // A page's own command may be saved on Zen's chord. It answers first and
+      // marks the key as handled; without this the key also opened Zen.
+      if (props.enabled === false || event.defaultPrevented) return;
       const action = matchKeybinding(keybindings, event, isApplePlatform());
       if (action === undefined) return;
       // A text field keeps its own chords whether or not Zen is showing: while

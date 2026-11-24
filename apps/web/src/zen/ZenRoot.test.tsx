@@ -65,6 +65,30 @@ describe("ZenRoot", () => {
     expect(notHandled).toBe(true);
   });
 
+  it("stays shut when the page already took the key for a command of its own", () => {
+    const onToggle = vi.fn();
+    render(
+      <ZenRoot active={false} onExit={() => undefined} onToggle={onToggle} zen={<div>Zen</div>}>
+        <button type="button">Finished thread</button>
+      </ZenRoot>,
+    );
+    // The Review page listens on the document, so it answers first.
+    const takeKey = (event: KeyboardEvent) => event.preventDefault();
+    document.addEventListener("keydown", takeKey);
+
+    try {
+      fireEvent.keyDown(screen.getByRole("button", { name: "Finished thread" }), {
+        key: "e",
+        metaKey: true,
+        shiftKey: true,
+      });
+    } finally {
+      document.removeEventListener("keydown", takeKey);
+    }
+
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
   it("leaves its chord to the composer instead of opening Zen while someone is typing", () => {
     const onToggle = vi.fn();
     render(
