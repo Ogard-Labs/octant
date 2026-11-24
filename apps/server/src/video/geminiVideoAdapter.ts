@@ -47,7 +47,12 @@ export const GEMINI_OMNI_FLASH: VideoModelCapabilities = decodeVideoModelCapabil
   aspectRatios: [{ ratio: "16:9" }, { ratio: "9:16" }],
   defaultAspectRatio: "16:9",
   audio: "always",
-  inputs: { firstFrame: true, lastFrame: true, maxReferenceImages: 6 },
+  inputs: {
+    firstFrame: true,
+    lastFrame: true,
+    maxDurationSecondsWithBothFrames: MAX_INTERPOLATION_SECONDS,
+    maxReferenceImages: 6,
+  },
   price: {
     kind: "per-token",
     outputTokensPerSecond: [
@@ -181,19 +186,6 @@ async function start(
 ): Promise<VideoAdapterStart> {
   const refusal = refuseOutsideDeclaration(declaredFor(profile), request);
   if (refusal !== undefined) return { status: "failed", providerFailure: refusal };
-  if (
-    request.firstFrame !== undefined &&
-    request.lastFrame !== undefined &&
-    request.options.durationSeconds > MAX_INTERPOLATION_SECONDS
-  ) {
-    return {
-      status: "failed",
-      providerFailure: videoFailure(
-        "invalid-configuration",
-        `Gemini Omni Flash makes clips from a first and a last frame only up to ${MAX_INTERPOLATION_SECONDS} seconds.`,
-      ),
-    };
-  }
   const images = [
     ...(request.firstFrame === undefined ? [] : [request.firstFrame]),
     ...(request.lastFrame === undefined ? [] : [request.lastFrame]),

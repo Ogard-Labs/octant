@@ -426,6 +426,7 @@ export interface VideoModelCapabilities {
   readonly inputs: {
     readonly firstFrame: boolean;
     readonly lastFrame: boolean;
+    readonly maxDurationSecondsWithBothFrames?: number;
     /** 0 when the model takes no reference images. */
     readonly maxReferenceImages: number;
   };
@@ -475,7 +476,7 @@ export type VideoPrice =
   | { readonly kind: "unpublished" };
 ```
 
-Gemini Omni Flash, for example, declares 3–15 s; 360p, 720p, 1080p and 4K;
+Gemini Omni Flash, for example, declares 3–15 s (up to 10 s with both frames); 360p, 720p, 1080p and 4K;
 16:9 and 9:16; audio `always`; up to six reference images; a per-token price;
 and `cancel: "running"`, `removal: delete`, with a resume window of 55 days.
 xAI would declare `cancel: "none"`, which puts the Stop line on the card.

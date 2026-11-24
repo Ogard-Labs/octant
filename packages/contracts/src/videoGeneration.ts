@@ -122,6 +122,8 @@ export const VideoModelCapabilities = Schema.Struct({
   inputs: Schema.Struct({
     firstFrame: Schema.Boolean,
     lastFrame: Schema.Boolean,
+    /** A lower duration ceiling when both frames are supplied. */
+    maxDurationSecondsWithBothFrames: Schema.optional(PositiveInt),
     /** 0 when the model takes no reference images. */
     maxReferenceImages: NonNegativeInt,
   }).annotations(strict),
