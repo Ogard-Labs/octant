@@ -450,13 +450,14 @@ Settings loads the full registry of controls and search terms when it opens.
 The renderer's first load has a byte budget, recorded in
 `scripts/initial-renderer-budget.json` and enforced by `bun run renderer:check`
 in CI. The budget counts the static graph Vite loads for `index.html`: the main
-entry is at most 1,610,036 B (1,572 KiB), the initial CSS at most 665,705 B
-(650 KiB), and the initial JavaScript and CSS at most 1,214,339 B after gzip
+entry is at most 1,610,022 B (1,572 KiB), the initial CSS at most 665,705 B
+(650 KiB), and the initial JavaScript and CSS at most 1,214,440 B after gzip
 level 6. A change that grows any measure past its budget fails. A change that
 shrinks one lowers the recorded budget. Raising a budget is a maintainer
 decision; the editable composer prompt that holds inline `@model` chips raised
-it once (maintainer decision, 2026-11-23), its picker and chip loading on first
-use. The budgets are exact bytes with no headroom, because the same
+it (maintainer decision, 2026-11-23), its picker and chip loading on first use,
+and so did refusing saved shortcuts on text editing chords, which are checked at
+startup (maintainer decision, 2026-11-24). The budgets are exact bytes with no headroom, because the same
 source measures identically on macOS and Linux with Bun 1.4.4.
 
 The window build marks every `Schema` call pure and treats every workspace

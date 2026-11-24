@@ -115,6 +115,33 @@ describe("ZenRoot", () => {
     expect(onToggle).not.toHaveBeenCalled();
   });
 
+  it("still answers inside Zen when a focused card also used the key", () => {
+    const onToggle = vi.fn();
+    const onCycleSpace = vi.fn();
+    render(
+      <ZenRoot
+        active
+        onCycleSpace={onCycleSpace}
+        onExit={() => undefined}
+        onToggle={onToggle}
+        zen={
+          <button onKeyDown={(event) => event.preventDefault()} type="button">
+            Card
+          </button>
+        }
+      >
+        <div>Shell</div>
+      </ZenRoot>,
+    );
+    const card = screen.getByRole("button", { name: "Card" });
+
+    fireEvent.keyDown(card, { key: "]", metaKey: true, altKey: true });
+    fireEvent.keyDown(card, { key: "e", metaKey: true, shiftKey: true });
+
+    expect(onCycleSpace).toHaveBeenCalledExactlyOnceWith(1);
+    expect(onToggle).toHaveBeenCalledOnce();
+  });
+
   it("leaves its chord to the composer instead of opening Zen while someone is typing", () => {
     const onToggle = vi.fn();
     render(

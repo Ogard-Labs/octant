@@ -37,8 +37,9 @@ export function ZenRoot(props: ZenRootProps) {
   useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent): void {
       // A page's own command may be saved on Zen's chord. It answers first and
-      // marks the key as handled; without this the key also opened Zen.
-      if (props.enabled === false || event.defaultPrevented) return;
+      // marks the key as handled; without this the key also opened Zen. Inside
+      // Zen no page is in front, and a focused card marks the arrows it uses.
+      if (props.enabled === false || (event.defaultPrevented && !props.active)) return;
       // A text field keeps its own chords whether or not Zen is showing: while
       // this was guarded only with Zen active, a chord pressed in the composer
       // threw the window into Zen.
