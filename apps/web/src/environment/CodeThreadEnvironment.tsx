@@ -193,8 +193,8 @@ export interface CodeThreadEnvironmentProps {
   readonly threadPullRequests?: ThreadBoardPullRequestSummaries;
   /** The issues the thread's tool calls wrote to, listed under its pull requests. */
   readonly threadIssues?: ThreadTouchedIssues;
-  /** Opens a touched issue's page outside Octant. */
-  readonly onOpenThreadIssue?: (url: string) => void;
+  /** Opens a page outside Octant: a touched issue, or a pull request's checks or conflicts. */
+  readonly onOpenThreadPage?: (url: string) => void;
   /** Opens one of this thread's pull requests in the app. Absent leaves its rows inert. */
   readonly onOpenThreadPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   /** Opens one of this thread's pull requests on GitHub. Absent hides that menu entry. */
@@ -604,10 +604,11 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 pointer may be on. */}
             <EnvironmentThreadPullRequests
               onOpen={props.onOpenThreadPullRequest}
+              onOpenExternal={props.onOpenThreadPage}
               onOpenOnGithub={props.onOpenThreadPullRequestOnGithub}
               summaries={props.threadPullRequests}
             />
-            <EnvironmentThreadIssues issues={props.threadIssues} onOpen={props.onOpenThreadIssue} />
+            <EnvironmentThreadIssues issues={props.threadIssues} onOpen={props.onOpenThreadPage} />
           </EnvironmentCard>
         }
         mode="code"

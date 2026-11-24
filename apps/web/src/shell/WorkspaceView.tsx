@@ -3433,7 +3433,7 @@ function threadPullRequestProps(
   readonly onOpenThreadPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly onOpenThreadPullRequestOnGithub?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly threadIssues?: ThreadTouchedIssues;
-  readonly onOpenThreadIssue: (url: string) => void;
+  readonly onOpenThreadPage: (url: string) => void;
 } {
   const entry = codeController.navigation?.find((item) => String(item.threadId) === threadId);
   const summaries = entry?.pullRequestSummaries;
@@ -3443,7 +3443,7 @@ function threadPullRequestProps(
   return {
     ...(summaries === undefined ? {} : { threadPullRequests: summaries }),
     ...(issues === undefined ? {} : { threadIssues: issues }),
-    onOpenThreadIssue: (url: string) => openExternalUrl(hostBridge, url),
+    onOpenThreadPage: (url: string) => openExternalUrl(hostBridge, url),
     ...(open === undefined ? {} : { onOpenThreadPullRequest: open }),
     onOpenThreadPullRequestOnGithub: (identity: ThreadBoardPullRequestIdentity) => {
       const url = githubPullRequestUrl(identity);

@@ -3684,7 +3684,7 @@ first, under a small "Pull requests" caption. Past ten, the rest fold behind
 one quiet "Show more (n)" row that becomes "Show less", as the sidebar folds a
 long thread list. Each pull request is one row of fixed height with the
 state's mark in its colour (open, draft, merged, closed, or a neutral mark when
-the state is not known), the title on one line, then the repository, the
+the state is not known), the title on up to two lines, then the repository, the
 number and the state in the meta ink, with "Ready to merge" and a stale or
 unavailable reading said in words, then the pull request's added and removed
 lines as "+A −D" in the two inks of the changes row. An open pull request that
@@ -3713,6 +3713,13 @@ reaches no forge, and the link is built from the repository and number, never
 taken as text. The host sends at most 50 and a count of the rest, which the
 list says as "N more not shown". A thread with no pull request shows no caption
 and no row, and the folded Changes summary adds the count ("Clean · 1 PR").
+An open or draft pull request ends with the one next step it waits on, by
+what blocks it first: **Resolve ↗** while it has conflicts, which opens its
+conflicts on GitHub; **Fix ↗** while its checks fail, which opens its checks on
+GitHub; and **Merge** once it is ready to merge, which opens the pull request,
+whose Merge asks for the method before it acts. Resolve and Fix are in the
+danger ink; a merged or closed pull request offers none (maintainer decision,
+2026-11-24).
 The Project's own open pull requests stay under Delivery (maintainer request,
 2026-11-16).
 **The thread's issues.** Under its pull requests, a small "Issues" caption lists
