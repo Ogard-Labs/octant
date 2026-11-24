@@ -62,6 +62,18 @@ describe("choosing a provider question's option by number", () => {
     expect(onAnswer).toHaveBeenCalledExactlyOnceWith("Keep existing pairings only");
   });
 
+  it("still picks by number once focus has moved to Submit", async () => {
+    const user = userEvent.setup();
+    render(<ProviderQuestionCard onAnswer={vi.fn()} options={options} prompt="May I pair?" />);
+    await user.click(screen.getByRole("radio", { name: "Allow isolated test pairing" }));
+    screen.getByRole("button", { name: "Submit" }).focus();
+    await user.keyboard("2");
+    expect(screen.getByRole("radio", { name: "Keep existing pairings only" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
   it("keeps digits typed into the answer field as text", async () => {
     const user = userEvent.setup();
     render(<ProviderQuestionCard onAnswer={vi.fn()} options={options} prompt="May I pair?" />);

@@ -6,7 +6,7 @@ import { useState } from "react";
 import { Eye, EyeOff } from "../ui/icons";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { moveOrChooseInRadioGroup } from "../ui/base/radioGroupKeys";
+import { chooseByNumber, moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 import { OptionKey } from "./OptionKey";
 
 export interface ProviderQuestionCardProps {
@@ -72,6 +72,9 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
   return (
     <section
       aria-label="Provider question"
+      // Numbers pick from anywhere in the card, Submit included; arrows stay
+      // on the choice group.
+      onKeyDown={chooseByNumber}
       className={`provider-question-card${props.className === undefined ? "" : ` ${props.className}`}`}
     >
       <p className="provider-question-card__prompt">{props.prompt}</p>
@@ -80,7 +83,7 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
       ) : null}
       <div
         className="provider-question-card__choices"
-        onKeyDown={moveOrChooseInRadioGroup}
+        onKeyDown={moveWithinRadioGroup}
         role="radiogroup"
       >
         {props.options.map((option, index) => (

@@ -36,6 +36,37 @@ const questionnaire = {
 };
 
 describe("inline questionnaires", () => {
+  it("leaves the answer alone when a disabled option's number is pressed", async () => {
+    const user = userEvent.setup();
+    render(
+      <QuestionnaireCard
+        prompt="Provider form"
+        questionnaire={{
+          allowComment: false,
+          questions: [
+            {
+              id: "formats",
+              prompt: "Which formats?",
+              selection: "multiple",
+              maxSelections: 1,
+              options: [
+                { id: "pdf", label: "PDF" },
+                { id: "md", label: "Markdown" },
+                { id: "html", label: "HTML" },
+              ],
+            },
+          ],
+        }}
+        onAnswer={vi.fn(async () => true)}
+      />,
+    );
+    await user.click(screen.getByRole("checkbox", { name: /PDF/ }));
+    expect(screen.getByRole("checkbox", { name: "Markdown" })).toBeDisabled();
+    await user.keyboard("2");
+    expect(screen.getByRole("checkbox", { name: /PDF/ })).toBeChecked();
+    expect(screen.queryByRole("textbox", { name: "Your answer" })).not.toBeInTheDocument();
+  });
+
   it("picks options by number within the question that has focus", async () => {
     const user = userEvent.setup();
     const submit = vi.fn(async () => true);

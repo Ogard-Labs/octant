@@ -64,13 +64,16 @@ export function chooseByNumber(event: KeyboardEvent<HTMLElement>): void {
   ) {
     return;
   }
+  // Count every choice, disabled ones included, so a key always means the
+  // number printed beside it; a disabled choice's key does nothing rather
+  // than landing on the next enabled one.
   const choices = Array.from(
     event.currentTarget.querySelectorAll<HTMLElement>(
       '[role="radio"], [role="checkbox"], input[type="checkbox"]',
     ),
-  ).filter((choice) => !choice.matches(':disabled, [aria-disabled="true"]'));
+  );
   const choice = choices[Number(event.key) - 1];
-  if (choice === undefined) return;
+  if (choice === undefined || choice.matches(':disabled, [aria-disabled="true"]')) return;
   event.preventDefault();
   choice.focus();
   choice.click();
