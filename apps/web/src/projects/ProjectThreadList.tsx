@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { ReactElement, ReactNode } from "react";
+import type { ComponentType, ReactElement, ReactNode } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import {
   Archive,
@@ -250,12 +250,28 @@ export function threadRowAgeFact(
   return { label, title };
 }
 
-/* The card and its styles load on the first approach to a row, not with the
-   window: a row is drawn at startup, its card only when someone asks for it. */
-const loadThreadRowInfoCard = () => import("./ThreadRowInfoCard");
-const ThreadRowInfoCard = lazy(() =>
-  loadThreadRowInfoCard().then((module) => ({ default: module.ThreadRowInfoCard })),
-);
+interface ThreadRowInfoCardProps {
+  readonly actions: ThreadRowActions;
+  readonly lineageParentTitle?: string;
+  readonly projectName: string | undefined;
+  readonly thread: ChatThreadNavigationItem;
+}
+
+/**
+ * The card and its styles load on the first approach to a row, not with the
+ * window: a row is drawn at startup, its card only when someone asks for it.
+ * A card that cannot load (a tab left open across an update asks for a file
+ * the host no longer has) names the thread instead: thrown out of render, the
+ * failure would take the whole window down for a hover.
+ */
+const loadThreadRowInfoCard = (): Promise<{
+  readonly default: ComponentType<ThreadRowInfoCardProps>;
+}> =>
+  import("./ThreadRowInfoCard").then(
+    (module) => ({ default: module.ThreadRowInfoCard }),
+    () => ({ default: ({ thread }) => <span>{thread.title}</span> }),
+  );
+const ThreadRowInfoCard = lazy(loadThreadRowInfoCard);
 
 /**
  * Wraps a row trigger so the info card appears after a short delay on hover or
