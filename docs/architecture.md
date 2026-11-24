@@ -8204,8 +8204,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   Navigator show a microphone beside the attach control only while
   transcription is `ready`; the clip is recorded by the browser's own encoder
   from the microphone the window's Voice settings name (kept in the window's
-  storage, falling back to the system default when it is not connected),
-  the transcript is appended to the draft, and the person still sends. Navigator
+  storage, falling back to the system default when it is not connected); the
+  microphone button or the remappable Dictate chord on the focused composer
+  (tap to toggle, hold to talk) starts it, the transcript is appended to the
+  draft, and the person still sends. Navigator
   can read replies aloud through the configured synthesis endpoint, or with the
   operating system's voices when none is set. A paired device reaches the
   status and transcription routes only: the listener forwards those two routes

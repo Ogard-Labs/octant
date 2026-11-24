@@ -1,5 +1,5 @@
 import { SpeechClientFailure } from "@octant/client-runtime/speech-client";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComposerVoiceButton } from "./ComposerVoiceButton";
@@ -135,5 +135,86 @@ describe("ComposerVoiceButton", () => {
     // Dictating again clears it.
     await user.click(screen.getByRole("button", { name: "Dictate message" }));
     await waitFor(() => expect(container.querySelector(".composer-notices")).toBeEmptyDOMElement());
+  });
+});
+
+describe("the Dictate shortcut", () => {
+  const dictateChord = { key: "M", metaKey: true, shiftKey: true };
+
+  function renderComposer(options: { readonly configured?: boolean } = {}) {
+    const { client, transcribe } = fakeSpeechClient({ transcript: "from the keyboard" });
+    const onTranscript = vi.fn();
+    render(
+      <SpeechCapabilityProvider
+        client={client}
+        instances={speechTestInstances()}
+        settings={options.configured === false ? {} : speechTestSettings()}
+      >
+        <div>
+          <textarea aria-label="Message" />
+          <ComposerVoiceButton onTranscript={onTranscript} />
+        </div>
+        <div>
+          <textarea aria-label="Other message" />
+        </div>
+      </SpeechCapabilityProvider>,
+    );
+    return { onTranscript, transcribe };
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("a tap on the dictation shortcut starts and a second tap stops", async () => {
+    const { getUserMedia } = installFakeMicrophone();
+    const { onTranscript } = renderComposer();
+    screen.getByRole("textbox", { name: "Message" }).focus();
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+
+    fireEvent.keyDown(window, dictateChord);
+    now.mockReturnValue(1_050);
+    fireEvent.keyUp(window, dictateChord);
+    await screen.findByRole("button", { name: "Stop dictating" });
+    expect(getUserMedia).toHaveBeenCalledOnce();
+
+    now.mockReturnValue(5_000);
+    fireEvent.keyDown(window, dictateChord);
+    fireEvent.keyUp(window, dictateChord);
+    await waitFor(() => expect(onTranscript).toHaveBeenCalledWith("from the keyboard"));
+  });
+
+  it("holding the shortcut records until it is released", async () => {
+    installFakeMicrophone();
+    const { onTranscript } = renderComposer();
+    screen.getByRole("textbox", { name: "Message" }).focus();
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+
+    fireEvent.keyDown(window, dictateChord);
+    await screen.findByRole("button", { name: "Stop dictating" });
+    expect(onTranscript).not.toHaveBeenCalled();
+
+    // Letting go of Command ends the hold, as macOS may never report the letter's release.
+    now.mockReturnValue(2_500);
+    fireEvent.keyUp(window, { key: "Meta", shiftKey: true });
+    await waitFor(() => expect(onTranscript).toHaveBeenCalledWith("from the keyboard"));
+  });
+
+  it("the shortcut does nothing while transcription is not ready", () => {
+    const { getUserMedia } = installFakeMicrophone();
+    renderComposer({ configured: false });
+    screen.getByRole("textbox", { name: "Message" }).focus();
+
+    fireEvent.keyDown(window, dictateChord);
+    expect(getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it("leaves a composer without focus alone", () => {
+    const { getUserMedia } = installFakeMicrophone();
+    renderComposer();
+    screen.getByRole("textbox", { name: "Other message" }).focus();
+
+    fireEvent.keyDown(window, dictateChord);
+    expect(getUserMedia).not.toHaveBeenCalled();
   });
 });

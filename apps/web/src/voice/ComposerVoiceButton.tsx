@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useComposerNoticeSink } from "../composer/ComposerNotice";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useSpeechCapability } from "./SpeechCapabilityContext";
+import { useDictationShortcut } from "./useDictationShortcut";
 import { formatRecordingDuration, MAX_VOICE_RECORDING_MS, useVoiceRecorder } from "./voiceRecorder";
 
 export interface ComposerVoiceButtonProps {
@@ -31,6 +32,7 @@ export function ComposerVoiceButton(props: ComposerVoiceButtonProps) {
   const recorder = useVoiceRecorder();
   const [phase, setPhase] = useState<Phase>({ kind: "ready" });
   const requestId = useRef(0);
+  const anchor = useRef<HTMLSpanElement>(null);
   const onTranscript = useRef(props.onTranscript);
   onTranscript.current = props.onTranscript;
 
@@ -101,10 +103,21 @@ export function ComposerVoiceButton(props: ComposerVoiceButtonProps) {
       : { key: "dictation", tone: "warning", role: "alert", text: failure },
   );
 
-  if (!ready || !recorder.supported) return null;
-
   const recording = recorder.state.kind === "recording";
   const busy = recorder.state.kind === "requesting" || phase.kind === "transcribing";
+  const begin = () => {
+    setPhase({ kind: "ready" });
+    void recorder.start();
+  };
+  useDictationShortcut({
+    enabled: ready && recorder.supported && props.disabled !== true && !busy,
+    recording,
+    anchor,
+    start: begin,
+    stop: () => void finish(),
+  });
+
+  if (!ready || !recorder.supported) return null;
   const label = recording
     ? "Stop dictating"
     : phase.kind === "transcribing"
@@ -114,7 +127,7 @@ export function ComposerVoiceButton(props: ComposerVoiceButtonProps) {
         : "Dictate message";
 
   return (
-    <span className="composer-voice">
+    <span className="composer-voice" ref={anchor}>
       <OctantButton
         aria-label={label}
         aria-pressed={recording}
@@ -126,8 +139,7 @@ export function ComposerVoiceButton(props: ComposerVoiceButtonProps) {
             void finish();
             return;
           }
-          setPhase({ kind: "ready" });
-          void recorder.start();
+          begin();
         }}
         size="icon"
         title={label}

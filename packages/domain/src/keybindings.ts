@@ -22,6 +22,7 @@ export type OctantKeybindingActionId =
   | "new-todo"
   | "next-waiting-thread"
   | "reply-detail-cycle"
+  | "dictate"
   | "zen-next-space"
   | "zen-previous-space"
   | "review-next"
@@ -101,6 +102,15 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     // (Safari: Add to Reading List), which a page may take; the window
     // listener prevents the default only when the chord runs this action.
     defaultChord: "Mod+Shift+D",
+  },
+  {
+    id: "dictate",
+    label: "Dictate into the focused message (tap to toggle, hold to talk)",
+    area: "Shell",
+    // M for microphone. The desktop menu holds Mod+M (Minimize) but not this,
+    // and no other default does. It answers in a text field, which is where
+    // dictation goes.
+    defaultChord: "Mod+Shift+M",
   },
   {
     id: "zen-next-space",
