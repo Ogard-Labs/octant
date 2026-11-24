@@ -25,6 +25,7 @@ import { threadHandoffDisclosure } from "../providers/conversationHandoff";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { TurnActions } from "../transcript/TurnActions";
 import { TurnHeader, TurnLiveLine, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
+import { TranscriptHandoff, resolveTranscriptHandoff } from "../transcript/TranscriptHandoff";
 import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import {
@@ -320,6 +321,16 @@ export function ChatTranscript(props: ChatTranscriptProps) {
   // behind it.
   const turns = useMemo(() => activeChatTurns(shown.turns), [shown.turns]);
   const loadedTurnIds = useMemo(() => new Set(turns.map((turn) => String(turn.id))), [turns]);
+  const previousTurnAttemptByTurnId = useMemo(() => {
+    const map = new Map<string, ChatAttempt>();
+    let previous: ChatAttempt | undefined;
+    for (const turn of turns) {
+      if (previous !== undefined) map.set(String(turn.id), previous);
+      const latest = turn.attempts.at(-1);
+      if (latest !== undefined) previous = latest;
+    }
+    return map;
+  }, [turns]);
   // A Chat turn keeps the submission id its sender chose, which is how a turn
   // an outside agent sent is named for that agent.
   const agentTurnSender = useAgentTurnSenders();
@@ -621,8 +632,28 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 turn.sequence <= (props.view.thread.branchedFrom?.carriedTurnCount ?? 0),
               )
             : undefined;
+        const providerGroups = props.providerGroups ?? [];
+        const firstAttempt = turn.attempts[0];
+        const previousTurnAttempt = previousTurnAttemptByTurnId.get(String(turn.id));
+        const turnHandoff =
+          firstAttempt === undefined
+            ? undefined
+            : resolveTranscriptHandoff({
+                previous: previousTurnAttempt,
+                current: firstAttempt,
+                handoff: firstAttempt.handoff,
+                disclosure:
+                  firstAttempt.handoff === undefined
+                    ? undefined
+                    : threadHandoffDisclosure(firstAttempt.handoff, (selection) =>
+                        providerModelLabel(providerGroups, selection),
+                      ),
+              });
         return (
           <div className="chat-transcript__turn">
+            {turnHandoff === undefined ? null : (
+              <TranscriptHandoff entry={turnHandoff} providerGroups={providerGroups} />
+            )}
             <TurnActionMenu actions={messageActions} onAction={onAction}>
               <article
                 aria-label={
@@ -695,6 +726,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                     ? { onSnoozeAtReset: props.onSnoozeAtUsageReset }
                     : {})}
                   previousAttempt={turn.attempts[index - 1]}
+                  handoffRenderedAtTurn={index === 0 && turnHandoff !== undefined}
                   subagentsFrom={attempt.createdAt}
                   {...subagentsUntil(
                     turn.attempts[index + 1]?.createdAt ??
@@ -938,6 +970,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   readonly onFork: (() => void) | undefined;
   readonly forkDisabled: boolean;
   readonly previousAttempt: ChatAttempt | undefined;
+  readonly handoffRenderedAtTurn: boolean;
   /** When this attempt started, and when the next one did: the subagents it started fall between. */
   readonly subagentsFrom: string;
   readonly subagentsUntil?: string;
@@ -949,7 +982,26 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   readonly beforeReply?: ReactNode;
   readonly canvasPreview: ChatTranscriptProps["canvasPreview"];
 }) {
-  const handoff = handoffLabel(props.previousAttempt, props.attempt, props.providerGroups ?? []);
+  const providerGroups = props.providerGroups ?? [];
+  const attemptHandoff = props.handoffRenderedAtTurn
+    ? undefined
+    : resolveTranscriptHandoff({
+        previous: props.previousAttempt,
+        current: props.attempt,
+        handoff: props.attempt.handoff,
+        disclosure:
+          props.attempt.handoff === undefined
+            ? undefined
+            : threadHandoffDisclosure(props.attempt.handoff, (selection) =>
+                providerModelLabel(providerGroups, selection),
+              ),
+      });
+  const regenerated =
+    attemptHandoff === undefined &&
+    props.previousAttempt !== undefined &&
+    props.previousAttempt.outcome === "completed" &&
+    String(props.previousAttempt.providerInstanceId) === String(props.attempt.providerInstanceId) &&
+    String(props.previousAttempt.modelId) === String(props.attempt.modelId);
   const responseContents = props.attempt.responseRefs.map((reference) =>
     resolvedContent(props.contentById, reference, "assistant"),
   );
@@ -995,8 +1047,12 @@ const AttemptBlock = memo(function AttemptBlock(props: {
 
   return (
     <>
-      {handoff === undefined ? null : (
-        <OctantSeparatorWithLabel aria-label={handoff}>{handoff}</OctantSeparatorWithLabel>
+      {attemptHandoff === undefined ? (
+        regenerated ? (
+          <OctantSeparatorWithLabel aria-label="Regenerated">Regenerated</OctantSeparatorWithLabel>
+        ) : null
+      ) : (
+        <TranscriptHandoff entry={attemptHandoff} providerGroups={providerGroups} />
       )}
       <DescribedImagesNote
         className="chat-transcript__handoff"
@@ -1015,13 +1071,6 @@ const AttemptBlock = memo(function AttemptBlock(props: {
           serverUrl={props.serverUrl}
           windowCapability={props.windowCapability}
         />
-      )}
-      {props.attempt.handoff === undefined ? null : (
-        <p className="chat-transcript__handoff" role="note">
-          {threadHandoffDisclosure(props.attempt.handoff, (selection) =>
-            providerModelLabel(props.providerGroups ?? [], selection),
-          )}
-        </p>
       )}
       <article
         aria-label={`Assistant response · ${usageLimit === undefined ? attemptLabels[props.attempt.outcome] : usageLimitLabels[usageLimit.kind]}`}
@@ -1412,31 +1461,6 @@ function CitationList(props: { readonly citations: ChatThreadView["citations"] }
       })}
     </ul>
   );
-}
-
-function handoffLabel(
-  previous: ChatAttempt | undefined,
-  current: ChatAttempt,
-  groups: ReadonlyArray<PickerGroup>,
-): string | undefined {
-  if (previous === undefined) return undefined;
-  if (
-    previous.providerInstanceId === current.providerInstanceId &&
-    previous.modelId === current.modelId
-  ) {
-    // The provider did not change, so the only way a second attempt follows a
-    // completed one is a regeneration; the person asked for a new answer.
-    return previous.outcome === "completed" ? "Regenerated" : undefined;
-  }
-  if (previous.modelId !== current.modelId) return `Provider handoff · ${current.modelId}`;
-  // Same model on another instance is a move to another account, so the
-  // marker names the account the conversation went to.
-  const account = groups.find(
-    (group) => String(group.instance.id) === String(current.providerInstanceId),
-  )?.instance.displayName;
-  return account === undefined
-    ? "Provider handoff · provider changed"
-    : `Provider handoff · ${account}`;
 }
 
 function handoffWarningText(

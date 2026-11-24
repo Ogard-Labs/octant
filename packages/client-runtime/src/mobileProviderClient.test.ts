@@ -12,6 +12,7 @@ import {
   encodeMobileModelOptionId,
   fetchMobileModelOptions,
   normalizeMobileModelOptions,
+  normalizeMobileProviderDirectory,
 } from "./mobileProviderClient";
 import type { MobileRemoteTransport } from "./mobileInboxClient";
 
@@ -130,6 +131,7 @@ describe("mobile provider catalog", () => {
         modelId: "model-a",
         label: "Model A",
         detail: "Alpha",
+        driverKind: "openai-compatible",
         attachmentModalities: ["text"],
       },
       {
@@ -138,11 +140,94 @@ describe("mobile provider catalog", () => {
         modelId: "model-b",
         label: "Model B",
         detail: "Alpha",
+        driverKind: "openai-compatible",
         attachmentModalities: ["text"],
       },
     ]);
     expect(JSON.stringify(options)).not.toContain("baseUrl");
     expect(JSON.stringify(options)).not.toContain("authentication");
+  });
+
+  it("retains disabled and unready accounts in the display directory for historical handoffs", () => {
+    const directory = normalizeMobileProviderDirectory(snapshot());
+    expect(directory).toEqual([
+      {
+        providerInstanceId: String(instanceA),
+        displayName: "Alpha",
+        driverKind: "openai-compatible",
+        models: [
+          { modelId: "model-a", displayName: "Model A" },
+          { modelId: "model-b", displayName: "Model B" },
+        ],
+      },
+      {
+        providerInstanceId: String(instanceB),
+        displayName: "Bravo",
+        driverKind: "openai-compatible",
+        models: [{ modelId: "model-x", displayName: "Hidden" }],
+      },
+    ]);
+  });
+
+  it("falls back to persisted catalog model names when a probe clears an account's observed models", () => {
+    const probed = decodeProviderRegistrySnapshot({
+      ...snapshot(),
+      observedStates: [
+        {
+          instanceId: instanceA,
+          readiness: "ready",
+          processState: "running",
+          models: [model("model-a", "Model A Live")],
+          capabilities,
+          observedAt: now,
+        },
+        {
+          instanceId: instanceB,
+          readiness: "unavailable",
+          processState: "stopped",
+          models: [],
+          capabilities,
+          observedAt: now,
+        },
+      ],
+      catalogs: [
+        {
+          instanceId: instanceA,
+          version: 1,
+          models: [model("model-a", "Model A Persisted"), model("model-b", "Model B Persisted")],
+          manualModelOrder: [],
+          invalidated: false,
+          updatedAt: now,
+        },
+        {
+          instanceId: instanceB,
+          version: 1,
+          models: [model("model-x", "Historical Model X")],
+          manualModelOrder: [],
+          invalidated: false,
+          updatedAt: now,
+        },
+      ],
+    });
+
+    const directory = normalizeMobileProviderDirectory(probed);
+    expect(directory).toEqual([
+      {
+        providerInstanceId: String(instanceA),
+        displayName: "Alpha",
+        driverKind: "openai-compatible",
+        models: [
+          { modelId: "model-a", displayName: "Model A Live" },
+          { modelId: "model-b", displayName: "Model B Persisted" },
+        ],
+      },
+      {
+        providerInstanceId: String(instanceB),
+        displayName: "Bravo",
+        driverKind: "openai-compatible",
+        models: [{ modelId: "model-x", displayName: "Historical Model X" }],
+      },
+    ]);
   });
 
   it("skips unavailable readiness and fetches via bootstrap", async () => {
@@ -248,6 +333,7 @@ describe("mobile provider catalog", () => {
         modelId: "model-a",
         label: "Model A",
         detail: "Alpha",
+        driverKind: "openai-compatible",
         attachmentModalities: ["text"],
       },
     ]);

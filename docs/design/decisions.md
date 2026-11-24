@@ -1820,8 +1820,9 @@ When a conversation moves to a new session, the new provider gets a bounded, dis
 - A switch that cannot hand over refuses before the provider starts, with a named reason.
 - Continue elsewhere reuses provider changes and existing paired-screen transport, identifies execution host separately from controlling screen, and discloses retained state and omissions. A task link selects the same existing task after authentication and never clones a writer or sends a draft. The explicit next-continuation text-only choice survives reload/queueing; the receiving thread can read its exact admitted input manifest.
 - Merging a fork's conversation back is explicit and approval-free and adds context only. File changes reach the source only through Git review, and outside content the fork took in taints the source.
+- Chat, Work, and Code on desktop, web, and mobile render one shared inline hairline boundary (`TranscriptHandoff` / `TranscriptHandoffDivider`) ahead of the next user message on turn-to-turn switches (or ahead of the attempt on a Chat retry) showing the transition icon, label, source-to-target models with provider marks, and the host's disclosure note beneath it whenever a handoff was recorded.
 
-Status: Built. Since: —. Detail: [Architecture: Stop reasons](../architecture.md#stop-reasons).
+Status: Built. Since: —. Detail: [Architecture: Stop reasons](../architecture.md#stop-reasons) and [Thread view: Context handoffs](thread-view.md#context-handoffs).
 
 ### Stop reasons
 

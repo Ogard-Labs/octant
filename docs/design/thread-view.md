@@ -41,6 +41,27 @@ rather than on every turn; a launch outside Strict shows nothing. It is the
 same meta-ink note as a provider handoff's (`role="note"`), not a page banner
 or a card. `strictKeptSentence` in `@octant/domain` is the one wording.
 
+## Context handoffs
+
+When a thread changes provider, moves to another account, switches models, or
+starts a new session from a fork, branch, or rewind, Chat, Work, and Code draw
+one shared boundary, `TranscriptHandoff` in `apps/web/src/transcript/`: a
+full-width hairline (`OctantSeparatorWithLabel`) with a 12px transition icon,
+the boundary label (**Context handoff**, **Model switch**, **Forked context**,
+**Branched context**, or **Rewound context**), and when the provider or model
+changed, the source and target models joined by a 12px arrow with their
+provider marks (`ProviderGlyph` at 14px; one mark on a same-provider model
+switch, both marks when switching providers or accounts, and account names
+beside the model when two accounts share one model name). Across turns, the
+boundary sits ahead of the next user message so it marks the handoff between
+the previous reply and the prompt sent to the new provider; within a single
+Chat turn's retry onto another provider or model, it sits ahead of that
+attempt. Whenever the host recorded a handoff, its disclosure sentence sits
+centred in meta ink (`role="note"`, no card or banner) directly beneath the
+hairline, naming what carried over, every omission, any outside-content mark,
+and what stayed behind. The phone draws the same boundary and disclosure across
+Chat, Work, and Code (`TranscriptHandoffDivider` in `apps/mobile/src/ui/`).
+
 ## Loop and stall notices
 
 Outside Strict, neither a repeated-tool loop (6 identical consecutive calls)
