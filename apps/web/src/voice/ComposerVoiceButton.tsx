@@ -112,6 +112,7 @@ export function ComposerVoiceButton(props: ComposerVoiceButtonProps) {
   useDictationShortcut({
     enabled: ready && recorder.supported && props.disabled !== true && !busy,
     recording,
+    starting: recorder.state.kind === "requesting",
     anchor,
     start: begin,
     stop: () => void finish(),

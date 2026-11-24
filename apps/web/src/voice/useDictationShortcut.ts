@@ -23,6 +23,8 @@ export interface DictationShortcutTarget {
   /** Whether this composer may dictate now: transcription ready and the control enabled. */
   readonly enabled: boolean;
   readonly recording: boolean;
+  /** The microphone was asked for and has not answered yet (a permission prompt may be open). */
+  readonly starting: boolean;
   /** An element inside the composer; the shortcut acts only when its composer has focus. */
   readonly anchor: RefObject<HTMLElement | null>;
   readonly start: () => void;
@@ -40,6 +42,21 @@ export function useDictationShortcut(target: DictationShortcutTarget): void {
   const latest = useRef(target);
   latest.current = target;
   const identity = useRef({});
+  // A hold let go while the microphone was still starting. Without it the
+  // release would be lost and the clip would run on until the two-minute
+  // limit once permission was granted.
+  const stopWhenStarted = useRef(false);
+
+  useEffect(() => {
+    if (!stopWhenStarted.current) return;
+    if (target.recording) {
+      stopWhenStarted.current = false;
+      latest.current.stop();
+    } else if (!target.starting) {
+      // The microphone was refused or failed: nothing is left to stop.
+      stopWhenStarted.current = false;
+    }
+  }, [target.recording, target.starting]);
 
   useEffect(() => {
     const self = identity.current;
@@ -68,6 +85,7 @@ export function useDictationShortcut(target: DictationShortcutTarget): void {
       event.preventDefault();
       if (event.repeat) return;
       press = { at: Date.now(), key: event.key.toLowerCase(), started: true };
+      stopWhenStarted.current = false;
       current.start();
     }
 
@@ -78,9 +96,9 @@ export function useDictationShortcut(target: DictationShortcutTarget): void {
       const held = Date.now() - press.at;
       const startedHere = press.started;
       press = undefined;
-      if (startedHere && held >= HOLD_TO_TALK_MS && latest.current.recording) {
-        latest.current.stop();
-      }
+      if (!startedHere || held < HOLD_TO_TALK_MS) return;
+      if (latest.current.recording) latest.current.stop();
+      else if (latest.current.starting) stopWhenStarted.current = true;
     }
 
     window.addEventListener("keydown", onKeyDown);

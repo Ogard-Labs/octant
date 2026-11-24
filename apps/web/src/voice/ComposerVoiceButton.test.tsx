@@ -200,6 +200,36 @@ describe("the Dictate shortcut", () => {
     await waitFor(() => expect(onTranscript).toHaveBeenCalledWith("from the keyboard"));
   });
 
+  it("a hold let go while the microphone is still starting stops once it starts", async () => {
+    installFakeMicrophone();
+    let grant: () => void = () => undefined;
+    const granted = new Promise<void>((resolve) => {
+      grant = resolve;
+    });
+    const stream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(async () => {
+          await granted;
+          return stream;
+        }),
+      },
+    });
+    const { onTranscript } = renderComposer();
+    screen.getByRole("textbox", { name: "Message" }).focus();
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+
+    fireEvent.keyDown(window, dictateChord);
+    await screen.findByRole("button", { name: "Starting microphone…" });
+    now.mockReturnValue(2_000);
+    fireEvent.keyUp(window, dictateChord);
+
+    grant();
+    await waitFor(() => expect(onTranscript).toHaveBeenCalledWith("from the keyboard"));
+    expect(screen.queryByRole("button", { name: "Stop dictating" })).toBeNull();
+  });
+
   it("the shortcut does nothing while transcription is not ready", () => {
     const { getUserMedia } = installFakeMicrophone();
     renderComposer({ configured: false });
