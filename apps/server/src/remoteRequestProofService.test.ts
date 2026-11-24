@@ -13,6 +13,7 @@ import {
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { openSqlite, type SqliteConnection } from "./persistence/sqlitePort";
 import {
+  isAuthenticatedPairedDeviceSessionCurrent,
   isPairedDeviceSessionCurrent,
   RemoteRequestProofError,
   RemoteRequestProofService,
@@ -168,6 +169,54 @@ describe("RemoteRequestProofService", () => {
     expect(session.idleExpiresAt).toBe("2026-07-29T09:15:00.000Z");
     expect(session.authenticationVersion).toBe(1);
     connection.close();
+  });
+
+  it("rechecks an authenticated pairing's session without rereading the approval audit", () => {
+    const { connection, service, privateKey } = setup();
+    try {
+      connection
+        .prepare(`INSERT INTO remote_security_audit_projection (
+          event_kind, host_id, device_id, protocol_version, credential_generation,
+          source_class, result_category, reason_code, correlation_id, occurred_at
+        ) VALUES ('device-approved', ?, ?, 1, 1, 'lan-private', 'ok', 'user-approved', ?, ?)`)
+        .run(hostId, deviceId, randomUUID(), new Date(now).toISOString());
+      const session = issueSession(service, privateKey);
+      const verified = service.verifyRequest(makeFacts(session, privateKey));
+      const issuer = createRemoteDevicePrincipal({
+        ...verified,
+        capabilityDigest,
+        admittedBy: "host-person",
+      });
+      const approvalReads = vi.fn();
+      const observed: SqliteConnection = {
+        ...connection,
+        prepare(sql) {
+          if (sql.includes("remote_security_audit_projection")) approvalReads();
+          return connection.prepare(sql);
+        },
+      };
+
+      expect(isAuthenticatedPairedDeviceSessionCurrent(observed, issuer, now)).toBe(true);
+      expect(isAuthenticatedPairedDeviceSessionCurrent(observed, issuer, now + 1)).toBe(true);
+      expect(approvalReads).not.toHaveBeenCalled();
+      expect(
+        isAuthenticatedPairedDeviceSessionCurrent(
+          observed,
+          issuer,
+          Date.parse(session.idleExpiresAt),
+        ),
+      ).toBe(false);
+      const hubDevice = createRemoteDevicePrincipal({
+        ...verified,
+        capabilityDigest,
+        admittedBy: "hub-roster",
+      });
+      expect(isAuthenticatedPairedDeviceSessionCurrent(observed, hubDevice, now)).toBe(false);
+      connection.prepare("UPDATE remote_device_projection SET credential_generation = 2").run();
+      expect(isAuthenticatedPairedDeviceSessionCurrent(observed, issuer, now)).toBe(false);
+    } finally {
+      connection.close();
+    }
   });
 
   it.each(["idleExpiresAt", "absoluteExpiresAt"] as const)(

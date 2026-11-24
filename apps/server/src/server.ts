@@ -289,6 +289,7 @@ export function startOctantServer(
       isRestrictedDeviceScope,
       isPersonPairedDeviceCurrent,
       isPairedDeviceSessionCurrent,
+      isAuthenticatedPairedDeviceSessionCurrent,
       liveTurns,
       machineChangeFeed,
       onAgentRunExecutionAccepted,
@@ -1540,7 +1541,7 @@ export function startOctantServer(
       workResearchProjection,
       workResearchRoutes,
     } = wireWorkFiles({
-      isPairedDeviceSessionCurrent,
+      isAuthenticatedPairedDeviceSessionCurrent,
       speechGates,
       credentialResolver,
       serviceOffers,

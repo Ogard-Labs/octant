@@ -1,4 +1,8 @@
-import { isPairedDeviceSessionCurrent as checkPairedDeviceSessionCurrent } from "../remoteRequestProofService";
+import {
+  isAuthenticatedPairedDeviceSessionCurrent as checkAuthenticatedPairedDeviceSessionCurrent,
+  isPairedDeviceSessionCurrent as checkPairedDeviceSessionCurrent,
+} from "../remoteRequestProofService";
+import type { ClientPrincipal } from "../clientPrincipal";
 import { ThreadNarration } from "../speech/narrationTool";
 import { ThreadTranscription } from "../speech/transcriptionTool";
 import { createSpeechGates } from "../speech/speechGates";
@@ -258,6 +262,15 @@ export function wireAuthority(deps: AuthorityDependencies) {
     sessionNow?: () => number,
   ): boolean =>
     checkPairedDeviceSessionCurrent(persistence.connection, principal, (sessionNow ?? Date.now)());
+  const isAuthenticatedPairedDeviceSessionCurrent = (
+    principal: Extract<ClientPrincipal, { kind: "remote-device" }>,
+    sessionNow?: () => number,
+  ): boolean =>
+    checkAuthenticatedPairedDeviceSessionCurrent(
+      persistence.connection,
+      principal,
+      (sessionNow ?? Date.now)(),
+    );
   const isPersonPairedDeviceCurrent = (
     deviceId: string,
     credentialGeneration: number,
@@ -572,6 +585,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     isPairedDeviceScope,
     isRestrictedDeviceScope,
     isPairedDeviceSessionCurrent,
+    isAuthenticatedPairedDeviceSessionCurrent,
     isPersonPairedDeviceCurrent,
     liveTurns,
     machineChangeFeed,

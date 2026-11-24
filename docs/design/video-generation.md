@@ -354,6 +354,7 @@ which the person sets, like any turn.
   new one before it runs out. Each clip request rechecks the issuer's access
   to its thread. Window revocation drops its tickets. A paired device's ticket
   requires the original session and credential generation to remain current.
+  The ticket retains the pairing approval verified by the gateway at issuance.
   A ticket grants only that clip.
 - A running job shows its state in the thread with Stop; a failed or stopped
   one says why. Deleting a thread stops its jobs and removes its clips.
