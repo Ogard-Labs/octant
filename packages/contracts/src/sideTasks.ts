@@ -223,3 +223,73 @@ export const decodeStartSideTask = Schema.decodeUnknownSync(StartSideTask);
 export const decodeDismissSideTask = Schema.decodeUnknownSync(DismissSideTask);
 export const decodeContinueSideTaskHere = Schema.decodeUnknownSync(ContinueSideTaskHere);
 export const decodeSideTaskResult = Schema.decodeUnknownSync(SideTaskResult);
+
+// ── Completion reports back to the offering thread ──────────────────────────
+//
+// A thread started from a side task owes its offering thread a report of
+// every turn that ends in it — completed, failed, or cancelled — delivered as
+// an honestly marked delivery turn through the parent's mode. The reports are
+// journaled on an aggregate keyed by the child thread, so a report owed while
+// the host restarts is found in the projection and delivered then. The
+// aggregate id is the child thread's id.
+
+/** At most this much of a finished turn's reply rides in one report. */
+export const MAX_SIDE_TASK_REPORT_TEXT_LENGTH = 4_096;
+
+export const THREAD_SIDE_TASK_REPORTS_AGGREGATE_TYPE = "thread-side-task-reports";
+export const THREAD_SIDE_TASK_REPORT_EVENT_NAMES = {
+  owed: "side-task-report-owed@1",
+  delivered: "side-task-report-delivered@1",
+  reportingStopped: "side-task-reporting-stopped@1",
+  reportingResumed: "side-task-reporting-resumed@1",
+} as const;
+
+/** How the child's turn ended; only completions carry the reply's text. */
+export const SideTaskReportOutcome = Schema.Literal("completed", "failed", "cancelled");
+export type SideTaskReportOutcome = typeof SideTaskReportOutcome.Type;
+
+/**
+ * One ended turn in the child that the parent has not yet heard about. The
+ * parent's identity, mode, and the offer's title ride in the event rather
+ * than being looked up at delivery time, because the report must survive
+ * anything that happens to the offering thread's own records in between.
+ */
+export const SideTaskReportOwed = Schema.Struct({
+  reportId: Schema.UUID,
+  parentThreadId: Schema.UUID,
+  parentMode: OctantMode,
+  /** The offer's title: how the parent and its agent know the task. */
+  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_SIDE_TASK_TITLE_LENGTH)),
+  outcome: SideTaskReportOutcome,
+  /** The finished turn's reply, honestly truncated; absent on failure and cancellation. */
+  text: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_SIDE_TASK_REPORT_TEXT_LENGTH)),
+  ),
+  /** True when the reply was cut to fit; the report says so rather than pretending completeness. */
+  truncated: Schema.optional(Schema.Literal(true)),
+  endedAt: UtcTimestamp,
+  owedAt: UtcTimestamp,
+}).annotations(strict);
+export type SideTaskReportOwed = typeof SideTaskReportOwed.Type;
+
+/**
+ * The reports these ids name entered the parent as a delivery turn. One event
+ * covers a coalesced delivery: several owed reports may share one turn, each
+ * honestly labelled, and nothing is marked delivered that was not in it.
+ */
+export const SideTaskReportDelivered = Schema.Struct({
+  reportIds: Schema.Array(Schema.UUID).pipe(Schema.minItems(1)),
+  deliveredAt: UtcTimestamp,
+}).annotations(strict);
+export type SideTaskReportDelivered = typeof SideTaskReportDelivered.Type;
+
+/** The person asked the child to stop reporting; new turns in it owe nothing. */
+export const SideTaskReportingStopped = Schema.Struct({
+  stoppedAt: UtcTimestamp,
+}).annotations(strict);
+export type SideTaskReportingStopped = typeof SideTaskReportingStopped.Type;
+
+export const SideTaskReportingResumed = Schema.Struct({
+  resumedAt: UtcTimestamp,
+}).annotations(strict);
+export type SideTaskReportingResumed = typeof SideTaskReportingResumed.Type;
