@@ -819,7 +819,7 @@ export class VideoJobService {
     );
     if (this.#closing.signal.aborted) return;
     const recorded = this.#recordRemote(sending, started.remoteId, model);
-    await this.#pollToEnd(recorded, adapter, model);
+    await this.#pollToEnd(recorded, adapter, model?.job.cancel === "running");
   }
 
   async #resume(job: VideoJob): Promise<void> {
@@ -828,15 +828,26 @@ export class VideoJobService {
     const instance = this.#options.readProviderInstance(job.profileInstanceId);
     const adapter = instance === undefined ? undefined : this.#adapterFor(instance);
     const startedAt = Date.parse(job.startedAt ?? job.createdAt);
-    const remaining = startedAt + VIDEO_JOB_TIMEOUT_MS - this.#now();
+    const deadline = startedAt + VIDEO_JOB_TIMEOUT_MS;
+    const remaining = deadline - this.#now();
+    const deadlineSignal = remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abort();
     const signal = AbortSignal.any([
       this.#closing.signal,
       running.controller.signal,
-      remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abort(),
+      deadlineSignal,
     ]);
-    const models = adapter === undefined ? undefined : await this.#modelsOf(adapter, signal);
+    const models =
+      adapter === undefined || signal.aborted ? undefined : await this.#modelsOf(adapter, signal);
     const model = models?.find((candidate) => String(candidate.modelId) === String(job.modelId));
     if (this.#closing.signal.aborted) return;
+    const canCancel =
+      model === undefined
+        ? adapter?.cancelRunningWithoutDiscovery === true
+        : model.job.cancel === "running";
+    if (adapter !== undefined && (deadlineSignal.aborted || this.#now() >= deadline)) {
+      await this.#finishExpired(job, adapter, canCancel);
+      return;
+    }
     const windowMs = (model?.job.resumeWindowHours ?? 0) * 3_600_000;
     if (
       adapter === undefined ||
@@ -852,7 +863,7 @@ export class VideoJobService {
       });
       return;
     }
-    await this.#pollToEnd(job, adapter, model);
+    await this.#pollToEnd(job, adapter, canCancel);
   }
 
   #recordRemote(
@@ -884,7 +895,7 @@ export class VideoJobService {
   async #pollToEnd(
     job: VideoJob,
     adapter: VideoGenerationAdapter,
-    model: VideoModelCapabilities | undefined,
+    canCancel: boolean,
   ): Promise<void> {
     const running = this.#running.get(String(job.id));
     const remoteId = job.remoteId;
@@ -895,7 +906,7 @@ export class VideoJobService {
     while (!this.#closing.signal.aborted) {
       if (running.stopRequested && !cancelAsked) {
         cancelAsked = true;
-        if (model?.job.cancel === "running") {
+        if (canCancel) {
           // Bounded by the job's deadline as well as shutdown, so the request
           // can never hold the job past the time it would settle anyway.
           const answer = await adapter.cancel(
@@ -929,23 +940,7 @@ export class VideoJobService {
         }
       }
       if (this.#now() >= deadline) {
-        // Settled before the provider is asked to stop, and the stop is
-        // bounded: a cancel that finds the clip already finished may download
-        // it again, which must not hold the job or its slot.
-        this.#finish(this.#current(job), "failed", {
-          failure: videoFailure(
-            "unavailable",
-            "Octant could not confirm the clip's result within 30 minutes.",
-          ),
-          settledCostUsdMicros: estimateOrZero(job),
-          billed: true,
-        });
-        if (model?.job.cancel === "running") {
-          await adapter.cancel(
-            remoteId,
-            AbortSignal.any([this.#closing.signal, AbortSignal.timeout(VIDEO_TIMEOUT_CLEANUP_MS)]),
-          );
-        }
+        await this.#finishExpired(job, adapter, canCancel);
         return;
       }
       // Once cancel is asked, Stop's signal stays aborted. Keep polling for
@@ -985,6 +980,25 @@ export class VideoJobService {
         waitSignal,
       );
       interval = Math.min(Math.round(interval * 1.5), MAX_POLL_MS);
+    }
+  }
+
+  async #finishExpired(job: VideoJob, adapter: VideoGenerationAdapter, canCancel: boolean) {
+    this.#finish(this.#current(job), "failed", {
+      failure: videoFailure(
+        "unavailable",
+        "Octant could not confirm the clip's result within 30 minutes.",
+      ),
+      settledCostUsdMicros: estimateOrZero(job),
+      billed: true,
+    });
+    // A cancel can download an already finished clip. Bound that cleanup
+    // separately after settling the job at its original deadline.
+    if (canCancel && job.remoteId !== undefined) {
+      await adapter.cancel(
+        job.remoteId,
+        AbortSignal.any([this.#closing.signal, AbortSignal.timeout(VIDEO_TIMEOUT_CLEANUP_MS)]),
+      );
     }
   }
 

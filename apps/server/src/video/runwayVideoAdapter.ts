@@ -352,6 +352,7 @@ export const runwayVideoDriver: VideoGenerationDriver = {
     models: async () => declaredFor(profile),
     start: (request) => start(ports, profile, request),
     poll: (remoteId, signal) => poll(ports, remoteId, signal),
+    cancelRunningWithoutDiscovery: true,
     cancel: (remoteId, signal) => cancel(ports, remoteId, signal),
     forget: (remoteId) => forget(ports, remoteId),
   }),

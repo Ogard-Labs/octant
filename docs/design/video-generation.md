@@ -435,6 +435,10 @@ At startup the host reconciles every video job the journal left unfinished:
     or the remaining job deadline. If Stop interrupts discovery before the
     host knows whether the provider can cancel, the host stops waiting and
     settles at the estimate.
+  - An adapter that can cancel all of its accepted jobs can cancel a recovered
+    job by its recorded ID without consulting the catalog. After the job
+    deadline, the host settles the estimate first and bounds cancellation
+    separately as cleanup.
   - The host polls until the job ends, stores the clip and calls `forget`.
   - The provider may already have billed it, so it is not thrown away.
   - Past either limit, it is cancelled where the driver can cancel, then
@@ -638,9 +642,11 @@ export interface VideoGenerationAdapter {
   readonly models: (signal?: AbortSignal) => Promise<ReadonlyArray<VideoModelCapabilities>>;
   readonly start: (request: VideoAdapterRequest) => Promise<VideoAdapterStart>;
   readonly poll: (remoteId: string, signal: AbortSignal) => Promise<VideoAdapterPoll>;
+  /** All accepted jobs can be cancelled by ID without consulting the catalog. */
+  readonly cancelRunningWithoutDiscovery?: true;
   /**
    * Asks the provider to stop, then reports the job's state with any usage it
-   * states. Called only when the model declares it can cancel. A result still
+   * states. Called when the model or adapter declares it can cancel. A result still
    * `running` means the stop is not yet confirmed: the job service keeps
    * polling until a terminal state or the job time runs out.
    */

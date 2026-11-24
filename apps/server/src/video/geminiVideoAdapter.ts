@@ -441,6 +441,7 @@ export const geminiVideoDriver: VideoGenerationDriver = {
     models: async () => declaredFor(profile),
     start: (request) => start(ports, profile, request),
     poll: (remoteId, signal) => readInteraction(ports, remoteId, signal),
+    cancelRunningWithoutDiscovery: true,
     cancel: (remoteId, signal) => cancel(ports, remoteId, signal),
     forget: (remoteId) => forget(ports, remoteId),
   }),

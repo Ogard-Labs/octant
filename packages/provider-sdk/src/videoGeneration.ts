@@ -82,13 +82,15 @@ export type VideoAdapterForget =
  * as results so the host can record them. Discovery may reject if it fails.
  */
 export interface VideoGenerationAdapter {
-  /** The profile's declared models. The signal bounds discovery during job recovery. */
+  /** The profile's declared models. Network discovery must honor the caller's signal. */
   readonly models: (signal?: AbortSignal) => Promise<ReadonlyArray<VideoModelCapabilities>>;
   readonly start: (request: VideoAdapterRequest) => Promise<VideoAdapterStart>;
   readonly poll: (remoteId: string, signal: AbortSignal) => Promise<VideoAdapterPoll>;
+  /** All accepted jobs on this adapter can be cancelled by ID without consulting the catalog. */
+  readonly cancelRunningWithoutDiscovery?: true;
   /**
    * Asks the provider to stop, then reports the job's state with any usage it
-   * states. Called only when the model declares it can cancel. A result still
+   * states. Called when the model or adapter declares it can cancel. A result still
    * `running` means the stop is not yet confirmed: the job service keeps
    * polling until a terminal state or the job time runs out. The signal
    * bounds the call: once the job time has run out, the host asks for a stop

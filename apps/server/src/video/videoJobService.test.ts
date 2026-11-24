@@ -117,6 +117,7 @@ interface Script {
   polls?: Array<VideoAdapterPoll>;
   poll?: (signal: AbortSignal) => Promise<VideoAdapterPoll>;
   cancel?: (signal: AbortSignal | undefined) => Promise<VideoAdapterPoll>;
+  cancelRunningWithoutDiscovery?: true;
   credential?: () => Promise<string>;
   forget?: () => Promise<"removed" | "failed" | VideoAdapterForget>;
   model?: VideoModelCapabilities;
@@ -143,6 +144,9 @@ function fakeDriver(script: Script) {
     providerHosts: ["video.example.test"],
     create: ({ ports }) => {
       return {
+        ...(script.cancelRunningWithoutDiscovery === true
+          ? { cancelRunningWithoutDiscovery: true as const }
+          : {}),
         models: async (signal?: AbortSignal) => {
           calls.models += 1;
           const call = calls.models;
@@ -1342,6 +1346,7 @@ describe("video jobs", () => {
       const release = Promise.withResolvers<void>();
       const second = harness(
         {
+          cancelRunningWithoutDiscovery: true,
           beforeModels: async (call, signal) => {
             // The first lookup warms the catalog; the accepted job starts its own.
             if (call === 1) return;
@@ -1375,12 +1380,55 @@ describe("video jobs", () => {
           expect(signal?.aborted).toBe(true);
         }
         expect(second.calls.poll).toBe(0);
+        expect(second.calls.cancel).toBe(interruption === "shutdown" ? 0 : 1);
       } finally {
         second.service.close();
         release.resolve();
       }
     },
   );
+
+  it("settles an expired recovered job and asks the provider to cancel without discovering its model", async () => {
+    const first = harness({
+      poll: (signal) =>
+        new Promise((resolve) => {
+          signal.addEventListener("abort", () => resolve({ status: "running" }), { once: true });
+        }),
+    });
+    const queued = await enqueue(first.service);
+    await vi.waitFor(() => expect(first.calls.poll).toBe(1));
+    first.service.close();
+
+    let cleanupSignal: AbortSignal | undefined;
+    const stopped = Promise.withResolvers<VideoAdapterPoll>();
+    const second = harness(
+      {
+        cancelRunningWithoutDiscovery: true,
+        beforeModels: async (_call, signal) => signal?.throwIfAborted(),
+        cancel: (signal) => {
+          cleanupSignal = signal;
+          return stopped.promise;
+        },
+      },
+      first.root,
+    );
+    second.advance(VIDEO_JOB_TIMEOUT_MS + 1_000);
+    try {
+      await second.service.recover();
+      expect(await second.service.whenTerminal(queued.id, 1_000)).toMatchObject({
+        status: "failed",
+        settledCostUsdMicros: 695_040,
+      });
+      expect(second.calls.cancel).toBe(1);
+      expect(cleanupSignal?.aborted).toBe(false);
+      // Only the background catalog warmup ran.
+      expect(second.calls.models).toBe(1);
+      expect(second.calls.poll).toBe(0);
+    } finally {
+      second.service.close();
+      stopped.resolve({ status: "cancelled" });
+    }
+  });
 
   it("keeps polling a sent job whose post-start model lookup fails", async () => {
     const { service } = harness({ modelsFail: 2 });

@@ -806,6 +806,7 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
     },
     start,
     poll: (remoteId: string, signal: AbortSignal) => poll(remoteId, signal),
+    cancelRunningWithoutDiscovery: true as const,
     cancel,
     forget,
   };
