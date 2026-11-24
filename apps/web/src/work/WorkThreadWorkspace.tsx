@@ -190,7 +190,8 @@ import {
   LoadEarlierMessages,
   type LoadEarlierMessagesState,
 } from "../transcript/LoadEarlierMessages";
-import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
+import { ThreadTasksPanel, type ThreadTaskRow } from "../transcript/ThreadTasksPanel";
+import { usePublishThreadTaskList } from "../transcript/threadTaskLists";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import { TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { RewindDialog, composerAfterRewind } from "../transcript/RewindDialog";
@@ -574,6 +575,16 @@ function WorkToolGroup(props: {
  */
 function workTurnWorkedFor(turn: WorkTurnState): string | undefined {
   return turnWorkedFor(turnHeaderOutcome(turn), turn.acceptedAt, turn.updatedAt);
+}
+
+/** A journaled Work task as the task list draws it. */
+function threadTaskRow(task: NonNullable<WorkTurnState["tasks"]>[number]): ThreadTaskRow {
+  return {
+    id: task.taskId,
+    state: task.state,
+    summary: task.summary,
+    ...(task.runningSummary === undefined ? {} : { runningSummary: task.runningSummary }),
+  };
 }
 
 function turnHeaderOutcome(turn: WorkTurnState): TurnHeaderOutcome {
@@ -1016,6 +1027,17 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   });
   const [loaded, setLoaded] = useState<WorkLoadedTurns>(NO_LOADED_TURNS);
   const turns = loaded.turns;
+  // The newest turn's task list, for the Tasks dock panel: the provider
+  // restates its whole plan as a turn proceeds, so older lists are history.
+  const latestTasks = useMemo(() => {
+    const turn = turns.findLast((candidate) => (candidate.tasks?.length ?? 0) > 0);
+    if (turn?.tasks === undefined) return undefined;
+    return {
+      running: turn.status === "accepted" || turn.status === "running",
+      tasks: turn.tasks.map(threadTaskRow),
+    };
+  }, [turns]);
+  usePublishThreadTaskList(String(props.threadId), latestTasks);
   // Each turn owns the subagents started between its start and the next
   // turn's: the host links a subagent to the thread, not to a turn.
   const nextTurnStart = useMemo(
@@ -2996,14 +3018,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   <ThreadTasksPanel
                     tasks={{
                       running: row.turn.status === "accepted" || row.turn.status === "running",
-                      tasks: row.tasks.map((task) => ({
-                        id: task.taskId,
-                        state: task.state,
-                        summary: task.summary,
-                        ...(task.runningSummary === undefined
-                          ? {}
-                          : { runningSummary: task.runningSummary }),
-                      })),
+                      tasks: row.tasks.map(threadTaskRow),
                     }}
                   />
                 );

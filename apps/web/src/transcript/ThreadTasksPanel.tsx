@@ -21,6 +21,11 @@ export interface ThreadTaskProgress {
 
 export interface ThreadTasksPanelProps {
   readonly tasks: ThreadTaskProgress;
+  /**
+   * Keeps the list open whether or not the turn runs, for the Tasks dock
+   * panel, which a person opened to see it. The transcript leaves it out.
+   */
+  readonly alwaysOpen?: boolean;
 }
 
 /**
@@ -66,7 +71,7 @@ export function ThreadTasksPanel(props: ThreadTasksPanelProps) {
   // hand is readable without a click, and folds to its summary once the turn
   // settles. Opening or folding it by hand wins over both.
   const [chosenOpen, setChosenOpen] = useState<boolean>();
-  const open = chosenOpen ?? running;
+  const open = chosenOpen ?? (props.alwaysOpen === true || running);
   const listId = useId();
   const completed = tasks.filter((task) => task.state === "completed").length;
   const failed = tasks.filter((task) => task.state === "failed").length;

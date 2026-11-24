@@ -44,6 +44,7 @@ import { SideTaskInline } from "../followUps/SideTaskCards";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
+import { usePublishThreadTaskList } from "../transcript/threadTaskLists";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import {
   runningStepTitle,
@@ -267,6 +268,27 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       ),
     ),
   );
+
+  // The newest reply's task list, for the Tasks dock panel. Read from the live
+  // view, not a detached jump back, so the panel always shows current work.
+  const liveTurns = props.view.turns;
+  const latestTasks = useMemo(() => {
+    for (const turn of activeChatTurns(liveTurns).toReversed()) {
+      const attempt = turn.attempts.at(-1);
+      if (attempt?.tasks === undefined || attempt.tasks.length === 0) continue;
+      return {
+        running: attempt.outcome === "queued" || attempt.outcome === "streaming",
+        tasks: attempt.tasks.map((task) => ({
+          id: task.taskId,
+          state: task.state,
+          summary: task.summary,
+          ...(task.runningSummary === undefined ? {} : { runningSummary: task.runningSummary }),
+        })),
+      };
+    }
+    return undefined;
+  }, [liveTurns]);
+  usePublishThreadTaskList(String(props.view.thread.id), latestTasks);
 
   const [checkpointDraft, setCheckpointDraft] = useState<
     { readonly turnId: string; readonly kind: "mark" | "restore" } | undefined

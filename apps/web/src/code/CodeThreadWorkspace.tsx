@@ -151,7 +151,8 @@ import { CodeTurnReviewPreviewCard } from "./CodeTurnReviewPreviewCard";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import { runningStepTitle, settledTurnFoldsActivity } from "../transcript/turnActivity";
-import { splitTurnTasks } from "./transcriptActivity";
+import { latestTurnTasks, splitTurnTasks } from "./transcriptActivity";
+import { usePublishThreadTaskList } from "../transcript/threadTaskLists";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
 import {
@@ -886,6 +887,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       return { status: "accepted" };
     },
   );
+  const conversation = props.controller.conversation;
+  const turnActivity = props.controller.turnActivity;
+  const latestTasks = useMemo(
+    () =>
+      latestTurnTasks(
+        conversation.flatMap((message) =>
+          message.role !== "assistant" || message.operationId === undefined
+            ? []
+            : [
+                {
+                  activity: turnActivity.get(String(message.operationId)),
+                  running: message.status === "incomplete",
+                },
+              ],
+        ),
+      ),
+    [conversation, turnActivity],
+  );
+  usePublishThreadTaskList(String(props.threadId), latestTasks);
   if (props.controller.status === "disconnected") {
     return (
       <section aria-label="Code thread" className="code-thread-workspace">

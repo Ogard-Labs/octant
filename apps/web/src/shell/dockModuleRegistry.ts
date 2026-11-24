@@ -18,6 +18,7 @@ const BrowserModule = lazy(() => import("../dockModules/BrowserModule"));
 const FilesModule = lazy(() => import("../dockModules/FilesModule"));
 const DocumentModule = lazy(() => import("../dockModules/DocumentModule"));
 const PlanModule = lazy(() => import("../dockModules/PlanModule"));
+const TasksModule = lazy(() => import("../dockModules/TasksModule"));
 const DeliveryModule = lazy(() => import("../dockModules/DeliveryModule"));
 const CanvasModule = lazy(() => import("../dockModules/CanvasModule"));
 const ReviewModule = lazy(() => import("../dockModules/ReviewModule"));
@@ -165,6 +166,7 @@ export const dockModuleInputs = {
   environment: [],
   vitals: ["serverUrl", "subject", "windowCapability"],
   artifacts: ["canvasClient", "canvasRevision", "serverUrl", "subject", "windowCapability"],
+  tasks: ["subject"],
 } as const satisfies Readonly<
   Record<RightUtilityDockSurfaceId, ReadonlyArray<keyof ThreadUtilityDockContentProps>>
 >;
@@ -203,5 +205,6 @@ export const dockModules: Readonly<
   debug: (props) => createElement(RunDebugModule, inputs(props, dockModuleInputs.debug)),
   vitals: (props) => createElement(VitalsModule, inputs(props, dockModuleInputs.vitals)),
   artifacts: (props) => createElement(ArtifactsModule, inputs(props, dockModuleInputs.artifacts)),
+  tasks: (props) => createElement(TasksModule, inputs(props, dockModuleInputs.tasks)),
   environment: () => createElement(EnvironmentModule, {}),
 };

@@ -1,5 +1,6 @@
 import type { CodeOperationEvent } from "@octant/contracts";
 import { completedCallDurationMs } from "@octant/domain/turn-activity-timing";
+import type { ThreadTaskProgress } from "../transcript/ThreadTasksPanel";
 import type { TurnActivity, TurnActivityRow } from "../transcript/turnActivity";
 
 export type TaskActivityRow = Extract<TurnActivityRow, { kind: "task" }>;
@@ -19,6 +20,23 @@ export function splitTurnTasks(activity: TurnActivity): {
     tasks,
     activity: { ...activity, rows: activity.rows.filter((row) => row.kind !== "task") },
   };
+}
+
+/**
+ * The newest Code turn's task list, for the Tasks dock panel: providers restate
+ * their whole plan as a turn proceeds, so the latest list is the agent's
+ * current work, and merging older turns would mix finished history into it.
+ */
+export function latestTurnTasks(
+  turns: ReadonlyArray<{ readonly activity: TurnActivity | undefined; readonly running: boolean }>,
+): ThreadTaskProgress | undefined {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn?.activity === undefined) continue;
+    const { tasks } = splitTurnTasks(turn.activity);
+    if (tasks.length > 0) return { tasks, running: turn.running };
+  }
+  return undefined;
 }
 
 function upsert(
