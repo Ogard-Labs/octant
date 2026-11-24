@@ -84,7 +84,6 @@ import { resolveAvailableTools } from "../scaffold/scaffoldFilesystem";
 import { hydrateAgentMessageProjectionFromJournal } from "../agentMessage/agentMessageProjection";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { defaultShellSettings, findWorkspacePresetTarget } from "@octant/domain";
-import { CREATE_VIDEO_TOOL_NAME } from "@octant/plugin-host/media-tools";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import type { AppManagedToolSet } from "../chat/chatTurnRunner";
@@ -202,17 +201,6 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     FoundationsWiring,
     "providerRuntimeRegistry" | "conversationInputTransfer" | "resolveThreadStrict"
   >;
-
-function chatToolResultTaintsThread(call: { readonly name: string }, result: unknown): boolean {
-  // A pending or cancelled video call only returns a status from this host.
-  return (
-    call.name !== CREATE_VIDEO_TOOL_NAME ||
-    (typeof result === "object" &&
-      result !== null &&
-      "status" in result &&
-      result.status === "completed")
-  );
-}
 
 export function wireChat(deps: ChatDependencies) {
   const imageDescriber = deps.imageDescriber;
@@ -542,37 +530,28 @@ export function wireChat(deps: ChatDependencies) {
       resolveHostRunTools: ({ thread }) =>
         withheldFromSideChat({
           sideChat: sideChatSidecars.findBySidecarThread(thread.id) !== undefined,
-          tools: () => {
-            const video = createThreadVideoAgentTools({
-              windowId: ROUTINE_HOST_SCOPE_ID,
-              threadKind: "chat-thread",
-              scopeId: decodeImageGenerationScopeId(String(thread.id)),
-              offers: videoOffers,
-              kept: keptVideoChoices,
-              jobs: videoJobService,
-              imageSources: chatImageSourcesFor(thread),
-              imageJobs: imageJobService,
-              unattended: true,
-            });
-            return combineAppManagedToolSets(
+          tools: () =>
+            combineAppManagedToolSets(
               createCanvasAgentTools({
                 windowId: ROUTINE_HOST_SCOPE_ID,
                 hostRun: true,
                 thread,
                 port: canvasAgentToolPort,
               }),
-              video === undefined
-                ? undefined
-                : taintAppManagedToolResults({
-                    tools: video,
-                    threadId: thread.id,
-                    recordExternalContentIngestion: (input) =>
-                      externalContentIngestionStore.record(input),
-                    resultTaintsThread: chatToolResultTaintsThread,
-                    uuid: randomUUID,
-                  }),
-            );
-          },
+              createThreadVideoAgentTools({
+                windowId: ROUTINE_HOST_SCOPE_ID,
+                threadKind: "chat-thread",
+                scopeId: decodeImageGenerationScopeId(String(thread.id)),
+                offers: videoOffers,
+                kept: keptVideoChoices,
+                jobs: videoJobService,
+                recordExternalContentIngestion: (input) =>
+                  externalContentIngestionStore.record(input),
+                imageSources: chatImageSourcesFor(thread),
+                imageJobs: imageJobService,
+                unattended: true,
+              }),
+            ),
         }),
       resolveComputerUseTools: ({ windowId, thread }) =>
         withheldFromSideChat({
@@ -717,28 +696,29 @@ export function wireChat(deps: ChatDependencies) {
                           )
                           ?.inputModalities.includes("image") === true,
                     }),
-                    createThreadVideoAgentTools({
-                      windowId,
-                      threadKind: "chat-thread",
-                      scopeId: decodeImageGenerationScopeId(String(thread.id)),
-                      offers: videoOffers,
-                      kept: keptVideoChoices,
-                      jobs: videoJobService,
-                      imageSources: chatImageSources,
-                      imageJobs: imageJobService,
-                    }),
                   ),
               }),
             ),
             threadId: thread.id,
             recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
-            resultTaintsThread: chatToolResultTaintsThread,
             uuid: randomUUID,
           }),
           withheldFromSideChat({
             sideChat,
             tools: () =>
               combineAppManagedToolSets(
+                createThreadVideoAgentTools({
+                  windowId,
+                  threadKind: "chat-thread",
+                  scopeId: decodeImageGenerationScopeId(String(thread.id)),
+                  offers: videoOffers,
+                  kept: keptVideoChoices,
+                  jobs: videoJobService,
+                  recordExternalContentIngestion: (input) =>
+                    externalContentIngestionStore.record(input),
+                  imageSources: chatImageSources,
+                  imageJobs: imageJobService,
+                }),
                 ...chatHostAnsweredToolContributors.map((contribute) =>
                   contribute(windowId, thread),
                 ),

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   MAX_VIDEO_REFERENCES,
   MAX_VIDEO_OFFER_PROFILE_NAME_LENGTH,
@@ -40,6 +41,10 @@ import {
 } from "../image/threadImageSources";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { adaptMediaToolSet } from "../providers/mediaToolAdapter";
+import {
+  taintAppManagedToolResults,
+  type TaintAppManagedToolResultsInput,
+} from "../providers/appManagedToolTaint";
 import type { EnqueueVideoJobInput, VideoJobService, VideoQuote } from "./videoJobService";
 import type { VideoOfferOutcome } from "./videoOfferDecisionRules";
 import type { VideoGenerationChoice, VideoOfferService } from "./videoOfferService";
@@ -95,6 +100,7 @@ export function createVideoAgentTools(options: {
   readonly threadKind: ThreadKind;
   readonly scopeId: ImageGenerationScopeId;
   readonly port: VideoAgentToolPort;
+  readonly recordExternalContentIngestion: TaintAppManagedToolResultsInput["recordExternalContentIngestion"];
 }): AppManagedToolSet | undefined {
   const { port } = options;
   const mediaPort: MediaToolHostPort = {
@@ -119,7 +125,19 @@ export function createVideoAgentTools(options: {
     },
   };
   const tools = CREATE_VIDEO_MEDIA_TOOL_PLUGIN.createTools(mediaPort);
-  return tools === undefined ? undefined : adaptMediaToolSet({ tools });
+  if (tools === undefined) return undefined;
+  return taintAppManagedToolResults({
+    tools: adaptMediaToolSet({ tools }),
+    threadId: options.scopeId,
+    recordExternalContentIngestion: options.recordExternalContentIngestion,
+    uuid: randomUUID,
+    // The host's status and save receipts do not deliver provider content.
+    resultTaintsThread: (_call, result) =>
+      typeof result === "object" &&
+      result !== null &&
+      "status" in result &&
+      result.status === "completed",
+  });
 }
 
 /** One line per ready model with what it declares, so the agent asks only for what can run. */
@@ -577,6 +595,7 @@ export function createThreadVideoAgentTools(input: {
   readonly offers: Pick<VideoOfferService, "offerGenerate" | "offerSave">;
   readonly kept: Pick<KeptImageGenerationChoices, "remembered" | "forget" | "asksAgain">;
   readonly jobs: VideoAgentToolPort["jobs"];
+  readonly recordExternalContentIngestion: TaintAppManagedToolResultsInput["recordExternalContentIngestion"];
   readonly unattended?: boolean;
   readonly fullAccess?: () => boolean;
   readonly refusal?: () => string | undefined;
@@ -590,6 +609,7 @@ export function createThreadVideoAgentTools(input: {
   const withSignal = (signal: AbortSignal | undefined) => (signal === undefined ? {} : { signal });
   return createVideoAgentTools({
     ...scope,
+    recordExternalContentIngestion: input.recordExternalContentIngestion,
     port: {
       jobs: input.jobs,
       askGenerate: (offer, signal) =>

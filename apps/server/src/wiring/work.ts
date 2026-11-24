@@ -1066,6 +1066,8 @@ export function wireWork(deps: WorkDependencies) {
               fullAccess: () =>
                 runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
               jobs: videoJobService,
+              recordExternalContentIngestion: (input) =>
+                externalContentIngestionStore.record(input),
               imageSources: workImageSources,
               imageJobs: imageJobService,
               save: {

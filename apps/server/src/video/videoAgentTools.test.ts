@@ -12,6 +12,7 @@ import {
 } from "@octant/contracts";
 import { CREATE_VIDEO_TOOL_NAME } from "@octant/plugin-host/media-tools";
 import { describe, expect, it, vi } from "vitest";
+import type { ExternalContentIngestionResult } from "../context/externalContentIngestionStore";
 import { writeConfinedNewFileUnder } from "../image/generatedImageSave";
 import { applyProtectedFilesChoice, currentProtectedFilesChoice } from "../process/secretGuard";
 import { createVideoAgentTools, type VideoAgentToolPort } from "./videoAgentTools";
@@ -103,6 +104,7 @@ const running: VideoJob = decodeVideoJob({
 });
 
 function harness(options: {
+  readonly threadKind?: VideoJob["threadKind"];
   readonly kept?: {
     readonly profileInstanceId: typeof profileId;
     readonly modelId: typeof model.modelId;
@@ -147,9 +149,16 @@ function harness(options: {
         relativePath,
       })),
   );
+  const recordExternalContentIngestion = vi.fn(
+    (): ExternalContentIngestionResult => ({
+      kind: "recorded",
+      taint: { externalContentIngested: true, ingestedSources: [CREATE_VIDEO_TOOL_NAME] },
+    }),
+  );
   const set = createVideoAgentTools({
-    threadKind: "work-thread",
+    threadKind: options.threadKind ?? "work-thread",
     scopeId,
+    recordExternalContentIngestion,
     port: {
       jobs: {
         readyProfilesNow: () => [{ instance, models: [model] }],
@@ -191,7 +200,16 @@ function harness(options: {
       inputJson: JSON.stringify(input),
       ...(signal === undefined ? {} : { signal }),
     });
-  return { call, quote, enqueue, stop, askGenerate, askSave, write };
+  return {
+    call,
+    quote,
+    enqueue,
+    stop,
+    askGenerate,
+    askSave,
+    write,
+    recordExternalContentIngestion,
+  };
 }
 
 describe("octant_create_video on the host", () => {
@@ -227,6 +245,38 @@ describe("octant_create_video on the host", () => {
     expect(declined.askGenerate).toHaveBeenCalledOnce();
     expect(declined.enqueue).not.toHaveBeenCalled();
   });
+
+  it.each(["chat-thread", "work-thread", "code-thread"] as const)(
+    "records delivered clips and leaves pending or declined replies unmarked in %s",
+    async (threadKind) => {
+      const prompt = { prompt: "A paper boat on a pond" };
+      const kept = { profileInstanceId: profileId, modelId: model.modelId };
+      const completed = harness({ threadKind, kept });
+      expect(await completed.call(prompt)).toMatchObject({
+        result: { status: "completed", clipId },
+        outsideContent: { labels: [] },
+      });
+      expect(completed.recordExternalContentIngestion).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          threadId: scopeId,
+          provenance: { origin: "tool-result", sourceLabel: CREATE_VIDEO_TOOL_NAME },
+          authorized: true,
+        }),
+      );
+
+      const pending = harness({ threadKind, kept, pending: true, waitMs: 1 });
+      const pendingResult = await pending.call(prompt);
+      expect(pendingResult.result).toMatchObject({ status: "generating" });
+      expect(pendingResult.outsideContent).toBeUndefined();
+      expect(pending.recordExternalContentIngestion).not.toHaveBeenCalled();
+
+      const declined = harness({ threadKind });
+      const declinedResult = await declined.call(prompt);
+      expect(declinedResult.result).toMatchObject({ status: "cancelled" });
+      expect(declinedResult.outsideContent).toBeUndefined();
+      expect(declined.recordExternalContentIngestion).not.toHaveBeenCalled();
+    },
+  );
 
   it("asks again at Full access after the Project drops its video choice", async () => {
     const { call, askGenerate, enqueue } = harness({ fullAccess: true, asksAgain: true });

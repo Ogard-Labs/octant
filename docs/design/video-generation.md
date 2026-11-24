@@ -383,8 +383,8 @@ At startup the host reconciles every video job the journal left unfinished:
   them.
 - Reference images follow the image rule. They are named on the card and need
   that card's confirmation, and a model that cannot take them is not offered.
-- A clip's result marks the thread as having read outside content, because the
-  provider's output enters the thread, as image results do.
+- Delivering a completed clip marks a Chat, Work or Code thread as having
+  read outside content. Pending and declined replies contain only host status.
 - Nothing goes to an Octant-operated service. No telemetry is added.
 
 ## Seam

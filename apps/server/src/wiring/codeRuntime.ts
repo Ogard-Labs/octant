@@ -887,6 +887,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         kept: keptVideoChoices,
         fullAccess: () => level() === "full-access",
         jobs: videoJobService,
+        recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         imageSources: codeImageSources,
         imageJobs: imageJobService,
         ...(checkoutRoot === undefined
