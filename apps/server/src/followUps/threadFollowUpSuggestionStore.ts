@@ -8,9 +8,12 @@ import {
   NATIVE_HARNESS_SESSION_EVENT_NAMES,
   THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE,
   THREAD_FOLLOW_UP_SUGGESTION_EVENT_NAMES,
+  THREAD_SIDE_TASK_EVENT_NAMES,
+  THREAD_SIDE_TASKS_AGGREGATE_TYPE,
   ThreadFollowUpActivated,
   ThreadFollowUpNextMessageSpent,
   ThreadFollowUpsSuggested,
+  type SideTaskStarted,
   decodeNativeHarnessSession,
   decodeNativeHarnessTurnId,
   decodeThreadFollowUpSuggestions,
@@ -72,11 +75,13 @@ export class ThreadFollowUpSuggestionStore {
   readonly #clock: () => string;
   readonly #records = new Map<string, SuggestionRecord>();
   /**
-   * The thread each started follow-up came from, by the thread it created.
-   * Unlike the offer itself this outlives later replies: it is what lets the
-   * sidebar nest a task under the thread that suggested it.
+   * The thread each started follow-up or side task came from, by the thread it
+   * created. Unlike the offer itself this outlives later replies: it is what
+   * lets the sidebar nest a task under the thread that suggested it. The origin
+   * is remembered alongside because only side-task children owe their parent a
+   * report when their turns complete.
    */
-  readonly #parents = new Map<string, string>();
+  readonly #parents = new Map<string, { parent: string; origin: "follow-up" | "side-task" }>();
 
   constructor(options: {
     readonly journal: JournalPort;
@@ -93,10 +98,30 @@ export class ThreadFollowUpSuggestionStore {
 
   /** Every remembered follow-up link, newest first. */
   links(): ReadonlyArray<{ readonly threadId: string; readonly parentThreadId: string }> {
-    return [...this.#parents].reverse().map(([threadId, parentThreadId]) => ({
+    return [...this.#parents].reverse().map(([threadId, link]) => ({
       threadId,
-      parentThreadId,
+      parentThreadId: link.parent,
     }));
+  }
+
+  /**
+   * The offering thread of a side-task-started child, or `undefined` when the
+   * thread is no side-task child. Only side-task children owe their parent a
+   * report; follow-up-suggestion children are ordinary independent threads.
+   */
+  sideTaskParentOf(threadId: string): string | undefined {
+    const link = this.#parents.get(threadId);
+    return link?.origin === "side-task" ? link.parent : undefined;
+  }
+
+  /**
+   * Records in the projection that a side-task start created `childThreadId`.
+   * The journaled fact lives on the offering thread's side-task aggregate;
+   * this only mirrors it in memory, the way hydration does after a restart.
+   */
+  noteSideTaskStarted(parentThreadId: string, childThreadId: string): void {
+    if (childThreadId === parentThreadId) return;
+    this.#parents.set(childThreadId, { parent: parentThreadId, origin: "side-task" });
   }
 
   /** What activating this suggestion of the current set created, if it was activated. */
@@ -250,12 +275,25 @@ export class ThreadFollowUpSuggestionStore {
     for (const envelope of replayAggregateTypesInOrder(this.#journal, [
       THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE,
       NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
+      THREAD_SIDE_TASKS_AGGREGATE_TYPE,
     ])) {
       const threadId = String(envelope.aggregateId);
       if (envelope.aggregateType === THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE) {
         this.#apply(threadId, envelope.eventName, envelope.payload);
       } else if (envelope.aggregateType === NATIVE_HARNESS_SESSION_AGGREGATE_TYPE) {
         this.#applyHarnessFrame(harnessOrigins, threadId, envelope.eventName, envelope.payload);
+      } else if (
+        envelope.aggregateType === THREAD_SIDE_TASKS_AGGREGATE_TYPE &&
+        envelope.eventName === THREAD_SIDE_TASK_EVENT_NAMES.started
+      ) {
+        // A side-task start is journaled on the offering thread with the child
+        // it created; that is the same "came from" fact a follow-up activation
+        // records, so the child nests the same way.
+        const started = envelope.payload as SideTaskStarted;
+        const childThreadId = String(started.startedThreadId);
+        if (childThreadId !== threadId) {
+          this.#parents.set(childThreadId, { parent: threadId, origin: "side-task" });
+        }
       }
     }
   }
@@ -288,7 +326,7 @@ export class ThreadFollowUpSuggestionStore {
   #rememberParent(parentThreadId: string, created: NativeHarnessFollowUpCreation): void {
     if (created.kind === "same-thread" || created.threadId === undefined) return;
     if (String(created.threadId) === parentThreadId) return;
-    this.#parents.set(String(created.threadId), parentThreadId);
+    this.#parents.set(String(created.threadId), { parent: parentThreadId, origin: "follow-up" });
   }
 
   #applyHarnessFrame(

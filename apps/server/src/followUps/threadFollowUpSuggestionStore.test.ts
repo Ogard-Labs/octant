@@ -19,6 +19,7 @@ import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { NativeHarnessSessionStore } from "../harness/nativeHarnessSessionStore";
 import { readableFollowUpLinks, settleFollowUpSuggestion } from "./followUpSuggestionRoutes";
+import { registerSideTaskEvents, SideTaskStore } from "../sideTasks/sideTaskStore";
 import {
   registerFollowUpSuggestionEvents,
   ThreadFollowUpSuggestionStore,
@@ -62,7 +63,9 @@ afterEach(() => {
 function journalFor(connection: SqliteConnection): Journal {
   return new Journal({
     connection,
-    registry: registerFollowUpSuggestionEvents(registerNativeHarnessEvents(new EventRegistry())),
+    registry: registerSideTaskEvents(
+      registerFollowUpSuggestionEvents(registerNativeHarnessEvents(new EventRegistry())),
+    ),
     projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
     clock: () => now,
   });
@@ -163,6 +166,74 @@ describe("thread follow-up suggestions", () => {
 
     const restarted = storeOn(connection);
     expect(restarted.links()).toEqual([{ threadId: child, parentThreadId: threadId }]);
+  });
+
+  it("remembers which thread a started side task came from, past a restart", () => {
+    const connection = openConnection();
+    // A side-task start is journaled on the offering thread's side-task
+    // aggregate; the lineage projection must read that fact as well.
+    const journal = journalFor(connection);
+    const sideTasks = new SideTaskStore({
+      journal,
+      uuid: uuidFactory(),
+      actor,
+      clock: () => now,
+    });
+    const child = "00000000-0000-4000-8000-000000000097";
+    const offerId = "00000000-0000-4000-8000-000000000096";
+    sideTasks.offer({
+      id: offerId,
+      threadId,
+      mode: "chat",
+      suggestedBy: claude,
+      title: "Fix stale install docs",
+      reason: "reason",
+      prompt: "prompt",
+      target: "new-thread",
+      offeredAt: now,
+    } as never);
+    sideTasks.settle(threadId, {
+      kind: "started",
+      payload: {
+        sideTaskId: offerId,
+        startedThreadId: child,
+        startedWith: "fresh",
+        startedAt: now,
+      } as never,
+    });
+
+    const restarted = storeOn(connection);
+    expect(restarted.links()).toEqual([{ threadId: child, parentThreadId: threadId }]);
+    expect(restarted.sideTaskParentOf(child)).toBe(threadId);
+    // The parent itself is nobody's side-task child.
+    expect(restarted.sideTaskParentOf(threadId)).toBeUndefined();
+  });
+
+  it("notes a started side task at runtime and does not confuse it with a follow-up child", () => {
+    const store = storeOn(openConnection());
+    const child = "00000000-0000-4000-8000-000000000095";
+    store.noteSideTaskStarted(threadId, child);
+    expect(store.links()).toEqual([{ threadId: child, parentThreadId: threadId }]);
+    expect(store.sideTaskParentOf(child)).toBe(threadId);
+    // The parent itself is nobody's side-task child.
+    expect(store.sideTaskParentOf(threadId)).toBeUndefined();
+
+    // A follow-up-activated child nests the same way but is no side-task child.
+    const followUpChild = "00000000-0000-4000-8000-000000000094";
+    store.recordReply({
+      threadId,
+      mode: "chat",
+      suggestedBy: claude,
+      followUps: suggestions(),
+    });
+    store.activate(threadId, suggestionId as never, {
+      kind: "new-thread",
+      mode: "chat",
+      title: "Add tests",
+      threadId: followUpChild,
+    } as never);
+    expect(store.links().map((link) => link.threadId)).toEqual([followUpChild, child]);
+    expect(store.sideTaskParentOf(followUpChild)).toBeUndefined();
   });
 
   it("names a follow-up link only when the window may read both the child and its parent", async () => {
