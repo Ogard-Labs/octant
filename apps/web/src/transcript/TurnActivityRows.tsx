@@ -1,4 +1,4 @@
-import type { ThreadToolCallRecord } from "@octant/contracts";
+import type { ThreadCanvasPreviewReceipt, ThreadToolCallRecord } from "@octant/contracts";
 import { TurnSubagentRows, type TurnSubagentWindow } from "../agents/threadSubagents";
 import type { ToolOutsideContentMark } from "@octant/contracts/shield";
 import { SHIELD_WATCHER_LABEL_WORDS } from "@octant/domain/shield-watcher-policy";
@@ -88,6 +88,12 @@ export interface TurnActivityRowsProps {
    * listed under its activity. Absent lists none.
    */
   readonly subagents?: TurnSubagentWindow;
+  /**
+   * Draws the Canvas version a preview call drew, inside its opened row.
+   * Absent where the surface has no Canvas client; the row then shows its
+   * summary alone.
+   */
+  readonly canvasPreview?: (preview: ThreadCanvasPreviewReceipt) => ReactNode;
 }
 
 /** Rejects when the records cannot be read from this window. */
@@ -371,6 +377,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
         row={row}
         settled={settled && !running}
         onReveal={() => setRevealedSummaryIds((current) => setHas(current, id, true))}
+        {...(props.canvasPreview === undefined ? {} : { canvasPreview: props.canvasPreview })}
       />
     );
   }
@@ -654,6 +661,7 @@ function ActivityDisclosure(props: {
   /** Present on a tool row whose surface keeps tool-call records. */
   readonly records?: ToolCallRecordsState | undefined;
   readonly onLoadRecords?: () => void;
+  readonly canvasPreview?: (preview: ThreadCanvasPreviewReceipt) => ReactNode;
 }) {
   const { row } = props;
   const StateIcon = outcomeIcon(row, props.settled);
@@ -710,6 +718,11 @@ function ActivityDisclosure(props: {
       </summary>
       <div className="turn-activity__body">
         {activityDetail(row, props)}
+        {/* Read only once the row is opened, so a closed toolchain loads no
+            Canvas. */}
+        {props.open && row.kind === "tool" && row.canvasPreview !== undefined
+          ? props.canvasPreview?.(row.canvasPreview)
+          : null}
         {props.onLoadRecords === undefined ? null : (
           <ToolCallRecordDetail records={props.records} toolCallId={row.id} />
         )}

@@ -276,7 +276,7 @@ describe("planWorkTurnContext", () => {
       expect.stringContaining("as a Canvas with the octant_canvas"),
       "Keep STATUS.md current.",
       BROWSER_TOOL_HOST_LINE,
-      expect.stringContaining("inline below your reply with octant_canvas"),
+      expect.stringContaining("draw it inline with octant_canvas"),
       "Take stock first.",
     ]);
   });
@@ -309,7 +309,7 @@ describe("planWorkTurnContext", () => {
       },
       {
         kind: "instructions",
-        text: expect.stringContaining("inline below your reply with octant_canvas"),
+        text: expect.stringContaining("draw it inline with octant_canvas"),
         tool: "octant_canvas",
       },
     ]);

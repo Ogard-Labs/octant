@@ -3,6 +3,7 @@ import type {
   ProviderTurnInput,
   ProviderToolImage,
   ShieldWatcherLabel,
+  ThreadCanvasPreviewReceipt,
   ThreadRoutineReceipt,
 } from "@octant/contracts";
 
@@ -56,6 +57,8 @@ export interface AppManagedToolSet {
     readonly outsideContent?: { readonly labels: ReadonlyArray<ShieldWatcherLabel> };
     /** Set when the call created a routine; the tool row carries what was created. */
     readonly routine?: ThreadRoutineReceipt;
+    /** Set when the call previewed a Canvas; the tool row draws that version. */
+    readonly canvasPreview?: ThreadCanvasPreviewReceipt;
   }>;
 }
 

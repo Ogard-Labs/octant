@@ -3192,6 +3192,7 @@ An agent-authored Canvas is drawn read-only inline or offered in the dock, and i
 - An inline Canvas gets no layout, plan, comment or action runtime, so nothing drawn there writes a version.
 - A prototype starts only when the person presses Run. Octant never moves focus into a running prototype.
 - A thread whose binding the host cannot resolve is refused rather than given an assumed scope.
+- A turn's Canvases sit inside its last reply, between its tool rows and its text; a turn with no reply yet keeps them after its last row. An inline Canvas shows whole up to 1,200 px before it fades into Show the whole Canvas (maintainer request, 2026-11-23).
 
 Status: Built. Since: —. Detail: [Workspace: Tool lifecycles](workspace.md#tool-lifecycles) and [Canvas: Presentation and schema versions](canvas.md#presentation-and-schema-versions).
 
@@ -3326,6 +3327,7 @@ Status: Built. Since: 2026-11-21. Detail: [Start screen: First-run provider fold
 An agent delivers anything the person will keep, share or return to as a Canvas, built from a closed, version-gated block catalogue.
 
 - The delivery test is the answer, not the verb. When in doubt the agent makes the Canvas rather than asking.
+- Findings that carry numbers, a trend, or a comparison lead with an inline Canvas summary drawn above the reply, and the reply adds only what the summary does not say. The tool description, the delivery instructions, the routing line, and the inline result say so in the same words, held by tests. The inline form stays typed blocks and static designs, not agent-written HTML with script or network (maintainer request, 2026-11-23).
 - A document that declares an older schema version but carries a newer block is refused as a future version.
 - A diagram holds at most 512 nodes and 1,024 edges, re-checked by domain policy before it persists or renders. Boards embed no third-party canvas engine and run no markup or script. _Here only._
 - A bounded subset of Mermaid is translated into typed blocks. The translator is widened to the constructs models use most (more flowchart directions, shapes, links and nested subgraphs; more sequence arrows and the activation shorthand; state descriptions), with no new dependency and no Mermaid renderer. A diagram still outside the subset is refused with a typed reason and keeps its raw source as a code block (maintainer decision, 2026-11-12, which replaces the earlier bundled-renderer direction). Styling is dropped and the diagram still imports, because Canvas applies its own theme: `%%{…}%%` directives, and in flowcharts and state diagrams `classDef`, `class`, `style` and `linkStyle` lines and the `:::class` suffix on a node (maintainer decision, 2026-11-13). The subset also covers, with no change to a block schema (maintainer decision, 2026-11-13): flowchart hexagon, subroutine and parallelogram nodes (a process node whose detail names the shape), `<-->` (one arrow each way) and `click` lines (dropped); and in a sequence `loop`, `alt`/`else`, `opt` and `par`/`and` (flattened, with a note on the first message of each part and on the last message of the fragment), `Note over A,B` (a note naming no participant), `rect` (dropped as colour), `box` (a note naming its participants) and nested activations. Still refused: class diagrams, `critical` and `break`, a fragment part with no message.
@@ -3338,6 +3340,7 @@ The agent's `preview` returns typed layout warnings and a picture drawn in a no-
 
 - A model that accepts no images, or a host with no browser, still gets the warnings and a plain sentence saying no picture was taken and why.
 - A Canvas read or previewed by another thread carries its outside-content mark to the reader.
+- An inline preview draws at the thread's default 760 px column and warns (`inline-past-cap`) past the 1,200 px the thread shows whole. A preview's tool step keeps a reference to the version it drew, never the picture, and the opened row draws that version under the window's own Canvas authority (maintainer request, 2026-11-23).
 
 Status: Built. Since: —. Detail: [Canvas: Preview and placement in the thread](canvas.md#preview-and-placement-in-the-thread).
 

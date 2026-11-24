@@ -9,7 +9,7 @@ import { CANVAS_TOOL_NAME } from "./canvasAgentTools";
  * tool description does not. It names no provider and grants nothing.
  */
 export const CANVAS_DELIVERY_INSTRUCTIONS =
-  "Deliver a document, report, memo, plan, deck, dashboard, page, or prototype the person will keep or share as a Canvas with the octant_canvas tool, not as a file written with your own file tools and not as a long reply, unless the person asks for a file or for plain text.";
+  "Deliver a document, report, memo, plan, deck, dashboard, page, or prototype the person will keep or share as a Canvas with the octant_canvas tool, not as a file written with your own file tools and not as a long reply, unless the person asks for a file or for plain text. Lead findings that carry numbers, a trend, or a comparison with an inline Canvas summary drawn above your reply, and reply with only what it does not already say.";
 
 /**
  * Sent in place of the Canvas rule when the person turned on delivering

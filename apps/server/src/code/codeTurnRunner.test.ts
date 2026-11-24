@@ -588,6 +588,41 @@ describe("CodeTurnRunner", () => {
     );
   });
 
+  it("records the Canvas version a preview drew on that call's tool event", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "tool-request",
+            requestId: "preview-request",
+            toolName: "octant_canvas",
+            inputJson: "{}",
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const canvasPreview = { canvasId: "canvas-1", versionId: "version-3" };
+    const observed: CodeTurnEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            appManagedTools: {
+              definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+              execute: async () => ({ result: { warnings: [] }, canvasPreview }),
+            },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+          }),
+        ),
+      ),
+    );
+    expect(observed).toContainEqual(
+      expect.objectContaining({ category: "tool", status: "completed", canvasPreview }),
+    );
+  });
+
   it.each([undefined, "/private/approved/task"])(
     "subscribes before send and launches in the chosen folder %s with thread authority",
     async (providerRoot) => {
