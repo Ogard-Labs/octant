@@ -181,6 +181,27 @@ describe("a command run with a secret", () => {
     expect(reply).toMatchObject({ result: { exitCode: 1, truncated: true }, isError: true });
   });
 
+  const base64 = (text: string) => Buffer.from(text).toString("base64");
+  it.each([
+    ["the end of the first stream", `first line\nthen ${VALUE.slice(0, 9)}`],
+    ["the start of the second stream", `fine\nlines\n[stderr]\n${VALUE.slice(7)}\nmore`],
+    ["the end of the second stream", `fine\nlines\n[stderr]\nmore\n${VALUE.slice(0, 11)}`],
+    ["one long line's start", `${VALUE.slice(5)}${"a".repeat(64)}`],
+    ["a character's middle, at the start", `\uFFFD\uFFFD${VALUE.slice(4)}`],
+    ["a character's middle, at the end", `first\nnext ${VALUE.slice(0, 9)}\uFFFD`],
+    ["the start, under a line of the host's own", `A warning.\n${VALUE.slice(5)}\nnext`],
+    ["an encoded value's start", `${base64(`user:${VALUE}`).slice(11)}\nnext`],
+    ["an encoded value's end", `first\nnext ${base64(VALUE).slice(0, 14)}`],
+  ])("shows no part of a value cut at %s", async (_name, output) => {
+    const h = setup({ run: () => ({ status: "ran", exitCode: 0, output, truncated: true }) });
+    await h.grant();
+    const { result } = await h.run();
+    const shown = (result as { output: string }).output;
+    for (const whole of [VALUE, base64(VALUE), base64(`user:${VALUE}`)])
+      for (let at = 0; at + 6 <= whole.length; at += 1)
+        expect(shown).not.toContain(whole.slice(at, at + 6));
+  });
+
   it("keeps the newest of a long output", async () => {
     const h = setup({
       run: () => ({
@@ -270,11 +291,26 @@ describe("a command run with a secret", () => {
     expect(h.finish).toHaveBeenCalledWith({ started: false });
   });
 
-  it("does not start once the turn's authority changed", async () => {
+  it("does not start, and spends nothing, once the turn's authority changed", async () => {
     const h = setup({ admits: () => false });
-    await h.grant();
+    await h.grant("this-command");
     expect(await h.run()).toMatchObject({ result: { failure: "no-shell" } });
-    expect(h.state.events).not.toContain("ran");
+    expect(h.state.events).toEqual(["asked"]);
+    expect(h.service.active()).toHaveLength(1);
+  });
+
+  it("spends nothing when the host refuses to start it", async () => {
+    const h = setup();
+    h.shellRun.mockImplementationOnce(async () => ({
+      status: "unavailable",
+      output: "",
+      truncated: false,
+    }));
+    await h.grant("this-command");
+    expect(await h.run()).toMatchObject({ result: { failure: "no-shell" } });
+    expect(h.service.active()).toHaveLength(1);
+    expect(await h.run()).toMatchObject({ result: { status: "ran" } });
+    expect(h.service.active()).toEqual([]);
   });
 
   it("stops with its call and with its turn", async () => {

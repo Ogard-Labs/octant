@@ -31,10 +31,7 @@ export interface ThreadSecretMemoryJournal {
   readonly history: () => ReadonlyArray<ThreadSecretMemoryRecord>;
 }
 
-type Remembered = Extract<
-  ThreadSecretMemoryRecord,
-  { readonly name: "thread-secret.remembered" }
->;
+type Remembered = Extract<ThreadSecretMemoryRecord, { readonly name: "thread-secret.remembered" }>;
 
 export type RememberedValue =
   | { readonly kind: "value"; readonly value: string }

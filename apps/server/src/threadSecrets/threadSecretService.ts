@@ -171,7 +171,12 @@ export type ThreadSecretLoan =
   | {
       readonly status: "lent";
       readonly environment: Readonly<Record<string, string>>;
-      /** Says the command has ended and its output has been read. */
+      /**
+       * Called as the command starts, and false when it must not: something
+       * that admitted it ended, or its use could not be recorded.
+       */
+      readonly start: () => boolean;
+      /** Says the command has ended, or never started, and its output has been read. */
       readonly done: () => void;
     }
   | { readonly status: "refused"; readonly failure: ThreadSecretFailure };
@@ -472,48 +477,74 @@ export class ThreadSecretService {
     const { caller } = input;
     this.sweep();
     const claimed: string[] = [];
-    try {
-      const wanted: ActiveSecret[] = [];
-      for (const name of input.names) {
-        const found = this.#lendable(caller, name, input.signal);
-        if (typeof found === "string") return { status: "refused", failure: found };
-        // One command's secret goes to one command, however many are prepared at once.
-        if (found.lifetime === "this-command") {
-          this.#claimed.add(found.id);
-          claimed.push(found.id);
-        }
-        wanted.push(found);
+    const leases: Lease[] = [];
+    let endUse: (() => void) | undefined;
+    const done = () => {
+      for (const id of claimed.splice(0)) this.#claimed.delete(id);
+      for (const lease of leases.splice(0)) this.#endLease(lease);
+      endUse?.();
+    };
+    const refuse = (failure: ThreadSecretFailure): ThreadSecretLoan => {
+      done();
+      return { status: "refused", failure };
+    };
+    const wanted: ActiveSecret[] = [];
+    for (const name of input.names) {
+      const found = this.#lendable(caller, name, input.signal);
+      if (typeof found === "string") return refuse(found);
+      // One command's secret goes to one command, however many are prepared at once.
+      if (found.lifetime === "this-command") {
+        this.#claimed.add(found.id);
+        claimed.push(found.id);
       }
-      const values: string[] = [];
-      for (const secret of wanted) {
-        const value = await this.#currentValue(secret, input.signal);
-        if (typeof value !== "string") return { status: "refused", failure: value.failure };
-        values.push(value);
-      }
-      this.sweep();
-      const uses: Use[] = [];
-      for (const [index, secret] of wanted.entries()) {
-        const current = this.#active.get(secret.id);
-        const value = values[index];
-        if (current === undefined || value === undefined)
-          return { status: "refused", failure: "revoked" };
-        const after = this.#refusesUse(caller, current, input.signal);
-        if (after !== undefined) return { status: "refused", failure: after };
-        uses.push({ secret: current, value });
-      }
-      const done = this.#use(caller, uses, "command");
-      return done === undefined
-        ? { status: "refused", failure: "unavailable" }
-        : {
-            status: "lent",
-            environment: Object.fromEntries(
-              uses.map(({ secret, value }) => [secret.environmentName, value]),
-            ),
-            done,
-          };
-    } finally {
-      for (const id of claimed) this.#claimed.delete(id);
+      wanted.push(found);
     }
+    const uses: Use[] = [];
+    for (const secret of wanted) {
+      const value = await this.#currentValue(secret, input.signal);
+      if (typeof value !== "string") return refuse(value.failure);
+      uses.push({ secret, value });
+    }
+    this.sweep();
+    for (const { secret } of uses) {
+      const refused = this.#refusesLent(caller, secret, input.signal);
+      if (refused !== undefined) return refuse(refused);
+    }
+    try {
+      for (const { value } of uses) {
+        const lease: Lease = {
+          threadId: caller.threadId,
+          turnId: caller.turnId,
+          release: this.#options.hold(value),
+        };
+        leases.push(lease);
+        this.#leases.add(lease);
+      }
+    } catch {
+      return refuse("unavailable");
+    }
+    let started = false;
+    return {
+      status: "lent",
+      environment: Object.fromEntries(
+        uses.map(({ secret, value }) => [secret.environmentName, value]),
+      ),
+      start: () => {
+        if (started || leases.length === 0) return false;
+        this.sweep();
+        const current: Use[] = [];
+        for (const { secret, value } of uses) {
+          const now = this.#active.get(secret.id);
+          if (now === undefined || this.#refusesLent(caller, now, input.signal) !== undefined)
+            return false;
+          current.push({ secret: now, value });
+        }
+        endUse = this.#use(caller, current, "command");
+        started = endUse !== undefined;
+        return started;
+      },
+      done,
+    };
   }
 
   /** Ends what the turn alone was given, and the cards it left open. */
@@ -1168,6 +1199,15 @@ export class ThreadSecretService {
     if (secret === undefined) return "expired";
     if (secret.delivery === "handle" || this.#claimed.has(secret.id)) return "unavailable";
     return this.#refusesUse(caller, secret, signal) ?? secret;
+  }
+
+  /** Why a secret already being lent may not be, read again; its own claim is no reason. */
+  #refusesLent(
+    caller: ThreadSecretCaller,
+    secret: ActiveSecret,
+    signal: AbortSignal,
+  ): ThreadSecretFailure | undefined {
+    return this.#active.has(secret.id) ? this.#refusesUse(caller, secret, signal) : "revoked";
   }
 
   /** What a secret's value is now: its item's, read again, or the one that was typed. */

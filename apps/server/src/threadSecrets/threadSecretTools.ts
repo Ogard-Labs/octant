@@ -9,7 +9,8 @@ import {
 import { Either } from "effect";
 import type { PreparedThreadCommand } from "../harness/nativeHarnessComposition";
 import type { NativeHarnessShellPort, NativeHarnessShellRun } from "../harness/nativeHarnessTools";
-import { redactHostSecrets } from "../process/secretRedaction";
+import { STDERR_MARK } from "../harness/nativeHarnessShell";
+import { redactHostSecrets, secretForms } from "../process/secretRedaction";
 import type { ThreadSecretCaller, ThreadSecretService } from "./threadSecretService";
 
 /** How the host runs one of this thread's commands: the thread's own rules, then its own shell. */
@@ -141,7 +142,8 @@ async function run(input: {
           ? {}
           : { confirmedHosts: prepared.confirmedHosts }),
         outputRetention: "newest",
-        beforeLaunch: () => prepared.admitStart(),
+        // Spent and recorded as it starts: a command the host refuses spends nothing.
+        beforeLaunch: () => prepared.admitStart() && loan.start(),
         signal,
       });
       return ranReply(ran, Object.values(loan.environment));
@@ -174,16 +176,40 @@ function ranReply(run: NativeHarnessShellRun, values: ReadonlyArray<string>): To
   return { result, isError: run.status !== "ran" || run.exitCode !== 0 };
 }
 
-/** Output kept from its newest end can begin in the middle of a value. */
+/**
+ * Takes a value's remains off the edges of output that was cut. Each stream is
+ * cut on its own, and a host keeps its newest or its first end, so every edge
+ * is read. A stream that may have lost its beginning loses the rest of that
+ * line too: an encoded value's remains look like nothing in particular. What
+ * follows is read as a beginning as well, since the host can put a line of its
+ * own before a stream's.
+ */
 function withoutCutValue(output: string, values: ReadonlyArray<string>): string {
+  const forms = values.flatMap((value) => [value, ...secretForms(value)]);
+  return output
+    .split(STDERR_MARK)
+    .map((stream) => {
+      // A cut inside a character leaves its replacement, which no value matches.
+      const text = stream.replace(/^\uFFFD+|\uFFFD+$/gu, "");
+      return withoutEnd(withoutStart(text.slice(text.indexOf("\n") + 1), forms), forms);
+    })
+    .join(STDERR_MARK);
+}
+
+function withoutStart(text: string, forms: ReadonlyArray<string>): string {
   let cut = 0;
-  for (const value of values)
-    for (let length = value.length - 1; length >= MINIMUM_CUT_LENGTH; length -= 1)
-      if (output.startsWith(value.slice(-length))) {
-        cut = Math.max(cut, length);
-        break;
-      }
-  return output.slice(cut);
+  for (const form of forms)
+    for (let length = Math.min(form.length, text.length); length > cut; length -= 1)
+      if (length >= MINIMUM_CUT_LENGTH && text.startsWith(form.slice(-length))) cut = length;
+  return text.slice(cut);
+}
+
+function withoutEnd(text: string, forms: ReadonlyArray<string>): string {
+  let cut = 0;
+  for (const form of forms)
+    for (let length = Math.min(form.length, text.length); length > cut; length -= 1)
+      if (length >= MINIMUM_CUT_LENGTH && text.endsWith(form.slice(0, length))) cut = length;
+  return cut === 0 ? text : text.slice(0, -cut);
 }
 
 function newest(text: string): { readonly text: string; readonly cut: boolean } {

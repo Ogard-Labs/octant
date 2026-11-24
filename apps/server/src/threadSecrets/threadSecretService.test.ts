@@ -815,6 +815,10 @@ describe("a secret lent to one command", () => {
       names,
       signal: over.signal ?? new AbortController().signal,
     });
+  const started = async (...input: Parameters<typeof lend>) => {
+    const loan = await lend(...input);
+    return loan.status === "lent" && loan.start() ? loan : { ...loan, status: "refused" as const };
+  };
   const item = {
     name: "DEPLOY_TOKEN",
     source: "onepassword",
@@ -837,11 +841,31 @@ describe("a secret lent to one command", () => {
         status: "lent",
         environment: { OCTANT_SECRET_DEPLOY_TOKEN: VALUE },
       });
+      expect(records().at(-1)).toMatchObject({ name: "thread-secret.granted" });
+      expect(loan.status === "lent" && loan.start()).toBe(true);
+      expect(loan.status === "lent" && loan.start()).toBe(false);
       expect(records().at(-1)).toMatchObject({ name: "thread-secret.used", use: "command" });
       expect(JSON.stringify(records())).not.toContain(VALUE);
       expect(await lend(context)).toMatchObject({ status: "lent" });
     },
   );
+
+  it("holds nothing more of a value once its command is done", async () => {
+    const holds = { live: 0 };
+    const context = host({
+      hold: () => {
+        holds.live += 1;
+        return () => (holds.live -= 1);
+      },
+    });
+    await grant(context);
+    const before = holds.live;
+    for (let round = 0; round < 5; round += 1) {
+      const loan = await started(context);
+      if ("done" in loan) loan.done();
+    }
+    expect(holds.live).toBe(before);
+  });
 
   it("gives several fields at once, each under its own variable", async () => {
     const context = host();
@@ -905,7 +929,7 @@ describe("a secret lent to one command", () => {
   it("goes to one command when that is all the person allowed", async () => {
     const context = host();
     await grant(context, request(), { lifetime: "this-command" });
-    const loans = await Promise.all([lend(context), lend(context)]);
+    const loans = await Promise.all([started(context), started(context)]);
     expect(loans.map((loan) => loan.status).sort()).toEqual(["lent", "refused"]);
     expect(context.service.active()).toEqual([]);
     expect(redactHostSecrets(`printed ${VALUE}`)).toBe("printed [redacted secret]");
@@ -918,8 +942,44 @@ describe("a secret lent to one command", () => {
     status = { status: "locked" };
     expect(await lend(context)).toEqual({ status: "refused", failure: "locked" });
     status = { status: "read", value: VALUE };
-    expect(await lend(context)).toMatchObject({ status: "lent" });
+    const never = await lend(context);
+    expect(await lend(context)).toMatchObject({ status: "refused", failure: "unavailable" });
+    if (never.status === "lent") never.done();
+    expect(never.status === "lent" && never.start()).toBe(false);
+    expect(context.service.active()).toHaveLength(1);
+    expect(records().some((record) => record.name === "thread-secret.used")).toBe(false);
+    expect(await started(context)).toMatchObject({ status: "lent" });
     expect(await lend(context)).toMatchObject({ status: "refused" });
+  });
+
+  it.each([
+    [
+      "the person revokes it",
+      (c: ReturnType<typeof host>) => {
+        c.service.revoke(THREAD, c.service.active(THREAD)[0]?.id ?? "");
+      },
+    ],
+    [
+      "its time is up",
+      (c: ReturnType<typeof host>) => {
+        c.state.now += 25 * 60 * 60_000;
+      },
+    ],
+    [
+      "Strict comes on",
+      (c: ReturnType<typeof host>) => {
+        c.state.authority = { mode: "code", strict: true, commandsConfined: true };
+      },
+    ],
+    ["its thread is archived", (c: ReturnType<typeof host>) => c.service.withdrawThread(THREAD)],
+    ["the turn stops", (c: ReturnType<typeof host>) => c.stop.abort()],
+  ] as const)("does not start a command when %s as it is about to", async (_name, happen) => {
+    const context = host();
+    await grant(context);
+    const loan = await lend(context);
+    happen(context);
+    expect(loan.status === "lent" && loan.start()).toBe(false);
+    expect(records().some((record) => record.name === "thread-secret.used")).toBe(false);
   });
 
   it("gives every secret asked for or none", async () => {
@@ -937,9 +997,11 @@ describe("a secret lent to one command", () => {
     const context = host({ journalFails: () => fails });
     await grant(context, request(), { lifetime: "this-command" });
     fails = true;
-    expect(await lend(context)).toEqual({ status: "refused", failure: "unavailable" });
+    const refused = await lend(context);
+    expect(refused.status === "lent" && refused.start()).toBe(false);
+    if (refused.status === "lent") refused.done();
     fails = false;
-    expect(await lend(context)).toMatchObject({ status: "lent" });
+    expect(await started(context)).toMatchObject({ status: "lent" });
   });
 
   it("is read at each use, kept nowhere and written nowhere, when the person chose that", async () => {
@@ -964,10 +1026,10 @@ describe("a secret lent to one command", () => {
     });
     expect(existsSync(join(root, THREAD))).toBe(false);
     expect([...holds]).toEqual([]);
-    const first = await lend(context);
+    const first = await started(context);
     expect(first).toMatchObject({ environment: { OCTANT_SECRET_DEPLOY_TOKEN: "first-Value-1" } });
     value = "second-Value-2";
-    const second = await lend(context);
+    const second = await started(context);
     expect(second).toMatchObject({ environment: { OCTANT_SECRET_DEPLOY_TOKEN: "second-Value-2" } });
     expect(reads).toBe(3);
     if (first.status === "lent") first.done();
@@ -1102,9 +1164,7 @@ describe("a secret the person asked Octant to remember", () => {
       expect(
         await save(context.service, {
           lifetime: "1-hour",
-          fields: [
-            { name: offered.fields[0]?.name ?? "", source: "remembered", rememberedId: id },
-          ],
+          fields: [{ name: offered.fields[0]?.name ?? "", source: "remembered", rememberedId: id }],
         }),
       ).toEqual({ status: "refused", failure: "missing" });
       context.service.withdrawThread(THREAD);

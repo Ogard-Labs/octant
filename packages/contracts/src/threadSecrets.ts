@@ -198,7 +198,16 @@ export const ThreadSecretRunInput = Schema.Struct({
     }),
   ),
   timeoutMs: Schema.optional(Schema.Int.pipe(Schema.between(1_000, 600_000))),
-}).annotations(strict);
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      ({ command, secrets }) =>
+        command.length + secrets.reduce((total, name) => total + name.length, 0) <=
+        MAX_THREAD_SECRET_COMMAND_LENGTH,
+      { message: () => "The command and its secrets' names are too long to show whole." },
+    ),
+  );
 export type ThreadSecretRunInput = typeof ThreadSecretRunInput.Type;
 
 /** What the agent reads of a command it ran with a secret. Its output is redacted. */

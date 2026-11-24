@@ -145,6 +145,7 @@ describe("a command run with a secret", () => {
       { command: "  " },
       { command: "a\u0000b" },
       { command: "x".repeat(1_501) },
+      { command: "x".repeat(1_450), secrets: ["A".repeat(60)] },
       { secrets: [] },
       { secrets: ["A", "A"] },
       { secrets: ["PATH; rm"] },
