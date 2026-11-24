@@ -299,6 +299,9 @@ export class VideoJobService {
     readonly lastFrame: boolean;
     readonly referenceCount: number;
   }): Promise<VideoQuote> {
+    if (this.#closing.signal.aborted) {
+      return { status: "refused", reason: "The host is shutting down." };
+    }
     const instance = this.#options.readProviderInstance(input.profileInstanceId);
     if (instance === undefined || !instance.enabled) {
       return { status: "refused", reason: "That video profile is not available." };
@@ -312,6 +315,9 @@ export class VideoJobService {
       return { status: "refused", reason: "That video provider's plugin is turned off." };
     }
     const models = await this.#modelsOf(adapter);
+    if (this.#closing.signal.aborted) {
+      return { status: "refused", reason: "The host is shutting down." };
+    }
     if (models === undefined) {
       return { status: "refused", reason: "That video provider cannot be reached." };
     }
@@ -362,6 +368,9 @@ export class VideoJobService {
       lastFrame: input.lastFrame !== undefined,
       referenceCount: input.references.length,
     });
+    if (this.#closing.signal.aborted) {
+      throw new VideoJobServiceError("busy", "The host is shutting down.");
+    }
     if (quote.status === "refused") throw new VideoJobServiceError("ineligible", quote.reason);
     if (this.#options.projection.countQueued() >= MAX_QUEUED_VIDEO_JOBS) {
       throw new VideoJobServiceError("busy", "Too many video jobs are queued.");
@@ -470,6 +479,7 @@ export class VideoJobService {
    */
   async recover(): Promise<void> {
     await this.#options.clips.recover();
+    if (this.#closing.signal.aborted) return;
     for (const job of this.#options.projection.listUnfinished()) {
       if (job.status === "queued") {
         this.#finish(job, "failed", {
@@ -510,6 +520,7 @@ export class VideoJobService {
 
   /** Tries again to remove each provider copy the host still owes. */
   async retryOwedRemovals(): Promise<void> {
+    if (this.#closing.signal.aborted) return;
     for (const job of this.#options.projection.listOwedRemovals()) {
       await this.#forget(job);
     }
@@ -636,14 +647,14 @@ export class VideoJobService {
         signal: running.controller.signal,
       })
       .finally(() => clearTimeout(startTimer));
+    // Keep the journal's sending state when shutdown wins the race with
+    // the provider's reply. Recovery accounts for a start it cannot confirm.
+    if (this.#closing.signal.aborted) return;
     if (started.status === "refused") {
       this.#finish(sending, "failed", { safetyRefusal: started.safetyRefusal });
       return;
     }
     if (started.status === "failed") {
-      // Host shutdown: left running without a provider id, so recovery
-      // settles it at the estimate, as for any send it cannot confirm.
-      if (this.#closing.signal.aborted) return;
       if (running.stopRequested && this.#knownUnsent(running)) {
         this.#finish(sending, "cancelled", {});
         return;
@@ -683,6 +694,7 @@ export class VideoJobService {
     const model = (await this.#modelsOf(adapter))?.find(
       (candidate) => String(candidate.modelId) === String(job.modelId),
     );
+    if (this.#closing.signal.aborted) return;
     const recorded = this.#recordRemote(sending, started.remoteId, model);
     await this.#pollToEnd(recorded, adapter, model);
   }
@@ -696,6 +708,7 @@ export class VideoJobService {
         : (await this.#modelsOf(adapter))?.find(
             (candidate) => String(candidate.modelId) === String(job.modelId),
           );
+    if (this.#closing.signal.aborted) return;
     const startedAt = Date.parse(job.startedAt ?? job.createdAt);
     const windowMs = (model?.job.resumeWindowHours ?? 0) * 3_600_000;
     if (adapter === undefined || model === undefined || this.#now() - startedAt > windowMs) {
@@ -732,7 +745,7 @@ export class VideoJobService {
     const deadline = Date.parse(job.startedAt ?? job.createdAt) + VIDEO_JOB_TIMEOUT_MS;
     let interval = FIRST_POLL_MS;
     let cancelAsked = false;
-    while (true) {
+    while (!this.#closing.signal.aborted) {
       if (running.stopRequested && !cancelAsked) {
         cancelAsked = true;
         if (model?.job.cancel === "running") {
@@ -926,9 +939,9 @@ export class VideoJobService {
   readonly #removing = new Set<string>();
 
   async #forget(candidate: VideoJob): Promise<void> {
+    if (this.#closing.signal.aborted) return;
     const job = this.#current(candidate);
-    if (this.#closing.signal.aborted || job.providerCopy !== "held" || job.remoteId === undefined)
-      return;
+    if (job.providerCopy !== "held" || job.remoteId === undefined) return;
     if (this.#removing.has(String(job.id))) return;
     this.#removing.add(String(job.id));
     try {

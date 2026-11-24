@@ -87,6 +87,7 @@ interface Script {
   credential?: () => Promise<string>;
   forget?: () => Promise<"removed" | "failed">;
   model?: VideoModelCapabilities;
+  beforeModels?: (call: number) => Promise<void>;
   /** Rejects models() once, on a numbered call, or for good, as a failed discovery read can. */
   modelsFail?: "once" | "always" | number;
 }
@@ -106,11 +107,9 @@ function fakeDriver(script: Script) {
       return {
         models: async () => {
           modelsCalls += 1;
-          if (
-            modelsFailOnce ||
-            script.modelsFail === "always" ||
-            script.modelsFail === modelsCalls
-          ) {
+          const call = modelsCalls;
+          if (script.beforeModels !== undefined) await script.beforeModels(call);
+          if (modelsFailOnce || script.modelsFail === "always" || script.modelsFail === call) {
             modelsFailOnce = false;
             throw { category: "unavailable", message: "Discovery failed." };
           }
@@ -437,6 +436,66 @@ describe("video jobs", () => {
     expect(job?.settledCostUsdMicros).toBeUndefined();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(fetched).toEqual([]);
+  });
+
+  it("leaves a successful start for recovery when shutdown interrupts its model lookup", async () => {
+    const lookingUp = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const { service, connection, root, calls, spend } = harness({
+      beforeModels: async (call) => {
+        if (call !== 2) return;
+        lookingUp.resolve();
+        await resume.promise;
+      },
+      poll: async () => ({ status: "running" }),
+    });
+    const queued = await enqueue(service);
+    await lookingUp.promise;
+    const running = service.getById(queued.id);
+    expect(running?.status).toBe("running");
+    expect(calls.start).toBe(1);
+    service.close();
+    resume.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(service.getById(queued.id)).toEqual(running);
+    expect(calls.poll).toBe(0);
+    expect(spend.settle).not.toHaveBeenCalled();
+    connection.close();
+
+    const restarted = harness({}, root);
+    try {
+      await restarted.service.recover();
+      expect(restarted.service.getById(queued.id)).toMatchObject({
+        status: "failed",
+        failure: { category: "interrupted" },
+        settledCostUsdMicros: queued.estimatedCostUsdMicros,
+      });
+      expect(restarted.calls.start).toBe(0);
+    } finally {
+      restarted.service.close();
+      restarted.connection.close();
+    }
+  });
+
+  it("refuses a new clip quote that comes back after shutdown starts", async () => {
+    const lookingUp = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const { service, connection, calls, spend } = harness({
+      beforeModels: () => {
+        lookingUp.resolve();
+        return resume.promise;
+      },
+    });
+    const pending = enqueue(service);
+    await lookingUp.promise;
+    service.close();
+    connection.close();
+    resume.resolve();
+
+    await expect(pending).rejects.toThrow("The host is shutting down.");
+    expect(spend.admit).not.toHaveBeenCalled();
+    expect(calls.start).toBe(0);
   });
 
   it("releases both slots when start responses stall past the job deadline", async () => {
