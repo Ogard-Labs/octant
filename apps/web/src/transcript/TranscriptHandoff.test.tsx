@@ -116,9 +116,52 @@ describe("TranscriptHandoff", () => {
     render(<TranscriptHandoff entry={entry!} providerGroups={groups} />);
     expect(
       screen.getByRole("separator", {
-        name: "Context handoff from Claude Personal — Sonnet 4 to Claude Personal — Opus 4",
+        name: "Context handoff from Sonnet 4 to Opus 4",
       }),
     ).toBeVisible();
+  });
+
+  it("prefers the recorded handoff source when a stopped handoff repeats on the destination provider", () => {
+    const entry = resolveTranscriptHandoff({
+      previous: { providerInstanceId: claudeId, modelId: "claude-sonnet-4" },
+      current: { providerInstanceId: claudeId, modelId: "claude-sonnet-4" },
+      handoff: {
+        reason: "provider-switch",
+        previousProviderInstanceId: codexId,
+        previousModelId: "gpt-5.3",
+      },
+      disclosure: "Handed over 4 recent messages from Codex — GPT-5.3 as text.",
+    });
+
+    expect(entry?.kind).toBe("context-handoff");
+    expect(entry?.from).toEqual({ providerInstanceId: codexId, modelId: "gpt-5.3" });
+    expect(entry?.to).toEqual({ providerInstanceId: claudeId, modelId: "claude-sonnet-4" });
+    render(<TranscriptHandoff entry={entry!} providerGroups={groups} />);
+    expect(
+      screen.getByRole("separator", {
+        name: "Context handoff from Codex — GPT-5.3 to Claude Personal — Sonnet 4",
+      }),
+    ).toBeVisible();
+  });
+
+  it("keeps an explicit fork label when the fork opens on a different model of the same provider", () => {
+    const entry = resolveTranscriptHandoff({
+      previous: { providerInstanceId: claudeId, modelId: "claude-sonnet-4" },
+      current: { providerInstanceId: claudeId, modelId: "claude-opus-4" },
+      handoff: { reason: "fork" },
+      disclosure: "Forked with 2 recent messages of the source conversation as text.",
+    });
+
+    expect(entry?.kind).toBe("fork");
+    expect(entry?.from).toEqual({ providerInstanceId: claudeId, modelId: "claude-sonnet-4" });
+    expect(entry?.to).toEqual({ providerInstanceId: claudeId, modelId: "claude-opus-4" });
+    render(<TranscriptHandoff entry={entry!} providerGroups={groups} />);
+    const separator = screen.getByRole("separator", {
+      name: "Forked context from Sonnet 4 to Opus 4",
+    });
+    expect(separator).toHaveTextContent("Forked context");
+    expect(separator).toHaveTextContent("Sonnet 4");
+    expect(separator).toHaveTextContent("Opus 4");
   });
 
   it("recovers the source model from a recorded handoff when earlier turns are not loaded", () => {

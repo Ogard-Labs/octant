@@ -1,4 +1,4 @@
-import type { MobileModelOption } from "@octant/client-runtime";
+import type { MobileModelOption, MobileProviderDirectoryEntry } from "@octant/client-runtime";
 import type {
   AccountMoveTextHandoffCause,
   ChatAttemptHandoff,
@@ -44,6 +44,12 @@ export type MobileRecordedHandoff =
   | WorkTurnHandoff
   | CodeConversationTurnHandoff;
 
+export interface MobileChatHandoffPlacements {
+  readonly beforeContentId: ReadonlyMap<string, ReadonlyArray<MobileTranscriptHandoffEntry>>;
+  readonly afterContentId: ReadonlyMap<string, ReadonlyArray<MobileTranscriptHandoffEntry>>;
+  readonly trailing: ReadonlyArray<MobileTranscriptHandoffEntry>;
+}
+
 const HEADING_FOR_KIND: Readonly<Record<MobileTranscriptHandoffKind, string>> = {
   "context-handoff": "Context handoff",
   "model-switch": "Model switch",
@@ -65,6 +71,7 @@ function monogram(displayName: string): string {
 
 function providerMeta(
   options: ReadonlyArray<MobileModelOption>,
+  directory: ReadonlyArray<MobileProviderDirectoryEntry>,
   selection: MobileProviderSelection,
 ): {
   readonly modelLabel: string;
@@ -74,15 +81,23 @@ function providerMeta(
 } {
   const instanceId = String(selection.providerInstanceId);
   const modelId = String(selection.modelId);
-  const exact = options.find(
+  // Check the full directory first so disabled or unready historical accounts
+  // keep their display names instead of falling back to raw instance IDs.
+  const directoryEntry = directory.find(
+    (candidate) => String(candidate.providerInstanceId) === instanceId,
+  );
+  const directoryModel = directoryEntry?.models.find(
+    (candidate) => String(candidate.modelId) === modelId,
+  );
+  const exactOption = options.find(
     (candidate) =>
       String(candidate.providerInstanceId) === instanceId && String(candidate.modelId) === modelId,
   );
   const providerOption =
-    exact ?? options.find((candidate) => String(candidate.providerInstanceId) === instanceId);
-  const modelLabel = exact?.label ?? modelId;
-  const providerName = providerOption?.detail;
-  const driverKind = providerOption?.driverKind;
+    exactOption ?? options.find((candidate) => String(candidate.providerInstanceId) === instanceId);
+  const modelLabel = directoryModel?.displayName ?? exactOption?.label ?? modelId;
+  const providerName = directoryEntry?.displayName ?? providerOption?.detail;
+  const driverKind = directoryEntry?.driverKind ?? providerOption?.driverKind;
   const fullLabel =
     providerName === undefined
       ? `${instanceId} — ${modelLabel}`
@@ -161,8 +176,10 @@ function accountMoveTextCauseDisclosure(cause: AccountMoveTextHandoffCause | und
 export function formatMobileHandoffDisclosure(
   handoff: MobileRecordedHandoff,
   options: ReadonlyArray<MobileModelOption>,
+  directory: ReadonlyArray<MobileProviderDirectoryEntry> = [],
 ): string {
-  const label = (selection: MobileProviderSelection) => providerMeta(options, selection).fullLabel;
+  const label = (selection: MobileProviderSelection) =>
+    providerMeta(options, directory, selection).fullLabel;
   switch (handoff.reason) {
     case "provider-switch": {
       const inherited = "inherited" in handoff ? handoff.inherited : undefined;
@@ -238,17 +255,21 @@ export function resolveMobileTranscriptHandoff(input: {
   readonly current?: MobileProviderSelection | undefined;
   readonly handoff?: MobileRecordedHandoff | undefined;
   readonly modelOptions: ReadonlyArray<MobileModelOption>;
+  readonly providerDirectory?: ReadonlyArray<MobileProviderDirectoryEntry> | undefined;
 }): MobileTranscriptHandoffEntry | undefined {
-  const from =
-    input.previous ??
-    (input.handoff !== undefined &&
+  const directory = input.providerDirectory ?? [];
+  // Prefer a recorded source pair over the adjacent selection so repeated
+  // handoffs after a stopped turn still show the true origin.
+  const recordedFrom =
+    input.handoff !== undefined &&
     "previousProviderInstanceId" in input.handoff &&
     "previousModelId" in input.handoff
       ? {
           providerInstanceId: input.handoff.previousProviderInstanceId,
           modelId: input.handoff.previousModelId,
         }
-      : undefined);
+      : undefined;
+  const from = recordedFrom ?? input.previous;
   const to = input.current;
   const providerChanged =
     from !== undefined &&
@@ -261,22 +282,25 @@ export function resolveMobileTranscriptHandoff(input: {
     String(from.modelId) !== String(to.modelId);
   const reason = input.handoff?.reason;
 
+  // Explicit recorded reasons take precedence over inferred endpoint changes so
+  // a text fork, branch, or rewind onto another model never reads as a model switch.
   let kind: MobileTranscriptHandoffKind | undefined;
   if (
-    providerChanged ||
     reason === "provider-switch" ||
     reason === "account-move" ||
     reason === "account-move-native-session"
   ) {
     kind = "context-handoff";
-  } else if (modelChanged) {
-    kind = "model-switch";
   } else if (reason === "fork" || reason === "fork-native-session") {
     kind = "fork";
   } else if (reason === "branch") {
     kind = "branch";
   } else if (reason === "rewind" || reason === "rewind-native-session") {
     kind = "rewind";
+  } else if (providerChanged) {
+    kind = "context-handoff";
+  } else if (modelChanged) {
+    kind = "model-switch";
   }
 
   if (kind === undefined) return undefined;
@@ -284,7 +308,7 @@ export function resolveMobileTranscriptHandoff(input: {
   const disclosure =
     input.handoff === undefined
       ? undefined
-      : formatMobileHandoffDisclosure(input.handoff, input.modelOptions);
+      : formatMobileHandoffDisclosure(input.handoff, input.modelOptions, directory);
 
   if (from === undefined || to === undefined || (!providerChanged && !modelChanged)) {
     return {
@@ -295,8 +319,8 @@ export function resolveMobileTranscriptHandoff(input: {
     };
   }
 
-  const fromMeta = providerMeta(input.modelOptions, from);
-  const toMeta = providerMeta(input.modelOptions, to);
+  const fromMeta = providerMeta(input.modelOptions, directory, from);
+  const toMeta = providerMeta(input.modelOptions, directory, to);
   const differentInstance = String(from.providerInstanceId) !== String(to.providerInstanceId);
   const disambiguateAccount = differentInstance && fromMeta.modelLabel === toMeta.modelLabel;
   const fromLabel =
@@ -308,10 +332,9 @@ export function resolveMobileTranscriptHandoff(input: {
       ? `${toMeta.providerName} · ${toMeta.modelLabel}`
       : toMeta.modelLabel;
 
-  const accessibleLabel =
-    kind === "model-switch"
-      ? `${heading} from ${fromLabel} to ${toLabel}`
-      : `${heading} from ${fromMeta.fullLabel} to ${toMeta.fullLabel}`;
+  const accessibleLabel = differentInstance
+    ? `${heading} from ${fromMeta.fullLabel} to ${toMeta.fullLabel}`
+    : `${heading} from ${fromLabel} to ${toLabel}`;
 
   return {
     kind,
@@ -338,20 +361,43 @@ export function resolveMobileTranscriptHandoff(input: {
   };
 }
 
+function appendEntry(
+  map: Map<string, MobileTranscriptHandoffEntry[]>,
+  key: string,
+  entry: MobileTranscriptHandoffEntry,
+): void {
+  const existing = map.get(key);
+  if (existing === undefined) {
+    map.set(key, [entry]);
+    return;
+  }
+  existing.push(entry);
+}
+
 /**
- * Places each Chat handoff or switch boundary on the message content id it opens:
- * turn-to-turn transitions ahead of the turn's user message, and within-turn
- * retry transitions ahead of that attempt's first reply.
+ * Places each Chat handoff or switch boundary in attempt order: turn-to-turn
+ * transitions ahead of the turn's user message, reply-bearing retries ahead of
+ * that attempt's first reply, and replyless retries immediately after the
+ * preceding visible message in the same turn so their disclosures are never lost.
  */
-export function mobileChatHandoffsByContentId(
+export function mobileChatHandoffPlacements(
   view: ChatThreadView,
   modelOptions: ReadonlyArray<MobileModelOption>,
-): ReadonlyMap<string, MobileTranscriptHandoffEntry> {
-  const byContentId = new Map<string, MobileTranscriptHandoffEntry>();
+  providerDirectory: ReadonlyArray<MobileProviderDirectoryEntry> = [],
+): MobileChatHandoffPlacements {
+  const beforeContentId = new Map<string, MobileTranscriptHandoffEntry[]>();
+  const afterContentId = new Map<string, MobileTranscriptHandoffEntry[]>();
+  const trailing: MobileTranscriptHandoffEntry[] = [];
+  const storedContentIds = new Set(view.contents.map((content) => String(content.contentId)));
   const turns = activeChatTurns(view.turns);
   let previousTurnAttempt: ChatThreadView["turns"][number]["attempts"][number] | undefined;
 
   for (const turn of turns) {
+    const userContentId = String(turn.userMessageRef.contentId);
+    let lastVisibleAnchor: string | undefined = storedContentIds.has(userContentId)
+      ? userContentId
+      : undefined;
+
     const firstAttempt = turn.attempts[0];
     if (firstAttempt !== undefined) {
       const turnEntry = resolveMobileTranscriptHandoff({
@@ -359,11 +405,21 @@ export function mobileChatHandoffsByContentId(
         current: firstAttempt,
         handoff: firstAttempt.handoff,
         modelOptions,
+        providerDirectory,
       });
       if (turnEntry !== undefined) {
-        byContentId.set(String(turn.userMessageRef.contentId), turnEntry);
+        if (storedContentIds.has(userContentId)) {
+          appendEntry(beforeContentId, userContentId, turnEntry);
+        } else {
+          trailing.push(turnEntry);
+        }
+      }
+      for (const ref of firstAttempt.responseRefs) {
+        const id = String(ref.contentId);
+        if (storedContentIds.has(id)) lastVisibleAnchor = id;
       }
     }
+
     for (let index = 1; index < turn.attempts.length; index += 1) {
       const previousAttempt = turn.attempts[index - 1];
       const attempt = turn.attempts[index];
@@ -373,15 +429,29 @@ export function mobileChatHandoffsByContentId(
         current: attempt,
         handoff: attempt.handoff,
         modelOptions,
+        providerDirectory,
       });
-      const anchor = attempt.responseRefs[0]?.contentId;
-      if (attemptEntry !== undefined && anchor !== undefined) {
-        byContentId.set(String(anchor), attemptEntry);
+      const firstVisibleReply = attempt.responseRefs
+        .map((ref) => String(ref.contentId))
+        .find((id) => storedContentIds.has(id));
+      if (attemptEntry !== undefined) {
+        if (firstVisibleReply !== undefined) {
+          appendEntry(beforeContentId, firstVisibleReply, attemptEntry);
+        } else if (lastVisibleAnchor !== undefined) {
+          appendEntry(afterContentId, lastVisibleAnchor, attemptEntry);
+        } else {
+          trailing.push(attemptEntry);
+        }
+      }
+      for (const ref of attempt.responseRefs) {
+        const id = String(ref.contentId);
+        if (storedContentIds.has(id)) lastVisibleAnchor = id;
       }
     }
+
     const latest = turn.attempts.at(-1);
     if (latest !== undefined) previousTurnAttempt = latest;
   }
 
-  return byContentId;
+  return { beforeContentId, afterContentId, trailing };
 }

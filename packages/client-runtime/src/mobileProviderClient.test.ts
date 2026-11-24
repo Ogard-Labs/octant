@@ -12,6 +12,7 @@ import {
   encodeMobileModelOptionId,
   fetchMobileModelOptions,
   normalizeMobileModelOptions,
+  normalizeMobileProviderDirectory,
 } from "./mobileProviderClient";
 import type { MobileRemoteTransport } from "./mobileInboxClient";
 
@@ -145,6 +146,27 @@ describe("mobile provider catalog", () => {
     ]);
     expect(JSON.stringify(options)).not.toContain("baseUrl");
     expect(JSON.stringify(options)).not.toContain("authentication");
+  });
+
+  it("retains disabled and unready accounts in the display directory for historical handoffs", () => {
+    const directory = normalizeMobileProviderDirectory(snapshot());
+    expect(directory).toEqual([
+      {
+        providerInstanceId: String(instanceA),
+        displayName: "Alpha",
+        driverKind: "openai-compatible",
+        models: [
+          { modelId: "model-a", displayName: "Model A" },
+          { modelId: "model-b", displayName: "Model B" },
+        ],
+      },
+      {
+        providerInstanceId: String(instanceB),
+        displayName: "Bravo",
+        driverKind: "openai-compatible",
+        models: [{ modelId: "model-x", displayName: "Hidden" }],
+      },
+    ]);
   });
 
   it("skips unavailable readiness and fetches via bootstrap", async () => {

@@ -9,6 +9,7 @@ import {
   threadRoutineReceipts,
   type MobileCodeConversation,
   type MobileModelOption,
+  type MobileProviderDirectoryEntry,
   type MobileTurnTargets,
 } from "@octant/client-runtime";
 import type { ChatAttachment, ReplyDetailLevel, WorkTurnState } from "@octant/contracts";
@@ -20,8 +21,9 @@ import { MessageBubble } from "../../ui/MessageBubble";
 import { RoutineReceiptCard } from "../../ui/RoutineReceiptCard";
 import { TranscriptHandoffDivider } from "../../ui/TranscriptHandoffDivider";
 import {
-  mobileChatHandoffsByContentId,
+  mobileChatHandoffPlacements,
   resolveMobileTranscriptHandoff,
+  type MobileChatHandoffPlacements,
   type MobileTranscriptHandoffEntry,
 } from "../../ui/transcriptHandoffPresentation";
 import type { MessageActionItem } from "../../ui/MessageActions";
@@ -44,6 +46,8 @@ export interface ThreadTranscriptProps {
   readonly replyDetail: ReplyDetailLevel;
   /** Host-advertised models, for resolving provider and model names on handoff dividers. */
   readonly modelOptions?: ReadonlyArray<MobileModelOption>;
+  /** Full provider directory (including disabled/unready accounts) for historical handoff labels. */
+  readonly providerDirectory?: ReadonlyArray<MobileProviderDirectoryEntry>;
   /**
    * A turn to bring into view, from a message search hit: the transcript
    * reports where that turn sits so the screen can scroll to it. The id is the
@@ -138,15 +142,20 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
   );
   const { chat, workTurns, codeConversation } = props;
   const modelOptions = props.modelOptions ?? [];
+  const providerDirectory = props.providerDirectory ?? [];
   const codeTurns = codeConversation?.turns;
   const view = chat.view;
   const messages = useMemo(() => (view === undefined ? [] : mobileChatMessages(view)), [view]);
-  const chatHandoffs = useMemo(
+  const chatHandoffs = useMemo<MobileChatHandoffPlacements>(
     () =>
       view === undefined
-        ? new Map<string, MobileTranscriptHandoffEntry>()
-        : mobileChatHandoffsByContentId(view, modelOptions),
-    [modelOptions, view],
+        ? {
+            beforeContentId: new Map(),
+            afterContentId: new Map(),
+            trailing: [],
+          }
+        : mobileChatHandoffPlacements(view, modelOptions, providerDirectory),
+    [modelOptions, providerDirectory, view],
   );
   const workHandoffs = useMemo(() => {
     const map = new Map<string, MobileTranscriptHandoffEntry>();
@@ -160,11 +169,12 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
         current: turn.authority,
         handoff: turn.handoff,
         modelOptions,
+        providerDirectory,
       });
       if (entry !== undefined) map.set(String(turn.turnId), entry);
     }
     return map;
-  }, [modelOptions, workTurns]);
+  }, [modelOptions, providerDirectory, workTurns]);
   const codeHandoffs = useMemo(() => {
     const map = new Map<string, MobileTranscriptHandoffEntry>();
     if (codeTurns === undefined) return map;
@@ -179,12 +189,13 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
         current,
         handoff: turn.handoff,
         modelOptions,
+        providerDirectory,
       });
       if (entry !== undefined) map.set(turn.operationId, entry);
       if (current !== undefined) previous = current;
     }
     return map;
-  }, [codeTurns, modelOptions]);
+  }, [codeTurns, modelOptions, providerDirectory]);
   const attachmentsByMessage = useMemo(
     () =>
       view === undefined
@@ -472,7 +483,10 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                 chat.activeAttempt === undefined &&
                 props.allowProductMutations;
               const sentWith = attachmentsByMessage.get(String(content.contentId)) ?? [];
-              const handoff = chatHandoffs.get(String(content.contentId));
+              const handoffsBefore =
+                chatHandoffs.beforeContentId.get(String(content.contentId)) ?? [];
+              const handoffsAfter =
+                chatHandoffs.afterContentId.get(String(content.contentId)) ?? [];
               return (
                 <View
                   key={content.contentId}
@@ -487,12 +501,13 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                     : {})}
                   style={styles.messageWithAttachments}
                 >
-                  {handoff === undefined ? null : (
+                  {handoffsBefore.map((handoff, handoffIndex) => (
                     <TranscriptHandoffDivider
                       entry={handoff}
+                      key={`before-${String(content.contentId)}-${String(handoffIndex)}`}
                       testID={`mobile-chat-handoff-${String(content.contentId)}`}
                     />
-                  )}
+                  ))}
                   <MessageBubble
                     replyDetail={props.replyDetail}
                     body={content.body}
@@ -515,10 +530,24 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                       : {})}
                   />
                   {sentWith.length > 0 ? attachmentChips(sentWith, true) : null}
+                  {handoffsAfter.map((handoff, handoffIndex) => (
+                    <TranscriptHandoffDivider
+                      entry={handoff}
+                      key={`after-${String(content.contentId)}-${String(handoffIndex)}`}
+                      testID={`mobile-chat-handoff-after-${String(content.contentId)}-${String(handoffIndex)}`}
+                    />
+                  ))}
                 </View>
               );
             })
           )}
+          {chatHandoffs.trailing.map((handoff, handoffIndex) => (
+            <TranscriptHandoffDivider
+              entry={handoff}
+              key={`trailing-${String(handoffIndex)}`}
+              testID={`mobile-chat-handoff-trailing-${String(handoffIndex)}`}
+            />
+          ))}
         </View>
       ) : null}
     </>

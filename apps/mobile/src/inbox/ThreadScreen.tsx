@@ -705,6 +705,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 chat={chat}
                 codeConversation={code.conversation}
                 modelOptions={models.options}
+                providerDirectory={models.providerDirectory}
                 replyDetail={replyDetail}
                 turnActionsFor={turnActions.actionsFor}
                 workTurns={work.turns}

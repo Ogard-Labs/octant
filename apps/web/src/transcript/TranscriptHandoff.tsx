@@ -62,15 +62,18 @@ export function resolveTranscriptHandoff(input: {
   readonly handoff?: RecordedHandoffSummary | undefined;
   readonly disclosure?: string | undefined;
 }): TranscriptHandoffEntry | undefined {
-  const from =
-    input.previous ??
-    (input.handoff?.previousProviderInstanceId !== undefined &&
+  // Prefer a recorded source pair over the adjacent turn's selection: when a
+  // stopped handoff is repeated on the destination provider, the adjacent turn
+  // already names the destination while the record still names the true source.
+  const recordedFrom =
+    input.handoff?.previousProviderInstanceId !== undefined &&
     input.handoff.previousModelId !== undefined
       ? {
           providerInstanceId: input.handoff.previousProviderInstanceId,
           modelId: input.handoff.previousModelId,
         }
-      : undefined);
+      : undefined;
+  const from = recordedFrom ?? input.previous;
   const to = input.current;
   const providerChanged =
     from !== undefined &&
@@ -83,22 +86,25 @@ export function resolveTranscriptHandoff(input: {
     String(from.modelId) !== String(to.modelId);
   const reason = input.handoff?.reason;
 
+  // Explicit recorded reasons take precedence over inferred endpoint changes so
+  // a text fork, branch, or rewind onto another model never reads as a model switch.
   let kind: TranscriptHandoffKind | undefined;
   if (
-    providerChanged ||
     reason === "provider-switch" ||
     reason === "account-move" ||
     reason === "account-move-native-session"
   ) {
     kind = "context-handoff";
-  } else if (modelChanged) {
-    kind = "model-switch";
   } else if (reason === "fork" || reason === "fork-native-session") {
     kind = "fork";
   } else if (reason === "branch") {
     kind = "branch";
   } else if (reason === "rewind" || reason === "rewind-native-session") {
     kind = "rewind";
+  } else if (providerChanged) {
+    kind = "context-handoff";
+  } else if (modelChanged) {
+    kind = "model-switch";
   }
 
   if (kind === undefined) return undefined;
@@ -220,9 +226,9 @@ export function TranscriptHandoff(props: {
   const accessibleLabel =
     route === undefined
       ? heading
-      : entry.kind === "model-switch"
-        ? `${heading} from ${route.from.label} to ${route.to.label}`
-        : `${heading} from ${route.from.fullLabel} to ${route.to.fullLabel}`;
+      : route.showToGlyph
+        ? `${heading} from ${route.from.fullLabel} to ${route.to.fullLabel}`
+        : `${heading} from ${route.from.label} to ${route.to.label}`;
 
   return (
     <div className="transcript-handoff" data-handoff-kind={entry.kind}>

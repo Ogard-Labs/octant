@@ -2,12 +2,12 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { MobileModelOption } from "@octant/client-runtime";
+import type { MobileModelOption, MobileProviderDirectoryEntry } from "@octant/client-runtime";
 import { decodeChatThreadView } from "@octant/contracts/chat";
 import { ThemeProvider } from "../../design-system/theme";
 import { TranscriptHandoffDivider } from "./TranscriptHandoffDivider";
 import {
-  mobileChatHandoffsByContentId,
+  mobileChatHandoffPlacements,
   resolveMobileTranscriptHandoff,
   type MobileTranscriptHandoffEntry,
 } from "./transcriptHandoffPresentation";
@@ -277,13 +277,215 @@ describe("TranscriptHandoffDivider on the phone", () => {
       followUpVersion: 0,
     });
 
-    const placements = mobileChatHandoffsByContentId(view, modelOptions);
-    expect(placements.get(user1Id)).toBeUndefined();
-    expect(placements.get(reply1bId)?.kind).toBe("context-handoff");
-    expect(placements.get(reply1bId)?.route?.from.label).toBe("GPT-5.3");
-    expect(placements.get(reply1bId)?.route?.to.label).toBe("Sonnet 4");
-    expect(placements.get(user2Id)?.kind).toBe("model-switch");
-    expect(placements.get(user2Id)?.route?.from.label).toBe("Sonnet 4");
-    expect(placements.get(user2Id)?.route?.to.label).toBe("Opus 4");
+    const placements = mobileChatHandoffPlacements(view, modelOptions);
+    expect(placements.beforeContentId.get(user1Id)).toBeUndefined();
+    expect(placements.beforeContentId.get(reply1bId)?.[0]?.kind).toBe("context-handoff");
+    expect(placements.beforeContentId.get(reply1bId)?.[0]?.route?.from.label).toBe("GPT-5.3");
+    expect(placements.beforeContentId.get(reply1bId)?.[0]?.route?.to.label).toBe("Sonnet 4");
+    expect(placements.beforeContentId.get(user2Id)?.[0]?.kind).toBe("model-switch");
+    expect(placements.beforeContentId.get(user2Id)?.[0]?.route?.from.label).toBe("Sonnet 4");
+    expect(placements.beforeContentId.get(user2Id)?.[0]?.route?.to.label).toBe("Opus 4");
+  });
+
+  it("prefers the recorded handoff source when a stopped handoff repeats on the destination provider", () => {
+    const entry = resolveMobileTranscriptHandoff({
+      previous: { providerInstanceId: claudeId, modelId: "claude-sonnet-4" },
+      current: { providerInstanceId: claudeId, modelId: "claude-sonnet-4" },
+      handoff: {
+        reason: "provider-switch",
+        previousProviderInstanceId: codexId as never,
+        previousModelId: "gpt-5.3" as never,
+        messages: 3,
+        omissions: emptyOmissions,
+        externalContentIngested: false,
+        nativeSessionTransferred: false,
+        hiddenReasoningTransferred: false,
+      },
+      modelOptions,
+    });
+
+    expect(entry?.kind).toBe("context-handoff");
+    expect(entry?.route?.from.label).toBe("GPT-5.3");
+    expect(entry?.route?.to.label).toBe("Sonnet 4");
+  });
+
+  it("keeps an explicit fork label when the fork opens on a different model of the same provider", () => {
+    const entry = resolveMobileTranscriptHandoff({
+      previous: { providerInstanceId: claudeId, modelId: "claude-sonnet-4" },
+      current: { providerInstanceId: claudeId, modelId: "claude-opus-4" },
+      handoff: {
+        reason: "fork",
+        messages: 2,
+        omissions: emptyOmissions,
+        externalContentIngested: false,
+        nativeSessionTransferred: false,
+        hiddenReasoningTransferred: false,
+      },
+      modelOptions,
+    });
+
+    expect(entry?.kind).toBe("fork");
+    expect(entry?.heading).toBe("Forked context");
+    expect(entry?.route?.from.label).toBe("Sonnet 4");
+    expect(entry?.route?.to.label).toBe("Opus 4");
+  });
+
+  it("resolves disabled or unready historical accounts from the provider directory", () => {
+    const disabledId = "10000000-0000-4000-8000-000000000099";
+    const directory: ReadonlyArray<MobileProviderDirectoryEntry> = [
+      {
+        providerInstanceId: disabledId,
+        displayName: "Retired Codex",
+        driverKind: "codex",
+        models: [{ modelId: "gpt-5.2", displayName: "GPT-5.2" }],
+      },
+      {
+        providerInstanceId: claudeId,
+        displayName: "Claude Personal",
+        driverKind: "claude",
+        models: [{ modelId: "claude-sonnet-4", displayName: "Sonnet 4" }],
+      },
+    ];
+    const entry = resolveMobileTranscriptHandoff({
+      previous: { providerInstanceId: disabledId, modelId: "gpt-5.2" },
+      current: { providerInstanceId: claudeId, modelId: "claude-sonnet-4" },
+      handoff: {
+        reason: "provider-switch",
+        previousProviderInstanceId: disabledId as never,
+        previousModelId: "gpt-5.2" as never,
+        messages: 2,
+        omissions: emptyOmissions,
+        externalContentIngested: false,
+        nativeSessionTransferred: false,
+        hiddenReasoningTransferred: false,
+      },
+      modelOptions: modelOptions.filter((option) => option.providerInstanceId === claudeId),
+      providerDirectory: directory,
+    });
+
+    expect(entry?.route?.from.label).toBe("GPT-5.2");
+    expect(entry?.route?.from.monogram).toBe("RC");
+    expect(entry?.disclosure).toContain("Retired Codex — GPT-5.2");
+  });
+
+  it("keeps recorded handoffs for consecutive replyless Chat retries in attempt order", () => {
+    const now = "2026-11-24T12:00:00.000Z";
+    const threadId = "00000000-0000-4000-8000-000000000901";
+    const turnId = "00000000-0000-4000-8000-000000000902";
+    const userId = "00000000-0000-4000-8000-000000000911";
+    const ref = (contentId: string) => ({ contentId, digest: "b".repeat(64), byteLength: 10 });
+    const view = decodeChatThreadView({
+      thread: {
+        id: threadId,
+        title: "Retry handoff",
+        lifecycle: "active",
+        providerInstanceId: claudeWorkId,
+        modelId: "claude-sonnet-4",
+        researchEnabled: false,
+        researchRouting: "automatic",
+        personalityInstructions: "Be calm.",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+      lastSequence: 1,
+      turns: [
+        {
+          id: turnId,
+          threadId,
+          sequence: 1,
+          userMessageRef: ref(userId),
+          attachmentIds: [],
+          attempts: [
+            {
+              id: "10000000-0000-4000-8000-000000000921",
+              turnId,
+              threadId,
+              providerInstanceId: codexId,
+              providerSessionId: "20000000-0000-4000-8000-000000000921",
+              modelId: "gpt-5.3",
+              contextManifestId: "30000000-0000-4000-8000-000000000921",
+              outcome: "interrupted",
+              responseRefs: [],
+              citationIds: [],
+              createdAt: now,
+              updatedAt: now,
+            },
+            {
+              id: "10000000-0000-4000-8000-000000000922",
+              turnId,
+              threadId,
+              providerInstanceId: claudeId,
+              providerSessionId: "20000000-0000-4000-8000-000000000922",
+              modelId: "claude-sonnet-4",
+              contextManifestId: "30000000-0000-4000-8000-000000000922",
+              outcome: "failed",
+              responseRefs: [],
+              citationIds: [],
+              handoff: {
+                reason: "provider-switch",
+                previousProviderInstanceId: codexId,
+                previousModelId: "gpt-5.3",
+                messages: 4,
+                omissions: emptyOmissions,
+                externalContentIngested: false,
+                nativeSessionTransferred: false,
+                hiddenReasoningTransferred: false,
+              },
+              createdAt: now,
+              updatedAt: now,
+            },
+            {
+              id: "10000000-0000-4000-8000-000000000923",
+              turnId,
+              threadId,
+              providerInstanceId: claudeWorkId,
+              providerSessionId: "20000000-0000-4000-8000-000000000923",
+              modelId: "claude-sonnet-4",
+              contextManifestId: "30000000-0000-4000-8000-000000000923",
+              outcome: "interrupted",
+              responseRefs: [],
+              citationIds: [],
+              handoff: {
+                reason: "provider-switch",
+                previousProviderInstanceId: codexId,
+                previousModelId: "gpt-5.3",
+                messages: 4,
+                omissions: emptyOmissions,
+                externalContentIngested: false,
+                nativeSessionTransferred: false,
+                hiddenReasoningTransferred: false,
+              },
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+          createdAt: now,
+        },
+      ],
+      contents: [
+        {
+          contentId: userId,
+          role: "user",
+          body: "Retry me",
+          byteLength: 8,
+          digest: "b".repeat(64),
+        },
+      ],
+      attachments: [],
+      citations: [],
+      workItems: [],
+      workListVersion: 0,
+      followUpVersion: 0,
+    });
+
+    const placements = mobileChatHandoffPlacements(view, modelOptions);
+    const afterUser = placements.afterContentId.get(userId);
+    expect(afterUser).toHaveLength(2);
+    expect(afterUser?.[0]?.route?.from.label).toBe("GPT-5.3");
+    expect(afterUser?.[0]?.route?.to.label).toBe("Sonnet 4");
+    expect(afterUser?.[0]?.disclosure).toContain("Handed over 4 recent messages");
+    expect(afterUser?.[1]?.route?.from.label).toBe("GPT-5.3");
+    expect(afterUser?.[1]?.route?.to.label).toBe("Sonnet 4");
   });
 });

@@ -19,6 +19,18 @@ export interface MobileModelOption {
   readonly attachmentModalities: ReadonlyArray<ProviderInputModality>;
 }
 
+/**
+ * Every configured provider account the host knows, enabled or not, so
+ * historical transcript handoffs keep human account and model names after an
+ * account is disabled or goes unready.
+ */
+export interface MobileProviderDirectoryEntry {
+  readonly providerInstanceId: string;
+  readonly displayName: string;
+  readonly driverKind: string;
+  readonly models: ReadonlyArray<{ readonly modelId: string; readonly displayName: string }>;
+}
+
 const OPTION_SEPARATOR = "::";
 
 export function encodeMobileModelOptionId(providerInstanceId: string, modelId: string): string {
@@ -67,6 +79,29 @@ export function normalizeMobileModelOptions(
     }
   }
   return options;
+}
+
+/**
+ * Full provider directory for display attribution (handoff dividers and
+ * disclosures), including disabled and unready instances that pickers omit.
+ */
+export function normalizeMobileProviderDirectory(
+  snapshot: ProviderRegistrySnapshot,
+): ReadonlyArray<MobileProviderDirectoryEntry> {
+  return snapshot.instances.map((instance) => {
+    const observation = snapshot.observedStates.find(
+      (candidate) => candidate.instanceId === instance.id,
+    );
+    return {
+      providerInstanceId: String(instance.id),
+      displayName: instance.displayName,
+      driverKind: instance.driverKind,
+      models: (observation?.models ?? []).map((model) => ({
+        modelId: String(model.id),
+        displayName: model.displayName,
+      })),
+    };
+  });
 }
 
 export async function fetchMobileProviderCatalog(
