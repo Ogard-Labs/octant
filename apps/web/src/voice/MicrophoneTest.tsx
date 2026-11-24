@@ -81,7 +81,7 @@ export function MicrophoneTest() {
           variant={recording ? "destructive" : "secondary"}
         >
           {recording ? (
-            <Square aria-hidden="true" fill="currentColor" size={10} />
+            <Square aria-hidden="true" fill="currentColor" size={12} />
           ) : (
             <Mic aria-hidden="true" size={14} />
           )}

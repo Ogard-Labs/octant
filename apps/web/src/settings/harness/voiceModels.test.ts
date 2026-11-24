@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSpeechUsable, voiceModelsOf } from "./voiceModels";
+import { isSpeechUsable, presetVoiceHintFor, voiceModelsOf } from "./voiceModels";
 
 const ids = (...list: string[]) => list.map((id) => ({ id: id as never }));
 
@@ -41,5 +41,29 @@ describe("which endpoints Voice can use", () => {
     expect(isSpeechUsable(instance("ollama", true))).toBe(false);
     expect(isSpeechUsable(instance("azure-foundry", true))).toBe(false);
     expect(isSpeechUsable(instance("anthropic-compatible", true))).toBe(false);
+  });
+
+  it("offers a preset's models only to an endpoint still at that preset's address", () => {
+    const at = (baseUrl: string) =>
+      ({
+        id: "00000000-0000-4000-8000-00000000c001",
+        displayName: "OpenAI",
+        enabled: true,
+        driverKind: "openai-compatible",
+        configuration: {
+          kind: "openai-compatible-http",
+          baseUrl,
+          authentication: "bearer",
+          protocol: "auto",
+          manualModelIds: [],
+        },
+      }) as never;
+    expect(presetVoiceHintFor(at("https://api.openai.com/v1"))?.transcription).toBe(
+      "gpt-4o-mini-transcribe",
+    );
+    expect(presetVoiceHintFor(at("http://127.0.0.1:8080/v1"))).toBeUndefined();
+    expect(voiceModelsOf(undefined, presetVoiceHintFor(at("http://127.0.0.1:8080/v1")))).toEqual(
+      {},
+    );
   });
 });
