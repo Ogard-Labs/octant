@@ -210,12 +210,12 @@ function renderWorkspace(
 describe("CodeProjectPullRequests", () => {
   it("shows reload instructions when the overview or watch settings cannot load their controls", async () => {
     const user = userEvent.setup();
-    const failure = new PullRequestControlsUnavailableError();
-    const unavailable = vi.fn().mockRejectedValue(failure);
+    const unavailable = vi.fn().mockRejectedValue(new PullRequestControlsUnavailableError());
+    const recovery = /reload the page in your browser, or quit and reopen the Octant desktop app/i;
     const { unmount } = render(
       <CodeProjectPullRequests load={unavailable} refresh={unavailable} />,
     );
-    expect(await screen.findByText(failure.message)).toBeVisible();
+    expect(await screen.findByText(recovery)).toBeVisible();
     unmount();
     render(
       <CodeProjectPullRequests
@@ -228,7 +228,7 @@ describe("CodeProjectPullRequests", () => {
       />,
     );
     await user.click(await screen.findByRole("button", { name: "Babysit octant/octant#12" }));
-    expect(await screen.findByText(failure.message)).toBeVisible();
+    expect(await screen.findByText(recovery)).toBeVisible();
   });
 
   it("starts babysitting the chosen PR from the list in the selected linked thread", async () => {

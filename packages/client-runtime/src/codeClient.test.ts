@@ -11,6 +11,7 @@ import {
   CodeClientSnapshotRequiredError,
   createCodeClient,
   MAX_CODE_NDJSON_LINE_BYTES,
+  PullRequestControlsUnavailableError,
 } from "./codeClient";
 
 const baseUrl = "http://127.0.0.1:4310";
@@ -660,8 +661,9 @@ describe("code client", () => {
     vi.doMock("@octant/contracts/code-project-pull-requests", unavailable);
     vi.doMock("@octant/contracts/code-project-pull-request-switches", unavailable);
     try {
-      const failure = { name: "CodeClientFailure", category: "unavailable" };
-      await expect(client.queryProjectPullRequests({ version: 1 })).rejects.toMatchObject(failure);
+      await expect(client.queryProjectPullRequests({ version: 1 })).rejects.toBeInstanceOf(
+        PullRequestControlsUnavailableError,
+      );
       await expect(
         client.queryProjectPullRequestSwitches?.({
           projectId: decodeProjectId(ids.project),
@@ -669,7 +671,7 @@ describe("code client", () => {
           repositoryName: "octant",
           number: 12,
         }),
-      ).rejects.toMatchObject(failure);
+      ).rejects.toBeInstanceOf(PullRequestControlsUnavailableError);
       expect(fetch).not.toHaveBeenCalled();
     } finally {
       vi.doUnmock("@octant/contracts/code-project-pull-requests");

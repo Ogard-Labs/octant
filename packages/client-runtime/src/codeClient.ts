@@ -432,7 +432,8 @@ export class PullRequestControlsUnavailableError extends CodeClientFailure {
   constructor() {
     super({
       category: "unavailable",
-      message: "Pull request controls could not load. Reload Octant and try again.",
+      message:
+        "Pull request controls could not load. Reload the page in your browser, or quit and reopen the Octant desktop app.",
     });
   }
 }
