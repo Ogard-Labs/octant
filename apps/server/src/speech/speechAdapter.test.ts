@@ -1,6 +1,10 @@
 import { decodeProviderInstance, type OpenAiCompatibleProviderInstance } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { makeOpenAiCompatibleSpeechAdapter, transcriptionPreferencesOf } from "./speechAdapter";
+import {
+  makeOpenAiCompatibleSpeechAdapter,
+  transcriptionPreferencesOf,
+  transcriptionRequestIdentity,
+} from "./speechAdapter";
 
 const now = "2026-09-05T10:00:00.000Z";
 
@@ -306,5 +310,32 @@ describe("OpenAI-compatible speech adapter", () => {
         format: "wav",
       }),
     ).toMatchObject({ status: "failed", providerFailure: { category: "protocol" } });
+  });
+});
+
+describe("transcription request identity", () => {
+  const long = Array.from({ length: 100 }, (_, index) => `term-number-${String(index)}`);
+
+  it("ignores dictionary terms past the prompt cut on OpenAI-shaped endpoints but not on Mistral", () => {
+    const openai = "https://api.openai.com/v1";
+    const mistral = "https://api.mistral.ai/v1";
+    const changedPastCut = [...long.slice(0, 99), "a-new-last-term"];
+
+    expect(transcriptionRequestIdentity(openai, "nb", { dictionary: long })).toBe(
+      transcriptionRequestIdentity(openai, "nb", { dictionary: changedPastCut }),
+    );
+    expect(transcriptionRequestIdentity(mistral, "nb", { dictionary: long })).not.toBe(
+      transcriptionRequestIdentity(mistral, "nb", { dictionary: changedPastCut }),
+    );
+  });
+
+  it("lets the request's own language decide, falling back to Voice settings' language", () => {
+    const openai = "https://api.openai.com/v1";
+    expect(transcriptionRequestIdentity(openai, "nb", { language: "en" })).toBe(
+      transcriptionRequestIdentity(openai, "nb", {}),
+    );
+    expect(transcriptionRequestIdentity(openai, undefined, { language: "en" })).not.toBe(
+      transcriptionRequestIdentity(openai, undefined, {}),
+    );
   });
 });
