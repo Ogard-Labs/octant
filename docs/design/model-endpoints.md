@@ -500,6 +500,10 @@ If the endpoint or model cannot be used, exceeds its deadline, or returns
 no title, the locally derived title stays. Each request uses only the
 selected source and model.
 
+In Chat, retrying a failed first send can generate a title when it is the
+thread's only recorded turn and the title endpoint has yet to receive a
+request. Retrying the first send after a later turn keeps the current title.
+
 ### Model roles
 
 Model roles is the page under Model endpoints on Octant Harness that says which model does which job (maintainer decision, 2026-11-15). Its line under the title says what uses the roles: coordinator workers and helper agents; a thread a person starts runs on the model picked in its composer. A role is a routing slot: an ordered list of models, the main one first and then up to 15 fallbacks. The six primary roles a person sees, in the order the work gets harder, are Scout (`task`), Quick edit (`quick`), Builder (`default`), Hard problems (`deep`), Reviewer (`slow`) and Sees images (`vision`); Advisor (`advisor`) and any custom slot sit under Other roles, and a disclosure below them keeps the job-to-role table for the jobs the server resolves (`researcher`, `implementer`, `reviewer`, `image-understanding`, `custom`). Built-in slots (`plan`, `smol`) and jobs (`planner`, `explorer`, `title`, `summary`, `compaction`) that no server caller resolves remain in the wire schema so saved routing decodes cleanly, while Settings hides them unless a live server-resolved job explicitly binds to `plan` or `smol` (maintainer decision, 2026-11-19). An empty role reads "Same as Builder" and resolves as it always has: an unconfigured slot routes to `default` and the host journals the warning. Builder is the one role with no such fallback, and its chooser says "Choose model" until one is picked. With exactly one ready endpoint and no Builder, the page offers that endpoint's first tool-capable model as the Builder and saves only when asked.
