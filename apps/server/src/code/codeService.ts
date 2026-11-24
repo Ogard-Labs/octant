@@ -2889,7 +2889,6 @@ export class CodeService {
       // moment ago — whether hiding it would hide work in flight.
       const restSignals =
         command.kind === "complete-code-thread" ||
-        command.kind === "mark-code-thread-done" ||
         command.kind === "snooze-code-thread" ||
         command.kind === "snooze-code-thread-at-usage-reset"
           ? boardRuntimeActivityFromWorks(this.#persistence.readCodeRuntimeWorks(current.id))
@@ -3131,13 +3130,7 @@ export class CodeService {
                                       // says so, unless a turn is still running or waits on
                                       // the person: then the mark stands and the row stays.
                                       const putAway =
-                                        this.#putAwayWhenDone() &&
-                                        restSignals !== undefined &&
-                                        decideCompleteThread({
-                                          lifecycle: current.lifecycle,
-                                          executing: restSignals.executing,
-                                          awaitingInput: restSignals.awaitingInput,
-                                        }).status !== "refused";
+                                        this.#putAwayWhenDone() && this.#mayPutAwayDone(current);
                                       return {
                                         ...(putAway
                                           ? {
@@ -3362,17 +3355,8 @@ export class CodeService {
       return { status: "skipped", reason: "already-put-away" };
     }
     const alreadyPutAway = current.completedAt !== undefined;
-    if (!alreadyPutAway) {
-      const signals = boardRuntimeActivityFromWorks(
-        this.#persistence.readCodeRuntimeWorks(current.id),
-      );
-      const decision = decideCompleteThread({
-        lifecycle: current.lifecycle,
-        executing: signals.executing || this.#liveTurns?.read(String(current.id)) !== undefined,
-        awaitingInput:
-          signals.awaitingInput || this.#awaitsHarnessApproval?.(String(current.id)) === true,
-      });
-      if (decision.status === "refused") return { status: "skipped", reason: "busy" };
+    if (!alreadyPutAway && !this.#mayPutAwayDone(current)) {
+      return { status: "skipped", reason: "busy" };
     }
     const updatedAt = decodeTimestamp(this.#clock());
     const next = decodeCodeThread({
@@ -3395,6 +3379,27 @@ export class CodeService {
       "system",
     );
     return alreadyPutAway ? { status: "recorded" } : { status: "put-away" };
+  }
+
+  /**
+   * Whether a thread that is done may also be put away now. A turn's runtime
+   * work alone misses two states: a live turn the work journal has not caught
+   * up with, and an agent's harness approval that outlived a restart which
+   * ended its turn. Either keeps the row in view, since it still needs the
+   * person or is still working.
+   */
+  #mayPutAwayDone(thread: CodeThread): boolean {
+    const signals = boardRuntimeActivityFromWorks(
+      this.#persistence.readCodeRuntimeWorks(thread.id),
+    );
+    return (
+      decideCompleteThread({
+        lifecycle: thread.lifecycle,
+        executing: signals.executing || this.#liveTurns?.read(String(thread.id)) !== undefined,
+        awaitingInput:
+          signals.awaitingInput || this.#awaitsHarnessApproval?.(String(thread.id)) === true,
+      }).status !== "refused"
+    );
   }
 
   async *subscribe(

@@ -6810,6 +6810,19 @@ describe("completing and snoozing a Code thread", () => {
     expect(markedWhileRunning.thread.markedDoneAt).toBe(now);
     expect(markedWhileRunning.thread).not.toHaveProperty("completedAt");
 
+    const awaitingApproval = serviceFixture({
+      putAwayWhenDone: () => true,
+      awaitsHarnessApproval: () => true,
+    });
+    const markedWhileApprovalWaits = await awaitingApproval.service.execute(ids.window, {
+      kind: "mark-code-thread-done",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    if (!("thread" in markedWhileApprovalWaits)) throw new Error("expected the marked thread");
+    expect(markedWhileApprovalWaits.thread.markedDoneAt).toBe(now);
+    expect(markedWhileApprovalWaits.thread).not.toHaveProperty("completedAt");
+
     const off = serviceFixture({ putAwayWhenDone: () => false });
     const markedWithSettingOff = await off.service.execute(ids.window, {
       kind: "mark-code-thread-done",
