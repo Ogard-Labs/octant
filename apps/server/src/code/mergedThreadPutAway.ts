@@ -1,5 +1,5 @@
 import type { CodeThread, CodeThreadId } from "@octant/contracts";
-import type { MergedThreadPutAwayOutcome } from "./codeService";
+import type { MergedPullRequest, MergedThreadPutAwayOutcome } from "./codeService";
 import type { CodeThreadMetadataService } from "./codeThreadMetadataService";
 
 /**
@@ -12,10 +12,7 @@ export const MERGED_THREAD_PUT_AWAY_INTERVAL_MS = 2 * 60 * 1_000;
 /** Threads looked at between yields to the event loop, as in the archive sweep. */
 const MERGED_THREAD_PUT_AWAY_BATCH = 25;
 
-export interface MergedPullRequest {
-  readonly baseRepository: string;
-  readonly number: number;
-}
+export type { MergedPullRequest };
 
 /**
  * Whether two merged pull requests are the same one in this Project, across a
@@ -42,8 +39,8 @@ export interface MergedThreadPutAwayOptions {
   readonly samePullRequest: SameMergedPullRequest;
   readonly putAway: (
     threadId: CodeThreadId,
-    pullRequest: MergedPullRequest,
-    alreadyPutAwayFor: (recorded: MergedPullRequest) => boolean,
+    merges: ReadonlyArray<MergedPullRequest>,
+    samePullRequest: (left: MergedPullRequest, right: MergedPullRequest) => boolean,
   ) => MergedThreadPutAwayOutcome;
   /** The person's Settings choice; off means the pass reads and writes nothing. */
   readonly enabled: () => boolean;
@@ -101,13 +98,15 @@ export class MergedThreadPutAway {
       examined += 1;
       if (this.#stopped) return putAway;
       try {
-        const merge = await this.#latestMerge(thread);
-        if (merge === undefined || this.#options.decisionPending(thread)) continue;
-        const alreadyPutAwayFor = (recorded: MergedPullRequest) =>
-          this.#options.samePullRequest(thread.projectId, recorded, merge);
-        const recorded = thread.putAwayForPullRequest;
-        if (recorded !== undefined && alreadyPutAwayFor(recorded)) continue;
-        const outcome = this.#options.putAway(thread.id, merge, alreadyPutAwayFor);
+        const merges = await this.#merges(thread);
+        const same = (left: MergedPullRequest, right: MergedPullRequest) =>
+          this.#options.samePullRequest(thread.projectId, left, right);
+        const recorded = thread.putAwayForPullRequests ?? [];
+        // Only a merge the thread was never put away for counts, whatever its
+        // number: pull request numbers order creation, not merging.
+        if (!merges.some((merge) => !recorded.some((known) => same(known, merge)))) continue;
+        if (this.#options.decisionPending(thread)) continue;
+        const outcome = this.#options.putAway(thread.id, merges, same);
         if (outcome.status === "put-away") putAway.push(thread.id);
       } catch {
         // A version race means the thread changed under the pass, and the
@@ -118,32 +117,29 @@ export class MergedThreadPutAway {
   }
 
   /**
-   * The newest merged pull request linked to the thread, from the thread's
-   * own delivery evidence or the refresh cache; none while child work the
-   * thread started is still running or its result is unread.
+   * Every merged pull request linked to the thread, from the thread's own
+   * delivery evidence and the refresh cache; none while child work the thread
+   * started is still running or its result is unread. All of them are
+   * recorded when the thread is put away, so one that a cache drops and
+   * another still shows (a GitHub sign-out clears the refresh cache) never
+   * reads as new.
    */
-  async #latestMerge(thread: CodeThread): Promise<MergedPullRequest | undefined> {
+  async #merges(thread: CodeThread): Promise<ReadonlyArray<MergedPullRequest>> {
     const view = await this.#options.metadata.project([
       { thread, projectProjectionPresent: this.#options.projectExists(thread.projectId) },
     ]);
     const metadata = view.threads[0];
-    if (metadata === undefined) return undefined;
+    if (metadata === undefined) return [];
     if (metadata.childAgents.active > 0 || metadata.childAgents.unacknowledgedResults > 0) {
-      return undefined;
+      return [];
     }
     const linked = metadata.linkedPullRequest;
-    const merges = [
+    return [
       ...(linked.kind === "linked" && linked.state === "merged" && linked.matchesDeliveryBranch
         ? [{ baseRepository: linked.baseRepository, number: linked.number }]
         : []),
       ...this.#options.cachedMerges(thread.id),
     ];
-    // The highest number is the latest merge, so a thread linked to several
-    // merged pull requests settles on one and is not put away for each in turn.
-    return merges.reduce<MergedPullRequest | undefined>(
-      (latest, merge) => (latest === undefined || merge.number > latest.number ? merge : latest),
-      undefined,
-    );
   }
 
   async #runPassThenSchedule(): Promise<void> {

@@ -456,15 +456,19 @@ export const CodeThread = Schema.Struct({
    */
   markedDoneAt: Schema.optional(UtcTimestamp),
   /**
-   * The merged pull request the host last put this thread away for. Recorded
-   * so a thread a person takes back out of the Put away shelf stays out until
-   * another pull request merges. Absent until a merge put the thread away.
+   * Every merged pull request the host has already accounted for when it put
+   * this thread away, newest last and at most 32. A thread a person takes back
+   * out of the Put away shelf stays out until a pull request merges that is
+   * not here, whatever its number and whichever cache still shows the older
+   * ones. Absent until a merge put the thread away.
    */
-  putAwayForPullRequest: Schema.optional(
-    Schema.Struct({
-      baseRepository: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-      number: Schema.Int.pipe(Schema.positive()),
-    }).annotations(strict),
+  putAwayForPullRequests: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        baseRepository: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+        number: Schema.Int.pipe(Schema.positive()),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(32)),
   ),
   /** Fresh finished receipt recorded as completion evidence when a person marked the thread Done. */
   completionReceiptId: Schema.optional(FinishedReceiptId),

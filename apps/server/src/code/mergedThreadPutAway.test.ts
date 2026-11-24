@@ -106,7 +106,7 @@ describe("merged thread put-away", () => {
     expect(putAway).toHaveBeenCalledTimes(1);
     expect(putAway).toHaveBeenCalledWith(
       "merged",
-      { baseRepository: "acme/app", number: 42 },
+      [{ baseRepository: "acme/app", number: 42 }],
       expect.any(Function),
     );
   });
@@ -121,7 +121,7 @@ describe("merged thread put-away", () => {
     expect(await pass.pass()).toEqual(["refreshed"]);
     expect(putAway).toHaveBeenCalledWith(
       "refreshed",
-      { baseRepository: "acme/app", number: 42 },
+      [{ baseRepository: "acme/app", number: 42 }],
       expect.any(Function),
     );
   });
@@ -144,10 +144,49 @@ describe("merged thread put-away", () => {
     const { pass, putAway } = fixture({
       threads: [
         codeThread("taken-back", {
-          putAwayForPullRequest: { baseRepository: "acme/app", number: 42 },
+          putAwayForPullRequests: [{ baseRepository: "acme/app", number: 42 }],
         }),
       ],
       evidence: { "taken-back": { linkedPullRequest: merged } },
+    });
+
+    expect(await pass.pass()).toEqual([]);
+    expect(putAway).not.toHaveBeenCalled();
+  });
+
+  it("puts a taken-back thread away when a lower-numbered pull request merges later", async () => {
+    const { pass, putAway } = fixture({
+      threads: [
+        codeThread("taken-back", {
+          putAwayForPullRequests: [{ baseRepository: "acme/app", number: 42 }],
+        }),
+      ],
+      evidence: { "taken-back": { linkedPullRequest: merged } },
+      cachedMerges: { "taken-back": [{ baseRepository: "acme/app", number: 41 }] },
+    });
+
+    expect(await pass.pass()).toEqual(["taken-back"]);
+    expect(putAway).toHaveBeenCalledWith(
+      "taken-back",
+      [
+        { baseRepository: "acme/app", number: 42 },
+        { baseRepository: "acme/app", number: 41 },
+      ],
+      expect.any(Function),
+    );
+  });
+
+  it("does not put a taken-back thread away again when a sign-out empties the refresh cache and an older merge remains", async () => {
+    const { pass, putAway } = fixture({
+      threads: [
+        codeThread("taken-back", {
+          putAwayForPullRequests: [
+            { baseRepository: "acme/app", number: 41 },
+            { baseRepository: "acme/app", number: 42 },
+          ],
+        }),
+      ],
+      evidence: { "taken-back": { linkedPullRequest: { ...merged, number: 41 } } },
     });
 
     expect(await pass.pass()).toEqual([]);

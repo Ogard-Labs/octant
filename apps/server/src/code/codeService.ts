@@ -998,6 +998,12 @@ const CODE_MOVE_REFUSALS = {
     "This thread's checkout would not stay valid in that Project. A Code thread can only move to a Project bound to the same repository folder.",
 } as const;
 
+/** A merged pull request as the put-away pass names it. */
+export interface MergedPullRequest {
+  readonly baseRepository: string;
+  readonly number: number;
+}
+
 /** What putting a thread away for its merged pull request did. */
 export type MergedThreadPutAwayOutcome =
   | { readonly status: "put-away" | "recorded" }
@@ -3331,29 +3337,28 @@ export class CodeService {
   }
 
   /**
-   * Put a thread away on the host's behalf because its pull request merged.
-   * Re-reads the thread and decides from the authoritative record: a thread
-   * already put away for this pull request is left alone, so one a person
-   * took back out of the shelf stays out until another pull request merges.
-   * A thread with a turn running or waiting on the person is skipped and
-   * nothing is recorded, so the next pass tries again. A thread the person
-   * already put away only records the pull request.
+   * Put a thread away on the host's behalf because a pull request linked to
+   * it merged. Re-reads the thread and decides from the authoritative record:
+   * when every merge named here is one the thread was already put away for,
+   * it is left alone, so a thread a person took back out of the shelf stays
+   * out until another pull request merges. A thread with a turn running or
+   * waiting on the person is skipped and nothing is recorded, so the next
+   * pass tries again. A thread the person already put away only records the
+   * merges.
    */
   putAwayMergedThread(
     threadId: CodeThreadId,
-    pullRequest: { readonly baseRepository: string; readonly number: number },
-    alreadyPutAwayFor: (recorded: {
-      readonly baseRepository: string;
-      readonly number: number;
-    }) => boolean,
+    merges: ReadonlyArray<MergedPullRequest>,
+    samePullRequest: (left: MergedPullRequest, right: MergedPullRequest) => boolean,
   ): MergedThreadPutAwayOutcome {
     const current = this.#persistence.readCodeThread(threadId);
     if (current === undefined) return { status: "skipped", reason: "not-found" };
     if (current.lifecycle !== "active") return { status: "skipped", reason: "not-active" };
-    const recorded = current.putAwayForPullRequest;
-    if (recorded !== undefined && alreadyPutAwayFor(recorded)) {
-      return { status: "skipped", reason: "already-put-away" };
-    }
+    const recorded = current.putAwayForPullRequests ?? [];
+    const unrecorded = merges.filter(
+      (merge) => !recorded.some((known) => samePullRequest(known, merge)),
+    );
+    if (unrecorded.length === 0) return { status: "skipped", reason: "already-put-away" };
     const alreadyPutAway = current.completedAt !== undefined;
     if (!alreadyPutAway && !this.#mayPutAwayDone(current)) {
       return { status: "skipped", reason: "busy" };
@@ -3363,10 +3368,9 @@ export class CodeService {
       ...(alreadyPutAway
         ? current
         : { ...withoutPinned(withoutRest(current)), completedAt: updatedAt }),
-      putAwayForPullRequest: {
-        baseRepository: pullRequest.baseRepository,
-        number: pullRequest.number,
-      },
+      putAwayForPullRequests: [...recorded, ...unrecorded]
+        .slice(-32)
+        .map((merge) => ({ baseRepository: merge.baseRepository, number: merge.number })),
       version: current.version + 1,
       updatedAt,
     });

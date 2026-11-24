@@ -2270,8 +2270,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                   )
                 : left.baseRepository === right.baseRepository;
             },
-            putAway: (threadId, pullRequest, alreadyPutAwayFor) =>
-              hostCodeService.putAwayMergedThread(threadId, pullRequest, alreadyPutAwayFor),
+            putAway: (threadId, merges, samePullRequest) =>
+              hostCodeService.putAwayMergedThread(threadId, merges, samePullRequest),
             enabled: () =>
               (persistence.readShellSettings()?.settings ?? defaultShellSettings())
                 .putAwayThreadsWhenDone,

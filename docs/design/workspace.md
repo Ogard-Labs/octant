@@ -667,10 +667,13 @@ finished investigation and a local commit are Done on the board but are not put
 away: a merge is the only evidence that the work is over. The host checks every
 two minutes and leaves alone a coordinator, a thread whose child work is still
 running or unread, and a thread whose finished turn left a decision for the
-person. It records the pull request on the thread (`putAwayForPullRequest`,
-matched across a repository rename) so a thread a person brings back with
-Reopen or a new message stays out of the shelf until another pull request
-merges. A thread whose turn runs or waits on the person, including an agent's
+person. It records on the thread every merged pull request it has accounted
+for (`putAwayForPullRequests`, at most 32, matched across a repository rename),
+so a thread a person brings back with Reopen or a new message stays out of the
+shelf until a pull request merges that is not on that list. Pull request
+numbers order creation, not merging, so a lower number merging later still
+counts, and a merge one cache drops while another still shows (a GitHub
+sign-out empties the refresh cache) never reads as new. A thread whose turn runs or waits on the person, including an agent's
 approval that outlived a restart, keeps its row: Mark done still marks it, and
 the host tries again on its next pass. Putting away never marks a thread Done;
 with the setting off nothing is put away on its own and the host reads nothing
