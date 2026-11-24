@@ -22,6 +22,7 @@ export type OctantKeybindingActionId =
   | "new-todo"
   | "next-waiting-thread"
   | "reply-detail-cycle"
+  | "dictate"
   | "composer-stash"
   | "zen-next-space"
   | "zen-previous-space"
@@ -48,10 +49,9 @@ export interface OctantKeybindingAction {
    */
   readonly page?: "review";
   /**
-   * An action that answers only while a terminal holds the keyboard. The
-   * terminal sends every other key to its shell, so the chord must hold Mod
-   * or Alt, and may name Escape: held with a modifier it is not the Escape a
-   * shell or editor reads, which is why it can be the way out.
+   * An action that answers only while a terminal or composer holds focus.
+   * A terminal chord must hold Mod or Alt, and may name Escape with a modifier
+   * so ordinary Escape can still reach the shell.
    */
   readonly scope?: "terminal" | "composer";
 }
@@ -102,13 +102,6 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     // (Safari: Add to Reading List), which a page may take; the window
     // listener prevents the default only when the chord runs this action.
     defaultChord: "Mod+Shift+D",
-  },
-  {
-    id: "composer-stash",
-    label: "Stash or restore a draft in the composer",
-    area: "Shell",
-    scope: "composer",
-    defaultChord: "Mod+S",
   },
   {
     id: "zen-next-space",
@@ -191,6 +184,24 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     area: "Terminal",
     defaultChord: "Mod+Shift+Escape",
     scope: "terminal",
+  },
+  {
+    id: "dictate",
+    label: "Dictate into the focused message (tap to toggle, hold to talk)",
+    area: "Shell",
+    // M for microphone. The desktop menu holds Mod+M (Minimize) but not this,
+    // and no other default does. It answers in a text field, which is where
+    // dictation goes. Earlier actions keep priority for a shared chord, so a
+    // person who already saved that chord for another action keeps it.
+    defaultChord: "Mod+Shift+M",
+  },
+  {
+    id: "composer-stash",
+    label: "Stash or restore a draft in the composer",
+    area: "Shell",
+    scope: "composer",
+    // Keep existing custom chords ahead of the newly introduced default.
+    defaultChord: "Mod+S",
   },
 ];
 

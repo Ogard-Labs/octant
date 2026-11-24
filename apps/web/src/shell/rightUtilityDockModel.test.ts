@@ -339,6 +339,12 @@ describe("resolving what the right utility dock shows", () => {
         modes: ["work", "code"],
         scope: "thread",
       },
+      {
+        id: "tasks",
+        label: "Tasks",
+        modes: ["chat", "work", "code"],
+        scope: "thread",
+      },
     ]);
   });
 
@@ -391,7 +397,7 @@ describe("resolving what the right utility dock shows", () => {
     ).toEqual({ kind: "closed", reason: "mode-invalid" });
   });
 
-  it("offers only Agents for a Chat thread", () => {
+  it("offers only Agents and Tasks for a Chat thread", () => {
     for (const { id } of RIGHT_UTILITY_DOCK_SURFACES) {
       expect(
         resolveRightUtilityDockSurface({
@@ -402,8 +408,8 @@ describe("resolving what the right utility dock shows", () => {
           savedSurface: id,
         }),
       ).toEqual(
-        id === "agents"
-          ? { kind: "surface", surface: surface("agents") }
+        id === "agents" || id === "tasks"
+          ? { kind: "surface", surface: surface(id) }
           : { kind: "closed", reason: "mode-invalid" },
       );
     }

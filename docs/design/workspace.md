@@ -2072,8 +2072,11 @@ unreviewed results first while collapsed; a result the parent already received i
 done, not to review. While a Chat thread's host connection is lost it dims and
 withholds Stop without repeating the connection notice; expansion previews up to three active or
 unresolved children. Rows open the corresponding detail in Agents, and View all
-keeps completed history reachable. Chat admits Agents as its only dock tool;
-opening it does not expose Work or Code tools or the bottom panel. Every
+keeps completed history reachable. Chat admits Agents, and Tasks while the
+thread shows a task list or its tab is retained
+([Mode-specific utility chrome](#mode-specific-utility-chrome)),
+as its only dock tools; opening either does not expose Work or Code tools or
+the bottom panel. Every
 subagent of the thread is one row in the same list, whether Octant started it
 through `octant_agents` or the thread's provider runtime started it itself, and
 every row in the Agents tool names its provider and its model ("Model unknown"
@@ -3053,7 +3056,7 @@ be the one a press replaced, which took the section off screen while its tab
 stayed open.
 
 Every tool has one of two size classes (`rightUtilityDockModel.ts`). **Fixed**
-tools are Environment (300px) and the panel tools (Vitals, Plan, Agents,
+tools are Environment (300px) and the panel tools (Vitals, Plan, Tasks, Agents,
 Delivery, Side Chat, Artifacts, Pull requests, Tests and Debug) at 360px
 (`COMPACT_DOCK_WIDTH`): they never change width whatever opens or closes beside
 them and have no resize handle. **Flexible** tools (Browser, Terminal, Review,
@@ -3156,8 +3159,10 @@ exactly Review, Terminal, Browser, Files and Side chat. The dock can host
 Review, Pull requests (open rows for a Code thread's Project), Files, Document
 (only once a turn has written one), Browser, Terminal, Canvas, Plan (only for a
 real plan artifact), Delivery (only for a configured target), Agents (when
-children exist or explicitly invoked), Artifacts (a Work or Code thread in a
-Project on this host), Simulator, and Side chat. A Markdown or
+children exist or explicitly invoked), Tasks (opened by the person; see
+[Thread view: Plans and task lists](thread-view.md#plans-and-task-lists)),
+Artifacts (a Work or Code thread in a Project on this host), Simulator, and
+Side chat. A Markdown or
 text file a Code turn creates or rewrites, and a Canvas a Work or Code turn
 authors, open in the dock beside the transcript once, the first time they appear: the
 offer never moves focus from the composer, a rewrite never reopens a tab, and a
@@ -4046,7 +4051,10 @@ sidebar showing, and records nothing else.
 ### Mode-specific utility chrome
 
 Chat admits only the Agents dock when helpers exist, it was explicitly requested,
-or its tab is retained; see the [workspace rule](#subagents).
+or its tab is retained; see the [workspace rule](#subagents). It also admits
+the Tasks dock tool while the thread shows a task list, or while its tab is
+retained, so More tools can offer it; nothing opens it for the person
+(maintainer decision, 2026-11-24).
 Chat has no bottom panel. With the dock closed, the conversation uses the available
 workspace width. A Chat
 Canvas opens as a content tab beside the thread (**Open Canvas**). Work shares

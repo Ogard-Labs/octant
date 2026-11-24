@@ -372,6 +372,8 @@ describe("mobile Code follow-through", () => {
         {
           operationId,
           status: "completed",
+          providerInstanceId: "10000000-0000-4000-8000-000000000001",
+          modelId: "model-a",
           prompt: "Fix the test",
           assistant: ["Done: the test now passes."],
           routines: [],
@@ -381,6 +383,29 @@ describe("mobile Code follow-through", () => {
       hasEarlier: false,
       hasLater: false,
     });
+  });
+
+  it("carries a turn's recorded context handoff so the phone renders the same boundary as desktop", async () => {
+    const handoff = {
+      reason: "provider-switch" as const,
+      previousProviderInstanceId: "40000000-0000-4000-8000-000000000002",
+      previousModelId: "model-prev",
+      messages: 3,
+      omissions: {
+        earlierMessages: 0,
+        unfinishedReplies: 0,
+        missingBodies: 0,
+        oversizedBodies: 0,
+        emptyBodies: 0,
+        attachments: 0,
+        truncatedMessages: 0,
+        truncatedCharacters: 0,
+        sourceTruncatedMessages: 0,
+      },
+      externalContentIngested: false,
+    };
+    const conversation = await loadMobileCodeConversation(transport([], { handoff }), threadId);
+    expect(conversation.turns[0]?.handoff).toEqual(handoff);
   });
 
   it("carries the usage limit a waiting turn stopped at, so the phone can offer its resume", async () => {
@@ -508,6 +533,8 @@ describe("mobile Code follow-through", () => {
         {
           operationId,
           status: "completed",
+          providerInstanceId: "10000000-0000-4000-8000-000000000001",
+          modelId: "model-a",
           prompt: "Fix the test",
           assistant: ["Done: the test now passes."],
           routines: [],
@@ -646,6 +673,8 @@ describe("mobile Code follow-through", () => {
         {
           operationId,
           status: "completed",
+          providerInstanceId: "10000000-0000-4000-8000-000000000001",
+          modelId: "model-a",
           prompt: "Fix the test",
           assistant: assistant.slice(0, MAX_CODE_EVIDENCE_BATCH_ITEMS - 1).map((part) => part.text),
           routines: [],

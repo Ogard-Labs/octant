@@ -8,14 +8,20 @@ Every assistant reply in Chat, Work, and Code opens with the same line: who
 answered (provider and model as the picker names them), how the turn stands
 (Working, Waiting for approval, Completed with how long it took, Failed with
 the host's sanitized reason on the line below), and when it last changed at the
-right edge. While a turn runs and has a start time, the line reads "Working ·
-12s · Read": the clock counts from the turn's own start (not from when the row
+right edge. While a turn runs and has a start time, the header holds no status;
+the turn instead ends with its live line, "Working · 12s · Read", under its
+reply and task list (maintainer decision, 2026-11-24), so the line stays beside
+the newest content however long the turn grows. In the header it scrolled away
+with the top of a long turn. The clock counts from the turn's own start (not from when the row
 mounted) once a second in tabular digits with a fixed minimum width, so a tick
 moves nothing; the step is the title of the newest running tool, left out when
 none runs (a reply that spoke before a tool ran still names it), and clips to an ellipsis. The live
 region holds the step alone, so a change of step is announced politely and the
 clock is never read; the timer stops when the turn settles and when the row
-unmounts. A finished turn's duration ("Worked for 1m 5s") is drawn once: at the
+unmounts. A turn waiting on the person, or one with a label of its own
+("Waiting for your answer"), keeps its status in the header and draws no live
+line. `TurnLiveLine` beside `TurnHeader` draws it, and the header and the line
+ask the same question, so exactly one of them shows a running turn's status. A finished turn's duration ("Worked for 1m 5s") is drawn once: at the
 head of the fold's summary line when the turn folds its tool calls, otherwise in
 the header. It is set in the interface face at the detail size; only the status
 word carries colour. `TurnHeader` in `apps/web/src/transcript/` is the one
@@ -34,6 +40,27 @@ Strict kept differs from the turn before, so a thread says it once per change
 rather than on every turn; a launch outside Strict shows nothing. It is the
 same meta-ink note as a provider handoff's (`role="note"`), not a page banner
 or a card. `strictKeptSentence` in `@octant/domain` is the one wording.
+
+## Context handoffs
+
+When a thread changes provider, moves to another account, switches models, or
+starts a new session from a fork, branch, or rewind, Chat, Work, and Code draw
+one shared boundary, `TranscriptHandoff` in `apps/web/src/transcript/`: a
+full-width hairline (`OctantSeparatorWithLabel`) with a 12px transition icon,
+the boundary label (**Context handoff**, **Model switch**, **Forked context**,
+**Branched context**, or **Rewound context**), and when the provider or model
+changed, the source and target models joined by a 12px arrow with their
+provider marks (`ProviderGlyph` at 14px; one mark on a same-provider model
+switch, both marks when switching providers or accounts, and account names
+beside the model when two accounts share one model name). Across turns, the
+boundary sits ahead of the next user message so it marks the handoff between
+the previous reply and the prompt sent to the new provider; within a single
+Chat turn's retry onto another provider or model, it sits ahead of that
+attempt. Whenever the host recorded a handoff, its disclosure sentence sits
+centred in meta ink (`role="note"`, no card or banner) directly beneath the
+hairline, naming what carried over, every omission, any outside-content mark,
+and what stayed behind. The phone draws the same boundary and disclosure across
+Chat, Work, and Code (`TranscriptHandoffDivider` in `apps/mobile/src/ui/`).
 
 ## Loop and stall notices
 
@@ -772,7 +799,14 @@ dialog, with keyboard focus restored on cancellation. Submission records a
 proposed artifact and does not approve it or change execution access. The
 entry returns after withdrawal; the dock stays artifact-only.
 
-The provider's recorded task list is a separate group. It is open while the
+The provider's recorded task list is a separate group, drawn inside the turn
+that recorded it in Chat, Work and Code alike (maintainer decision,
+2026-11-24): Chat draws it in the reply before its answer, Work and Code at the
+turn's end, and the turn's live line follows it. Code used to pin only the
+newest list above the composer and drop it once the turn settled, so a
+finished list left the transcript; its task rows are no longer drawn among the
+turn's tool rows either. A reopened Code thread shows no past task lists yet,
+because Code's conversation read carries none. It is open while the
 turn that recorded it runs, so the step in hand reads without a click, and
 folds to its header once the turn settles; a person's own open or fold wins
 over both. The header keeps completed/total progress and failed or waiting
@@ -780,7 +814,10 @@ counts visible while folded. An unfinished list after a settled turn says
 Incomplete; it does not claim that the agent is still running. The open list
 shows the recorded ordered steps in a bounded, scrollable list: the running
 step at Medium (500), finished steps struck through in secondary ink, and no
-fill on any row. A provider that words a task for while it runs (Claude's
+fill on any row. A task still marked running when its turn has stopped takes the
+not-started mark and is read as "not finished", never a spinner. Each row ends
+with its state in words for a screen reader, since the marks are drawn for
+the eye only. A provider that words a task for while it runs (Claude's
 `activeForm`: "Running the test suite" for "Run the test suite") has that
 wording shown for the running task, and in the header when nothing failed or
 waits, only while the turn is running; once the turn has stopped the task is
@@ -788,7 +825,16 @@ named plainly, so a stopped turn never reads as still working. A provider
 without running wording (Codex) shows the plain wording throughout. The
 running wording is untrusted provider text, bounded and redacted like the
 plain one, optional in every journaled task so older journals replay
-unchanged, and task rows never count as tool calls or steps. Neither this list nor the journaled plan borrows progress,
+unchanged, and task rows never count as tool calls or steps.
+
+A person who wants the list in view whatever they scroll to can open the
+**Tasks** dock tool from More tools ([Workspace: Right dock and bottom
+panel](workspace.md#right-dock-and-bottom-panel)). It is never opened for them.
+It shows the thread's newest task list, the same one the transcript shows (read
+from the thread's own view, so the two never disagree), kept open whether or
+not the turn runs, with the same header and wording rules; a thread whose view
+shows no list says "No task list yet". The Propose plan entry above still adds
+nothing to the dock; the Tasks tool is the provider's list, not the plan. Neither this list nor the journaled plan borrows progress,
 completion, or authority from the subagent group.
 
 ## Message queue and Stop

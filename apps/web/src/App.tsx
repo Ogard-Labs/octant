@@ -28,6 +28,7 @@ import {
 } from "./composer/useNewTaskPrompt";
 import type { ComposerStashTodo } from "./composer/composerStashDraft";
 import { StreamRepliesContext } from "./transcript/streamReplies";
+import { useThreadTaskList } from "./transcript/threadTaskLists";
 import { NextMessageSuggestionsContext } from "./followUps/FollowUpSuggestionChips";
 import {
   REPLY_DETAIL_DESCRIPTIONS,
@@ -4140,6 +4141,8 @@ function LaunchedShell(
     () => describeUtilityTabs(displayedDockState.tabs),
     [displayedDockState.tabs],
   );
+  const dockThreadShowsTasks =
+    useThreadTaskList(dockThreadId === undefined ? "" : String(dockThreadId)) !== undefined;
   const dockAvailable =
     (activeMode !== "chat" ||
       dockHasChildRuns === true ||
@@ -6508,8 +6511,15 @@ function LaunchedShell(
   // presentation but changes nothing a button shows, so the model is kept by
   // value: the memoised chrome re-renders only when a button's state changes.
   const dockShelfDrawn = !isNarrow && activeMode !== "chat" && dockThreadId !== undefined;
+  // A Chat thread showing a task list offers its tools so the person can open
+  // Tasks; the dock itself opens only once they pick one, which keeps its tab.
+  const dockOffersChatTasks =
+    activeMode === "chat" &&
+    dockThreadId !== undefined &&
+    dockThreadShowsTasks &&
+    !startScreenActive;
   const dockToolButtonsKey = JSON.stringify(
-    dockAvailable
+    dockAvailable || dockOffersChatTasks
       ? buildDockToolButtons({
           surfaces: dockToolSurfaces,
           unavailable: Object.fromEntries(

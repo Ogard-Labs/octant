@@ -9,7 +9,12 @@ import {
   activeRowCount,
   settledTurnActivitySummary,
 } from "../transcript/turnActivity";
-import { appendReasoning, applyActivityEvent, liveTaskProgress } from "./transcriptActivity";
+import {
+  appendReasoning,
+  applyActivityEvent,
+  latestTurnTasks,
+  splitTurnTasks,
+} from "./transcriptActivity";
 
 function tool(state: "started" | "running" | "completed" | "failed"): CodeOperationEvent {
   return {
@@ -278,53 +283,19 @@ describe("transcript activity", () => {
     expect(activeRowCount(applyActivityEvent(withDoneTask, tool("completed")))).toBe(0);
   });
 
-  it("shows the newest turn's task list while any of it is still open", () => {
-    const earlier = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
+  it("keeps a turn's task list apart from the steps its summary counts", () => {
+    const withTool = applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("completed"));
+    const withTask = applyActivityEvent(withTool, {
       kind: "task-progress",
       taskId: "t1",
-      state: "completed",
-      summary: "Earlier work",
-    } as CodeOperationEvent);
-    const live = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
-      kind: "task-progress",
-      taskId: "t2",
       state: "running",
       summary: "Watch CI on the branch head",
     } as CodeOperationEvent);
-    expect(
-      liveTaskProgress([
-        { activity: earlier, running: false },
-        { activity: live, running: true },
-      ]),
-    ).toEqual({
-      tasks: [{ kind: "task", id: "t2", state: "running", summary: "Watch CI on the branch head" }],
-      running: true,
-    });
-  });
-
-  it("keeps an interrupted turn's unfinished list on the panel", () => {
-    const interrupted = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
-      kind: "task-progress",
-      taskId: "t1",
-      state: "pending",
-      summary: "Update the pull request body",
-    } as CodeOperationEvent);
-    expect(liveTaskProgress([{ activity: interrupted, running: false }])).toEqual({
-      tasks: [
-        { kind: "task", id: "t1", state: "pending", summary: "Update the pull request body" },
-      ],
-      running: false,
-    });
-  });
-
-  it("leaves no panel for a settled turn whose tasks all finished", () => {
-    const settled = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
-      kind: "task-progress",
-      taskId: "t1",
-      state: "completed",
-      summary: "Post the verification comment",
-    } as CodeOperationEvent);
-    expect(liveTaskProgress([{ activity: settled, running: false }])).toBeUndefined();
+    const split = splitTurnTasks(withTask);
+    expect(split.tasks).toEqual([
+      { kind: "task", id: "t1", state: "running", summary: "Watch CI on the branch head" },
+    ]);
+    expect(split.activity.rows.map((row) => row.kind)).toEqual(["tool"]);
   });
 
   describe("turn timings", () => {
@@ -420,8 +391,39 @@ describe("transcript activity", () => {
     });
   });
 
-  it("leaves no panel for a turn that journaled no tasks", () => {
+  it("ends the search for the newest list at a list the provider cleared", () => {
+    const earlier = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
+      kind: "task-progress",
+      taskId: "t1",
+      state: "running",
+      summary: "Run tests",
+    } as CodeOperationEvent);
+    const written = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
+      kind: "task-progress",
+      taskId: "t2",
+      state: "running",
+      summary: "Fix parser",
+    } as CodeOperationEvent);
+    const cleared = applyActivityEvent(written, {
+      kind: "task-list",
+      taskIds: [],
+    } as CodeOperationEvent);
+    expect(
+      latestTurnTasks([
+        { activity: earlier, running: false },
+        { activity: cleared, running: true },
+      ]),
+    ).toBeUndefined();
+    expect(
+      latestTurnTasks([
+        { activity: earlier, running: false },
+        { activity: applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("completed")), running: true },
+      ]),
+    ).toEqual({ running: false, tasks: earlier.rows });
+  });
+
+  it("leaves a turn that journaled no tasks with no task list", () => {
     const toolOnly = applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("completed"));
-    expect(liveTaskProgress([{ activity: toolOnly, running: true }])).toBeUndefined();
+    expect(splitTurnTasks(toolOnly)).toEqual({ tasks: [], activity: toolOnly });
   });
 });

@@ -33,6 +33,29 @@ describe("VoiceSettings", () => {
     expect(() => decodeVoiceSettings({ transcription: { modelId: "whisper-1" } })).toThrow();
     expect(() => decodeVoiceSettings({ fallback: "system" })).toThrow();
   });
+
+  it("a settings record without language or dictionary still decodes", () => {
+    const settings = decodeVoiceSettings({ transcription: endpoint });
+    expect(settings.language).toBeUndefined();
+    expect(settings.dictionary).toBeUndefined();
+  });
+
+  it("keeps a language tag and a bounded dictionary of trimmed terms", () => {
+    const settings = decodeVoiceSettings({
+      transcription: endpoint,
+      language: "sv-SE",
+      dictionary: ["Octant", "OAuth"],
+    });
+    expect(settings.language).toBe("sv-SE");
+    expect(settings.dictionary).toEqual(["Octant", "OAuth"]);
+    expect(() => decodeVoiceSettings({ language: "Swedish" })).toThrow();
+    expect(() => decodeVoiceSettings({ dictionary: [""] })).toThrow();
+    expect(() => decodeVoiceSettings({ dictionary: [" Octant "] })).toThrow();
+    expect(() => decodeVoiceSettings({ dictionary: ["x".repeat(65)] })).toThrow();
+    expect(() =>
+      decodeVoiceSettings({ dictionary: Array.from({ length: 101 }, (_, i) => `term${i}`) }),
+    ).toThrow();
+  });
 });
 
 describe("speech requests and responses", () => {

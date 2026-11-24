@@ -797,6 +797,7 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
         debug={threadUtility("debug")}
         vitals={threadUtility("vitals")}
         artifacts={threadUtility("artifacts")}
+        tasks={threadUtility("tasks")}
         {...(isNarrow
           ? {
               toolRow: {

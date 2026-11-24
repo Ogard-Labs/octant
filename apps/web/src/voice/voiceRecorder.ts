@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readMicrophonePreference } from "./microphonePreference";
 
 /**
  * A clip longer than this is stopped for the person, not by them. Two minutes
@@ -115,10 +116,24 @@ export function useVoiceRecorder(): VoiceRecorder {
     const token = generation.current;
     setState({ kind: "requesting" });
     let stream: MediaStream;
+    const preferred = readMicrophonePreference();
+    const constraints = (deviceId: string | undefined): MediaStreamConstraints => ({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        ...(deviceId === undefined ? {} : { deviceId: { exact: deviceId } }),
+      },
+    });
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-      });
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints(preferred));
+      } catch (error) {
+        // A chosen microphone that was unplugged must not stop dictation: the
+        // system default records instead, and Voice settings says so.
+        if (preferred === undefined || !isMissingDevice(error)) throw error;
+        stream = await navigator.mediaDevices.getUserMedia(constraints(undefined));
+      }
     } catch (error) {
       starting.current = false;
       if (generation.current === token) {
@@ -191,6 +206,11 @@ export function formatRecordingDuration(elapsedMs: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function isMissingDevice(error: unknown): boolean {
+  const name = error instanceof Error ? error.name : "";
+  return name === "OverconstrainedError" || name === "NotFoundError";
 }
 
 function describeMicrophoneFailure(error: unknown): string {
