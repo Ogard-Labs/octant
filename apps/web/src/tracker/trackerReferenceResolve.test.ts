@@ -267,4 +267,30 @@ describe("tracker reference helpers", () => {
       },
     ]);
   });
+
+  it("does not fall back to listIssues when direct lookup reports an ordinary missing issue", async () => {
+    const getIssueByIdentifier = vi.fn(async () => {
+      throw new IntegrationClientFailure("That Linear issue is not available.", 404);
+    });
+    const listIssues = vi.fn();
+    const client = {
+      getIssueByIdentifier,
+      listIssues,
+    } as unknown as IntegrationClient;
+    const ports = createTrackerReferenceClientPorts({
+      linear: { available: true, client },
+    });
+    const resolved = await resolveTrackerReferences(
+      [{ patternKind: "tracker-key", raw: "ENG-404", key: "ENG-404" }],
+      ports,
+    );
+    expect(getIssueByIdentifier).toHaveBeenCalledWith({ identifier: "ENG-404" });
+    expect(listIssues).not.toHaveBeenCalled();
+    expect(resolved).toEqual([
+      {
+        status: "not-found",
+        reference: { patternKind: "tracker-key", raw: "ENG-404", key: "ENG-404" },
+      },
+    ]);
+  });
 });

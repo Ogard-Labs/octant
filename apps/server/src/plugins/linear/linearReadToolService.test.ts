@@ -215,15 +215,38 @@ describe("LinearReadToolService", () => {
       },
     }));
     const foreign = makeHarness({ executeOperation: foreignExecute });
-    const refusedByPrefix = await foreign.toolSet.execute({
+    const refusedByKey = await foreign.toolSet.execute({
       name: LINEAR_READ_TOOL_NAME,
       inputJson: JSON.stringify({ operation: "get", identifier: "OTHER-9" }),
     });
-    expect(refusedByPrefix).toMatchObject({
+    expect(refusedByKey).toMatchObject({
       isError: true,
       result: { error: "issue-not-found" },
     });
-    expect(foreignExecute).not.toHaveBeenCalled();
+
+    const renamedTeam = makeHarness({
+      executeOperation: vi.fn(async () => ({
+        kind: "ok" as const,
+        value: {
+          id: "issue-3",
+          identifier: "DEV-42",
+          title: "Renamed team key issue",
+          state: { name: "In Progress", type: "started" },
+          teamId: "team-oct",
+          teamKey: "DEV",
+          projectId: "proj-v1",
+          url: "https://linear.app/ogard-labs/issue/DEV-42",
+          description: "Matches by stable teamId",
+          descriptionTruncated: false,
+          comments: [],
+        },
+      })),
+    });
+    const renamedOk = await renamedTeam.toolSet.execute({
+      name: LINEAR_READ_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "get", identifier: "DEV-42" }),
+    });
+    expect(renamedOk.isError).toBe(false);
 
     const refusedById = await foreign.toolSet.execute({
       name: LINEAR_READ_TOOL_NAME,

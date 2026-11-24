@@ -133,7 +133,8 @@ export function createTrackerReferenceClientPorts(
 function isUnsupportedDirectLookup(error: IntegrationClientFailure): boolean {
   const normalized = error.message.toLowerCase();
   return (
-    normalized.includes("not available") ||
+    normalized.includes("operations are not available") ||
+    normalized.includes("operation is not available") ||
     normalized.includes("not supported") ||
     normalized.includes("unsupported") ||
     normalized.includes("unknown operation")

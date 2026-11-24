@@ -496,7 +496,7 @@ export function LinearConnectionSettings({
                 Store key
               </OctantButton>
               <OctantButton
-                disabled={personalBusy || !personalKeyStored}
+                disabled={personalBusy || (snapshot.state === "unauthorized" && !personalKeyStored)}
                 onClick={() => {
                   setPersonalBusy(true);
                   void client

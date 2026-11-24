@@ -236,15 +236,6 @@ export class LinearReadToolService {
   ) {
     const normalizedIdentifier = identifier.trim().toUpperCase();
     const isPublicKey = IDENTIFIER_PATTERN.test(normalizedIdentifier);
-    if (isPublicKey) {
-      const requestedTeamKey = normalizedIdentifier.split("-")[0];
-      if (requestedTeamKey !== target.teamKey.toUpperCase()) {
-        return failure(
-          "issue-not-found",
-          "No Linear issue with that identifier was found in this Project's bound Linear scope.",
-        );
-      }
-    }
     const response = await this.#reader.executeOperation(
       isPublicKey ? LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION : LINEAR_ISSUE_GET_OPERATION,
       isPublicKey ? { identifier: normalizedIdentifier } : { id: identifier.trim() },
