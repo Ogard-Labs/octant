@@ -88,6 +88,16 @@ describe("a window's request to a paired computer", () => {
     expect(answer).toMatchObject({ status: "answered", httpStatus: 200 });
   });
 
+  it("passes the selected computer's desktop frame back as image bytes", async () => {
+    const body = new Uint8Array([137, 80, 78, 71]);
+    const { answer, sent } = await ask(
+      { origin: ORIGIN, method: "POST", path: "/api/code/desktops/frame", body: "{}" },
+      { answer: () => new Response(body, { headers: { "content-type": "image/png" } }) },
+    );
+    expect(sent.mock.calls[0]?.[0]).toBe(ORIGIN + "/api/code/desktops/frame");
+    expect(answer).toMatchObject({ status: "answered", body });
+  });
+
   it("goes only to a listed origin, matched exactly", async () => {
     for (const origin of [
       OTHER_ORIGIN,
@@ -262,6 +272,8 @@ describe("a window's request to a paired computer", () => {
         "POST /api/server-proxy/forwards",
         "GET /api/host/resources",
         "POST /api/code/local-servers/commands",
+        "POST /api/code/desktops",
+        "POST /api/code/desktops/frame",
         "GET /api/todos",
         "GET /api/todos/changes",
         "POST /api/todos/commands",

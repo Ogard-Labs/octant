@@ -2129,7 +2129,27 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     });
     const nextBrowserRuntimeBroker = await startBrowserRuntimeBroker(surfaceHost, profileStore);
     launch.acquired({ browserBroker: nextBrowserRuntimeBroker });
+    const deviceHelperPath = resolveDesktopNativeHelperPath(
+      {
+        packaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        moduleUrl: import.meta.url,
+      },
+      DEVICE_HELPER_FILENAME,
+    );
     const nextComputerService = createComputerUseDesktopService({
+      displayHelperPath: deviceHelperPath,
+      onDisplayLock: (close) => {
+        powerMonitor.on("lock-screen", close);
+        powerMonitor.on("suspend", close);
+        powerMonitor.on("user-did-resign-active", close);
+        return () => {
+          powerMonitor.off("lock-screen", close);
+          powerMonitor.off("suspend", close);
+          powerMonitor.off("user-did-resign-active", close);
+        };
+      },
+      displayUnlocked: () => ["active", "idle"].includes(powerMonitor.getSystemIdleState(60)),
       bundledPath: resolveDesktopNativeHelperPath(
         {
           packaged: app.isPackaged,
@@ -2159,14 +2179,6 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       }),
     });
     launch.acquired({ managedTools: nextManagedToolService });
-    const deviceHelperPath = resolveDesktopNativeHelperPath(
-      {
-        packaged: app.isPackaged,
-        resourcesPath: process.resourcesPath,
-        moduleUrl: import.meta.url,
-      },
-      DEVICE_HELPER_FILENAME,
-    );
     // Simulators exist on macOS only. The broker still starts when the native
     // helper binary is missing, so a managed serve-sim stream can drive the
     // pane. Without either, input is reported unavailable.

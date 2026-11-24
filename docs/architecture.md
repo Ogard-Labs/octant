@@ -14569,6 +14569,8 @@ completed or skipped onboarding, the local desktop instead opens Computer use
 Settings once on launch, without changing that onboarding outcome. Settings exposes plugin enablement, separate
 Accessibility and Screen Recording shortcuts, the driver version and update
 controls. Both surfaces refresh permissions on focus and visibility changes.
+If Octant cannot load its native permission checker, Settings reports that it
+couldn’t check either permission and computer control remains unavailable.
 Enabled, permissions granted and verified working are separate facts. Only an
 explicit successful test reports Verified working. Driver restart/replacement,
 disablement, permission loss or an unreadable driver permission answer clears

@@ -671,12 +671,79 @@ const paneThread = { threadId: Schema.UUID };
 const paneLease = { ...paneThread, leaseId: DesktopLeaseId };
 const paneView = { ...paneLease, viewId: DesktopViewId };
 
+const unitPoint = Schema.Number.pipe(Schema.finite(), Schema.between(0, 1));
+const point = { x: unitPoint, y: unitPoint };
+export const HostDisplayInput = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("click", "double-click", "right-click"), ...point }),
+  Schema.Struct({ kind: Schema.Literal("drag"), ...point, endX: unitPoint, endY: unitPoint }),
+  Schema.Struct({
+    kind: Schema.Literal("scroll"),
+    ...point,
+    deltaX: Schema.Int.pipe(Schema.between(-10000, 10000)),
+    deltaY: Schema.Int.pipe(Schema.between(-10000, 10000)),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("key"),
+    code: text(32),
+    shift: Schema.Boolean,
+    alt: Schema.Boolean,
+    meta: Schema.Boolean,
+    ctrl: Schema.Boolean,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("text"),
+    text: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4096)),
+  }),
+);
+const hostView = { kind: Schema.Literal("host-display"), ...paneThread, viewId: DesktopViewId };
+export const HostDisplayScope = Schema.Struct({
+  deviceId: Schema.UUID,
+  sessionId: Schema.UUID,
+  generation: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
+export type HostDisplayScope = typeof HostDisplayScope.Type;
+export const decodeHostDisplayScope = Schema.decodeUnknownSync(HostDisplayScope);
+export const HostDisplayRequest = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("host-display"),
+    ...paneThread,
+    action: Schema.Literal("open"),
+  }).annotations(strict),
+  Schema.Struct({
+    ...hostView,
+    action: Schema.Literal("frame", "take-control", "hand-back", "close"),
+  }).annotations(strict),
+  Schema.Struct({
+    ...hostView,
+    action: Schema.Literal("input"),
+    geometry: text(128),
+    event: HostDisplayInput,
+  }).annotations(strict),
+);
+export type HostDisplayRequest = typeof HostDisplayRequest.Type;
+export const decodeHostDisplayRequest = Schema.decodeUnknownSync(HostDisplayRequest);
+export const HostDisplayAnswer = Schema.Union(
+  DesktopPaneRefusal,
+  Schema.Struct({ status: Schema.Literal("viewing"), viewId: DesktopViewId }),
+  Schema.Struct({
+    status: Schema.Literal("host-frame"),
+    jpeg: Schema.String.pipe(Schema.minLength(4), Schema.maxLength(2097152)),
+    geometry: text(128),
+  }),
+  Schema.Struct({
+    status: Schema.Literal("delivered", "view-closed", "not-delivered", "no-frame"),
+  }),
+);
+export type HostDisplayAnswer = typeof HostDisplayAnswer.Type;
+export const decodeHostDisplayAnswer = Schema.decodeUnknownSync(HostDisplayAnswer);
+
 /**
  * What a person's Desktop tab asks the host for one Code thread. The host
  * derives the person from the authenticated window or paired device that
  * sent it, never from the body.
  */
 export const DesktopPaneRequest = Schema.Union(
+  HostDisplayRequest,
   DesktopPreviewRequest,
   Schema.Struct({ kind: Schema.Literal("overview"), ...paneThread }).annotations(strict),
   Schema.Struct({
@@ -785,9 +852,15 @@ const leaseAnswer = <S extends string>(status: S) =>
   Schema.Struct({ status: Schema.Literal(status), lease: DesktopLease }).annotations(strict);
 
 export const DesktopPaneAnswer = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("host-frame"),
+    jpeg: Schema.String.pipe(Schema.minLength(4), Schema.maxLength(2097152)),
+    geometry: text(128),
+  }),
   DesktopPreviewAnswer,
   Schema.Struct({
     status: Schema.Literal("overview"),
+    hostDisplay: Schema.optional(Schema.Literal(true)),
     /** The thread's leases that may still hold a desktop, then its most recent ended one. */
     leases: Schema.Array(DesktopLease),
     /** Every provider the host has loaded, so a lease names its provider even once it is not leasable. */

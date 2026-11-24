@@ -86,6 +86,11 @@ function fakeClient(state: { overview: Overview }) {
       switch (request.kind) {
         case "overview":
           return state.overview;
+        case "host-display":
+          if (request.action === "open") return { status: "viewing", viewId };
+          if (request.action === "frame")
+            return { status: "host-frame", jpeg: "test", geometry: "main" };
+          return { status: "delivered" };
         case "acquire":
           state.overview = overviewOf([lease()]);
           return { status: "acquired", lease: lease() };
@@ -128,6 +133,65 @@ afterEach(() => {
 });
 
 describe("Desktop pane", () => {
+  it("watches the paired Mac before taking control and stops sending keys after handback", async () => {
+    const { client, requests } = fakeClient({ overview: { ...overviewOf([]), hostDisplay: true } });
+    render(<DesktopPane client={client} threadId={threadId} />);
+    const show = await screen.findByRole("button", { name: "Show Mac desktop" });
+    expect(requests.some((r) => r.kind === "host-display")).toBe(false);
+    fireEvent.click(show);
+    const image = await screen.findByAltText("Mac host display");
+    const press = () => fireEvent.keyDown(image, { code: "KeyA", key: "a" });
+    const inputs = () => requests.filter((r) => r.kind === "host-display" && r.action === "input");
+    press();
+    expect(inputs()).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Take control" }));
+    const back = await screen.findByRole("button", { name: "Hand back to agent" });
+    press();
+    fireEvent.click(back);
+    await screen.findByRole("button", { name: "Take control" });
+    press();
+    expect(inputs()).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Close host display" }));
+    expect(requests.at(-1)).toMatchObject({ kind: "host-display", action: "close", viewId });
+  });
+  it("forwards only supported Mac gestures and consumes scrolling only during control", async () => {
+    const { client, requests } = fakeClient({ overview: { ...overviewOf([]), hostDisplay: true } });
+    render(<DesktopPane client={client} threadId={threadId} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Show Mac desktop" }));
+    const image = await screen.findByAltText("Mac host display");
+    Object.assign(image, { setPointerCapture: vi.fn() });
+    image.getBoundingClientRect = () => new DOMRect(0, 0, 100, 100);
+    const wheel = (ctrlKey = false) =>
+      fireEvent.wheel(image, { clientX: 50, clientY: 25, deltaY: 20, cancelable: true, ctrlKey });
+    const gesture = (button: number, endX: number) => {
+      fireEvent.pointerDown(image, { button, clientX: 50, clientY: 25, pointerId: 1 });
+      fireEvent.pointerUp(image, { button, clientX: endX, clientY: 25, pointerId: 1 });
+    };
+    expect(wheel()).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Take control" }));
+    const handBack = await screen.findByRole("button", { name: "Hand back to agent" });
+    fireEvent.keyDown(image, { key: "CapsLock", code: "CapsLock" });
+    fireEvent.keyDown(image, { key: "Enter", code: "NumpadEnter" });
+    gesture(1, 50);
+    gesture(2, 80);
+    gesture(2, 50);
+    gesture(0, 80);
+    expect(wheel(true)).toBe(true);
+    const localScrollAllowed = wheel();
+    fireEvent.click(handBack);
+    await screen.findByRole("button", { name: "Take control" });
+    expect(
+      requests.flatMap((r) => (r.kind === "host-display" && r.action === "input" ? [r.event] : [])),
+    ).toMatchObject([
+      { kind: "key", code: "Enter" },
+      { kind: "right-click", x: 0.5, y: 0.25 },
+      { kind: "drag", x: 0.5, endX: 0.8 },
+      { kind: "scroll", x: 0.5, y: 0.25, deltaY: 20 },
+    ]);
+    expect(localScrollAllowed).toBe(false);
+    expect(wheel()).toBe(true);
+  });
+
   it("says honestly that the Project has no recipe, and offers no Start", async () => {
     const { client, requests } = fakeClient({
       overview: overviewOf([], { status: "refused", reason: "no-provider-configured" }),
