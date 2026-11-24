@@ -154,6 +154,22 @@ describe("Runway video driver", () => {
     });
   });
 
+  it.each([
+    { code: "SAFETY.INPUT.TEXT", billed: true },
+    { code: "SAFETY.OUTPUT.VIDEO", billed: undefined },
+    { code: "INPUT_PREPROCESSING.SAFETY.TEXT", billed: undefined },
+  ])("preserves refund semantics for a $code refusal with no cost", async ({ code, billed }) => {
+    const adapter = runwayVideoDriver.create({
+      profile,
+      ports: ports(() => Response.json({ id: taskId, status: "FAILED", failureCode: code })).ports,
+    });
+    expect(await adapter.poll(taskId, new AbortController().signal)).toEqual({
+      status: "refused",
+      safetyRefusal: "Runway's content moderation blocked this clip.",
+      ...(billed === true ? { billed } : {}),
+    });
+  });
+
   it("keeps a finished clip it could not download running, so the next poll tries again", async () => {
     const recorder = ports(() => Response.json(succeeded()));
     const adapter = runwayVideoDriver.create({

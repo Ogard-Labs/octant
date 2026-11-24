@@ -59,6 +59,8 @@ export type VideoAdapterPoll =
   | {
       readonly status: "refused";
       readonly safetyRefusal: string;
+      /** The refusal is billed even if the provider does not report the charge. */
+      readonly billed?: true;
       /** What the provider charged for the refusal, where it bills one. */
       readonly usage?: VideoAdapterUsage;
     }

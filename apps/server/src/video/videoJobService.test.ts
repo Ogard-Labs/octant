@@ -792,6 +792,29 @@ describe("video jobs", () => {
     expect(spend.abandon).toHaveBeenCalledOnce();
   });
 
+  it.each([undefined, 0, 600_000])(
+    "settles a billed safety refusal with the reported cost (%s) or its estimate",
+    async (costUsdMicros) => {
+      const { service, spend } = harness({
+        polls: [
+          {
+            status: "refused",
+            safetyRefusal: "Blocked by the provider's filters.",
+            ...(costUsdMicros === undefined ? { billed: true } : { usage: { costUsdMicros } }),
+          },
+        ],
+      });
+      const job = await enqueue(service);
+      expect(await service.whenTerminal(job.id)).toMatchObject({
+        status: "failed",
+        safetyRefusal: "Blocked by the provider's filters.",
+        settledCostUsdMicros: costUsdMicros ?? job.estimatedCostUsdMicros,
+      });
+      expect(spend.settle).toHaveBeenCalledOnce();
+      expect(spend.abandon).not.toHaveBeenCalled();
+    },
+  );
+
   it("keeps an owed removal through a failure and clears it on a later try", async () => {
     let refuse = true;
     const { service } = harness({ forget: async () => (refuse ? "failed" : "removed") });

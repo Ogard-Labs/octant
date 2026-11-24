@@ -231,12 +231,14 @@ async function poll(
         };
       case "FAILED": {
         const code = jsonField(payload, "failureCode");
-        // Runway does not refund SAFETY.INPUT failures (its task-failure
-        // guide), so a refusal carries the cost Runway reports.
         if (typeof code === "string" && /^(SAFETY\.|INPUT_PREPROCESSING\.SAFETY)/.test(code)) {
+          // Runway's task-failure guide says only SAFETY.INPUT failures keep
+          // the credits when it does not supply a charge.
+          const billed = usage === undefined && code.startsWith("SAFETY.INPUT.");
           return {
             status: "refused",
             safetyRefusal: "Runway's content moderation blocked this clip.",
+            ...(billed ? { billed: true } : {}),
             ...(usage === undefined ? {} : { usage }),
           };
         }

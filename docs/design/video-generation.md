@@ -152,9 +152,9 @@ activation ladder.
    - It is a dedicated video provider with self-serve keys and a published
      price.
    - One call cancels a running task or deletes a finished one.
-   - It reports each task's charged credits, so a job settles at what Runway
-     charged; it keeps credits for input-safety refusals, so such a refusal
-     settles at its charge rather than at nothing.
+   - A job settles at the charged credits when Runway reports them. Runway
+     keeps credits for `SAFETY.INPUT.*` refusals, so Octant settles at the
+     reserved estimate if Runway omits the charge for one of those refusals.
    - The driver offers Gen-4.5 (from text or a first frame) and Gen-4 Turbo
      (first frame only), 2-10 s at 720p, with no audio.
    - It resells several other providers' models under the same key.
@@ -607,7 +607,12 @@ export type VideoAdapterPoll =
       readonly video: { readonly bytes: Uint8Array; readonly mediaType: "video/mp4" };
       readonly usage?: VideoAdapterUsage;
     }
-  | { readonly status: "refused"; readonly safetyRefusal: string }
+  | {
+      readonly status: "refused";
+      readonly safetyRefusal: string;
+      readonly billed?: true;
+      readonly usage?: VideoAdapterUsage;
+    }
   | {
       readonly status: "failed";
       readonly providerFailure: ProviderFailure;

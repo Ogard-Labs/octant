@@ -1046,20 +1046,24 @@ export class VideoJobService {
         }
         break;
       }
-      case "refused":
-        // Most providers bill nothing for a refusal; one that reports a
-        // charge (Runway keeps input-safety credits) settles at that charge.
+      case "refused": {
+        // A provider can keep credits without returning the amount charged.
+        const reportedCharge = answer.usage?.costUsdMicros;
         this.#finish(current, "failed", {
           safetyRefusal: answer.safetyRefusal,
-          ...(answer.usage?.costUsdMicros === undefined
-            ? {}
-            : {
-                settledCostUsdMicros: Math.max(0, Math.round(answer.usage.costUsdMicros)),
+          ...(answer.billed === true || reportedCharge !== undefined
+            ? {
+                settledCostUsdMicros:
+                  reportedCharge === undefined
+                    ? estimateOrZero(current)
+                    : Math.max(0, Math.round(reportedCharge)),
                 billed: true,
-                usage: answer.usage,
-              }),
+                ...(answer.usage === undefined ? {} : { usage: answer.usage }),
+              }
+            : {}),
         });
         break;
+      }
       case "failed":
         this.#finish(current, stopped ? "cancelled" : "failed", {
           ...(stopped ? {} : { failure: answer.providerFailure }),
