@@ -298,6 +298,7 @@ import type {
 } from "../harness/nativeHarnessTurnObserver";
 import type { RestartContinuationReadiness } from "../harness/threadRestartContinuation";
 import { withPromptDigest, type TurnEndSummary } from "../metrics/turnEnd";
+import type { ThreadTitleRequest } from "../automaticModels/threadTitle";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import type { ThreadToolCallRecorders } from "../threadToolCallRecorder";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
@@ -901,6 +902,7 @@ export interface ChatServiceOptions {
     readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
     /** The host's keyed prompt digest; absent when the host has no key. */
     readonly promptDigest?: (text: string) => string;
+    readonly titleFirstTurn?: ThreadTitleRequest;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & {
         readonly text: string;
@@ -3353,6 +3355,7 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: command.prompt,
       prepared: accepted.prepared,
+      mayTitleFirstTurn: true,
       ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "turn-created", turn: accepted.turn };
@@ -4314,7 +4317,17 @@ export class ChatService {
           },
         },
       );
-      return { thread: updatedThread, turn: updatedTurn, attempt: nextAttempt, prompt, prepared };
+      return {
+        thread: updatedThread,
+        turn: updatedTurn,
+        attempt: nextAttempt,
+        prompt,
+        prepared,
+        mayTitleFirstTurn:
+          view.turns.length === 1 &&
+          executionContext?.limitRecovery !== true &&
+          !turn.attempts.some((attempt) => attempt.outcome === "completed"),
+      };
     });
     await this.#runAttempt({
       thread: threadAsRoutedFor(accepted.thread, accepted.attempt),
@@ -4322,6 +4335,7 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: accepted.prompt,
       prepared: accepted.prepared,
+      mayTitleFirstTurn: accepted.mayTitleFirstTurn,
       ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "attempt-updated", attempt: accepted.attempt };
@@ -7214,6 +7228,7 @@ export class ChatService {
     readonly prepared: PreparedChatTurn;
     readonly mode?: "send" | "resume";
     readonly windowId?: WindowId;
+    readonly mayTitleFirstTurn?: boolean;
   }): Promise<void> {
     const controller = new AbortController();
     this.#activeAttempts.set(String(input.attempt.id), controller);
@@ -7470,6 +7485,14 @@ export class ChatService {
       // Chat has no Full access, so the attempt keeps the person's number
       // for the levels below it.
       const toolStepLimit = this.#toolStepsPerTurn();
+      const titleFirstTurn =
+        input.mayTitleFirstTurn === true &&
+        input.turn.sequence === 1 &&
+        input.turn.delivery === undefined &&
+        input.windowId !== undefined &&
+        !isRoutineHostScope(input.windowId)
+          ? this.#nativeHarness?.titleFirstTurn
+          : undefined;
       try {
         await Effect.runPromise(
           Effect.scoped(
@@ -7477,6 +7500,11 @@ export class ChatService {
               thread: input.thread,
               attempt: input.attempt,
               prompt: input.prompt,
+              ...(titleFirstTurn === undefined
+                ? {}
+                : {
+                    onPromptSent: () => void titleFirstTurn("chat", input.thread.id, input.prompt),
+                  }),
               ...(this.#outsideContentMarks === undefined
                 ? {}
                 : { outsideContentMarks: this.#outsideContentMarks }),

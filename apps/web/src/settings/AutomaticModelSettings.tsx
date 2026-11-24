@@ -1,8 +1,9 @@
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
 import type { CodeSettings } from "@octant/contracts/code";
 import type { PersonMemorySettings, PersonMemoryView } from "@octant/contracts/person-memory";
-import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
+import type { ProviderInstance, ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { ShieldModelChoice } from "@octant/contracts/shield";
+import type { ThreadTitleSettings, ThreadTitleSource } from "@octant/contracts/shell";
 import type { SettingsSettingId } from "@octant/contracts";
 import {
   AUTOMATIC_MODEL_DISCLOSURE,
@@ -10,10 +11,12 @@ import {
   AUTOMATIC_MODEL_NO_SWITCH_NOTE,
   DECISION_REVIEW_OFF_LABEL,
   automaticModelUnavailableReason,
+  threadTitleEndpointSource,
   type AutomaticModelJob,
 } from "@octant/domain/automatic-model-policy";
 import { useCallback, useEffect, useState } from "react";
 import type { CodeSettingsUpdate } from "../code/CodeSettingsView";
+import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SettingRow, SettingsSection, SettingsState } from "./primitives";
 
@@ -25,10 +28,15 @@ export interface AutomaticModelSettingsProps {
   readonly personMemoryClient: PersonMemoryClient | undefined;
   readonly providerSnapshot?: ProviderRegistrySnapshot | undefined;
   readonly focusedSetting?: SettingsSettingId | undefined;
+  readonly threadTitles?: ThreadTitleSettings | undefined;
+  readonly onThreadTitlesChange?: (
+    settings: ThreadTitleSettings,
+  ) => Promise<boolean> | boolean | void;
+  readonly onOpenModelEndpoints?: () => void;
 }
 
 export const AUTOMATIC_MODEL_INTRO =
-  "Some work Octant does for you without being asked: judging an action when Auto is on, and writing memory after a thread. Each job uses the provider of the thread it is about, with that provider's smallest model, unless you choose an account and model here. A second opinion on decisions has no default: it stays off until you choose an account and model. Every call shows in Usage.";
+  "Choose which models Octant uses for background tasks. The Judge and memory use the thread’s provider by default. Thread titles and second opinions use a model only after you choose one. Calls appear in Usage.";
 
 const DEFAULT_LABEL = "The thread's provider, smallest model";
 
@@ -38,6 +46,13 @@ export const modelValue = (choice: ShieldModelChoice | undefined) =>
   choice === undefined
     ? THREAD_PROVIDER_MODEL
     : `${String(choice.providerInstanceId)}/${String(choice.modelId)}`;
+
+type ModelOption = {
+  readonly id: string;
+  readonly label: string;
+  readonly choice?: ShieldModelChoice;
+  readonly unavailable?: true;
+};
 
 /**
  * The accounts an automatic job may use: each enabled provider account's
@@ -50,16 +65,11 @@ export function shieldModelOptions(
   current: ShieldModelChoice | undefined,
   /** What the first option, which stands for no choice, is called. */
   defaultLabel: string = DEFAULT_LABEL,
-): ReadonlyArray<{
-  readonly id: string;
-  readonly label: string;
-  readonly choice?: ShieldModelChoice;
-}> {
-  const options: Array<{ id: string; label: string; choice?: ShieldModelChoice }> = [
-    { id: THREAD_PROVIDER_MODEL, label: defaultLabel },
-  ];
+  eligible: (instance: ProviderInstance) => boolean = () => true,
+): ReadonlyArray<ModelOption> {
+  const options: ModelOption[] = [{ id: THREAD_PROVIDER_MODEL, label: defaultLabel }];
   for (const instance of snapshot?.instances ?? []) {
-    if (!instance.enabled) continue;
+    if (!instance.enabled || !eligible(instance)) continue;
     const catalog = snapshot?.catalogs?.find(
       (candidate) => String(candidate.instanceId) === String(instance.id),
     );
@@ -78,7 +88,12 @@ export function shieldModelOptions(
   // A stored choice whose provider is gone is still shown, so the select
   // never claims a choice the host does not hold.
   if (current !== undefined && !options.some((option) => option.id === modelValue(current))) {
-    options.push({ id: modelValue(current), label: String(current.modelId), choice: current });
+    options.push({
+      id: modelValue(current),
+      label: current.modelId,
+      choice: current,
+      unavailable: true,
+    });
   }
   return options;
 }
@@ -258,6 +273,16 @@ export function AutomaticModelSettings(props: AutomaticModelSettingsProps) {
   return (
     <SettingsSection description={AUTOMATIC_MODEL_INTRO} title="Automatic model calls">
       <div className="setgroup">
+        {props.onThreadTitlesChange === undefined ? null : (
+          <ThreadTitleRows
+            settings={props.threadTitles ?? { source: "first-message" }}
+            focusedSetting={props.focusedSetting}
+            onChange={props.onThreadTitlesChange}
+            onOpenModelEndpoints={props.onOpenModelEndpoints}
+            onProblem={setProblem}
+            snapshot={props.providerSnapshot}
+          />
+        )}
         <SettingRow
           description={
             <JobNote choice={judgeChoice} job="shield-judge" snapshot={props.providerSnapshot} />
@@ -328,6 +353,137 @@ export function AutomaticModelSettings(props: AutomaticModelSettingsProps) {
       <p className="setgroup-note">{AUTOMATIC_MODEL_NO_SWITCH_NOTE}</p>
       {problem === undefined ? null : <SettingsState kind="error">{problem}</SettingsState>}
     </SettingsSection>
+  );
+}
+
+const TITLE_SOURCES = [
+  { id: "first-message", label: "Use first message" },
+  { id: "api", label: "API endpoint" },
+  { id: "subscription", label: "Subscription" },
+] as const satisfies ReadonlyArray<{ readonly id: ThreadTitleSource; readonly label: string }>;
+
+function ThreadTitleRows(props: {
+  readonly settings: ThreadTitleSettings;
+  readonly focusedSetting: SettingsSettingId | undefined;
+  readonly onChange: NonNullable<AutomaticModelSettingsProps["onThreadTitlesChange"]>;
+  readonly onOpenModelEndpoints: (() => void) | undefined;
+  readonly onProblem: (message: string | undefined) => void;
+  readonly snapshot: ProviderRegistrySnapshot | undefined;
+}) {
+  const [busy, setBusy] = useState(false);
+  const { source } = props.settings;
+  const modelKey = source === "subscription" ? "subscriptionModel" : "apiModel";
+  const choice = props.settings[modelKey];
+  const modelLabel = source === "subscription" ? "Subscription model" : "API endpoint model";
+  const options = shieldModelOptions(
+    props.snapshot,
+    choice,
+    "Choose model",
+    (instance) => threadTitleEndpointSource(instance) === source,
+  );
+  const value = modelValue(choice);
+  const hasModel = options.some((option) => option.choice !== undefined && !option.unavailable);
+  const missingModel = props.snapshot !== undefined && options.some((option) => option.unavailable);
+  const unavailable =
+    accountProblem(props.snapshot, choice) ??
+    (missingModel ? "The saved model is unavailable." : undefined);
+  const focusModel = props.focusedSetting === "automatic-model-thread-title-model";
+
+  async function save(next: ThreadTitleSettings) {
+    if (busy) return;
+    setBusy(true);
+    props.onProblem(undefined);
+    try {
+      if ((await props.onChange(next)) === false) {
+        props.onProblem("Thread title settings could not be saved.");
+      }
+    } catch {
+      props.onProblem("Thread title settings could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <SettingRow
+        description="Choose how Octant names new Chat, Work, and Code threads. Model sources receive an excerpt of the first message. Octant remembers each model choice."
+        focused={
+          props.focusedSetting === "automatic-model-thread-title" ||
+          (focusModel && source === "first-message")
+        }
+        label="Thread titles"
+        scope="host"
+        settingId="automatic-model-thread-title"
+      >
+        <OctantSelectField
+          aria-label="Thread title source"
+          aria-describedby="automatic-model-thread-title-description"
+          className="settings-view__select window-no-drag"
+          disabled={busy}
+          onValueChange={(next) => {
+            const selected = TITLE_SOURCES.find(({ id }) => id === next);
+            if (selected !== undefined && selected.id !== source) {
+              void save({ ...props.settings, source: selected.id });
+            }
+          }}
+          options={TITLE_SOURCES}
+          value={source}
+        />
+      </SettingRow>
+      {source === "first-message" ? null : (
+        <SettingRow
+          description={
+            <>
+              {choice === undefined
+                ? source === "subscription"
+                  ? "Choose a model from a ChatGPT plan endpoint. Used when you send the first message."
+                  : "Choose a model from an API endpoint. Your provider may charge for title requests."
+                : `Octant sends up to 2,000 characters of the first message to ${destination(props.snapshot, choice)}, with recognizable secrets removed.`}
+              {unavailable === undefined ? null : (
+                <> {unavailable} Octant will use the first message.</>
+              )}
+            </>
+          }
+          label={modelLabel}
+          focused={focusModel}
+          scope="host"
+          settingId="automatic-model-thread-title-model"
+        >
+          {!hasModel && props.onOpenModelEndpoints !== undefined ? (
+            <OctantButton
+              onClick={props.onOpenModelEndpoints}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Open Model endpoints
+            </OctantButton>
+          ) : (
+            <OctantSelectField
+              aria-label={modelLabel}
+              aria-describedby="automatic-model-thread-title-model-description"
+              className="settings-view__select window-no-drag"
+              disabled={busy || !hasModel}
+              onValueChange={(next) => {
+                const selected = options.find(
+                  (option) => option.id === next && !option.unavailable,
+                )?.choice;
+                if (selected !== undefined && next !== value) {
+                  void save({ ...props.settings, [modelKey]: selected });
+                }
+              }}
+              options={options.map(({ id, label, choice: model, unavailable }) => ({
+                id,
+                label,
+                disabled: model === undefined || unavailable === true,
+              }))}
+              value={value}
+            />
+          )}
+        </SettingRow>
+      )}
+    </>
   );
 }
 

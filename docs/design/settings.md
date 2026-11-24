@@ -263,6 +263,13 @@ visible while the details are closed; pressing it opens the details and gives
 the same answer without the picker. See
 [Providers and model endpoints](model-endpoints.md).
 
+Under **Automatic model calls**, **Thread titles** switches between **Use first
+message** (the default), **API endpoint**, and **Subscription** for new Chat,
+Work, and Code threads. Each model-backed source remembers its model. With no
+eligible endpoint connected, its model row opens Model endpoints for setup.
+The row says what leaves the host and names the selected endpoint.
+See [Thread titles](model-endpoints.md#thread-titles) for routing and fallback.
+
 ### Provider channels
 
 Providers & Models carries a **Provider channels** section after Stalled
@@ -471,8 +478,8 @@ account and model). The rules behind them are in
 [Octant Shield](../architecture.md#octant-shield). Built for Code: Auto
 reviewer in Settings › Code › Access, **Automatic model calls** in Settings ›
 Providers & Models (a section with one select per job, a plain note of where the
-work goes, and the account's problem when it has one; the second opinion on
-decisions starts at **Off** and is the only job with no default account), and the reviewer
+work goes, and the account's problem when it has one; second opinions start
+at **Off**, and thread titles start at **Use first message**), and the reviewer
 override as a select on a Code Project's overview; **Servers** is built below
 Safe networks in Settings › Permissions as an account list and a **Project**
 picker that says whether the chosen Project uses the account's servers or

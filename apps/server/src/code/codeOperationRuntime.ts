@@ -199,6 +199,8 @@ import type {
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
 import { withPromptDigest, type TurnEndSummary } from "../metrics/turnEnd";
+import type { ThreadTitleRequest } from "../automaticModels/threadTitle";
+import { isRoutineHostScope } from "../routineHostScope";
 import type { AutomaticCompactionSighting } from "../context/automaticCompaction";
 import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
 import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
@@ -868,6 +870,7 @@ export interface CodeOperationRuntimeOptions {
     readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
     /** The host's keyed prompt digest; absent when the host has no key. */
     readonly promptDigest?: (text: string) => string;
+    readonly titleFirstTurn?: ThreadTitleRequest;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & {
         readonly text: string;
@@ -6471,6 +6474,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     };
     const harnessContext = this.#options.nativeHarness?.contextFor(harnessScope) ?? [];
     this.#options.nativeHarness?.turnStarted(harnessScope);
+    if (active.firstTurn && active.runtimeTurn !== true && !isRoutineHostScope(active.windowId)) {
+      void this.#options.nativeHarness?.titleFirstTurn?.("code", String(active.thread.id), prompt);
+    }
     let endedTurn: TurnEndSummary | undefined;
     const appManagedTools = this.#appManagedTools(active);
     const toolEffects = this.#options.nativeHarness?.toolEffects?.({

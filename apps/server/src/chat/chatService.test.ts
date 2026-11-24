@@ -317,6 +317,7 @@ function searxngResearchProbe(): ProviderProbeResult {
 }
 
 function openFixture(options?: {
+  readonly nativeHarness?: ChatServiceOptions["nativeHarness"];
   readonly toolRequest?: { readonly name: string; readonly inputJson: string };
   readonly responseFragments?: ReadonlyArray<string>;
   readonly verifyModelToolsOnFirstUse?: ChatServiceOptions["verifyModelToolsOnFirstUse"];
@@ -808,6 +809,7 @@ function openFixture(options?: {
     actor: Schema.decodeUnknownSync(EventActor)({ kind: "system", actorId: ids.actor }),
   });
   const service = new ChatService({
+    ...(options?.nativeHarness === undefined ? {} : { nativeHarness: options.nativeHarness }),
     ...(options?.describeImages === undefined ? {} : { describeImages: options.describeImages }),
     ...(options?.verifyModelToolsOnFirstUse === undefined
       ? {}
@@ -1469,6 +1471,67 @@ function providerSearchComposition(tainted: ReadonlySet<string>) {
 }
 
 describe("ChatService", () => {
+  it.each([false, true])(
+    "handles title generation for a first-prompt retry with a later turn: %s",
+    async (laterTurn) => {
+      const titleFirstTurn = vi.fn(async () => undefined);
+      const { service } = openFixture({
+        turnOutcome: (index) => (index === 0 ? "failed" : "completed"),
+        nativeHarness: {
+          contextFor: () => [],
+          turnStarted: () => undefined,
+          turnCompleted: async () => undefined,
+          titleFirstTurn,
+        },
+      });
+      const windowId = decodeWindowId("84000000-0000-4000-8000-0000000000ff");
+      const prompt = "Name the release preparation thread";
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: prompt,
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected a Chat thread.");
+      const threadId = created.thread.id;
+      const sent = await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId,
+          expectedVersion: created.thread.version,
+          prompt,
+        },
+        { windowId },
+      );
+      if (sent.kind !== "turn-created") throw new Error("Expected the first Chat turn.");
+      expect(service.read(threadId).turns[0]?.attempts[0]?.outcome).toBe("failed");
+      if (laterTurn) {
+        await service.execute(
+          {
+            kind: "send-chat-turn",
+            threadId,
+            expectedVersion: service.read(threadId).thread.version,
+            prompt: "Write the release notes",
+          },
+          { windowId },
+        );
+        expect(service.read(threadId).turns[1]?.attempts[0]?.outcome).toBe("completed");
+      }
+      expect(titleFirstTurn).not.toHaveBeenCalled();
+      await service.execute(
+        {
+          kind: "retry-chat-turn",
+          threadId,
+          expectedVersion: service.read(threadId).thread.version,
+          turnId: sent.turn.id,
+          attemptId: sent.turn.attempts[0]!.id,
+        },
+        { windowId },
+      );
+      if (laterTurn) expect(titleFirstTurn).not.toHaveBeenCalled();
+      else expect(titleFirstTurn).toHaveBeenCalledExactlyOnceWith("chat", threadId, prompt);
+    },
+  );
+
   it("sends no turn nobody sent that would fall back onto Google Antigravity, and takes the person's own", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000012");
     const fallbackProvider = "84000000-0000-4000-8000-000000000007";
