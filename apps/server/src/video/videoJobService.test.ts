@@ -17,6 +17,7 @@ import {
   type VideoModelCapabilities,
 } from "@octant/contracts/video-generation";
 import {
+  classifyVideoHttpFailure,
   isProviderFailure,
   type VideoAdapterForget,
   type VideoAdapterPoll,
@@ -32,6 +33,7 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { catchUpProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
+import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
 import type { SpendCeilingTurnRequest } from "../spendCeilingService";
 import { VideoClipStore } from "./videoClipStore";
 import { VIDEO_HTTP_LIMITS } from "./videoHttp";
@@ -119,6 +121,7 @@ interface Script {
   cancel?: (signal: AbortSignal | undefined) => Promise<VideoAdapterPoll>;
   cancelRunningWithoutDiscovery?: true;
   credential?: () => Promise<string>;
+  lease?: NonNullable<ProviderCredentialResolver["lease"]>;
   forget?: () => Promise<"removed" | "failed" | VideoAdapterForget>;
   model?: VideoModelCapabilities;
   beforeModels?: (call: number, signal: AbortSignal | undefined) => Promise<void>;
@@ -237,6 +240,7 @@ function harness(script: Script, directory?: string) {
     credentialResolver: {
       has: async () => true,
       resolve: async () => (await script.credential?.()) ?? "key",
+      lease: script.lease,
     },
     fetch: async (input) => {
       fetched.push(String(input));
@@ -1763,6 +1767,56 @@ describe("video jobs", () => {
       expect(spend.abandon).toHaveBeenCalledTimes(1);
     },
   );
+
+  it("releases reserved spend when a rate-limited start's body outlasts the HTTP deadline", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const reading = Promise.withResolvers<void>();
+    const cancelled = vi.fn();
+    const { service, spend } = harness({
+      lease: async () => ({ credential: "fixture-key", reportRejected: () => undefined }),
+      response: () =>
+        new Response(
+          new ReadableStream(
+            { pull: () => reading.resolve(), cancel: cancelled },
+            {
+              highWaterMark: 0,
+            },
+          ),
+          { status: 429, headers: { "retry-after": "60" } },
+        ),
+      start: async (ports, request) => {
+        try {
+          const response = await ports.request({
+            url: "https://video.example.test/start",
+            method: "POST",
+            auth: { header: "authorization", scheme: "Bearer" },
+            signal: request.signal,
+          });
+          return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
+        } catch (error) {
+          if (!isProviderFailure(error)) throw error;
+          return { status: "failed", providerFailure: error };
+        }
+      },
+    });
+    try {
+      const queued = await enqueue(service);
+      await reading.promise;
+      await vi.advanceTimersByTimeAsync(VIDEO_HTTP_LIMITS.connectionTimeoutMs);
+      const done = await service.whenTerminal(queued.id);
+      expect(done).toMatchObject({
+        status: "failed",
+        failure: { category: "rate-limited", retryAfterMs: 60_000 },
+      });
+      expect(done?.settledCostUsdMicros).toBeUndefined();
+      expect(spend.settle).not.toHaveBeenCalled();
+      expect(spend.abandon).toHaveBeenCalledOnce();
+      expect(cancelled).toHaveBeenCalledOnce();
+    } finally {
+      service.close();
+      vi.useRealTimers();
+    }
+  });
 
   it("waits out the provider's retry-after before polling again", async () => {
     const { service, sleeps } = harness({

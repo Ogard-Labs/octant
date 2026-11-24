@@ -767,8 +767,8 @@ export class VideoJobService {
     });
     const remainingMs =
       Date.parse(sending.startedAt ?? sending.createdAt) + VIDEO_JOB_TIMEOUT_MS - this.#now();
-    // The HTTP port's connection timer ends at the headers. The same signal
-    // stays attached to the response body until the start has been decoded.
+    // The HTTP port hands off a successful response at its headers. Keep
+    // the job deadline attached until the start response has been decoded.
     let startTimedOut = false;
     const startTimer = setTimeout(
       () => {

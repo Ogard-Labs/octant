@@ -103,11 +103,14 @@ async function readRejectionPrefix(response: Response, signal?: AbortSignal): Pr
       chunks.push(value);
       length += value.byteLength;
     }
+  } catch (error) {
+    // The fetch may fail its body read as the signal cancels it. Any
+    // quota text we received before that still applies to this key.
+    if (signal?.aborted !== true) throw error;
   } finally {
     signal?.removeEventListener("abort", cancel);
     cancel();
   }
-  if (signal?.aborted) return "";
   const bytes = new Uint8Array(Math.min(length, REJECTION_BODY_BYTES));
   let offset = 0;
   for (const chunk of chunks) {

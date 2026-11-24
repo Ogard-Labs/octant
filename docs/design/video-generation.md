@@ -322,7 +322,8 @@ which the person sets, like any turn.
   driver computes from the usage the provider reports (Gemini's token count),
   or to the estimate when the provider reports none.
   - A confirmed failure before output releases its reservation when there
-    is no charged usage. An unconfirmed start follows the interruption
+    is no charged usage. A rate-limit status still confirms refusal if
+    reading the error body times out. An unconfirmed start follows the interruption
     rule below. A confirmed completion with invalid output still settles to
     reported usage or to the estimate when no usage was reported.
   - A cancelled job settles at the reported usage, or at the estimate when

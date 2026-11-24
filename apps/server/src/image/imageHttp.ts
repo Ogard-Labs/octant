@@ -133,16 +133,23 @@ export async function performImageHttpRequest(
       await cancelResponseBody(response);
       throw imageFailure("invalid-configuration", "The configured endpoint returned a redirect.");
     }
-    try {
-      await Promise.race([
-        reportKeyRejection(attempt.lease, response, deadline.signal),
-        deadline.failure,
+    if (!response.ok && attempt.lease !== undefined) {
+      const expired = await Promise.race([
+        reportKeyRejection(attempt.lease, response, deadline.signal).then(() => undefined),
+        deadline.failure.catch((failure: ProviderFailure) => failure),
       ]);
-    } catch (error) {
-      // The key pool reads a clone. Release the original too when the
-      // request ends before the caller can take ownership of the response.
-      safelyCancel(response.body);
-      throw error;
+      if (expired !== undefined) {
+        // The deadline releases the pool's clone. Release the original too.
+        safelyCancel(response.body);
+        if (expired.category === "interrupted") throw expired;
+        // The provider already answered. Preserve its refusal and retry
+        // metadata when only the optional error text timed out.
+        return new Response(null, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers,
+        });
+      }
     }
     return boundResponse(response, request.limits, request.signal);
   } finally {
