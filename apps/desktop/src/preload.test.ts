@@ -909,6 +909,7 @@ describe("desktop preload bridge", () => {
       "subscribeWindowFullScreen",
       "tabBrowserSurface",
       "testComputerUse",
+      "undoAccessChangeNotice",
       "updateBrowserSurfaceBounds",
       "updateCodeOperationApprovalAnchor",
       "windowChrome",

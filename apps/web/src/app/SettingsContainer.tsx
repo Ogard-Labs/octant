@@ -29,6 +29,11 @@ type HostFederationLifecycle = NonNullable<
 >["lifecycle"];
 
 export interface SettingsContainerProps {
+  /** Change feed revisions for Settings › Remote access's access activity and change notices. */
+  readonly accessActivityRevisions?: {
+    readonly activity: number;
+    readonly notices: number;
+  };
   readonly projectTerminalClient?: ProjectTerminalClient;
   readonly projectActionStoragePrefix?: string;
   readonly onOpenServerProject?: (project: ServerProject) => void;
@@ -295,6 +300,11 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
         : { browserAutomationClient: props.browserAutomationClient })}
       protectedFilesClient={protectedFilesClient}
       newDeviceAlertsClient={newDeviceAlertsClient}
+      accessActivity={{
+        port: props.clients.accessActivityPort,
+        activityRevision: props.accessActivityRevisions?.activity ?? 0,
+        noticesRevision: props.accessActivityRevisions?.notices ?? 0,
+      }}
       blockedToolsClient={blockedToolsClient}
       sandboxRestrictionsClient={sandboxRestrictionsClient}
       sandboxScopes={[

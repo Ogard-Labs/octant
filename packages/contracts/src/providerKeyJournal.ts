@@ -23,6 +23,14 @@ export const PROVIDER_KEY_AGGREGATE_TYPE = "provider-key";
 
 const RequestId = Schema.UUID;
 
+/**
+ * A key's id in its provider's pool: random, never derived from the key.
+ * `default` is the one key a plain stored value holds.
+ */
+const ApiKeyId = Schema.String.pipe(
+  Schema.pattern(/^(default|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/),
+);
+
 export const ProviderKeyJournalRecord = Schema.Union(
   Schema.Struct({
     name: Schema.Literal("provider-key.change-requested"),
@@ -32,6 +40,14 @@ export const ProviderKeyJournalRecord = Schema.Union(
     /** The instance version the change was made against, so a restart can tell a later reconfiguration. */
     instanceVersion: AggregateVersion,
     windowId: WindowId,
+    /**
+     * On a `set` that stores a new secret: whether it added a key (and which,
+     * so a change notice's Undo removes exactly that one) or replaced one.
+     * Absent on a rename, a reorder, a change of active key, and on every
+     * record written before change notices.
+     */
+    keyChange: Schema.optional(Schema.Literal("added", "replaced")),
+    keyId: Schema.optional(ApiKeyId),
   }).annotations(strict),
   Schema.Struct({
     name: Schema.Literal("provider-key.change-completed"),
@@ -44,6 +60,21 @@ export const ProviderKeyJournalRecord = Schema.Union(
      * found the request without an outcome and settled the store.
      */
     outcome: Schema.Literal("stored", "removed", "cleared-after-change", "reconciled"),
+    /**
+     * The pool's key ids after the change, in stored order. Ids are random or
+     * `default`, never derived from a key, so a change notice's Undo can hold
+     * the pool to this list before it removes a key.
+     */
+    keyIds: Schema.optional(Schema.Array(ApiKeyId)),
+    /**
+     * The pool's non-secret identity after the change: key ids, the active
+     * key, and each key's opaque secret-revision marker — never anything
+     * derived from a secret. A change notice's Undo holds the pool to it,
+     * so an edit the journal never saw refuses. Events journaled when it
+     * still held a secret-derived hash decode but match no current
+     * fingerprint, so their Undo refuses too.
+     */
+    fingerprint: Schema.optional(Schema.String),
   }).annotations(strict),
   Schema.Struct({
     name: Schema.Literal("provider-key.change-failed"),

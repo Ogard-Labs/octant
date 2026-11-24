@@ -35,6 +35,48 @@ describe("MachineChangeFeed", () => {
     await expect(stream.next()).resolves.toMatchObject({ done: true });
   });
 
+  it("refreshes access activity for a device added or re-levelled, and change notices for a raise, a key, or a dismissal", async () => {
+    const feed = new MachineChangeFeed();
+    const controller = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
+
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: "remote-device",
+          eventName: "remote.security-audit-recorded@1",
+          payload: { record: { eventKind: "device-approved" } },
+        },
+        { aggregateType: "remote-device", eventName: "remote.device-access-level-changed@1" },
+      ],
+    });
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: "remote-host",
+          eventName: "remote.security-audit-recorded@1",
+          payload: { record: { eventKind: "session-negotiated" } },
+        },
+      ],
+    });
+    feed.publishCommitted({
+      events: [
+        { aggregateType: "guardrail-change" },
+        { aggregateType: "provider-key" },
+        { aggregateType: "access-notice" },
+      ],
+    });
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "changed", topics: ["access-activity"] },
+    });
+    // An audit record other than an approval wakes nobody, so the next frame is the notices'.
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "changed", topics: ["change-notices"] },
+    });
+    controller.abort();
+  });
+
   it("tells a subscriber when an image job is queued or finishes", async () => {
     const feed = new MachineChangeFeed();
     const controller = new AbortController();
