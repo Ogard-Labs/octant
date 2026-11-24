@@ -1,15 +1,19 @@
 import {
   decodeCodeProjectPullRequestView,
+  decodeUtcTimestamp,
   type CodeProjectPullRequestQuery,
   type CodeProjectPullRequestRefreshCommand,
   type CodeProjectPullRequestView,
 } from "@octant/contracts";
 import { decodeProjectId } from "@octant/contracts/projects";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { ThreadWatchHandoff } from "./PullRequestHandoff";
+import type { CodeClient } from "@octant/client-runtime";
+import { PullRequestControlsUnavailableError } from "@octant/client-runtime/code-client";
 import { CodeProjectPullRequests } from "./CodeProjectPullRequests";
 
 const projectA = "10000000-0000-4000-8000-000000000001";
@@ -204,6 +208,313 @@ function renderWorkspace(
 }
 
 describe("CodeProjectPullRequests", () => {
+  it("shows reload instructions when the overview or watch settings cannot load their controls", async () => {
+    const user = userEvent.setup();
+    const unavailable = vi.fn().mockRejectedValue(new PullRequestControlsUnavailableError());
+    const recovery = /reload the page in your browser, or quit and reopen the Octant desktop app/i;
+    const { unmount } = render(
+      <CodeProjectPullRequests load={unavailable} refresh={unavailable} />,
+    );
+    expect(await screen.findByText(recovery)).toBeVisible();
+    unmount();
+    render(
+      <CodeProjectPullRequests
+        load={async () => view()}
+        refresh={async () => view()}
+        babysitClient={{
+          queryProjectPullRequestSwitches: unavailable,
+          setProjectPullRequestAutoFix: vi.fn(),
+        }}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Babysit octant/octant#12" }));
+    expect(await screen.findByText(recovery)).toBeVisible();
+  });
+
+  it("starts babysitting the chosen PR from the list in the selected linked thread", async () => {
+    const user = userEvent.setup();
+    const otherThread = "20000000-0000-4000-8000-000000000002";
+    const base = view().rows[0]!;
+    const snapshot = view({
+      rows: [
+        {
+          ...base,
+          linkedThreads: [...base.linkedThreads, { threadId: otherThread, title: "Repair thread" }],
+        },
+        { ...base, number: 13, linkedThreads: [] },
+      ],
+    });
+    const read = vi.fn().mockResolvedValue({ autoFix: { status: "off" } });
+    const write = vi.fn().mockResolvedValue({
+      status: "applied",
+      view: { autoFix: { status: "on", threadId: otherThread, babysit: { checks: "required" } } },
+    });
+    render(
+      <CodeProjectPullRequests
+        load={async () => snapshot}
+        refresh={async () => snapshot}
+        babysitClient={{
+          queryProjectPullRequestSwitches: read,
+          setProjectPullRequestAutoFix: write,
+        }}
+      />,
+    );
+    const action = await screen.findByRole("button", { name: "Babysit octant/octant#12" });
+    expect(read).not.toHaveBeenCalled();
+    await user.click(action);
+    expect(screen.queryByRole("button", { name: "Start babysitting" })).toBeNull();
+    await user.click(screen.getByRole("combobox", { name: "Repairing Code thread" }));
+    await user.click(await screen.findByRole("option", { name: "Repair thread" }));
+    await user.click(await screen.findByRole("button", { name: "Start babysitting" }));
+    expect(write).toHaveBeenCalledExactlyOnceWith({
+      kind: "enable",
+      threadId: otherThread,
+      target: {
+        projectId: projectA,
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+        number: 12,
+      },
+      babysit: { checks: "required" },
+    });
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Babysit octant/octant#13" }));
+    expect(await screen.findByText(/Link a Code thread to this pull request/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Start babysitting" })).toBeNull();
+  });
+
+  it("restores saved rules in the dialog and resumes directly from Needs me with the displayed budget", async () => {
+    const user = userEvent.setup();
+    const base = view().rows[0]!;
+    const rules = { checks: "all", requiredLabel: "release" };
+    const watch = {
+      threadId,
+      status: "feedback-limit",
+      stoppedAt: generatedAt,
+      ...rules,
+      feedbackTurns: 3,
+      feedbackLimit: 3,
+    };
+    const snapshot = view({ rows: [{ ...base, babysit: watch }] });
+    const read = vi.fn().mockResolvedValue({
+      autoFix: {
+        status: "stopped",
+        reason: "feedback-limit",
+        stoppedAt: generatedAt,
+        threadId,
+        babysit: rules,
+      },
+    });
+    const write = vi.fn().mockResolvedValue({
+      status: "applied",
+      view: { autoFix: { status: "on", threadId, babysit: rules } },
+    });
+    render(
+      <CodeProjectPullRequests
+        load={async () => snapshot}
+        refresh={async () => snapshot}
+        babysitClient={{
+          queryProjectPullRequestSwitches: read,
+          setProjectPullRequestAutoFix: write,
+        }}
+      />,
+    );
+    expect(await screen.findByText(/3 of 3 feedback turns/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^Needs me/ }));
+    await user.click(screen.getByRole("button", { name: "Babysit octant/octant#12" }));
+    expect(await screen.findByRole("checkbox", { name: /Require all checks/ })).toBeChecked();
+    expect(screen.getByLabelText("Required label (optional)")).toHaveValue("release");
+    expect(screen.getByRole("button", { name: "Resume babysitting" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Resume babysitting octant/octant#12" }));
+    expect(write).toHaveBeenCalledExactlyOnceWith({
+      kind: "enable",
+      threadId,
+      target: {
+        projectId: projectA,
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+        number: 12,
+      },
+      babysit: rules,
+      expectedStoppedAt: generatedAt,
+    });
+  });
+
+  it("confirms the exact ready commit for the chosen PR in a multi-PR thread notice", async () => {
+    const user = userEvent.setup();
+    const heads = ["a".repeat(40), "b".repeat(40), "c".repeat(40)];
+    const base = view().rows[0]!;
+    const rows = view({
+      rows: heads.map((sha, i) => ({
+        ...base,
+        number: 12 + i,
+        state: i === 0 ? "unknown" : "open",
+        draft: i > 0,
+        updatedAt: i === 2 ? "2026-08-22T09:00:00.000Z" : base.updatedAt,
+        babysit: { threadId, status: "ready", stoppedAt: generatedAt, readyHeadSha: sha },
+      })),
+    }).rows;
+    const selected = base.linkedThreads[0]!.threadId;
+    const reason = [
+      "Pull request updates",
+      ...heads.map((sha, i) => `octant/octant#${12 + i} ready to merge at ${sha}`),
+      "octant/octant#15 ready to merge at " + heads[0],
+    ].join("\n");
+    const merge = vi.fn().mockResolvedValue({ status: "refused", reason: "stale" });
+    const query = vi.fn().mockResolvedValue({ rows });
+    render(
+      <ThreadWatchHandoff
+        client={
+          {
+            queryProjectPullRequests: query,
+            mergeProjectPullRequest: merge,
+          } as unknown as CodeClient
+        }
+        projectId={projectAId}
+        threadId={selected}
+        followUp={{
+          state: "open",
+          origin: "automatic",
+          reason,
+          threadId: selected,
+          createdAt: decodeUtcTimestamp(generatedAt),
+          triggerSequence: 1,
+          acknowledgedThroughSequence: 0,
+        }}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Merge octant/octant#12" })).toBeVisible();
+    expect(screen.getByText("Returned to draft after the ready check.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Merge octant/octant#14" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Merge octant/octant#13" }));
+    expect(query).toHaveBeenCalledWith({ version: 1, threadId });
+    expect(screen.queryByRole("button", { name: "Merge octant/octant#15" })).toBeNull();
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText(heads[1]!)).toBeVisible();
+    expect(merge).not.toHaveBeenCalled();
+    await user.click(dialog.getByRole("button", { name: "Confirm merge" }));
+    expect(merge).toHaveBeenCalledExactlyOnceWith({
+      projectId: projectA,
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 13,
+      method: "squash",
+      headSha: heads[1],
+      confirmed: true,
+    });
+    expect(await screen.findByText(/changed since this review/)).toBeVisible();
+    // The overview refreshed while this handoff stayed open. Its formerly draft PR is ready again.
+    query.mockResolvedValue({
+      rows: rows.map((row) => (row.number === 14 ? { ...row, draft: false } : row)),
+    });
+    fireEvent(document, new Event("visibilitychange"));
+    expect(await screen.findByRole("button", { name: "Merge octant/octant#14" })).toBeVisible();
+    expect(screen.queryByText("Returned to draft after the ready check.")).toBeNull();
+    expect(merge).toHaveBeenCalledTimes(1);
+    merge.mockResolvedValue({ status: "merged", number: 14 });
+    await user.click(screen.getByRole("button", { name: "Merge octant/octant#14" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm merge" }),
+    );
+    expect(await screen.findByText(/Merged octant\/octant#14/)).toBeVisible();
+    query.mockResolvedValue({ rows: [] });
+    fireEvent(document, new Event("visibilitychange"));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Merge octant/octant#12" })).toBeNull(),
+    );
+    expect(screen.getByText(/Merged octant\/octant#14/)).toBeVisible();
+    expect(screen.queryByText(/octant\/octant#14 ready to merge/)).toBeNull();
+  });
+
+  it("bulk-starts only chosen PRs with shared rules, preserves active watches and retries just the failure", async () => {
+    const user = userEvent.setup();
+    const base = view().rows[0]!;
+    const other = "20000000-0000-4000-8000-000000000002";
+    const snapshot = view({
+      rows: [
+        base,
+        {
+          ...base,
+          number: 13,
+          linkedThreads: [...base.linkedThreads, { threadId: other, title: "Build fixes" }],
+        },
+        { ...base, number: 14 },
+        { ...base, number: 15 },
+      ],
+    });
+    const write = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "applied", alreadyActive: true })
+      .mockRejectedValueOnce(new Error("unreachable"))
+      .mockResolvedValue({ status: "applied" });
+    render(
+      <CodeProjectPullRequests
+        load={async () => snapshot}
+        refresh={async () => snapshot}
+        babysitClient={{
+          queryProjectPullRequestSwitches: vi.fn(),
+          setProjectPullRequestAutoFix: write,
+        }}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: /Babysit multiple/ }));
+    const dialog = within(screen.getByRole("dialog"));
+    for (const number of [12, 13, 14])
+      await user.click(dialog.getByRole("checkbox", { name: new RegExp("#" + number) }));
+    expect(dialog.getByRole("button", { name: /Start selected/ })).toBeDisabled();
+    await user.click(dialog.getByRole("combobox", { name: /Repairing thread/ }));
+    await user.click(await screen.findByRole("option", { name: "Build fixes" }));
+    await user.click(dialog.getByRole("checkbox", { name: /all checks/ }));
+    await user.type(dialog.getByLabelText("Required label (optional)"), "qa");
+    await user.click(dialog.getByRole("button", { name: "Start selected (3)" }));
+    expect(await dialog.findByText("Started")).toBeVisible();
+    expect(dialog.getByText("Already active")).toBeVisible();
+    expect(dialog.getByText(/Could not confirm/)).toBeVisible();
+    const calls = write.mock.calls.map(([cmd]) => [cmd.target.number, cmd.threadId, cmd.babysit]);
+    expect(calls).toHaveLength(3);
+    expect(calls).toEqual(
+      expect.arrayContaining([
+        [12, threadId, { checks: "all", requiredLabel: "qa" }],
+        [13, other, { checks: "all", requiredLabel: "qa" }],
+        [14, threadId, { checks: "all", requiredLabel: "qa" }],
+      ]),
+    );
+    await user.click(dialog.getByRole("button", { name: "Start selected (1)" }));
+    expect(write).toHaveBeenCalledTimes(4);
+    expect(write.mock.calls[3]).toEqual(write.mock.calls[1]);
+  });
+
+  it("shows the repairing thread and narrows the overview to watches needing a person", async () => {
+    const row = view().rows[0]!;
+    const snapshot = view({
+      rows: [
+        { ...row, babysit: { threadId, status: "approval" } },
+        { ...row, number: 13, title: "Second PR", babysit: { threadId, status: "checks" } },
+        {
+          ...row,
+          number: 14,
+          title: "Stalled repair",
+          babysit: { threadId, status: "needs-help" },
+        },
+        {
+          ...row,
+          number: 15,
+          title: "Feedback limit",
+          babysit: { threadId, status: "feedback-limit" },
+        },
+      ],
+    });
+    renderWorkspace({ load: async () => snapshot });
+    expect(await screen.findByText(/Waiting for approval · Manual refresh/)).toBeVisible();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Needs me/ }));
+    expect(screen.getByText("List active pull requests")).toBeVisible();
+    expect(screen.queryByText("Second PR")).toBeNull();
+    expect(screen.getByText("Stalled repair")).toBeVisible();
+    expect(screen.getByText("Feedback limit")).toBeVisible();
+  });
+
   it("loads the cached snapshot on open and does not refresh GitHub", async () => {
     const { load, refresh } = renderWorkspace();
 

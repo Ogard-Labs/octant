@@ -3,6 +3,8 @@ import {
   type CodeProjectPullRequestAutoFixFailure,
   type CodeProjectPullRequestMergeMethod,
   type CodeProjectPullRequestMergeWait,
+  type PullRequestBabysitRules,
+  type PullRequestBabysitStatus,
 } from "@octant/contracts";
 import type { CoordinatorDoneWhenPullRequestFact } from "@octant/domain";
 import {
@@ -43,6 +45,7 @@ export type GhAutoMergeResult =
 /** One failure Auto-fix found, with the outside text that explains it. */
 export interface GhAutoFixFailureDetail {
   readonly failure: CodeProjectPullRequestAutoFixFailure;
+  readonly outsideReviewer?: true;
   /** Forge-supplied text: a log excerpt, review comments, or a conflict notice. */
   readonly detail: string;
 }
@@ -57,7 +60,10 @@ export interface GhPullRequestActivity {
   readonly failedChecks: ReadonlyArray<string>;
   readonly reviewDecision?: "approved" | "changes-requested" | "review-required";
   readonly conflicting: boolean;
+  readonly requestedApproval?: string;
   readonly reviews: ReadonlyArray<{
+    readonly trustedFeedback?: true;
+    readonly viewerDidAuthor?: true;
     readonly id: string;
     readonly author: string;
     readonly state: string;
@@ -65,6 +71,7 @@ export interface GhPullRequestActivity {
     readonly body: string;
   }>;
   readonly comments: ReadonlyArray<{
+    readonly trustedFeedback?: true;
     readonly id: string;
     readonly author: string;
     readonly at: string;
@@ -81,6 +88,7 @@ export interface GhPullRequestActivity {
 export interface GhPullRequestSwitchReads {
   readonly failures: boolean;
   readonly activity: boolean;
+  readonly babysit?: PullRequestBabysitRules;
 }
 
 export type GhPullRequestSwitchObservation =
@@ -88,6 +96,9 @@ export type GhPullRequestSwitchObservation =
       status: "observed";
       state: "open" | "merged" | "closed";
       headSha: string;
+      babysitReady?: boolean;
+      babysitBlocker?: PullRequestBabysitStatus;
+      babysitBlockerDetail?: string;
       headBranch: string;
       baseBranch: string;
       autoMergeEnabled: boolean;
@@ -113,7 +124,7 @@ const MAX_ACTIVITY_ENTRIES = 50;
  * whole history, and a long enough discussion outgrows the command's 1 MiB
  * output cap, so every pass would fail. Only the newest window is asked for.
  */
-const DISCUSSION_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviews(last:${MAX_ACTIVITY_ENTRIES}){nodes{id author{login} state submittedAt body}} comments(last:${MAX_ACTIVITY_ENTRIES}){nodes{id author{login} createdAt body viewerDidAuthor}}}}}`;
+const DISCUSSION_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewRequests(first:8){nodes{asCodeOwner requestedReviewer{... on User{login} ... on Team{combinedSlug}}}} reviews(last:${MAX_ACTIVITY_ENTRIES}){nodes{id authorAssociation author{login __typename} state submittedAt body viewerDidAuthor}} comments(last:${MAX_ACTIVITY_ENTRIES}){nodes{id authorAssociation author{login __typename} createdAt body viewerDidAuthor}}}}}`;
 /**
  * Bodies are cut inside `gh`, before they reach stdout. jq slices by code
  * point, one past the byte clamp, so a body over the clamp still reaches
@@ -123,9 +134,9 @@ const DISCUSSION_QUERY = `query($owner:String!,$name:String!,$number:Int!){repos
  * however long the history is. (`tojson` is printed raw; gh's own encoder
  * would also escape `<`, `>` and `&` to six bytes.)
  */
-const DISCUSSION_FILTER = `def cut: (.body // "")[0:${MAX_COMMENT_BYTES + 1}] | explode | map(select(. == 9 or . == 10 or . == 13 or (. > 31 and . != 127))) | implode; .data.repository.pullRequest | {reviews: [(.reviews.nodes // [])[] | .body = cut], comments: [(.comments.nodes // [])[] | .body = cut]} | tojson`;
+const DISCUSSION_FILTER = `def cut: (.body // "")[0:${MAX_COMMENT_BYTES + 1}] | explode | map(select(. == 9 or . == 10 or . == 13 or (. > 31 and . != 127))) | implode; .data.repository.pullRequest | {reviewRequests: (.reviewRequests.nodes // []), reviews: [(.reviews.nodes // [])[] | .body = cut], comments: [(.comments.nodes // [])[] | .body = cut]} | tojson`;
 const PASSING_CHECK_CONCLUSIONS = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
-const REVIEW_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:${REVIEW_THREADS_PAGE},after:$after){pageInfo{hasNextPage endCursor} nodes{id isResolved isOutdated path line comments(first:10){nodes{author{login} body}}}}}}}`;
+const REVIEW_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:${REVIEW_THREADS_PAGE},after:$after){pageInfo{hasNextPage endCursor} nodes{id isResolved isOutdated path line comments(first:10){nodes{authorAssociation author{login __typename} body}}}}}}}`;
 
 /**
  * The forge calls behind Merge when ready and Auto-fix, through the host's
@@ -279,18 +290,19 @@ export class GhPullRequestSwitchPort {
     if (!validRepository(repository) || !validNumber(request.number)) {
       return { status: "unavailable" };
     }
-    const view = await this.#run(
-      [
-        "pr",
-        "view",
-        String(request.number),
-        "--repo",
-        repository,
-        "--json",
-        reads.activity ? ACTIVITY_VIEW_FIELDS : VIEW_FIELDS,
-      ],
-      signal,
-    );
+    let fields = reads.activity ? ACTIVITY_VIEW_FIELDS : VIEW_FIELDS;
+    if (reads.babysit) fields += ",isDraft,mergeStateStatus";
+    if (reads.babysit?.requiredLabel !== undefined) fields += ",labels";
+    const viewArguments = [
+      "pr",
+      "view",
+      String(request.number),
+      "--repo",
+      repository,
+      "--json",
+      fields,
+    ];
+    const view = await this.#run(viewArguments, signal);
     if (view === undefined || view.exitCode !== 0) return { status: "unavailable" };
     const pullRequest = parseJson(view.stdout);
     if (!isRecord(pullRequest)) return { status: "unavailable" };
@@ -302,9 +314,15 @@ export class GhPullRequestSwitchPort {
       pullRequest.reviewDecision === "REVIEW_REQUIRED" ||
       pullRequest.reviewDecision === "CHANGES_REQUESTED";
     let activity: GhPullRequestActivity | undefined;
-    if (reads.activity) {
+    if (reads.activity || (reads.babysit && state === "open")) {
       const discussion = await this.#recentDiscussion(request, signal);
-      if (discussion === undefined) return { status: "unavailable" };
+      if (
+        discussion === undefined ||
+        (reads.babysit &&
+          (!Array.isArray(discussion.reviews) || !Array.isArray(discussion.comments)))
+      ) {
+        return { status: "unavailable" };
+      }
       activity = pullRequestActivity(pullRequest, discussion, conflicting);
     }
     const pullRequestNodeId =
@@ -328,9 +346,13 @@ export class GhPullRequestSwitchPort {
     };
     if (state !== "open" || !reads.failures) return { ...base, waitingOn: [], failures: [] };
 
-    const checks = await this.#requiredChecks(repository, request.number, signal);
+    const checks = await this.#checks(request, signal, reads.babysit?.checks);
     if (checks === undefined) return { status: "unavailable" };
-    const threads = await this.#unresolvedReviewThreads(request, signal);
+    const threads = await this.#unresolvedReviewThreads(
+      request,
+      signal,
+      reads.babysit !== undefined,
+    );
     if (threads === undefined) return { status: "unavailable" };
 
     const failures: GhAutoFixFailureDetail[] = [];
@@ -346,21 +368,117 @@ export class GhPullRequestSwitchPort {
         detail: log === undefined ? "No log excerpt was available." : log,
       });
     }
-    failures.push(...threads);
+    failures.push(...threads.filter((thread) => !thread.outsideReviewer));
     if (conflicting) {
       failures.push({
         failure: { kind: "conflict", key: "base" },
         detail: `The branch ${base.headBranch} conflicts with ${base.baseBranch}.`,
       });
     }
+    if (reads.babysit && pullRequest.mergeStateStatus === "BEHIND" && !conflicting) {
+      failures.push({
+        failure: { kind: "behind", key: "base" },
+        detail: "GitHub requires the branch to be brought up to date with its base.",
+      });
+    }
+    let babysitReady = false;
+    let babysitBlockerDetail: string | undefined;
+    let babysitBlocker: PullRequestBabysitStatus | undefined;
+    if (reads.babysit !== undefined) {
+      const label = reads.babysit.requiredLabel;
+      const hasLabel =
+        label === undefined ||
+        (Array.isArray(pullRequest.labels) &&
+          pullRequest.labels.some(
+            (entry) =>
+              isRecord(entry) &&
+              typeof entry.name === "string" &&
+              entry.name.toLowerCase() === label.toLowerCase(),
+          ));
+      if (pullRequest.isDraft === true) babysitBlocker = "draft";
+      else if (!hasLabel) babysitBlocker = "label";
+      else if (pullRequest.reviewDecision === "REVIEW_REQUIRED") babysitBlocker = "approval";
+      else if (checks.pending) babysitBlocker = "checks";
+      else if (reviewsPending && failures.length === 0) babysitBlocker = "approval";
+      else if (threads.some((entry) => entry.outsideReviewer)) babysitBlocker = "outside-review";
+      else babysitBlocker = "repository";
+      if (babysitBlocker === "approval") {
+        babysitBlockerDetail =
+          pullRequest.reviewDecision === "CHANGES_REQUESTED"
+            ? "Changes requested in review"
+            : activity?.requestedApproval;
+      }
+      if (
+        babysitBlocker === "repository" &&
+        pullRequest.mergeStateStatus === "BLOCKED" &&
+        failures.length === 0
+      ) {
+        babysitBlockerDetail = await this.#requiredDeploymentBlocker(
+          request,
+          base.baseBranch,
+          headSha,
+          signal,
+        );
+      }
+      const candidate =
+        failures.length === 0 &&
+        threads.length === 0 &&
+        !checks.pending &&
+        !reviewsPending &&
+        pullRequest.isDraft === false &&
+        pullRequest.mergeable === "MERGEABLE" &&
+        hasLabel;
+      // UNSTABLE can mean only an optional job failed. In that case check the
+      // base's requirements, including any required check that has yet to report.
+      babysitReady =
+        candidate &&
+        (pullRequest.mergeStateStatus === "CLEAN" ||
+          (pullRequest.mergeStateStatus === "UNSTABLE" &&
+            reads.babysit.checks === "required" &&
+            (await this.#requiredChecksForCondition(
+              request,
+              repository,
+              base.baseBranch,
+              "UNSTABLE",
+              signal,
+            )) === "green"));
+      // Checks and discussions were read separately. A push during that work
+      // invalidates both a repair prompt and a ready notification.
+      const latest = await this.#run(viewArguments, signal);
+      const finalView = latest?.exitCode === 0 ? parseJson(latest.stdout) : undefined;
+      if (
+        !isRecord(finalView) ||
+        finalView.headRefOid !== headSha ||
+        finalView.baseRefName !== pullRequest.baseRefName ||
+        finalView.state !== pullRequest.state ||
+        finalView.mergeStateStatus !== pullRequest.mergeStateStatus ||
+        finalView.mergeable !== pullRequest.mergeable ||
+        finalView.isDraft !== pullRequest.isDraft ||
+        finalView.reviewDecision !== pullRequest.reviewDecision ||
+        (label !== undefined &&
+          JSON.stringify(finalView.labels) !== JSON.stringify(pullRequest.labels))
+      ) {
+        return { status: "unavailable" };
+      }
+    }
     const waitingOn: CodeProjectPullRequestMergeWait[] = [];
-    if (checks.pending || checks.failed.length > 0) waitingOn.push("checks");
+    const mergeChecks =
+      reads.babysit?.checks === "all" &&
+      base.autoMergeEnabled &&
+      (checks.pending || checks.failed.length > 0)
+        ? await this.#checks(request, signal)
+        : checks;
+    if (mergeChecks === undefined) return { status: "unavailable" };
+    if (mergeChecks.pending || mergeChecks.failed.length > 0) waitingOn.push("checks");
     if (reviewsPending || threads.length > 0) waitingOn.push("reviews");
     if (conflicting) waitingOn.push("conflicts");
     return {
       ...base,
       waitingOn,
       failures: failures.slice(0, MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_FAILURES),
+      ...(babysitBlockerDetail && !babysitReady ? { babysitBlockerDetail } : {}),
+      ...(babysitBlocker && !babysitReady ? { babysitBlocker } : {}),
+      ...(reads.babysit === undefined ? {} : { babysitReady }),
     };
   }
 
@@ -447,7 +565,8 @@ export class GhPullRequestSwitchPort {
     if (result === undefined) return "unavailable";
     const value = parseJson(result.stdout);
     const noChecksReported = !Array.isArray(value)
-      ? /no required checks|no checks reported/i.test(`${result.stderr ?? ""}\n${result.stdout}`)
+      ? lacksChecksJson(result) ||
+        /no required checks|no checks reported/i.test(`${result.stderr ?? ""}\n${result.stdout}`)
       : value.length === 0;
     if (!noChecksReported) {
       if (!Array.isArray(value)) return "unavailable";
@@ -721,10 +840,10 @@ export class GhPullRequestSwitchPort {
     return collected;
   }
 
-  async #requiredChecks(
-    repository: string,
-    number: number,
+  async #checks(
+    request: GhPullRequestSwitchRequest,
     signal: AbortSignal,
+    scope?: "required" | "all",
   ): Promise<
     | {
         readonly pending: boolean;
@@ -736,16 +855,42 @@ export class GhPullRequestSwitchPort {
       [
         "pr",
         "checks",
-        String(number),
+        String(request.number),
         "--repo",
-        repository,
-        "--required",
+        `${request.owner}/${request.name}`,
+        ...(scope === "all" ? [] : ["--required"]),
         "--json",
         "name,bucket,link",
       ],
       signal,
     );
     if (result === undefined) return undefined;
+    if (lacksChecksJson(result)) {
+      const rollups = await this.#pullRequestCommitRollups(
+        request.owner,
+        request.name,
+        request.number,
+        signal,
+      );
+      if (rollups.status !== "ready") return undefined;
+      const latest = selectLatestCommitChecks(
+        rollups.testMergeChecks?.length ? rollups.testMergeChecks : rollups.headChecks,
+      );
+      if (scope !== "all" && latest.some((check) => check.isRequired === undefined))
+        return undefined;
+      const selected = scope === "all" ? latest : latest.filter((check) => check.isRequired);
+      return {
+        pending:
+          (scope === "all" && selected.length === 0) ||
+          selected.some((check) => check.bucket === "pending"),
+        failed: selected
+          .filter((check) => check.bucket === "failing")
+          .map((check) => ({
+            name: check.context.slice(0, 512),
+            ...(check.jobId === undefined ? {} : { jobId: check.jobId }),
+          })),
+      };
+    }
     // `gh pr checks` exits non-zero while a check is failing or pending, and
     // also when the repository requires none; only unreadable output is a
     // failed observation.
@@ -754,13 +899,21 @@ export class GhPullRequestSwitchPort {
       return /no required checks|no checks reported/i.test(
         `${result.stderr ?? ""}\n${result.stdout}`,
       )
-        ? { pending: false, failed: [] }
+        ? { pending: scope === "all", failed: [] }
         : undefined;
     }
     const failed: Array<{ readonly name: string; readonly jobId?: string }> = [];
-    let pending = false;
+    let pending = scope === "all" && value.length === 0;
     for (const entry of value) {
-      if (!isRecord(entry) || typeof entry.name !== "string" || entry.name.trim() === "") continue;
+      if (!isRecord(entry) || typeof entry.name !== "string" || entry.name.trim() === "") {
+        if (scope !== undefined) return undefined;
+        continue;
+      }
+      if (
+        scope !== undefined &&
+        !["pass", "pending", "fail", "cancel", "skipping"].includes(String(entry.bucket))
+      )
+        return undefined;
       if (entry.bucket === "pending") pending = true;
       if (entry.bucket !== "fail" && entry.bucket !== "cancel") continue;
       const jobId =
@@ -775,11 +928,84 @@ export class GhPullRequestSwitchPort {
     return { pending, failed };
   }
 
+  /** Explain a blocked head only when an active base rule and its deployment evidence agree. */
+  async #requiredDeploymentBlocker(
+    request: GhPullRequestSwitchRequest,
+    branch: string,
+    head: string,
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
+    if (!branch || branch.includes("..") || !/^[0-9a-f]{40}$/i.test(head)) return;
+    const rules = await this.#run(
+      [
+        "api",
+        `repos/${request.owner}/${request.name}/rules/branches/${encodeURIComponent(branch)}`,
+      ],
+      signal,
+    );
+    const rows = rules?.exitCode === 0 ? parseJson(rules.stdout) : undefined;
+    if (!Array.isArray(rows)) return;
+    const environments = rows
+      .filter(isRecord)
+      .filter((r) => r.type === "required_deployments")
+      .flatMap((rule) => {
+        const names = readPath(rule, ["parameters", "required_deployment_environments"]);
+        return Array.isArray(names)
+          ? names.filter(
+              (name): name is string =>
+                typeof name === "string" &&
+                name.length > 0 &&
+                name.length <= 100 &&
+                !/\p{Cc}/u.test(name),
+            )
+          : [];
+      });
+    if (!environments.length) return;
+    const wanted = [...new Set(environments)].slice(0, 10);
+    const query =
+      "query($owner:String!,$repo:String!,$head:String!,$env:[String!]!){repository(owner:$owner,name:$repo){object(expression:$head){... on Commit{deployments(first:50,environments:$env,orderBy:{field:CREATED_AT,direction:DESC}){nodes{environment latestStatus{state}} pageInfo{hasNextPage}}}}}}";
+    const result = await this.#run(
+      [
+        "api",
+        "graphql",
+        "-f",
+        `query=${query}`,
+        "-f",
+        `owner=${request.owner}`,
+        "-f",
+        `repo=${request.name}`,
+        "-f",
+        `head=${head}`,
+        ...wanted.flatMap((name) => ["-f", `env[]=${name}`]),
+      ],
+      signal,
+    );
+    const deployments =
+      result?.exitCode === 0
+        ? readPath(parseJson(result.stdout), ["data", "repository", "object", "deployments"])
+        : undefined;
+    if (!isRecord(deployments) || !Array.isArray(deployments.nodes)) return;
+    for (const name of wanted) {
+      const latest = deployments.nodes.find(
+        (entry) => isRecord(entry) && entry.environment === name,
+      );
+      if (
+        latest
+          ? readPath(latest, ["latestStatus", "state"]) !== "SUCCESS"
+          : readPath(deployments, ["pageInfo", "hasNextPage"]) === false
+      )
+        return `Waiting for required deployment to ${name}`;
+    }
+    return;
+  }
+
   async #unresolvedReviewThreads(
     request: GhPullRequestSwitchRequest,
     signal: AbortSignal,
+    verifyComplete: boolean,
   ): Promise<ReadonlyArray<GhAutoFixFailureDetail> | undefined> {
     const threads: GhAutoFixFailureDetail[] = [];
+    let outsideThread: GhAutoFixFailureDetail | undefined;
     let after: string | undefined;
     // Resolved and outdated threads count against a page, so an unresolved one
     // can sit past the first page: follow the cursor until there is enough to
@@ -811,16 +1037,36 @@ export class GhPullRequestSwitchPort {
       const nodes = readPath(connection, ["nodes"]);
       if (!Array.isArray(nodes)) return undefined;
       for (const node of nodes) {
-        const thread = reviewThreadFailure(node);
-        if (thread !== undefined) threads.push(thread);
+        if (
+          verifyComplete &&
+          (!isRecord(node) ||
+            typeof node.id !== "string" ||
+            typeof node.isResolved !== "boolean" ||
+            typeof node.isOutdated !== "boolean")
+        )
+          return undefined;
+        const thread = reviewThreadFailure(node, verifyComplete);
+        if (thread?.outsideReviewer) outsideThread ??= thread;
+        else if (thread) threads.push(thread);
       }
       if (threads.length >= MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_FAILURES) break;
       const next = readPath(connection, ["pageInfo", "endCursor"]);
-      if (readPath(connection, ["pageInfo", "hasNextPage"]) !== true || typeof next !== "string") {
+      const more = readPath(connection, ["pageInfo", "hasNextPage"]);
+      if (
+        verifyComplete &&
+        threads.length === 0 &&
+        outsideThread === undefined &&
+        (typeof more !== "boolean" ||
+          (more && (typeof next !== "string" || page + 1 === MAX_REVIEW_THREAD_PAGES)))
+      )
+        return undefined;
+      if (more !== true || typeof next !== "string") {
         break;
       }
       after = next;
     }
+    // One outside thread is enough to explain the human gate. Keep repair slots for eligible findings.
+    if (outsideThread) threads.push(outsideThread);
     return threads;
   }
 
@@ -880,21 +1126,65 @@ export class GhPullRequestSwitchPort {
   }
 }
 
-function reviewThreadFailure(node: unknown): GhAutoFixFailureDetail | undefined {
+function trustedFeedback(item: unknown): boolean {
+  if (
+    !isRecord(item) ||
+    !isRecord(item.author) ||
+    typeof item.author.login !== "string" ||
+    !item.author.login.trim()
+  )
+    return false;
+  return (
+    item.author.__typename === "Bot" ||
+    ["OWNER", "MEMBER", "COLLABORATOR"].includes(String(item.authorAssociation))
+  );
+}
+
+function requestedApproval(requests: unknown): string | undefined {
+  if (!Array.isArray(requests)) return undefined;
+  const names = requests.filter(isRecord).flatMap((entry) => {
+    const actor = entry.requestedReviewer;
+    if (!isRecord(actor)) return [];
+    const name = actor.login ?? actor.combinedSlug;
+    return typeof name === "string" &&
+      /^[a-zA-Z0-9_.-]{1,100}(?:\/[a-zA-Z0-9_.-]{1,100})?$/.test(name) &&
+      name.length <= 120
+      ? [{ name, owner: entry.asCodeOwner === true }]
+      : [];
+  });
+  const owners = names.filter((entry) => entry.owner);
+  const selected = owners.length ? owners : names;
+  if (!selected.length) return undefined;
+  return `Approval required · ${owners.length ? "Code owner review" : "Review"} requested from ${selected
+    .slice(0, 3)
+    .map(({ name }) => "@" + name)
+    .join(", ")}`;
+}
+
+function reviewThreadFailure(
+  node: unknown,
+  babysitting: boolean,
+): GhAutoFixFailureDetail | undefined {
   if (!isRecord(node) || typeof node.id !== "string" || node.id === "") return undefined;
   if (node.isResolved === true || node.isOutdated === true) return undefined;
   const comments = readPath(node, ["comments", "nodes"]);
-  const lines = (Array.isArray(comments) ? comments : []).filter(isRecord).map((comment) => {
-    const author = readPath(comment, ["author", "login"]);
-    const body = typeof comment.body === "string" ? comment.body : "";
-    return `${typeof author === "string" ? author : "someone"}: ${clampBytes(body, MAX_COMMENT_BYTES)}`;
-  });
+  const entries = Array.isArray(comments) ? comments : [];
+  const outsideReviewer = babysitting && !trustedFeedback(entries[0]);
+  const lines = entries
+    .filter(isRecord)
+    .filter((comment) => !babysitting || trustedFeedback(comment))
+    .map((comment) => {
+      const author = readPath(comment, ["author", "login"]);
+      const body = typeof comment.body === "string" ? comment.body : "";
+      return `${typeof author === "string" ? author : "someone"}: ${clampBytes(body, MAX_COMMENT_BYTES)}`;
+    });
   const where =
     typeof node.path === "string"
       ? `${node.path}${typeof node.line === "number" ? `:${node.line}` : ""}`
       : "the pull request";
   return {
     failure: { kind: "review-thread", key: node.id.slice(0, 512) },
+    ...(outsideReviewer && { outsideReviewer: true as const }),
     detail: `On ${where}:\n${lines.join("\n")}`,
   };
 }
@@ -957,7 +1247,9 @@ function pullRequestActivity(
         : [
             {
               id: review.id.slice(0, 512),
+              ...(review.viewerDidAuthor === true ? { viewerDidAuthor: true as const } : {}),
               author: authorLogin(review),
+              ...(trustedFeedback(review) && { trustedFeedback: true as const }),
               state:
                 typeof review.state === "string"
                   ? review.state.toLowerCase().replaceAll("_", " ")
@@ -985,6 +1277,7 @@ function pullRequestActivity(
             {
               id: comment.id.slice(0, 512),
               author: authorLogin(comment),
+              ...(trustedFeedback(comment) && { trustedFeedback: true as const }),
               at: comment.createdAt,
               body: clampBytes(
                 typeof comment.body === "string" ? comment.body : "",
@@ -994,8 +1287,10 @@ function pullRequestActivity(
           ],
     )
     .slice(-MAX_ACTIVITY_ENTRIES);
+  const approval = requestedApproval(discussion.reviewRequests);
   return {
     checks,
+    ...(approval && { requestedApproval: approval }),
     failedChecks,
     ...(reviewDecision === undefined ? {} : { reviewDecision }),
     conflicting,
@@ -1007,6 +1302,12 @@ function pullRequestActivity(
 function authorLogin(entry: Record<string, unknown>): string {
   const login = readPath(entry, ["author", "login"]);
   return typeof login === "string" && login !== "" ? login.slice(0, 128) : "someone";
+}
+
+// Older GitHub CLI releases provide check data through GraphQL but lack the
+// structured output option on the checks command itself.
+function lacksChecksJson(result: GhCommandResult): boolean {
+  return result.exitCode !== 0 && /unknown flag: --json\b/.test(result.stderr ?? "");
 }
 
 function classifyFailure(result: GhCommandResult):
@@ -1108,6 +1409,7 @@ interface ObservedCommitCheck {
   readonly checkSuiteId?: string;
   readonly workflowId?: string;
   readonly isRequired?: boolean;
+  readonly jobId?: string;
   readonly timestampMs?: number;
   readonly bucket: "pass" | "pending" | "failing";
 }
@@ -1118,6 +1420,7 @@ const ROLLUP_CONTEXT_NODES_SELECTION = `
   nodes {
     __typename
     ... on CheckRun {
+      detailsUrl
       databaseId
       name
       status
@@ -1268,7 +1571,12 @@ function parseCommitRollupPage(rollup: unknown):
         typeof workflow?.id === "string" && workflow.id.length > 0 ? workflow.id : undefined;
       const isRequired = typeof node.isRequired === "boolean" ? node.isRequired : undefined;
       const timestampMs = parseTimestampMs(node.completedAt) ?? parseTimestampMs(node.startedAt);
+      const jobId =
+        typeof node.detailsUrl === "string"
+          ? /\/actions\/runs\/\d+\/job\/(\d+)/.exec(node.detailsUrl)?.[1]
+          : undefined;
       checks.push({
+        ...(jobId === undefined ? {} : { jobId }),
         kind: "check-run",
         context: node.name,
         bucket,

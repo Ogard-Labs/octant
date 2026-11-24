@@ -1,14 +1,7 @@
-import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { UtcTimestamp, type BrowserContextId, type BrowserThreadId } from "@octant/contracts";
-import {
-  readDeviceApprovedByPerson,
-  readDeviceRegistration,
-  readRemoteSessionInvalidation,
-} from "../persistence/remoteAccessProjection";
-import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
   MAX_PAIRED_BROWSER_FILE_BYTES,
   MAX_PAIRED_BROWSER_FPS,
@@ -153,63 +146,6 @@ export type PairedBrowserStreamOpenResult =
 
 const encoder = new TextEncoder();
 const MAX_PAIRED_STAGED_UPLOADS = 16;
-
-export function isPairedDeviceSessionCurrent(
-  connection: SqliteConnection,
-  principal: {
-    readonly deviceId: unknown;
-    readonly sessionId: unknown;
-    readonly credentialGeneration: number;
-  },
-  nowMs: number,
-): boolean {
-  const deviceId = String(principal.deviceId);
-  const registration = readDeviceRegistration(connection, deviceId);
-  if (
-    registration === undefined ||
-    registration.state !== "active" ||
-    registration.revokedAt !== null ||
-    (registration.expiresAt !== null && Date.parse(registration.expiresAt) <= nowMs)
-  ) {
-    return false;
-  }
-  if (registration.credentialGeneration !== principal.credentialGeneration) return false;
-  if (!readDeviceApprovedByPerson(connection, deviceId)) return false;
-
-  const sessionIdDigest = createHash("sha256")
-    .update(String(principal.sessionId), "utf8")
-    .digest("hex");
-  if (readRemoteSessionInvalidation(connection, sessionIdDigest) !== undefined) {
-    return false;
-  }
-
-  const session = connection
-    .prepare(
-      `SELECT device_id, credential_generation, idle_expires_at, absolute_expires_at, state
-       FROM remote_session_store
-       WHERE session_id_digest = ?`,
-    )
-    .get(sessionIdDigest) as
-    | {
-        readonly device_id: string;
-        readonly credential_generation: number;
-        readonly idle_expires_at: number;
-        readonly absolute_expires_at: number;
-        readonly state: string;
-      }
-    | undefined;
-  if (
-    session === undefined ||
-    session.state !== "active" ||
-    session.device_id !== deviceId ||
-    session.credential_generation !== principal.credentialGeneration ||
-    session.idle_expires_at <= nowMs ||
-    session.absolute_expires_at <= nowMs
-  ) {
-    return false;
-  }
-  return true;
-}
 
 export class PairedBrowserControlService {
   readonly #options: PairedBrowserControlOptions;

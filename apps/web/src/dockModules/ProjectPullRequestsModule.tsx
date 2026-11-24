@@ -25,6 +25,7 @@ export default function ProjectPullRequestsModule(props: Props) {
   }
   return (
     <CodeProjectPullRequests
+      babysitClient={codeClient}
       load={(query) => codeClient.queryProjectPullRequests(query)}
       presentation="dock"
       projectId={props.subject.projectId}

@@ -3738,7 +3738,56 @@ describe("Code project pull-request detail routes", () => {
     expect(actOnProjectPullRequest).not.toHaveBeenCalled();
   });
 
-  it("lets a paired device turn Merge when ready on but never Auto-fix", async () => {
+  it("binds babysitting to the authenticated host-paired session on both start and reconnect", async () => {
+    const view = {
+      version: 1 as const,
+      target: detailQuery,
+      mergeWhenReady: { status: "off" as const },
+      autoFix: { status: "off" as const },
+      generatedAt: now,
+    };
+    const setProjectPullRequestAutoFix = vi.fn(async () => ({ status: "applied" as const, view }));
+    const queryProjectPullRequestSwitches = vi.fn(async () => view);
+    const route = routeFixture({ setProjectPullRequestAutoFix, queryProjectPullRequestSwitches });
+    const deviceId = "00000000-0000-4000-8000-000000000917";
+    const sessionId = "00000000-0000-4000-8000-000000000918";
+    const command = { kind: "enable", target: detailQuery, threadId, babysit: { checks: "all" } };
+    for (const [suffix, body] of [
+      ["auto-fix", command],
+      ["switches", detailQuery],
+    ] as const) {
+      const message = request("/api/code/project-pull-requests/" + suffix, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      bindPrincipalRouteContext(message, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: deviceId as never,
+          sessionId: sessionId as never,
+          credentialGeneration: 2,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          admittedBy: "host-person",
+        }),
+        scopeId: deviceId as never,
+      });
+      expect((await route(message))?.status).toBe(200);
+    }
+    const binding = { deviceId, sessionId, credentialGeneration: 2 };
+    expect(setProjectPullRequestAutoFix).toHaveBeenCalledWith(
+      deviceId,
+      command,
+      "user",
+      expect.objectContaining({ deviceId }),
+      binding,
+    );
+    expect(queryProjectPullRequestSwitches).toHaveBeenCalledWith(deviceId, detailQuery, binding);
+  });
+
+  it("lets a hub-introduced device turn Merge when ready on but never Auto-fix", async () => {
     const view = {
       version: 1 as const,
       target: detailQuery,

@@ -177,6 +177,7 @@
     "./tracker-reference": "./src/trackerReference.ts",
     "./github-onboarding": "./src/githubOnboarding.ts",
     "./code-project-pull-requests": "./src/codeProjectPullRequests.ts",
+    "./code-project-pull-request-switches": "./src/codeProjectPullRequestSwitches.ts",
     "./pull-request-identity": "./src/pullRequestIdentity.ts",
     "./canvas-share-snapshot": "./src/canvasShareSnapshot.ts",
     "./canvas-share-access-log": "./src/canvasShareAccessLog.ts",

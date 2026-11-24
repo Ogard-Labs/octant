@@ -224,6 +224,7 @@ export function defaultShellSettings(): ShellSettings {
     computerUse: { enabled: true, automaticUpdates: false },
     marketplaceFetchesEnabled: true,
     completedThreadArchiveAfterDays: DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,
+    putAwayThreadsWhenDone: true,
     autoCompactOctantWindowPercent: DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT,
     autoCompactRuntimeWindowPercent: null,
     autoCompactIdleMinutes: null,

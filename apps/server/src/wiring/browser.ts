@@ -41,10 +41,7 @@ import {
   readDeviceRegistration,
   readDeviceRegistrations,
 } from "../persistence/remoteAccessProjection";
-import {
-  isPairedDeviceSessionCurrent as checkPairedDeviceSessionCurrent,
-  PairedBrowserControlService,
-} from "../browser/pairedBrowserControl";
+import { PairedBrowserControlService } from "../browser/pairedBrowserControl";
 import { createPairedBrowserJournal } from "../browser/pairedBrowserJournal";
 import { createProductFeedbackRouteHandler } from "../productFeedbackRoutes";
 import {
@@ -1034,23 +1031,9 @@ export function wireBrowser(deps: BrowserDependencies) {
     yield* Effect.addFinalizer(() => Effect.promise(() => pairedBrowserControlService.close()));
     const resolvePairedDeviceName = (deviceId: string): string | undefined =>
       readDeviceRegistration(persistence.connection, deviceId)?.deviceLabel;
-    const isPairedDeviceSessionCurrent = (
-      principal: {
-        readonly deviceId: unknown;
-        readonly sessionId: unknown;
-        readonly credentialGeneration: number;
-      },
-      sessionNow?: () => number,
-    ): boolean =>
-      checkPairedDeviceSessionCurrent(
-        persistence.connection,
-        principal,
-        (sessionNow ?? Date.now)(),
-      );
     return {
       pairedBrowserControlService,
       resolvePairedDeviceName,
-      isPairedDeviceSessionCurrent,
       nativeBrowserPresentationRoutes,
       browserSessionGrants,
       browserUploadPermissions,

@@ -67,6 +67,7 @@ import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 export type ContextDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     AuthorityWiring,
+    | "isPairedDeviceSessionCurrent"
     | "browserCaptures"
     | "windowAuthorityStore"
     | "browserModelBindings"
@@ -94,7 +95,6 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
     | "liveProjectBrowsers"
     | "pairedBrowserControlService"
     | "resolvePairedDeviceName"
-    | "isPairedDeviceSessionCurrent"
   > &
   Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService"> &
   Pick<ChatWiring, "chatService"> &

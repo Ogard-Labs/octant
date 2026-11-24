@@ -157,6 +157,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "default folder documents octant projectless folderless no project quick task files artifacts location path",
         },
         {
+          id: settingId("put-away-when-done"),
+          label: "Put away threads when they're done",
+          scope: "host",
+          keywords: "finished merged pull request settle automatically mark shelf sidebar hide",
+        },
+        {
           id: settingId("completed-thread-archive"),
           label: "Archive put-away threads",
           scope: "host",
