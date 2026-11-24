@@ -123,7 +123,6 @@ import type { ChatThread, ChatThreadId, ChatTurnId } from "@octant/contracts/cha
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useChatController } from "../chat/useChatController";
 import type { ChatController, ChatReadCursorStore } from "../chat/useChatController";
-import { ChatWelcome } from "../chat/ChatWelcome";
 import type { CodeController } from "../code/useCodeController";
 import { useCodeThreadController, type CodeThreadControllers } from "../code/codeThreadControllers";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
@@ -211,6 +210,9 @@ const CoordinatorProposalCards = lazy(() =>
 );
 const ChatWorkspace = lazy(() =>
   import("../chat/ChatWorkspace").then((module) => ({ default: module.ChatWorkspace })),
+);
+const ChatWelcome = lazy(() =>
+  import("../chat/ChatWelcome").then((module) => ({ default: module.ChatWelcome })),
 );
 const WorkThreadWorkspace = lazy(() =>
   import("../work/WorkThreadWorkspace").then((module) => ({
@@ -3150,62 +3152,66 @@ function renderNonCodeTab(
   const recentThreads = draftRecentThreads("chat", props);
   return (
     <NewTaskDraftScopeContext.Provider value={`chat-welcome:${String(paneId)}`}>
-      <ChatWelcome
-        {...(recentThreads.length === 0 ? {} : { recentThreads })}
-        {...(props.homeStart === undefined
-          ? {}
-          : { homeStart: withoutCodeActivity(props.homeStart) })}
-        {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-        {...(props.selectedCreateHostId === undefined
-          ? {}
-          : { selectedHostId: props.selectedCreateHostId })}
-        {...(props.lastSelectedHealthyHostId === undefined
-          ? {}
-          : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-        {...(props.createHostViewScope === undefined
-          ? {}
-          : { viewScope: props.createHostViewScope })}
-        {...(props.onSelectCreateHost === undefined
-          ? {}
-          : { onSelectHost: props.onSelectCreateHost })}
-        {...(props.chatWelcomeError === undefined
-          ? props.chatController.errorMessage === undefined
+      <Suspense fallback={<SurfaceLoading label="Opening composer" />}>
+        <ChatWelcome
+          {...(recentThreads.length === 0 ? {} : { recentThreads })}
+          {...(props.homeStart === undefined
             ? {}
-            : { errorMessage: props.chatController.errorMessage }
-          : { errorMessage: props.chatWelcomeError })}
-        {...(props.chatWelcomeCreating === undefined
-          ? {}
-          : { creating: props.chatWelcomeCreating })}
-        {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
-        onCreateChat={(prompt, modelOptionValues, extensionSelections, attachments) => {
-          if (attachments !== undefined) {
-            return props.onCreateChat(
-              prompt,
-              modelOptionValues,
-              paneId,
-              extensionSelections,
-              attachments,
-            );
-          } else if (extensionSelections === undefined) {
-            props.onCreateChat(prompt, modelOptionValues, paneId);
-          } else {
-            props.onCreateChat(prompt, modelOptionValues, paneId, extensionSelections);
-          }
-        }}
-        providerGroups={props.draftProviderGroups ?? []}
-        {...(props.draftSelectedProviderInstanceId === undefined
-          ? {}
-          : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
-        {...(props.draftSelectedModelId === undefined
-          ? {}
-          : { selectedModelId: props.draftSelectedModelId })}
-        {...(props.onDraftSelectProvider === undefined
-          ? {}
-          : { onSelectProvider: props.onDraftSelectProvider })}
-        {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
-        onRetry={props.chatController.retry}
-        status={props.chatController.status}
-      />
+            : { homeStart: withoutCodeActivity(props.homeStart) })}
+          {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+          {...(props.selectedCreateHostId === undefined
+            ? {}
+            : { selectedHostId: props.selectedCreateHostId })}
+          {...(props.lastSelectedHealthyHostId === undefined
+            ? {}
+            : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+          {...(props.createHostViewScope === undefined
+            ? {}
+            : { viewScope: props.createHostViewScope })}
+          {...(props.onSelectCreateHost === undefined
+            ? {}
+            : { onSelectHost: props.onSelectCreateHost })}
+          {...(props.chatWelcomeError === undefined
+            ? props.chatController.errorMessage === undefined
+              ? {}
+              : { errorMessage: props.chatController.errorMessage }
+            : { errorMessage: props.chatWelcomeError })}
+          {...(props.chatWelcomeCreating === undefined
+            ? {}
+            : { creating: props.chatWelcomeCreating })}
+          {...(props.extensionClient === undefined
+            ? {}
+            : { extensionClient: props.extensionClient })}
+          onCreateChat={(prompt, modelOptionValues, extensionSelections, attachments) => {
+            if (attachments !== undefined) {
+              return props.onCreateChat(
+                prompt,
+                modelOptionValues,
+                paneId,
+                extensionSelections,
+                attachments,
+              );
+            } else if (extensionSelections === undefined) {
+              props.onCreateChat(prompt, modelOptionValues, paneId);
+            } else {
+              props.onCreateChat(prompt, modelOptionValues, paneId, extensionSelections);
+            }
+          }}
+          providerGroups={props.draftProviderGroups ?? []}
+          {...(props.draftSelectedProviderInstanceId === undefined
+            ? {}
+            : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
+          {...(props.draftSelectedModelId === undefined
+            ? {}
+            : { selectedModelId: props.draftSelectedModelId })}
+          {...(props.onDraftSelectProvider === undefined
+            ? {}
+            : { onSelectProvider: props.onDraftSelectProvider })}
+          {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
+          onRetry={props.chatController.retry}
+          status={props.chatController.status}
+        />
+      </Suspense>
     </NewTaskDraftScopeContext.Provider>
   );
 }
