@@ -9,7 +9,10 @@ import {
   type SpeechAudioMediaType,
   type SpeechSynthesisFormat,
   type SpeechSynthesisVoice,
+  type VoiceDictionaryTerm,
+  type VoiceSettings,
 } from "@octant/contracts";
+import { transcriptionPromptOf } from "@octant/domain";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
 import {
   cancelResponseBody,
@@ -51,8 +54,28 @@ export interface SpeechAdapter {
   synthesize(request: SpeechSynthesisRequestInput): Promise<SpeechSynthesisResult>;
 }
 
+/**
+ * What Voice settings ask of every transcription: the language to assume when
+ * a request names none, and the names and terms to spell the person's way.
+ */
+export interface SpeechTranscriptionPreferences {
+  readonly language?: string;
+  readonly dictionary?: ReadonlyArray<VoiceDictionaryTerm>;
+}
+
+/** The transcription preferences Voice settings hold, as every adapter is given them. */
+export function transcriptionPreferencesOf(
+  settings: VoiceSettings,
+): SpeechTranscriptionPreferences {
+  return {
+    ...(settings.language === undefined ? {} : { language: settings.language }),
+    ...(settings.dictionary === undefined ? {} : { dictionary: settings.dictionary }),
+  };
+}
+
 export interface SpeechAdapterOptions {
   readonly instance: OpenAiCompatibleProviderInstance;
+  readonly transcriptionPreferences?: SpeechTranscriptionPreferences;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: CompatibleFetch;
   readonly limits?: Partial<CompatibleHttpLimits>;
@@ -115,7 +138,19 @@ export function makeOpenAiCompatibleSpeechAdapter(options: SpeechAdapterOptions)
         const form = new FormData();
         form.set("model", String(request.modelId));
         form.set("response_format", "json");
-        if (request.language !== undefined) form.set("language", request.language);
+        // A language the request names wins: the agent's tool may name the
+        // one a recording is in. Otherwise Voice settings' language applies.
+        const language = request.language ?? options.transcriptionPreferences?.language;
+        if (language !== undefined) form.set("language", language);
+        const dictionary = options.transcriptionPreferences?.dictionary ?? [];
+        if (isMistralHost(options.instance.configuration.baseUrl)) {
+          // Mistral reads terms as `context_bias`, the field repeated once per
+          // term, and has no `prompt`.
+          for (const term of dictionary) form.append("context_bias", term);
+        } else {
+          const prompt = transcriptionPromptOf(dictionary);
+          if (prompt !== undefined) form.set("prompt", prompt);
+        }
         form.set(
           "file",
           new Blob([Uint8Array.from(request.audio)], { type: request.mediaType }),

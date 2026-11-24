@@ -1,6 +1,6 @@
 import { decodeProviderInstance, type OpenAiCompatibleProviderInstance } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { makeOpenAiCompatibleSpeechAdapter } from "./speechAdapter";
+import { makeOpenAiCompatibleSpeechAdapter, transcriptionPreferencesOf } from "./speechAdapter";
 
 const now = "2026-09-05T10:00:00.000Z";
 
@@ -81,6 +81,74 @@ describe("OpenAI-compatible speech adapter", () => {
     expect(file).toBeInstanceOf(Blob);
     expect((file as File).name).toBe("recording.wav");
     expect((file as Blob).type).toBe("audio/wav");
+  });
+
+  it("applies the configured language when the request names none, and sends the dictionary as the transcription prompt", async () => {
+    const fetch: FetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ text: "ok" }), { status: 200 }),
+    );
+    const adapter = makeOpenAiCompatibleSpeechAdapter({
+      instance: instance(),
+      credentialResolver,
+      fetch,
+      transcriptionPreferences: transcriptionPreferencesOf({
+        language: "sv",
+        dictionary: ["Octant", "OAuth"],
+      }),
+    });
+
+    await adapter.transcribe({ audio: wav, mediaType: "audio/wav", modelId: "whisper-1" as never });
+
+    const form = firstCall(fetch).init.body as FormData;
+    expect(form.get("language")).toBe("sv");
+    expect(form.get("prompt")).toBe("Octant, OAuth");
+    expect(form.getAll("context_bias")).toEqual([]);
+  });
+
+  it("an explicit request language wins over the setting", async () => {
+    const fetch: FetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ text: "ok" }), { status: 200 }),
+    );
+    const adapter = makeOpenAiCompatibleSpeechAdapter({
+      instance: instance(),
+      credentialResolver,
+      fetch,
+      transcriptionPreferences: { language: "sv" },
+    });
+
+    await adapter.transcribe({
+      audio: wav,
+      mediaType: "audio/wav",
+      modelId: "whisper-1" as never,
+      language: "de",
+    });
+
+    const form = firstCall(fetch).init.body as FormData;
+    expect(form.get("language")).toBe("de");
+    expect(form.get("prompt")).toBeNull();
+  });
+
+  it("gives Mistral the dictionary as one context_bias field per term, with no prompt", async () => {
+    const fetch: FetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ text: "ok" }), { status: 200 }),
+    );
+    const adapter = makeOpenAiCompatibleSpeechAdapter({
+      instance: instance({ baseUrl: "https://api.mistral.ai/v1" }),
+      credentialResolver,
+      fetch,
+      transcriptionPreferences: { dictionary: ["Octant", "OAuth"] },
+    });
+
+    await adapter.transcribe({
+      audio: wav,
+      mediaType: "audio/wav",
+      modelId: "voxtral-mini-latest" as never,
+    });
+
+    const form = firstCall(fetch).init.body as FormData;
+    expect(form.getAll("context_bias")).toEqual(["Octant", "OAuth"]);
+    expect(form.get("prompt")).toBeNull();
+    expect(form.get("language")).toBeNull();
   });
 
   it("speaks to an unauthenticated loopback instance without inventing a credential", async () => {

@@ -8150,8 +8150,12 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and credential. Mistral's speech route is the one dialect the adapter
   speaks besides OpenAI's: on `api.mistral.ai` the voice goes as `voice_id`
   and the reply is JSON with base64 `audio_data`, as Mistral's OpenAPI
-  description lays out; transcription there is OpenAI-shaped and needs no
-  dialect. Voice settings choose transcription from one menu: Off, then each
+  description lays out; transcription there is OpenAI-shaped except for Voice
+  settings' dictionary, which an OpenAI-shaped route reads as one `prompt` of
+  at most about 800 characters and Mistral as one `context_bias` field per
+  term. Every transcription the host makes (dictation, a paired phone's clips,
+  the agent's tool) carries the dictionary, and Voice settings' language when
+  the request names none. Voice settings choose transcription from one menu: Off, then each
   enabled OpenAI-compatible endpoint with the transcription model it lists or
   its preset knows, saved on choice, with Other model… for a typed id; a
   Test microphone row plays a ten-second clip back in the window and sends it

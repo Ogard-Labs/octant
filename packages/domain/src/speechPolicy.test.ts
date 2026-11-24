@@ -1,12 +1,14 @@
 import { decodeProviderInstance, type ProviderInstance } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  addVoiceDictionaryTerms,
   admitRemoteTranscription,
   listSpeechEligibleInstances,
   pairedDeviceSpeechStatusOf,
   REMOTE_TRANSCRIPTION_BUDGET,
   resolveSpeechEndpoint,
   speechStatusOf,
+  transcriptionPromptOf,
   VOICE_SYNTHESIS_TARGET,
   VOICE_TRANSCRIPTION_TARGET,
 } from "./speechPolicy";
@@ -183,5 +185,37 @@ describe("paired device transcription budget", () => {
     });
     expect(later.kind).toBe("admit");
     expect(later.recent).toHaveLength(REMOTE_TRANSCRIPTION_BUDGET.maximum);
+  });
+});
+
+describe("voice dictionary", () => {
+  it("adds comma-separated terms once each, keeping the first spelling", () => {
+    const result = addVoiceDictionaryTerms(["Octant"], " OAuth, octant ,\nKubernetes, oauth ");
+    expect(result).toEqual({ status: "added", dictionary: ["Octant", "OAuth", "Kubernetes"] });
+  });
+
+  it("refuses a paste that is empty, repeated, too long or over the limit, changing nothing", () => {
+    expect(addVoiceDictionaryTerms([], " , ")).toEqual({
+      status: "refused",
+      reason: "Enter a word or phrase.",
+    });
+    expect(addVoiceDictionaryTerms(["Octant"], "OCTANT").status).toBe("refused");
+    expect(addVoiceDictionaryTerms([], `ok, ${"x".repeat(65)}`).status).toBe("refused");
+    const full = Array.from({ length: 100 }, (_, index) => `term${String(index)}`);
+    expect(addVoiceDictionaryTerms(full, "one more")).toEqual({
+      status: "refused",
+      reason: "Your dictionary holds at most 100 terms.",
+    });
+  });
+
+  it("sends the dictionary as one prompt that keeps the first terms when it is long", () => {
+    expect(transcriptionPromptOf(undefined)).toBeUndefined();
+    expect(transcriptionPromptOf([])).toBeUndefined();
+    expect(transcriptionPromptOf(["Octant", "OAuth"])).toBe("Octant, OAuth");
+    const long = Array.from({ length: 100 }, (_, index) => `term-number-${String(index)}`);
+    const prompt = transcriptionPromptOf(long) ?? "";
+    expect(prompt.length).toBeLessThanOrEqual(800);
+    expect(prompt.startsWith("term-number-0, term-number-1,")).toBe(true);
+    expect(prompt).not.toContain("term-number-99");
   });
 });

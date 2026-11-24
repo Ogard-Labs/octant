@@ -9,11 +9,14 @@ import {
   type SpeechEndpointRef,
   type SpeechSynthesisEndpointRef,
   type SpeechSynthesisVoice,
+  type SpeechTranscriptionLanguage,
+  type VoiceDictionaryTerm,
   type VoiceSettings,
 } from "@octant/contracts";
 import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { ShellSettings } from "@octant/contracts/shell";
 import {
+  addVoiceDictionaryTerms,
   listSpeechEligibleInstances,
   resolveSpeechEndpoint,
   type SpeechEndpointResolution,
@@ -22,6 +25,7 @@ import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { X } from "../ui/icons";
 import { MicrophonePicker } from "../voice/MicrophonePicker";
 import { MicrophoneTest } from "../voice/MicrophoneTest";
 import { transcriptionChoices, type TranscriptionChoice } from "./harness/voiceModels";
@@ -89,6 +93,36 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
                     apply(rest);
                   }}
                   onSave={(ref) => apply({ ...props.settings, transcription: ref })}
+                />
+              </SettingRow>
+              <SettingRow
+                description="The language you speak. Automatic lets the model work it out."
+                focused={props.focusedSetting === settingId("dictation-language")}
+                label="Language"
+                scope="app"
+                settingId="dictation-language"
+              >
+                <LanguageMenu
+                  current={props.settings.language}
+                  onChange={(language) => {
+                    const { language: _previous, ...rest } = props.settings;
+                    apply(language === undefined ? rest : { ...rest, language });
+                  }}
+                />
+              </SettingRow>
+              <SettingRow
+                description="Names and terms to spell your way. Every transcription on this computer uses them."
+                focused={props.focusedSetting === settingId("dictation-dictionary")}
+                label="Your dictionary"
+                scope="app"
+                settingId="dictation-dictionary"
+              >
+                <DictionaryEditor
+                  dictionary={props.settings.dictionary ?? []}
+                  onChange={(dictionary) => {
+                    const { dictionary: _previous, ...rest } = props.settings;
+                    apply(dictionary.length === 0 ? rest : { ...rest, dictionary });
+                  }}
                 />
               </SettingRow>
             </div>
@@ -241,6 +275,119 @@ function TranscriptionMenu(props: TranscriptionMenuProps) {
             ? " No endpoint lists a transcription model yet; choose Other model… to enter one."
             : ""}
         </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Languages offered by name. Transcription models accept many more; a tag set
+ * some other way (an imported settings file) keeps its own entry.
+ */
+const DICTATION_LANGUAGES: ReadonlyArray<{ readonly tag: string; readonly name: string }> = [
+  { tag: "ar", name: "Arabic" },
+  { tag: "zh", name: "Chinese" },
+  { tag: "da", name: "Danish" },
+  { tag: "nl", name: "Dutch" },
+  { tag: "en", name: "English" },
+  { tag: "fi", name: "Finnish" },
+  { tag: "fr", name: "French" },
+  { tag: "de", name: "German" },
+  { tag: "hi", name: "Hindi" },
+  { tag: "it", name: "Italian" },
+  { tag: "ja", name: "Japanese" },
+  { tag: "ko", name: "Korean" },
+  { tag: "no", name: "Norwegian" },
+  { tag: "pl", name: "Polish" },
+  { tag: "pt", name: "Portuguese" },
+  { tag: "ru", name: "Russian" },
+  { tag: "es", name: "Spanish" },
+  { tag: "sv", name: "Swedish" },
+  { tag: "tr", name: "Turkish" },
+  { tag: "uk", name: "Ukrainian" },
+];
+const AUTOMATIC = "automatic";
+
+function LanguageMenu(props: {
+  readonly current: SpeechTranscriptionLanguage | undefined;
+  readonly onChange: (language: SpeechTranscriptionLanguage | undefined) => void;
+}) {
+  const known = DICTATION_LANGUAGES.some((language) => language.tag === props.current);
+  const options = [
+    { id: AUTOMATIC, label: "Automatic" },
+    ...DICTATION_LANGUAGES.map((language) => ({ id: language.tag, label: language.name })),
+    ...(props.current !== undefined && !known ? [{ id: props.current, label: props.current }] : []),
+  ];
+  return (
+    <OctantSelectField
+      aria-label="Dictation language"
+      className="settings-view__select window-no-drag"
+      onValueChange={(value) => props.onChange(value === AUTOMATIC ? undefined : value)}
+      options={options}
+      value={props.current ?? AUTOMATIC}
+    />
+  );
+}
+
+function DictionaryEditor(props: {
+  readonly dictionary: ReadonlyArray<VoiceDictionaryTerm>;
+  readonly onChange: (dictionary: ReadonlyArray<VoiceDictionaryTerm>) => void;
+}) {
+  const [problem, setProblem] = useState<string | undefined>(undefined);
+  return (
+    <div className="voice-settings__choice">
+      <form
+        aria-label="Add to your dictionary"
+        className="voice-settings__test-controls"
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          const field = event.currentTarget.elements.namedItem("terms");
+          if (!(field instanceof HTMLInputElement)) return;
+          const result = addVoiceDictionaryTerms(props.dictionary, field.value);
+          if (result.status === "refused") {
+            setProblem(result.reason);
+            return;
+          }
+          setProblem(undefined);
+          field.value = "";
+          props.onChange(result.dictionary);
+        }}
+      >
+        <OctantInput
+          aria-label="Words to add"
+          className="settings-view__text-input window-no-drag"
+          name="terms"
+          placeholder="Add words, separated by commas"
+          spellCheck={false}
+        />
+        <OctantButton size="sm" type="submit" variant="secondary">
+          Add
+        </OctantButton>
+      </form>
+      {problem === undefined ? null : (
+        /* ui-boundary-exception: inline-field-error */
+        <p className="provider-settings__field-guidance" role="alert">
+          {problem}
+        </p>
+      )}
+      {props.dictionary.length === 0 ? null : (
+        <ul aria-label="Your dictionary" className="voice-settings__terms">
+          {props.dictionary.map((term) => (
+            <li key={term}>
+              <span>{term}</span>
+              <OctantButton
+                aria-label={`Remove ${term}`}
+                onClick={() => props.onChange(props.dictionary.filter((other) => other !== term))}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <X aria-hidden="true" size={12} />
+              </OctantButton>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
