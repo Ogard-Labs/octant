@@ -69,7 +69,7 @@ import {
   type EndpointPreset,
   type ToolCheck,
 } from "./addEndpointSteps";
-import { isSpeechUsable, voiceModelsOf } from "./voiceModels";
+import { isSpeechUsable, presetVoiceHintFor, voiceModelsOf } from "./voiceModels";
 import { VoiceTip, type VoiceLinks } from "./VoiceTip";
 import { NEEDS_KEY_LABEL, type EndpointStatus, type ModelEndpointInstance } from "./endpointStatus";
 import type { EndpointDetailFocus } from "./ModelEndpointDetail";
@@ -252,7 +252,7 @@ export function AddEndpointFlow(props: AddEndpointFlowProps) {
         onClose={props.onClose}
         onOpenAdded={props.onOpenAdded}
         {...(props.voice === undefined ? {} : { voice: props.voice })}
-        voiceModels={voiceModelsOf(added.observed?.models, preset?.voice)}
+        voiceModels={voiceModelsOf(added.observed?.models, presetVoiceHintFor(added.instance))}
       />
     );
   }
