@@ -71,7 +71,7 @@ const GH_SUCCESS_STATE_LINE = new RegExp(
 /** What each of gh's success lines says was done. */
 const GH_LINE_ACTIONS: ReadonlyArray<readonly [RegExp, ThreadForgeAction]> = [
   [/\bmerged pull request /i, "merged"],
-  [/ will be added to the merge queue/, "merged"],
+  [/ will be added to the merge queue/, "edited"],
   [/\bwill be automatically merged /, "edited"],
   [/\bauto-merge disabled for pull request /i, "edited"],
   [/ is (?:marked as|converted to) /, "edited"],
@@ -287,8 +287,8 @@ interface GhInvocation {
   readonly kind: Kind;
   /** Undefined for a read (`view`, `list`, `checks`, `diff`, …). */
   readonly action: ThreadForgeAction | undefined;
-  /** A merge with `--auto` (or ending one): GitHub merges it, now or later. */
-  readonly leavesMerge: boolean;
+  /** A `gh pr merge`, whose outcome gh reports: merged, queued, or left to GitHub. */
+  readonly merges: boolean;
   /** The identity the command names itself, when it names one fully. */
   readonly named: GithubIdentity | undefined;
   /** The number the command names without a repository. */
@@ -402,9 +402,11 @@ function ghInvocation({ words, exitSpeaks }: ShellCommand): GhInvocation | undef
   const switches = GH_SWITCHES[`${noun} ${verb}`];
   const rest = words.slice(at + 3);
   // `--auto` leaves the merge to GitHub until the requirements are met.
-  const leavesMerge =
-    noun === "pr" && verb === "merge" && rest.some((word) => /^--(disable-)?auto$/.test(word));
-  const action = leavesMerge ? "edited" : (noun === "pr" ? GH_PR_WRITES : GH_ISSUE_WRITES)[verb];
+  const merges = noun === "pr" && verb === "merge";
+  const action =
+    merges && rest.some((word) => /^--(disable-)?auto$/.test(word))
+      ? "edited"
+      : (noun === "pr" ? GH_PR_WRITES : GH_ISSUE_WRITES)[verb];
   let repository: { readonly owner: string; readonly repository: string } | undefined;
   let number: number | undefined;
   let named: GithubIdentity | undefined;
@@ -452,7 +454,7 @@ function ghInvocation({ words, exitSpeaks }: ShellCommand): GhInvocation | undef
   if (named === undefined && repository !== undefined && number !== undefined) {
     named = { kind, ...repository, number };
   }
-  return { kind, action, leavesMerge, named, number, exitSpeaks };
+  return { kind, action, merges, named, number, exitSpeaks };
 }
 
 function fromShell(
@@ -497,10 +499,12 @@ function fromShell(
     if (identity === undefined) continue;
     // When the call's exit status does not speak for this command (it ran
     // before a `||` fallback, say), only its own output confirms the write.
-    // gh merges at once when nothing is left to wait for, and then says so.
-    const mergedAtOnce = invocation.leavesMerge && confirmed.has(`merged ${identityKey(identity)}`);
-    const action = mergedAtOnce ? "merged" : invocation.action;
-    if (!invocation.exitSpeaks && !confirmed.has(`${action} ${identityKey(identity)}`)) continue;
+    // gh says whether a merge happened or was left to GitHub (a queue, or
+    // `--auto`), and its word beats what the command asked for.
+    const key = identityKey(identity);
+    const said = (["merged", "edited"] as const).find((each) => confirmed.has(`${each} ${key}`));
+    const action = invocation.merges ? (said ?? invocation.action) : invocation.action;
+    if (!invocation.exitSpeaks && !confirmed.has(`${action} ${key}`)) continue;
     const state =
       identity.kind === "issue" && action === "closed"
         ? "closed"

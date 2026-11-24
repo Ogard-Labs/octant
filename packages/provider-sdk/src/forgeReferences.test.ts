@@ -323,7 +323,21 @@ describe("forgeReferencesFromToolCall", () => {
         "\u2713 Pull request acme/app#12 will be automatically merged via squash when all requirements are met",
       ),
     ).toEqual(["edited"]);
+    expect(
+      call("\u2713 Pull request acme/app#12 will be added to the merge queue for main when ready"),
+    ).toEqual(["edited"]);
     expect(call("")).toBeUndefined();
+  });
+
+  it("records a pull request put in the merge queue as an edit, whatever the command asked for", () => {
+    expect(
+      forgeReferencesFromToolCall({
+        toolName: "Bash",
+        command: "gh pr merge 12 -R acme/app",
+        output:
+          "\u2713 Pull request acme/app#12 will be added to the merge queue for main when ready",
+      })?.[0]?.action,
+    ).toBe("edited");
   });
 
   it("leaves out an identity the journal would refuse, so it never loses the call", () => {
