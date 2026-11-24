@@ -1855,7 +1855,7 @@ export interface RemoteRouteFacts {
 
 export const REMOTE_SECURITY_POLICY = {
   hsts: "max-age=31536000; includeSubDomains",
-  csp: "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'",
+  csp: "default-src 'self'; img-src 'self' data: blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'",
   nosniff: "nosniff",
   referrer: "no-referrer",
 } as const;
