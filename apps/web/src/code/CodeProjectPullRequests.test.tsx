@@ -388,6 +388,19 @@ describe("CodeProjectPullRequests", () => {
     expect(await screen.findByRole("button", { name: "Merge octant/octant#14" })).toBeVisible();
     expect(screen.queryByText("Returned to draft after the ready check.")).toBeNull();
     expect(merge).toHaveBeenCalledTimes(1);
+    merge.mockResolvedValue({ status: "merged", number: 14 });
+    await user.click(screen.getByRole("button", { name: "Merge octant/octant#14" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm merge" }),
+    );
+    expect(await screen.findByText(/Merged octant\/octant#14/)).toBeVisible();
+    query.mockResolvedValue({ rows: [] });
+    fireEvent(document, new Event("visibilitychange"));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Merge octant/octant#12" })).toBeNull(),
+    );
+    expect(screen.getByText(/Merged octant\/octant#14/)).toBeVisible();
+    expect(screen.queryByText(/octant\/octant#14 ready to merge/)).toBeNull();
   });
 
   it("bulk-starts only chosen PRs with shared rules, preserves active watches and retries just the failure", async () => {

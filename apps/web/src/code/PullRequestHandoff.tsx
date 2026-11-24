@@ -18,7 +18,6 @@ import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { type BabysitClient, targetFor } from "./BulkBabysitDialog";
 import { isMergeMethod, mergeOutcomeCopy, switchRefusalCopy } from "./ProjectPullRequestSupport";
-import { projectPullRequestKey } from "./projectPullRequestKey";
 
 function pullRequestRef(row: CodeProjectPullRequestRow) {
   return `${row.repositoryOwner}/${row.repositoryName}#${row.number}`;
@@ -28,12 +27,12 @@ function ReadyMerge({
   row,
   headSha,
   client,
-  onUpdated,
+  onMerged,
 }: {
   row: CodeProjectPullRequestRow;
   headSha: string;
   client: BabysitClient;
-  onUpdated?: (() => void) | undefined;
+  onMerged?: (() => void) | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const [method, setMethod] = useState<CodeProjectPullRequestMergeMethod>("squash");
@@ -66,7 +65,7 @@ function ReadyMerge({
       });
       setDone(outcome.status === "merged");
       setMessage(outcome.status === "merged" ? `Merged ${ref}.` : mergeOutcomeCopy(outcome));
-      if (outcome.status === "merged") onUpdated?.();
+      if (outcome.status === "merged") onMerged?.();
     } catch {
       setMessage("Octant could not confirm the merge. Check the pull request before retrying.");
     } finally {
@@ -162,7 +161,7 @@ export function RowWatchHandoff({
         row={row}
         client={client}
         headSha={watch.readyHeadSha}
-        onUpdated={onUpdated}
+        onMerged={onUpdated}
       />
     );
   if (
@@ -215,6 +214,46 @@ export function RowWatchHandoff({
         </OctantAlert>
       )}
     </>
+  );
+}
+
+type ReadyHandoff = { readonly row: CodeProjectPullRequestRow; readonly sha: string };
+
+function ThreadHandoffLine({
+  client,
+  line,
+  match,
+}: {
+  readonly client: BabysitClient;
+  readonly line: string;
+  readonly match: ReadyHandoff | undefined;
+}) {
+  // A successful merge removes the row from the open-PR list. The receipt belongs to the notice.
+  const [receipt, setReceipt] = useState<string>();
+  if (receipt)
+    return (
+      <li>
+        <span role="status" title={line}>
+          {receipt}
+        </span>
+      </li>
+    );
+  if (!match)
+    return <li>{line.replace(` ${readyPullRequestNotice("")}`, " was ready to merge at ")}</li>;
+  const { row, sha } = match;
+  const ref = pullRequestRef(row);
+  return (
+    <li>
+      <span title={line}>
+        {ref} {readyPullRequestNotice(sha.slice(0, 12))}
+      </span>{" "}
+      <ReadyMerge
+        row={row}
+        headSha={sha}
+        client={client}
+        onMerged={() => setReceipt(`Merged ${ref} from ${sha.slice(0, 12)}.`)}
+      />
+    </li>
   );
 }
 
@@ -272,7 +311,7 @@ export function ThreadWatchHandoff({
     };
   }, [client, reason, projectId, threadId]);
   if (!reason) return null;
-  const actions = new Map<string, { row: CodeProjectPullRequestRow; sha: string }>(
+  const actions = new Map<string, ReadyHandoff>(
     rows.flatMap((row) => {
       const sha = row.babysit?.readyHeadSha;
       return sha
@@ -287,28 +326,14 @@ export function ThreadWatchHandoff({
         {reason
           .slice(PULL_REQUEST_HANDOFF_HEADING.length)
           .split("\n")
-          .map((line) => {
-            const match = actions.get(line);
-            return (
-              <li key={line}>
-                {match ? (
-                  <span title={line}>
-                    {pullRequestRef(match.row)} {readyPullRequestNotice(match.sha.slice(0, 12))}
-                  </span>
-                ) : (
-                  line
-                )}{" "}
-                {match && (
-                  <ReadyMerge
-                    key={projectPullRequestKey(match.row) + match.sha}
-                    row={match.row}
-                    client={client}
-                    headSha={match.sha}
-                  />
-                )}
-              </li>
-            );
-          })}
+          .map((line) => (
+            <ThreadHandoffLine
+              key={`${projectId}:${threadId}:${line}`}
+              line={line}
+              match={actions.get(line)}
+              client={client}
+            />
+          ))}
       </ul>
     </section>
   );
