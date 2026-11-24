@@ -602,8 +602,8 @@ authoritative.
 
 The desktop and web composer in Chat, Work, and Code offers **Stash draft** and
 **Saved drafts** in its + menu, for both the first message and follow-ups. A
-focused composer uses ⌘S or Ctrl+S by default, remappable in Settings › Keyboard
-shortcuts. With content it stashes the draft. When empty it restores the only
+focused composer uses ⌘S or Ctrl+S by default, remappable under Keyboard
+shortcuts in Settings › Keybindings. With content it stashes the draft. When empty it restores the only
 compatible entry or opens the list. Save and restore can include a draft with
 only attachments or selected context. The editor still handles Save in the
 editor's own focus.

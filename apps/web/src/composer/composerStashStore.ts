@@ -1,5 +1,5 @@
 import {
-  composerStashLocationKey,
+  composerStashRecoveryKey,
   emptyComposerStashDraft,
   type ComposerStashDraft,
   type ComposerStashLocation,
@@ -112,11 +112,11 @@ export function createComposerStashStore(factory: IDBFactory) {
       }),
     readRecovery: (location: ComposerStashLocation) =>
       inDraftStorage(factory, "readonly", (_, recovered) =>
-        readRecovery(recovered, composerStashLocationKey(location)),
+        readRecovery(recovered, composerStashRecoveryKey(location)),
       ),
     stash: (move: ComposerDraftMove, draft: ComposerStashDraft) =>
       inDraftStorage(factory, "readwrite", async (saved, recovered) => {
-        const key = composerStashLocationKey(move.location);
+        const key = composerStashRecoveryKey(move.location);
         const previous = await readRecovery(recovered, key);
         if (previous?.revision !== move.expectedRevision || !move.stillCurrent()) return undefined;
         const entry: SavedComposerDraft = {
@@ -132,7 +132,7 @@ export function createComposerStashStore(factory: IDBFactory) {
       }),
     restore: (id: string, move: ComposerDraftMove, draft: ComposerStashDraft) =>
       inDraftStorage(factory, "readwrite", async (saved, recovered) => {
-        const key = composerStashLocationKey(move.location);
+        const key = composerStashRecoveryKey(move.location);
         const [entry, previous] = await Promise.all([
           result(saved.get(id)) as Promise<SavedComposerDraft | undefined>,
           readRecovery(recovered, key),
@@ -149,27 +149,36 @@ export function createComposerStashStore(factory: IDBFactory) {
         saved.delete(id);
         return restored;
       }),
-    revise: (previous: ComposerDraftRecovery, draft: ComposerStashDraft, beforeText: string) =>
+    revise: (
+      previous: ComposerDraftRecovery,
+      draft: ComposerStashDraft,
+      beforeText: string,
+      location = previous.location,
+    ) =>
       inDraftStorage(factory, "readwrite", async (_, recovered) => {
-        const key = composerStashLocationKey(previous.location);
+        const key = composerStashRecoveryKey(previous.location);
         if ((await readRecovery(recovered, key))?.revision !== previous.revision) return undefined;
-        const revised = recovery(previous.location, beforeText, draft);
+        const revised = recovery(location, beforeText, draft);
         recovered.put(revised, key);
         return revised;
       }),
     retire: (previous: ComposerDraftRecovery) =>
       inDraftStorage(factory, "readwrite", async (_, recovered) => {
-        const key = composerStashLocationKey(previous.location);
+        const key = composerStashRecoveryKey(previous.location);
         if ((await readRecovery(recovered, key))?.revision !== previous.revision) return false;
         recovered.delete(key);
         return true;
       }),
-    discardNewTaskRecovery: (composerId: string) =>
+    discardNewTaskRecovery: (composerId: string, windowId?: string) =>
       inDraftStorage(factory, "readwrite", async (_, recovered) => {
         const records = (await result(recovered.getAll())) as ComposerDraftRecovery[];
         for (const { location } of records) {
-          if (location.threadId === null && location.composerId === composerId) {
-            recovered.delete(composerStashLocationKey(location));
+          if (
+            location.threadId === null &&
+            location.composerId === composerId &&
+            location.windowId === windowId
+          ) {
+            recovered.delete(composerStashRecoveryKey(location));
           }
         }
       }),
@@ -187,6 +196,29 @@ export function createComposerStashStore(factory: IDBFactory) {
         for (const key of savedKeys) saved.delete(key);
         for (const key of recoveredKeys) recovered.delete(key);
       }),
+    dropUnknownThreads: (
+      host: string,
+      mode: ComposerStashLocation["mode"],
+      threadIds: ReadonlyArray<string>,
+    ) =>
+      inDraftStorage(factory, "readwrite", async (saved, recovered) => {
+        const known = new Set(threadIds);
+        const missing = (location: ComposerStashLocation) =>
+          location.host === host &&
+          location.mode === mode &&
+          location.threadId !== null &&
+          !known.has(location.threadId);
+        const [entries, records] = await Promise.all([
+          result(saved.index("host").getAll(host)) as Promise<SavedComposerDraft[]>,
+          result(recovered.getAll()) as Promise<ComposerDraftRecovery[]>,
+        ]);
+        for (const entry of entries) {
+          if (missing(entry.source)) saved.delete(entry.id);
+        }
+        for (const { location } of records) {
+          if (missing(location)) recovered.delete(composerStashRecoveryKey(location));
+        }
+      }),
   };
 }
 
@@ -198,8 +230,24 @@ export async function purgeComposerStashThread(threadId: string): Promise<void> 
   }
 }
 
-export async function discardComposerNewTaskRecovery(composerId: string): Promise<void> {
+export async function dropUnknownComposerStashThreads(
+  host: string,
+  mode: ComposerStashLocation["mode"],
+  threadIds: ReadonlyArray<string>,
+): Promise<void> {
   if (globalThis.indexedDB !== undefined) {
-    await createComposerStashStore(globalThis.indexedDB).discardNewTaskRecovery(composerId);
+    await createComposerStashStore(globalThis.indexedDB).dropUnknownThreads(host, mode, threadIds);
+  }
+}
+
+export async function discardComposerNewTaskRecovery(
+  composerId: string,
+  windowId?: string,
+): Promise<void> {
+  if (globalThis.indexedDB !== undefined) {
+    await createComposerStashStore(globalThis.indexedDB).discardNewTaskRecovery(
+      composerId,
+      windowId,
+    );
   }
 }

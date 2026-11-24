@@ -653,7 +653,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       readsImages: imageSupport !== false,
     },
     threads: { current: threadMentions.chips, change: threadMentions.restore },
-    extensions: { current: extensionDraft.stagedReceipts, change: extensionDraft.restore },
+    extensions: {
+      current: extensionDraft.stagedReceipts,
+      change: extensionDraft.restore,
+      scopeKey: extensionDraft.scopeKey,
+    },
     source: props.stashSource,
     todo: props.stashTodo,
   });

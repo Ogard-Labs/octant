@@ -1193,7 +1193,7 @@ function LaunchedShell(
     {},
   );
   const newTaskDrafts = useMemo(
-    () => createNewTaskDrafts(),
+    () => createNewTaskDrafts(String(props.launch.windowId)),
     [props.launch.serverUrl, props.launch.windowId],
   );
   function resetNewTaskDraft(mode: OctantMode, paneId?: PaneId): void {
@@ -2033,6 +2033,7 @@ function LaunchedShell(
   const chatController = useChatController({
     client: chatClient,
     navigationRefreshMs: 0,
+    composerStashHost: LOCAL_HOST_ID,
     changeRevision: machineChanges.chatNavigation,
     readCursorStore: chatReadCursorStore,
     serverUrl: props.launch.serverUrl,
@@ -2195,6 +2196,7 @@ function LaunchedShell(
   );
   const workNavigation = useWorkThreadNavigation(workThreadClient, {
     navigationRefreshMs: 0,
+    composerStashHost: LOCAL_HOST_ID,
     changeRevision: machineChanges.workNavigation,
   });
   const githubClient = useMemo(() => {
@@ -2806,6 +2808,7 @@ function LaunchedShell(
   const codeController = useCodeController({
     client: codeClient,
     navigationRefreshMs: 0,
+    composerStashHost: LOCAL_HOST_ID,
     changeRevision: machineChanges.codeNavigation,
     readCursorStore: codeReadCursorStore,
   });
@@ -10063,6 +10066,7 @@ function LaunchedShell(
                                         key={`${remoteTodo.hostId}:${remoteTodo.todo?.id ?? remoteTodo.thread?.threadId}`}
                                         bridge={remoteTodoSlot.bridge}
                                         hostId={remoteTodo.hostId}
+                                        ownerWindowId={props.launch.windowId}
                                         hostName={remoteTodoSlot.displayName}
                                         connected={remoteTodoSlot.state.kind === "ready"}
                                         {...(remoteTodo.destination === undefined

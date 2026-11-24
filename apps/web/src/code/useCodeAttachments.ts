@@ -363,7 +363,7 @@ export function useCodeAttachments(input: {
       return prepareComposerStashFiles({
         current: current.current,
         files,
-        stage: (file) => stageFile(file, threadId),
+        stage: async (file) => ({ kind: "staged", entry: await stageFile(file, threadId) }),
         discard: (entry) => {
           forget(entry.previewUrl);
           void client

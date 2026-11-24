@@ -11,6 +11,7 @@ import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerStashControls } from "../composer/ComposerStashControls";
 import { ComposerMenuActionProvider } from "../composer/ComposerMenuActions";
 import { useNewTaskComposerStash } from "../composer/useNewTaskComposerStash";
+import type { ComposerStashSubmission } from "../composer/useComposerStash";
 import { MAX_WORK_ATTACHMENT_BYTES, MAX_WORK_TURN_ATTACHMENTS } from "@octant/contracts";
 import type {
   ProviderInstanceId,
@@ -148,6 +149,7 @@ export function WorkOverview(props: WorkOverviewProps) {
   const [starterArtifactSubmitting, setStarterArtifactSubmitting] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const composerForm = useRef<HTMLFormElement>(null);
+  const stashSubmission = useRef<ComposerStashSubmission>(undefined);
   const stash = useNewTaskComposerStash({
     mode: "work",
     host: props.fixedHostId ?? props.selectedHostId,
@@ -171,8 +173,11 @@ export function WorkOverview(props: WorkOverviewProps) {
     if (!createAvailable || submitting || normalized === "") return;
     setSubmitting(true);
     const staged = images.filesForSend();
-    setDraft("");
-    images.clearAfterAccepted();
+    const retireStashRecovery = stashSubmission.current?.();
+    if (retireStashRecovery === undefined) {
+      setDraft("");
+      images.clearAfterAccepted();
+    }
     try {
       const created =
         Object.keys(modelOptionValues).length > 0
@@ -184,7 +189,13 @@ export function WorkOverview(props: WorkOverviewProps) {
           : staged.length === 0
             ? await props.onCreateThread(normalized)
             : await props.onCreateThread(normalized, staged);
-      if (!created) {
+      if (created && retireStashRecovery !== undefined) {
+        retireStashRecovery();
+        if (drafts === undefined || draftScope === undefined || drafts.read(draftScope) === draft) {
+          setDraft("");
+        }
+        images.consume(staged);
+      } else if (!created && retireStashRecovery === undefined) {
         const currentText =
           drafts === undefined || draftScope === undefined ? "" : drafts.read(draftScope);
         const currentFiles =
@@ -324,7 +335,10 @@ export function WorkOverview(props: WorkOverviewProps) {
             value={draft}
           />
           <ComposerMenuActionProvider offered>
-            <ComposerStashControls binding={stash} surface={composerForm} />
+            <ComposerStashControls
+              binding={{ ...stash, submission: stashSubmission }}
+              surface={composerForm}
+            />
             <ComposerAttachButton
               busy={!createAvailable || submitting}
               onRefused={images.refuse}

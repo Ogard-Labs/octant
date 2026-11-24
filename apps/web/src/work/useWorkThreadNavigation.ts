@@ -58,6 +58,7 @@ export function buildWorkThreadNavigation(
 export interface UseWorkThreadNavigationOptions {
   readonly navigationRefreshMs?: number;
   readonly changeRevision?: number;
+  readonly composerStashHost?: string;
 }
 
 export function useWorkThreadNavigation(
@@ -73,6 +74,7 @@ export function useWorkThreadNavigation(
   const requestGeneration = useRef(0);
   const clientRef = useRef(client);
   clientRef.current = client;
+  const { composerStashHost } = options;
 
   const refresh = useCallback(async () => {
     const request = ++requestGeneration.current;
@@ -81,6 +83,20 @@ export function useWorkThreadNavigation(
     try {
       const next = await clientRef.current.bootstrap();
       if (!mounted.current || request !== requestGeneration.current) return false;
+      if (
+        !bootstrapped.current &&
+        composerStashHost !== undefined &&
+        globalThis.indexedDB !== undefined
+      ) {
+        const known = next.threads
+          .filter((thread) => thread.lifecycle !== "deleted")
+          .map((thread) => String(thread.id));
+        void import("../composer/composerStashStore")
+          .then(({ dropUnknownComposerStashThreads }) =>
+            dropUnknownComposerStashThreads(composerStashHost, "work", known),
+          )
+          .catch(() => undefined);
+      }
       bootstrapped.current = true;
       setBootstrap(next);
       setStatus("ready");
@@ -95,7 +111,7 @@ export function useWorkThreadNavigation(
       );
       return false;
     }
-  }, []);
+  }, [composerStashHost]);
 
   useEffect(() => {
     mounted.current = true;

@@ -8,7 +8,6 @@ import type { CodeNewThreadWorkspace } from "@octant/contracts/projects";
 import type { PermissionMode, PermissionPersistence } from "@octant/contracts/providers";
 import { createContext, useCallback, useContext, useState, useSyncExternalStore } from "react";
 import type { ComposerExtensionSelection } from "./composerExtensionSelection";
-import { discardComposerNewTaskRecovery } from "./composerStashStore";
 
 export type NewTaskCreateFromSelection =
   | {
@@ -88,6 +87,7 @@ export function mentionChipsFromDraft(chips: ReadonlyArray<NewTaskMentionChip>):
 }
 
 export interface NewTaskDrafts {
+  readonly windowId: string | undefined;
   readonly read: (scope: string) => string;
   readonly write: (scope: string, text: string) => void;
   readonly readImages: (scope: string) => ReadonlyArray<File>;
@@ -120,7 +120,7 @@ function sameDraftFiles(left: ReadonlyArray<File>, right: ReadonlyArray<File>): 
   return left.every((file, index) => file === right[index]);
 }
 
-export function createNewTaskDrafts(): NewTaskDrafts {
+export function createNewTaskDrafts(windowId?: string): NewTaskDrafts {
   const drafts = new Map<string, string>();
   const images = new Map<string, ReadonlyArray<File>>();
   const createFrom = new Map<string, NewTaskCreateFromSelection>();
@@ -132,6 +132,7 @@ export function createNewTaskDrafts(): NewTaskDrafts {
     for (const listener of listeners) listener();
   };
   return {
+    windowId,
     read: (scope) => drafts.get(scope) ?? "",
     write: (scope, text) => {
       const current = drafts.get(scope) ?? "";
@@ -187,7 +188,13 @@ function discardNewTaskDraftScope(drafts: NewTaskDrafts, scope: string): void {
   drafts.writeCodeCheckout(scope, undefined);
   drafts.writeMentionChips(scope, []);
   drafts.writeExtensionReceipts(scope, []);
-  void discardComposerNewTaskRecovery(scope).catch(() => undefined);
+  if (globalThis.indexedDB !== undefined) {
+    void import("./composerStashStore")
+      .then(({ discardComposerNewTaskRecovery }) =>
+        discardComposerNewTaskRecovery(scope, drafts.windowId),
+      )
+      .catch(() => undefined);
+  }
 }
 
 /**

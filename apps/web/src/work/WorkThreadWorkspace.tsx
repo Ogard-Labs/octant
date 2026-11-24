@@ -1598,6 +1598,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     target: {
       location: {
         host: props.hostId ?? "local",
+        extensionScope: extensionDraft.scopeKey,
         mode: "work",
         projectId: thread?.projectId ?? projectId ?? null,
         composerId: props.threadId,

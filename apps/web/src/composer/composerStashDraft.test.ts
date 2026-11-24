@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  composerStashRecoveryKey,
   emptyComposerStashDraft,
-  planComposerStashRestore,
   type ComposerStashLocation,
   type ComposerStashTarget,
 } from "./composerStashDraft";
+import { planComposerStashRestore } from "./composerStashRestore";
 
 const chat: ComposerStashLocation = {
   host: "host",
@@ -23,6 +24,74 @@ const target: ComposerStashTarget = {
 };
 
 describe("restoring a saved composer draft", () => {
+  it("keeps one live new-task recovery across Project changes and isolates it from other windows", () => {
+    const location = {
+      ...chat,
+      mode: "work" as const,
+      threadId: null,
+      composerId: "work-overview",
+      windowId: "first-window",
+    };
+    expect(composerStashRecoveryKey({ ...location, projectId: "another-project" })).toBe(
+      composerStashRecoveryKey(location),
+    );
+    expect(composerStashRecoveryKey({ ...location, windowId: "second-window" })).not.toBe(
+      composerStashRecoveryKey(location),
+    );
+  });
+
+  it("keeps extension selections in their original provider scope", () => {
+    const location = { ...chat, threadId: null, extensionScope: "provider-one" };
+    expect(
+      planComposerStashRestore(
+        location,
+        { ...target, location: { ...location, extensionScope: "provider-two" } },
+        emptyComposerStashDraft(),
+        {
+          ...emptyComposerStashDraft(),
+          context: [
+            {
+              kind: "extension",
+              value: {
+                label: "Review",
+                reference: "@review",
+                status: { kind: "blocked", reason: "unavailable" },
+              },
+            },
+          ],
+        },
+      ),
+    ).toEqual({
+      kind: "refused",
+      reason: "Choose the original provider and Project to restore the extension selection.",
+    });
+  });
+
+  it("replaces an untouched paired to-do prompt and keeps later edits when restoring the same link", () => {
+    const location = { ...chat, threadId: null, composerId: "remote-todo" };
+    const seed = "Check the release notes";
+    const context = [
+      {
+        kind: "todo" as const,
+        value: { todoId: "todo-1", title: seed, listHostId: "list-host" },
+      },
+    ];
+    const saved = { ...emptyComposerStashDraft(), text: "Check the edited release notes", context };
+    const targetForTodo = { ...target, location, context: ["todo"] as const, todoSeed: seed };
+    const current = { ...emptyComposerStashDraft(), text: seed, context };
+
+    expect(planComposerStashRestore(location, targetForTodo, current, saved)).toEqual({
+      kind: "ready",
+      draft: saved,
+    });
+    expect(
+      planComposerStashRestore(location, targetForTodo, { ...current, text: "New edits" }, saved),
+    ).toEqual({
+      kind: "ready",
+      draft: { ...saved, text: "New edits\n\n" + saved.text, caret: 11 },
+    });
+  });
+
   it("restores an attachment-only draft into a compatible mode and keeps the original bytes", async () => {
     const file = new File(["hello from the saved draft"], "notes.md", { type: "text/markdown" });
     const restore = planComposerStashRestore(

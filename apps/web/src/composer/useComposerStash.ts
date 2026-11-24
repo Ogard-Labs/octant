@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   composerStashLocationKey,
+  composerStashRecoveryKey,
   emptyComposerStashDraft,
   hasComposerStashContent,
-  planComposerStashRestore,
   type ComposerStashDraft,
+  type ComposerStashLocation,
   type ComposerStashTarget,
 } from "./composerStashDraft";
+import { planComposerStashRestore } from "./composerStashRestore";
 import {
   createComposerStashStore,
   type ComposerDraftRecovery,
@@ -53,6 +55,23 @@ function sameDraft(left: ComposerStashDraft, right: ComposerStashDraft): boolean
   );
 }
 
+function sameScope(left: ComposerStashLocation, right: ComposerStashLocation): boolean {
+  return (
+    composerStashLocationKey(left) === composerStashLocationKey(right) &&
+    left.extensionScope === right.extensionScope
+  );
+}
+
+function canRecoverContext(record: ComposerDraftRecovery, target: ComposerStashTarget): boolean {
+  return (
+    sameScope(record.location, target.location) ||
+    planComposerStashRestore(record.location, target, emptyComposerStashDraft(), {
+      ...record.draft,
+      files: [],
+    }).kind === "ready"
+  );
+}
+
 type ComposerStashNotice = {
   readonly text: string;
   readonly tone: "success" | "warning";
@@ -69,8 +88,12 @@ export function useComposerStash(binding: ComposerStashBinding) {
   const recoveryApplied = useRef(true);
   const mounted = useRef(true);
   const moving = useRef(false);
+  const hydrated = useRef(false);
+  const hydration = useRef<Promise<void> | undefined>(undefined);
   const write = useRef(Promise.resolve());
-  const locationKey = composerStashLocationKey(binding.target.location);
+  const locationKey = composerStashRecoveryKey(binding.target.location);
+  const scopeKey = composerStashLocationKey(binding.target.location);
+  const extensionScope = binding.target.location.extensionScope;
 
   function report(text: string, tone: ComposerStashNotice["tone"] = "warning") {
     if (mounted.current) setNotice({ text, tone });
@@ -80,13 +103,22 @@ export function useComposerStash(binding: ComposerStashBinding) {
     mounted.current = true;
     let observing = true;
     if (store === undefined) return;
+    if (hydrated.current && recoveryApplied.current) {
+      return () => {
+        mounted.current = false;
+      };
+    }
     moving.current = true;
+    setBusy(true);
     const initial = latest.current;
     const hydrate = async () => {
       const record = await store.readRecovery(initial.target.location);
-      if (!observing || record === undefined) return;
+      if (!observing) return;
+      hydrated.current = true;
+      if (record === undefined) return;
       recovery.current = record;
       recoveryApplied.current = false;
+      const current = latest.current;
       if (
         !hasComposerStashContent(record.draft) &&
         (record.beforeText === "" || initial.draft.text !== record.beforeText)
@@ -94,8 +126,31 @@ export function useComposerStash(binding: ComposerStashBinding) {
         recoveryApplied.current = true;
         return;
       }
-      if (!sameDraft(latest.current.draft, initial.draft)) {
+      if (!sameDraft(current.draft, initial.draft)) {
         report("A restored draft is saved on this client. Reopen the composer to recover it.");
+        return;
+      }
+      // An already populated pane owns its newer files. Reopening a surface such
+      // as Settings can remount the controls without remounting that live draft.
+      if (current.draft.files.length > 0) {
+        recoveryApplied.current = true;
+        return;
+      }
+      const plan = planComposerStashRestore(
+        record.location,
+        current.target,
+        emptyComposerStashDraft(),
+        record.draft,
+      );
+      if (plan.kind === "refused") {
+        report(plan.reason);
+        return;
+      }
+      const savedContext = new Set(record.draft.context.map((part) => JSON.stringify(part)));
+      if (current.draft.context.some((part) => !savedContext.has(JSON.stringify(part)))) {
+        report(
+          "Your current selections were kept. Reopen the composer to recover the saved draft.",
+        );
         return;
       }
       const text =
@@ -109,12 +164,16 @@ export function useComposerStash(binding: ComposerStashBinding) {
         recoveryApplied.current = true;
         return;
       }
-      const prepared = await initial.prepare(draft, initial.draft);
+      const prepared = await current.prepare(draft, current.draft);
       if (prepared.kind === "refused") {
         if (observing) report(prepared.reason);
         return;
       }
-      if (!observing || !sameDraft(latest.current.draft, initial.draft)) {
+      if (
+        !observing ||
+        !sameScope(latest.current.target.location, current.target.location) ||
+        !sameDraft(latest.current.draft, current.draft)
+      ) {
         prepared.release?.();
         if (observing)
           report("Your current edits are kept. Reopen the composer to recover the saved draft.");
@@ -123,7 +182,7 @@ export function useComposerStash(binding: ComposerStashBinding) {
       prepared.apply();
       recoveryApplied.current = true;
     };
-    void hydrate()
+    hydration.current = hydrate()
       .catch(() => {
         if (observing) report("Saved drafts could not be read on this client.");
       })
@@ -136,7 +195,7 @@ export function useComposerStash(binding: ComposerStashBinding) {
       observing = false;
       mounted.current = false;
     };
-  }, [locationKey, store]);
+  }, [extensionScope, locationKey, scopeKey, store]);
 
   useEffect(() => {
     if (store === undefined || busy || !recoveryApplied.current || recovery.current === undefined) {
@@ -145,14 +204,23 @@ export function useComposerStash(binding: ComposerStashBinding) {
     const followEdits = async () => {
       const previous = recovery.current;
       if (previous === undefined || moving.current) return;
-      const draft = latest.current.draft;
+      const { draft, target } = latest.current;
       const tracked = hasComposerStashContent(previous.draft);
-      if (tracked ? sameDraft(previous.draft, draft) : previous.beforeText === "") return;
+      const compatible = canRecoverContext(previous, target);
+      const location = compatible ? target.location : previous.location;
+      const next = compatible ? draft : { ...draft, context: previous.draft.context };
+      if (
+        tracked
+          ? sameDraft(previous.draft, next) && sameScope(previous.location, location)
+          : previous.beforeText === ""
+      )
+        return;
       // Once the source has cleared, its marker only protects the move's revision.
       const updated = await store.revise(
         previous,
-        tracked ? draft : previous.draft,
+        tracked ? next : previous.draft,
         tracked ? previous.draft.text : "",
+        location,
       );
       if (updated !== undefined) recovery.current = updated;
     };
@@ -166,6 +234,7 @@ export function useComposerStash(binding: ComposerStashBinding) {
     if (submission === undefined || store === undefined) return;
     submission.current = () => {
       if (!recoveryApplied.current || recovery.current === undefined || moving.current) return;
+      if (!hasComposerStashContent(recovery.current.draft)) return;
       const sending = latest.current.draft;
       const expected = write.current.then(() => {
         const record = recovery.current;
@@ -193,7 +262,8 @@ export function useComposerStash(binding: ComposerStashBinding) {
   }, [binding.submission, store]);
 
   async function move(entry?: SavedComposerDraft): Promise<void> {
-    if (moving.current) return;
+    await hydration.current;
+    if (!mounted.current || moving.current) return;
     if (store === undefined) {
       report("Saved drafts are unavailable in this browser profile.");
       return;
@@ -201,6 +271,10 @@ export function useComposerStash(binding: ComposerStashBinding) {
     const input = latest.current;
     if (!recoveryApplied.current) {
       report("Reopen this composer to recover its saved draft before moving another draft.");
+      return;
+    }
+    if (recovery.current !== undefined && !canRecoverContext(recovery.current, input.target)) {
+      report("Return to the original composer to move this recovered draft.");
       return;
     }
     if (input.unavailable !== undefined) {
@@ -226,6 +300,7 @@ export function useComposerStash(binding: ComposerStashBinding) {
     const stillCurrent = () =>
       mounted.current &&
       latest.current.unavailable === undefined &&
+      sameScope(latest.current.target.location, input.target.location) &&
       sameDraft(latest.current.draft, before);
     try {
       await write.current;
@@ -276,7 +351,8 @@ export function useComposerStash(binding: ComposerStashBinding) {
   }
 
   async function open(restoreSingle: boolean): Promise<void> {
-    if (moving.current) return;
+    await hydration.current;
+    if (!mounted.current || moving.current) return;
     if (store === undefined) {
       report("Saved drafts are unavailable in this browser profile.");
       return;

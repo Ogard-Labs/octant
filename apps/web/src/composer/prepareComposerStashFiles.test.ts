@@ -14,7 +14,7 @@ describe("restoring saved attachments", () => {
       files: [original.file, added.file, refused],
       stage: async (file) => {
         if (file === refused) throw new Error("The destination cannot accept the file");
-        return added;
+        return { kind: "staged", entry: added };
       },
       discard,
       apply,
@@ -33,7 +33,7 @@ describe("restoring saved attachments", () => {
     const result = await prepareComposerStashFiles({
       current: [original],
       files: [replacement.file],
-      stage: async () => replacement,
+      stage: async () => ({ kind: "staged", entry: replacement }),
       discard,
       apply,
     });
@@ -44,5 +44,23 @@ describe("restoring saved attachments", () => {
     result.apply();
     expect(apply).toHaveBeenCalledExactlyOnceWith([replacement]);
     expect(discard).toHaveBeenCalledExactlyOnceWith(original);
+  });
+
+  it("explains a known attachment incompatibility in the destination", async () => {
+    const original = { file: new File(["existing"], "existing.txt") };
+    const reason = "This model cannot read this file. Choose a compatible model.";
+    const apply = vi.fn();
+    const discard = vi.fn();
+    const result = await prepareComposerStashFiles({
+      current: [original],
+      files: [original.file, new File(["data"], "archive.zip")],
+      stage: async () => ({ kind: "refused", reason }),
+      discard,
+      apply,
+    });
+
+    expect(result).toEqual({ kind: "refused", reason });
+    expect(apply).not.toHaveBeenCalled();
+    expect(discard).not.toHaveBeenCalled();
   });
 });

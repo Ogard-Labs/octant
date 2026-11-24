@@ -4717,25 +4717,6 @@ input.switch:checked::after {
 .composer-attachment-input[hidden] {
   display: none;
 }
-.composer-stash-list {
-  display: grid;
-  gap: var(--oct-space-2);
-  max-height: min(50vh, 24rem);
-  overflow: auto;
-  margin-block: var(--oct-space-3);
-  padding: 0;
-  list-style: none;
-}
-.composer-stash-list__entry {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: var(--oct-space-2);
-  overflow-wrap: anywhere;
-}
-.composer-stash-list__entry :is(small, p) {
-  color: var(--oct-meta);
-}
 /* Every composer, on a start screen or under a thread, in Chat, Work, and
    Code, has this one prompt: the same insets and the transcript's own type,
    so a message reads the same in the box as in the bubble it becomes. The

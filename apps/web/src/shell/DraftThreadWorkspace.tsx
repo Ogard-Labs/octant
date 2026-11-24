@@ -1315,7 +1315,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     textarea: textareaRef,
     setPrompt,
     busy: props.creating === true || atMenu.resolving,
-    extensions: { current: extensionDraft.stagedReceipts, change: extensionDraft.restore },
+    extensions: {
+      current: extensionDraft.stagedReceipts,
+      change: extensionDraft.restore,
+      scopeKey: extensionDraft.scopeKey,
+    },
     source:
       sourceSlot === null
         ? undefined

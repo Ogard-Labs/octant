@@ -16,7 +16,6 @@ import {
   purgeQueueReceipts,
 } from "../messageQueue/threadMessageQueueReceipts";
 import { registerComposerThreadDraftReset } from "./composerThreadDraftReset";
-import { purgeComposerStashThread } from "./composerStashStore";
 import type { ComposerInputElement } from "./ComposerInput";
 
 /**
@@ -86,6 +85,7 @@ export interface ComposerThreadDraftStore {
   readonly dropUnknownThreads: (
     mode: ComposerDraftMode,
     knownThreadIds: ReadonlyArray<string>,
+    authoritativeStashHost?: string,
   ) => ComposerDraftPersistResult;
   readonly clearAll: () => ComposerDraftPersistResult;
   readonly revision: (mode: ComposerDraftMode, threadId: string | undefined) => number;
@@ -468,11 +468,13 @@ export function createComposerThreadDraftStore(
       });
     },
     purgeThread: (threadId) => {
-      if (isBrowserLocalStorage(storage)) {
-        void purgeComposerStashThread(threadId).catch(() => {
-          persistError = COMPOSER_DRAFT_REMOVE_FAILED_NOTE;
-          notify();
-        });
+      if (isBrowserLocalStorage(storage) && globalThis.indexedDB !== undefined) {
+        void import("./composerStashStore")
+          .then(({ purgeComposerStashThread }) => purgeComposerStashThread(threadId))
+          .catch(() => {
+            persistError = COMPOSER_DRAFT_REMOVE_FAILED_NOTE;
+            notify();
+          });
       }
       const refused = purgeReceipts((scope) => scope.threadId !== threadId);
       if (refused !== undefined) return refused;
@@ -487,7 +489,21 @@ export function createComposerThreadDraftStore(
         return changed;
       });
     },
-    dropUnknownThreads: (mode, knownThreadIds) => {
+    dropUnknownThreads: (mode, knownThreadIds, authoritativeStashHost) => {
+      if (
+        authoritativeStashHost !== undefined &&
+        isBrowserLocalStorage(storage) &&
+        globalThis.indexedDB !== undefined
+      ) {
+        void import("./composerStashStore")
+          .then(({ dropUnknownComposerStashThreads }) =>
+            dropUnknownComposerStashThreads(authoritativeStashHost, mode, knownThreadIds),
+          )
+          .catch(() => {
+            persistError = COMPOSER_DRAFT_REMOVE_FAILED_NOTE;
+            notify();
+          });
+      }
       const prefix = `${mode}:`;
       const known = new Set(knownThreadIds);
       const refused = purgeReceipts((scope) => scope.mode !== mode || known.has(scope.threadId));

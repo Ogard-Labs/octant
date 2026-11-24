@@ -37,7 +37,10 @@ export interface ComposerThreadDraftController {
   readonly restoreFor: (threadId: string, draft: ComposerThreadDraft) => void;
   readonly clearFor: (threadId: string) => void;
   readonly purge: (threadId: string) => void;
-  readonly dropUnknown: (knownThreadIds: ReadonlyArray<string>) => void;
+  readonly dropUnknown: (
+    knownThreadIds: ReadonlyArray<string>,
+    authoritativeStashHost?: string,
+  ) => void;
   readonly revisionFor: (threadId: string) => number;
 }
 
@@ -126,8 +129,8 @@ export function useComposerThreadDraft(options: {
   );
 
   const dropUnknown = useCallback(
-    (knownThreadIds: ReadonlyArray<string>) => {
-      store.dropUnknownThreads(mode, knownThreadIds);
+    (knownThreadIds: ReadonlyArray<string>, authoritativeStashHost?: string) => {
+      store.dropUnknownThreads(mode, knownThreadIds, authoritativeStashHost);
     },
     [mode, store],
   );

@@ -145,7 +145,11 @@ export function ChatWelcome(props: ChatWelcomeProps) {
       attachmentByteLimit: MAX_COMPOSER_ATTACHMENT_BYTES,
       readsImages: true,
     },
-    extensions: { current: extensionDraft.stagedReceipts, change: extensionDraft.restore },
+    extensions: {
+      current: extensionDraft.stagedReceipts,
+      change: extensionDraft.restore,
+      scopeKey: extensionDraft.scopeKey,
+    },
   });
   const trimmed = prompt.trim();
   const canSubmit = trimmed.length > 0 && ready && !props.creating && !atMenu.resolving;

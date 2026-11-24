@@ -143,6 +143,7 @@ export interface ChatControllerOptions {
   readonly reconnectDelayMs?: number;
   readonly readCursorStore?: ChatReadCursorStore;
   readonly draftStore?: ComposerThreadDraftStore;
+  readonly composerStashHost?: string;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
 }
@@ -302,16 +303,19 @@ export function useChatController(options: ChatControllerOptions) {
   composerDraftRef.current = composerDraft;
   const knownDraftThreads = useRef<ReadonlySet<string> | undefined>(undefined);
 
-  const reconcileDrafts = useCallback((threadIds: ReadonlyArray<string>) => {
-    if (knownDraftThreads.current === undefined) {
-      composerDraftRef.current.dropUnknown(threadIds);
-    } else {
-      for (const threadId of knownDraftThreads.current) {
-        if (!threadIds.includes(threadId)) composerDraftRef.current.purge(threadId);
+  const reconcileDrafts = useCallback(
+    (threadIds: ReadonlyArray<string>) => {
+      if (knownDraftThreads.current === undefined) {
+        composerDraftRef.current.dropUnknown(threadIds, options.composerStashHost);
+      } else {
+        for (const threadId of knownDraftThreads.current) {
+          if (!threadIds.includes(threadId)) composerDraftRef.current.purge(threadId);
+        }
       }
-    }
-    knownDraftThreads.current = new Set(threadIds);
-  }, []);
+      knownDraftThreads.current = new Set(threadIds);
+    },
+    [options.composerStashHost],
+  );
 
   const updatePendingDraft = useCallback((value: string, caretIndex?: number) => {
     if (caretIndex === undefined) composerDraftRef.current.setDraft(value);
@@ -1510,7 +1514,7 @@ export function useChatController(options: ChatControllerOptions) {
        * turn's own text on a refusal.
        */
       sendOptions: {
-        readonly composerDraft: "consume" | "keep";
+        readonly composerDraft: "consume" | "consume-on-acceptance" | "keep";
         readonly contextInputPolicy?: ConversationInputPolicy;
         readonly draftRevision?: number;
       } = { composerDraft: "consume" },
@@ -1544,11 +1548,14 @@ export function useChatController(options: ChatControllerOptions) {
         decodeChatSubmissionId(globalThis.crypto.randomUUID());
       pendingSubmissionIds.current.set(submissionKey, submissionId);
       const consumesDraft =
-        sendOptions.composerDraft === "consume" &&
+        sendOptions.composerDraft !== "keep" &&
         (sendOptions.draftRevision === undefined ||
           composerDraftRef.current.revisionFor(sendingThreadId) === sendOptions.draftRevision);
-      const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
-      if (consumesDraft) composerDraftRef.current.clearFor(sendingThreadId);
+      const clearsBeforeSend = consumesDraft && sendOptions.composerDraft === "consume";
+      const previousDraft = clearsBeforeSend
+        ? composerDraftRef.current.readFor(sendingThreadId)
+        : undefined;
+      if (clearsBeforeSend) composerDraftRef.current.clearFor(sendingThreadId);
       const revisionAfterClear = composerDraftRef.current.revisionFor(sendingThreadId);
       const result = await execute({
         kind: "send-chat-turn",
@@ -1571,15 +1578,18 @@ export function useChatController(options: ChatControllerOptions) {
       });
       if (
         consumesDraft &&
-        result === undefined &&
         composerDraftRef.current.revisionFor(sendingThreadId) === revisionAfterClear
       ) {
-        composerDraftRef.current.restoreFor(sendingThreadId, {
-          ...previousDraft,
-          text: prompt,
-          caretIndex: previousDraft?.caretIndex ?? prompt.length,
-          stagedDropped: previousDraft?.stagedDropped === true,
-        });
+        if (clearsBeforeSend && result === undefined) {
+          composerDraftRef.current.restoreFor(sendingThreadId, {
+            ...previousDraft,
+            text: prompt,
+            caretIndex: previousDraft?.caretIndex ?? prompt.length,
+            stagedDropped: previousDraft?.stagedDropped === true,
+          });
+        } else if (!clearsBeforeSend && result !== undefined) {
+          composerDraftRef.current.clearFor(sendingThreadId);
+        }
       }
       if (result !== undefined) pendingSubmissionIds.current.delete(submissionKey);
       return result !== undefined;

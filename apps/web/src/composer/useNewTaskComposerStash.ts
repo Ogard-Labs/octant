@@ -8,7 +8,11 @@ import {
   type ComposerStashTodo,
 } from "./composerStashDraft";
 import { applyComposerCaret, type ComposerDraftMode } from "./composerThreadDraftStore";
-import { NewTaskDraftScopeContext, type NewTaskCreateFromSelection } from "./useNewTaskPrompt";
+import {
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+  type NewTaskCreateFromSelection,
+} from "./useNewTaskPrompt";
 import type { ComposerStashBinding } from "./useComposerStash";
 import type { ThreadMentionChip } from "../chat/ThreadMentionPicker";
 
@@ -21,6 +25,7 @@ export interface ComposerStashTodoSource {
   readonly current: ComposerStashTodo | undefined;
   readonly canRestore: (todo: ComposerStashTodo) => boolean;
   readonly change: (todo: ComposerStashTodo | undefined) => void;
+  readonly seed?: string | undefined;
 }
 
 interface ComposerStashSelection<Value> {
@@ -41,11 +46,16 @@ export function useNewTaskComposerStash(options: {
         Pick<ComposerStashTarget, "attachmentLimit" | "attachmentByteLimit" | "readsImages">)
     | undefined;
   readonly threads?: ComposerStashSelection<ThreadMentionChip> | undefined;
-  readonly extensions?: ComposerStashSelection<ComposerExtensionSelection> | undefined;
+  readonly extensions?:
+    | (ComposerStashSelection<ComposerExtensionSelection> & {
+        readonly scopeKey: string;
+      })
+    | undefined;
   readonly source?: ComposerStashSource | undefined;
   readonly todo?: ComposerStashTodoSource | undefined;
 }): ComposerStashBinding {
   const draftScope = useContext(NewTaskDraftScopeContext);
+  const windowId = useContext(NewTaskDraftsContext)?.windowId;
   const parts: ComposerStashContext[] = [
     ...(options.source?.current === undefined
       ? []
@@ -64,7 +74,10 @@ export function useNewTaskComposerStash(options: {
         projectId: options.projectId ?? null,
         composerId: draftScope ?? options.mode,
         threadId: null,
+        windowId,
+        extensionScope: options.extensions?.scopeKey,
       },
+      todoSeed: options.todo?.seed,
       attachmentLimit: options.files?.attachmentLimit ?? 0,
       attachmentByteLimit: options.files?.attachmentByteLimit ?? 0,
       readsImages: options.files?.readsImages ?? false,

@@ -24,7 +24,7 @@ import type { Todo, TodoThreadLink } from "@octant/contracts/todos";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import { buildModelPickerGroups, defaultPermissionModeFor } from "@octant/domain";
 import { pairedTodoThreadTitle } from "@octant/domain/automatic-model-policy";
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { useProviderController } from "../providers/useProviderController";
 import { firstSelectableProviderSelection } from "../providers/firstSelectableProviderSelection";
 import { useProjectController } from "../projects/useProjectController";
@@ -33,8 +33,7 @@ import { planCodeThreadCreate } from "../code/codeThreadCreate";
 import type { CodeComposerSubmitInput } from "../code/composer/CodeComposerAdapter";
 import type { ComposerStashTodo } from "../composer/composerStashDraft";
 import { ComposerStashHostContext } from "../composer/ComposerStashControls";
-import { discardComposerNewTaskRecovery } from "../composer/composerStashStore";
-import { NewTaskDraftScopeContext } from "../composer/useNewTaskPrompt";
+import { NewTaskDraftsContext, NewTaskDraftScopeContext } from "../composer/useNewTaskPrompt";
 import {
   DraftThreadWorkspace,
   type DraftThreadWorkspaceProps,
@@ -51,6 +50,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 export function RemoteTodoDraft(props: {
   readonly bridge: RemoteSessionBridge;
   readonly hostId: string;
+  readonly ownerWindowId?: string;
   readonly hostName?: string;
   readonly connected: boolean;
   readonly project?: ProjectSummary;
@@ -108,7 +108,17 @@ export function RemoteTodoDraft(props: {
   const [error, setError] = useState<string>();
   const [turnError, setTurnError] = useState<string>();
   const [unsentPrompt, setUnsentPrompt] = useState("");
-  const draftScope = `remote-todo:${props.hostId}:${String(props.todo?.id ?? "")}`;
+  const draftScope = JSON.stringify([
+    "remote-todo",
+    props.ownerWindowId,
+    props.hostId,
+    props.todo?.id,
+  ]);
+  const windowId = useContext(NewTaskDraftsContext)?.windowId;
+  const seed =
+    props.todo === undefined
+      ? ""
+      : `${props.todo.title}${props.todo.notes === "" ? "" : `\n\n${props.todo.notes}`}`;
   const project =
     projects.allProjects.find((candidate) => String(candidate.id) === String(props.project?.id)) ??
     props.project;
@@ -139,7 +149,13 @@ export function RemoteTodoDraft(props: {
     try {
       if (source !== undefined) await props.onCreated(value);
     } finally {
-      void discardComposerNewTaskRecovery(draftScope).catch(() => undefined);
+      if (globalThis.indexedDB !== undefined) {
+        void import("../composer/composerStashStore")
+          .then(({ discardComposerNewTaskRecovery }) =>
+            discardComposerNewTaskRecovery(draftScope, windowId),
+          )
+          .catch(() => undefined);
+      }
       setThread(value);
     }
   };
@@ -445,15 +461,12 @@ export function RemoteTodoDraft(props: {
             onCancel={props.onClose}
             creating={busy || !props.connected}
             {...(error === undefined ? {} : { errorMessage: error })}
-            pendingPrompt={
-              props.todo === undefined
-                ? ""
-                : `${props.todo.title}${props.todo.notes === "" ? "" : `\n\n${props.todo.notes}`}`
-            }
+            pendingPrompt={seed}
             {...(props.todo === undefined
               ? {}
               : {
                   todoSource: {
+                    seed,
                     current:
                       source === undefined
                         ? undefined

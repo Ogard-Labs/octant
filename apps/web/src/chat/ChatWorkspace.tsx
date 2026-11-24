@@ -775,6 +775,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     target: {
       location: {
         host: props.hostId ?? "local",
+        extensionScope: extensionDraft.scopeKey,
         mode: "chat",
         projectId: thread.projectId ?? null,
         composerId: thread.id,
@@ -847,9 +848,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               bytes,
               displayName,
             );
-            if (refusal !== undefined) throw new Error(refusal);
+            if (refusal !== undefined) return { kind: "refused", reason: refusal };
           } else if (imageAttachmentCapability.kind !== "supported") {
-            throw new Error("This model cannot read images.");
+            return { kind: "refused", reason: "This model cannot read images." };
           }
           try {
             await props.controller.upload({
@@ -865,7 +866,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               .catch(() => undefined);
             throw error;
           }
-          return { id, displayName, file };
+          return { kind: "staged", entry: { id, displayName, file } };
         },
         discard: (attachment) => {
           void discardAttachmentRef
@@ -1221,9 +1222,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         ];
         if (previous !== undefined && previous.threadId === String(thread.id))
           args[6] = previous.version;
-        if (sendingDraftRevision !== undefined || continuation.policy === "text-only")
+        if (
+          sendingDraftRevision !== undefined ||
+          continuation.policy === "text-only" ||
+          retireStashRecovery !== undefined
+        )
           args[7] = {
-            composerDraft: "consume",
+            composerDraft: retireStashRecovery === undefined ? "consume" : "consume-on-acceptance",
             ...(continuation.policy === "text-only"
               ? { contextInputPolicy: continuation.policy }
               : {}),

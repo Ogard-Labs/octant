@@ -7162,12 +7162,16 @@ ls-remote` against the thread's remote and the GitHub reads they already
   and the full editable draft, including attachment bytes and typed context.
   IndexedDB commits the stash and its cleared source, or the restored
   destination and removal from the stash, as one move. A restored draft keeps
-  its recovery data there while it is editable. The live composer changes only
-  after the write commits, and a competing restore can consume the entry only
+  its recovery data there while it is editable. New-task recovery belongs to
+  its window and follows the live composer across Project changes. The live
+  composer changes only after the write commits, and a competing restore can consume the entry only
   once. A failed move preserves a recoverable copy. Ordinary attachment
   staging assigns destination-owned references. Ordinary turn admission
   rechecks authority, context references and model capabilities. Thread
-  deletion and purge remove that thread's saved and recovered drafts.
+  deletion and purge remove that thread's saved and recovered drafts. A
+  complete local thread listing also removes drafts for threads deleted while
+  this client was closed. Recovery waits for host acceptance before clearing
+  a submitted draft.
 
 - **Accepted message queue.** Chat, Work, and Code share a host-owned ordered
   queue for messages the user submits while a turn runs. A successful enqueue
