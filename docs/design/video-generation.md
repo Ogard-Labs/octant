@@ -431,6 +431,10 @@ At startup the host reconciles every video job the journal left unfinished:
   `interrupted` and billed nothing.
 - A job that was **running** with a recorded provider job id is resumed while
   the model's declared resume window and the 30-minute job time both allow it.
+  - If recovery needs to reread the model, discovery ends on Stop, shutdown,
+    or the remaining job deadline. If Stop interrupts discovery before the
+    host knows whether the provider can cancel, the host stops waiting and
+    settles at the estimate.
   - The host polls until the job ends, stores the clip and calls `forget`.
   - The provider may already have billed it, so it is not thrown away.
   - Past either limit, it is cancelled where the driver can cancel, then
@@ -627,12 +631,11 @@ export type VideoAdapterPoll =
   | { readonly status: "cancelled"; readonly usage?: VideoAdapterUsage };
 
 /**
- * One video profile's generator. No method rejects: every refusal and
- * failure is a result the job records, so a broken adapter cannot leave a job
- * running.
+ * One video profile's generator. Job operations report refusals and failures
+ * as results. Discovery may reject if it fails.
  */
 export interface VideoGenerationAdapter {
-  readonly models: () => Promise<ReadonlyArray<VideoModelCapabilities>>;
+  readonly models: (signal?: AbortSignal) => Promise<ReadonlyArray<VideoModelCapabilities>>;
   readonly start: (request: VideoAdapterRequest) => Promise<VideoAdapterStart>;
   readonly poll: (remoteId: string, signal: AbortSignal) => Promise<VideoAdapterPoll>;
   /**

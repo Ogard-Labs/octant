@@ -475,6 +475,7 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
   };
 
   const readEndpoints = async (signal?: AbortSignal): Promise<FalEndpoints> => {
+    signal?.throwIfAborted();
     const withSignal = signal === undefined ? {} : { signal };
     const ids = profile.modelIds.map(String).filter((id) => ENDPOINT_PATTERN.test(id));
     if (ids.length === 0) return { endpoints: [] };
@@ -794,11 +795,12 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
   };
 
   return {
-    models: async () => {
+    models: async (signal?: AbortSignal) => {
       if (submittedModels !== undefined) return submittedModels;
       // Profile discovery must still retry a failed or partial read. Only an
       // accepted submission can use its own already-read declarations above.
-      const read = await endpoints();
+      const read = await endpoints(signal);
+      signal?.throwIfAborted();
       if (read.failure !== undefined) throw read.failure;
       return read.endpoints.map((endpoint) => endpoint.model);
     },

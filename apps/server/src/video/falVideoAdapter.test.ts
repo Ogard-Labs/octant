@@ -104,6 +104,37 @@ function ports(respond: (request: VideoHttpRequest) => Response): {
 }
 
 describe("fal video driver", () => {
+  it("forwards the discovery signal through pricing and a stalled schema request", async () => {
+    const control = new AbortController();
+    const sent: Array<VideoHttpRequest> = [];
+    const schema = Promise.withResolvers<Response>();
+    const adapter = falVideoDriver.create({
+      profile,
+      ports: {
+        ...ports(script()).ports,
+        request: async (request) => {
+          sent.push(request);
+          if (new URL(request.url).hostname === "api.fal.ai") return Response.json({ prices: [] });
+          request.signal?.addEventListener("abort", () => schema.reject(request.signal?.reason), {
+            once: true,
+          });
+          return schema.promise;
+        },
+      },
+    });
+    const pending = adapter.models(control.signal);
+    try {
+      await vi.waitFor(() => expect(sent).toHaveLength(2));
+      expect(sent.map((request) => request.signal)).toEqual([control.signal, control.signal]);
+      control.abort();
+      await expect(pending).rejects.toBeDefined();
+      expect(sent).toHaveLength(2);
+    } finally {
+      schema.resolve(new Response(null, { status: 503 }));
+      await pending.catch(() => undefined);
+    }
+  });
+
   it("keeps every promise of the video seam", async () => {
     await expect(
       runVideoGenerationConformance({

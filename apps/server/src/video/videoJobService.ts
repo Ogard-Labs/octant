@@ -339,7 +339,7 @@ export class VideoJobService {
         this.#discoveryReadAt.set(key, this.#now());
         const wanted = modelAllowlistOf(candidate.configuration).length;
         void adapter
-          .models()
+          .models(this.#closing.signal)
           .then((models) => this.#declared.set(key, { models, complete: models.length >= wanted }))
           .catch(() => undefined)
           .finally(() => this.#declaring.delete(key));
@@ -386,9 +386,10 @@ export class VideoJobService {
    */
   async #modelsOf(
     adapter: VideoGenerationAdapter,
+    signal?: AbortSignal,
   ): Promise<ReadonlyArray<VideoModelCapabilities> | undefined> {
     try {
-      return await adapter.models();
+      return await adapter.models(signal);
     } catch {
       return undefined;
     }
@@ -822,18 +823,25 @@ export class VideoJobService {
   }
 
   async #resume(job: VideoJob): Promise<void> {
+    const running = this.#running.get(String(job.id));
+    if (running === undefined) return;
     const instance = this.#options.readProviderInstance(job.profileInstanceId);
     const adapter = instance === undefined ? undefined : this.#adapterFor(instance);
-    const model =
-      adapter === undefined
-        ? undefined
-        : (await this.#modelsOf(adapter))?.find(
-            (candidate) => String(candidate.modelId) === String(job.modelId),
-          );
-    if (this.#closing.signal.aborted) return;
     const startedAt = Date.parse(job.startedAt ?? job.createdAt);
+    const remaining = startedAt + VIDEO_JOB_TIMEOUT_MS - this.#now();
+    const signal = AbortSignal.any([
+      this.#closing.signal,
+      running.controller.signal,
+      remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abort(),
+    ]);
+    const models = adapter === undefined ? undefined : await this.#modelsOf(adapter, signal);
+    const model = models?.find((candidate) => String(candidate.modelId) === String(job.modelId));
+    if (this.#closing.signal.aborted) return;
     const windowMs = (model?.job.resumeWindowHours ?? 0) * 3_600_000;
-    if (adapter === undefined || model === undefined || this.#now() - startedAt > windowMs) {
+    if (
+      adapter === undefined ||
+      (!running.stopRequested && (model === undefined || this.#now() - startedAt > windowMs))
+    ) {
       this.#finish(job, "failed", {
         failure: videoFailure(
           "interrupted",
@@ -1369,8 +1377,8 @@ export class VideoJobService {
     });
     return {
       ...adapter,
-      models: async () => {
-        const models = await adapter.models();
+      models: async (signal) => {
+        const models = await adapter.models(signal);
         for (const model of models) {
           this.#priceCache.set(`${String(instance.id)}\n${String(model.modelId)}`, model.price);
         }

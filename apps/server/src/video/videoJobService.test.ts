@@ -120,7 +120,7 @@ interface Script {
   credential?: () => Promise<string>;
   forget?: () => Promise<"removed" | "failed" | VideoAdapterForget>;
   model?: VideoModelCapabilities;
-  beforeModels?: (call: number) => Promise<void>;
+  beforeModels?: (call: number, signal: AbortSignal | undefined) => Promise<void>;
   /** Rejects models() once, on a numbered call, or for good, as a failed discovery read can. */
   modelsFail?: "once" | "always" | number;
   /** Answers models() from the read's count, for a catalog that changes under the host. */
@@ -143,10 +143,10 @@ function fakeDriver(script: Script) {
     providerHosts: ["video.example.test"],
     create: ({ ports }) => {
       return {
-        models: async () => {
+        models: async (signal?: AbortSignal) => {
           calls.models += 1;
           const call = calls.models;
-          if (script.beforeModels !== undefined) await script.beforeModels(call);
+          if (script.beforeModels !== undefined) await script.beforeModels(call, signal);
           if (modelsFailOnce || script.modelsFail === "always" || script.modelsFail === call) {
             modelsFailOnce = false;
             throw { category: "unavailable", message: "Discovery failed." };
@@ -1324,6 +1324,63 @@ describe("video jobs", () => {
     expect(done?.status).toBe("completed");
     await vi.waitFor(() => expect(second.service.getById(queued.id)?.providerCopy).toBe("removed"));
   });
+
+  it.each(["Stop", "shutdown", "the job deadline"])(
+    "interrupts stalled recovery discovery on %s",
+    async (interruption) => {
+      const first = harness({
+        poll: (signal) =>
+          new Promise((resolve) => {
+            signal.addEventListener("abort", () => resolve({ status: "running" }), { once: true });
+          }),
+      });
+      const queued = await enqueue(first.service);
+      await vi.waitFor(() => expect(first.calls.poll).toBe(1));
+      first.service.close();
+
+      const discovery = Promise.withResolvers<AbortSignal | undefined>();
+      const release = Promise.withResolvers<void>();
+      const second = harness(
+        {
+          beforeModels: async (call, signal) => {
+            // The first lookup warms the catalog; the accepted job starts its own.
+            if (call === 1) return;
+            discovery.resolve(signal);
+            signal?.addEventListener("abort", () => release.reject(signal.reason), { once: true });
+            await release.promise;
+          },
+        },
+        first.root,
+      );
+      if (interruption === "the job deadline") second.advance(VIDEO_JOB_TIMEOUT_MS - 200);
+      try {
+        await second.service.recover();
+        const signal = await discovery.promise;
+        expect(signal).toBeDefined();
+        if (interruption === "Stop") second.service.stop(queued.id);
+        if (interruption === "shutdown") {
+          second.service.close();
+          expect(signal?.aborted).toBe(true);
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          expect(second.service.getById(queued.id)).toMatchObject({
+            status: "running",
+            remoteId: "remote-1",
+          });
+        } else {
+          const done = await second.service.whenTerminal(queued.id, 1_000);
+          expect(done).toMatchObject({
+            status: interruption === "Stop" ? "cancelled" : "failed",
+            settledCostUsdMicros: 695_040,
+          });
+          expect(signal?.aborted).toBe(true);
+        }
+        expect(second.calls.poll).toBe(0);
+      } finally {
+        second.service.close();
+        release.resolve();
+      }
+    },
+  );
 
   it("keeps polling a sent job whose post-start model lookup fails", async () => {
     const { service } = harness({ modelsFail: 2 });

@@ -78,13 +78,12 @@ export type VideoAdapterForget =
   | { readonly status: "failed"; readonly providerFailure: ProviderFailure };
 
 /**
- * One video profile's generator. No method rejects: every refusal and
- * failure is a result the job records, so a broken adapter cannot leave a
- * job running.
+ * One video profile's generator. Job operations report refusals and failures
+ * as results so the host can record them. Discovery may reject if it fails.
  */
 export interface VideoGenerationAdapter {
-  /** The models this profile offers, each with what it declares about itself. */
-  readonly models: () => Promise<ReadonlyArray<VideoModelCapabilities>>;
+  /** The profile's declared models. The signal bounds discovery during job recovery. */
+  readonly models: (signal?: AbortSignal) => Promise<ReadonlyArray<VideoModelCapabilities>>;
   readonly start: (request: VideoAdapterRequest) => Promise<VideoAdapterStart>;
   readonly poll: (remoteId: string, signal: AbortSignal) => Promise<VideoAdapterPoll>;
   /**
