@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
@@ -6,6 +6,61 @@ import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 const view = {
   thread: { id: "00000000-0000-4000-8000-000000000901", title: "Launch plan" },
 } as never;
+
+it.each(["browser", "desktop"])(
+  "shows an archive's size and downloads only when confirmed in %s",
+  async (surface) => {
+    const user = userEvent.setup();
+    const url = `http://127.0.0.1:3100/api/threads/export/video-archive?ticket=${"a".repeat(43)}`;
+    const offerArchive = vi.fn(
+      async () => ({ kind: "archive-ready", url, size: 3072, clipCount: 1 }) as const,
+    );
+    const exportThread = vi.fn();
+    const clicked: string[] = [];
+    const downloadThreadVideoArchive = vi.fn(async () => true);
+    const bridge = Object.getOwnPropertyDescriptor(window, "octantHost");
+    if (surface === "desktop")
+      Object.defineProperty(window, "octantHost", {
+        configurable: true,
+        value: { downloadThreadVideoArchive },
+      });
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        clicked.push(this.href);
+      });
+    try {
+      render(
+        <ChatThreadActionsMenu
+          exportClient={{ exportThread, offerArchive, readToolCallRecords: vi.fn() }}
+          view={view}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: "Thread actions" }));
+      await user.click(await screen.findByRole("menuitemradio", { name: "Export…" }));
+      const dialog = await screen.findByRole("dialog", { name: "Export thread" });
+      expect(
+        within(dialog).getByText(/3 KB archive includes the transcript and 1 video clip/i),
+      ).toBeVisible();
+      expect(within(dialog).getByText(/exact size 3,072 bytes/i)).toBeVisible();
+      expect(clicked).toEqual([]);
+      expect(downloadThreadVideoArchive).not.toHaveBeenCalled();
+      await user.click(within(dialog).getByRole("button", { name: "Download archive" }));
+      await screen.findByText("Started the thread archive download.");
+      if (surface === "desktop") {
+        expect(downloadThreadVideoArchive).toHaveBeenCalledExactlyOnceWith("a".repeat(43));
+        expect(clicked).toEqual([]);
+      } else {
+        expect(clicked).toEqual([url]);
+      }
+      expect(exportThread).not.toHaveBeenCalled();
+    } finally {
+      click.mockRestore();
+      if (bridge !== undefined) Object.defineProperty(window, "octantHost", bridge);
+      else Reflect.deleteProperty(window, "octantHost");
+    }
+  },
+);
 
 describe("handing off a Chat thread from its actions menu", () => {
   it("shows why the host refused and hands nothing to the shell", async () => {

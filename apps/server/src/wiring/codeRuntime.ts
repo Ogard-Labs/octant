@@ -1,6 +1,7 @@
 import { decodeBrowserThreadId } from "@octant/contracts";
+import { ownPullRequestsFromHistory } from "../code/codeThreadMetadataService";
 import { splitRepositoryName } from "../code/pullRequestLinkService";
-import { MergedThreadPutAway } from "../code/mergedThreadPutAway";
+import { MergedThreadPutAway, threadDeliversPullRequest } from "../code/mergedThreadPutAway";
 import {
   FinishedReportSettle,
   managedChildWorkPending,
@@ -894,6 +895,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         fullAccess: () => level() === "full-access",
         jobs: videoJobService,
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        defaultProfileInstanceId: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings()).videoGeneration
+            .defaultProfileInstanceId,
         imageSources: codeImageSources,
         imageJobs: imageJobService,
         ...(checkoutRoot === undefined
@@ -2296,8 +2300,22 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             threads: () => persistence.readCodeThreads(),
             projectExists: (projectId) => persistence.readProject(projectId) !== undefined,
             metadata: codeThreadMetadataService,
-            cachedMerges: (threadId) =>
-              projectPullRequestService.mergedPullRequestsForThread(String(threadId)),
+            cachedMerges: (thread) => {
+              const own = ownPullRequestsFromHistory(
+                codeBoardEventStore.summaryForThread(thread.id),
+              );
+              return projectPullRequestService.mergedPullRequestsForThread(
+                String(thread.id),
+                (pullRequest) =>
+                  threadDeliversPullRequest({
+                    thread,
+                    own,
+                    pullRequest,
+                    sameRepository: (projectId, left, right) =>
+                      pullRequestLinkService.areSameRepository(projectId, left, right),
+                  }),
+              );
+            },
             decisionPending: (thread) => codeTurnDecisions.forThread(thread) !== undefined,
             samePullRequest: (projectId, left, right) => {
               if (left.number !== right.number) return false;

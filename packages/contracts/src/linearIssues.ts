@@ -77,7 +77,8 @@ export const LinearAssigneeFilterId = Schema.Union(
 );
 export type LinearAssigneeFilterId = typeof LinearAssigneeFilterId.Type;
 
-const linearIssueUrl = Schema.String.pipe(
+/** A Linear issue page on linear.app, with nothing secret-shaped in it. */
+export const LinearIssueUrl = Schema.String.pipe(
   Schema.maxLength(512),
   Schema.filter(
     (value) =>
@@ -99,7 +100,7 @@ export const LinearIssueRow = Schema.Struct({
   title: safeText(256),
   state: LinearIssueState,
   assignee: Schema.optional(safeText(128)),
-  url: linearIssueUrl,
+  url: LinearIssueUrl,
 }).annotations(strict);
 export type LinearIssueRow = typeof LinearIssueRow.Type;
 
@@ -119,7 +120,7 @@ export const LinearIssueDetail = Schema.Struct({
   title: safeText(256),
   state: LinearIssueState,
   assignee: Schema.optional(safeText(128)),
-  url: linearIssueUrl,
+  url: LinearIssueUrl,
   description: boundedBody(ISSUE_BODY_MAX_BYTES),
   descriptionTruncated: Schema.Boolean,
   comments: Schema.Array(LinearIssueComment).pipe(Schema.maxItems(10)),

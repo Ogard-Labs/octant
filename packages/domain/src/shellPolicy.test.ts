@@ -254,6 +254,8 @@ describe("shell settings policy", () => {
       voice: {},
       // Image generation starts with no custom OpenAI-compatible sources.
       imageGeneration: { customSources: [] },
+      // Video names no profile for Full access, so the first ready one is used.
+      videoGeneration: {},
       // The Computer-use driver waits for a person before fetching an upstream release.
       computerUse: { enabled: true, automaticUpdates: false },
       // The host has not been told who is using it, so the profile carries no

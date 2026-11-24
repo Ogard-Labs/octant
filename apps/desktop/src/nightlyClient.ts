@@ -28,6 +28,7 @@ import {
 } from "./desktopFilesClose";
 import { watchSystemShutdown } from "./personQuitReport";
 import { installNightlyBrokeredFlows } from "./nightlyBrokeredFlows";
+import { startThreadVideoArchiveDownload } from "./threadVideoArchiveDownload";
 import { installNightlyProviderCredentials } from "./nightlyProviderCredentials";
 import { installNightlyCodeApprovals } from "./nightlyCodeApprovals";
 import { createNativeCodeApprovalViewHost } from "./nativeCodeApprovalView";
@@ -224,6 +225,13 @@ export async function runNightlyClient(
   // The inbox holds each link until the first window has loaded.
   launchLinks.handOff(surfaces.acceptCodeLink);
   register(DESKTOP_IPC_CHANNELS.minimize, (event) => owns(event).minimize());
+  register(DESKTOP_IPC_CHANNELS.downloadThreadVideoArchive, (event, ticket) =>
+    startThreadVideoArchiveDownload(
+      event.sender,
+      bootstraps.get(event.sender.id)?.hostOrigin,
+      ticket,
+    ),
+  );
   register(DESKTOP_IPC_CHANNELS.maximizeOrRestore, (event) => {
     const window = owns(event);
     if (window.isMaximized()) window.unmaximize();

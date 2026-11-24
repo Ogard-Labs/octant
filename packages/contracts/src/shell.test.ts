@@ -130,6 +130,7 @@ const settings = {
   navigatorAssistant: {},
   voice: {},
   imageGeneration: { customSources: [] },
+  videoGeneration: {},
   computerUse: { enabled: true, automaticUpdates: true },
   standaloneSkillActivations: {},
   skillFolders: { providers: [], folders: [] },

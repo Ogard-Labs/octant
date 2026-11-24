@@ -346,3 +346,35 @@ export const decodeVideoJobProviderCopyChanged = Schema.decodeUnknownSync(
   VideoJobProviderCopyChanged,
 );
 export const decodeVideoClipOptions = Schema.decodeUnknownSync(VideoClipOptions);
+
+/** A thread's video jobs, newest last, as the viewer lists them. */
+export const VideoJobsResponse = Schema.Struct({ jobs: Schema.Array(VideoJob) }).annotations(
+  strict,
+);
+export type VideoJobsResponse = typeof VideoJobsResponse.Type;
+
+/**
+ * A short-lived address for one clip, so a `<video>` element, which cannot
+ * send the window's credential, can seek with byte ranges. Every request on it
+ * checks the issuing window's authority over the thread again.
+ */
+export const VideoClipTicketResponse = Schema.Struct({
+  url: Schema.String.pipe(Schema.pattern(/^\/api\/video\/clip\?ticket=[A-Za-z0-9_-]{43}$/)),
+  expiresAt: UtcTimestamp,
+}).annotations(strict);
+export type VideoClipTicketResponse = typeof VideoClipTicketResponse.Type;
+
+/**
+ * Host settings for video. `defaultProfileInstanceId` is the video profile a
+ * thread at Full access makes clips on when several are ready and its Project
+ * keeps no choice; absent, or naming one that is not ready, means the first
+ * ready profile, as for images.
+ */
+export const VideoGenerationSettings = Schema.Struct({
+  defaultProfileInstanceId: Schema.optional(ProviderInstanceId),
+}).annotations(strict);
+export type VideoGenerationSettings = typeof VideoGenerationSettings.Type;
+export const decodeVideoGenerationSettings = Schema.decodeUnknownSync(VideoGenerationSettings);
+
+export const decodeVideoJobsResponse = Schema.decodeUnknownSync(VideoJobsResponse);
+export const decodeVideoClipTicketResponse = Schema.decodeUnknownSync(VideoClipTicketResponse);

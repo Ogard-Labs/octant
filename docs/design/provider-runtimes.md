@@ -728,7 +728,20 @@ address and title from the structured result (an `https` claude.ai address
 only), the driver adds the snapshot it read when the person approved the
 publish, the mapper attaches both to the call's `tool-success` as
 `published`, and the call is reported as outside
-content (`hosted-tool`), because claude.ai's answer reaches the model. The
+content (`hosted-tool`), because claude.ai's answer reaches the model. In
+the same way a `tool-success` may carry `forgeReferences`: the pull requests
+and issues the call wrote to (created, merged, reviewed, commented on, edited,
+closed or reopened), at most ten, which the adapter reads from the call's own
+command or arguments and its result with the shared
+`forgeReferencesFromToolCall` rules in `@octant/provider-sdk`. A read never
+counts, an identity the call does not pin down is left out, and a shell write
+counts only when the call's exit status speaks for that command (it is in the
+last `;`-separated list, joined by `&&` alone, with no earlier successful exit)
+or `gh`'s own output says that very write happened.
+The Claude
+mapper keeps a shell, GitHub or Linear call's input until its result arrives
+for this; the Codex mapper reads a command that exited cleanly and its printed
+output, because its tool-server items arrive without arguments or result. The
 same probe showed that
 `strictMcpConfig: true`, which a query sets while the account's tool servers
 are off, keeps the account's claude.ai connectors (listed by 2.1.304 with

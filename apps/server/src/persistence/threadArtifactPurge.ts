@@ -31,6 +31,8 @@ export interface ThreadArtifactPurgeInput {
     readonly threadId: string;
   }) => Promise<void>;
   readonly purgeGeneratedImages: (threadId: string) => Promise<void>;
+  /** Stops the thread's video jobs and removes its clips; owed provider removals stay on their jobs. */
+  readonly purgeGeneratedVideos?: (threadId: string) => Promise<void>;
   readonly purgeBrowserCaptures: (threadId: string) => Promise<void>;
   readonly purgeAgentMessages: (threadId: string) => Promise<void>;
 }
@@ -43,6 +45,7 @@ export async function purgeThreadArtifacts(input: ThreadArtifactPurgeInput): Pro
   await input.purgeCodeAttachments(input.threadId);
   await input.purgeServerAttachments?.({ mode: input.mode, threadId: input.threadId });
   await input.purgeGeneratedImages(input.threadId);
+  await input.purgeGeneratedVideos?.(input.threadId);
   await input.purgeBrowserCaptures(input.threadId);
   await input.purgeAgentMessages(input.threadId);
   await removeMatchingReceipts(

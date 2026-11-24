@@ -1,3 +1,4 @@
+import { VideoClientContext } from "../video/ThreadVideoClips";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { readContinuationLink } from "../continuity/continuationLink";
 import { decodeChatThreadId, decodeCodeThreadId, decodeWorkThreadId } from "@octant/contracts";
@@ -54,6 +55,12 @@ export interface RemoteWorkspaceProps {
    * absent, the session is shown as restricted.
    */
   readonly actsAsHostPerson?: boolean;
+  /**
+   * True when this browser was directly paired with the host (at Full,
+   * Approve and steer, or Read only), so it can watch and download clips from
+   * threads it can open. Absent defaults to `actsAsHostPerson === true`.
+   */
+  readonly canWatchVideoClips?: boolean;
   readonly readOnly?: boolean;
   /** Shows each thread its waiting tool prompts; absent, none is shown. */
   readonly extensionClient?: ExtensionClient;
@@ -72,13 +79,21 @@ export function RemoteWorkspace(props: RemoteWorkspaceProps) {
     props.actsAsHostPerson === true,
   );
   return (
-    <ConversationInputClientContext.Provider value={props.clients.conversationInputs}>
-      <ReplyDetailSourceContext.Provider value={replyDetail}>
-        <ReplyDetailContext.Provider value={replyDetail.reading.defaultLevel}>
-          <RemoteModeSurface {...props} />
-        </ReplyDetailContext.Provider>
-      </ReplyDetailSourceContext.Provider>
-    </ConversationInputClientContext.Provider>
+    <VideoClientContext.Provider
+      value={
+        (props.canWatchVideoClips ?? props.actsAsHostPerson === true)
+          ? props.clients.videoResults
+          : undefined
+      }
+    >
+      <ConversationInputClientContext.Provider value={props.clients.conversationInputs}>
+        <ReplyDetailSourceContext.Provider value={replyDetail}>
+          <ReplyDetailContext.Provider value={replyDetail.reading.defaultLevel}>
+            <RemoteModeSurface {...props} />
+          </ReplyDetailContext.Provider>
+        </ReplyDetailSourceContext.Provider>
+      </ConversationInputClientContext.Provider>
+    </VideoClientContext.Provider>
   );
 }
 

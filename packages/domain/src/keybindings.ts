@@ -356,15 +356,6 @@ export interface OctantKeybindings {
    * keeps a typo in the JSON from silently leaving an action unreachable.
    */
   readonly rejected: ReadonlyArray<OctantKeybindingRejection>;
-  /**
-   * Actions that ended up sharing a chord. The first one listed for a chord
-   * keeps it; the rest are reported so the user can see the collision instead
-   * of discovering it by pressing the key.
-   */
-  readonly conflicts: ReadonlyArray<{
-    readonly chord: string;
-    readonly actionIds: ReadonlyArray<OctantKeybindingActionId>;
-  }>;
 }
 
 /**
@@ -401,27 +392,14 @@ export function resolveKeybindings(
     if (fallback.status === "ok") bindings.set(action.id, fallback.chord);
   }
 
-  const byChord = new Map<string, OctantKeybindingActionId[]>();
-  // Iterate the action table, not the map, so a conflict resolves the same way
-  // whatever order the override JSON happened to list its keys in.
-  for (const action of OCTANT_KEYBINDING_ACTIONS) {
-    const chord = bindings.get(action.id);
-    if (chord === undefined) continue;
-    const key = formatChord(chord);
-    byChord.set(key, [...(byChord.get(key) ?? []), action.id]);
-  }
-  const conflicts = [...byChord.entries()]
-    .filter(([, actionIds]) => actionIds.length > 1)
-    .map(([chord, actionIds]) => ({ chord, actionIds: [...actionIds] }));
-
-  return { bindings, rejected, conflicts };
+  return { bindings, rejected };
 }
 
 /**
  * Which action a keyboard event runs, if any.
  *
  * When two actions share a chord the first in the action table wins, matching
- * what {@link resolveKeybindings} reports, so the warning the user sees names
+ * what {@link isShadowedKeybinding} reports, so the warning the user sees is on
  * the action that is actually being shadowed.
  */
 export function matchKeybinding(
@@ -464,15 +442,32 @@ export function matchPageKeybinding(
 }
 
 /**
- * Whether an action lost its chord to an earlier action that shares it, and so
+ * Whether an action lost its chord to an earlier action in the table, and so
  * never runs. Anything that tells the user a chord must ask this first, or it
  * advertises a key that does nothing.
+ *
+ * Global chords compete with each other, and a page's only with that page's. A
+ * terminal's compete with each other and yield to a global chord listed ahead
+ * of them, but never take one from a global action listed after them: that
+ * action still runs everywhere else.
  */
 export function isShadowedKeybinding(
   keybindings: OctantKeybindings,
   actionId: OctantKeybindingActionId,
 ): boolean {
-  return keybindings.conflicts.some((conflict) => conflict.actionIds.slice(1).includes(actionId));
+  const action = OCTANT_KEYBINDING_ACTIONS.find((candidate) => candidate.id === actionId);
+  const chord = keybindings.bindings.get(actionId);
+  if (action === undefined || chord === undefined) return false;
+  const holder = OCTANT_KEYBINDING_ACTIONS.find((earlier) => {
+    const bound = keybindings.bindings.get(earlier.id);
+    return (
+      bound !== undefined &&
+      sameChord(bound, chord) &&
+      earlier.page === action.page &&
+      (earlier.scope === undefined || earlier.scope === action.scope)
+    );
+  });
+  return holder !== action;
 }
 
 /**
@@ -480,7 +475,7 @@ export function isShadowedKeybinding(
  *
  * The terminal calls this from its own key handler, before the key reaches the
  * shell. A chord that two actions share stays with the one listed first, as
- * {@link resolveKeybindings} reports, so a terminal command that lost its chord
+ * {@link isShadowedKeybinding} reports, so a terminal command that lost its chord
  * to a global one does not also run.
  */
 export function matchTerminalKeybinding(

@@ -85,6 +85,7 @@ import { MentionableThreadId } from "./threadMention";
 import { NavigatorAssistantSettings } from "./navigatorAssistant";
 import { VoiceSettings } from "./speech";
 import { ImageGenerationSettings } from "./imageGeneration";
+import { VideoGenerationSettings } from "./videoGeneration";
 import { ComputerUseSettings } from "./computerUseSettings";
 import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR, UserProfile } from "./userProfile";
 import { SidebarBackground, DEFAULT_SIDEBAR_BACKGROUND } from "./theme";
@@ -1259,6 +1260,9 @@ export const ShellSettings = Schema.Struct({
   imageGeneration: Schema.optionalWith(ImageGenerationSettings, {
     default: () => ({ customSources: [] }),
   }),
+  // A store persisted before video shipped decodes to no named profile, so
+  // Full access uses the first ready video profile.
+  videoGeneration: Schema.optionalWith(VideoGenerationSettings, { default: () => ({}) }),
   // Who is using this host. A store persisted before profiles shipped decodes
   // to the empty profile rather than a name guessed from the OS account: the
   // host was never asked, and saying so is the honest reading.

@@ -12,7 +12,7 @@ import {
 } from "./extensionIdentity";
 import { ExtensionNpmSource } from "./extensionIdentity";
 import { OctantMode } from "./modes";
-import { ThreadPublishedPage } from "./threadToolSteps";
+import { ThreadForgeReferences, ThreadPublishedPage } from "./threadToolSteps";
 import { MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS } from "./threadToolCallRecords";
 import {
   ACP_AGENT_KINDS,
@@ -3343,6 +3343,14 @@ export const ProviderRuntimeEvent = Schema.Union(
      * tool publishes to.
      */
     published: Schema.optional(ThreadPublishedPage),
+    /**
+     * The pull requests and issues the call wrote to (created, merged,
+     * reviewed, commented on, edited, closed or reopened), read by the
+     * adapter from the call's own command and result with the shared
+     * `forgeReferencesFromToolCall` rules. A call that only read one carries
+     * none. The thread is linked to each of them.
+     */
+    forgeReferences: Schema.optional(ThreadForgeReferences),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

@@ -15,6 +15,7 @@ import { useProviderController } from "../providers/useProviderController";
 import { createRemoteExtensionClient } from "../remote/remoteProductClients";
 import { RemoteCodeSurface } from "../remote/RemoteWorkspace";
 import { HostSelector } from "../shell/HostSelector";
+import { VideoClientContext } from "../video/ThreadVideoClips";
 import { createPairedComputerCodeClients } from "./pairedComputerCodeClients";
 import { PairedComputerThreadServers } from "./PairedComputerThreadServers";
 import type { RemoteServerGrantSource } from "@octant/contracts";
@@ -125,38 +126,49 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
           {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
         />
       </div>
-      <RemoteCodeSurface
-        clients={clients}
-        actsAsHostPerson={standing.actsAsHostPerson}
-        extensionClient={extensionClient}
-        connected={connected}
-        providerGroups={providerGroups}
-        followsContinuationLink={false}
-        {...(props.initialThreadId === undefined ? {} : { initialThreadId: props.initialThreadId })}
-        {...(props.initialThreadRequest === undefined
-          ? {}
-          : { initialThreadRequest: props.initialThreadRequest })}
-        {...(openServer === undefined
-          ? {}
-          : {
-              renderThreadExtras: (
-                thread: CodeThread,
-                checkout: CodeCheckoutIdentity | undefined,
-              ) => (
-                <PairedComputerThreadServers
-                  key={String(thread.id)}
-                  client={localServers}
-                  inOwnWorktree={checkout?.kind === "managed-worktree"}
-                  hostName={hostName}
-                  open={openServer}
-                  projectId={thread.projectId}
-                  threadId={thread.id}
-                />
-              ),
-            })}
-        onNavigate={() => undefined}
-        onOpenCanvas={() => undefined}
-      />
+      <VideoClientContext.Provider
+        value={
+          standing !== RESTRICTED_REMOTE_SESSION &&
+          (standing.actsAsHostPerson || standing.accessLevel !== undefined)
+            ? clients.videoResults
+            : undefined
+        }
+      >
+        <RemoteCodeSurface
+          clients={clients}
+          actsAsHostPerson={standing.actsAsHostPerson}
+          extensionClient={extensionClient}
+          connected={connected}
+          providerGroups={providerGroups}
+          followsContinuationLink={false}
+          {...(props.initialThreadId === undefined
+            ? {}
+            : { initialThreadId: props.initialThreadId })}
+          {...(props.initialThreadRequest === undefined
+            ? {}
+            : { initialThreadRequest: props.initialThreadRequest })}
+          {...(openServer === undefined
+            ? {}
+            : {
+                renderThreadExtras: (
+                  thread: CodeThread,
+                  checkout: CodeCheckoutIdentity | undefined,
+                ) => (
+                  <PairedComputerThreadServers
+                    key={String(thread.id)}
+                    client={localServers}
+                    inOwnWorktree={checkout?.kind === "managed-worktree"}
+                    hostName={hostName}
+                    open={openServer}
+                    projectId={thread.projectId}
+                    threadId={thread.id}
+                  />
+                ),
+              })}
+          onNavigate={() => undefined}
+          onOpenCanvas={() => undefined}
+        />
+      </VideoClientContext.Provider>
     </div>
   );
 }

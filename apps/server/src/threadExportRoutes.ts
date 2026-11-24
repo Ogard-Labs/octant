@@ -1,5 +1,9 @@
 import {
   decodeThreadExportOutcome,
+  decodeThreadVideoArchiveOffer,
+  THREAD_EXPORT_PATH,
+  THREAD_VIDEO_ARCHIVE_PATH,
+  THREAD_VIDEO_ARCHIVE_QUERY,
   type ThreadExportOutcome,
 } from "@octant/contracts/thread-export";
 import {
@@ -16,6 +20,7 @@ import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principa
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import type { ThreadExportService } from "./threadExportService";
+import { createThreadVideoArchives } from "./threadVideoArchive";
 import type { ThreadHandOffService } from "./threadHandOffService";
 
 const METHODS = "POST, OPTIONS";
@@ -32,9 +37,10 @@ const BODY_LIMIT = 8_192;
  */
 
 export interface ThreadExportRouteDependencies {
-  readonly service: ThreadExportService;
+  readonly service: Pick<ThreadExportService, "exportThread" | "readToolCallRecords">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
+  readonly videoJobs?: Parameters<typeof createThreadVideoArchives>[0]["jobs"];
 }
 
 export interface ThreadHandOffRouteDependencies {
@@ -51,13 +57,35 @@ export function createThreadExportRouteHandler(dependencies: ThreadExportRouteDe
   const exportThread = createThreadCommandRouteHandler({
     ...shared,
     label: "Thread export",
-    path: "/api/threads/export",
+    path: THREAD_EXPORT_PATH,
     execute: (windowId, actorKind, body) =>
       dependencies.service.exportThread(windowId, actorKind, body),
     status: (outcome: ThreadExportOutcome) =>
       outcome.kind === "exported" ? 200 : outcome.reason === "unauthorized" ? 401 : 404,
     encode: decodeThreadExportOutcome,
   });
+  const archives =
+    dependencies.videoJobs === undefined
+      ? undefined
+      : createThreadVideoArchives({
+          exportService: dependencies.service,
+          jobs: dependencies.videoJobs,
+          windows: dependencies.windowAuthorityStore,
+          now: dependencies.now ?? Date.now,
+        });
+  const prepareArchive =
+    archives === undefined
+      ? undefined
+      : createThreadCommandRouteHandler({
+          ...shared,
+          label: "Thread video archive",
+          path: THREAD_EXPORT_PATH,
+          localWindowOnly: true,
+          execute: (windowId, _actorKind, body) => archives.offer(windowId, body),
+          status: (outcome) =>
+            outcome.kind !== "refused" ? 200 : outcome.reason === "unauthorized" ? 401 : 404,
+          encode: decodeThreadVideoArchiveOffer,
+        });
   // The same service and the same check that the caller may read the thread,
   // so one turn's tool-call records are served beside the export.
   const toolCallRecords = createThreadCommandRouteHandler({
@@ -70,8 +98,34 @@ export function createThreadExportRouteHandler(dependencies: ThreadExportRouteDe
       outcome.kind === "records" ? 200 : outcome.reason === "unauthorized" ? 401 : 404,
     encode: decodeThreadToolCallRecordsResult,
   });
-  return async (request: Request): Promise<Response | undefined> =>
-    (await exportThread(request)) ?? (await toolCallRecords(request));
+  return async (request: Request): Promise<Response | undefined> => {
+    const url = new URL(request.url);
+    if (archives !== undefined && url.pathname === THREAD_VIDEO_ARCHIVE_PATH) {
+      if (request.method !== "GET")
+        return failureResponse("Thread archive download requires GET.", 405, null);
+      const origin = request.headers.get("origin");
+      const bound = readPrincipalRouteContext(request);
+      if (
+        !isLoopbackHostname(url.hostname) ||
+        (origin !== null && !isAllowedOrigin(origin)) ||
+        (bound !== undefined && bound.principal.kind !== "local-window")
+      ) {
+        return failureResponse("The thread archive is unavailable.", 404, null);
+      }
+      return (
+        (await archives.take(url.searchParams.get("ticket") ?? "")) ??
+        failureResponse("The thread archive is unavailable or has expired.", 404, origin)
+      );
+    }
+    if (
+      prepareArchive !== undefined &&
+      url.pathname === THREAD_EXPORT_PATH &&
+      url.searchParams.get(THREAD_VIDEO_ARCHIVE_QUERY) === "1"
+    ) {
+      return prepareArchive(request);
+    }
+    return (await exportThread(request)) ?? (await toolCallRecords(request));
+  };
 }
 
 export function createThreadHandOffRouteHandler(dependencies: ThreadHandOffRouteDependencies) {
@@ -100,6 +154,7 @@ function createThreadCommandRouteHandler<Outcome>(options: {
   readonly path: string;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
+  readonly localWindowOnly?: boolean;
   readonly execute: (
     windowId: ReturnType<typeof authenticateRouteWindowId>,
     actorKind: ThreadExportActorKind,
@@ -139,6 +194,9 @@ function createThreadCommandRouteHandler<Outcome>(options: {
           now: now(),
         });
       } else {
+        if (options.localWindowOnly === true && bound.principal.kind !== "local-window") {
+          return failureResponse(`${options.label} is unauthorized.`, 401, origin);
+        }
         windowId = bound.scopeId;
         actorKind = principalActsAsHostPerson(bound.principal) ? "local-window" : "remote-device";
       }
