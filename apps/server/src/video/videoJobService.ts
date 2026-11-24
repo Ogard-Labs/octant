@@ -530,6 +530,7 @@ export class VideoJobService {
   }
 
   close(): void {
+    if (this.#closing.signal.aborted) return;
     // Recorded before anything is aborted, while the journal is still open: a
     // start still reading its credential never reached the provider, so it is
     // interrupted and billed nothing rather than left for recovery to bill.
@@ -543,6 +544,8 @@ export class VideoJobService {
       }
     }
     this.#closing.abort();
+    for (const waiting of this.#waiting.values()) waiting(false);
+    this.#waiting.clear();
     for (const controller of controllers) controller.abort();
     if (this.#removalTimer !== undefined) clearInterval(this.#removalTimer);
   }
@@ -558,6 +561,7 @@ export class VideoJobService {
   }
 
   async #withSlot(id: VideoJobId, work: () => Promise<void>): Promise<void> {
+    if (this.#closing.signal.aborted) return;
     if (this.#active >= VIDEO_JOB_HOST_CONCURRENCY) {
       const admitted = await new Promise<boolean>((resolve) => this.#waiting.set(id, resolve));
       if (!admitted) return;
@@ -565,7 +569,9 @@ export class VideoJobService {
       this.#active += 1;
     }
     try {
-      await work();
+      // A slot can be handed off just before close, then resume after the
+      // database has closed. Keep the queued journal state for recovery.
+      if (!this.#closing.signal.aborted) await work();
     } finally {
       const next = this.#waiting.entries().next().value;
       if (next === undefined) {
@@ -583,7 +589,7 @@ export class VideoJobService {
     const inputs = this.#inputs.get(String(id));
     this.#inputs.delete(String(id));
     if (job === undefined || running === undefined || inputs === undefined) return;
-    if (running.stopRequested || this.#closing.signal.aborted) {
+    if (running.stopRequested) {
       this.#finish(job, "cancelled", {});
       return;
     }

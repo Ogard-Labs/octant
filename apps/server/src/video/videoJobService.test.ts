@@ -770,6 +770,45 @@ describe("video jobs", () => {
     }
   });
 
+  it("leaves a waiting job for recovery when active polls finish after shutdown", async () => {
+    const bothPolling = Promise.withResolvers<void>();
+    const releasePolls = Promise.withResolvers<VideoAdapterPoll>();
+    let active = 0;
+    const { service, calls, root } = harness({
+      poll: () => {
+        active += 1;
+        if (active === 2) bothPolling.resolve();
+        return releasePolls.promise;
+      },
+    });
+    await enqueue(service);
+    await enqueue(service);
+    const waiting = await enqueue(service);
+    await bothPolling.promise;
+    service.close();
+    releasePolls.resolve({ status: "running" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(service.getById(waiting.id)).toMatchObject({
+      status: "queued",
+      version: waiting.version,
+    });
+    expect(calls.start).toBe(2);
+
+    const restarted = harness({}, root);
+    try {
+      await restarted.service.recover();
+      expect(restarted.service.getById(waiting.id)).toMatchObject({
+        status: "failed",
+        failure: { category: "interrupted" },
+      });
+      expect(restarted.service.getById(waiting.id)?.settledCostUsdMicros).toBeUndefined();
+    } finally {
+      restarted.service.close();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  });
+
   it("resumes a running job with a provider id after a restart and keeps its clip", async () => {
     const first = harness({
       polls: Array.from({ length: 50 }, () => ({ status: "running" as const })),
