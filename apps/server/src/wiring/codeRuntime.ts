@@ -2605,7 +2605,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             turnUpdate: (event) => {
               if (event.eventName !== "code.operation-event-recorded@1") return undefined;
               const frame = decodeCodeOperationEventFrame(event.payload);
-              return frame.event.kind === "operation-state"
+              // A command that is not a turn can wait for approval under its
+              // own operation id, so only a run starting or completing marks
+              // a new turn.
+              return frame.event.kind === "operation-state" &&
+                (frame.event.state === "running" || frame.event.state === "completed")
                 ? {
                     threadId: String(frame.threadId),
                     turnId: String(frame.operationId),

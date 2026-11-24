@@ -64,12 +64,14 @@ const BUSY_WAIT_MS = 2_000;
 export class FinishedReportSettle {
   readonly #ports: FinishedReportSettlePorts;
   /**
-   * The turn each thread last recorded a state change for. A retry stops once
-   * a newer turn appears: a person may start one during the wait, and if it
-   * ended without a report of its own, settling on the earlier report would
-   * hide that turn.
+   * For each thread with a settle attempt in flight, the turn it last
+   * recorded a state change for. A retry stops once a newer turn appears: a
+   * person may start one during the wait, and if it ended without a report of
+   * its own, settling on the earlier report would hide that turn. Only threads
+   * being settled are kept, and each leaves when its attempt ends.
    */
   readonly #latestTurn = new Map<string, string>();
+  readonly #attempts = new Map<string, number>();
 
   constructor(ports: FinishedReportSettlePorts) {
     this.#ports = ports;
@@ -86,12 +88,27 @@ export class FinishedReportSettle {
         continue;
       }
       if (update === undefined) continue;
-      this.#latestTurn.set(update.threadId, update.turnId);
+      if (this.#latestTurn.has(update.threadId)) {
+        this.#latestTurn.set(update.threadId, update.turnId);
+      }
       if (!update.completed || !this.#ports.enabled()) continue;
       if (this.#ports.latestReportTurnId(update.threadId) !== update.turnId) continue;
-      void this.#settle(update.threadId, update.turnId).catch((error: unknown) =>
-        this.#ports.onError?.("A finished thread could not be settled.", error),
-      );
+      const { threadId, turnId } = update;
+      this.#latestTurn.set(threadId, turnId);
+      this.#attempts.set(threadId, (this.#attempts.get(threadId) ?? 0) + 1);
+      void this.#settle(threadId, turnId)
+        .catch((error: unknown) =>
+          this.#ports.onError?.("A finished thread could not be settled.", error),
+        )
+        .finally(() => {
+          const left = (this.#attempts.get(threadId) ?? 1) - 1;
+          if (left > 0) {
+            this.#attempts.set(threadId, left);
+            return;
+          }
+          this.#attempts.delete(threadId);
+          this.#latestTurn.delete(threadId);
+        });
     }
   }
 
