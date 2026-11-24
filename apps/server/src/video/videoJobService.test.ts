@@ -1776,10 +1776,18 @@ describe("video jobs", () => {
     { status: 524, source: "edge", endRead: "deadline", terminal: "failed", charged: true },
     { status: 525, source: "edge", endRead: "deadline", terminal: "failed", charged: false },
     { status: 525, source: "bare", endRead: "deadline", terminal: "failed", charged: true },
+    { status: 525, source: "type-only", endRead: "deadline", terminal: "failed", charged: true },
     { status: 526, source: "edge", endRead: "deadline", terminal: "failed", charged: false },
     { status: 526, source: "edge", endRead: "Stop", terminal: "cancelled", charged: false },
     { status: 526, source: "bare", endRead: "Stop", terminal: "cancelled", charged: true },
+    { status: 526, source: "origin-only", endRead: "Stop", terminal: "cancelled", charged: true },
   ] as const)("settles $source HTTP $status after $endRead", async (scenario) => {
+    const diagnosticHeaders = {
+      bare: {},
+      edge: { "cf-error-type": "52x", "cf-error-origin": "fixture" },
+      "type-only": { "cf-error-type": "52x" },
+      "origin-only": { "cf-error-origin": "fixture" },
+    }[scenario.source];
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const reading = Promise.withResolvers<void>();
     const cancelled = vi.fn();
@@ -1797,9 +1805,7 @@ describe("video jobs", () => {
             status: scenario.status,
             headers: {
               "retry-after": "60",
-              ...(scenario.source === "edge"
-                ? { "cf-error-type": "52x", "cf-error-origin": "fixture" }
-                : {}),
+              ...diagnosticHeaders,
             },
           },
         ),
