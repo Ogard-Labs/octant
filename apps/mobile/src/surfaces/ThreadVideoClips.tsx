@@ -3,9 +3,10 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useEvent } from "expo";
 import type { File } from "expo-file-system";
 import { useVideoPlayer, VideoView } from "expo-video";
-import type { MobileRemoteTransport } from "@octant/client-runtime";
+import { RemoteConnectionError, type MobileRemoteTransport } from "@octant/client-runtime";
 import {
   createMobileThreadVideos,
+  VideoGenerationClientFailure,
   type MobileThreadVideos,
 } from "@octant/client-runtime/video-generation-client";
 import {
@@ -26,17 +27,34 @@ export function ThreadVideoClips(props: {
   const { colors } = useTheme();
   const { transport, threadId, threadKind } = props;
   const client = useMemo(() => createMobileThreadVideos(transport), [transport]);
-  const load = useCallback(
-    () => client.list({ threadKind, scopeId: decodeImageGenerationScopeId(threadId) }),
-    [client, threadKind, threadId],
-  );
+  const load = useCallback(async () => {
+    try {
+      return await client.list({ threadKind, scopeId: decodeImageGenerationScopeId(threadId) });
+    } catch (error) {
+      // A refusal replaces the last authorized list. Transport errors leave
+      // it in place so an already downloaded clip keeps playing offline.
+      if (
+        (error instanceof VideoGenerationClientFailure && [401, 403, 404].includes(error.status)) ||
+        (error instanceof RemoteConnectionError &&
+          (error.category === "unauthorized" || error.category === "host-changed"))
+      ) {
+        return { jobs: [] };
+      }
+      throw error;
+    }
+  }, [client, threadKind, threadId]);
   const resource = usePolledResource(load, { intervalMs: 5_000 });
   const [openClip, setOpenClip] = useState<VideoJobId>();
   const jobs = resource.value?.jobs ?? [];
   const clips = jobs.flatMap((job) =>
     job.status === "completed" && job.clip !== undefined ? [{ id: job.id, clip: job.clip }] : [],
   );
-  if (resource.error !== undefined || clips.length === 0) return null;
+  useEffect(() => {
+    if (openClip !== undefined && !resource.value?.jobs.some((job) => job.id === openClip)) {
+      setOpenClip(undefined);
+    }
+  }, [openClip, resource.value]);
+  if (clips.length === 0) return null;
 
   return (
     <View style={styles.clips}>
