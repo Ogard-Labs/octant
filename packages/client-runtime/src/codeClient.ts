@@ -417,9 +417,19 @@ export class CodeClientSnapshotRequiredError extends Error {
 }
 
 // PR list, review and watch schemas are only needed when the client reads or changes a PR.
-const loadPullRequestContracts = () => import("@octant/contracts/code-project-pull-requests");
+const loadPullRequestContracts = () =>
+  import("@octant/contracts/code-project-pull-requests").catch(pullRequestControlsUnavailable);
 const loadPullRequestSwitchContracts = () =>
-  import("@octant/contracts/code-project-pull-request-switches");
+  import("@octant/contracts/code-project-pull-request-switches").catch(
+    pullRequestControlsUnavailable,
+  );
+
+function pullRequestControlsUnavailable(): never {
+  throw new CodeClientFailure({
+    category: "unavailable",
+    message: "Pull request controls could not load. Reload Octant and try again.",
+  });
+}
 
 export function createCodeClient(options: CodeClientOptions): CodeClient {
   const fetch = bindFetchPort(options.fetch);
