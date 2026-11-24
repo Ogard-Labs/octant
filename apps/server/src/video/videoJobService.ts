@@ -1109,11 +1109,15 @@ export class VideoJobService {
   }
 
   #settled(job: VideoJob, usage: VideoAdapterUsage | undefined): number {
-    return settleWithKnownPrice(job, usage, this.#priceFor(job));
-  }
-
-  #priceFor(job: VideoJob): VideoModelCapabilities["price"] | undefined {
-    return this.#priceCache.get(`${String(job.profileInstanceId)}\n${String(job.modelId)}`);
+    const price = this.#priceCache.get(`${String(job.profileInstanceId)}\n${String(job.modelId)}`);
+    // The provider can report the actual charge before recovery has a model price.
+    return settleVideoCostUsdMicros(
+      price ?? { kind: "unpublished" },
+      estimateOrZero(job),
+      usage,
+      job.options,
+      { imageCount: job.imageCount },
+    );
   }
 
   readonly #priceCache = new Map<string, VideoModelCapabilities["price"]>();
@@ -1408,19 +1412,6 @@ function isTerminal(job: VideoJob): boolean {
 
 function estimateOrZero(job: VideoJob): number {
   return job.estimatedCostUsdMicros === "unknown" ? 0 : job.estimatedCostUsdMicros;
-}
-
-function settleWithKnownPrice(
-  job: VideoJob,
-  usage: VideoAdapterUsage | undefined,
-  price: VideoModelCapabilities["price"] | undefined,
-): number {
-  const estimate = estimateOrZero(job);
-  return price === undefined
-    ? estimate
-    : settleVideoCostUsdMicros(price, estimate, usage, job.options, {
-        imageCount: job.imageCount,
-      });
 }
 
 function declaredKey(instance: ProviderInstance): string {

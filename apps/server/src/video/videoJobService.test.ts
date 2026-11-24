@@ -1430,6 +1430,60 @@ describe("video jobs", () => {
     }
   });
 
+  it.each([0, 250_000, undefined])(
+    "settles a recovered cancellation with reported cost %s before the catalog responds",
+    async (costUsdMicros) => {
+      const first = harness({
+        driverKind: "fal-video",
+        poll: (signal) =>
+          new Promise((resolve) => {
+            signal.addEventListener("abort", () => resolve({ status: "running" }), { once: true });
+          }),
+      });
+      const queued = await enqueue(first.service);
+      await vi.waitFor(() => expect(first.calls.poll).toBe(1));
+      first.service.close();
+
+      const warmup = Promise.withResolvers<void>();
+      const discoveryStarted = Promise.withResolvers<void>();
+      const discovery = Promise.withResolvers<void>();
+      const second = harness(
+        {
+          driverKind: "fal-video",
+          cancelRunningWithoutDiscovery: true,
+          beforeModels: async (call, signal) => {
+            if (call === 1) return warmup.promise;
+            signal?.addEventListener("abort", () => discovery.reject(signal.reason), {
+              once: true,
+            });
+            discoveryStarted.resolve();
+            await discovery.promise;
+          },
+          cancel: async () => ({
+            status: "cancelled",
+            ...(costUsdMicros === undefined ? {} : { usage: { costUsdMicros } }),
+          }),
+        },
+        first.root,
+      );
+      try {
+        await second.service.recover();
+        await discoveryStarted.promise;
+        second.service.stop(queued.id);
+        expect(await second.service.whenTerminal(queued.id, 1_000)).toMatchObject({
+          status: "cancelled",
+          settledCostUsdMicros: costUsdMicros ?? queued.estimatedCostUsdMicros,
+        });
+        expect(second.calls.cancel).toBe(1);
+        expect(second.calls.poll).toBe(0);
+      } finally {
+        second.service.close();
+        discovery.resolve();
+        warmup.resolve();
+      }
+    },
+  );
+
   it("keeps polling a sent job whose post-start model lookup fails", async () => {
     const { service } = harness({ modelsFail: 2 });
     const queued = await enqueue(service);

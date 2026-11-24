@@ -324,8 +324,9 @@ which the person sets, like any turn.
     reported usage or to the estimate when no usage was reported.
   - A cancelled job settles at the reported usage, or at the estimate when
     none is reported, because a provider may bill a job it had already
-    started. Runway's DELETE does not report charges or establish a refund,
-    so it leaves the estimate in place.
+    started. A provider's explicit charge takes precedence even before the
+    model price is available. fal reports zero for a cancellation confirmed
+    while the job was queued. Runway's DELETE leaves the estimate in place.
 - No video-only ceiling is added: the person's own ceilings already cover it.
 
 ### Storage, export and deletion
