@@ -76,6 +76,8 @@ export interface ProjectOverviewProps {
   readonly hostId?: string;
   readonly memoryProjects?: ReadonlyArray<ProjectSummary>;
   readonly onArchive: (projectId: ProjectId) => void;
+  /** Opens the modal to clone this local Code Project onto another paired computer. */
+  readonly onAddToAnotherComputer?: (projectId: ProjectId) => void;
   readonly onMemoryChanged?: () => void;
   readonly onNewThread?: () => void;
   readonly onRelink: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
@@ -233,8 +235,17 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               ]
             : []),
         ];
+  const canAddToAnotherComputer =
+    props.project.type === "code" &&
+    !archived &&
+    !connectionStale &&
+    !unavailable &&
+    props.onAddToAnotherComputer !== undefined;
   const overflowItems: ReadonlyArray<OctantMenuItem> = [
     ...iconItems,
+    ...(canAddToAnotherComputer
+      ? [{ label: "Add to another computer…", value: "add-to-computer" }]
+      : []),
     ...(canRelink && !unavailable ? [{ label: "Relink folder", value: "relink" }] : []),
     {
       destructive: true,
@@ -481,6 +492,8 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 items={overflowItems}
                 onValueChange={(value) => {
                   if (value === "relink") void relink();
+                  else if (value === "add-to-computer")
+                    props.onAddToAnotherComputer?.(props.project.id);
                   else if (value === "archive") props.onArchive(props.project.id);
                   else if (value === "icon-change") iconFile.current?.click();
                   else if (value === "icon-reset") void resetIcon();
@@ -503,25 +516,37 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               <h2 className="project-overview__card-title">
                 {props.project.type === "code" ? "Repository" : "Folders"}
               </h2>
-              {unavailable ? null : (
-                <span
-                  className="project-overview__availability"
-                  data-state={
-                    archived
-                      ? "quiet"
-                      : props.availability?.status === "unverified"
+              <div className="flex items-center gap-2">
+                {canAddToAnotherComputer ? (
+                  <OctantButton
+                    onClick={() => props.onAddToAnotherComputer?.(props.project.id)}
+                    size="xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Add to another computer…
+                  </OctantButton>
+                ) : null}
+                {unavailable ? null : (
+                  <span
+                    className="project-overview__availability"
+                    data-state={
+                      archived
                         ? "quiet"
-                        : "ok"
-                  }
-                >
-                  <span aria-hidden="true" className="project-overview__availability-dot" />
-                  {archived
-                    ? "Archived · read-only"
-                    : props.availability?.status === "unverified"
-                      ? "Availability unverified"
-                      : "Available"}
-                </span>
-              )}
+                        : props.availability?.status === "unverified"
+                          ? "quiet"
+                          : "ok"
+                    }
+                  >
+                    <span aria-hidden="true" className="project-overview__availability-dot" />
+                    {archived
+                      ? "Archived · read-only"
+                      : props.availability?.status === "unverified"
+                        ? "Availability unverified"
+                        : "Available"}
+                  </span>
+                )}
+              </div>
             </header>
             <ProjectFoldersSection
               key={String(props.project.id)}

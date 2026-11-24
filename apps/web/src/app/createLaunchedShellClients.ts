@@ -90,6 +90,7 @@ import {
   type ExtensionClient,
 } from "@octant/client-runtime/extension-client";
 import { createFolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
+import { createRepositoryBootstrapClient } from "@octant/client-runtime/repository-bootstrap-client";
 import {
   createProviderToolingClient,
   type ProviderToolingClient,
@@ -221,6 +222,7 @@ export interface LaunchedShellClients {
   readonly diagnosticsExportClient: ReturnType<typeof createDiagnosticsExportClient>;
   readonly extensionClient: ExtensionClient;
   readonly folderBrowseClient: ReturnType<typeof createFolderBrowseClient>;
+  readonly repositoryBootstrapClient: ReturnType<typeof createRepositoryBootstrapClient>;
   readonly githubCloneClient: ReturnType<typeof createGithubCloneClient>;
   readonly githubTransport: ReturnType<typeof createGithubClient>;
   readonly goalClient: ReturnType<typeof createGoalClient>;
@@ -411,6 +413,7 @@ export function createLaunchedShellClients(
     diagnosticsExportClient: createDiagnosticsExportClient(port),
     extensionClient: options.extensionClient ?? createExtensionClient(port),
     folderBrowseClient: createFolderBrowseClient(port),
+    repositoryBootstrapClient: createRepositoryBootstrapClient(port),
     githubCloneClient: createGithubCloneClient(port),
     githubTransport: createGithubClient(port),
     goalClient: createGoalClient(port),

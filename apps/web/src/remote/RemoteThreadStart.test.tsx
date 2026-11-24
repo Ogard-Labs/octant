@@ -349,4 +349,61 @@ describe("starting a Code thread from a browser the host's own person paired", (
     });
     expect(browse).toHaveBeenCalledWith(expect.objectContaining({ hostId: "local", mode: "code" }));
   });
+
+  it("shows Clone from this computer only when the window acts as that computer's own person", async () => {
+    const projectClient = {
+      bootstrap: async () => ({
+        active: [],
+        archived: [],
+        availability: [],
+        memory: [],
+      }),
+      execute: vi.fn(),
+    } as unknown as ProjectClient;
+    const controller = {
+      bootstrap: { settings },
+      execute: vi.fn(async () => undefined),
+      lastExecuteError: { current: undefined },
+      startThreadTurn: vi.fn(async () => true),
+    } as unknown as Parameters<typeof RemoteCodeThreadStart>[0]["controller"];
+    const onCloneFromThisComputer = vi.fn();
+    const user = userEvent.setup();
+
+    const { rerender } = render(
+      <RemoteCodeThreadStart
+        actsAsHostPerson={false}
+        codeClient={
+          { bootstrap: async () => ({ settings }) } as unknown as Pick<CodeClient, "bootstrap">
+        }
+        connected
+        controller={controller}
+        onCloneFromThisComputer={onCloneFromThisComputer}
+        onCreated={() => undefined}
+        projectClient={projectClient}
+        providerGroups={[]}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Clone a repository from this computer" }),
+    ).toBeNull();
+
+    rerender(
+      <RemoteCodeThreadStart
+        actsAsHostPerson
+        codeClient={
+          { bootstrap: async () => ({ settings }) } as unknown as Pick<CodeClient, "bootstrap">
+        }
+        connected
+        controller={controller}
+        onCloneFromThisComputer={onCloneFromThisComputer}
+        onCreated={() => undefined}
+        projectClient={projectClient}
+        providerGroups={[]}
+      />,
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Clone a repository from this computer" }),
+    );
+    expect(onCloneFromThisComputer).toHaveBeenCalledTimes(1);
+  });
 });

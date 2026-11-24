@@ -39,6 +39,11 @@ export interface PairedComputerCodeSurfaceProps {
     source: RemoteServerGrantSource,
     mode: RemoteOpenMode,
   ) => Promise<RemoteOpenOutcome>;
+  readonly onCloneFromThisComputer?: () => void;
+  readonly selectProjectRequest?: Readonly<{
+    readonly projectId: string;
+    readonly sequence: number;
+  }>;
 }
 
 /**
@@ -136,6 +141,12 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
         {...(props.initialThreadRequest === undefined
           ? {}
           : { initialThreadRequest: props.initialThreadRequest })}
+        {...(standing.actsAsHostPerson && props.onCloneFromThisComputer !== undefined
+          ? { onCloneFromThisComputer: props.onCloneFromThisComputer }
+          : {})}
+        {...(props.selectProjectRequest === undefined
+          ? {}
+          : { selectProjectRequest: props.selectProjectRequest })}
         {...(openServer === undefined
           ? {}
           : {

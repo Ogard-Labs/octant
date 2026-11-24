@@ -293,6 +293,8 @@ export interface ProjectSidebarSectionProps {
   readonly onNewThreadInProject?: (projectId: ProjectId) => void;
   /** New coordinator in a Code Project's menu; absent outside Code. */
   readonly onNewCoordinatorInProject?: (projectId: ProjectId) => void;
+  /** Opens the modal to clone a local Code Project onto another paired computer. */
+  readonly onAddToAnotherComputer?: (projectId: ProjectId) => void;
   readonly newThreadVerb?: "chat" | "thread";
   readonly onReorder: (
     projectId: ProjectId,
@@ -684,6 +686,9 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         {...(props.onNewCoordinatorInProject === undefined
           ? {}
           : { onNewCoordinatorInProject: props.onNewCoordinatorInProject })}
+        {...(props.onAddToAnotherComputer === undefined
+          ? {}
+          : { onAddToAnotherComputer: props.onAddToAnotherComputer })}
         onReorder={props.onReorder}
         onProjectOpen={props.onProjectOpen}
         {...(options.allowAdd === true && props.onAddProject !== undefined
@@ -1008,6 +1013,7 @@ function ProjectGroup(props: {
   readonly newThreadVerb?: "chat" | "thread";
   readonly onNewThreadInProject?: (projectId: ProjectId) => void;
   readonly onNewCoordinatorInProject?: (projectId: ProjectId) => void;
+  readonly onAddToAnotherComputer?: (projectId: ProjectId) => void;
   readonly onReorder: (
     projectId: ProjectId,
     pinned: boolean,
@@ -1200,6 +1206,9 @@ function ProjectGroup(props: {
                 {...(props.onNewCoordinatorInProject === undefined
                   ? {}
                   : { onNewCoordinator: props.onNewCoordinatorInProject })}
+                {...(props.onAddToAnotherComputer === undefined
+                  ? {}
+                  : { onAddToAnotherComputer: props.onAddToAnotherComputer })}
                 onOpen={props.onProjectOpen}
                 onReorder={props.onReorder}
                 onRestore={props.onRestore}
@@ -1310,6 +1319,7 @@ function ProjectActionsMenu(props: {
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
   /** Starts a coordinator in a Code Project (docs/design/coordinator-threads.md). */
   readonly onNewCoordinator?: (projectId: ProjectId) => void;
+  readonly onAddToAnotherComputer?: (projectId: ProjectId) => void;
   readonly onOpen: (project: ProjectSummary) => void;
   readonly onReorder: (
     projectId: ProjectId,
@@ -1354,6 +1364,13 @@ function ProjectActionsMenu(props: {
             {onNewCoordinator === undefined ? null : (
               <OctantMenuActionItem onClick={() => onNewCoordinator(project.id)}>
                 New coordinator
+              </OctantMenuActionItem>
+            )}
+            {props.onAddToAnotherComputer === undefined ||
+            archived ||
+            project.type !== "code" ? null : (
+              <OctantMenuActionItem onClick={() => props.onAddToAnotherComputer?.(project.id)}>
+                Add to another computer…
               </OctantMenuActionItem>
             )}
             <OctantMenuActionItem onClick={() => props.onMove(project.id, !project.pinned)}>

@@ -545,6 +545,7 @@ export interface WorkspaceViewProps {
   readonly isNarrow?: boolean;
   readonly availabilityByProject: ReadonlyMap<ProjectId, ProjectAvailability>;
   readonly onArchiveProject: (projectId: ProjectId) => void;
+  readonly onAddToAnotherComputer?: (projectId: ProjectId) => void;
   readonly onRelinkProject: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
   readonly onAddProjectExtraFolder?: (
     projectId: ProjectId,
@@ -2779,6 +2780,9 @@ function renderNonCodeTab(
         }
       >
         <ProjectOverview
+          {...(props.onAddToAnotherComputer === undefined
+            ? {}
+            : { onAddToAnotherComputer: props.onAddToAnotherComputer })}
           {...(props.onOpenSandboxRestrictionsSettings === undefined
             ? {}
             : {
