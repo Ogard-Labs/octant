@@ -50,7 +50,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Authority and approvals](#authority-and-approvals)                                   | 8         | 7       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 18        | 10      | 7            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 10        | 6       | 4            | 0                   |
-| [Remote access and pairing](#remote-access-and-pairing)                               | 13        | 6       | 7            | 0                   |
+| [Remote access and pairing](#remote-access-and-pairing)                               | 14        | 6       | 8            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 7         | 4       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **296**   | **178** | **114**      | **4**               |
+| **All areas**                                                                         | **297**   | **178** | **115**      | **4**               |
 
 ## Principles and hard lines
 
@@ -1684,7 +1684,7 @@ Short video clips run as a journaled job through provider-neutral video driver p
 - Clips are stored beside generated images, exported and deleted with their thread, and the provider's copy is removed as soon as the clip is kept where the driver can; otherwise the card says how long the provider keeps it.
 - After a restart, a running job with a recorded provider id resumes within its declared resume window; one without settles at its estimate as interrupted.
 
-Status: Partly built. Since: 2026-11-22. Built: the video seam in `@octant/provider-sdk/video-generation` with its conformance harness, the declared-capability contract and pricing rules, and the Gemini API driver (Gemini Omni Flash). Not yet built: the host job service, the agent tool and card, the viewer and save, and the Runway and fal drivers. Detail: [Video generation](video-generation.md).
+Status: Partly built. Since: 2026-11-22. Built: the video seam in `@octant/provider-sdk/video-generation` with its conformance harness, the declared-capability contract and pricing rules, the Gemini API driver (Gemini Omni Flash), the Gemini video profile in Settings behind its bundled driver plugin, and the host video job service (spend reservation and settlement attributed to the thread and Project, two running and sixteen waiting jobs, MP4 clip storage, provider-copy removal with retries, and restart recovery). Not yet built: the agent tool and card, the viewer and save, and the Runway and fal drivers. Detail: [Video generation](video-generation.md).
 
 ### Provider reach Octant no longer narrows
 
@@ -2735,6 +2735,19 @@ A device the host's own person paired submits and manages provider cloud jobs an
 - A device's setup check, Project terminal, saved-action run and preview are owned by its session on the host's shared SSH connection and end when it is revoked, its session ends or it is quiet for a minute. A server key needing a confirmation at the host computer fails with a sentence rather than waiting. A device's preview goes through the private listener's relay route, never a loopback listener.
 
 Status: Built. Since: 2026-11-18. Detail: [Architecture: Paired devices and cloud jobs](../architecture.md#provider-cloud-jobs) and [Server Projects: Paired devices](server-projects.md#paired-devices).
+
+### Access activity and change notices
+
+The person sees who changed access to this computer, and is told in the app when a paired device or an agent raised it (maintainer decision, 2026-11-22).
+
+- Settings › Remote access lists devices added, removed and re-levelled, newest first, each with its time, the device's label and who did it, and refreshes as each change is journaled. A window and a device paired at Full read it; a narrower device, a hub-introduced device and an agent grant are refused.
+- A change notice appears when a paired device or an agent grant raised a thread's level strictly up the level order, or added or replaced a provider key. A window's own change raises none, and neither does a lowering or a move between Auto and Accept edits. Each names the device or agent, the thread or provider, and when; it carries no key.
+- Notices show on windows and on devices paired at Full, other than the device that made the change. Dismissing one is journaled, so it stays dismissed across a restart and on every client.
+- Undo sets the thread back to its previous level through the thread's own level command, or removes exactly the key that was added, each as whoever pressed it; it is refused once the thread's level or the provider's keys changed again. A replaced key has no Undo, since the earlier key is not kept, and the notice says so. **Revoke that device** revokes the paired device, or ends the agent's grant, through their existing revoke paths. From a window, a key's Undo and the revoke keep the bar of the routes they stand in for: the desktop bridge secret, so a desktop window runs a key's Undo through the notice's own Undo and the revoke through its own device and grant controls after a fresh read shows the notice still current, and a window capability alone is refused.
+- In the app only: no notice goes to a phone's push path or by email.
+- Built: the host's reads and actions, Settings' list and notices on a window, the newest notice in a window's notice stack, and the notices in a browser paired at Full. Not built yet: the phone app shows neither.
+
+Status: Partly built. Since: 2026-11-22. Detail: [Architecture: Security and authority, Remote clients](../architecture.md#security-and-authority) and [Settings: Remote access](settings.md).
 
 ## Credentials and sign-in
 

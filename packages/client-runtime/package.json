@@ -66,6 +66,7 @@
     "./mobile-speech-client": "./src/mobileSpeechClient.ts",
     "./reply-detail-client": "./src/replyDetailClient.ts",
     "./new-device-alerts-client": "./src/newDeviceAlertsClient.ts",
+    "./access-activity-client": "./src/accessActivityClient.ts",
     "./ship-client": "./src/shipClient.ts",
     "./plan-client": "./src/planClient.ts",
     "./product-feedback-client": "./src/productFeedbackClient.ts",

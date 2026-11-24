@@ -1111,6 +1111,71 @@ describe("useProviderController", () => {
     expect(host.clearProviderCredential).toHaveBeenCalledWith(createdId);
   });
 
+  it("creates a Gemini video profile before storing its write-only credential and reconfigures its models", async () => {
+    const calls: string[] = [];
+    const created = geminiVideoProvider();
+    const api = client();
+    vi.mocked(api.execute).mockImplementation(async (command) => {
+      if (command.kind === "create-gemini-video-provider") {
+        calls.push("provider.create");
+        return { kind: "provider-created", instance: { ...created, id: command.instanceId } };
+      }
+      if (command.kind === "change-gemini-video-configuration") {
+        calls.push("provider.change");
+        return {
+          kind: "provider-updated",
+          instance: {
+            ...created,
+            id: command.instanceId,
+            configuration: command.configuration,
+            version: 2 as ProviderInstance["version"],
+          },
+        };
+      }
+      throw new Error(`unexpected provider command ${command.kind}`);
+    });
+    const host = credentialHost(calls);
+    const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.createGeminiVideo(
+          "Omni",
+          created.configuration,
+          transientCredential("video-secret", calls),
+        ),
+      ).resolves.toBe(true);
+    });
+    expect(calls).toEqual(["provider.create", "credential.set", "field.clear"]);
+    expect(api.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "create-gemini-video-provider",
+        displayName: "Omni",
+        configuration: created.configuration,
+      }),
+    );
+    expect(JSON.stringify(result.current)).not.toContain("video-secret");
+
+    const createdId = result.current.instances.find(
+      (instance) => instance.driverKind === "gemini-video",
+    )?.id;
+    if (createdId === undefined) throw new Error("expected created video profile");
+    expect(host.addProviderApiKey).toHaveBeenCalledWith(createdId, "video-secret");
+
+    await act(async () => {
+      await expect(
+        result.current.changeGeminiVideoConfiguration(
+          createdId,
+          created.configuration,
+          transientCredential("", calls),
+        ),
+      ).resolves.toBe(true);
+    });
+    expect(calls).toContain("provider.change");
+    expect(host.addProviderApiKey).toHaveBeenCalledOnce();
+  });
+
   it("creates Claude subscription configuration without credential mutation", async () => {
     const calls: string[] = [];
     const api = client();
@@ -3739,4 +3804,22 @@ function deferred<T>() {
     reject = no;
   });
   return { promise, resolve, reject };
+}
+
+function geminiVideoProvider(): Extract<ProviderInstance, { driverKind: "gemini-video" }> {
+  return {
+    id,
+    displayName: "Omni",
+    driverKind: "gemini-video",
+    configuration: {
+      kind: "gemini-video-http",
+      modelAllowlist: ["gemini-omni-1.2-flash" as never],
+      defaultModel: "gemini-omni-1.2-flash" as never,
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as ProviderInstance["version"],
+    createdAt: "2026-08-28T10:00:00.000Z" as ProviderInstance["createdAt"],
+    updatedAt: "2026-08-28T10:00:00.000Z" as ProviderInstance["updatedAt"],
+  };
 }

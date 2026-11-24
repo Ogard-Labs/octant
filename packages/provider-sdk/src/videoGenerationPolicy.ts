@@ -29,12 +29,24 @@ export interface VideoUsage {
   readonly billedSeconds?: number;
 }
 
-/** Every whole second the model accepts, ascending. */
-export function videoDurationValues(capabilities: VideoModelCapabilities): ReadonlyArray<number> {
+/** Every whole second the model accepts for these frames, ascending. */
+export function videoDurationValues(
+  capabilities: VideoModelCapabilities,
+  frames?: Pick<VideoRequestInputs, "firstFrame" | "lastFrame">,
+): ReadonlyArray<number> {
   const durations = capabilities.durations;
-  if (durations.kind === "values") return [...new Set(durations.values)].sort((a, b) => a - b);
+  const frameLimit =
+    frames?.firstFrame && frames.lastFrame
+      ? capabilities.inputs.maxDurationSecondsWithBothFrames
+      : undefined;
+  if (durations.kind === "values") {
+    return [...new Set(durations.values)]
+      .filter((seconds) => frameLimit === undefined || seconds <= frameLimit)
+      .sort((a, b) => a - b);
+  }
+  const maximum = Math.min(durations.max, frameLimit ?? durations.max);
   const values: Array<number> = [];
-  for (let seconds = durations.min; seconds <= durations.max; seconds += 1) values.push(seconds);
+  for (let seconds = durations.min; seconds <= maximum; seconds += 1) values.push(seconds);
   return values;
 }
 
@@ -112,13 +124,17 @@ function nearest(values: ReadonlyArray<number>, target: number): number | undefi
 export function defaultVideoClipOptions(
   capabilities: VideoModelCapabilities,
   hasFirstFrame = false,
+  hasLastFrame = false,
 ): VideoClipOptions | undefined {
   const ratios = videoAspectRatioChoices(capabilities, hasFirstFrame);
   const declaredRatio = capabilities.defaultAspectRatio;
   const aspectRatio =
     declaredRatio !== undefined && ratios.includes(declaredRatio) ? declaredRatio : ratios[0];
   if (aspectRatio === undefined) return undefined;
-  const durations = videoDurationValues(capabilities);
+  const durations = videoDurationValues(capabilities, {
+    firstFrame: hasFirstFrame,
+    lastFrame: hasLastFrame,
+  });
   const targetDuration = capabilities.defaultDuration ?? VIDEO_PREFERRED_DURATION_SECONDS;
   const audioChoices = videoAudioChoices(capabilities);
   const preferredAudio =
@@ -166,7 +182,7 @@ export function checkVideoClipOptions(
   options: VideoClipOptions,
   inputs: VideoRequestInputs,
 ): VideoOptionsCheck {
-  if (!videoDurationValues(capabilities).includes(options.durationSeconds)) {
+  if (!videoDurationValues(capabilities, inputs).includes(options.durationSeconds)) {
     return refused(
       `${capabilities.displayName} does not make ${options.durationSeconds}-second clips.`,
     );

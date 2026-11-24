@@ -3,6 +3,7 @@ import {
   createNewDeviceAlertsClient,
   type NewDeviceAlertsClient,
 } from "@octant/client-runtime/new-device-alerts-client";
+import type { AccessActivityPort } from "@octant/client-runtime/access-activity-client";
 import {
   createSandboxRestrictionsClient,
   type SandboxRestrictionsClient,
@@ -275,6 +276,8 @@ export interface LaunchedShellClients {
   readonly agentGrantClient: ReturnType<typeof createAgentGrantClient>;
   readonly protectedFilesClient: ProtectedFilesClient;
   readonly newDeviceAlertsClient: NewDeviceAlertsClient;
+  /** Access activity's clients are made where they are shown, in their own chunks. */
+  readonly accessActivityPort: AccessActivityPort;
   readonly blockedToolsClient: BlockedToolsClient;
   readonly sandboxRestrictionsClient: SandboxRestrictionsClient;
   readonly archivedWorktreesClient: ArchivedWorktreesClient;
@@ -460,6 +463,7 @@ export function createLaunchedShellClients(
     agentGrantClient: createAgentGrantClient(port),
     protectedFilesClient: createProtectedFilesClient(port),
     newDeviceAlertsClient: createNewDeviceAlertsClient(port),
+    accessActivityPort: port,
     blockedToolsClient: createBlockedToolsClient(port),
     sandboxRestrictionsClient: createSandboxRestrictionsClient(port),
     archivedWorktreesClient: createArchivedWorktreesClient(port),

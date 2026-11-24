@@ -588,6 +588,7 @@ export interface OctantHostBridge {
   ) => Promise<void>;
   readonly getRemoteAccessPaused?: () => Promise<boolean>;
   readonly setRemoteAccessPaused?: (paused: boolean) => Promise<boolean>;
+  readonly undoAccessChangeNotice?: (noticeId: string) => Promise<void>;
   readonly denyRemotePairingRequest?: (
     ticketId: string,
     reasonCode: string,
@@ -1671,6 +1672,10 @@ export function createHostBridge(
             (await invokeRemote(IPC_CHANNELS.remoteAccessPauseRead)) === true,
           setRemoteAccessPaused: async (paused: boolean) =>
             (await invokeRemote(IPC_CHANNELS.remoteAccessPauseSet, paused === true)) === true,
+          undoAccessChangeNotice: async (noticeId: string) => {
+            validateRemoteUuid(noticeId);
+            await invokeRemote(IPC_CHANNELS.undoAccessChangeNotice, noticeId);
+          },
           denyRemotePairingRequest: async (ticketId: string, reasonCode: string) => {
             validateRemoteUuid(ticketId);
             validateRemoteReason(reasonCode);
@@ -1802,6 +1807,7 @@ export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
   "setRemoteDeviceAccessLevel",
   "getRemoteAccessPaused",
   "setRemoteAccessPaused",
+  "undoAccessChangeNotice",
   "denyRemotePairingRequest",
   "getRemoteDeviceInventory",
   "renameRemoteDevice",

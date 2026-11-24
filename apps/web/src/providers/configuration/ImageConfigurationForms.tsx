@@ -1,6 +1,7 @@
 import {
   BFL_IMAGE_MODEL_PRESETS,
   GEMINI_IMAGE_MODEL_PRESETS,
+  GEMINI_VIDEO_MODEL_PRESETS,
   IDEOGRAM_IMAGE_MODEL_PRESETS,
   OPENAI_IMAGE_MODEL_PRESETS,
   type ProviderInstance,
@@ -21,6 +22,7 @@ import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
 import {
   openAiImageConfigurationFrom,
   geminiImageConfigurationFrom,
+  geminiVideoConfigurationFrom,
   bflImageConfigurationFrom,
   ideogramImageConfigurationFrom,
 } from "./configurationValues";
@@ -786,6 +788,160 @@ export function IdeogramImageConfigurationForm(props: IdeogramImageConfiguration
           variant="secondary"
           size="sm"
           aria-label={`Save Ideogram image settings for ${props.instance.displayName}`}
+        >
+          Save
+        </OctantButton>
+        {props.credentialManagementAvailable ? (
+          <OctantButton
+            disabled={props.disabled || props.credential.status !== "stored"}
+            onClick={() => {
+              const generation = props.credential.beginMutation();
+              void props.onClearCredential(props.instance.id).then(
+                (cleared) => {
+                  props.credential.finishMutation(generation, cleared, "missing");
+                },
+                () => props.credential.finishMutation(generation, false, "missing"),
+              );
+            }}
+            type="button"
+            variant="destructive"
+          >
+            Clear stored API key for {props.instance.displayName}
+          </OctantButton>
+        ) : null}
+      </div>
+    </form>
+  );
+}
+
+/**
+ * A Gemini video profile's models and key. It has no aspect ratio or
+ * resolution: those are chosen per clip when a video is generated.
+ */
+export function GeminiVideoFields(props: {
+  readonly credentialInput: RefObject<HTMLInputElement | null>;
+  readonly credentialManagementAvailable: boolean;
+  readonly instance?: Extract<ProviderInstance, { driverKind: "gemini-video" }>;
+}) {
+  const hostPlatform = useHostPlatform();
+  const configuration = props.instance?.configuration;
+  const settingId = (field: string) =>
+    props.instance === undefined ? undefined : `provider-${props.instance.id}-${field}`;
+  return (
+    <>
+      <ProviderField
+        className="provider-settings__models-field"
+        label="Model allowlist"
+        settingId={settingId("model-allowlist")}
+      >
+        <OctantTextarea
+          aria-label={
+            props.instance === undefined
+              ? "Model allowlist"
+              : `Model allowlist for ${props.instance.displayName}`
+          }
+          className="settings-view__text-input window-no-drag"
+          defaultValue={
+            configuration?.modelAllowlist.join(", ") ?? GEMINI_VIDEO_MODEL_PRESETS.join(", ")
+          }
+          name="modelAllowlist"
+          placeholder={GEMINI_VIDEO_MODEL_PRESETS.join(", ")}
+          required
+          rows={2}
+        />
+      </ProviderField>
+      <ProviderField label="Default model" settingId={settingId("default-model")}>
+        <OctantInput
+          aria-label={
+            props.instance === undefined
+              ? "Default model"
+              : `Default model for ${props.instance.displayName}`
+          }
+          className="settings-view__text-input window-no-drag"
+          defaultValue={configuration?.defaultModel ?? GEMINI_VIDEO_MODEL_PRESETS[0]}
+          name="defaultModel"
+          placeholder={GEMINI_VIDEO_MODEL_PRESETS[0]}
+          required
+        />
+      </ProviderField>
+      <ProviderField
+        label={props.instance === undefined ? "API key" : "API key (leave blank to preserve)"}
+        settingId={settingId("api-key")}
+      >
+        <OctantInput
+          aria-label={
+            props.instance === undefined ? "API key" : `API key for ${props.instance.displayName}`
+          }
+          autoComplete="new-password"
+          className="settings-view__text-input window-no-drag"
+          disabled={!props.credentialManagementAvailable}
+          name="credential"
+          ref={props.credentialInput}
+          spellCheck={false}
+          type="password"
+        />
+      </ProviderField>
+      <p className="provider-settings__field-guidance">
+        Suggested models are data, not a catalog Octant maintains:{" "}
+        {GEMINI_VIDEO_MODEL_PRESETS.join(", ")}. Enter any model IDs. Aspect ratio, resolution, and
+        length are chosen for each clip. The API key is stored write-only in{" "}
+        {hostCredentialStore(hostPlatform)}. This profile has no editable base URL.
+      </p>
+      {!props.credentialManagementAvailable ? (
+        <p className="provider-settings__field-guidance">
+          Manage credentials in the Octant host app. Credential changes are unavailable in this
+          browser.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+interface GeminiVideoConfigurationFormProps {
+  readonly instance: Extract<ProviderInstance, { driverKind: "gemini-video" }>;
+  readonly disabled: boolean;
+  readonly credentialManagementAvailable: boolean;
+  readonly credential: CredentialStatusController;
+  readonly onChange: ProviderSettingsViewProps["onChangeGeminiVideoConfiguration"];
+  readonly onClearCredential: ProviderSettingsViewProps["onClearProviderCredential"];
+}
+
+export function GeminiVideoConfigurationForm(props: GeminiVideoConfigurationFormProps) {
+  const credentialInput = useRef<HTMLInputElement>(null);
+  return (
+    <form
+      className="provider-card__edit provider-card__edit--image"
+      noValidate
+      onSubmit={(event) => {
+        event.preventDefault();
+        const configuration = geminiVideoConfigurationFrom(new FormData(event.currentTarget));
+        const enteredCredential = transientCredential(credentialInput.current);
+        const generation =
+          enteredCredential.value.length > 0 ? props.credential.beginMutation() : undefined;
+        void props.onChange(props.instance.id, configuration, enteredCredential).then(
+          (updated) => {
+            if (generation !== undefined)
+              props.credential.finishMutation(generation, updated, "stored");
+          },
+          () => {
+            if (generation !== undefined)
+              props.credential.finishMutation(generation, false, "stored");
+          },
+        );
+      }}
+    >
+      <GeminiVideoFields
+        credentialInput={credentialInput}
+        credentialManagementAvailable={props.credentialManagementAvailable}
+        instance={props.instance}
+      />
+      <div className="provider-card__edit-actions">
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="secondary"
+          size="sm"
+          aria-label={`Save Gemini video settings for ${props.instance.displayName}`}
         >
           Save
         </OctantButton>

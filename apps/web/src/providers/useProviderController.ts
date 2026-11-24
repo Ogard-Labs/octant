@@ -17,6 +17,7 @@ import {
   type CodexProviderConfiguration,
   type IdeogramImageProviderConfiguration,
   type GeminiImageProviderConfiguration,
+  type GeminiVideoProviderConfiguration,
   type OpenAiCompatibleProviderConfiguration,
   type OpenAiImageProviderConfiguration,
   type OllamaProviderConfiguration,
@@ -888,6 +889,64 @@ export function useProviderController(options: ProviderControllerOptions) {
             applyResult(
               await client.execute({
                 kind: "create-gemini-native-image-provider",
+                instanceId,
+                expectedVersion: 0 as ProviderDefaults["version"],
+                displayName,
+                configuration,
+              }),
+              current,
+              install,
+            );
+          } catch (error) {
+            await recoverRegistryFailure(error, "Provider configuration could not be created.");
+            return false;
+          }
+          try {
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
+            return true;
+          } catch (storeError) {
+            if (mounted.current) {
+              setMessage(
+                storeFailureMessage(
+                  "The provider was created, but its credential could not be stored.",
+                  storeError,
+                ),
+              );
+            }
+            return false;
+          }
+        }),
+      );
+    },
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
+  const createGeminiVideo = useCallback(
+    (
+      displayName: string,
+      configuration: GeminiVideoProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) => {
+      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
+      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          if (hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
+            }
+            return false;
+          }
+          if (credentialValue.length === 0) {
+            if (mounted.current) {
+              setMessage("Enter a Gemini API key before creating this video profile.");
+            }
+            return false;
+          }
+          const current = authoritative.current;
+          if (client === undefined || current === undefined) return false;
+          try {
+            applyResult(
+              await client.execute({
+                kind: "create-gemini-video-provider",
                 instanceId,
                 expectedVersion: 0 as ProviderDefaults["version"],
                 displayName,
@@ -1852,6 +1911,63 @@ export function useProviderController(options: ProviderControllerOptions) {
       ),
     [client, hostBridge, install, recoverRegistryFailure],
   );
+  const changeGeminiVideoConfiguration = useCallback(
+    (
+      instanceId: ProviderInstanceId,
+      configuration: GeminiVideoProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) =>
+      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          const current = authoritative.current;
+          const instance = current === undefined ? undefined : findProvider(current, instanceId);
+          if (
+            client === undefined ||
+            current === undefined ||
+            instance?.driverKind !== "gemini-video"
+          ) {
+            return false;
+          }
+          try {
+            applyResult(
+              await client.execute({
+                kind: "change-gemini-video-configuration",
+                instanceId,
+                expectedVersion: instance.version,
+                configuration,
+              }),
+              current,
+              install,
+            );
+          } catch (error) {
+            await recoverRegistryFailure(error, "Provider configuration could not be updated.");
+            return false;
+          }
+          if (credentialValue.length === 0) return true;
+          if (hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
+            }
+            return false;
+          }
+          try {
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
+            return true;
+          } catch (storeError) {
+            if (mounted.current) {
+              setMessage(
+                storeFailureMessage(
+                  "Provider configuration was saved, but its credential could not be stored.",
+                  storeError,
+                ),
+              );
+            }
+            return false;
+          }
+        }),
+      ),
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
   const changeBflImageConfiguration = useCallback(
     (
       instanceId: ProviderInstanceId,
@@ -2380,6 +2496,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           instance.driverKind === "azure-foundry" ||
           instance.driverKind === "openai-image" ||
           instance.driverKind === "gemini-native-image" ||
+          instance.driverKind === "gemini-video" ||
           instance.driverKind === "bfl-image" ||
           instance.driverKind === "ideogram-image" ||
           (instance.driverKind === "anthropic-compatible" &&
@@ -2730,6 +2847,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     createAmazonBedrock,
     createOpenAiImage,
     createGeminiImage,
+    createGeminiVideo,
     createBflImage,
     createIdeogramImage,
     rename,
@@ -2744,6 +2862,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     changeOpenAiCompatibleConfiguration,
     changeOpenAiImageConfiguration,
     changeGeminiImageConfiguration,
+    changeGeminiVideoConfiguration,
     changeBflImageConfiguration,
     changeIdeogramImageConfiguration,
     changeAnthropicCompatibleConfiguration,

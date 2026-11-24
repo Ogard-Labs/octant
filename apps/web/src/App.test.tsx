@@ -5495,7 +5495,7 @@ describe("App", () => {
       );
       expect(screen.queryByText("feature/handed-by-start-a-fix")).toBeNull();
       // The clean draft is Code Home's page again, list and all.
-      expect(screen.getByRole("region", { name: "CI failures" })).toBeVisible();
+      expect(await screen.findByRole("region", { name: "CI failures" })).toBeVisible();
     },
   );
 

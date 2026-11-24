@@ -68,7 +68,8 @@ export function readUsageDashboard(
     const mode =
       row.subject_type === "agent-run" && row.subject_id !== null
         ? readChildRunParent(connection, row.subject_id)?.mode
-        : row.subject_type === "image-job" && row.subject_id !== null
+        : (row.subject_type === "image-job" || row.subject_type === "video-job") &&
+            row.subject_id !== null
           ? readImageJobThread(connection, row.subject_id)?.mode
           : deriveModeFromSubjectType(row.subject_type);
     const projectId =
@@ -273,11 +274,13 @@ function resolveProjectId(
   };
 
   const imageThread =
-    subjectType === "image-job" ? readImageJobThread(connection, subjectId) : undefined;
+    subjectType === "image-job" || subjectType === "video-job"
+      ? readImageJobThread(connection, subjectId)
+      : undefined;
   const projectId =
     subjectType === "agent-run"
       ? resolveChildRunProjectId(connection, cache, subjectId, cacheStats)
-      : subjectType === "image-job"
+      : subjectType === "image-job" || subjectType === "video-job"
         ? imageThread === undefined
           ? undefined
           : resolveProjectId(
