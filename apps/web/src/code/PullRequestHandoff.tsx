@@ -11,6 +11,7 @@ import type {
   CodeThreadId,
   ProjectId,
 } from "@octant/contracts";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
@@ -237,27 +238,37 @@ export function ThreadWatchHandoff({
       : undefined;
   const [rows, setRows] = useState<ReadonlyArray<CodeProjectPullRequestRow>>([]);
   useEffect(() => {
-    let live = true;
     setRows([]);
-    if (reason && client.mergeProjectPullRequest) {
-      void client
-        .queryProjectPullRequests({ version: 1, threadId })
-        .then((view) => {
-          if (live)
-            setRows(
-              view.rows.filter(
-                (row) =>
-                  String(row.projectId) === String(projectId) &&
-                  row.babysit?.status === "ready" &&
-                  String(row.babysit.threadId) === String(threadId) &&
-                  row.linkedThreads.some((link) => String(link.threadId) === String(threadId)),
-              ),
-            );
-        })
-        .catch(() => {});
-    }
+    if (!reason?.includes(readyPullRequestNotice("")) || !client.mergeProjectPullRequest) return;
+    let live = true;
+    let reading = false;
+    // The overview and thread share the host's cached PR rows. A visible handoff follows updates
+    // without restarting its stopped watch or polling GitHub.
+    const readRows = async () => {
+      if (reading) return;
+      reading = true;
+      try {
+        const view = await client.queryProjectPullRequests({ version: 1, threadId });
+        if (live)
+          setRows(
+            view.rows.filter(
+              (row) =>
+                String(row.projectId) === String(projectId) &&
+                row.babysit?.status === "ready" &&
+                String(row.babysit.threadId) === String(threadId) &&
+                row.linkedThreads.some((link) => String(link.threadId) === String(threadId)),
+            ),
+          );
+      } catch {
+        if (live) setRows([]);
+      } finally {
+        reading = false;
+      }
+    };
+    const cancel = scheduleVisibleInterval(() => void readRows(), 20_000, { runImmediately: true });
     return () => {
       live = false;
+      cancel();
     };
   }, [client, reason, projectId, threadId]);
   if (!reason) return null;

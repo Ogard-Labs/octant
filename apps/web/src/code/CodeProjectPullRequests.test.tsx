@@ -6,7 +6,7 @@ import {
   type CodeProjectPullRequestView,
 } from "@octant/contracts";
 import { decodeProjectId } from "@octant/contracts/projects";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -380,6 +380,14 @@ describe("CodeProjectPullRequests", () => {
       confirmed: true,
     });
     expect(await screen.findByText(/changed since this review/)).toBeVisible();
+    // The overview refreshed while this handoff stayed open. Its formerly draft PR is ready again.
+    query.mockResolvedValue({
+      rows: rows.map((row) => (row.number === 14 ? { ...row, draft: false } : row)),
+    });
+    fireEvent(document, new Event("visibilitychange"));
+    expect(await screen.findByRole("button", { name: "Merge octant/octant#14" })).toBeVisible();
+    expect(screen.queryByText("Returned to draft after the ready check.")).toBeNull();
+    expect(merge).toHaveBeenCalledTimes(1);
   });
 
   it("bulk-starts only chosen PRs with shared rules, preserves active watches and retries just the failure", async () => {
