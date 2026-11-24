@@ -183,12 +183,26 @@ import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import type { WorkPromotionController } from "../work/useWorkPromotionController";
 import type { CodeThreadProviderChoice } from "../code/codeThreadCreate";
-import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
-import type { DraftRecentThread } from "./DraftThreadWorkspace";
+import type { DraftRecentThread, DraftThreadWorkspaceProps } from "./DraftThreadWorkspace";
+import { SurfaceLoading } from "../surface/SurfaceLoading";
 import type { OctantMode } from "@octant/contracts/modes";
 import { ThreadActivityPictureInPicture } from "../threadActivity/ThreadActivityPictureInPicture";
 import { threadHasBrowserSurface } from "./browserActivityReveal";
 import type { ThreadProviderIdentity } from "./navigationModel";
+
+const DraftThread = lazy(() =>
+  import("./DraftThreadWorkspace").then(({ DraftThreadWorkspace }) => ({
+    default: DraftThreadWorkspace,
+  })),
+);
+
+function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
+  return (
+    <Suspense fallback={<SurfaceLoading label="Opening composer" />}>
+      <DraftThread {...props} />
+    </Suspense>
+  );
+}
 
 const CoordinatorProposalCards = lazy(() =>
   import("../code/CoordinatorProposalCards").then((module) => ({
