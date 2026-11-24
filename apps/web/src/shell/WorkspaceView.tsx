@@ -56,6 +56,7 @@ import type {
   MovedThreadReference,
   ThreadBoardPullRequestIdentity,
   ThreadBoardPullRequestSummaries,
+  ThreadTouchedIssues,
 } from "@octant/contracts";
 import type {
   ProjectAction,
@@ -3400,14 +3401,18 @@ function threadPullRequestProps(
   readonly threadPullRequests?: ThreadBoardPullRequestSummaries;
   readonly onOpenThreadPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly onOpenThreadPullRequestOnGithub?: (identity: ThreadBoardPullRequestIdentity) => void;
+  readonly threadIssues?: ThreadTouchedIssues;
+  readonly onOpenThreadIssue: (url: string) => void;
 } {
-  const summaries = codeController.navigation?.find(
-    (item) => String(item.threadId) === threadId,
-  )?.pullRequestSummaries;
+  const entry = codeController.navigation?.find((item) => String(item.threadId) === threadId);
+  const summaries = entry?.pullRequestSummaries;
+  const issues = entry?.touchedIssues;
   const open = props.onSelectPullRequest;
   const hostBridge = props.hostBridge;
   return {
     ...(summaries === undefined ? {} : { threadPullRequests: summaries }),
+    ...(issues === undefined ? {} : { threadIssues: issues }),
+    onOpenThreadIssue: (url: string) => openExternalUrl(hostBridge, url),
     ...(open === undefined ? {} : { onOpenThreadPullRequest: open }),
     onOpenThreadPullRequestOnGithub: (identity: ThreadBoardPullRequestIdentity) => {
       const url = githubPullRequestUrl(identity);

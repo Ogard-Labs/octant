@@ -17,7 +17,11 @@ import {
   decodeProjectId,
   decodeWindowId,
 } from "@octant/contracts";
-import { decodeCodeCheckoutId, decodeCodeThreadId } from "@octant/contracts/code";
+import {
+  decodeCodeCheckoutId,
+  decodeCodeDeliveryTarget,
+  decodeCodeThreadId,
+} from "@octant/contracts/code";
 import type { RequiredChecksState } from "@octant/domain/code-pull-request-action-policy";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Journal } from "../persistence/journal";
@@ -34,6 +38,7 @@ import {
   CodeProjectPullRequestSwitchService,
   type PullRequestAutoFixThreads,
 } from "./codeProjectPullRequestSwitchService";
+import { threadDeliversPullRequest } from "./mergedThreadPutAway";
 import { CodeThreadMetadataService } from "./codeThreadMetadataService";
 import { FailingChecksFollowUps } from "./failingChecksFollowUps";
 import { GhPullRequestPort, type GhCommandPort, type GhCommandResult } from "./ghPullRequestPort";
@@ -755,6 +760,57 @@ describe("pull request readers use the single forge identity owner", () => {
     const switchesAfterTick = await switches.query(windowId, newestTarget);
     expect(switchesAfterTick.autoFix.status).toBe("on");
     expect(switchesAfterTick.mergeWhenReady.status).toBe("on");
+  });
+
+  it("shows a thread with a placeholder target the merge of the pull request Octant opened for it", async () => {
+    const clock = () => "2026-11-19T12:00:00.000Z";
+    const { repoRoot, gitPort } = createRealGitRepo("https://github.com/acme/app.git");
+    const forge = createFakeForge({ owner: "acme", name: "app", nodeId: "R_kgDOapp001" });
+    forge.repo.pullRequests.set(42, defaultPr());
+    const { links, pullRequestService } = buildStack({
+      journal: openJournal(clock),
+      repoRoot,
+      gitPort,
+      forge,
+      clock,
+      // What the composer proposes when it can read no remote.
+      threadRepo: { owner: "local", name: "App" },
+      prNumbers: [],
+    });
+    // What the create operation records.
+    await links.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "app",
+      number: 42,
+      headBranch: "feature/work",
+      threadIds: [threadId],
+    });
+    const merges = () =>
+      pullRequestService.mergedPullRequestsForThread(String(threadId), (pullRequest) =>
+        threadDeliversPullRequest({
+          thread: {
+            projectId,
+            deliveryTarget: decodeCodeDeliveryTarget({
+              outcomeKind: "opened-pr",
+              branchIntent: "feature/work",
+              remoteName: "origin",
+              proposedBaseRepository: "local/App",
+              proposedBaseBranch: "main",
+              confirmedAt: "2026-11-19T12:00:00.000Z",
+            }),
+          },
+          own: [{ number: 42, repository: { owner: "acme", name: "app" } }],
+          pullRequest,
+          sameRepository: (project, left, right) => links.areSameRepository(project, left, right),
+        }),
+      );
+
+    await pullRequestService.refresh(windowId, { kind: "refresh-all" }, signal);
+    expect(merges()).toEqual([]);
+    forge.repo.pullRequests.set(42, defaultPr({ state: "MERGED" }));
+    await pullRequestService.refresh(windowId, { kind: "refresh-all" }, signal);
+    expect(merges()).toEqual([{ baseRepository: "acme/app", number: 42 }]);
   });
 
   it("keeps one link and all reader state when a repository is transferred to another owner", async () => {

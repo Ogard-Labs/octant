@@ -15,6 +15,7 @@ import {
   CodeThreadMetadataService,
   MAX_CODE_THREAD_KNOWN_PULL_REQUESTS,
   pullRequestIdentitiesFromHistory,
+  touchedIssuesFromHistory,
   type CodeGitWorktreeObservation,
   type CodeGithubMetadataObservation,
   type CodeThreadMetadataInput,
@@ -70,6 +71,120 @@ describe("Code thread known pull-request identities", () => {
     expect(identities[0]).toEqual({ number: 1, observedAt: "2026-07-21T23:00:00.000Z" });
     expect(new Set(identities.map((identity) => identity.number)).size).toBe(identities.length);
     expect(pullRequestIdentitiesFromHistory({ status: "rebuild-required" })).toEqual([]);
+  });
+});
+
+describe("Pull requests and issues a thread's tool calls wrote to", () => {
+  const toolFrames = (): CodeOperationEventFrame[] => [
+    frame(
+      {
+        kind: "tool-activity",
+        toolCallId: "call-merge",
+        toolName: "Bash",
+        state: "completed",
+        forgeReferences: [
+          {
+            forge: "github",
+            kind: "pull-request",
+            action: "merged",
+            owner: "acme",
+            repository: "site",
+            number: 7,
+          },
+          {
+            forge: "github",
+            kind: "issue",
+            action: "closed",
+            owner: "acme",
+            repository: "site",
+            number: 3,
+            title: "Docs are stale",
+          },
+        ],
+      } as never,
+      "2026-11-24T08:00:00.000Z",
+      1,
+    ),
+    frame(
+      {
+        kind: "tool-activity",
+        toolCallId: "call-read",
+        toolName: "Bash",
+        state: "completed",
+      } as never,
+      "2026-11-24T08:01:00.000Z",
+      2,
+    ),
+    frame(
+      {
+        kind: "tool-activity",
+        toolCallId: "call-linear",
+        toolName: "mcp__Linear__save_issue",
+        state: "completed",
+        forgeReferences: [
+          {
+            forge: "linear",
+            kind: "issue",
+            action: "edited",
+            identifier: "ENG-991",
+            title: "Hover card",
+            state: "In Progress",
+          },
+          {
+            forge: "github",
+            kind: "issue",
+            action: "commented",
+            owner: "acme",
+            repository: "site",
+            number: 3,
+            state: "closed",
+          },
+        ],
+      } as never,
+      "2026-11-24T08:02:00.000Z",
+      3,
+    ),
+  ];
+
+  it("links the pull request a tool call merged, in the repository the call named", () => {
+    expect(pullRequestIdentitiesFromHistory({ status: "ok", frames: toolFrames() })).toEqual([
+      {
+        number: 7,
+        observedAt: "2026-11-24T08:00:00.000Z",
+        repository: { owner: "acme", name: "site" },
+      },
+    ]);
+  });
+
+  it("lists every issue newest first, keeping an earlier title when a later call reported none", () => {
+    expect(touchedIssuesFromHistory({ status: "ok", frames: toolFrames() })).toEqual([
+      {
+        forge: "github",
+        owner: "acme",
+        repository: "site",
+        number: 3,
+        title: "Docs are stale",
+        state: "closed",
+        observedAt: "2026-11-24T08:02:00.000Z",
+      },
+      {
+        forge: "linear",
+        identifier: "ENG-991",
+        title: "Hover card",
+        state: "In Progress",
+        observedAt: "2026-11-24T08:02:00.000Z",
+      },
+    ]);
+  });
+
+  it("rebuilds the same touched pull requests and issues from a compacted history", () => {
+    const compacted = summarizeThreadHistory(toolFrames());
+    expect(pullRequestIdentitiesFromHistory({ status: "ok", frames: compacted })).toEqual(
+      pullRequestIdentitiesFromHistory({ status: "ok", frames: toolFrames() }),
+    );
+    expect(touchedIssuesFromHistory({ status: "ok", frames: compacted })).toEqual(
+      touchedIssuesFromHistory({ status: "ok", frames: toolFrames() }),
+    );
   });
 });
 

@@ -2,6 +2,7 @@ import type {
   CoordinatorWorkerChoice,
   ThreadBoardPullRequestSummaries,
   ThreadLiveStep,
+  ThreadTouchedIssues,
 } from "@octant/contracts";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { SidebarThreadStatusInput } from "@octant/domain/sidebar-thread-status-policy";
@@ -202,6 +203,8 @@ export interface ChatThreadNavigationItem {
    * than a guess — the same closed door the Work board keeps.
    */
   readonly pullRequests?: ThreadBoardPullRequestSummaries;
+  /** The issues the thread's tool calls wrote to (Code only); absent when none. */
+  readonly touchedIssues?: ThreadTouchedIssues;
   readonly threadId: string;
   readonly title: string;
   readonly unread?: boolean;

@@ -3,7 +3,10 @@ import {
   MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
   type CodeTranscriptSearch,
   type ThreadFinishedReceipt,
+  type ThreadTouchedIssue,
+  type ThreadTouchedIssues,
 } from "@octant/contracts";
+import { composeThreadTouchedIssues } from "@octant/domain/thread-board-pull-request-policy";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
@@ -891,6 +894,17 @@ export interface CodeServiceOptions {
    * pretending the thread has none.
    */
   readonly pullRequests?: CodeNavigationPullRequestSource;
+  /**
+   * The issues each thread's tool calls wrote to, from its journal, and
+   * whether Linear is connected on this host (read locally, never from
+   * Linear). Absent, no row carries touched issues.
+   */
+  readonly touchedIssues?: CodeNavigationTouchedIssueSource;
+}
+
+export interface CodeNavigationTouchedIssueSource {
+  issuesFor(threadId: CodeThreadId): ReadonlyArray<ThreadTouchedIssue>;
+  linearConnected(): boolean;
 }
 
 export interface CodeNavigationPullRequestSource {
@@ -1126,6 +1140,7 @@ export class CodeService {
   readonly #onThreadArchived: CodeServiceOptions["onThreadArchived"];
   readonly #waitForThreadChange: CodeServiceOptions["waitForThreadChange"];
   readonly #pullRequests: CodeNavigationPullRequestSource | undefined;
+  readonly #touchedIssues: CodeNavigationTouchedIssueSource | undefined;
   readonly #readLatestFinishedReceipt:
     | ((threadId: string) => ThreadFinishedReceipt | undefined)
     | undefined;
@@ -1195,6 +1210,7 @@ export class CodeService {
     this.#onThreadArchived = options.onThreadArchived;
     this.#waitForThreadChange = options.waitForThreadChange;
     this.#pullRequests = options.pullRequests;
+    this.#touchedIssues = options.touchedIssues;
     this.#liveTurns = options.liveTurns;
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     this.#readLatestFinishedReceipt = options.readLatestFinishedReceipt;
@@ -1534,12 +1550,49 @@ export class CodeService {
         ...(parked ? { awaitingInput: true as const } : {}),
         ...(checkoutChip === undefined ? {} : { checkoutChip }),
         ...(hasPullRequests ? { pullRequestSummaries, threadPullRequests } : {}),
+        ...this.#touchedIssuesFor(thread, pullRequests),
         // Rides on the row the caller was already allowed to see: `threads`
         // is the authority-filtered list, so a window never learns what a
         // thread it cannot browse is running.
         ...(parked ? {} : this.#liveTurns?.read(String(thread.id))),
       };
     });
+  }
+
+  /**
+   * The issues a thread's tool calls wrote to, as far as this read may show
+   * them: GitHub issues in the thread's own repository or one the window's
+   * pull-request snapshot already reads, and Linear issues while Linear is
+   * connected. A failing source leaves the row without them.
+   */
+  #touchedIssuesFor(
+    thread: CodeThread,
+    pullRequests: ThreadBoardPullRequestSnapshot | undefined,
+  ): { readonly touchedIssues?: ThreadTouchedIssues } {
+    const source = this.#touchedIssues;
+    if (source === undefined) return {};
+    try {
+      const own = thread.deliveryTarget.proposedBaseRepository.split("/");
+      const ownRepository =
+        own.length === 2 && own[0] !== undefined && own[1] !== undefined
+          ? [{ owner: own[0], name: own[1] }]
+          : [];
+      const touchedIssues = composeThreadTouchedIssues({
+        issues: source.issuesFor(thread.id),
+        readableRepositories: [
+          ...ownRepository,
+          ...(pullRequests?.rows ?? []).map((row) => ({
+            owner: row.repositoryOwner,
+            name: row.repositoryName,
+          })),
+        ],
+        githubRevoked: pullRequests?.githubRevoked ?? false,
+        linearConnected: source.linearConnected(),
+      });
+      return touchedIssues === undefined ? {} : { touchedIssues };
+    } catch {
+      return {};
+    }
   }
 
   /**
