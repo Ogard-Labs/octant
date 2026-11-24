@@ -14,6 +14,7 @@ function setup(overrides: { readonly paired?: () => boolean } = {}) {
   return createThreadMessageQueueAuthority({
     isLocalWindowLive: (id) => String(id) === String(windowId),
     isPairedDevice: (id) => paired() && String(id) === String(deviceId),
+    deviceAccessLevel: () => "full",
     localWindowCanAccess: (id) => String(id) === String(windowId),
     projectType: (id) =>
       id === chatProject
@@ -33,6 +34,7 @@ describe("who a queued message may wait for", () => {
     const authority = createThreadMessageQueueAuthority({
       isLocalWindowLive: () => false,
       isPairedDevice: (id) => String(id) === String(deviceId),
+      deviceAccessLevel: () => undefined,
       localWindowCanAccess: () => false,
       projectType: () => "code",
       hasActiveCodeProject: () => true,
