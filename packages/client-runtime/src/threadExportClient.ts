@@ -1,8 +1,8 @@
 import {
-  THREAD_EXPORT_PATH,
   THREAD_VIDEO_ARCHIVE_QUERY,
   ThreadExportOutcome,
   ThreadVideoArchiveOffer,
+  type THREAD_EXPORT_PATH,
   type ThreadExportRequest,
 } from "@octant/contracts/thread-export";
 import {
@@ -34,6 +34,7 @@ export class ThreadExportClientError extends Error {
 }
 
 const EXPORT_TIMEOUT_MS = 30_000;
+const EXPORT_PATH: typeof THREAD_EXPORT_PATH = "/api/threads/export";
 
 export function createThreadExportClient(options: ThreadExportClientOptions): ThreadExportClient {
   const resolvedFetch = bindFetchPort(options.fetch);
@@ -70,7 +71,7 @@ export function createThreadExportClient(options: ThreadExportClientOptions): Th
   };
   return {
     async exportThread(request) {
-      const body = await post(THREAD_EXPORT_PATH, "Thread export", request);
+      const body = await post(EXPORT_PATH, "Thread export", request);
       try {
         return decodeHostAnswer(ThreadExportOutcome)(body);
       } catch {
@@ -79,7 +80,7 @@ export function createThreadExportClient(options: ThreadExportClientOptions): Th
     },
     async offerArchive(request) {
       const body = await post(
-        `${THREAD_EXPORT_PATH}?${THREAD_VIDEO_ARCHIVE_QUERY}=1`,
+        `${EXPORT_PATH}?${THREAD_VIDEO_ARCHIVE_QUERY}=1`,
         "Thread export",
         request,
       );
