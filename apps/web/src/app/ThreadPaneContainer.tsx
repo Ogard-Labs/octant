@@ -210,8 +210,6 @@ export interface ThreadPaneContainerProps {
   readonly createHostViewScope: CreateHostViewScope;
   /** The paired computer's Code start screen while the picker names one; see WorkspaceView. */
   readonly renderPairedComputerCodeStart?: () => ReactNode | undefined;
-  /** Opens the modal to clone a local Code Project onto another paired computer. */
-  readonly onAddToAnotherComputer?: (projectId: ProjectId) => void;
   readonly dockOpen: boolean;
   readonly dockSurface?: RightUtilityDockSurfaceId;
   readonly draftCreating: boolean;
@@ -764,9 +762,6 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                     {...(renderPairedComputerCodeStart === undefined
                       ? {}
                       : { renderPairedComputerCodeStart })}
-                    {...(props.onAddToAnotherComputer === undefined
-                      ? {}
-                      : { onAddToAnotherComputer: props.onAddToAnotherComputer })}
                     {...(lastSelectedHealthyHostId === undefined
                       ? {}
                       : { lastSelectedHealthyHostId })}

@@ -11,10 +11,6 @@ import {
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
 import { createProviderClient, type ProviderClient } from "@octant/client-runtime/provider-client";
 import {
-  createRepositoryBootstrapClient,
-  type RepositoryBootstrapClient,
-} from "@octant/client-runtime/repository-bootstrap-client";
-import {
   createThreadVideoResults,
   type ThreadVideoResults,
 } from "@octant/client-runtime/video-generation-client";
@@ -27,8 +23,6 @@ export interface PairedComputerCodeClients {
   readonly videoResults: ThreadVideoResults;
   /** That computer's folders, for a new Code Project there; it admits only its own person. */
   readonly folderBrowse: FolderBrowseClient;
-  /** Cloning a local repository onto that computer; admits only its own person. */
-  readonly repositoryBootstrap: RepositoryBootstrapClient;
 }
 
 // The remote session owns the destination, so the base URL only shapes the
@@ -58,6 +52,5 @@ export function createPairedComputerCodeClients(
     provider: createProviderClient(port),
     videoResults: createThreadVideoResults(port),
     folderBrowse: createFolderBrowseClient(port),
-    repositoryBootstrap: createRepositoryBootstrapClient(port),
   };
 }

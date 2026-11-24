@@ -165,7 +165,6 @@ export interface SidebarContainerProps {
   /** Code threads on the person's other computers, each opened there. */
   readonly pairedComputerThreads?: ReadonlyArray<FederatedReadItem<PairedComputerThreadPayload>>;
   readonly onOpenPairedComputerThread?: (hostId: string, threadId: string) => void;
-  readonly onAddToAnotherComputer?: (projectId: ProjectId) => void;
   readonly federatedHostStates: NonNullable<ShellSidebarProps["environments"]>["hostStates"];
   readonly githubIssuesReadAvailable: boolean;
   readonly hostBridge?: OctantHostBridge;
@@ -897,9 +896,6 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                           onNewThreadInProject: (projectId) => void openDraftInProject(projectId),
                           onNewCoordinatorInProject: (projectId) =>
                             void actions.openCoordinatorDraftInProject(projectId),
-                          ...(props.onAddToAnotherComputer === undefined
-                            ? {}
-                            : { onAddToAnotherComputer: props.onAddToAnotherComputer }),
                         }
                       : activeMode === "work"
                         ? {

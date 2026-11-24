@@ -21,7 +21,17 @@ import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/de
 import type { ProjectColor, ProjectProviderPolicy } from "@octant/contracts/projects";
 import type { ProviderInstance } from "@octant/contracts/providers";
 import { ChevronDown, Ellipsis, SquarePen } from "../ui/icons";
-import { Children, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Children,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { AddRepositoryToComputerContext } from "./addRepositoryToComputerContext";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { homeRelativePath } from "../lib/homeRelativePath";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
@@ -238,12 +248,14 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               ]
             : []),
         ];
+  const contextAddToAnotherComputer = useContext(AddRepositoryToComputerContext);
+  const onAddToAnotherComputer = props.onAddToAnotherComputer ?? contextAddToAnotherComputer;
   const canAddToAnotherComputer =
     props.project.type === "code" &&
     !archived &&
     !connectionStale &&
     !unavailable &&
-    props.onAddToAnotherComputer !== undefined;
+    onAddToAnotherComputer !== undefined;
   const overflowItems: ReadonlyArray<OctantMenuItem> = [
     ...iconItems,
     ...(canAddToAnotherComputer
@@ -495,8 +507,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 items={overflowItems}
                 onValueChange={(value) => {
                   if (value === "relink") void relink();
-                  else if (value === "add-to-computer")
-                    props.onAddToAnotherComputer?.(props.project.id);
+                  else if (value === "add-to-computer") onAddToAnotherComputer?.(props.project.id);
                   else if (value === "archive") props.onArchive(props.project.id);
                   else if (value === "icon-change") iconFile.current?.click();
                   else if (value === "icon-reset") void resetIcon();
@@ -522,7 +533,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               <div className="flex items-center gap-2">
                 {canAddToAnotherComputer ? (
                   <OctantButton
-                    onClick={() => props.onAddToAnotherComputer?.(props.project.id)}
+                    onClick={() => onAddToAnotherComputer?.(props.project.id)}
                     size="xs"
                     type="button"
                     variant="ghost"

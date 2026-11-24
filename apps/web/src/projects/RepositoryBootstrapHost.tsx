@@ -1,39 +1,65 @@
 import type { HostFederationTransports } from "@octant/client-runtime/host-federation-transports";
-import type { RepositoryBootstrapClientOptions } from "@octant/client-runtime/repository-bootstrap-client";
+import { localHostDisplayName } from "@octant/client-runtime";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import type { ProjectId, ProjectSummary } from "@octant/contracts/projects";
-import { useEffect, useMemo, useState } from "react";
-import { useBootstrapDestinations } from "../host/useBootstrapDestinations";
-import { localHostDisplayName } from "@octant/client-runtime";
-import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import {
-  AddRepositoryToComputerDialog,
-  type AddRepositoryToComputerCompleted,
-} from "./AddRepositoryToComputerDialog";
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+import { useBootstrapDestinations } from "../host/useBootstrapDestinations";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
+import type { OpenRepositoryBootstrap } from "./addRepositoryToComputerContext";
+import { AddRepositoryToComputerDialog } from "./AddRepositoryToComputerDialog";
 
-export interface RepositoryBootstrapRequest {
+interface RepositoryBootstrapRequest {
   readonly projectId?: ProjectId;
   readonly destinationHostId?: HostId;
+}
+
+export interface RepositoryBootstrapSelection {
+  readonly hostId: HostId;
+  readonly projectId: string;
+  readonly sequence: number;
 }
 
 export interface RepositoryBootstrapHostProps {
   readonly transports: HostFederationTransports;
   readonly allProjects: ReadonlyArray<ProjectSummary>;
   readonly hosts: ReadonlyArray<{ readonly hostId: HostId; readonly displayName: string }>;
-  readonly request: RepositoryBootstrapRequest | undefined;
-  readonly sourceBootstrapPort: RepositoryBootstrapClientOptions;
-  readonly onHasDestinationChange: (hasDestination: boolean) => void;
-  readonly onClose: () => void;
-  readonly onCompleted: (result: AddRepositoryToComputerCompleted) => void;
+  readonly serverUrl: string;
+  readonly windowCapability: string;
+  readonly onReady: Dispatch<SetStateAction<OpenRepositoryBootstrap | undefined>>;
+  readonly onCompleted: (selection: RepositoryBootstrapSelection) => void;
 }
 
-export function RepositoryBootstrapHost(props: RepositoryBootstrapHostProps) {
+export default function RepositoryBootstrapHost(props: RepositoryBootstrapHostProps) {
   const [refreshKey, setRefreshKey] = useState(0);
+  const [request, setRequest] = useState<RepositoryBootstrapRequest | undefined>(undefined);
   const destinations = useBootstrapDestinations(props.transports, refreshKey);
 
+  const openBootstrap = useCallback<OpenRepositoryBootstrap>((target) => {
+    setRequest(typeof target === "object" ? target : { projectId: target });
+  }, []);
+
+  const hasDestinations = destinations.length > 0;
+  const { onReady } = props;
   useEffect(() => {
-    props.onHasDestinationChange(destinations.length > 0);
-  }, [destinations.length, props.onHasDestinationChange]);
+    onReady(() => (hasDestinations ? openBootstrap : undefined));
+    return () => onReady(undefined);
+  }, [hasDestinations, onReady, openBootstrap]);
+
+  const sourceBootstrapPort = useMemo(
+    () => ({
+      baseUrl: props.serverUrl,
+      fetch: globalThis.fetch,
+      windowCapability: props.windowCapability,
+    }),
+    [props.serverUrl, props.windowCapability],
+  );
 
   const sourceHostName =
     props.hosts.find((host) => String(host.hostId) === String(LOCAL_HOST_ID))?.displayName ??
@@ -49,31 +75,36 @@ export function RepositoryBootstrapHost(props: RepositoryBootstrapHostProps) {
   );
   const targetProject = useMemo(
     () =>
-      props.request?.projectId === undefined
+      request?.projectId === undefined
         ? undefined
         : localActiveCodeProjects.find(
-            (candidate) => String(candidate.id) === String(props.request?.projectId),
+            (candidate) => String(candidate.id) === String(request.projectId),
           ),
-    [props.request?.projectId, localActiveCodeProjects],
+    [request?.projectId, localActiveCodeProjects],
   );
 
   return (
     <OctantDialogPresence>
-      {props.request === undefined ? null : (
+      {request === undefined ? null : (
         <AddRepositoryToComputerDialog
           destinations={destinations}
-          {...(props.request.destinationHostId === undefined
+          {...(request.destinationHostId === undefined
             ? {}
-            : { initialDestinationHostId: props.request.destinationHostId })}
+            : { initialDestinationHostId: request.destinationHostId })}
           localProjects={localActiveCodeProjects}
-          onClose={props.onClose}
+          onClose={() => setRequest(undefined)}
           onCompleted={(result) => {
-            setRefreshKey((count) => count + 1);
-            props.onCompleted(result);
+            const nextSequence = refreshKey + 1;
+            setRefreshKey(nextSequence);
+            props.onCompleted({
+              hostId: result.destinationHostId,
+              projectId: String(result.projectId),
+              sequence: nextSequence,
+            });
           }}
           open
           {...(targetProject === undefined ? {} : { project: targetProject })}
-          sourceBootstrapPort={props.sourceBootstrapPort}
+          sourceBootstrapPort={sourceBootstrapPort}
           sourceHostName={sourceHostName}
         />
       )}
