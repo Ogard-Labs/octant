@@ -1,9 +1,10 @@
 import {
   MAX_THREAD_FORGE_REFERENCES_PER_CALL,
+  ThreadForgeReference,
   type ThreadForgeAction,
-  type ThreadForgeReference,
   type ThreadGithubForgeReference,
 } from "@octant/contracts";
+import { Schema } from "effect";
 
 /**
  * One finished tool call as an adapter sees it, before anything is reduced or
@@ -51,6 +52,8 @@ const GITHUB_URL = new RegExp(
 const GITHUB_URL_ALONE = new RegExp(
   String.raw`^https://github\.com/${OWNER}/${REPOSITORY}/(pull|issues)/[1-9][0-9]{0,8}/?$`,
 );
+const isThreadForgeReference = Schema.is(ThreadForgeReference);
+
 /** gh's own success lines: "Merged pull request owner/repo#12", "Closed issue owner/repo#7". */
 const GH_SUCCESS_LINE = new RegExp(
   String.raw`\b(pull request|issue) (${OWNER})/(${REPOSITORY})#([1-9][0-9]{0,8})\b`,
@@ -300,16 +303,48 @@ const GH_SWITCHES: Readonly<Record<string, ReadonlySet<string>>> = {
   "pr merge": new Set(["-m", "-r"]),
 };
 
+/** Words that run the command after them, with their own options and durations. */
+const COMMAND_PREFIXES: ReadonlySet<string> = new Set([
+  "command",
+  "do",
+  "else",
+  "env",
+  "exec",
+  "nohup",
+  "sudo",
+  "then",
+  "time",
+  "timeout",
+]);
+
+/**
+ * Whether a word before `gh` leaves it the command that runs: an environment
+ * assignment, or a wrapper with its options. Anything else (`echo gh pr merge
+ * 12`, or a `!` that turns failure into success) makes `gh` text or untold.
+ */
+function runsTheNextWord(word: string): boolean {
+  return (
+    COMMAND_PREFIXES.has(word) ||
+    /^[A-Za-z_][A-Za-z0-9_]*=/.test(word) ||
+    word.startsWith("-") ||
+    /^[0-9.]+[smhd]?$/.test(word)
+  );
+}
+
 function ghInvocation({ words, exitSpeaks }: ShellCommand): GhInvocation | undefined {
   const at = words.findIndex((candidate) => candidate === "gh" || candidate.endsWith("/gh"));
-  if (at === -1) return undefined;
+  if (at === -1 || !words.slice(0, at).every(runsTheNextWord)) return undefined;
   const noun = words[at + 1];
   const verb = words[at + 2];
   if ((noun !== "pr" && noun !== "issue") || verb === undefined) return undefined;
   const kind: Kind = noun === "pr" ? "pull-request" : "issue";
-  const action = (noun === "pr" ? GH_PR_WRITES : GH_ISSUE_WRITES)[verb];
   const switches = GH_SWITCHES[`${noun} ${verb}`];
   const rest = words.slice(at + 3);
+  // `--auto` leaves the merge to GitHub, once the requirements are met.
+  const action =
+    noun === "pr" && verb === "merge" && rest.some((word) => /^--(disable-)?auto$/.test(word))
+      ? "edited"
+      : (noun === "pr" ? GH_PR_WRITES : GH_ISSUE_WRITES)[verb];
   let repository: { readonly owner: string; readonly repository: string } | undefined;
   let number: number | undefined;
   let named: GithubIdentity | undefined;
@@ -694,6 +729,8 @@ export function forgeReferencesFromToolCall(
           : [];
   const unique = new Map<string, ThreadForgeReference>();
   for (const reference of found) {
+    // One reference the journal refuses would lose the whole call's event.
+    if (!isThreadForgeReference(reference)) continue;
     const key = identityKey(reference);
     const earlier = unique.get(key);
     // One call can write to the same thing twice (comment, then close). The

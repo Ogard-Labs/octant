@@ -240,6 +240,43 @@ describe("forgeReferencesFromToolCall", () => {
     expect(reference?.title).toBe("\u6f22".repeat(85));
   });
 
+  it("leaves out an identity the journal would refuse, so it never loses the call", () => {
+    expect(
+      forgeReferencesFromToolCall({
+        toolName: "Bash",
+        command: "gh pr close 5 -R acme/.. && gh pr close 6 -R acme/app",
+      })?.map((reference) => ("number" in reference ? reference.number : 0)),
+    ).toEqual([6]);
+    expect(
+      forgeReferencesFromToolCall({
+        toolName: "mcp__github__create_pull_request",
+        input: {},
+        output: '{"html_url":"https://github.com/acme/../pull/5"}',
+      }),
+    ).toBeUndefined();
+  });
+
+  it("records a merge left to GitHub as an edit, since nothing merged yet", () => {
+    const action = (command: string) =>
+      forgeReferencesFromToolCall({ toolName: "Bash", command })?.[0]?.action;
+    expect(action("gh pr merge 12 --auto --squash -R acme/app")).toBe("edited");
+    expect(action("gh pr merge 12 --disable-auto -R acme/app")).toBe("edited");
+    expect(action("gh pr merge 12 --squash -R acme/app")).toBe("merged");
+  });
+
+  it("reads gh only where a command starts, not as another command's text", () => {
+    const numbers = (command: string) =>
+      forgeReferencesFromToolCall({ toolName: "Bash", command })?.map((reference) =>
+        "number" in reference ? reference.number : 0,
+      );
+    expect(numbers("echo gh pr merge 12 -R acme/app")).toBeUndefined();
+    expect(numbers("grep -rn gh pr close 12 -R acme/app docs")).toBeUndefined();
+    expect(numbers("! gh pr close 12 -R acme/app")).toBeUndefined();
+    expect(numbers("GH_TOKEN=x gh pr close 12 -R acme/app")).toEqual([12]);
+    expect(numbers("timeout 60 /opt/homebrew/bin/gh pr close 12 -R acme/app")).toEqual([12]);
+    expect(numbers("env GH_PAGER= command gh pr close 12 -R acme/app")).toEqual([12]);
+  });
+
   it("records nothing for a command that only read pull requests", () => {
     expect(
       forgeReferencesFromToolCall({
