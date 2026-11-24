@@ -6810,6 +6810,19 @@ describe("completing and snoozing a Code thread", () => {
     expect(markedWhileRunning.thread.markedDoneAt).toBe(now);
     expect(markedWhileRunning.thread).not.toHaveProperty("completedAt");
 
+    // A turn the live registry already holds, before its runtime work is
+    // journaled, still counts as running.
+    const liveTurns = new LiveTurnRegistry();
+    liveTurns.tracker(String(ids.thread), "code-navigation").begin(now);
+    const justStarted = serviceFixture({ putAwayWhenDone: () => true, liveTurns });
+    const markedAsTurnStarts = await justStarted.service.execute(ids.window, {
+      kind: "mark-code-thread-done",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    if (!("thread" in markedAsTurnStarts)) throw new Error("expected the marked thread");
+    expect(markedAsTurnStarts.thread).not.toHaveProperty("completedAt");
+
     const awaitingApproval = serviceFixture({
       putAwayWhenDone: () => true,
       awaitsHarnessApproval: () => true,
