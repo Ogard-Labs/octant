@@ -168,6 +168,7 @@ import { runningStepTitle, settledTurnFoldsActivity } from "../transcript/turnAc
 import { latestTurnTasks, splitTurnTasks } from "./transcriptActivity";
 import { usePublishThreadTaskList } from "../transcript/threadTaskLists";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
+import { PendingRequests } from "../transcript/PendingRequests";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import {
   TranscriptHandoff,
@@ -2700,10 +2701,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           />
         )}
         {readOnly || props.controller.providerRequests.length === 0 ? null : (
-          <div
-            aria-label="Pending provider requests"
-            className="code-thread-workspace__provider-requests thread-column"
-          >
+          <PendingRequests>
             {props.controller.providerRequests.map((request) =>
               request.kind === "approval" ? (
                 <ProviderApprovalPrompt
@@ -2749,7 +2747,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 />
               ),
             )}
-          </div>
+          </PendingRequests>
         )}
         {props.browserAutomationClient === undefined ? null : (
           <TerminalBrowserApprovalPrompt
