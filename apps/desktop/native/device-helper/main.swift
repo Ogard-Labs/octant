@@ -364,6 +364,7 @@ private func selectedDeveloperDirectory() -> String {
 }
 
 private func run() -> Int32 {
+    if CommandLine.arguments == [CommandLine.arguments[0], "--host-display"] { runHostDisplayCommand() }
     _ = frameChannelIsOpen
     let arguments = CommandLine.arguments
     guard arguments.count == 2, UUID(uuidString: arguments[1]) != nil else {

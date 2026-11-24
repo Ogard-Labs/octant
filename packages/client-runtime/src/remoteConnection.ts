@@ -19,6 +19,8 @@
 //   ambiguous mutations or query results.
 
 import {
+  DEVICE_ACCESS_LEVEL_REFUSED_REASON,
+  REMOTE_ACCESS_PAUSED_REASON,
   REMOTE_SECURITY_FLOOR,
   HostHelloV1,
   NegotiatedProtocolV1,
@@ -189,7 +191,28 @@ export type RemoteConnectionErrorCategory =
   | "host-changed";
 
 export type RemoteReauthReason = "expired" | "revoked" | "lost-key";
-export type RemoteConnectionReason = RemoteReauthReason | "host-changed";
+export type RemoteConnectionReason =
+  | RemoteReauthReason
+  | "host-changed"
+  | typeof REMOTE_ACCESS_PAUSED_REASON;
+
+/**
+ * What a person reads when the host refused a request for a reason that is
+ * theirs to change, not a lost credential: the host's remote access is paused,
+ * or the access level they chose for this device does not reach the action.
+ * Anything else answers nothing, and the caller shows its own words.
+ */
+export function remoteRefusalCopy(body: unknown): string | undefined {
+  const reasonCode =
+    typeof body === "object" && body !== null && "reasonCode" in body ? body.reasonCode : undefined;
+  if (reasonCode === REMOTE_ACCESS_PAUSED_REASON) {
+    return "Remote access is paused on this computer. Resume it in Settings there to reconnect.";
+  }
+  if (reasonCode === DEVICE_ACCESS_LEVEL_REFUSED_REASON) {
+    return "This device's access level doesn't allow that. Change it in Settings on the computer.";
+  }
+  return undefined;
+}
 
 export class RemoteConnectionError extends Error {
   readonly category: RemoteConnectionErrorCategory;
@@ -849,6 +872,13 @@ async function protocolStatusError(
     const body = (await response.clone().json()) as { reasonCode?: unknown };
     if (body.reasonCode === "expired" || body.reasonCode === "revoked") {
       reasonCode = body.reasonCode;
+    }
+    // A paused host still knows this device: the pairing is kept and the
+    // person is told why, rather than shown a generic failure.
+    const paused =
+      body.reasonCode === REMOTE_ACCESS_PAUSED_REASON ? remoteRefusalCopy(body) : undefined;
+    if (paused !== undefined) {
+      return new RemoteConnectionError("unavailable", paused, REMOTE_ACCESS_PAUSED_REASON);
     }
   } catch {
     // Hosts may intentionally omit a failure body; preserve a generic rejection.

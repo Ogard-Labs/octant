@@ -3,7 +3,7 @@ import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { ContinuityScreenContext } from "../continuity/ContinueElsewhere";
 import { readContinuationLink } from "../continuity/continuationLink";
 import type { OctantMode } from "@octant/contracts/modes";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RemoteSessionBridge } from "@octant/client-runtime";
 import { createConnectionSupervisor, type ConnectionStatus } from "@octant/client-runtime";
 import { useConnectionStatus } from "@octant/client-runtime/use-connection-status";
@@ -35,6 +35,9 @@ import { NewDeviceAlerts } from "../host/NewDeviceAlerts";
 import { RemoteHostSettings } from "./RemoteHostSettings";
 import { RemoteWorkspace } from "./RemoteWorkspace";
 import { useRemoteSession } from "./useRemoteSession";
+import { useVisibleRefresh } from "../polling/useVisibleRefresh";
+
+const STANDING_REFRESH_INTERVAL_MS = 10_000;
 
 export interface RemoteShellViewProps {
   readonly bridge: RemoteSessionBridge;
@@ -61,23 +64,37 @@ export function RemoteShellView(props: RemoteShellViewProps) {
     () => readContinuationLink(globalThis.location?.href ?? "")?.mode ?? "chat",
   );
   const connected = canExecuteRemoteProductMutation(state);
-  // What the host says this session is, asked again each time the session
-  // becomes ready. Until the host answers, and whenever it does not, the
-  // session is shown as restricted.
-  const [standing, setStanding] = useState<RemoteSessionStanding>(RESTRICTED_REMOTE_SESSION);
-  const ready = state.kind === "ready";
-  useEffect(() => {
-    if (!ready) return;
-    const connection = props.bridge.connection();
-    if (connection === undefined) return;
-    let current = true;
-    void readRemoteSessionStanding(connection).then((answer) => {
-      if (current) setStanding(answer);
-    });
-    return () => {
-      current = false;
-    };
-  }, [props.bridge, ready]);
+  // The host can change device access without replacing the session.
+  const connection = props.bridge.connection();
+  const sessionId = state.kind === "ready" ? connection?.session()?.sessionId : undefined;
+  const [standingRead, setStandingRead] = useState<{
+    readonly connection: NonNullable<typeof connection>;
+    readonly sessionId: string;
+    readonly standing: RemoteSessionStanding;
+  }>();
+  const refreshStanding = useCallback(
+    async (signal: AbortSignal) => {
+      if (connection === undefined || sessionId === undefined) return;
+      const standing = await readRemoteSessionStanding(connection);
+      if (signal.aborted) return;
+      setStandingRead((previous) =>
+        previous?.connection === connection &&
+        previous.sessionId === sessionId &&
+        previous.standing.actsAsHostPerson === standing.actsAsHostPerson &&
+        previous.standing.accessLevel === standing.accessLevel
+          ? previous
+          : { connection, sessionId, standing },
+      );
+    },
+    [connection, sessionId],
+  );
+  useVisibleRefresh(refreshStanding, undefined, STANDING_REFRESH_INTERVAL_MS);
+  const standing =
+    standingRead !== undefined &&
+    standingRead.connection === connection &&
+    (standingRead.sessionId === sessionId || state.kind === "stale")
+      ? standingRead.standing
+      : RESTRICTED_REMOTE_SESSION;
   const extensionClient = useMemo(
     () => createRemoteExtensionClient(props.bridge, standing),
     [props.bridge, standing],
@@ -210,6 +227,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           connected={connected}
           extensionClient={extensionClient}
           mode={activeMode}
+          readOnly={standing.accessLevel === "read-only"}
         />
       </ContinuityScreenContext.Provider>
 

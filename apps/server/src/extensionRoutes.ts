@@ -584,7 +584,7 @@ export function createExtensionRouteHandler(options: {
       const principal = principalContext.principal;
       if (
         principal.kind !== "remote-device" ||
-        principal.admittedBy !== "host-person" ||
+        !principalActsAsHostPerson(principal) ||
         isAgentGrantSession(principal)
       ) {
         return response(
@@ -650,7 +650,7 @@ export function createExtensionRouteHandler(options: {
       const principal = principalContext.principal;
       const isPersonPairedDevice =
         principal.kind === "remote-device" &&
-        principal.admittedBy === "host-person" &&
+        principalActsAsHostPerson(principal) &&
         !isAgentGrantSession(principal);
       const principalKind: PrincipalKind =
         principal.kind === "local-window"

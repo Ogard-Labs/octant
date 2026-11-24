@@ -50,6 +50,16 @@
   min-height: 0;
 }
 
+/* In a paired thread the pane shares a page with the conversation. Its
+   size-contained lease screen needs a height independent of the grid row. */
+.remote-workspace__thread-view > .desktop-pane {
+  height: auto;
+}
+
+.remote-workspace__thread-view .desktop-pane__fit {
+  height: 65dvh;
+}
+
 .desktop-pane__screen {
   position: relative;
   display: grid;
@@ -89,4 +99,14 @@
 
 .desktop-pane__caption {
   gap: var(--oct-space-1);
+}
+
+.host-display__image {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 70vh;
+  touch-action: none;
+  user-select: none;
 }

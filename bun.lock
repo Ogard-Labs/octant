@@ -313,6 +313,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "@trycua/cua-driver@0.38.0": "patches/cua-driver-0.38.0.patch",
+  },
   "catalog": {
     "@anthropic-ai/claude-agent-sdk": "0.3.211",
     "@opencode-ai/sdk": "1.18.0",

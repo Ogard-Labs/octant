@@ -27,6 +27,7 @@ import {
   decodeWindowId,
   decodeWorkThread,
   decodeWorkTurnState,
+  type DeviceAccessLevel,
   type WorkTurnState,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
@@ -38,6 +39,7 @@ import { ContextHarnessService } from "../context/contextHarnessService";
 import { makeProviderCapacityScheduler } from "../context/contextRuntime";
 import { CHAT_SETTINGS_AGGREGATE_ID } from "../persistence/chatProjection";
 import { makePersistenceLive, Persistence } from "../persistence/persistenceService";
+import { createThreadMessageQueueAuthority } from "./threadMessageQueueAuthority";
 import {
   createThreadMessageQueuePort,
   type ThreadMessageQueuePortDependencies,
@@ -109,6 +111,47 @@ function setup() {
 }
 
 describe("queued turn admission", () => {
+  it("holds a paired device's queued message if its level is now Read only", async () => {
+    const { deps } = setup();
+    let level: DeviceAccessLevel = "full";
+    const deviceId = decodeWindowId("92000000-0000-4000-8000-000000000006");
+    const deviceAuthority = {
+      isLocalWindowLive: () => false,
+      isPairedDevice: (id: typeof deviceId) => String(id) === String(deviceId),
+      deviceAccessLevel: () => level,
+      localWindowCanAccess: () => false,
+      projectType: () => undefined,
+      hasActiveCodeProject: () => false,
+    };
+    const port = createThreadMessageQueuePort({
+      ...deps,
+      ...createThreadMessageQueueAuthority(deviceAuthority),
+    });
+    const scope = { mode: "chat", threadId } as const;
+    const inspection = await port.inspect({ scope, windowId: deviceId, intent: "enqueue" });
+    if (inspection.status === "held") throw new Error("Expected an admitted scope.");
+
+    level = "read-only";
+    expect(await port.inspect({ scope, windowId: deviceId, intent: "read" })).toMatchObject({
+      status: "ready",
+    });
+    expect(await port.inspect({ scope, windowId: deviceId, intent: "enqueue" })).toEqual({
+      status: "held",
+      reason: "unauthorized",
+    });
+    expect(
+      await port.admit({
+        scope,
+        windowId: deviceId,
+        messageId: decodeThreadQueueMessageId("92000000-0000-4000-8000-000000000004"),
+        binding: inspection.binding,
+        payload: { mode: "chat", prompt: "Queued follow-up" },
+        signal: new AbortController().signal,
+      }),
+    ).toEqual({ status: "refused", reason: "authority-revoked" });
+    expect(deps.chat.execute).not.toHaveBeenCalled();
+  });
+
   it("waits for Chat completion cleanup before dispatching at the current journal version", async () => {
     const dataDirectory = mkdtempSync(join(tmpdir(), "octant-queue-version-"));
     const runtime = ManagedRuntime.make(makePersistenceLive({ dataDirectory }));

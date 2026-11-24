@@ -1,5 +1,17 @@
 # Disposable desktops
 
+## Paired Mac display
+
+In an active Code thread, a device paired by the host's person can open the
+logged-in Mac's primary display from Desktop when Computer use is enabled.
+Opening starts in watch mode. Take control drains agent input before enabling
+pointer and keyboard input. Hand back returns control to the agent, whose
+existing application grants and protected-field restrictions still apply.
+Closing the view, locking the Mac, or disabling Computer use ends access.
+Frames and typed text are transient. This view does not acquire a desktop
+lease. On headless Linux hosts, the Desktop pane uses the configured desktop
+lease provider.
+
 This topic specification owns disposable desktops: throwaway Linux desktops a
 thread leases so that an agent and the person can launch, drive, and look at
 what the thread built, on a host that has no screen of its own. Architecture
@@ -1037,8 +1049,8 @@ Rules this slice resolved:
   thread below Full access is tainted, and Plan refuses. A desktop's approval is also asked in the
   thread, where any client that may open the thread can answer it
   ([decision 3](#maintainer-decisions)); the first answer, there or on a
-  local approval card, decides and withdraws the other. This Mac's approvals
-  stay local. An agent's transfer asks in the thread, with its path, size,
+  local approval card, decides and withdraws the other. For This Mac, a turn from the host person’s directly paired Code window
+  also asks for app approval in the thread. A local turn asks on the Mac. An agent's transfer asks in the thread, with its path, size,
   SHA-256, and destination, below Full access, once per thread; a cloud
   desktop asks every time while "Confirm each billed desktop" is on. The posture is the turn's, which may sit below the
   thread's, so a turn sent at approval-gated on a Full access thread asks.
@@ -1112,6 +1124,7 @@ Desktop tab.
 
 Rules this slice resolved:
 
+- A directly paired laptop opens **Desktop** from the selected remote Code thread. Opening the pane reads the thread’s overview through its paired session. Starting or showing a desktop is a separate action. Closing the pane or changing threads closes its view.
 - **A view is host memory, minted by a person's act.** A tab shows a screen
   only through a view the host mints when the person starts a desktop in that
   tab or presses **Show desktop**. Views are never journaled or persisted, so

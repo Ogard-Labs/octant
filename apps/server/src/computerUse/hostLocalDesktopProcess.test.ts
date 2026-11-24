@@ -12,7 +12,8 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { spawn } from "node:child_process";
+import { PNG } from "pngjs";
+import { spawn, spawnSync } from "node:child_process";
 import { createServer, type AddressInfo } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
@@ -708,6 +709,7 @@ describe("host-local desktop under real Bubblewrap and Xvfb", () => {
             size: app.length,
             sha256: createHash("sha256").update(app).digest("hex"),
           },
+          outsideContent: { labels: [] },
           isError: false,
         });
         expect(asked[0]).toContain("dist/notes-app");
@@ -889,5 +891,122 @@ describe("host-local desktop under real Bubblewrap and Xvfb", () => {
       expect(existsSync(join(directory, "desktops", String(leaseId)))).toBe(false);
     },
     120_000,
+  );
+  it.runIf(
+    canRunDesktop &&
+      spawnSync("/usr/bin/python3", ["-c", "import gi; gi.require_version('WebKit2', '4.1')"])
+        .status === 0,
+  )(
+    "shows the agent a checkout web page changed by the paired person's click",
+    async () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-web-desktop-")));
+      directories.push(root);
+      const checkout = join(root, "checkout");
+      mkdirSync(checkout);
+      writeFileSync(
+        join(checkout, "web-app"),
+        `#!/usr/bin/python3
+import gi
+gi.require_version("Gtk","3.0")
+gi.require_version("WebKit2","4.1")
+from gi.repository import Gtk, WebKit2
+window=Gtk.Window()
+window.set_decorated(False)
+window.set_default_size(640,480)
+browser=WebKit2.WebView()
+window.add(browser)
+browser.load_html("""<body style="background:#ef1020;height:100vh" onclick="this.style.background='#10ef20'"></body>""",None)
+window.show_all()
+Gtk.main()
+`,
+      );
+      const db = openSqlite(join(root, "host.sqlite3"));
+      applyMigrations(db, MIGRATIONS, () => new Date(START).toISOString());
+      const { service } = hostOver(db, join(root, "leases"), checkout, "approval-gated");
+      const deviceId = randomUUID(),
+        threadId = randomUUID();
+      const tab = {
+        owner: { mode: "code" as const, threadId },
+        actor: decodeEventActor({ kind: "remote-device", actorId: deviceId, deviceId }),
+        scopeId: deviceId,
+      };
+      const acquired = await service.acquire(tab);
+      if (acquired.status !== "acquired") throw Error("desktop unavailable");
+      const leaseId = acquired.lease.leaseId;
+      const agent = decodeEventActor({
+        kind: "agent",
+        actorId: randomUUID(),
+        providerInstanceId: randomUUID(),
+        threadId,
+      });
+      try {
+        expect(await service.transfer({ ...tab, leaseId, path: "web-app" })).toMatchObject({
+          status: "delivered",
+        });
+        const control = (operation: "launch" | "observe") =>
+          service.control({
+            owner: tab.owner,
+            actor: agent,
+            leaseId,
+            command: decodeComputerControlCommand({
+              operation,
+              appId: "web-app",
+              ...(operation === "observe" ? { windowId: 1 } : {}),
+            }),
+          });
+        expect(await control("launch")).toMatchObject({
+          status: "answered",
+          result: { kind: "windows" },
+        });
+        const opened = await service.openView({ ...tab, leaseId });
+        if (opened.status !== "viewing") throw Error("no personal view");
+        const view = { ...tab, leaseId, viewId: opened.viewId };
+        const pixel = (png: Buffer) => {
+          const image = PNG.sync.read(png);
+          const index = (image.width * 100 + 100) * 4;
+          return [...image.data.subarray(index, index + 3)];
+        };
+        await expect
+          .poll(
+            async () => {
+              const frame = await service.frame(view);
+              return frame.status === "frame" ? pixel(Buffer.from(frame.frame.bytes)) : [];
+            },
+            { timeout: 12000 },
+          )
+          .toEqual([239, 16, 32]);
+        for (const action of ["move", "down", "up"] as const) {
+          expect(
+            await service.input({
+              ...view,
+              event: {
+                kind: "pointer",
+                action,
+                ...(action === "move" ? {} : { button: "left" as const }),
+                x: 100,
+                y: 100,
+              },
+            }),
+          ).toEqual({ status: "delivered" });
+        }
+        await expect
+          .poll(
+            async () => {
+              const answer = await control("observe");
+              return answer.status === "answered" &&
+                answer.result.kind === "observation" &&
+                answer.result.image
+                ? pixel(Buffer.from(answer.result.image.data, "base64"))
+                : [];
+            },
+            { timeout: 12000 },
+          )
+          .toEqual([16, 239, 32]);
+      } finally {
+        await service.release({ ...tab, leaseId });
+        db.close();
+      }
+    },
+    30000,
   );
 });

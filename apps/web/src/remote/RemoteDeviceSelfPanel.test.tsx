@@ -79,6 +79,22 @@ function renderPanel(bridge: Awaited<ReturnType<typeof readyBridge>>["bridge"]) 
   );
 }
 
+describe("RemoteDeviceSelfPanel access level", () => {
+  it("shows this browser's own access level and why some controls are missing", async () => {
+    const { bridge } = await readyBridge({ actsAsHostPerson: false, accessLevel: "read-only" });
+    renderPanel(bridge);
+    expect(await screen.findByText("Read only")).toBeInTheDocument();
+    expect(screen.getByText(/can read this computer but not change it/i)).toBeInTheDocument();
+  });
+
+  it("says nothing more for a browser at Full", async () => {
+    const { bridge } = await readyBridge({ actsAsHostPerson: true, accessLevel: "full" });
+    renderPanel(bridge);
+    expect(await screen.findByText("Full")).toBeInTheDocument();
+    expect(screen.queryByText(/not change it|approve and steer/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("RemoteDeviceSelfPanel key rotation", () => {
   it("requires explicit confirmation before rotating and can be cancelled", async () => {
     const user = userEvent.setup();

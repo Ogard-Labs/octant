@@ -1,3 +1,4 @@
+import { ACCESS_LEVEL_RENDERERS } from "./accessLevelScenes";
 import { DEFAULT_THEME_SETTINGS, type ThemeSettings } from "@octant/contracts/theme";
 import type { ProjectId } from "@octant/contracts/projects";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
@@ -205,6 +206,11 @@ function RailScene() {
 }
 
 const RENDERERS: ReadonlyArray<{ readonly id: string; readonly render: () => ReactNode }> = [
+  ...ACCESS_LEVEL_RENDERERS,
+  {
+    id: "qa-paired-devices-confirm",
+    render: () => ACCESS_LEVEL_RENDERERS.find((r) => r.id === "qa-paired-devices")?.render(),
+  },
   { id: "home", render: () => <HomeScene /> },
   {
     // The side panel is the dock's Environment tool. The panel renders in place

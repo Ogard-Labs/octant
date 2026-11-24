@@ -188,6 +188,7 @@ export const ComputerUseStatus = Schema.Struct({
   supported: Schema.Boolean,
   enabled: Schema.Boolean,
   automaticUpdates: Schema.Boolean,
+  permissionsUnavailable: Schema.optional(Schema.Boolean),
   permissions: Schema.Struct({
     accessibility: Schema.Boolean,
     screenRecording: Schema.Boolean,

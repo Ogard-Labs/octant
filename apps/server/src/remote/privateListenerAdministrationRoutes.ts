@@ -50,7 +50,7 @@ export interface PrivateListenerAdministrationRouteOptions {
    * these routes change it: a server shutdown disables the listener through
    * the controller without forgetting it.
    */
-  readonly setting?: Pick<PrivateListenerSettingPort, "save" | "clear">;
+  readonly setting?: Pick<PrivateListenerSettingPort, "load" | "save" | "clear">;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -102,7 +102,7 @@ export function createPrivateListenerAdministrationRouteHandler(
     const route = url.pathname as RouteValue;
     if (route === ROUTES.status) {
       if (request.method !== "GET") return failure("invalid", 400);
-      return statusResponse(control.status());
+      return statusResponse(control.status(), options.setting);
     }
     if (request.method !== "POST") return failure("invalid", 400);
 
@@ -111,7 +111,7 @@ export function createPrivateListenerAdministrationRouteHandler(
         await readNoBody(request);
         const disabled = await control.disable();
         options.setting?.clear();
-        return statusResponse(disabled);
+        return statusResponse(disabled, options.setting);
       }
       if (request.headers.get("content-type")?.split(";", 1)[0]?.trim() !== "application/json") {
         return failure("invalid", 400);
@@ -126,16 +126,30 @@ export function createPrivateListenerAdministrationRouteHandler(
           return failure("invalid", 400);
         if (value.action === "prepare" || value.action === "cancel") {
           requireExactKeys(value, ["action"]);
-          return transitionResponse(await control.transitionKey({ action: value.action }));
+          return transitionResponse(
+            await control.transitionKey({ action: value.action }),
+            options.setting,
+          );
         }
         if (value.action !== "activate" || !("newPin" in value) || typeof value.newPin !== "string")
           return failure("invalid", 400);
         requireExactKeys(value, ["action", "newPin"]);
         return transitionResponse(
           await control.transitionKey({ action: "activate", newPin: value.newPin }),
+          options.setting,
         );
       }
-      const config = decodeListenerConfig(decoded.value);
+      let config: RequestedPrivateListenerConfig;
+      if (route === ROUTES.enable && isSavedListenerRequest(decoded.value)) {
+        // A bare `octant listener enable` asks to run the remembered
+        // settings again: address, port and the certificate it kept, pasted
+        // or self-made. Nothing is invented when none were saved.
+        const saved = options.setting?.load();
+        if (saved === undefined) return failure("invalid", 400);
+        config = saved;
+      } else {
+        config = decodeListenerConfig(decoded.value);
+      }
       const status =
         route === ROUTES.enable ? await control.enable(config) : await control.restart(config);
       if (!rememberListener(options.setting, config)) {
@@ -148,7 +162,7 @@ export function createPrivateListenerAdministrationRouteHandler(
           { status: 503 },
         );
       }
-      return statusResponse(status);
+      return statusResponse(status, options.setting);
     } catch (error) {
       return mapError(error);
     }
@@ -178,12 +192,23 @@ function rememberListener(
   }
 }
 
-function statusResponse(status: PrivateListenerHostStatus): Response {
-  return Response.json({ status: projectStatus(status) });
+function statusResponse(
+  status: PrivateListenerHostStatus,
+  setting: PrivateListenerAdministrationRouteOptions["setting"],
+): Response {
+  // The remembered endpoint, when the listener was ever enabled here: an off
+  // status carries no hostname, and a client telling someone how to turn it
+  // back on needs the address the host would run again, not live facts.
+  const saved = setting?.load();
+  return Response.json({
+    status: projectStatus(status),
+    ...(saved === undefined ? {} : { saved: { hostname: saved.hostname, port: saved.port } }),
+  });
 }
 
 function transitionResponse(
   result: Awaited<ReturnType<PrivateListenerLifecycleController["transitionKey"]>>,
+  setting: PrivateListenerAdministrationRouteOptions["setting"],
 ): Response {
   return "status" in result
     ? Response.json(
@@ -195,7 +220,7 @@ function transitionResponse(
         },
         { status: 503 },
       )
-    : statusResponse(result);
+    : statusResponse(result, setting);
 }
 
 function projectStatus(status: PrivateListenerHostStatus): PrivateListenerHostStatus {
@@ -213,6 +238,17 @@ function projectStatus(status: PrivateListenerHostStatus): PrivateListenerHostSt
     ...(status.keyTransition === undefined ? {} : { keyTransition: status.keyTransition }),
     ...(status.errorCode === undefined ? {} : { errorCode: status.errorCode }),
   });
+}
+
+/** The body a bare `octant listener enable` sends: run the saved settings again. */
+function isSavedListenerRequest(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "saved" in value &&
+    value.saved === true &&
+    Object.keys(value).length === 1
+  );
 }
 
 /**

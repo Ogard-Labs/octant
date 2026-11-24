@@ -2895,6 +2895,28 @@ CREATE INDEX validation_evidence_authority_idx
       DROP TABLE usage_turn_level_boundary;
     `,
   },
+  {
+    version: 112,
+    name: "create_remote_device_access_projection",
+    // A paired device's access level and the host's remote access pause, both
+    // kept by the remote-access projection. No journal written before this
+    // migration holds either fact, and a device with no row reads as Full and
+    // a host with no row as not paused, so nothing is backfilled.
+    sql: `
+      CREATE TABLE remote_device_access_level_projection (
+        device_id TEXT PRIMARY KEY CHECK(length(trim(device_id)) > 0),
+        host_id TEXT NOT NULL CHECK(length(trim(host_id)) > 0),
+        access_level TEXT NOT NULL CHECK(access_level IN ('full', 'approve-and-steer', 'read-only')),
+        changed_at TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE remote_access_pause_projection (
+        pause_key TEXT PRIMARY KEY CHECK(pause_key = 'host'),
+        host_id TEXT NOT NULL CHECK(length(trim(host_id)) > 0),
+        paused INTEGER NOT NULL CHECK(paused IN (0, 1)),
+        changed_at TEXT NOT NULL
+      ) STRICT;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

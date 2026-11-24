@@ -1040,7 +1040,11 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   { octant: "listener [status]" },
   {
     octant:
-      "listener enable --hostname <lan-or-tailscale-address> --port <port> --cert <path> --key <path>",
+      "listener enable [--hostname <lan-or-tailscale-address> --port <port>] [--cert <path> --key <path>]",
+  },
+  {
+    octant:
+      "            bare enable reuses the saved settings, including a pasted certificate; with nothing saved it needs --hostname and --port",
   },
   { octant: "listener disable" },
   { octant: "listener prepare-key|cancel-key" },
@@ -1077,6 +1081,7 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   { octant: "pair approve|deny <ticket-id>" },
   { octant: "auth list" },
   { octant: "auth revoke <device-id> | --all" },
+  { octant: "auth status | pause | resume" },
   { octant: "status [--hostname <host>] [--port <port>]" },
   { octant: "mcp" },
 ];

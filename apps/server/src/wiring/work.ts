@@ -61,6 +61,7 @@ import { ThreadMessageQueueService } from "../messageQueue/threadMessageQueueSer
 import { createThreadMessageQueuePort } from "../messageQueue/threadMessageQueuePorts";
 import { journalThreadMessageSteered } from "../messageQueue/threadMessageSteeredRecord";
 import { createThreadMessageQueueAuthority } from "../messageQueue/threadMessageQueueAuthority";
+import { readDeviceAccessLevel } from "../persistence/remoteAccessProjection";
 import { createThreadMessageQueueAttachments } from "../messageQueue/threadMessageQueueAttachments";
 import { createThreadMessageQueueRouteHandler } from "../messageQueue/threadMessageQueueRoutes";
 import { createThreadWakeupRouteHandler } from "../wakeups/threadWakeupRoutes";
@@ -1942,6 +1943,10 @@ export function wireWork(deps: WorkDependencies) {
           isRoutineHostScope(windowId) ||
           windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
         isPairedDevice: isPairedDeviceScope,
+        deviceAccessLevel: (windowId) =>
+          isRestrictedDeviceScope(windowId)
+            ? undefined
+            : readDeviceAccessLevel(persistence.connection, String(windowId)),
         localWindowCanAccess: (windowId, mode, projectId) => {
           if (isRoutineHostScope(windowId) && mode === "work")
             return projectId !== undefined && persistence.readProject(projectId)?.type === "work";

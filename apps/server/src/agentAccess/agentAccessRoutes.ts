@@ -5,6 +5,7 @@ import {
   initializeResult,
   type ToolAnswer,
 } from "@octant/cli/agent-tools";
+import { remoteAccessPausedResponse } from "../remote/remoteHttpAuthentication";
 import type { RemoteRouteFacts } from "../remoteRoutePolicy";
 import type { AgentAccessService } from "./agentAccessService";
 import {
@@ -37,6 +38,13 @@ export interface AgentAccessListenerRouteOptions {
   readonly version: string;
   readonly pollIntervalMs?: number;
   readonly events?: AgentEventRoutes;
+  /**
+   * Whether remote access is paused, read again once a request's body has
+   * arrived: the pause may have been made while it was still uploading,
+   * after the gateway read it. The loopback server never passes this; an
+   * MCP client on this computer is not remote access.
+   */
+  readonly remoteAccessPaused?: () => boolean;
 }
 
 /**
@@ -53,8 +61,9 @@ export function createAgentAccessListenerRouteHandler(
 ): (
   request: Request,
   facts?: Pick<RemoteRouteFacts, "sourceClass">,
+  pauseSignal?: AbortSignal,
 ) => Promise<Response | undefined> {
-  return async (request, facts) => {
+  return async (request, facts, pauseSignal) => {
     const url = new URL(request.url);
     if (
       url.pathname !== AGENT_ACCESS_LISTENER_ROUTES.claim &&
@@ -72,6 +81,15 @@ export function createAgentAccessListenerRouteHandler(
     }
     const bytes = await readBody(request, MAX_AGENT_MCP_BODY_BYTES);
     if (bytes === undefined) return Response.json({ error: "too-large" }, { status: 413 });
+    // Judged again now the upload has arrived, before the request's grant is
+    // read and any tool runs: a pause made while this body streamed refuses
+    // it here, the same answer the gateway would have given.
+    if (
+      sourceClass !== "loopback" &&
+      (options.remoteAccessPaused?.() === true || pauseSignal?.aborted === true)
+    ) {
+      return remoteAccessPausedResponse();
+    }
 
     if (url.pathname === AGENT_ACCESS_LISTENER_ROUTES.claim) {
       const claimed = options.service.claim(parseJson(new TextDecoder().decode(bytes)));
@@ -113,6 +131,10 @@ export function createAgentAccessListenerRouteHandler(
       return new Response(null, { status: 202 });
     }
     const grant = authenticated.grant;
+    const requestSignal =
+      pauseSignal === undefined || sourceClass === "loopback"
+        ? request.signal
+        : AbortSignal.any([request.signal, pauseSignal]);
     const policy = agentToolPolicy(grant, options.session);
     const modern = modernAgentMcp(request, params);
     const events = options.events;
@@ -134,7 +156,15 @@ export function createAgentAccessListenerRouteHandler(
     const compatibility = events?.compatibility(access) ?? false;
     if (typeof method === "string" && method.startsWith("events/") && events !== undefined) {
       try {
-        return await events.handle({ request, id, method, params, access, compatibility });
+        return await events.handle({
+          request,
+          requestSignal,
+          id,
+          method,
+          params,
+          access,
+          compatibility,
+        });
       } catch {
         return eventFailure(id, -32603, "Octant could not read thread milestones");
       }
@@ -177,7 +207,10 @@ export function createAgentAccessListenerRouteHandler(
     if (typeof name !== "string" || !agentToolList(policy).some((tool) => tool["name"] === name)) {
       return rpc(failure(id, -32602, `Unknown tool: ${String(name)}`));
     }
-    const signal = AbortSignal.any([authenticated.signal, request.signal]);
+    // A grant revoked while the body uploaded, or since it was read, aborts
+    // the signal the tool run binds to; refuse before the tool runs.
+    if (authenticated.signal.aborted) return unauthorized();
+    const signal = AbortSignal.any([authenticated.signal, requestSignal]);
     const call = callAgentTool(name, asObject(params?.["arguments"]) ?? {}, {
       openSession: async () => createAgentSession({ grant, signal, deps: options.session }),
       signal,

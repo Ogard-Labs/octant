@@ -1851,11 +1851,13 @@ export interface RemoteRouteFacts {
   readonly sourceKey: string;
   /** The peer's private-network address, for a new-device alert only. */
   readonly privateAddress?: string;
+  /** The remote-access state when the gateway first admitted an agent request. */
+  readonly agentAccessPauseSignal?: AbortSignal;
 }
 
 export const REMOTE_SECURITY_POLICY = {
   hsts: "max-age=31536000; includeSubDomains",
-  csp: "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'",
+  csp: "default-src 'self'; img-src 'self' data: blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'",
   nosniff: "nosniff",
   referrer: "no-referrer",
 } as const;

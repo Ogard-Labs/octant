@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createMobileChatWithFirstTurn,
   decodeMobileModelOptionId,
+  RESTRICTED_REMOTE_SESSION,
   type MobileInboxRow,
   type MobileModelOption,
   type MobileRemoteTransport,
@@ -13,6 +14,7 @@ import type { MobileHostHealthKind } from "../session/MobileHostSessionHub";
 import { presentPlacementDisabledReason } from "./placementDisabledReason";
 import { usePlacementHostModels } from "../session/usePlacementHostModels";
 import { selectMobilePlacementTransport } from "./placementTransport";
+import { useRemoteSessionStanding } from "./useRemoteSessionStanding";
 
 /**
  * The host new threads go to, its health, and the model chosen for it. Shared
@@ -23,7 +25,15 @@ import { selectMobilePlacementTransport } from "./placementTransport";
  * not, because it names the host it will use.
  */
 export function usePlacement(options: { readonly fallbackToFirstHost: boolean }) {
-  const { transports, hosts, placementHostId, transportForHost, health } = useMobileSession();
+  const {
+    environment,
+    transports,
+    hosts,
+    placementHostId,
+    transportForHost,
+    health,
+    refreshHosts,
+  } = useMobileSession();
   const { fallbackToFirstHost } = options;
 
   const placementTransport: MobileRemoteTransport | undefined = useMemo(() => {
@@ -46,6 +56,24 @@ export function usePlacement(options: { readonly fallbackToFirstHost: boolean })
     return hosts.find((host) => host.hostId === placementTransport.hostId)?.label;
   }, [hosts, placementTransport]);
   const staleGate = useMemo(() => presentStaleHostSecurity(placementHealth), [placementHealth]);
+  const [accessRefresh, setAccessRefresh] = useState(0);
+  const refreshPlacement = useCallback(() => {
+    setAccessRefresh((previous) => previous + 1);
+    void refreshHosts();
+  }, [refreshHosts]);
+  const standing = useRemoteSessionStanding(
+    placementTransport,
+    environment.kind === "mock" && environment.offlineDemo,
+    accessRefresh,
+  );
+  const placementAccessReason =
+    placementTransport === undefined || !staleGate.allowProductMutations
+      ? undefined
+      : standing === RESTRICTED_REMOTE_SESSION
+        ? MOBILE_COPY.threadCreationAccessUnconfirmed
+        : standing.accessLevel === "read-only"
+          ? MOBILE_COPY.threadCreationWatchingOnly
+          : undefined;
 
   const models = usePlacementHostModels(placementTransport);
   const [modelOptionId, setModelOptionId] = useState<string | undefined>();
@@ -64,14 +92,16 @@ export function usePlacement(options: { readonly fallbackToFirstHost: boolean })
       ? MOBILE_COPY.modelUnavailable
       : mobileModelLabel(models.options, models.options[0]?.modelId ?? MOBILE_COPY.modelHostOnly));
 
-  const placementDisabledReason = presentPlacementDisabledReason({
-    hostLabel: placementLabel,
-    health: placementHealth,
-    healthDetail: placementHealthDetail,
-    modelsFailed: placementTransport !== undefined && models.error !== undefined,
-  });
+  const placementDisabledReason =
+    placementAccessReason ??
+    presentPlacementDisabledReason({
+      hostLabel: placementLabel,
+      health: placementHealth,
+      healthDetail: placementHealthDetail,
+      modelsFailed: placementTransport !== undefined && models.error !== undefined,
+    });
 
-  /** Callers check `placementTransport` and `staleGate` first; this only sends. */
+  /** Callers check the placement host, health, and access first; this only sends. */
   const createChat = useCallback(
     async (prompt: string, onCreated?: (row: MobileInboxRow) => void): Promise<MobileInboxRow> => {
       if (placementTransport === undefined) {
@@ -95,7 +125,9 @@ export function usePlacement(options: { readonly fallbackToFirstHost: boolean })
     placementTransport,
     placementLabel,
     placementHealth,
+    placementAccessReason,
     placementDisabledReason,
+    refreshPlacement,
     staleGate,
     models,
     modelOptionId,

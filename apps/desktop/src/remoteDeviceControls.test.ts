@@ -67,6 +67,9 @@ function runtime(): RemoteDeviceControlRuntime & Record<string, ReturnType<typeo
       result: "applied" as const,
       occurredAt: pending.claimedAt,
     })),
+    setDeviceAccessLevel: vi.fn(async () => undefined),
+    readRemoteAccessPaused: vi.fn(async () => false),
+    setRemoteAccessPaused: vi.fn(async (input) => input.paused),
   };
 }
 

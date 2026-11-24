@@ -25,6 +25,7 @@ export interface ExtensionToolApprovalCardProps {
   readonly threadId: string;
   /** What the host said of this session; absent reads as restricted. */
   readonly actsAsHostPerson?: boolean;
+  readonly watchingOnly?: boolean;
   readonly refreshIntervalMs?: number;
   /** Confirms Allow on this phone; the device's own biometrics when absent. */
   readonly authenticator?: BiometricAuthenticator;
@@ -65,7 +66,7 @@ export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps)
   // from a session acting as its own person, so it is offered to no other.
   const canNarrow = covers === "server" && props.actsAsHostPerson === true;
   const decide = async (decision: "approved" | "denied", narrowToTool = false) => {
-    if (busyRef.current) return;
+    if (props.watchingOnly === true || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     try {
@@ -143,26 +144,28 @@ export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps)
             : MOBILE_COPY.toolApprovalServerOnThreadDetail}
         </Text>
       )}
-      <ApprovalDecisionButtons
-        allowLabel={
-          covers === "server"
-            ? MOBILE_COPY.toolApprovalAllowServer
-            : covers === "server-on-thread"
-              ? MOBILE_COPY.toolApprovalAllowServerOnThread
+      {props.watchingOnly === true ? null : (
+        <ApprovalDecisionButtons
+          allowLabel={
+            covers === "server"
+              ? MOBILE_COPY.toolApprovalAllowServer
+              : covers === "server-on-thread"
+                ? MOBILE_COPY.toolApprovalAllowServerOnThread
+                : undefined
+          }
+          busy={busy}
+          narrower={
+            canNarrow
+              ? {
+                  label: MOBILE_COPY.toolApprovalAllowToolOnly,
+                  onPress: () => void decide("approved", true),
+                }
               : undefined
-        }
-        busy={busy}
-        narrower={
-          canNarrow
-            ? {
-                label: MOBILE_COPY.toolApprovalAllowToolOnly,
-                onPress: () => void decide("approved", true),
-              }
-            : undefined
-        }
-        onAllow={() => void decide("approved")}
-        onDeny={() => void decide("denied")}
-      />
+          }
+          onAllow={() => void decide("approved")}
+          onDeny={() => void decide("denied")}
+        />
+      )}
       {resource.error === undefined ? null : (
         <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
           {MOBILE_COPY.approvalReconnecting}
