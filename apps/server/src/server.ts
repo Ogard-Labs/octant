@@ -715,6 +715,7 @@ export function startOctantServer(
       threadWork,
     } = wireHarness({
       hubActScopeSlot,
+      threadMoveHolds,
       resolveThreadStrict,
       providerAvailabilityMarks,
       isProjectPolicyTargetAllowed,

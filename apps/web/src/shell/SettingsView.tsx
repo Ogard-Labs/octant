@@ -1244,8 +1244,11 @@ function ActiveSectionContent({
             <AutomaticModelSettings
               codeSettings={props.codeController?.bootstrap?.settings}
               onCodeUpdate={props.codeController?.updateSettings ?? (async () => false)}
+              onOpenModelEndpoints={openModelEndpoints}
+              onThreadTitlesChange={(threadTitles) => props.onSettingsChange({ threadTitles })}
               personMemoryClient={props.personMemoryClient}
               providerSnapshot={props.providerController.snapshot}
+              threadTitles={props.settings.threadTitles}
               {...(focusedSetting === undefined ? {} : { focusedSetting })}
             />
           </div>

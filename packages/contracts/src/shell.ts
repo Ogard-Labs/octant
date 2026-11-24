@@ -65,6 +65,7 @@ import { AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { DEFAULT_PAIRED_DEVICE_LIFETIME, PairedDeviceLifetime } from "./remoteAccess";
 import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
+import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { ProjectId } from "./projects";
 import { CanvasId } from "./canvas";
 import {
@@ -772,6 +773,21 @@ export const NextMessageSuggestionsSetting = Schema.Struct({
 }).annotations({ parseOptions: { onExcessProperty: "error" as const } });
 export type NextMessageSuggestionsSetting = typeof NextMessageSuggestionsSetting.Type;
 
+export const ThreadTitleSource = Schema.Literal("first-message", "api", "subscription");
+export type ThreadTitleSource = typeof ThreadTitleSource.Type;
+
+const ThreadTitleModel = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+}).annotations(strict);
+
+export const ThreadTitleSettings = Schema.Struct({
+  source: ThreadTitleSource,
+  apiModel: Schema.optional(ThreadTitleModel),
+  subscriptionModel: Schema.optional(ThreadTitleModel),
+}).annotations(strict);
+export type ThreadTitleSettings = typeof ThreadTitleSettings.Type;
+
 /** How many host credentials one provider's pass-through list may name. */
 export const MAX_PROVIDER_PASS_THROUGH = 64;
 
@@ -805,6 +821,8 @@ export const ShellSettings = Schema.Struct({
    * and in which modes. Absent means on in every mode.
    */
   nextMessageSuggestions: Schema.optional(NextMessageSuggestionsSetting),
+  /** Absent keeps prompt-based titles. Remember each model across source changes. */
+  threadTitles: Schema.optional(ThreadTitleSettings),
   sidebarWidth: SidebarWidth,
   contextSidebarWidth: ContextSidebarWidth,
   lastContextSurface: Schema.NullOr(ContextSurfaceId),

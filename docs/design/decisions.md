@@ -43,7 +43,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 5         | 3       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
-| [Providers](#providers)                                                               | 10        | 8       | 2            | 0                   |
+| [Providers](#providers)                                                               | 11        | 8       | 3            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 10        | 8       | 2            | 0                   |
 | [Native harness](#native-harness)                                                     | 7         | 5       | 2            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **295**   | **178** | **113**      | **4**               |
+| **All areas**                                                                         | **296**   | **178** | **114**      | **4**               |
 
 ## Principles and hard lines
 
@@ -126,6 +126,7 @@ Everything a person cares about stays on the host; Octant makes only a short, sw
 - No Octant account, relay, or telemetry is required; artifact sync uses only a store the person owns.
 - There is no Octant relay (kept by maintainer decision, 2026-11-14). The user guide documents a relay or tunnel the person runs themselves (a private network overlay, an SSH tunnel) in front of the listener; the product does not change for it.
 - The outside calls are signed update checks, managed device-tool update checks, marketplace fetches the person starts, public Canvas link calls, and a hub's own push delivery when its person turns it on; each has an off switch.
+- Optional [thread titles](model-endpoints.md#thread-titles) go only to the API or subscription endpoint and model the person selects for that job.
 - Traffic among a person's own devices on their private network is not a third-party call, but it is always authenticated and encrypted.
 - Adding telemetry, an external call, credential exposure or a cloud dependency needs an explicit request and a documented boundary in the owning specification.
 
@@ -286,6 +287,7 @@ Octant Shield is Octant's own automatic approval reviewer for every runtime that
 - A release with Shield requires measuring its false-allow rate on a fixture set of known-safe and known-unsafe calls.
 - Build order: the native harness, every runtime's approval path, the picker and Settings, the Watcher, safe networks, then the server registry and SSH.
 - Automatic model calls (the Judge and person memory's distilling) share one Settings surface, Settings › Providers & Models › Automatic model calls, set from a local window or a paired device (maintainer decision, 2026-11-12; server policy admits a person-paired device and refuses hub-introduced devices; paired UI follow-up remains). Each job keeps the default (the thread's provider, its smallest model) or uses one account and model the person picks, API-key accounts included; the surface says plainly that what the job reads goes to that provider. Account selection is fully manual: a chosen account that is removed, off, not ready or at its limit sends the Judge's decision to the person (never allowed on its own) and makes distilling wait for a later pass; nothing rotates or fails over. Each decision and usage row names the account that was used. Built. Not folded in: the Octant Harness's advisor review, which is routed by its own slots.
+- Automatic model calls also offers optional [model-backed thread titles](model-endpoints.md#thread-titles). The person can switch between an API endpoint, a ChatGPT plan endpoint, and the first message. Each source remembers its chosen model. The explicit endpoint is separate from the thread's agent and respects the thread's Project provider policy and spend ceilings. The first message supplies the title until a result is available or if the call cannot run. Built.
 - Built: the Judge (rules, fast allow rules that read a command exactly as written, the model stage, fail-closed, brakes, per-call grants, taint limits, spend reservations with the review's usage recorded under the thread), answering the approvals of the Octant Harness, Claude Code, Codex, OpenCode, ACP agents and Pi on a Code thread or a Work thread in Auto where Shield is the reviewer, and their subagents', each decision journaled and shown on the transcript (on a Work thread, a review row among the turn's tool steps, the Octant Harness's included, which an older client reads as an ordinary step); Auto offered in the picker wherever a reviewer can run; Settings › Code › Access Auto reviewer with a Code Project override of the reviewer, and the Judge's model under Settings › Providers & Models › Automatic model calls; the fixture set with a test of the rule stages and a false-allow measurement script.
 - Built: the Watcher, deterministic detectors with no model, over every app-managed tool result and plugin MCP result before the model reads it; each label is journaled as an outside-content source that marks the thread, reaches the Judge as a kind, tags the Code tool row (quietly at Full access) and marks the Code board card; where an adapter sees what a runtime's own web search or fetch returned (an ACP agent's content items, Codex's standalone search results, OpenCode's web tool text items), the Watcher reads that text too, and Chat and Work tool rows carry the same tag as Code's.
 - Built: the server registry in Settings › Permissions › Servers (alias, user, Read-only, Operate or Admin profile, described deploys, runbook path), journaled and replayed, edited from a local window or a device the host's own person paired (journaled with the device as actor; hub-introduced devices are refused; paired UI follow-up remains); the Judge's SSH rules (a plain ssh call to a registered server as its user passes within its profile, an unregistered host, a key path, a tunnelling option, a lock-out or destructive remote command, or a remote secret read goes to the person or is refused) checked on a real-world command set; every Octant Harness `ssh` command journaled with host and exit status at every level; the person's SSH agent socket handed to harness shells; runbooks given to harness turns as notes that grant nothing.
@@ -1664,6 +1666,20 @@ Image generation is a journaled job with exactly one profile, and voice is an ap
 - In attended Work and Code outside Plan, an agent may turn text (up to 4,096 characters, as MP3, WAV or Opus) into a new confined audio file in the turn's folder (the Work folder or the Code thread's checkout, including a linked worktree) using the configured Voice synthesis endpoint and voice after a shared offer that also covers the file write. Remembering applies only to the same thread, endpoint, model and voice in host memory and skips the card only at Accept edits and Full access (Ask first and Work Auto still ask). Agent narration leaves a slot for local read-aloud. [Architecture: Providers](../architecture.md#providers)
 
 Status: Partly built. Since: —; agent images in every mode 2026-11-07. Detail: [Architecture: Providers](../architecture.md#providers).
+
+### Video generation
+
+Short video clips run as a journaled job through provider-neutral video driver plugins on the person's own provider keys, following the image rule for asking, with the price on the card (maintainer decision, 2026-11-22: the design and the three first-party drivers).
+
+- Video works like image generation: drivers plug into a `videoGeneration` seam in `@octant/provider-sdk` through the plugin-host activation ladder, and more than one provider is supported. Each model declares its durations, resolutions, aspect ratios, audio, inputs, price basis, cancel, removal and resume window, and the host builds the card, price, limits, spend, storage, recovery and viewing from those facts the same way for every provider.
+- First-party drivers (maintainer decision, 2026-11-22): Google Gemini API (Gemini Omni Flash), Runway and fal; Replicate, MiniMax, xAI, Kling, Seedance, Wan, Luma, Pika and Vertex Veo are left to plugins. OpenAI's Videos API, Stability's video API and Bedrock Nova Reel are shut down.
+- A provider runtime's own native media output shows in the thread with no Octant gate, as in comparable agent workspaces; no runtime they drive makes video natively today.
+- The card shows the estimate from the model's declared price before Generate, and what Stop does when the model cannot cancel, and offers "Don't ask again" as for images; Full access, routines and paired devices behave as they do for images. Plan and Side Chats are never offered the tool.
+- Clips use each model's declared range. The host bounds only a clip's stored size (1 GB), job time (30 minutes) and queued video jobs (16 per host) and shares the image queue; the person's thread and Project spend ceilings apply, settled from the provider's reported usage, else the estimate.
+- Clips are stored beside generated images, exported and deleted with their thread, and the provider's copy is removed as soon as the clip is kept where the driver can; otherwise the card says how long the provider keeps it.
+- After a restart, a running job with a recorded provider id resumes within its declared resume window; one without settles at its estimate as interrupted.
+
+Status: Partly built. Since: 2026-11-22. Built: the video seam in `@octant/provider-sdk/video-generation` with its conformance harness, the declared-capability contract and pricing rules, and the Gemini API driver (Gemini Omni Flash). Not yet built: the host job service, the agent tool and card, the viewer and save, and the Runway and fal drivers. Detail: [Video generation](video-generation.md).
 
 ### Provider reach Octant no longer narrows
 

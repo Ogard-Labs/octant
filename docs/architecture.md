@@ -444,13 +444,14 @@ and window-authority registration remain required before renderer navigation.
 
 The renderer defers code and styles used only by workspaces such as Browser
 and Canvas until they open. Shared shell controls keep their styles in the
-initial load.
+initial load. The command palette uses the Settings page labels from the shell.
+Settings loads the full registry of controls and search terms when it opens.
 
 The renderer's first load has a byte budget, recorded in
 `scripts/initial-renderer-budget.json` and enforced by `bun run renderer:check`
 in CI. The budget counts the static graph Vite loads for `index.html`: the main
-entry is at most 1,624,668 B (1,587 KiB), the initial CSS at most 665,705 B
-(650 KiB), and the initial JavaScript and CSS at most 1,231,439 B after gzip
+entry is at most 1,618,546 B (1,581 KiB), the initial CSS at most 665,705 B
+(650 KiB), and the initial JavaScript and CSS at most 1,213,872 B after gzip
 level 6. A change that grows any measure past its budget fails. A change that
 shrinks one lowers the recorded budget. Raising a budget is a maintainer
 decision; the editable composer prompt that holds inline `@model` chips raised
@@ -21472,6 +21473,12 @@ documents its authority, privacy, and release boundaries):
   pull request, which needs no approval (maintainer request, 2026-11-12).
   The rest of the allowed
   actions are not built yet.
+- Short video clips from a video provider the person set up, through video
+  driver plugins on the same seam pattern as image generation and the same
+  card with the price shown, on the person's own provider key with no
+  Octant-operated service ([Video generation](design/video-generation.md);
+  approved 2026-11-22 with Gemini Omni Flash, Runway and fal as first-party
+  drivers; being built).
 - Linked external secret stores, built for the 1Password CLI
   ([linked secret stores](#linked-secret-stores)): a pointer in the credential
   broker, the value fetched at use and never kept.

@@ -353,7 +353,7 @@ import { useRendererOverlayReport } from "./browser/useRendererOverlayReport";
 import { useHomeShortcut } from "./shell/useHomeShortcut";
 import { useNewThreadShortcut } from "./shell/useNewThreadShortcut";
 import { useJumpToWaitingShortcut } from "./shell/useJumpToWaitingShortcut";
-import { octantSettingsRegistry } from "./settings/octantSettingsRegistry";
+import { octantSettingsCommandPages } from "./settings/octantSettingsNavigation";
 import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
 import { PlanUsageProvider } from "./usage/PlanUsageContext";
 import { FollowUpLineageProvider } from "./followUps/followUpLineage";
@@ -8884,7 +8884,7 @@ function LaunchedShell(
       { id: "artifact-library", label: "Artifacts", onOpen: openArtifactLibrary },
       { id: "projects", label: "Projects", onOpen: openProjects },
     ],
-    settingsPages: octantSettingsRegistry.sections
+    settingsPages: octantSettingsCommandPages
       .filter((section) => section.nativeRequired === undefined)
       .map((section) => ({
         sectionId: section.id,
