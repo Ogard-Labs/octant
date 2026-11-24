@@ -42,6 +42,15 @@ function ReadyMerge({
   const running = useRef(false);
   const cancel = useRef<HTMLButtonElement>(null);
   if (!client.mergeProjectPullRequest) return null;
+  // A draft cached before the watch's ready observation may already have been marked ready.
+  if (
+    row.state === "open" &&
+    row.draft &&
+    row.babysit?.stoppedAt &&
+    Date.parse(row.updatedAt) > Date.parse(row.babysit.stoppedAt)
+  ) {
+    return <span>Returned to draft after the ready check.</span>;
+  }
   const ref = pullRequestRef(row);
   async function confirm() {
     if (running.current || !client.mergeProjectPullRequest) return;

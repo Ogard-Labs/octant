@@ -319,22 +319,23 @@ describe("CodeProjectPullRequests", () => {
 
   it("confirms the exact ready commit for the chosen PR in a multi-PR thread notice", async () => {
     const user = userEvent.setup();
-    const heads = ["a".repeat(40), "b".repeat(40)];
+    const heads = ["a".repeat(40), "b".repeat(40), "c".repeat(40)];
     const base = view().rows[0]!;
     const rows = view({
       rows: heads.map((sha, i) => ({
         ...base,
         number: 12 + i,
         state: i === 0 ? "unknown" : "open",
-        draft: i === 1,
-        babysit: { threadId, status: "ready", readyHeadSha: sha },
+        draft: i > 0,
+        updatedAt: i === 2 ? "2026-08-22T09:00:00.000Z" : base.updatedAt,
+        babysit: { threadId, status: "ready", stoppedAt: generatedAt, readyHeadSha: sha },
       })),
     }).rows;
     const selected = base.linkedThreads[0]!.threadId;
     const reason = [
       "Pull request updates",
       ...heads.map((sha, i) => `octant/octant#${12 + i} ready to merge at ${sha}`),
-      "octant/octant#14 ready to merge at " + heads[0],
+      "octant/octant#15 ready to merge at " + heads[0],
     ].join("\n");
     const merge = vi.fn().mockResolvedValue({ status: "refused", reason: "stale" });
     const query = vi.fn().mockResolvedValue({ rows });
@@ -360,9 +361,11 @@ describe("CodeProjectPullRequests", () => {
       />,
     );
     expect(await screen.findByRole("button", { name: "Merge octant/octant#12" })).toBeVisible();
+    expect(screen.getByText("Returned to draft after the ready check.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Merge octant/octant#14" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Merge octant/octant#13" }));
     expect(query).toHaveBeenCalledWith({ version: 1, threadId });
-    expect(screen.queryByRole("button", { name: "Merge octant/octant#14" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Merge octant/octant#15" })).toBeNull();
     const dialog = within(screen.getByRole("dialog"));
     expect(dialog.getByText(heads[1]!)).toBeVisible();
     expect(merge).not.toHaveBeenCalled();
