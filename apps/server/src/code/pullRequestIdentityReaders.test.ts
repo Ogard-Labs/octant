@@ -16,9 +16,12 @@ import {
   decodeCodeThreadFollowUp,
   decodeProjectId,
   decodeWindowId,
-  type CodeThread,
 } from "@octant/contracts";
-import { decodeCodeCheckoutId, decodeCodeThreadId } from "@octant/contracts/code";
+import {
+  decodeCodeCheckoutId,
+  decodeCodeDeliveryTarget,
+  decodeCodeThreadId,
+} from "@octant/contracts/code";
 import type { RequiredChecksState } from "@octant/domain/code-pull-request-action-policy";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Journal } from "../persistence/journal";
@@ -788,10 +791,14 @@ describe("pull request readers use the single forge identity owner", () => {
         threadDeliversPullRequest({
           thread: {
             projectId,
-            deliveryTarget: {
-              proposedBaseRepository: "local/App",
+            deliveryTarget: decodeCodeDeliveryTarget({
+              outcomeKind: "opened-pr",
               branchIntent: "feature/work",
-            } as CodeThread["deliveryTarget"],
+              remoteName: "origin",
+              proposedBaseRepository: "local/App",
+              proposedBaseBranch: "main",
+              confirmedAt: "2026-11-19T12:00:00.000Z",
+            }),
           },
           own: [{ number: 42, repository: { owner: "acme", name: "app" } }],
           pullRequest,

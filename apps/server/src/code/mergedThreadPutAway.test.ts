@@ -4,6 +4,7 @@ import type {
   CodeThreadLinkedPullRequest,
   CodeThreadOperationalMetadataView,
 } from "@octant/contracts";
+import { decodeCodeDeliveryTarget } from "@octant/contracts/code";
 import { describe, expect, it, vi } from "vitest";
 import type { MergedThreadPutAwayOutcome } from "./codeService";
 import {
@@ -92,10 +93,14 @@ function fixture(options: {
 describe("merged thread put-away", () => {
   it("counts a merge as the thread's delivery only in its own repository, on its branch or recorded by Octant", () => {
     const thread = codeThread("delivering", {
-      deliveryTarget: {
-        proposedBaseRepository: "acme/app",
+      deliveryTarget: decodeCodeDeliveryTarget({
+        outcomeKind: "opened-pr",
         branchIntent: "feature/thing",
-      } as CodeThread["deliveryTarget"],
+        remoteName: "origin",
+        proposedBaseRepository: "acme/app",
+        proposedBaseBranch: "main",
+        confirmedAt: "2026-11-19T12:00:00.000Z",
+      }),
     });
     const delivers = (
       pullRequest: Partial<Parameters<typeof threadDeliversPullRequest>[0]["pullRequest"]>,
@@ -129,10 +134,14 @@ describe("merged thread put-away", () => {
   it("finds a server thread's delivery repository in the pull request Octant opened for it", () => {
     // A composer reads no remote of a server, so the target is a placeholder.
     const thread = codeThread("on-a-server", {
-      deliveryTarget: {
-        proposedBaseRepository: "local/App",
+      deliveryTarget: decodeCodeDeliveryTarget({
+        outcomeKind: "opened-pr",
         branchIntent: "feature/thing",
-      } as CodeThread["deliveryTarget"],
+        remoteName: "origin",
+        proposedBaseRepository: "local/App",
+        proposedBaseBranch: "main",
+        confirmedAt: "2026-11-19T12:00:00.000Z",
+      }),
     });
     const delivers = (
       own: Parameters<typeof threadDeliversPullRequest>[0]["own"],
