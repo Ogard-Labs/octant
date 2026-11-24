@@ -330,3 +330,67 @@ it.each([false, true])(
     }
   },
 );
+
+it("discloses a signed-in screenshot and its recipient before approving a video", async () => {
+  const threadId = "00000000-0000-4000-8000-000000000020";
+  const offer = {
+    kind: "video-generate",
+    offerId: "00000000-0000-4000-8000-000000000025",
+    threadKind: "work-thread",
+    scopeId: threadId,
+    prompt: "A sailboat on the water",
+    images: [
+      { role: "first-frame", label: "example.com", signedIn: true },
+      { role: "reference", label: "public.example" },
+    ],
+    profileInstanceId: "00000000-0000-4000-8000-000000000022",
+    profileName: "Gemini Video",
+    providerName: "Google",
+    model: {
+      modelId: "gemini-omni-1.2-flash",
+      displayName: "Gemini Omni Flash",
+      durations: { kind: "range", min: 3, max: 15 },
+      resolutions: ["720p"],
+      aspectRatios: [{ ratio: "16:9" }],
+      audio: "always",
+      inputs: { firstFrame: true, lastFrame: false, maxReferenceImages: 2 },
+      price: {
+        kind: "per-token",
+        outputTokensPerSecond: [{ resolution: "720p", tokens: 5792 }],
+        outputUsdMicrosPerMillionTokens: 12_000_000,
+      },
+      job: { cancel: "running", removal: { kind: "delete" }, resumeWindowHours: 24 },
+    },
+    options: { durationSeconds: 8, resolution: "720p", aspectRatio: "16:9", audio: true },
+    canRemember: false,
+    requestedAt: "2026-10-15T06:00:00.000Z",
+  };
+  const authenticatedFetch = vi.fn<MobileRemoteTransport["authenticatedFetch"]>(async () =>
+    Response.json({ offers: [offer] }),
+  );
+  const rootNode = document.createElement("div");
+  document.body.append(rootNode);
+  const root = createRoot(rootNode);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(ThemeProvider, {
+          preference: "light",
+          children: createElement(ServiceOfferCard, {
+            transport: { hostId: "studio", authenticatedFetch },
+            threadId,
+            threadKind: "work-thread",
+            inProject: true,
+          }),
+        }),
+      ),
+    );
+    expect(rootNode.textContent).toContain("example.com (signed-in page) · sent to Google");
+    expect(rootNode.textContent).toContain("public.example · sent to Google");
+    expect(rootNode.querySelector('[aria-label="Generate"]')).not.toBeNull();
+    expect(authenticatedFetch.mock.calls.map(([request]) => request.method)).toEqual(["GET"]);
+  } finally {
+    act(() => root.unmount());
+    rootNode.remove();
+  }
+});

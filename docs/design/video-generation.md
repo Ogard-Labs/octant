@@ -223,7 +223,8 @@ under [Image generation and voice](decisions.md#image-generation-and-voice).
 The card shows:
 
 - the prompt;
-- any reference images, named, as for images;
+- any input images, named with the provider receiving them, and marked when
+  they came from a signed-in page;
 - the profile, provider and model;
 - the duration, resolution, aspect ratio and audio choice. The person can
   change each within what that model declares.

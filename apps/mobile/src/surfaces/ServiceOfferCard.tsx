@@ -198,7 +198,8 @@ function OfferCard(props: {
           <>
             {offer.images.map((image, index) => (
               <Text key={index} style={text}>
-                {VIDEO_IMAGE_ROLES[image.role]}: {image.label} · sent to {offer.providerName}
+                {VIDEO_IMAGE_ROLES[image.role]}: {image.label}
+                {image.signedIn === true ? " (signed-in page)" : ""} · sent to {offer.providerName}
               </Text>
             ))}
             <Text style={text}>
