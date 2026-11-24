@@ -66,6 +66,7 @@ const SERVER_CHECKOUT_TOOLS: ReadonlySet<RightUtilityDockSurfaceId> = new Set([
   "document",
   "canvas",
   "plan",
+  "tasks",
   "agents",
   "terminal",
   "files",
@@ -84,6 +85,7 @@ const SERVER_WORK_TOOLS: ReadonlySet<RightUtilityDockSurfaceId> = new Set([
   "document",
   "canvas",
   "plan",
+  "tasks",
   "agents",
   "vitals",
 ]);

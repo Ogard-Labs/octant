@@ -908,9 +908,11 @@ html[data-octant-increased-contrast="true"] .turn-action-menu__more .shell-icon-
   gap: 4px;
 }
 
-/* The running line ("Working · 12s · Read") shrinks its step to an ellipsis
-   instead of wrapping, and the clock keeps tabular digits in a fixed minimum
-   width so a tick never moves the words beside it. */
+/* The running line ("Working · 12s · Read") closes a running turn, under its
+   reply and task list, drawn as a header line so it reads like one; the task
+   card's own bottom margin spaces it, so it adds no rule here. It shrinks its
+   step to an ellipsis instead of wrapping, and the clock keeps tabular digits
+   in a fixed minimum width so a tick never moves the words beside it. */
 .turn-header__status--live {
   flex: 0 1 auto;
   min-width: 0;
