@@ -192,16 +192,3 @@ export function useBootstrapDestinations(
 
   return targets;
 }
-
-/** Lazy-mounted observer that keeps paired-computer destination discovery off the initial bundle. */
-export function BootstrapDestinationsBridge(props: {
-  readonly transports: HostFederationTransports;
-  readonly refreshKey: number;
-  readonly onTargetsChange: (targets: ReadonlyArray<BootstrapDestinationTarget>) => void;
-}) {
-  const targets = useBootstrapDestinations(props.transports, props.refreshKey);
-  useEffect(() => {
-    props.onTargetsChange(targets);
-  }, [targets, props.onTargetsChange]);
-  return null;
-}

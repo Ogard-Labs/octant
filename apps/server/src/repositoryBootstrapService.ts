@@ -455,7 +455,7 @@ export class RepositoryBootstrapService {
     const derived = deriveBootstrapCloneRemotes(originUrl);
     const repositoryName = defaultBootstrapFolderName(derived.repositoryName, project.name);
 
-    const excludesArgs = await this.#globalExcludesArgs(signal);
+    const excludesArgs = await this.#globalExcludesArgs(canonicalRoot, signal);
     const ignoredRead = await runHostGit(
       [
         ...excludesArgs,
@@ -619,7 +619,7 @@ export class RepositoryBootstrapService {
     }
 
     // Confirm Git actually considers this path ignored in this repository.
-    const excludesArgs = await this.#globalExcludesArgs(signal);
+    const excludesArgs = await this.#globalExcludesArgs(canonicalRoot, signal);
     const ignoreCheck = await runHostGit(
       [...excludesArgs, "-C", canonicalRoot, "check-ignore", "-q", "--", checked.normalized],
       signal,
@@ -841,18 +841,39 @@ export class RepositoryBootstrapService {
     }
     const trackedPaths = new Set<string>();
     if (validPaths.length > 0) {
-      const trackedRead = await runHostGit(
-        ["-C", cloneRoot, "ls-files", "-z", "--", ...validPaths],
-        new AbortController().signal,
-      );
-      if (trackedRead.exitCode !== 0) {
-        return refusedResult({
-          code: "unavailable",
-          message: "Could not verify tracked files in the cloned repository.",
-        });
+      // Chunk path arguments so each `git ls-files` command line stays well
+      // under Windows' 32,767-character CreateProcess limit even for 200 long paths.
+      const MAX_TRACKED_CHECK_ARG_CHARS = 16_000;
+      const chunks: string[][] = [];
+      let currentChunk: string[] = [];
+      let currentChars = 0;
+      for (const path of validPaths) {
+        const cost = path.length + 4;
+        if (currentChunk.length > 0 && currentChars + cost > MAX_TRACKED_CHECK_ARG_CHARS) {
+          chunks.push(currentChunk);
+          currentChunk = [];
+          currentChars = 0;
+        }
+        currentChunk.push(path);
+        currentChars += cost;
       }
-      for (const entry of trackedRead.stdout.split("\0")) {
-        if (entry.length > 0) trackedPaths.add(entry);
+      if (currentChunk.length > 0) chunks.push(currentChunk);
+
+      const trackedSignal = new AbortController().signal;
+      for (const chunk of chunks) {
+        const trackedRead = await runHostGit(
+          ["-C", cloneRoot, "ls-files", "-z", "--", ...chunk],
+          trackedSignal,
+        );
+        if (trackedRead.exitCode !== 0) {
+          return refusedResult({
+            code: "unavailable",
+            message: "Could not verify tracked files in the cloned repository.",
+          });
+        }
+        for (const entry of trackedRead.stdout.split("\0")) {
+          if (entry.length > 0) trackedPaths.add(entry);
+        }
       }
     }
 
@@ -1413,8 +1434,22 @@ export class RepositoryBootstrapService {
    * Resolves the user's effective global `core.excludesFile` without enabling
    * arbitrary global Git configuration during repository reads, so files ignored
    * only by the user's global excludes file remain discoverable and readable.
+   * Leaves repository-local `core.excludesFile` untouched when configured.
    */
-  async #globalExcludesArgs(signal: AbortSignal): Promise<ReadonlyArray<string>> {
+  async #globalExcludesArgs(
+    canonicalRoot: string,
+    signal: AbortSignal,
+  ): Promise<ReadonlyArray<string>> {
+    // Respect a repository's own local/worktree `core.excludesFile` instead of
+    // overriding it with `-c` (which takes precedence over repository config).
+    const repoExcludes = await runHostGit(
+      ["-C", canonicalRoot, "config", "--get", "core.excludesFile"],
+      signal,
+    );
+    if (repoExcludes.exitCode === 0 && repoExcludes.stdout.trim() !== "") {
+      return [];
+    }
+
     const env: NodeJS.ProcessEnv = {
       GIT_TERMINAL_PROMPT: "0",
       GIT_CONFIG_NOSYSTEM: "1",
@@ -1427,7 +1462,7 @@ export class RepositoryBootstrapService {
     const configured = await new Promise<string | undefined>((resolve) => {
       nodeExecFile(
         "git",
-        ["config", "--global", "--path", "--get", "core.excludesFile"],
+        ["config", "--global", "--includes", "--path", "--get", "core.excludesFile"],
         {
           encoding: "utf8",
           env,

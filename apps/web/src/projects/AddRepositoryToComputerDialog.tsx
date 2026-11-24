@@ -231,6 +231,7 @@ export function AddRepositoryToComputerDialog(props: AddRepositoryToComputerDial
     lastInspectedProjectIdRef.current = projectKey;
 
     const controller = new AbortController();
+    let settled = false;
     setInspectState({ kind: "loading" });
     setSelectedFiles(new Set());
     setPhase((current) => (current.kind === "running" ? current : { kind: "idle" }));
@@ -239,6 +240,7 @@ export function AddRepositoryToComputerDialog(props: AddRepositoryToComputerDial
       .inspect({ projectId: activeProject.id }, controller.signal)
       .then((result) => {
         if (controller.signal.aborted) return;
+        settled = true;
         setInspectState({ kind: "ready", data: result });
         setDestinationPath(result.defaultDestinationPath);
         const preferred =
@@ -248,6 +250,7 @@ export function AddRepositoryToComputerDialog(props: AddRepositoryToComputerDial
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
+        settled = true;
         setInspectState({
           kind: "error",
           message:
@@ -259,6 +262,9 @@ export function AddRepositoryToComputerDialog(props: AddRepositoryToComputerDial
 
     return () => {
       controller.abort();
+      if (!settled && lastInspectedProjectIdRef.current === projectKey) {
+        lastInspectedProjectIdRef.current = undefined;
+      }
     };
   }, [props.open, activeProject?.id, resolvedSourceClient]);
 
