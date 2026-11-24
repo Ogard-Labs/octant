@@ -16,6 +16,7 @@ import {
   REMOTE_PUSH_DELIVERY_HEADERS,
   REMOTE_SERVER_PROXY_RELAYED,
   REMOTE_SERVER_PROXY_RELAYED_HEADER,
+  REPOSITORY_BOOTSTRAP_LAND_FILES_MAX_BODY_BYTES,
   SHELL_SETTINGS_PATH,
   SERVICE_OFFERS_DECIDE_PATH,
   SERVICE_OFFERS_PATH,
@@ -97,6 +98,10 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/host-control/export",
   // Linking a store and pointing a key at it are acts at this machine.
   "/api/secret-stores",
+  // Source-side repository inspection and ignored-file reads stay local to the
+  // machine that owns the source Code Project.
+  "/api/projects/repository-bootstrap/inspect",
+  "/api/projects/repository-bootstrap/read-ignored-file",
 ] as const;
 
 /**
@@ -112,6 +117,11 @@ const PERSON_PAIRED_DEVICE_ROUTES = [
   // principal that is not the host's person.
   "/api/folders/browse",
   "/api/folders/select",
+  // Cloning a repository onto this computer from another paired computer: the
+  // route refuses any principal that does not act as this computer's person.
+  "/api/projects/repository-bootstrap/clone",
+  "/api/projects/repository-bootstrap/clone/status",
+  "/api/projects/repository-bootstrap/clone/cancel",
   // Installing, trusting, enabling, and removing a package; remembered tool
   // approvals; adding, pinning, signing in to, and reconnecting a server.
   "/api/extensions/lifecycle",
@@ -1113,6 +1123,15 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     path,
     methods: ["POST"] as const,
   })),
+  // Landing explicitly ticked ignored files after a repository clone completes
+  // on this host: bounded JSON payload for a person-paired device only.
+  {
+    kind: "exact" as const,
+    path: "/api/projects/repository-bootstrap/land-files",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: REPOSITORY_BOOTSTRAP_LAND_FILES_MAX_BODY_BYTES,
+  },
   // One-time connector OAuth callback relay for a person-paired device:
   // JSON-only, tightly bounded, never in the restricted device catalogue.
   {

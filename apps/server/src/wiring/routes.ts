@@ -69,6 +69,7 @@ export type RoutesDependencies = {
     | "diskCleanupRoutes"
     | "codeProjectAccess"
     | "folderBrowseRoutes"
+    | "repositoryBootstrapRoutes"
     | "projectRoutes"
   > &
   Pick<
@@ -221,6 +222,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     fileMentionRoutes,
     fleetActivityRoutes,
     folderBrowseRoutes,
+    repositoryBootstrapRoutes,
     followUpSuggestionRoutes,
     githubCloneRoutes,
     githubRoutes,
@@ -344,6 +346,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await githubCloneRoutes(request)) ??
     (await agentProfileRoutes(request)) ??
     (await folderBrowseRoutes(request)) ??
+    (await repositoryBootstrapRoutes(request)) ??
     (await linkedThreadRoutes(request)) ??
     (await codeOperationApprovalRoutes(request)) ??
     (await codeCheckoutOpenRoutes(request)) ??
