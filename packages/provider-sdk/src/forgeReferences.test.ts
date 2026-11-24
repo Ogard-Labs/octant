@@ -63,6 +63,76 @@ describe("forgeReferencesFromToolCall", () => {
         owner: "acme",
         repository: "app",
         number: 7,
+        state: "closed",
+      },
+    ]);
+  });
+
+  it("credits a write before a || fallback only when its own output confirms it", () => {
+    expect(
+      forgeReferencesFromToolCall({
+        toolName: "Bash",
+        command: "gh pr review 12 --approve -R acme/app || gh pr view 12 -R acme/app",
+        output:
+          "failed to create review: Can not approve your own pull request\nhttps://github.com/acme/app/pull/12",
+      }),
+      // The fallback view printed the address, but no line says a review was
+      // submitted, so the approval is not credited.
+    ).toBeUndefined();
+    expect(
+      forgeReferencesFromToolCall({
+        toolName: "Bash",
+        command: "gh pr review 12 --approve -R acme/app || true",
+        output: "✓ Approved pull request acme/app#12",
+      }),
+    ).toEqual([
+      {
+        forge: "github",
+        kind: "pull-request",
+        action: "reviewed",
+        owner: "acme",
+        repository: "app",
+        number: 12,
+      },
+    ]);
+  });
+
+  it("takes a write's target from its own arguments, never from an address cited in its body", () => {
+    expect(
+      forgeReferencesFromToolCall({
+        toolName: "Bash",
+        command:
+          'gh pr comment 12 -R acme/app --body "Superseded by https://github.com/acme/app/pull/44"',
+        output: "https://github.com/acme/app/pull/12#issuecomment-1",
+      }),
+    ).toEqual([
+      {
+        forge: "github",
+        kind: "pull-request",
+        action: "commented",
+        owner: "acme",
+        repository: "app",
+        number: 12,
+      },
+    ]);
+  });
+
+  it("records an issue a command closed or reopened with that state", () => {
+    expect(
+      forgeReferencesFromToolCall({
+        toolName: "Bash",
+        command: "gh issue close 7 --repo acme/app",
+        output: "✓ Closed issue acme/app#7 (Docs are stale)",
+      }),
+    ).toEqual([
+      {
+        forge: "github",
+        kind: "issue",
+        action: "closed",
+        owner: "acme",
+        repository: "app",
+        number: 7,
+        state: "closed",
       },
     ]);
   });
@@ -152,10 +222,10 @@ describe("forgeReferencesFromToolCall", () => {
     expect(
       forgeReferencesFromToolCall({
         toolName: "mcp__Linear__save_issue",
-        input: { id: "OCT-991", state: "In Progress" },
+        input: { id: "ENG-991", state: "In Progress" },
         output: JSON.stringify({
           id: "uuid",
-          identifier: "OCT-991",
+          identifier: "ENG-991",
           title: "Hover card",
           status: "In Progress",
         }),
@@ -165,7 +235,7 @@ describe("forgeReferencesFromToolCall", () => {
         forge: "linear",
         kind: "issue",
         action: "edited",
-        identifier: "OCT-991",
+        identifier: "ENG-991",
         title: "Hover card",
         state: "In Progress",
       },
@@ -173,7 +243,7 @@ describe("forgeReferencesFromToolCall", () => {
     expect(
       forgeReferencesFromToolCall({
         toolName: "mcp__Linear__list_issues",
-        output: JSON.stringify({ issues: [{ identifier: "OCT-1" }] }),
+        output: JSON.stringify({ issues: [{ identifier: "ENG-1" }] }),
       }),
     ).toBeUndefined();
   });
@@ -183,18 +253,18 @@ describe("forgeReferencesFromToolCall", () => {
       forgeReferencesFromToolCall({
         toolName: "mcp__Linear__save_issue",
         input: { title: "New" },
-        output: JSON.stringify({ identifier: "OCT-7", url }),
+        output: JSON.stringify({ identifier: "ENG-7", url }),
       });
-    expect(saved("https://linear.app/ogard/issue/OCT-7/new")).toEqual([
+    expect(saved("https://linear.app/ogard/issue/ENG-7/new")).toEqual([
       {
         forge: "linear",
         kind: "issue",
         action: "created",
-        identifier: "OCT-7",
-        url: "https://linear.app/ogard/issue/OCT-7/new",
+        identifier: "ENG-7",
+        url: "https://linear.app/ogard/issue/ENG-7/new",
       },
     ]);
-    expect(saved("https://linear.app/ogard/issue/OCT-8/other")?.[0]).not.toHaveProperty("url");
+    expect(saved("https://linear.app/ogard/issue/ENG-8/other")?.[0]).not.toHaveProperty("url");
   });
 
   it("keeps one reference per pull request and at most ten per call", () => {

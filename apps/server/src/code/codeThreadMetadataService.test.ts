@@ -126,7 +126,7 @@ describe("Pull requests and issues a thread's tool calls wrote to", () => {
             forge: "linear",
             kind: "issue",
             action: "edited",
-            identifier: "OCT-991",
+            identifier: "ENG-991",
             title: "Hover card",
             state: "In Progress",
           },
@@ -169,7 +169,7 @@ describe("Pull requests and issues a thread's tool calls wrote to", () => {
       },
       {
         forge: "linear",
-        identifier: "OCT-991",
+        identifier: "ENG-991",
         title: "Hover card",
         state: "In Progress",
         observedAt: "2026-11-24T08:02:00.000Z",

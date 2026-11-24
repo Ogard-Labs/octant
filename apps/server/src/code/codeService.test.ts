@@ -690,7 +690,7 @@ describe("CodeService reads", () => {
       },
       {
         forge: "linear" as const,
-        identifier: "OCT-991",
+        identifier: "ENG-991",
         state: "In Progress",
         observedAt: "2026-11-24T08:00:00.000Z",
       },

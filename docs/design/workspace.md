@@ -3668,7 +3668,7 @@ The Project's own open pull requests stay under Delivery (maintainer request,
 every GitHub and Linear issue the thread's tool calls created, commented on,
 edited, closed or reopened, open ones first, then finished ones (closed, done,
 canceled), each newest first, in the same row recipe: an open or finished mark,
-the title, then the repository or "Linear", the reference (#3, OCT-991) and the
+the title, then the repository or "Linear", the reference (#3, ENG-991) and the
 state the latest call reported. Past ten the rest fold behind "Show more (n)".
 A row opens the issue's page outside Octant: a GitHub address is built from the
 repository and number, and a Linear one is the address the call's result gave,

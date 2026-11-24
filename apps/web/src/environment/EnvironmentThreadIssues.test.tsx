@@ -8,15 +8,15 @@ const issues = decodeThreadTouchedIssues({
   items: [
     {
       forge: "linear",
-      identifier: "OCT-991",
-      url: "https://linear.app/ogard/issue/OCT-991/hover-card",
+      identifier: "ENG-991",
+      url: "https://linear.app/ogard/issue/ENG-991/hover-card",
       title: "Hover card",
       state: "In Progress",
       observedAt: "2026-11-24T09:00:00.000Z",
     },
     {
       forge: "linear",
-      identifier: "OCT-12",
+      identifier: "ENG-12",
       title: "No address given",
       observedAt: "2026-11-24T08:30:00.000Z",
     },
@@ -43,9 +43,9 @@ describe("EnvironmentThreadIssues", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(3);
 
     await user.click(
-      screen.getByRole("button", { name: "Linear issue OCT-991, Hover card, In Progress" }),
+      screen.getByRole("button", { name: "Linear issue ENG-991, Hover card, In Progress" }),
     );
-    expect(onOpen).toHaveBeenCalledWith("https://linear.app/ogard/issue/OCT-991/hover-card");
+    expect(onOpen).toHaveBeenCalledWith("https://linear.app/ogard/issue/ENG-991/hover-card");
 
     await user.click(
       screen.getByRole("button", { name: "GitHub issue #3, Docs are stale, acme/site, closed" }),
@@ -54,9 +54,9 @@ describe("EnvironmentThreadIssues", () => {
 
     // A Linear issue whose call gave no address is a fact, not a dead link.
     expect(
-      screen.getByRole("group", { name: "Linear issue OCT-12, No address given" }),
+      screen.getByRole("group", { name: "Linear issue ENG-12, No address given" }),
     ).toBeVisible();
-    expect(screen.queryByRole("button", { name: /OCT-12/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /ENG-12/ })).toBeNull();
   });
 
   it("draws nothing for a thread that touched no issues", () => {

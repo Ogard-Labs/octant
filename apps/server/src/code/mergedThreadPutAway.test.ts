@@ -75,7 +75,7 @@ function fixture(options: {
     threads: () => options.threads,
     projectExists: () => true,
     metadata: { project },
-    cachedMerges: (threadId) => options.cachedMerges?.[String(threadId)] ?? [],
+    cachedMerges: (thread) => options.cachedMerges?.[String(thread.id)] ?? [],
     decisionPending: (thread) => options.decisionPending?.includes(String(thread.id)) === true,
     samePullRequest: (_projectId, left, right) =>
       left.number === right.number && left.baseRepository === right.baseRepository,

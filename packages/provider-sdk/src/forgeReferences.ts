@@ -48,6 +48,9 @@ const GITHUB_URL = new RegExp(
   String.raw`https://github\.com/(${OWNER})/(${REPOSITORY})/(pull|issues)/([1-9][0-9]{0,8})(?![0-9])`,
   "g",
 );
+const GITHUB_URL_ALONE = new RegExp(
+  String.raw`^https://github\.com/${OWNER}/${REPOSITORY}/(pull|issues)/[1-9][0-9]{0,8}/?$`,
+);
 /** gh's own success lines: "Merged pull request owner/repo#12", "Closed issue owner/repo#7". */
 const GH_SUCCESS_LINE = new RegExp(
   String.raw`\b(pull request|issue) (${OWNER})/(${REPOSITORY})#([1-9][0-9]{0,8})\b`,
@@ -111,8 +114,17 @@ function githubSuccessLinesIn(text: string): ReadonlyArray<GithubIdentity> {
  * into separate commands at `&&`, `||`, `;`, `|` and line breaks. It is not a
  * shell: it only has to find `gh` invocations and their arguments.
  */
-function shellCommands(command: string): ReadonlyArray<ReadonlyArray<string>> {
+function shellCommands(command: string): {
+  readonly commands: ReadonlyArray<ReadonlyArray<string>>;
+  /**
+   * Whether the call's exit status speaks for every command in it: one
+   * command, or commands joined only by `&&`. After `||`, `;`, a pipe or `&`
+   * a later command can succeed after an earlier one failed.
+   */
+  readonly exitSpeaksForEach: boolean;
+} {
   const commands: string[][] = [];
+  let unsafeSeparator = false;
   let words: string[] = [];
   let word = "";
   let quote: '"' | "'" | undefined;
@@ -139,8 +151,15 @@ function shellCommands(command: string): ReadonlyArray<ReadonlyArray<string>> {
       inWord = true;
       continue;
     }
+    if (character === "&" && command.charAt(index + 1) === "&") {
+      endCommand();
+      index += 1;
+      continue;
+    }
     if (character === "\n" || character === ";" || character === "|" || character === "&") {
       endCommand();
+      if (command.charAt(index + 1) === character) index += 1;
+      unsafeSeparator = true;
       continue;
     }
     if (character === " " || character === "\t") {
@@ -151,7 +170,8 @@ function shellCommands(command: string): ReadonlyArray<ReadonlyArray<string>> {
     inWord = true;
   }
   endCommand();
-  return commands;
+  // A lone command is spoken for by the exit status whatever trails it.
+  return { commands, exitSpeaksForEach: !unsafeSeparator || commands.length <= 1 };
 }
 
 interface GhInvocation {
@@ -163,6 +183,52 @@ interface GhInvocation {
   /** The number the command names without a repository. */
   readonly number: number | undefined;
 }
+
+/**
+ * `gh pr|issue` options whose value is text or another ref, never the target:
+ * a body or title can cite any pull request, and a base or head names a branch.
+ */
+const GH_VALUE_FLAGS: ReadonlySet<string> = new Set([
+  "--body",
+  "-b",
+  "--body-file",
+  "-F",
+  "--title",
+  "-t",
+  "--base",
+  "-B",
+  "--head",
+  "-H",
+  "--label",
+  "-l",
+  "--add-label",
+  "--remove-label",
+  "--assignee",
+  "-a",
+  "--add-assignee",
+  "--remove-assignee",
+  "--reviewer",
+  "-r",
+  "--add-reviewer",
+  "--remove-reviewer",
+  "--milestone",
+  "-m",
+  "--project",
+  "-p",
+  "--add-project",
+  "--remove-project",
+  "--template",
+  "-T",
+  "--subject",
+  "--match-head-commit",
+  "--author-email",
+  "--comment",
+  "-c",
+  "--reason",
+  "--json",
+  "--jq",
+  "-q",
+]);
 
 function ghInvocation(words: ReadonlyArray<string>): GhInvocation | undefined {
   const at = words.findIndex((candidate) => candidate === "gh" || candidate.endsWith("/gh"));
@@ -178,6 +244,13 @@ function ghInvocation(words: ReadonlyArray<string>): GhInvocation | undefined {
   let named: GithubIdentity | undefined;
   for (let index = 0; index < rest.length; index += 1) {
     const argument = rest[index] ?? "";
+    if (GH_VALUE_FLAGS.has(argument)) {
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("-") && argument.includes("=") && !argument.startsWith("--repo=")) {
+      continue;
+    }
     const repoValue =
       argument === "--repo" || argument === "-R"
         ? rest[index + 1]
@@ -201,8 +274,10 @@ function ghInvocation(words: ReadonlyArray<string>): GhInvocation | undefined {
       continue;
     }
     if (named === undefined) {
+      // The target is an argument that is wholly an address, never one cited
+      // inside other text.
       const url = githubUrlsIn(argument)[0];
-      if (url !== undefined && url.kind === kind) named = url;
+      if (url !== undefined && url.kind === kind && GITHUB_URL_ALONE.test(argument)) named = url;
     }
     if (number === undefined && /^#?[1-9][0-9]{0,8}$/.test(argument)) {
       number = Number(argument.replace("#", ""));
@@ -218,10 +293,21 @@ function fromShell(
   command: string,
   output: string | undefined,
 ): ReadonlyArray<ThreadForgeReference> {
-  const invocations = shellCommands(command)
+  const parsed = shellCommands(command);
+  const invocations = parsed.commands
     .map(ghInvocation)
     .filter((invocation): invocation is GhInvocation => invocation !== undefined);
   const found = [...githubUrlsIn(output ?? ""), ...githubSuccessLinesIn(output ?? "")];
+  // What the output proves was written: gh's success lines ("Merged pull
+  // request acme/app#12") for any write, and a printed address only for a
+  // create or comment, which print the new thing's address. A read in a
+  // fallback prints addresses too, so an address alone proves no merge.
+  const confirmedByLine = new Set(
+    githubSuccessLinesIn(output ?? "").map((candidate) => identityKey(candidate)),
+  );
+  const confirmedByAddress = new Set(
+    githubUrlsIn(output ?? "").map((candidate) => identityKey(candidate)),
+  );
   const references: ThreadForgeReference[] = [];
   for (const invocation of invocations) {
     if (invocation.action === undefined) continue;
@@ -250,6 +336,24 @@ function fromShell(
       if (ofKind.size === 1) identity = [...ofKind.values()][0];
     }
     if (identity === undefined) continue;
+    // When the call's exit status does not speak for this command (it ran
+    // before a `||` fallback, say), only its own output confirms the write.
+    if (
+      !parsed.exitSpeaksForEach &&
+      !confirmedByLine.has(identityKey(identity)) &&
+      !(
+        (action === "created" || action === "commented") &&
+        confirmedByAddress.has(identityKey(identity))
+      )
+    ) {
+      continue;
+    }
+    const state =
+      identity.kind === "issue" && action === "closed"
+        ? "closed"
+        : identity.kind === "issue" && action === "reopened"
+          ? "open"
+          : undefined;
     references.push({
       forge: "github",
       kind: identity.kind,
@@ -257,6 +361,7 @@ function fromShell(
       owner: identity.owner,
       repository: identity.repository,
       number: identity.number,
+      ...(state === undefined ? {} : { state }),
     });
   }
   return references;

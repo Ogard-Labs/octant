@@ -484,7 +484,15 @@ export class CodeProjectPullRequestService {
    * pull requests, so a merge made outside Octant shows here even though the
    * thread's own operation history still holds the open state it last saw.
    */
-  mergedPullRequestsForThread(threadId: string): ReadonlyArray<{
+  mergedPullRequestsForThread(
+    threadId: string,
+    /**
+     * Whether a merged row is the thread's own delivery. A thread is also
+     * linked to pull requests its tool calls only reviewed or commented on,
+     * and merging one of those does not deliver the thread.
+     */
+    delivers: (row: { readonly number: number; readonly headBranch: string }) => boolean,
+  ): ReadonlyArray<{
     readonly baseRepository: string;
     readonly number: number;
   }> {
@@ -493,7 +501,8 @@ export class CodeProjectPullRequestService {
       .filter(
         (row) =>
           row.state === "merged" &&
-          row.linkedThreads.some((thread) => String(thread.threadId) === threadId),
+          row.linkedThreads.some((thread) => String(thread.threadId) === threadId) &&
+          delivers(row),
       )
       .map((row) => this.#canonicalizeRow(row))
       .map((row) => ({

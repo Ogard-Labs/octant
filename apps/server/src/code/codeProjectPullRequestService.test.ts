@@ -881,7 +881,7 @@ describe("CodeProjectPullRequestService", () => {
         },
       }),
     });
-    expect(service.mergedPullRequestsForThread(String(threadId))).toEqual([]);
+    expect(service.mergedPullRequestsForThread(String(threadId), () => true)).toEqual([]);
 
     await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
 
@@ -889,12 +889,17 @@ describe("CodeProjectPullRequestService", () => {
       expect.objectContaining({ number: 11 }),
       expect.any(AbortSignal),
     );
-    expect(service.mergedPullRequestsForThread(String(threadId))).toEqual([
+    expect(service.mergedPullRequestsForThread(String(threadId), () => true)).toEqual([
       { baseRepository: "octant/octant", number: 11 },
     ]);
-    expect(service.mergedPullRequestsForThread("20000000-0000-4000-8000-0000000000ff")).toEqual([]);
+    expect(
+      service.mergedPullRequestsForThread("20000000-0000-4000-8000-0000000000ff", () => true),
+    ).toEqual([]);
+    // A merged pull request the thread is linked to but did not deliver (one
+    // its tool calls only commented on) is left out by the caller's test.
+    expect(service.mergedPullRequestsForThread(String(threadId), () => false)).toEqual([]);
     service.revokeGithub();
-    expect(service.mergedPullRequestsForThread(String(threadId))).toEqual([]);
+    expect(service.mergedPullRequestsForThread(String(threadId), () => true)).toEqual([]);
   });
 
   it("reuses one board join for sidebar navigation reads until it ages out or a refresh replaces it", async () => {

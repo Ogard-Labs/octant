@@ -36,7 +36,8 @@ export interface MergedThreadPutAwayOptions {
    * Merged pull requests the Pull requests refresh cache links to the thread.
    * A merge made outside Octant reaches this cache, not the thread's history.
    */
-  readonly cachedMerges: (threadId: CodeThreadId) => ReadonlyArray<MergedPullRequest>;
+  /** The merged pull requests the refresh cache shows as this thread's own delivery. */
+  readonly cachedMerges: (thread: CodeThread) => ReadonlyArray<MergedPullRequest>;
   /** A finished turn's decision still waiting on the person keeps the thread in view. */
   readonly decisionPending: (thread: CodeThread) => boolean;
   readonly samePullRequest: SameMergedPullRequest;
@@ -141,7 +142,7 @@ export class MergedThreadPutAway {
       ...(linked.kind === "linked" && linked.state === "merged" && linked.matchesDeliveryBranch
         ? [{ baseRepository: linked.baseRepository, number: linked.number }]
         : []),
-      ...this.#options.cachedMerges(thread.id),
+      ...this.#options.cachedMerges(thread),
     ];
     // Both sources often name the same merge; it is one merge. Past the
     // record's bound the same fixed slice is kept every pass, so a thread with

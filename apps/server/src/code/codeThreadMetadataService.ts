@@ -702,7 +702,14 @@ export function touchedIssuesFromHistory(
           : `linear:${reference.identifier}`;
       const previous = latest.get(key);
       const title = reference.title ?? previous?.title;
-      const state = reference.state ?? previous?.state;
+      // A close or reopen says the state even when the result did not.
+      const state =
+        reference.state ??
+        (reference.action === "closed"
+          ? "closed"
+          : reference.action === "reopened"
+            ? "open"
+            : previous?.state);
       const linearUrl =
         reference.forge === "linear"
           ? (reference.url ?? (previous?.forge === "linear" ? previous.url : undefined))
