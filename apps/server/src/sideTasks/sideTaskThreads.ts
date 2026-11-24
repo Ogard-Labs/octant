@@ -6,6 +6,7 @@ import {
   type CodeCommand,
   type CodeCommandResult,
   type OctantMode,
+  type SideTaskChildState,
   type SideTaskOffer,
   type ThreadMessageQueueRefusalReason,
   type WindowId,
@@ -286,4 +287,25 @@ function queueRefusal(reason: ThreadMessageQueueRefusalReason): string {
     return "This window cannot queue a message on this thread.";
   }
   return "The prompt could not be queued on this thread.";
+}
+
+/**
+ * What a started child thread is doing, from the same navigation-projection
+ * facts the sidebar rows read: executing is Working, waiting on the person is
+ * Needs you, anything else is quiet. A row the window cannot read — the
+ * thread is gone, or the navigation does not list it for this window —
+ * answers nothing rather than guessing.
+ */
+export function sideTaskChildState(
+  row:
+    | {
+        readonly executing?: boolean | undefined;
+        readonly awaitingInput?: boolean | undefined;
+      }
+    | undefined,
+): SideTaskChildState | undefined {
+  if (row === undefined) return undefined;
+  if (row.executing === true) return "working";
+  if (row.awaitingInput === true) return "attention";
+  return "quiet";
 }

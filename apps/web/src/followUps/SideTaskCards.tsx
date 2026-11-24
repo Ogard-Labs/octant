@@ -291,6 +291,16 @@ function SideTaskCard(props: { readonly task: SideTask; readonly running: boolea
           {task.status === "started" ? (
             <>
               {task.startedWith === "fork" ? "Forked into a new thread" : "Started in a new thread"}
+              {task.childState === undefined ? null : (
+                <>
+                  <span aria-hidden="true"> · </span>
+                  {task.childState === "working"
+                    ? "Working"
+                    : task.childState === "attention"
+                      ? "Needs you"
+                      : "Finished"}
+                </>
+              )}
               {task.startedThreadId === undefined ? null : (
                 <>
                   <span aria-hidden="true"> · </span>

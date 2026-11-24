@@ -2,6 +2,8 @@ import {
   decodeContinueSideTaskHere,
   decodeDismissSideTask,
   decodeStartSideTask,
+  type OctantMode,
+  type SideTaskChildState,
   type SideTaskResult,
 } from "@octant/contracts";
 import { authenticateRouteWindowId } from "../principalRouteContext";
@@ -27,6 +29,17 @@ export interface SideTaskRouteDependencies extends SideTaskStartDependencies {
     readonly threadId: string;
     readonly windowId: string;
   }) => boolean | Promise<boolean>;
+  /**
+   * What a started child thread is doing, in the sidebar row vocabulary, as
+   * this window may read it. `undefined` when the child cannot be read — the
+   * receipt then says nothing rather than guessing. Absent on a host that
+   * cannot read thread activity.
+   */
+  readonly childState?: (input: {
+    readonly mode: OctantMode;
+    readonly threadId: string;
+    readonly windowId: string;
+  }) => Promise<SideTaskChildState | undefined> | SideTaskChildState | undefined;
   readonly now?: () => number;
 }
 
@@ -88,7 +101,26 @@ export function createSideTaskRouteHandler(dependencies: SideTaskRouteDependenci
       return json({ error: "Side task request is unauthorized." }, 403, origin);
     }
     if (request.method === "GET" && action === "") {
-      return json({ sideTasks: dependencies.store.read(threadId) }, 200, origin);
+      const sideTasks = dependencies.store.read(threadId);
+      const childState = dependencies.childState;
+      if (sideTasks === undefined || childState === undefined) {
+        return json({ sideTasks }, 200, origin);
+      }
+      // The child's live state is read-time enrichment: it rides on the task
+      // view but is never journaled, and it is simply absent when the window
+      // cannot read the child.
+      const tasks = await Promise.all(
+        sideTasks.tasks.map(async (task) => {
+          if (task.status !== "started" || task.startedThreadId === undefined) return task;
+          const state = await childState({
+            mode: task.offer.mode,
+            threadId: task.startedThreadId,
+            windowId,
+          });
+          return state === undefined ? task : { ...task, childState: state };
+        }),
+      );
+      return json({ sideTasks: { ...sideTasks, tasks } }, 200, origin);
     }
     if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, origin);
     let body: unknown;

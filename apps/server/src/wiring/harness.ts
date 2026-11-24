@@ -79,7 +79,7 @@ import {
   createFollowUpSuggestionRouteHandler,
   type FollowUpSuggestionActionDependencies,
 } from "../followUps/followUpSuggestionRoutes";
-import { createSideTaskRouteHandler } from "../sideTasks/sideTaskRoutes";
+import { createSideTaskRouteHandler, type SideTaskRouteDependencies } from "../sideTasks/sideTaskRoutes";
 import { createFinishedReceiptRouteHandler } from "../finishedReceipts/finishedReceiptRoutes";
 import type { SideTaskStartDependencies } from "../sideTasks/sideTaskStart";
 import {
@@ -669,7 +669,8 @@ export function wireHarness(deps: HarnessDependencies) {
   // exist, like the creator.
   const sideTaskHost: {
     current:
-      | Pick<SideTaskStartDependencies, "fork" | "offeringTurn" | "sendTurn" | "continueHere">
+      | (Pick<SideTaskStartDependencies, "fork" | "offeringTurn" | "sendTurn" | "continueHere"> &
+          Pick<SideTaskRouteDependencies, "childState">)
       | undefined;
   } = { current: undefined };
   const authorizeFollowUpThread = ({
@@ -708,6 +709,9 @@ export function wireHarness(deps: HarnessDependencies) {
     continueHere: (input) =>
       sideTaskHost.current?.continueHere(input) ??
       Promise.resolve({ kind: "refused", message: "This thread cannot take a message now." }),
+    noteStarted: ({ parentThreadId, childThreadId }) =>
+      threadFollowUpSuggestions.noteSideTaskStarted(parentThreadId, childThreadId),
+    childState: (input) => sideTaskHost.current?.childState?.(input),
     clock: () => new Date().toISOString(),
   });
   const finishedReceiptRoutes = createFinishedReceiptRouteHandler({

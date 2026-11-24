@@ -105,6 +105,7 @@ import {
   continueInThread,
   forkThroughOfferingTurn,
   offeringTurnStanding,
+  sideTaskChildState,
 } from "../sideTasks/sideTaskThreads";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import {
@@ -2090,6 +2091,28 @@ export function wireWork(deps: WorkDependencies) {
           { queue: threadMessageQueue, sendTurn: sendSideTaskTurn, uuid: randomUUID },
           input,
         ),
+      // The receipt's live state reads the same navigation projections the
+      // sidebar rows do, so the two never disagree. A child the window's
+      // navigation does not list answers nothing rather than guessing.
+      childState: async ({ mode, threadId, windowId }) => {
+        try {
+          if (mode === "chat") {
+            const row = chatService.navigation().threads.find((t) => String(t.id) === threadId);
+            return sideTaskChildState(row);
+          }
+          const window = decodeWindowId(windowId);
+          if (mode === "work") {
+            const navigation = await workThreadServiceWithWorkflows.navigation(window);
+            const row = navigation.runtime.find((entry) => String(entry.threadId) === threadId);
+            return sideTaskChildState(row);
+          }
+          const navigation = await routeCodeService.navigation(window);
+          const row = navigation.runtime.find((entry) => String(entry.threadId) === threadId);
+          return sideTaskChildState(row);
+        } catch {
+          return undefined;
+        }
+      },
     };
     restartContinuation.current = async ({ threadId, windowId, mode }) => {
       if (mode === "chat") chatService.settleCutOffTurns(decodeChatThreadId(threadId));

@@ -104,6 +104,34 @@ describe("SideTaskInline", () => {
     expect(await screen.findByText(/Started in a new thread/)).toBeVisible();
   });
 
+  it("shows the child thread's live state on the started receipt, and nothing when it is unknown", async () => {
+    setup(() => [
+      task({
+        status: "started",
+        startedWith: "fresh",
+        startedThreadId: "00000000-0000-4000-8000-000000000099",
+        childState: "attention",
+      }),
+    ]);
+
+    expect(await screen.findByText(/Started in a new thread/)).toBeVisible();
+    expect(screen.getByText(/Needs you/)).toBeVisible();
+  });
+
+  it("shows no state on the started receipt when the child cannot be read", async () => {
+    setup(() => [
+      task({
+        status: "started",
+        startedWith: "fresh",
+        startedThreadId: "00000000-0000-4000-8000-000000000099",
+      }),
+    ]);
+
+    expect(await screen.findByText(/Started in a new thread/)).toBeVisible();
+    expect(screen.queryByText(/Needs you/)).toBeNull();
+    expect(screen.queryByText(/Finished/)).toBeNull();
+  });
+
   it("does the work in this thread and says it will run after the current reply when queued", async () => {
     let status: SideTask["status"] = "offered";
     const { client } = setup(() => [task({ status })], {
