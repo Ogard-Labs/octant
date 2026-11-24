@@ -352,7 +352,7 @@ export interface ProjectSidebarSectionProps {
   readonly searchQuery?: string;
   /**
    * Asks the list to show a view from outside it: a sidebar tile opening the
-   * Activity feed, or the Put away shelf. A new sequence repeats the ask.
+   * Activity feed, or the Settled group. A new sequence repeats the ask.
    */
   readonly listRequest?: Readonly<{
     readonly view: "activity" | "completed";

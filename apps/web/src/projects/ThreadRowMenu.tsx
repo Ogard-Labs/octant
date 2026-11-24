@@ -55,7 +55,7 @@ export interface ThreadRowActions {
   /** Absent when the host cannot archive this thread. */
   readonly onArchiveThread?: (threadId: string) => void;
   /**
-   * Puts a finished thread away in the Put away shelf without archiving it.
+   * Settles a finished thread, filing it under Settled without archiving it.
    * Paired with {@link onReopenThread}: the menu offers whichever of the two
    * would change the thread. Absent when the host cannot put threads away.
    */
@@ -210,9 +210,11 @@ export function ThreadRowMenu(props: {
     props.actions.onPinThread !== undefined ||
     props.actions.onStartRenameThread !== undefined;
   const hasCoordinatorActions = threadCoordinatorMenuOffers(props.thread, props.actions);
-  // Reopen undoes either way a person closed the thread: put away, or
-  // marked Done.
+  // One action undoes either way the thread closed: settled, or marked Done.
+  // It says Un-settle when the thread settled, and Reopen for a Code thread
+  // marked Done while Settle threads when they're done is off.
   const closed = props.thread.completedAt !== undefined || props.thread.markedDone === true;
+  const reopenLabel = props.thread.completedAt === undefined ? "Reopen" : "Un-settle";
   const readStateAction =
     props.thread.unread === true
       ? props.actions.onMarkThreadRead
@@ -300,10 +302,10 @@ export function ThreadRowMenu(props: {
               props.actions.onReopenThread === undefined ? null : (
                 <OctantContextMenuItem
                   className="thread-row-context-menu__item"
-                  label="Un-settle"
+                  label={reopenLabel}
                   onClick={() => props.actions.onReopenThread?.(threadId)}
                 >
-                  <MenuContent icon={RotateCcw}>Un-settle</MenuContent>
+                  <MenuContent icon={RotateCcw}>{reopenLabel}</MenuContent>
                 </OctantContextMenuItem>
               )
             ) : props.actions.onCompleteThread === undefined ? null : (

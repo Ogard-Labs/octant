@@ -312,7 +312,7 @@ default (absent is on). The person's fallback list is their consent
   thread a person started never moves on its own, nor does a coordinator, a
   worker a person moved to a model of their own (its choice then reads
   "chosen by you"), one with the person's own **On usage limit → Hand off
-  to**, or one put away, marked Done, snoozed or archived. A worker's first
+  to**, or one settled, marked Done, snoozed or archived. A worker's first
   request that failed before any work is still the start and moves by the
   rule above. The harness's own helper runs keep the fallback they already
   have.
@@ -400,7 +400,7 @@ approval flow with one switch.
 ### Bounds
 
 - **Open workers.** A coordinator may have at most six open workers (neither
-  Done, put away, archived, nor deleted) by default. A person sets this from 1 to
+  Done, settled, archived, nor deleted) by default. A person sets this from 1 to
   16 in Settings › Code › Coordinators; an agent cannot.
 - **Starts per hour.** At most 60 `start` calls per coordinator in any hour by
   default, admitted or proposed. A person sets the bound per coordinator, from
@@ -649,7 +649,7 @@ a worker whose model cannot read one
 
 ## Not in this design
 
-- A coordinator cannot stop, steer mid-turn, complete, put away, archive, or
+- A coordinator cannot stop, steer mid-turn, complete, settle, archive, or
   delete a worker; it has `send`, and the person has the ordinary controls.
 - Coordinators in Work, coordinators across a hub's members, and phone or CLI
   surfaces for the role or the start setting.

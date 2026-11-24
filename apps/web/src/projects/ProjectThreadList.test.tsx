@@ -1272,8 +1272,10 @@ describe("completing and snoozing from a thread row", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
+    // Marked Done but not settled, the way back is Reopen, not Un-settle.
     expect(screen.queryByRole("menuitem", { name: "Mark done" })).toBeNull();
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Un-settle" }));
+    expect(screen.queryByRole("menuitem", { name: "Un-settle" })).toBeNull();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Reopen" }));
     expect(onReopenThread).toHaveBeenCalledWith("thread-one");
   });
 

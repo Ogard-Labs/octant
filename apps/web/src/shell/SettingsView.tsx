@@ -2372,7 +2372,7 @@ function CompletedThreadArchiveSelect(props: {
       : [...COMPLETED_THREAD_ARCHIVE_CHOICES, props.afterDays].sort((left, right) => left - right);
   return (
     <OctantSelectField
-      aria-label="Archive put-away threads"
+      aria-label="Archive settled threads"
       id="completed-thread-archive"
       onValueChange={(value) => props.onChange(value === "never" ? null : Number(value))}
       options={[
@@ -2754,7 +2754,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           <SettingRow
             description="A put-away thread rests in its shelf, then moves to the archive. Archiving keeps everything."
             focused={focusedSetting === settingId("completed-thread-archive")}
-            label="Archive put-away threads"
+            label="Archive settled threads"
             scope="host"
             settingId="completed-thread-archive"
           >

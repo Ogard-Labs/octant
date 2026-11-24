@@ -2204,7 +2204,7 @@ except where a bullet says otherwise.
   sources in Settings › Memory, and Forget everything erases all entries and
   digests at once.
 - **When it is written.** After a thread ends: a Chat, Work, or Code thread
-  the person completed (put away) after memory was turned on. A sweep of the
+  the person completed (settled) after memory was turned on. A sweep of the
   three modes' completed threads runs five minutes after start and then
   hourly, and distills
   each such thread at most once, so a thread that was reopened and completed
@@ -3435,10 +3435,12 @@ mark. Marking a Work or Code thread Done while a fresh receipt stands attaches
 that receipt (`completionReceiptId`) as the thread's completion evidence, and
 Reopen clears it. Reporting finished never marks a thread Done.
 
-With **Put away threads when they're done** on (the default), Mark done on a
-Work or Code thread also puts it away, and the host puts a Code thread away
-once a pull request linked to it merged, read from cached evidence only;
-neither marks a thread Done, and Reopen brings it back
+With **Settle threads when they're done** on (the default), Mark done on a
+Work or Code thread also settles it, the host settles a Work or Code thread
+once the turn that filed its passing finished report completes, and the host
+settles a Code thread once a pull request linked to it merged, read from
+cached evidence only; none of them marks a thread Done, and Un-settle brings it
+back
 ([Workspace: thread visibility and completion](design/workspace.md#thread-visibility-and-completion)).
 
 Each recorded `thread.finished-receipt-recorded@1` receipt also feeds a
@@ -7853,7 +7855,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   disclose it. The walk only goes forward, so a worker moves through its list
   at most once and then pauses as before, and it never reaches a model outside
   the roles. A coordinator, a worker on a model a person picked or with the
-  person's own usage-limit hand-off, a thread put away, marked Done, snoozed
+  person's own usage-limit hand-off, a thread settled, marked Done, snoozed
   or archived, and a role with the box off are never moved, and a move never
   goes into or within a role that has **Ask before using**
   ([Coordinator threads: Running workers](design/coordinator-threads.md#running-workers)).

@@ -164,7 +164,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("completed-thread-archive"),
-          label: "Archive put-away threads",
+          label: "Archive settled threads",
           scope: "host",
           keywords:
             "settle settled put away complete completed threads archive automatically days never snooze snoozed shelf sidebar",
