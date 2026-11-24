@@ -26,6 +26,8 @@ const NAMES_THE_ACTOR_ELSEWHERE: Readonly<Record<string, string>> = {
   "externalContentRoutes.ts": "builds the device actor from the principal where it clears a mark",
   "folderBrowseRoutes.ts":
     "lists folders and issues a one-use binding receipt; journals nothing, and the Project command that spends the receipt names the device",
+  "repositoryBootstrapRoutes.ts":
+    "inspects local repos, clones onto this host and issues a one-use binding receipt, and lands explicitly chosen ignored files; journals nothing, and the Project command that spends the receipt names the device",
   "harness/nativeHarnessEgressRoutes.ts": "hands the device to the rules store, which journals it",
   "image/imageRoutes.ts": "a paired device can only read its thread's image results",
   "integrationRoutes.ts": "checks local tool integrations on this host; journals nothing",
