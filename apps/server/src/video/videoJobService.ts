@@ -798,19 +798,21 @@ export class VideoJobService {
         }
         return;
       }
-      // Bounded by the job time too, so a hung poll or download cannot hold
-      // the job past it; the deadline branch above then settles it.
+      // Once cancel is asked, Stop's signal stays aborted. Keep polling for
+      // the provider's confirmation with shutdown and the deadline as bounds.
+      const waitSignal = cancelAsked ? this.#closing.signal : running.controller.signal;
       const poll = await adapter.poll(
         remoteId,
-        AbortSignal.any([
-          this.#closing.signal,
-          AbortSignal.timeout(Math.max(1, deadline - this.#now())),
-        ]),
+        AbortSignal.any([waitSignal, AbortSignal.timeout(Math.max(1, deadline - this.#now()))]),
       );
-      // Shutdown aborted the poll: the job stays running for the next host
-      // to resume, never concluded from an answer the abort produced.
+      // Shutdown leaves the job running for recovery. A poll interrupted by
+      // Stop leaves the provider outcome unknown and must reach cancel first.
       if (this.#closing.signal.aborted) return;
-      if (poll.status === "failed" && this.#now() >= deadline) continue;
+      if (
+        poll.status === "failed" &&
+        ((!cancelAsked && waitSignal.aborted) || this.#now() >= deadline)
+      )
+        continue;
       // A provider that rejects the status check may still be running the
       // clip. Retry until the provider reports an outcome or the job expires.
       if (
@@ -823,11 +825,9 @@ export class VideoJobService {
       // A provider that answered with a retry-after wait is honoured before
       // the next poll, still bounded by the job's deadline.
       const coolDown = poll.status === "failed" ? (poll.providerFailure.retryAfterMs ?? 0) : 0;
-      // Once cancel is asked, Stop's signal stays aborted; waiting on it would
-      // poll without any pause while the provider confirms.
       await this.#sleep(
         Math.min(Math.max(interval, coolDown), Math.max(0, deadline - this.#now())),
-        cancelAsked ? this.#closing.signal : running.controller.signal,
+        waitSignal,
       );
       interval = Math.min(Math.round(interval * 1.5), MAX_POLL_MS);
     }

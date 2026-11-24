@@ -951,6 +951,50 @@ describe("video jobs", () => {
     });
   });
 
+  it("interrupts a stalled status check so Stop reaches the provider promptly", async () => {
+    let firstPoll: AbortSignal | undefined;
+    let nextPoll: AbortSignal | undefined;
+    let cancelSignal: AbortSignal | undefined;
+    const { service, calls, spend } = harness({
+      poll: (signal) => {
+        if (firstPoll !== undefined) {
+          nextPoll = signal;
+          return Promise.resolve({ status: "cancelled" });
+        }
+        firstPoll = signal;
+        return new Promise((resolve) => {
+          signal?.addEventListener(
+            "abort",
+            () =>
+              resolve({
+                status: "failed",
+                providerFailure: { category: "interrupted", message: "Status check interrupted." },
+              }),
+            { once: true },
+          );
+        });
+      },
+      cancel: async (signal) => {
+        cancelSignal = signal;
+        return { status: "running" };
+      },
+    });
+    try {
+      const job = await enqueue(service);
+      await vi.waitFor(() => expect(firstPoll).toBeDefined());
+      service.stop(job.id);
+      expect(firstPoll?.aborted).toBe(true);
+      const done = await service.whenTerminal(job.id);
+      expect(done).toMatchObject({ status: "cancelled", settledCostUsdMicros: 695_040 });
+      expect(cancelSignal?.aborted).toBe(false);
+      expect(nextPoll?.aborted).toBe(false);
+      expect(calls.cancel).toBe(1);
+      expect(spend.settle).toHaveBeenCalledTimes(1);
+    } finally {
+      service.close();
+    }
+  });
+
   it("keeps polling when the provider's cancel fails, and completes billed with its clip", async () => {
     let release: () => void = () => undefined;
     const started = new Promise<void>((resolve) => {
