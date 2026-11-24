@@ -1,5 +1,12 @@
-import type { ProviderInstance, ProviderModel } from "@octant/contracts";
+import type {
+  ProviderInstance,
+  ProviderInstanceId,
+  ProviderModel,
+  ProviderModelId,
+  ProviderObservedState,
+} from "@octant/contracts";
 import { isSpeechEligibleInstance } from "@octant/domain";
+import { endpointPresetForUrl } from "./addEndpointSteps";
 
 /** The voice models a preset knows its service serves, by model id. */
 export interface VoiceModelHint {
@@ -45,4 +52,40 @@ export function voiceModelsOf(
  */
 export function isSpeechUsable(instance: ProviderInstance): boolean {
   return instance.enabled && isSpeechEligibleInstance(instance);
+}
+
+/** One endpoint and the transcription model Voice could use on it. */
+export interface TranscriptionChoice {
+  readonly instanceId: ProviderInstanceId;
+  readonly instanceName: string;
+  readonly modelId: ProviderModelId;
+}
+
+/**
+ * Every enabled OpenAI-compatible endpoint that lists, or whose preset knows,
+ * a transcription model, so Voice settings can offer them as one menu instead
+ * of asking for a typed model id. The host still checks the route on use.
+ */
+export function transcriptionChoices(
+  instances: ReadonlyArray<ProviderInstance>,
+  observedStates: ReadonlyArray<ProviderObservedState>,
+): ReadonlyArray<TranscriptionChoice> {
+  const choices: Array<TranscriptionChoice> = [];
+  for (const instance of instances) {
+    if (!instance.enabled || !isSpeechEligibleInstance(instance)) continue;
+    const observed = observedStates.find(
+      (state) => String(state.instanceId) === String(instance.id),
+    );
+    const { transcription } = voiceModelsOf(
+      observed?.models,
+      endpointPresetForUrl(instance.configuration.baseUrl)?.voice,
+    );
+    if (transcription === undefined) continue;
+    choices.push({
+      instanceId: instance.id,
+      instanceName: instance.displayName,
+      modelId: transcription as ProviderModelId,
+    });
+  }
+  return choices;
 }
