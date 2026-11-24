@@ -1,5 +1,8 @@
-import type { ThreadSecretsClient } from "@octant/client-runtime/thread-secrets-client";
-import type { ThreadSecretCommand, ThreadSecretsHostView } from "@octant/contracts/thread-secrets";
+import type {
+  ThreadSecretAction,
+  ThreadSecretsClient,
+} from "@octant/client-runtime/thread-secrets-client";
+import type { ThreadSecretsHostView } from "@octant/contracts/thread-secrets";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -26,9 +29,10 @@ const full: ThreadSecretsHostView = {
 
 function setup(status: "accepted" | "refused" | "throws" = "accepted") {
   let view = full;
-  const sent: ThreadSecretCommand[] = [];
+  const sent: ThreadSecretAction[] = [];
   const client: ThreadSecretsClient = {
     read: vi.fn(),
+    browse: vi.fn(),
     readHost: async () => view,
     execute: async (command) => {
       sent.push(command);

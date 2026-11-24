@@ -9,6 +9,10 @@ import {
 import type { CredentialRequestReference } from "@octant/contracts/credential-request";
 import type { CredentialRequestResolution } from "@octant/contracts/credential-request";
 import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
+import type {
+  SecretStoreBrowseResult,
+  SecretStoreBrowseStep,
+} from "@octant/contracts/secret-stores";
 import { isToolAllowedByAllowlist } from "@octant/domain";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
 import type { NativeHarnessComposition } from "../harness/nativeHarnessComposition";
@@ -51,6 +55,9 @@ export type ThreadSecretsDependencies = Pick<ServerStart, "options" | "persisten
           signal: AbortSignal,
         ) => Promise<CredentialRequestResolution>)
       | undefined;
+    readonly browse?:
+      | ((step: SecretStoreBrowseStep, signal: AbortSignal) => Promise<SecretStoreBrowseResult>)
+      | undefined;
   };
 
 /** The secrets people give threads: one service for the host, and its private routes. */
@@ -84,6 +91,7 @@ export function wireThreadSecrets(deps: ThreadSecretsDependencies) {
     hold: holdSecretValue,
     ...(remembered === undefined ? {} : { remembered }),
     ...(deps.readReference === undefined ? {} : { readReference: deps.readReference }),
+    ...(deps.browse === undefined ? {} : { browse: deps.browse }),
     threadTitle: (threadId) =>
       persistence.readCodeThread(decodeCodeThreadId(threadId))?.title ??
       deps.workThreadProjection.read(decodeWorkThreadId(threadId))?.title,

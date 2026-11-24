@@ -88,6 +88,8 @@ export function createThreadSecretRoutes(
     switch (right.kind) {
       case "revoke":
         return reply(service.revoke(right.threadId, right.secretId));
+      case "browse":
+        return reply(await service.browse(windowId, right.threadId, right.requestId, right.step));
       case "forget":
         return reply(await service.forget(right.id));
       case "answer":

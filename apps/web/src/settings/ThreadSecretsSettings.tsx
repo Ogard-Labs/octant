@@ -1,7 +1,9 @@
-import type { ThreadSecretsClient } from "@octant/client-runtime/thread-secrets-client";
+import type {
+  ThreadSecretAction,
+  ThreadSecretsClient,
+} from "@octant/client-runtime/thread-secrets-client";
 import type {
   RememberedThreadSecret,
-  ThreadSecretCommand,
   ThreadSecretsHostView,
 } from "@octant/contracts/thread-secrets";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -48,7 +50,7 @@ export function ThreadSecretsSettings(props: {
     };
   }, [load]);
 
-  const run = async (command: ThreadSecretCommand, failure: string) => {
+  const run = async (command: ThreadSecretAction, failure: string) => {
     setBusy(true);
     setProblem(undefined);
     try {

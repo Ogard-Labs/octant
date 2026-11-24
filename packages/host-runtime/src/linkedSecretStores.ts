@@ -17,6 +17,10 @@
  * an adapter to {@link LINKED_SECRET_STORE_KINDS} and nothing else.
  */
 
+import type {
+  SecretStoreBrowseResult,
+  SecretStoreBrowseStep,
+} from "@octant/contracts/secret-stores";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -29,6 +33,11 @@ import {
   type BrowserCredentialItemPin,
   type BrowserItemMetadata,
 } from "./onePasswordBrowserMetadata";
+import {
+  MAX_ONE_PASSWORD_LIST_BYTES,
+  onePasswordBrowseArguments,
+  readOnePasswordBrowse,
+} from "./onePasswordBrowse";
 import { constants } from "node:fs";
 import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -70,6 +79,8 @@ export interface LinkedSecretStoreAdapter {
   /** Whether the tool is installed and the store is open to it. */
   readonly probe: () => Promise<LinkedSecretToolState>;
   readonly read: (reference: string) => Promise<LinkedSecretRead>;
+  /** The names one step lists, and never anything an item holds. */
+  readonly browse?: (step: SecretStoreBrowseStep) => Promise<SecretStoreBrowseResult>;
   readonly browserMetadata?: (item: BrowserCredentialItemPin) => Promise<BrowserItemMetadata>;
   readonly consumeBrowserCredential?: (
     metadata: Omit<Extract<BrowserItemMetadata, { readonly status: "described" }>, "status">,
@@ -107,6 +118,11 @@ export interface LinkedSecretStores {
   readonly isValidReference: (kind: LinkedSecretStoreKind, reference: string) => boolean;
   /** Fetches the value now. Fails closed when the store is not linked. */
   readonly read: (kind: LinkedSecretStoreKind, reference: string) => Promise<LinkedSecretRead>;
+  /** Lists names for the person to pick from. Fails closed when the store is not linked. */
+  readonly browse?: (
+    kind: LinkedSecretStoreKind,
+    step: SecretStoreBrowseStep,
+  ) => Promise<SecretStoreBrowseResult>;
   /** Proves a reference resolves without returning the value. */
   readonly check: (kind: LinkedSecretStoreKind, reference: string) => Promise<LinkedSecretCheck>;
   /** Where the AWS command line's key pair lives, if the person pointed it at items. */
@@ -239,7 +255,11 @@ export type CommandOutcome =
 export type CommandRunner = (
   file: string,
   args: ReadonlyArray<string>,
-  options: { readonly timeoutMs: number; readonly env: NodeJS.ProcessEnv },
+  options: {
+    readonly timeoutMs: number;
+    readonly env: NodeJS.ProcessEnv;
+    readonly maxOutputBytes?: number;
+  },
 ) => Promise<CommandOutcome>;
 
 /** `execFile` without a shell: the reference is one argument and is never interpreted. */
@@ -251,7 +271,7 @@ export const runCommand: CommandRunner = (file, args, options) =>
       {
         timeout: options.timeoutMs,
         env: options.env,
-        maxBuffer: 4 * MAX_LINKED_SECRET_VALUE_BYTES,
+        maxBuffer: options.maxOutputBytes ?? 4 * MAX_LINKED_SECRET_VALUE_BYTES,
         windowsHide: true,
       },
       (error, stdout, stderr) => {
@@ -370,6 +390,21 @@ export function makeOnePasswordAdapter(
       if (outcome.kind === "not-found") return "not-installed";
       const result = classify(outcome);
       return result === "ok" ? "ready" : result === "locked" ? "locked" : "unavailable";
+    },
+    browse: async (step) => {
+      const args = onePasswordBrowseArguments(step);
+      if (args === undefined) return { status: "missing" };
+      const file = await executable();
+      if (file === undefined) return { status: "unavailable" };
+      const outcome = await run(file, args, {
+        timeoutMs,
+        env: environment(),
+        maxOutputBytes: MAX_ONE_PASSWORD_LIST_BYTES,
+      });
+      const result = classify(outcome);
+      if (result !== "ok" || outcome.kind !== "exited")
+        return { status: result === "ok" ? "unavailable" : result };
+      return readOnePasswordBrowse(step, outcome.stdout);
     },
     read: async (reference) => {
       if (!ONE_PASSWORD_REFERENCE.test(reference) || !isPlainReference(reference)) {
@@ -561,6 +596,19 @@ export function makeLinkedSecretStores(options: LinkedSecretStoresOptions): Link
       if (!adapter.isValidReference(reference)) return { status: "invalid-reference" };
       if ((await load()).stores[kind] === undefined) return { status: "not-linked" };
       return adapter.read(reference);
+    },
+    browse: async (kind, step) => {
+      const adapter = adapterFor(kind);
+      if (adapter?.browse === undefined) return { status: "unavailable" };
+      const linked = async () => (await load()).stores[kind]?.linkedAt;
+      const generation = commandGeneration;
+      const before = await linked();
+      if (before === undefined) return { status: "not-linked" };
+      const result = await adapter.browse(step);
+      // An unlink while it listed must not show what the person closed off.
+      return (await linked()) === before && commandGeneration === generation
+        ? result
+        : { status: "changed" };
     },
     check: async (kind, reference) => {
       const adapter = adapterFor(kind);

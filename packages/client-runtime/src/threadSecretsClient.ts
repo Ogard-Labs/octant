@@ -7,18 +7,30 @@ import {
   type ThreadSecretsHostView,
   type ThreadSecretsView,
 } from "@octant/contracts/thread-secrets";
+import {
+  decodeSecretStoreBrowseResult,
+  type SecretStoreBrowseResult,
+} from "@octant/contracts/secret-stores";
 import { bindFetchPort } from "./bindFetchPort";
 
 /** The host's answer, or that it refused the request with nothing read from it. */
 export type ThreadSecretReply = ThreadSecretCommandResult | { readonly status: "not-taken" };
+
+/** Every command but a listing, which answers with names instead. */
+export type ThreadSecretAction = Exclude<ThreadSecretCommand, { readonly kind: "browse" }>;
 
 export interface ThreadSecretsClient {
   /** One thread's waiting cards for this window, and its active secrets. */
   readonly read: (threadId: string, signal?: AbortSignal) => Promise<ThreadSecretsView>;
   /** Every active and remembered secret on this host. */
   readonly readHost: (signal?: AbortSignal) => Promise<ThreadSecretsHostView>;
+  /** Names in the linked store, for a card that is waiting. */
+  readonly browse: (
+    request: Omit<Extract<ThreadSecretCommand, { readonly kind: "browse" }>, "kind">,
+    signal?: AbortSignal,
+  ) => Promise<SecretStoreBrowseResult>;
   /** Throws where the outcome is not known. */
-  readonly execute: (command: ThreadSecretCommand) => Promise<ThreadSecretReply>;
+  readonly execute: (command: ThreadSecretAction) => Promise<ThreadSecretReply>;
 }
 
 /** Only this computer's own host: a secret is sent nowhere else. */
@@ -62,6 +74,15 @@ export function createThreadSecretsClient(options: {
       return decodeThreadSecretsView(await read(url, signal));
     },
     readHost: async (signal) => decodeThreadSecretsHostView(await read(endpoint, signal)),
+    browse: async (request, signal) => {
+      const response = await send(endpoint, {
+        method: "POST",
+        body: JSON.stringify({ kind: "browse", ...request }),
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (!response.ok) throw Error("The linked store could not be listed.");
+      return decodeSecretStoreBrowseResult(await response.json());
+    },
     execute: async (command) => {
       const response = await send(endpoint, { method: "POST", body: JSON.stringify(command) });
       // The host refuses a request before it reads an answer from it.

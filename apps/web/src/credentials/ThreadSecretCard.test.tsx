@@ -325,6 +325,34 @@ describe("another source", () => {
     expect(screen.queryByRole("combobox", { name: /Source for/ })).not.toBeInTheDocument();
   });
 
+  it("puts a picked 1Password item's address in the field, and leaves focus in the picker while it is open", async () => {
+    const user = userEvent.setup();
+    const send = vi.fn(async () => ({ status: "accepted" as const }));
+    const entry = { id: "v", label: "Work" };
+    render(
+      <ThreadSecretCard
+        card={{ ...card, sources }}
+        answer={send}
+        browse={async (step) => ({
+          status: "listed",
+          truncated: false,
+          entries: [step.kind === "fields" ? { ...entry, reference: "op://v/i/f" } : entry],
+        })}
+      />,
+    );
+    const pick = { name: "Pick a 1Password item for Deploy token" };
+    expect(screen.queryByRole("button", pick)).not.toBeInTheDocument();
+    await choose(user, "1Password");
+    await user.click(screen.getByRole("button", pick));
+    for (const place of ["Vaults", "Work", "Work"]) {
+      await user.click(await screen.findByLabelText(`Filter ${place}`));
+      expect(screen.getByLabelText(`Filter ${place}`)).toHaveFocus();
+      await user.click(await screen.findByRole("button", { name: "Work" }));
+    }
+    await waitFor(() => expect(input()).toHaveValue("op://v/i/f"));
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("is a 1Password reference, read again at each use when the person asks", async () => {
     const { user, send } = setup({ sources });
     await user.type(input(), "discarded-token");

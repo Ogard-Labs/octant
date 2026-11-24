@@ -11,7 +11,7 @@
 
 import { Schema } from "effect";
 import { AutomationThreadMode } from "./automation";
-import { SecretStoreItemReference, SecretStoreKind } from "./secretStores";
+import { SecretStoreBrowseStep, SecretStoreItemReference, SecretStoreKind } from "./secretStores";
 import { WindowId } from "./shell";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -403,6 +403,13 @@ export const ThreadSecretCommand = Schema.Union(
     kind: Schema.Literal("revoke"),
     threadId: ThreadId,
     secretId: Schema.UUID,
+  }).annotations(strict),
+  /** Lists names in the linked store for one waiting card, so the person can pick an item. */
+  Schema.Struct({
+    kind: Schema.Literal("browse"),
+    threadId: ThreadId,
+    requestId: Schema.UUID,
+    step: SecretStoreBrowseStep,
   }).annotations(strict),
   /** Removes a remembered secret. Threads that hold it keep it for their own time. */
   Schema.Struct({ kind: Schema.Literal("forget"), id: Schema.UUID }).annotations(strict),

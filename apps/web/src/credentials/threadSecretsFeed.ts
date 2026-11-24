@@ -1,10 +1,15 @@
 import { useCallback, useSyncExternalStore } from "react";
 import {
   createThreadSecretsClient,
+  type ThreadSecretAction,
   type ThreadSecretReply,
   type ThreadSecretsClient,
 } from "@octant/client-runtime/thread-secrets-client";
-import type { ThreadSecretCommand, ThreadSecretsView } from "@octant/contracts/thread-secrets";
+import type {
+  SecretStoreBrowseResult,
+  SecretStoreBrowseStep,
+} from "@octant/contracts/secret-stores";
+import type { ThreadSecretsView } from "@octant/contracts/thread-secrets";
 import { waitUntilDocumentVisible } from "../polling/documentVisibility";
 
 const REFRESH_MS = 1_000;
@@ -49,12 +54,20 @@ class ThreadSecretsFeed {
     };
   }
 
-  async execute(command: ThreadSecretCommand): Promise<ThreadSecretReply> {
+  async execute(command: ThreadSecretAction): Promise<ThreadSecretReply> {
     try {
       return await this.#client.execute(command);
     } finally {
       if (this.#listeners.size > 0) this.#refresh();
     }
+  }
+
+  browse(
+    requestId: string,
+    step: SecretStoreBrowseStep,
+    signal: AbortSignal,
+  ): Promise<SecretStoreBrowseResult> {
+    return this.#client.browse({ threadId: this.#threadId, requestId, step }, signal);
   }
 
   #stop(): void {
@@ -96,7 +109,13 @@ class ThreadSecretsFeed {
 const feeds = new Map<string, ThreadSecretsFeed>();
 
 export interface ThreadSecretsPort extends ThreadSecretsState {
-  readonly send: (command: ThreadSecretCommand) => Promise<ThreadSecretReply>;
+  readonly send: (command: ThreadSecretAction) => Promise<ThreadSecretReply>;
+  /** Names in the store linked on this computer, for one waiting card. */
+  readonly browse: (
+    requestId: string,
+    step: SecretStoreBrowseStep,
+    signal: AbortSignal,
+  ) => Promise<SecretStoreBrowseResult>;
 }
 
 /** One thread's secret cards and active secrets, from this window's own host. */
@@ -123,11 +142,17 @@ export function useThreadSecrets(input: {
     subscribe,
     () => feeds.get(keyOf(threadId, serverUrl, windowCapability))?.state ?? NOTHING,
   );
-  const send = async (command: ThreadSecretCommand): Promise<ThreadSecretReply> => {
+  const send = async (command: ThreadSecretAction): Promise<ThreadSecretReply> => {
     const feed = feedOf(threadId, serverUrl, windowCapability);
     return feed === undefined ? { status: "gone" } : feed.value.execute(command);
   };
-  return { ...state, send };
+  const browse: ThreadSecretsPort["browse"] = async (requestId, step, signal) => {
+    const feed = feedOf(threadId, serverUrl, windowCapability);
+    return feed === undefined
+      ? { status: "unavailable" }
+      : feed.value.browse(requestId, step, signal);
+  };
+  return { ...state, send, browse };
 }
 
 function keyOf(

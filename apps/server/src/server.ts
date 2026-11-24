@@ -718,6 +718,7 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
       readReference: commandBroker?.requestCardRead,
+      browse: commandBroker?.browse,
     });
     yield* Effect.addFinalizer(() => Effect.sync(() => threadSecrets.close()));
     const {

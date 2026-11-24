@@ -1,6 +1,7 @@
 import { nodeAwsProfilePorts, type AwsProfilePorts } from "./awsProfileCredentials";
 import { Schema } from "effect";
 import { CredentialRequestReference } from "@octant/contracts/credential-request";
+import { decodeSecretStoreBrowseStep } from "@octant/contracts/secret-stores";
 import { decodeCommandCredentialHostRequest } from "@octant/contracts/command-credentials";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
@@ -58,6 +59,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const ROUTES = new Set([
   "/v1/secret-stores/command-use",
   "/v1/secret-stores/request-card-read",
+  "/v1/secret-stores/browse",
   "/v1/credentials/has",
   "/v1/credentials/resolve",
   "/v1/credentials/set",
@@ -964,6 +966,20 @@ async function handleSecretStoreRoute(
       version: result.version,
       websiteOrigins: result.websiteOrigins,
       storeRevision: result.storeRevision,
+    });
+  }
+
+  if (operation === "browse") {
+    if (keys !== "step,store" || !isLinkedSecretStoreKind(store))
+      return failure("invalid-request", 400);
+    let step;
+    try {
+      step = decodeSecretStoreBrowseStep(value.step);
+    } catch {
+      return failure("invalid-request", 400);
+    }
+    return Response.json((await linked.browse?.(store, step)) ?? { status: "unavailable" }, {
+      headers: { "cache-control": "no-store" },
     });
   }
 
