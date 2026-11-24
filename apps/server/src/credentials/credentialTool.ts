@@ -1,4 +1,4 @@
-import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
+import { OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS } from "@octant/contracts/credential-request";
 import { createCredentialCodeTool } from "@octant/plugin-host/code-tools";
 import type {
   CodeToolOperationEntry,
@@ -46,8 +46,8 @@ export function createCredentialTool<
   const registered = sides.registered.offered ? sides.registered : undefined;
   const saved = sides.saved.offered ? sides.saved : undefined;
   const set = createCredentialCodeTool({
-    name: OCTANT_CREDENTIAL_TOOL.name,
-    description: OCTANT_CREDENTIAL_TOOL.description,
+    name: OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS.name,
+    description: OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS.description,
     port: {
       operations: () => registered?.list()?.map(({ id, label, reason }) => ({ id, label, reason })),
       savedCommands: () => saved?.list()?.map(({ id, label }) => ({ id, label })),
@@ -82,7 +82,7 @@ export function createCredentialTool<
         };
       },
     },
-    { [OCTANT_CREDENTIAL_TOOL.name]: CREDENTIAL_TOOL_HELP },
+    { [OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS.name]: CREDENTIAL_TOOL_HELP },
   );
 }
 
