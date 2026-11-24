@@ -69,7 +69,8 @@ export interface ImageGenerationAdapter {
  */
 export interface ImageHttpAuth {
   readonly header: string;
-  readonly scheme?: "Bearer";
+  /** `Key` is fal's scheme (`Authorization: Key <key>`). */
+  readonly scheme?: "Bearer" | "Key";
 }
 
 export interface ImageHttpRequest {

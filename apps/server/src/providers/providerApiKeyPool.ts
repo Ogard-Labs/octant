@@ -87,10 +87,13 @@ const REJECTION_BODY_BYTES = 4096;
  * the copy, so a large error body is never buffered whole; the caller's own
  * read of the response still enforces its size limit.
  */
-async function readRejectionPrefix(response: Response): Promise<string> {
+async function readRejectionPrefix(response: Response, signal?: AbortSignal): Promise<string> {
+  if (signal?.aborted) return "";
   const copy = response.clone().body;
   if (copy === null) return "";
   const reader = copy.getReader();
+  const cancel = () => void reader.cancel().catch(() => undefined);
+  signal?.addEventListener("abort", cancel, { once: true });
   const chunks: Uint8Array[] = [];
   let length = 0;
   try {
@@ -100,8 +103,13 @@ async function readRejectionPrefix(response: Response): Promise<string> {
       chunks.push(value);
       length += value.byteLength;
     }
+  } catch (error) {
+    // The fetch may fail its body read as the signal cancels it. Any
+    // quota text we received before that still applies to this key.
+    if (signal?.aborted !== true) throw error;
   } finally {
-    reader.cancel().catch(() => undefined);
+    signal?.removeEventListener("abort", cancel);
+    cancel();
   }
   const bytes = new Uint8Array(Math.min(length, REJECTION_BODY_BYTES));
   let offset = 0;
@@ -121,11 +129,12 @@ async function readRejectionPrefix(response: Response): Promise<string> {
 export async function reportKeyRejection(
   lease: ProviderCredentialLease | undefined,
   response: Response,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (lease === undefined || response.ok) return;
   let body = "";
   try {
-    body = await readRejectionPrefix(response);
+    body = await readRejectionPrefix(response, signal);
   } catch {
     body = "";
   }

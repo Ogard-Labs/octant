@@ -59,6 +59,8 @@ import {
   changeBflImageConfiguration,
   changeIdeogramImageConfiguration,
   changeGeminiVideoConfiguration,
+  changeRunwayVideoConfiguration,
+  changeFalVideoConfiguration,
   changeClaudeConfiguration,
   claudeChangeKeepsRuntime,
   changeGeminiImageConfiguration,
@@ -74,6 +76,8 @@ import {
   createBflImageProvider,
   createIdeogramImageProvider,
   createGeminiVideoProvider,
+  createRunwayVideoProvider,
+  createFalVideoProvider,
   assignedClaudeAccountConfigDirectory,
   claudeAccountUsesStoredKey,
   assignedCodexHome,
@@ -1101,6 +1105,8 @@ export class ProviderService implements ProviderServiceApi {
             command.kind === "create-bfl-image-provider" ||
             command.kind === "create-ideogram-image-provider" ||
             command.kind === "create-gemini-video-provider" ||
+            command.kind === "create-runway-video-provider" ||
+            command.kind === "create-fal-video-provider" ||
             command.kind === "create-outside-harness-endpoint-provider"
           ) {
             if (current !== undefined || command.expectedVersion !== 0) {
@@ -1243,6 +1249,18 @@ export class ProviderService implements ProviderServiceApi {
                 break;
               case "create-gemini-video-provider":
                 instance = createGeminiVideoProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-runway-video-provider":
+                instance = createRunwayVideoProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-fal-video-provider":
+                instance = createFalVideoProvider({
                   ...common,
                   configuration: command.configuration,
                 });
@@ -1520,6 +1538,20 @@ export class ProviderService implements ProviderServiceApi {
               throw this.#unsupported("This provider does not use Gemini video configuration.");
             }
             instance = changeGeminiVideoConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-runway-video-configuration") {
+            if (current.driverKind !== "runway-video") {
+              throw this.#unsupported("This provider does not use Runway video configuration.");
+            }
+            instance = changeRunwayVideoConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-fal-video-configuration") {
+            if (current.driverKind !== "fal-video") {
+              throw this.#unsupported("This provider does not use fal video configuration.");
+            }
+            instance = changeFalVideoConfiguration(current, command.configuration, updatedAt);
             await this.#runtime.invalidateRuntime(current.id);
             eventName = "provider.instance-configuration-changed@1";
           } else if (command.kind === "change-claude-configuration") {

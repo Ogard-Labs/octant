@@ -135,6 +135,19 @@ const BUNDLED_VIDEO_DRIVERS = [
     digestNibble: "1e",
     uuidNibble: "1f",
   },
+  // Each later video driver takes the next unused seeds, so none moves another.
+  {
+    driverKind: "runway-video",
+    displayName: "Runway Video",
+    digestNibble: "20",
+    uuidNibble: "21",
+  },
+  {
+    driverKind: "fal-video",
+    displayName: "fal Video",
+    digestNibble: "24",
+    uuidNibble: "23",
+  },
 ] as const satisfies ReadonlyArray<BundledDriverSpec>;
 
 const PROVIDER_DRIVER_COMPONENT_ID = "provider-driver";
