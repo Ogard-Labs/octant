@@ -333,9 +333,11 @@ export function makePinnedImageFetch(
             else if (Array.isArray(value)) headers.set(name, value.join(", "));
           }
           const status = incoming.statusCode ?? 502;
-          const chunks = incoming[Symbol.asyncIterator]();
+          const nullBody = status === 204 || status === 205 || status === 304;
+          if (nullBody) incoming.resume();
+          const chunks = nullBody ? undefined : incoming[Symbol.asyncIterator]();
           const body =
-            status === 204 || status === 304
+            chunks === undefined
               ? null
               : new ReadableStream<Uint8Array>({
                   async pull(controller) {
@@ -354,7 +356,12 @@ export function makePinnedImageFetch(
                     incoming.destroy();
                   },
                 });
-          resolve(new Response(body, { status, headers }));
+          try {
+            resolve(new Response(body, { status, headers }));
+          } catch (error) {
+            incoming.destroy();
+            reject(error instanceof Error ? error : new Error(String(error)));
+          }
         },
       );
       request.on("error", reject);

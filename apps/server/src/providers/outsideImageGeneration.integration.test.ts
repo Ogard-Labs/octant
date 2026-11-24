@@ -599,19 +599,25 @@ describe("an outside image driver's later fixes", () => {
     };
   };
 
-  it("streams an image too large for one line as chunks and assembles it", async () => {
+  it("streams an image larger than the one-line frame limit as chunks and assembles it", async () => {
+    // 1.2 MB raw (~1.6M base64 chars) exceeds the channel's one-line cap.
+    const largePng = Buffer.concat([png, Buffer.alloc(1_200_000)]);
+    const largeBase64 = largePng.toString("base64");
+    const chunkSize = 800_000;
     const { enqueue, service } = harness({
       handlers: {
         ...imageHandlers,
         "image/generate": (_params, context) => {
-          // Split on four-character boundaries, as the protocol requires.
-          const half = Math.floor(pngBase64.length / 8) * 4;
-          for (const data of [pngBase64.slice(0, half), pngBase64.slice(half)]) {
+          for (let offset = 0; offset < largeBase64.length; offset += chunkSize) {
             context.writeRaw(
               JSON.stringify({
                 jsonrpc: "2.0",
                 method: "image/chunk",
-                params: { requestId: context.id, image: 0, data },
+                params: {
+                  requestId: context.id,
+                  image: 0,
+                  data: largeBase64.slice(offset, offset + chunkSize),
+                },
               }),
             );
           }
@@ -622,6 +628,31 @@ describe("an outside image driver's later fixes", () => {
     const job = await service.whenTerminal((await enqueue({})).id);
     expect(job.status).toBe("completed");
     expect(job.artifacts).toHaveLength(1);
+    expect(job.artifacts[0]?.size).toBe(largePng.byteLength);
+  });
+
+  it("refuses a driver that sends too many tiny chunks for one image", async () => {
+    const { enqueue, service } = harness({
+      handlers: {
+        ...imageHandlers,
+        "image/generate": (_params, context) => {
+          for (let i = 0; i < 1_025; i += 1) {
+            context.writeRaw(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                method: "image/chunk",
+                params: { requestId: context.id, image: 0, data: "AAAA" },
+              }),
+            );
+          }
+          return NO_ANSWER;
+        },
+      },
+    });
+    const job = await service.whenTerminal((await enqueue({})).id);
+    expect(job.status === "failed" ? job.failure?.message : undefined).toBe(
+      "The image driver sent more image data than Octant accepts.",
+    );
   });
 
   it("refuses a chunk for an image index past the variants it asked for", async () => {
@@ -663,6 +694,30 @@ describe("an outside image driver's later fixes", () => {
         },
       },
       providerBody: '{"url":"https:\\/\\/cdn.images.example.test\\/out\\/1.png?a=1\\u0026sig=abc"}',
+      imageFetch,
+    });
+    const job = await run.service.whenTerminal((await run.enqueue({})).id);
+    expect(job.status).toBe("completed");
+    expect(imageFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("matches a JSON image address containing an apostrophe", async () => {
+    const named = "https://cdn.images.example.test/out/artist's-preview.png";
+    const imageFetch = vi.fn(() => new Response(png, { status: 200 }));
+    const run = harness({
+      handlers: {
+        ...imageHandlers,
+        "image/generate": async (_params, context) => {
+          await context.http({
+            requestId: context.id,
+            url: "https://images.example.test/v1/generate",
+            method: "POST",
+            auth: { header: "authorization", scheme: "Bearer" },
+          });
+          return { status: "completed", images: [{ url: named }] };
+        },
+      },
+      providerBody: JSON.stringify({ url: named }),
       imageFetch,
     });
     const job = await run.service.whenTerminal((await run.enqueue({})).id);

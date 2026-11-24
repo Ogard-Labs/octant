@@ -7,6 +7,9 @@ import {
   decodeOutsideDriverToHostMessage,
   HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS,
   HOST_IMAGE_GENERATION_PROTOCOL_VERSIONS,
+  OUTSIDE_DRIVER_IMAGE_BASE64_CHARACTERS,
+  OUTSIDE_DRIVER_REFERENCE_IMAGE_BASE64_CHARACTERS,
+  OutsideDriverImageGenerateParams,
   OutsideProviderDriverProtocolVersion,
   outsideDriverProtocolFamily,
 } from "./outsideDriverProtocol";
@@ -67,6 +70,28 @@ describe("outside image generation protocol", () => {
     ]) {
       expect(decodeOutsideDriverImageGenerateResult(result)._tag).toBe("Left");
     }
+  });
+
+  it("allows reference images larger than the inline result limit up to the host image ceiling", () => {
+    const decodeParams = Schema.decodeUnknownEither(OutsideDriverImageGenerateParams);
+    const largeReference = "A".repeat(OUTSIDE_DRIVER_IMAGE_BASE64_CHARACTERS + 4);
+    expect(
+      decodeParams({
+        modelId: "outside-model-1",
+        prompt: "edit this",
+        variantCount: 1,
+        references: [{ mediaType: "image/png", data: largeReference }],
+      })._tag,
+    ).toBe("Right");
+    const overCeiling = "A".repeat(OUTSIDE_DRIVER_REFERENCE_IMAGE_BASE64_CHARACTERS + 4);
+    expect(
+      decodeParams({
+        modelId: "outside-model-1",
+        prompt: "edit this",
+        variantCount: 1,
+        references: [{ mediaType: "image/png", data: overCeiling }],
+      })._tag,
+    ).toBe("Left");
   });
 });
 

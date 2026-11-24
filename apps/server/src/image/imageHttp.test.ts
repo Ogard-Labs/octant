@@ -216,4 +216,23 @@ describe("the pinned approved-image transport", () => {
       await new Promise<void>((closed) => server.close(() => closed()));
     }
   });
+
+  it("handles HTTP 205 without throwing outside the promise or crashing the host", async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(205);
+      response.end();
+    });
+    await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const origin = `http://images.proxy.test:${port}`;
+      const result = await fetchWith(
+        makePinnedImageFetch({ resolveAll: async () => ["127.0.0.1"], allowedOrigin: origin }),
+        `${origin}/reset.png`,
+      );
+      expect(result).toEqual({ bytes: new Uint8Array() });
+    } finally {
+      await new Promise<void>((closed) => server.close(() => closed()));
+    }
+  });
 });

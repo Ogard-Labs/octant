@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { MAX_GENERATED_IMAGE_BYTES } from "./imageGeneration";
 import { NativeHarnessTranscriptToolCall } from "./nativeHarnessTranscript";
 import {
   ProviderCapabilities,
@@ -372,8 +373,16 @@ export type OutsideDriverToHostMessage = typeof OutsideDriverToHostMessage.Type;
 
 // ── image generation ───────────────────────────────────────────────────────
 
-/** The largest base64 payload one image may carry across the channel either way. */
+/** The largest base64 payload one inline driver result may carry in one line. */
 export const OUTSIDE_DRIVER_IMAGE_BASE64_CHARACTERS = 4_000_000;
+
+/**
+ * The largest base64 payload a reference image may carry from the host to the
+ * driver: matches `MAX_GENERATED_IMAGE_BYTES` so every reference image
+ * `ImageJobService` accepts crosses without violating the protocol schema.
+ */
+export const OUTSIDE_DRIVER_REFERENCE_IMAGE_BASE64_CHARACTERS =
+  Math.ceil(MAX_GENERATED_IMAGE_BYTES / 3) * 4;
 
 const OutsideDriverImageMediaType = Schema.Literal(
   "image/png",
@@ -385,6 +394,12 @@ const OutsideDriverImageMediaType = Schema.Literal(
 const Base64Image = Schema.String.pipe(
   Schema.minLength(4),
   Schema.maxLength(OUTSIDE_DRIVER_IMAGE_BASE64_CHARACTERS),
+  Schema.pattern(/^[A-Za-z0-9+/]+={0,2}$/),
+);
+
+const Base64ReferenceImage = Schema.String.pipe(
+  Schema.minLength(4),
+  Schema.maxLength(OUTSIDE_DRIVER_REFERENCE_IMAGE_BASE64_CHARACTERS),
   Schema.pattern(/^[A-Za-z0-9+/]+={0,2}$/),
 );
 
@@ -400,9 +415,10 @@ export const OutsideDriverImageGenerateParams = Schema.Struct({
   prompt: Schema.String,
   variantCount: Schema.Int.pipe(Schema.between(1, 16)),
   references: Schema.Array(
-    Schema.Struct({ mediaType: OutsideDriverImageMediaType, data: Base64Image }).annotations(
-      strict,
-    ),
+    Schema.Struct({
+      mediaType: OutsideDriverImageMediaType,
+      data: Base64ReferenceImage,
+    }).annotations(strict),
   ).pipe(Schema.maxItems(16)),
   quality: Schema.optional(Schema.String),
   size: Schema.optional(Schema.String),

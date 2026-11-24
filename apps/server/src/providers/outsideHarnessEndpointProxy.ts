@@ -514,6 +514,7 @@ class OutsideDriverLink {
     if (response.body === null) return undefined;
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    const relayedParts = relayed === undefined ? undefined : ([] as Array<string>);
     let bytes = 0;
     const chunkCharacters = Math.max(1, Math.floor(this.#limits.messageBytes / 8));
     try {
@@ -528,7 +529,7 @@ class OutsideDriverLink {
           return failure("protocol", "The provider response exceeded the size limit.");
         }
         const text = decoder.decode(read.value, { stream: true });
-        relayed?.push(text);
+        relayedParts?.push(text);
         for (let offset = 0; offset < text.length; offset += chunkCharacters) {
           // The end that follows an abort is the last line for this call.
           if (signal.aborted) return interrupted();
@@ -539,7 +540,7 @@ class OutsideDriverLink {
         }
       }
       const rest = decoder.decode();
-      if (rest.length > 0) relayed?.push(rest);
+      if (rest.length > 0) relayedParts?.push(rest);
       if (signal.aborted) return interrupted();
       if (rest.length > 0) this.notify(OUTSIDE_DRIVER_METHODS.httpChunk, { httpId, data: rest });
       return undefined;
@@ -548,6 +549,9 @@ class OutsideDriverLink {
       if (signal.aborted) return interrupted();
       return failure("unavailable", "The provider response could not be read.");
     } finally {
+      if (relayed !== undefined && relayedParts !== undefined && relayedParts.length > 0) {
+        relayed.push(relayedParts.join(""));
+      }
       reader.cancel().catch(() => undefined);
     }
   }

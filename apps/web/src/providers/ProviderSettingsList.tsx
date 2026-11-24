@@ -1843,12 +1843,14 @@ function ProviderRow(props: ProviderRowProps) {
                         {String(outsideInstance.configuration.driver.digest)}
                       </span>
                     </span>
-                    <ProviderToolVerification
-                      disabled={disabled || !props.instance.enabled}
-                      instance={props.instance}
-                      observed={props.observed}
-                      onVerify={props.onVerifyModelTools}
-                    />
+                    {outsideInstance.driverKind === "outside-image" ? null : (
+                      <ProviderToolVerification
+                        disabled={disabled || !props.instance.enabled}
+                        instance={props.instance}
+                        observed={props.observed}
+                        onVerify={props.onVerifyModelTools}
+                      />
+                    )}
                   </div>
                 )}
                 {!isClaude ? null : (
