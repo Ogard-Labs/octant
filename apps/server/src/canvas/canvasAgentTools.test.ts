@@ -2531,11 +2531,7 @@ describe("Canvas preview through the tool", () => {
       inputJson: JSON.stringify({ operation: "preview", canvasId: previewCanvasId }),
     });
     expect(outcome.isError).not.toBe(true);
-    expect(outcome.canvasPreview).toEqual({
-      canvasId: previewCanvasId,
-      versionId: "version-3",
-      sequence: 3,
-    });
+    expect(outcome.canvasPreview).toEqual({ canvasId: previewCanvasId, versionId: "version-3" });
     expect(JSON.stringify(outcome.canvasPreview)).not.toContain("AAAA");
   });
 

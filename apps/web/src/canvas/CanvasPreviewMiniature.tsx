@@ -7,7 +7,7 @@ import { CanvasView } from "./CanvasView";
 
 type LoadedVersion =
   | { readonly kind: "loading" }
-  | { readonly kind: "ready"; readonly definition: CanvasDefinition }
+  | { readonly kind: "ready"; readonly definition: CanvasDefinition; readonly sequence: number }
   | { readonly kind: "unavailable" };
 
 /**
@@ -22,7 +22,7 @@ export function CanvasPreviewMiniature(props: {
   readonly preview: ThreadCanvasPreviewReceipt;
 }) {
   const { client } = props;
-  const { canvasId, versionId, sequence } = props.preview;
+  const { canvasId, versionId } = props.preview;
   const [loaded, setLoaded] = useState<LoadedVersion>({ kind: "loading" });
   useEffect(() => {
     let id;
@@ -40,7 +40,11 @@ export function CanvasPreviewMiniature(props: {
         if (cancelled) return;
         setLoaded(
           outcome.kind === "ready"
-            ? { kind: "ready", definition: outcome.version.definition }
+            ? {
+                kind: "ready",
+                definition: outcome.version.definition,
+                sequence: outcome.version.sequence,
+              }
             : { kind: "unavailable" },
         );
       })
@@ -58,15 +62,21 @@ export function CanvasPreviewMiniature(props: {
   return (
     <figure className="canvas-preview-shot">
       {loaded.kind === "ready" ? (
-        <span aria-hidden="true" className="canvas-preview-shot__frame" inert>
-          <span className="canvas-preview-shot__page">
-            <CanvasView input={loaded.definition} placement="thread" />
+        <>
+          <span aria-hidden="true" className="canvas-preview-shot__frame" inert>
+            <span className="canvas-preview-shot__page">
+              <CanvasView input={loaded.definition} placement="thread" />
+            </span>
           </span>
-        </span>
-      ) : null}
-      <figcaption className="canvas-preview-shot__caption">
-        {`Version ${String(sequence)}, as the agent previewed it`}
-      </figcaption>
+          <figcaption className="canvas-preview-shot__caption">
+            {`Version ${String(loaded.sequence)}, as the agent previewed it`}
+          </figcaption>
+        </>
+      ) : (
+        <figcaption className="canvas-preview-shot__caption">
+          Loading the previewed Canvas
+        </figcaption>
+      )}
     </figure>
   );
 }

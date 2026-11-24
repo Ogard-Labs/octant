@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CanvasPreviewMiniature } from "./CanvasPreviewMiniature";
 
 const canvasId = "20000000-0000-4000-8000-000000000002";
-const preview = { canvasId, versionId: "20000000-0000-4000-8000-000000000003", sequence: 3 };
+const preview = { canvasId, versionId: "20000000-0000-4000-8000-000000000003" };
 
 describe("the miniature of a previewed Canvas", () => {
   it("reads the exact version the agent previewed and draws it inert", async () => {

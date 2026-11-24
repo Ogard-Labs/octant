@@ -1146,7 +1146,7 @@ describe("the tool list", () => {
 });
 
 describe("a Canvas preview's row", () => {
-  const preview = { canvasId: "canvas-1", versionId: "version-3", sequence: 3 };
+  const preview = { canvasId: "canvas-1", versionId: "version-3" };
   const activity: TurnActivity = {
     reasoning: "",
     rows: [

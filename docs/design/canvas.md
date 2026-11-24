@@ -435,8 +435,8 @@ the thread shows whole (1,200 px, `CANVAS_INLINE_SHOWN_WHOLE_HEIGHT`) gets an
 drawn page, so a summary is not cut off behind **Show the whole Canvas**
 unseen; a model shown no picture of a Canvas without a design gets no such
 reading, since no page was drawn. A preview's result also hands the tool row
-a reference to the version it drew (`canvasPreview`: the Canvas id, version
-id, and sequence), journaled on the call's step like a routine receipt
+a reference to the version it drew (`canvasPreview`: the Canvas id and
+version id), journaled on the call's step like a routine receipt
 (`ThreadCanvasPreviewReceipt`); the picture the agent was shown is never
 journaled. Opening that row in Chat, Work, or Code draws the version as an
 inert miniature, read under the window's own Canvas authority, captioned with

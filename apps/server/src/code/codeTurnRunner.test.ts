@@ -602,7 +602,7 @@ describe("CodeTurnRunner", () => {
         ]),
       ),
     });
-    const canvasPreview = { canvasId: "canvas-1", versionId: "version-3", sequence: 3 };
+    const canvasPreview = { canvasId: "canvas-1", versionId: "version-3" };
     const observed: CodeTurnEvent[] = [];
     await Effect.runPromise(
       Effect.scoped(

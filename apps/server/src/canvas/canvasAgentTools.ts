@@ -1925,11 +1925,7 @@ function previewToolResult(
         ...(outcome.image === undefined ? {} : { images: [outcome.image] }),
         // The row shows the version drawn, never the picture: the reference
         // is all the step keeps.
-        canvasPreview: {
-          canvasId: outcome.canvasId,
-          versionId: outcome.versionId,
-          sequence: outcome.sequence,
-        },
+        canvasPreview: { canvasId: outcome.canvasId, versionId: outcome.versionId },
         result: {
           canvasId: outcome.canvasId,
           sequence: outcome.sequence,

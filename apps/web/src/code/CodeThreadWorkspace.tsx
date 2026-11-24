@@ -1102,6 +1102,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       : undefined;
   const canvasClient = props.canvasClient;
   const openInSidebar = props.onOpenCanvasInSidebar;
+  // A turn's Canvases, drawn above its reply or, with no reply yet, after its last row.
+  const turnCanvases = (cards: Parameters<typeof ThreadCanvases>[0]["cards"]) =>
+    canvasClient === undefined ? null : (
+      <ThreadCanvases
+        cards={cards}
+        client={canvasClient}
+        {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+        {...(props.canvasOpenLabel === undefined ? {} : { openLabel: props.canvasOpenLabel })}
+      />
+    );
   const canvasPlacement = placeThreadCanvases(
     threadTurnSpans(
       messages,
@@ -1986,16 +1996,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             rows={workerCardPlacement?.byRow.get(message.id) ?? []}
                           />
                         )}
-                        {canvasClient === undefined ? null : (
-                          <ThreadCanvases
-                            cards={canvasPlacement.byRow.get(message.id)}
-                            client={canvasClient}
-                            {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
-                            {...(props.canvasOpenLabel === undefined
-                              ? {}
-                              : { openLabel: props.canvasOpenLabel })}
-                          />
-                        )}
+                        {turnCanvases(canvasPlacement.byRow.get(message.id))}
                         {imageClient === undefined || imageProfiles === undefined ? null : (
                           <GeneratedImageJobs
                             canSaveToProject
@@ -2357,16 +2358,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             {/* The turn's Canvases sit between its steps and its
                             reply, so a summary reads first and the reply adds to
                             it rather than introducing it. */}
-                            {canvasClient === undefined ? null : (
-                              <ThreadCanvases
-                                cards={canvasPlacement.beforeReply.get(message.id)}
-                                client={canvasClient}
-                                {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
-                                {...(props.canvasOpenLabel === undefined
-                                  ? {}
-                                  : { openLabel: props.canvasOpenLabel })}
-                              />
-                            )}
+                            {turnCanvases(canvasPlacement.beforeReply.get(message.id))}
                             {/* An assistant reply is markdown — a plan arrives as a
                             heading and a numbered list, and rendering it as one
                             long line is what made plans unreadable here. */}

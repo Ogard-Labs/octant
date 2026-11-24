@@ -100,7 +100,6 @@ export type ThreadPublishedPage = typeof ThreadPublishedPage.Type;
 export const ThreadCanvasPreviewReceipt = Schema.Struct({
   canvasId: boundedNonEmptyText(255),
   versionId: boundedNonEmptyText(255),
-  sequence: Schema.Int.pipe(Schema.positive()),
 }).annotations(strict);
 export type ThreadCanvasPreviewReceipt = typeof ThreadCanvasPreviewReceipt.Type;
 

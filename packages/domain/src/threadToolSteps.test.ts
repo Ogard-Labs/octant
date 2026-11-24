@@ -382,7 +382,7 @@ describe("Octant Shield's decisions among a turn's tool steps", () => {
     const started = fold([
       event({ kind: "tool-start", toolCallId: "p", toolName: "octant_canvas" }),
     ]);
-    const canvasPreview = { canvasId: "canvas-1", versionId: "version-3", sequence: 3 };
+    const canvasPreview = { canvasId: "canvas-1", versionId: "version-3" };
     const marked = markThreadToolStepCanvasPreview(
       started,
       { toolCallId: "p", toolName: "octant_canvas", canvasPreview },
