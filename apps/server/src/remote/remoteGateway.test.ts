@@ -75,8 +75,6 @@ import {
   type RemoteGatewayOptions,
 } from "./remoteGateway";
 import { canonicalDeviceKeyFacts } from "./deviceKeyFacts";
-import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
-import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createLocalDeviceAdministrationRouteHandler } from "./localDeviceAdministrationRoutes";
 import { executeFinalizationSequence } from "./remoteGatewayFinalization";
 import { createPushNotificationTokenStore } from "./pushNotificationTokenStore";
