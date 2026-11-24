@@ -50,7 +50,7 @@ describe("secrets in Settings", () => {
   it("names each active secret with its thread and time, and revokes one", async () => {
     const { sent } = setup();
     expect(
-      await screen.findByText("DEPLOY_TOKEN · Publish the preview · Entered · Until archived"),
+      await screen.findByText("Until archived · Entered · Publish the preview · DEPLOY_TOKEN"),
     ).toBeInTheDocument();
     await userEvent.click(
       screen.getByRole("button", { name: "Revoke Deploy token, DEPLOY_TOKEN" }),

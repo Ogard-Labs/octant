@@ -90,13 +90,14 @@ export function ThreadSecretsSettings(props: {
                 key={secret.id}
                 label={secret.label}
                 meta={[
-                  secret.name,
-                  secret.threadTitle,
-                  THREAD_SECRET_SOURCES[secret.source],
                   threadSecretTimeLeft(secret),
+                  THREAD_SECRET_SOURCES[secret.source],
+                  secret.threadTitle,
+                  secret.name,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
+                labelWraps
                 metaWraps
                 settingId="thread-secrets-active"
               >
@@ -137,6 +138,8 @@ export function ThreadSecretsSettings(props: {
                 focused={focusedSetting === "thread-secrets-remembered"}
                 key={secret.id}
                 label={secret.name}
+                labelWraps
+                metaWraps
                 meta={
                   secret.source === "pasted"
                     ? "In this computer's credential store"

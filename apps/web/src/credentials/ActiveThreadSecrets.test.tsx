@@ -35,7 +35,7 @@ describe("the active secrets of a thread", () => {
     vi.stubGlobal("fetch", fetch);
     render(<ActiveThreadSecrets {...place} />);
     await userEvent.click(await screen.findByText(/Active secrets/));
-    expect(screen.getByText("DEPLOY_TOKEN · 1Password · 23 h left")).toBeInTheDocument();
+    expect(screen.getByText("23 h left · 1Password · DEPLOY_TOKEN")).toBeInTheDocument();
     await userEvent.click(
       screen.getByRole("button", { name: "Revoke Deploy token, DEPLOY_TOKEN" }),
     );

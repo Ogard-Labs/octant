@@ -61,8 +61,8 @@ export function ActiveThreadSecrets(props: {
           <li key={secret.id}>
             <span className="active-thread-secrets__name">{secret.label}</span>
             <span className="active-thread-secrets__facts">
-              {secret.name} · {THREAD_SECRET_SOURCES[secret.source]} ·{" "}
-              {threadSecretTimeLeft(secret)}
+              {threadSecretTimeLeft(secret)} · {THREAD_SECRET_SOURCES[secret.source]} ·{" "}
+              {secret.name}
             </span>
             <OctantButton
               aria-label={`Revoke ${secret.label}, ${secret.name}`}
