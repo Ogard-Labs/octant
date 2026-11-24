@@ -437,6 +437,16 @@ function linearState(object: Readonly<Record<string, unknown>>): string | undefi
   return text(nested?.name, 64);
 }
 
+/** The result's address for this issue, only when it is the issue's own linear.app page. */
+function linearIssueUrl(url: string | undefined, identifier: string): string | undefined {
+  if (url === undefined) return undefined;
+  const match =
+    /^https:\/\/linear\.app\/[A-Za-z0-9_.-]+\/issue\/([A-Z][A-Z0-9]{0,9}-[1-9][0-9]{0,8})(?:\/[A-Za-z0-9_.-]*)?$/.exec(
+      url,
+    );
+  return match?.[1] === identifier ? url : undefined;
+}
+
 function fromLinearTool(call: ForgeToolCall): ReadonlyArray<ThreadForgeReference> {
   const input = record(call.input);
   const action = linearToolAction(operationName(call.toolName), input);
@@ -447,12 +457,14 @@ function fromLinearTool(call: ForgeToolCall): ReadonlyArray<ThreadForgeReference
     if (identifier === undefined || !LINEAR_IDENTIFIER.test(identifier)) continue;
     const title = text(object.title, 256);
     const state = linearState(object);
+    const url = linearIssueUrl(text(object.url, 512), identifier);
     return [
       {
         forge: "linear",
         kind: "issue",
         action,
         identifier,
+        ...(url === undefined ? {} : { url }),
         ...(title === undefined ? {} : { title }),
         ...(state === undefined ? {} : { state }),
       },

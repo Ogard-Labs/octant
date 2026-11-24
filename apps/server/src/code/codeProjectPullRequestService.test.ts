@@ -106,6 +106,7 @@ function serviceFixture(options: {
   readonly knownPullRequests?: ReadonlyArray<{
     readonly number: number;
     readonly observedAt: string;
+    readonly repository?: { readonly owner: string; readonly name: string };
   }>;
   readonly observeIssueClosure?: (
     request: {

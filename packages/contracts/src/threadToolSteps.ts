@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { GithubRepositoryName, GithubRepositoryOwner } from "./githubCatalogue";
-import { LinearIssueIdentifier } from "./linearIssues";
+import { LinearIssueIdentifier, LinearIssueUrl } from "./linearIssues";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -149,6 +149,8 @@ export const ThreadLinearForgeReference = Schema.Struct({
   kind: Schema.Literal("issue"),
   action: ThreadForgeAction,
   identifier: LinearIssueIdentifier,
+  /** The issue's page, when the call's result gave it; Linear addresses need the workspace. */
+  url: Schema.optional(LinearIssueUrl),
   title: Schema.optional(boundedNonEmptyText(256)),
   state: Schema.optional(boundedNonEmptyText(64)),
 }).annotations(strict);

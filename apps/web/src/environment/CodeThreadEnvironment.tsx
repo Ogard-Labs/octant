@@ -21,6 +21,7 @@ import type {
   ProjectSummary,
   ThreadBoardPullRequestIdentity,
   ThreadBoardPullRequestSummaries,
+  ThreadTouchedIssues,
   WorkspaceTab,
 } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
@@ -57,6 +58,7 @@ import {
   EnvironmentThreadPullRequests,
   threadPullRequestCount,
 } from "./EnvironmentThreadPullRequests";
+import { EnvironmentThreadIssues } from "./EnvironmentThreadIssues";
 import { countGroupedLocalServerListenersByScope } from "./localServerGroups";
 import { LocalServersGroup } from "./LocalServersGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
@@ -189,6 +191,10 @@ export interface CodeThreadEnvironmentProps {
    * when it has none; the renderer never reads GitHub to fill it.
    */
   readonly threadPullRequests?: ThreadBoardPullRequestSummaries;
+  /** The issues the thread's tool calls wrote to, listed under its pull requests. */
+  readonly threadIssues?: ThreadTouchedIssues;
+  /** Opens a touched issue's page outside Octant. */
+  readonly onOpenThreadIssue?: (url: string) => void;
   /** Opens one of this thread's pull requests in the app. Absent leaves its rows inert. */
   readonly onOpenThreadPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   /** Opens one of this thread's pull requests on GitHub. Absent hides that menu entry. */
@@ -601,6 +607,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
               onOpenOnGithub={props.onOpenThreadPullRequestOnGithub}
               summaries={props.threadPullRequests}
             />
+            <EnvironmentThreadIssues issues={props.threadIssues} onOpen={props.onOpenThreadIssue} />
           </EnvironmentCard>
         }
         mode="code"

@@ -674,7 +674,7 @@ export type CodeThreadTouchedIssue = (
       readonly repository: string;
       readonly number: number;
     }
-  | { readonly forge: "linear"; readonly identifier: string }
+  | { readonly forge: "linear"; readonly identifier: string; readonly url?: string }
 ) & {
   readonly title?: string;
   readonly state?: string;
@@ -703,6 +703,10 @@ export function touchedIssuesFromHistory(
       const previous = latest.get(key);
       const title = reference.title ?? previous?.title;
       const state = reference.state ?? previous?.state;
+      const linearUrl =
+        reference.forge === "linear"
+          ? (reference.url ?? (previous?.forge === "linear" ? previous.url : undefined))
+          : undefined;
       const identity =
         reference.forge === "github"
           ? {
@@ -711,7 +715,11 @@ export function touchedIssuesFromHistory(
               repository: reference.repository,
               number: reference.number,
             }
-          : { forge: "linear" as const, identifier: reference.identifier };
+          : {
+              forge: "linear" as const,
+              identifier: reference.identifier,
+              ...(linearUrl === undefined ? {} : { url: linearUrl }),
+            };
       latest.delete(key);
       latest.set(key, {
         ...identity,

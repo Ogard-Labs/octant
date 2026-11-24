@@ -67,6 +67,7 @@ import {
   type ProviderExecutionPolicy,
   type ProviderUsageLimit,
   ThreadBoardPullRequestSummaries,
+  ThreadTouchedIssues,
   type ThreadLiveStep,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -203,6 +204,8 @@ export interface CodeThreadNavigationItem {
   };
   /** Exact linked pull requests joined by the host; absent when it has none. */
   readonly pullRequestSummaries?: ThreadBoardPullRequestSummaries;
+  /** The issues the thread's tool calls wrote to; absent when it has none. */
+  readonly touchedIssues?: ThreadTouchedIssues;
   readonly executing?: boolean;
   /** The agent's own approval waits on the person; the thread is parked, not working. */
   readonly awaitingInput?: boolean;
@@ -2120,6 +2123,7 @@ export function useCodeController(options: CodeControllerOptions) {
           readonly label: string;
         };
         readonly pullRequestSummaries?: ThreadBoardPullRequestSummaries;
+        readonly touchedIssues?: ThreadTouchedIssues;
         readonly turnStartedAt?: string;
         readonly liveStep?: ThreadLiveStep;
       }
@@ -2134,6 +2138,7 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(entry.liveStep === undefined ? {} : { liveStep: entry.liveStep }),
         ...(entry.checkoutChip === undefined ? {} : { checkoutChip: entry.checkoutChip }),
         ...(pullRequestSummaries === undefined ? {} : { pullRequestSummaries }),
+        ...(entry.touchedIssues === undefined ? {} : { touchedIssues: entry.touchedIssues }),
       });
     }
     return byThread;
@@ -2184,6 +2189,9 @@ export function useCodeController(options: CodeControllerOptions) {
             ...(runtime?.pullRequestSummaries === undefined
               ? {}
               : { pullRequestSummaries: runtime.pullRequestSummaries }),
+            ...(runtime?.touchedIssues === undefined
+              ? {}
+              : { touchedIssues: runtime.touchedIssues }),
             ...(thread.pinned === true ? { pinned: true } : {}),
             ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
             ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),

@@ -58,6 +58,7 @@ import {
 import type { CompletedThreadArchiveInput } from "../completedThreadArchiveSweep";
 import {
   pullRequestIdentitiesFromHistory,
+  touchedIssuesFromHistory,
   type CodeThreadKnownPullRequest,
 } from "../code/codeThreadMetadataService";
 import {
@@ -627,6 +628,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     IntegrationsWiring,
     | "cacheStats"
     | "githubIssueContextService"
+    | "linearConnected"
     | "linearIssueContextService"
     | "onGithubPullRequestsUnreadable"
     | "terminalSessionImports"
@@ -677,6 +679,7 @@ export function wireCode(deps: CodeDependencies) {
     githubIssueContextService,
     gitObservationPort,
     isProjectPolicyTargetAllowed,
+    linearConnected,
     linearIssueContextService,
     liveTurns,
     machineChangeFeed,
@@ -1142,6 +1145,11 @@ export function wireCode(deps: CodeDependencies) {
           // one, and a navigation read is the first thing that needs it.
           pullRequests: {
             snapshot: (windowId) => projectPullRequestService.navigationSnapshot(windowId),
+          },
+          touchedIssues: {
+            issuesFor: (threadId) =>
+              touchedIssuesFromHistory(codeBoardEventStore.summaryForThread(threadId)),
+            linearConnected,
           },
         });
       // Revocation is wired at construction, before any window can hold a watch.

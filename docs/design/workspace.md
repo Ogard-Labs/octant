@@ -2843,8 +2843,12 @@ under one Pull requests submenu of the right-click menu, while the flat
 overflow menu keeps the first three. A pull request the thread's tool calls
 created, merged or reviewed links the thread as its own branch does, and every
 GitHub and Linear issue those calls touched is listed in the thread's
-Environment tool and, at most five with the rest counted, in the card; both are
-designed, not built (maintainer decisions, 2026-11-23). Thread rows
+Environment tool and, at most five with the rest counted, in the card, as
+facts there rather than links (maintainer decisions, 2026-11-23). Only a write
+counts (created, merged, reviewed, commented on, edited, closed, reopened),
+never a read, and only an exact identity the call itself gave; the Claude and
+Codex adapters report them, and an adapter that cannot see a call's command and
+result reports none. Thread rows
 are not indented under their Project, so every row's fill sits the same
 distance from both edges of the sidebar. In Code, a Project whose threads run
 in two or more checkouts nests them under one heading per checkout, primary
@@ -3660,6 +3664,19 @@ list says as "N more not shown". A thread with no pull request shows no caption
 and no row, and the folded Changes summary adds the count ("Clean · 1 PR").
 The Project's own open pull requests stay under Delivery (maintainer request,
 2026-11-16).
+**The thread's issues.** Under its pull requests, a small "Issues" caption lists
+every GitHub and Linear issue the thread's tool calls created, commented on,
+edited, closed or reopened, open ones first, then finished ones (closed, done,
+canceled), each newest first, in the same row recipe: an open or finished mark,
+the title, then the repository or "Linear", the reference (#3, OCT-991) and the
+state the latest call reported. Past ten the rest fold behind "Show more (n)".
+A row opens the issue's page outside Octant: a GitHub address is built from the
+repository and number, and a Linear one is the address the call's result gave,
+so a Linear issue without one is a plain row. The host lists a GitHub issue only
+in the thread's own repository or one the window's pull-request reading already
+covers and only while GitHub is not revoked, and a Linear issue only while
+Linear is switched on and connected on this host, which it reads locally; the
+list reaches no forge (maintainer decisions, 2026-11-23 and 2026-11-24).
 Chat's fact list leaves out a fact whose value is none.
 
 On the phone, a thread's header button (Views and panes) is the one way to

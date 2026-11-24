@@ -178,6 +178,25 @@ describe("forgeReferencesFromToolCall", () => {
     ).toBeUndefined();
   });
 
+  it("keeps a Linear issue's address only when it is that issue's own page", () => {
+    const saved = (url: string) =>
+      forgeReferencesFromToolCall({
+        toolName: "mcp__Linear__save_issue",
+        input: { title: "New" },
+        output: JSON.stringify({ identifier: "OCT-7", url }),
+      });
+    expect(saved("https://linear.app/ogard/issue/OCT-7/new")).toEqual([
+      {
+        forge: "linear",
+        kind: "issue",
+        action: "created",
+        identifier: "OCT-7",
+        url: "https://linear.app/ogard/issue/OCT-7/new",
+      },
+    ]);
+    expect(saved("https://linear.app/ogard/issue/OCT-8/other")?.[0]).not.toHaveProperty("url");
+  });
+
   it("keeps one reference per pull request and at most ten per call", () => {
     const command = Array.from(
       { length: 12 },
