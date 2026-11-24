@@ -31,7 +31,10 @@ async function pemFromPublicKey(publicKey: CryptoKey): Promise<string> {
  */
 export async function readyPairedBridge(
   sent: URL[],
-  options: { readonly actsAsHostPerson?: boolean } = {},
+  options: {
+    readonly actsAsHostPerson?: boolean;
+    readonly wrapFetch?: (fetch: typeof globalThis.fetch) => typeof globalThis.fetch;
+  } = {},
 ): Promise<RemoteSessionBridge> {
   const server = createFakeRemoteServer({
     handleProductRequest: ({ method, path, headers }) => {
@@ -73,10 +76,11 @@ export async function readyPairedBridge(
   server.registerDevice({ deviceId, publicKeyPem: pem, fingerprint: fingerprintFromPem(pem) });
   const hostId = decodeStableHostId(HOST_ID);
   const deviceKeyId = await store.set(keyPair, { origin: ORIGIN, hostId, deviceId });
+  const fetch = options.wrapFetch?.(server.fetch) ?? server.fetch;
   const bridge = createRemoteSessionBridge({
     fetch: (input, init) => {
       sent.push(new URL(input instanceof Request ? input.url : String(input)));
-      return server.fetch(input, init);
+      return fetch(input, init);
     },
     deviceKeyStore: store,
   });

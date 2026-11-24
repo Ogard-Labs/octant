@@ -1,8 +1,15 @@
-import { createThreadVideoResults } from "@octant/client-runtime/video-generation-client";
-import { decodeVideoJob, type ImageGenerationScopeId, type VideoJob } from "@octant/contracts";
+import {
+  decodeImageGenerationScopeId,
+  decodeVideoJob,
+  type ImageGenerationScopeId,
+  type VideoJob,
+} from "@octant/contracts";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { createPairedComputerCodeClients } from "../host/pairedComputerCodeClients";
+import { createPairedComputerFetch } from "../host/pairedComputerFetch";
+import { readyPairedBridge } from "../host/pairedComputerTestBridge.test-support";
 import { ThreadVideoClips, VideoClientContext } from "./ThreadVideoClips";
 
 const scopeId = "f4000000-0000-4000-8000-000000000002" as ImageGenerationScopeId;
@@ -40,48 +47,95 @@ function job(status: VideoJob["status"], id: string): VideoJob {
 }
 
 describe("ThreadVideoClips", () => {
-  it("stops a paired clip transfer when the viewer leaves the thread", async () => {
-    const finished = job("completed", "f4000000-0000-4000-8000-000000000003");
-    const firstRange = Promise.withResolvers<Response>();
-    const fetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(
-        Response.json({
-          url: `/api/video/clip?ticket=${"a".repeat(43)}`,
-          expiresAt: "2026-11-26T12:00:00.000Z",
-        }),
-      )
-      .mockReturnValueOnce(firstRange.promise)
-      .mockResolvedValue(
-        new Response(new Uint8Array([2]), {
-          status: 206,
-          headers: { "content-range": "bytes 1-1/2" },
-        }),
-      );
-    const client = {
-      ...createThreadVideoResults({ windowCapability: "", baseUrl: "http://127.0.0.1", fetch }),
-      list: async () => ({ jobs: [finished] }),
+  it("stops waiting for the paired clip when switching threads during a native range read", async () => {
+    const finished = {
+      ...job("completed", "f4000000-0000-4000-8000-000000000003"),
+      threadKind: "code-thread" as const,
     };
-    const completed = vi.spyOn(client, "clipUrl");
-    const { unmount } = render(
-      <VideoClientContext.Provider value={client}>
-        <ThreadVideoClips scopeId={scopeId} threadKind="work-thread" />
-      </VideoClientContext.Provider>,
-    );
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-    const requestSignal = fetch.mock.calls[1]?.[1]?.signal;
-    unmount();
-    await act(async () => {
-      firstRange.resolve(
-        new Response(new Uint8Array([1]), {
-          status: 206,
-          headers: { "content-range": "bytes 0-0/2" },
-        }),
-      );
-      await completed.mock.results[0]?.value.catch(() => undefined);
+    const nextScope = decodeImageGenerationScopeId("f4000000-0000-4000-8000-000000000007");
+    const running = {
+      ...job("running", "f4000000-0000-4000-8000-000000000008"),
+      scopeId: nextScope,
+      threadKind: finished.threadKind,
+    };
+    const releaseRange = Promise.withResolvers<void>();
+    const rangeReturned = Promise.withResolvers<void>();
+    const ranges: string[] = [];
+    const bridge = await readyPairedBridge([], {
+      wrapFetch: (hostFetch) => {
+        const fetch = createPairedComputerFetch({
+          async requestPairedComputer(request) {
+            const body = request.body;
+            const response = await hostFetch(request.origin + request.path, {
+              method: request.method,
+              headers: request.headers ?? {},
+              body: body instanceof Uint8Array ? Uint8Array.from(body) : (body ?? null),
+            });
+            const answer = {
+              status: "answered" as const,
+              httpStatus: response.status,
+              headers: Array.from(response.headers.entries()),
+              body: new Uint8Array(await response.arrayBuffer()),
+            };
+            const range = request.headers?.range;
+            if (range !== undefined) {
+              expect(response.status).toBe(206);
+              ranges.push(range);
+              if (ranges.length === 1) {
+                await releaseRange.promise;
+                rangeReturned.resolve();
+              }
+            }
+            return answer;
+          },
+        });
+        return (input, init) => {
+          const body = init?.body;
+          // The test runner's TextEncoder returns Node-realm bytes. Electron
+          // creates these bytes in the same renderer realm as its fetch port.
+          return ArrayBuffer.isView(body)
+            ? fetch(input, {
+                ...init,
+                body: new Uint8Array(body.buffer, body.byteOffset, body.byteLength),
+              })
+            : fetch(input, init);
+        };
+      },
     });
-    expect(requestSignal?.aborted).toBe(true);
-    expect(fetch).toHaveBeenCalledTimes(2);
+    const client = {
+      ...createPairedComputerCodeClients(bridge).videoResults,
+      list: async (input: { readonly scopeId: ImageGenerationScopeId }) => ({
+        jobs: [input.scopeId === scopeId ? finished : running],
+      }),
+    };
+    const loadClip = vi.spyOn(client, "clipUrl");
+    const viewer = (activeScope: ImageGenerationScopeId) => (
+      <VideoClientContext.Provider value={client}>
+        <ThreadVideoClips scopeId={activeScope} threadKind="code-thread" />
+      </VideoClientContext.Provider>
+    );
+    const { rerender } = render(viewer(scopeId));
+    try {
+      await waitFor(() => expect(ranges).toEqual(["bytes=0-"]));
+      const pending = loadClip.mock.results[0]?.value;
+      if (pending === undefined) throw new Error("The original clip was never requested.");
+      const settled = vi.fn();
+      void pending.then(settled, settled);
+
+      rerender(viewer(nextScope));
+      expect(await screen.findByText("Making the clip…")).toBeVisible();
+      await waitFor(() =>
+        expect(settled).toHaveBeenCalledWith(expect.objectContaining({ name: "AbortError" })),
+      );
+      await act(async () => {
+        releaseRange.resolve();
+        await rangeReturned.promise;
+      });
+      expect(ranges).toEqual(["bytes=0-"]);
+    } finally {
+      releaseRange.resolve();
+      bridge.disconnect();
+    }
   });
 
   it("lets a person try again after a clip fails to load", async () => {
