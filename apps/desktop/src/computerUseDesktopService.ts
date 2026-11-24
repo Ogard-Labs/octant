@@ -1,3 +1,4 @@
+import { createHostDisplay, nativeHostDisplay } from "./hostDisplay";
 import { join } from "node:path";
 import type {
   ComputerControlCommand,
@@ -28,6 +29,9 @@ import {
 
 export function createComputerUseDesktopService(options: {
   readonly bundledPath: string;
+  readonly displayHelperPath?: string;
+  readonly onDisplayLock?: (close: () => void) => () => void;
+  readonly displayUnlocked?: () => boolean;
   readonly dataDirectory: string;
   readonly isWindowAvailable: (windowId: string) => boolean;
 }) {
@@ -117,6 +121,21 @@ export function createComputerUseDesktopService(options: {
       void updates.applyWhenIdle();
     },
   });
+  const display = createHostDisplay({
+    available: () =>
+      !closed &&
+      supported &&
+      settings.enabled &&
+      testing === undefined &&
+      options.displayHelperPath !== undefined &&
+      options.displayUnlocked?.() === true,
+    native: (request, signal) =>
+      options.displayHelperPath === undefined
+        ? Promise.resolve({ status: "refused", reason: "not-permitted" })
+        : nativeHostDisplay(options.displayHelperPath, request, signal),
+    drainAgentInput: controls.revokeAll,
+  });
+  const removeDisplayListeners = options.onDisplayLock?.(display.close);
   const updates = createComputerUseDriverUpdates({
     currentVersion: active.version,
     check: latestComputerDriverRelease,
@@ -240,15 +259,19 @@ export function createComputerUseDesktopService(options: {
   }
   async function reserve(owner: ComputerUseOwner): Promise<boolean> {
     if (
+      display.blocksAgent() ||
       closed ||
       testing !== undefined ||
       replacing ||
       !settings.enabled ||
-      !options.isWindowAvailable(String(owner.windowId))
+      (!options.isWindowAvailable(String(owner.windowId)) &&
+        (owner.mode !== "code" ||
+          display.agentLifetime(String(owner.windowId), owner.threadId) === undefined))
     )
       return false;
     const current = await status();
     if (
+      display.blocksAgent() ||
       closed ||
       testing !== undefined ||
       replacing ||
@@ -263,6 +286,8 @@ export function createComputerUseDesktopService(options: {
   }
   return {
     status,
+    hostDisplay: display.request,
+    closeHostDisplay: display.close,
     configure: async (next: ComputerUseSettings) => {
       if (
         settings.enabled === next.enabled &&
@@ -278,6 +303,7 @@ export function createComputerUseDesktopService(options: {
         automaticUpdates: settings.automaticUpdates,
       });
       if (!settings.enabled) {
+        display.close();
         verification = "not-tested";
         verificationMessage = undefined;
         verifiedRuntime = undefined;
@@ -297,20 +323,33 @@ export function createComputerUseDesktopService(options: {
       signal?: AbortSignal,
     ) => {
       if (command.operation === "stop") return controls.execute(owner, command, signal);
-      if (!(await reserve(owner)))
+      if (!(await reserve(owner)) || display.blocksAgent())
         return {
           kind: "refused" as const,
           reason: "setup-required",
           message:
             "Computer use is unavailable. Open Computer use in Settings to check the plugin and macOS permissions.",
         };
-      return controls.execute(owner, command, signal);
+      if (options.isWindowAvailable(String(owner.windowId)))
+        return controls.execute(owner, command, signal);
+      const lifetime = display.agentLifetime(String(owner.windowId), owner.threadId);
+      if (!lifetime || owner.mode !== "code")
+        return {
+          kind: "refused" as const,
+          reason: "view-ended",
+          message: "Open the Mac desktop in this Code thread to use it.",
+        };
+      return controls.execute(
+        owner,
+        command,
+        signal ? AbortSignal.any([lifetime, signal]) : lifetime,
+      );
     },
     release: controls.release,
     test: async (
       run: (runtime: ComputerDriverRuntime, signal: AbortSignal) => Promise<boolean>,
     ) => {
-      if (testing !== undefined) return status();
+      if (testing !== undefined || display.blocksAgent()) return status();
       const abort = new AbortController();
       testing = abort;
       const complete = async () => {
@@ -386,6 +425,8 @@ export function createComputerUseDesktopService(options: {
     close: () => {
       closing ??= (async () => {
         closed = true;
+        removeDisplayListeners?.();
+        display.close();
         shutdown.abort();
         testing?.abort();
         await testCompletion;

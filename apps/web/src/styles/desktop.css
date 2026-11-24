@@ -90,3 +90,13 @@
 .desktop-pane__caption {
   gap: var(--oct-space-1);
 }
+
+.host-display__image {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 70vh;
+  touch-action: none;
+  user-select: none;
+}

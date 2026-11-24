@@ -86,6 +86,11 @@ function fakeClient(state: { overview: Overview }) {
       switch (request.kind) {
         case "overview":
           return state.overview;
+        case "host-display":
+          if (request.action === "open") return { status: "viewing", viewId };
+          if (request.action === "frame")
+            return { status: "host-frame", jpeg: "test", geometry: "main" };
+          return { status: "delivered" };
         case "acquire":
           state.overview = overviewOf([lease()]);
           return { status: "acquired", lease: lease() };
@@ -128,6 +133,28 @@ afterEach(() => {
 });
 
 describe("Desktop pane", () => {
+  it("watches the paired Mac before taking control and stops sending keys after handback", async () => {
+    const { client, requests } = fakeClient({ overview: { ...overviewOf([]), hostDisplay: true } });
+    render(<DesktopPane client={client} threadId={threadId} />);
+    const show = await screen.findByRole("button", { name: "Show Mac desktop" });
+    expect(requests.some((r) => r.kind === "host-display")).toBe(false);
+    fireEvent.click(show);
+    const image = await screen.findByAltText("Mac host display");
+    const press = () => fireEvent.keyDown(image, { code: "KeyA", key: "a" });
+    const inputs = () => requests.filter((r) => r.kind === "host-display" && r.action === "input");
+    press();
+    expect(inputs()).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Take control" }));
+    const back = await screen.findByRole("button", { name: "Hand back to agent" });
+    press();
+    await waitFor(() => expect(inputs()).toHaveLength(1));
+    fireEvent.click(back);
+    await screen.findByRole("button", { name: "Take control" });
+    press();
+    expect(inputs()).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Close host display" }));
+    expect(requests.at(-1)).toMatchObject({ kind: "host-display", action: "close", viewId });
+  });
   it("says honestly that the Project has no recipe, and offers no Start", async () => {
     const { client, requests } = fakeClient({
       overview: overviewOf([], { status: "refused", reason: "no-provider-configured" }),

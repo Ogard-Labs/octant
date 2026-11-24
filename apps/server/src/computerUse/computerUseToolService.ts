@@ -67,6 +67,7 @@ export type ComputerUseThreadAsk = (
 
 export function createComputerUseToolService(options: {
   /** This Mac's driver; absent on a host with no screen of its own. */
+  readonly asksFromPairedWindow?: (owner: ComputerUseOwner) => boolean;
   readonly desktop?: DesktopComputerUsePort;
   /** The thread's disposable desktops; absent on a host that cannot lease one. */
   readonly leases?: LeasedComputerUsePort;
@@ -815,11 +816,16 @@ export function createComputerUseToolService(options: {
                 "This model does not accept image observations. Use the observed accessibility elements or select a vision-capable model.",
               ),
             );
-          // Only a desktop's approvals go to the thread: this Mac's stay with
-          // the person at this Mac.
+          // A remote operator answers in the paired thread.
           return authorityChanged()
             ? Promise.resolve(ownerChangedRefusal)
-            : execute(owner, command, signal, onDesktop ? ask : undefined, request?.reason);
+            : execute(
+                owner,
+                command,
+                signal,
+                onDesktop || options.asksFromPairedWindow?.(owner) ? ask : undefined,
+                request?.reason,
+              );
         },
         ...(onDesktop && ask !== undefined
           ? {

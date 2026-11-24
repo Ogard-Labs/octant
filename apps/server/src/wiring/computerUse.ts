@@ -421,6 +421,11 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     computerUseDesktop === undefined && !leasingOffered
       ? undefined
       : createComputerUseToolService({
+          asksFromPairedWindow: (owner) =>
+            owner.mode === "code" &&
+            !windowAuthorityStore
+              .listWindowIds()
+              .some((id) => String(id) === String(owner.windowId)),
           ...(computerUseDesktop === undefined ? {} : { desktop: computerUseDesktop }),
           ...(!leasingOffered
             ? {}
@@ -654,6 +659,21 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
       ) => Promise<DesktopPreviewAnswer>)
     | undefined;
   const desktopPaneRoutes = createDesktopPaneRouteHandler({
+    ...(process.platform === "darwin" && computerUseDesktop?.hostDisplay !== undefined
+      ? {
+          hostDisplay: computerUseDesktop.hostDisplay,
+          mayUseHostDisplay: (threadId: string) => {
+            const current = persistence.readCodeThread(decodeCodeThreadId(threadId));
+            return (
+              current?.lifecycle === "active" &&
+              current.completedAt === undefined &&
+              current.executionPolicy !== "plan" &&
+              (persistence.readShellSettings()?.settings ?? defaultShellSettings()).computerUse
+                .enabled
+            );
+          },
+        }
+      : {}),
     previews: (caller, request) =>
       previewRequest?.(caller, request) ??
       Promise.resolve({ status: "preview-refused", reason: "unavailable" }),

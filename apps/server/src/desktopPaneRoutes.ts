@@ -6,6 +6,9 @@ import {
   decodeProjectId,
   decodeDesktopLeaseId,
   type DesktopLeaseId,
+  type HostDisplayScope,
+  type HostDisplayRequest,
+  type HostDisplayAnswer,
   type DesktopPaneAnswer,
   type DesktopPaneRequest,
   type EventActor,
@@ -17,7 +20,7 @@ import { leasableProvidersOf } from "./computerUse/computerUseDestination";
 import type { DesktopLeaseCaller, DesktopLeaseService } from "./computerUse/desktopLeaseService";
 import type { DesktopPreviewRequest, DesktopPreviewAnswer } from "@octant/contracts";
 import { eventActorForPrincipal } from "./principalEventActor";
-import { authenticateRoutePrincipal } from "./principalRouteContext";
+import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -27,6 +30,12 @@ const PANE_PATH = "/api/code/desktops";
 const FRAME_PATH = "/api/code/desktops/frame";
 
 export interface DesktopPaneRouteDependencies {
+  readonly hostDisplay?: (
+    scope: HostDisplayScope,
+    request: HostDisplayRequest,
+    signal: AbortSignal,
+  ) => Promise<HostDisplayAnswer>;
+  readonly mayUseHostDisplay?: (threadId: string) => boolean;
   readonly previews?: (
     caller: DesktopLeaseCaller & {
       readonly leaseId: DesktopLeaseId;
@@ -105,6 +114,8 @@ export function createDesktopPaneRouteHandler(dependencies: DesktopPaneRouteDepe
     }
     let principal: ClientPrincipal;
     let scopeId: string;
+    let current: () => boolean;
+    let lifetime: AbortSignal;
     try {
       const context = authenticateRoutePrincipal({
         request,
@@ -113,6 +124,15 @@ export function createDesktopPaneRouteHandler(dependencies: DesktopPaneRouteDepe
         body,
       });
       principal = context.principal;
+      current = retainRouteAdmissionCurrent({
+        request,
+        context,
+        store: dependencies.windowAuthorityStore,
+        now,
+      });
+      lifetime = context.abortSignal
+        ? AbortSignal.any([request.signal, context.abortSignal])
+        : request.signal;
       scopeId = String(context.scopeId);
     } catch (error) {
       return failure(
@@ -153,6 +173,54 @@ export function createDesktopPaneRouteHandler(dependencies: DesktopPaneRouteDepe
       const personPaired =
         principal.kind === "remote-device" && principalActsAsHostPerson(principal);
       switch (paneRequest.kind) {
+        case "host-display": {
+          if (
+            !personPaired ||
+            dependencies.hostDisplay === undefined ||
+            dependencies.mayUseHostDisplay?.(paneRequest.threadId) !== true
+          )
+            return encoded({ status: "refused", reason: "not-permitted" }, origin);
+          const access = await dependencies.service.overview(
+            callerFor(paneRequest.threadId, actor, scopeId),
+          );
+          if (access.status !== "overview") return encoded(access, origin);
+          if (
+            principal.kind !== "remote-device" ||
+            !current() ||
+            !dependencies.mayUseHostDisplay(paneRequest.threadId)
+          )
+            return encoded({ status: "refused", reason: "not-permitted" }, origin);
+          const result = await dependencies.hostDisplay(
+            {
+              deviceId: principal.deviceId,
+              sessionId: principal.sessionId,
+              generation: principal.credentialGeneration,
+            },
+            paneRequest,
+            lifetime,
+          );
+          return encoded(
+            current() && dependencies.mayUseHostDisplay(paneRequest.threadId)
+              ? result
+              : { status: "refused", reason: "not-permitted" },
+            origin,
+          );
+        }
+        case "overview": {
+          const result = await dependencies.service.overview(
+            callerFor(paneRequest.threadId, actor, scopeId),
+          );
+          return encoded(
+            result.status === "overview" &&
+              personPaired &&
+              dependencies.hostDisplay !== undefined &&
+              current() &&
+              dependencies.mayUseHostDisplay?.(paneRequest.threadId) === true
+              ? { ...result, hostDisplay: true }
+              : result,
+            origin,
+          );
+        }
         case "preview-read":
         case "preview-review":
         case "preview-grant":
@@ -184,7 +252,13 @@ export function createDesktopPaneRouteHandler(dependencies: DesktopPaneRouteDepe
 
 async function answer(
   service: DesktopPaneRouteDependencies["service"],
-  request: Exclude<DesktopPaneRequest, { readonly kind: "recipe-key" } | DesktopPreviewRequest>,
+  request: Exclude<
+    DesktopPaneRequest,
+    | { readonly kind: "recipe-key" }
+    | DesktopPreviewRequest
+    | HostDisplayRequest
+    | { readonly kind: "overview" }
+  >,
   actor: EventActor,
   scopeId: string,
   personPairedDevice: boolean,
@@ -235,8 +309,6 @@ async function answer(
   }
   const caller = callerFor(request.threadId, actor, scopeId);
   switch (request.kind) {
-    case "overview":
-      return service.overview(caller);
     case "acquire":
       return service.acquire({
         ...caller,

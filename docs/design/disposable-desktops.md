@@ -1,5 +1,17 @@
 # Disposable desktops
 
+## Paired Mac display
+
+In an active Code thread, a device paired by the host's person can open the
+logged-in Mac's primary display from Desktop when Computer use is enabled.
+Opening starts in watch mode. Take control drains agent input before enabling
+pointer and keyboard input. Hand back returns control to the agent, whose
+existing application grants and protected-field restrictions still apply.
+Closing the view, locking the Mac, or disabling Computer use ends access.
+Frames and typed text are transient. This view does not acquire a desktop
+lease. On headless Linux hosts, the Desktop pane uses the configured desktop
+lease provider.
+
 This topic specification owns disposable desktops: throwaway Linux desktops a
 thread leases so that an agent and the person can launch, drive, and look at
 what the thread built, on a host that has no screen of its own. Architecture
