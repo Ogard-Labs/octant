@@ -31,10 +31,13 @@ const roots: Root[] = [];
 const containers: HTMLElement[] = [];
 
 afterEach(() => {
-  for (const root of roots.splice(0)) root.unmount();
+  act(() => {
+    for (const root of roots.splice(0)) root.unmount();
+  });
   for (const container of containers.splice(0)) container.remove();
   appStateListeners.clear();
   appState.currentState = "active";
+  vi.useRealTimers();
 });
 
 const device = {
@@ -88,6 +91,31 @@ const emit = (state: string) => {
 };
 
 describe("useRemoteSessionStanding", () => {
+  it("picks up access changes while the same computer stays selected and the app is active", async () => {
+    vi.useFakeTimers();
+    let accessLevel = "read-only";
+    const { transport: session, authenticatedFetch } = transport(() =>
+      Response.json({ ...device, actsAsHostPerson: false, accessLevel }),
+    );
+    const harness = render(session);
+    await harness.mount();
+    expect(JSON.parse(harness.output()).accessLevel).toBe("read-only");
+
+    accessLevel = "approve-and-steer";
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    expect(JSON.parse(harness.output()).accessLevel).toBe("approve-and-steer");
+
+    accessLevel = "read-only";
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    expect(JSON.parse(harness.output()).accessLevel).toBe("read-only");
+
+    await act(async () => {
+      emit("background");
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(authenticatedFetch).toHaveBeenCalledTimes(3);
+  });
+
   it("rereads the device's standing when the app returns to the foreground", async () => {
     const { transport: session, authenticatedFetch } = transport(
       () => new Response(JSON.stringify({ ...device, actsAsHostPerson: true }), { status: 200 }),

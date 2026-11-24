@@ -18565,6 +18565,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
     new Chat, Work and Code threads with a watching-only explanation. Existing
     threads remain openable, and new threads wait for standing to be confirmed
     whenever the phone switches its selected computer.
+    The phone refreshes standing while its start or thread screen is in the
+    foreground and when it returns, so host-side changes reach open screens.
     Routes that change something but rode a read action before (revising or
     refreshing a Canvas, a connector's sign-in and operations) carry their own
     write actions, and the local-servers commands route and the server proxy
