@@ -40,3 +40,50 @@ describe("a provider question asking for a secret", () => {
     expect(onAnswer).toHaveBeenCalledExactlyOnceWith(" three words ");
   });
 });
+
+describe("choosing a provider question's option by number", () => {
+  const options = [
+    { label: "Allow isolated test pairing" },
+    { label: "Keep existing pairings only" },
+  ];
+
+  it("picks the option whose number is pressed inside the card, and sends nothing until Submit", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn();
+    render(<ProviderQuestionCard onAnswer={onAnswer} options={options} prompt="May I pair?" />);
+    const first = screen.getByRole("radio", { name: "Allow isolated test pairing" });
+    first.focus();
+    await user.keyboard("2");
+    const second = screen.getByRole("radio", { name: "Keep existing pairings only" });
+    expect(second).toHaveAttribute("aria-checked", "true");
+    expect(second).toHaveFocus();
+    expect(onAnswer).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    expect(onAnswer).toHaveBeenCalledExactlyOnceWith("Keep existing pairings only");
+  });
+
+  it("still picks by number once focus has moved to Submit", async () => {
+    const user = userEvent.setup();
+    render(<ProviderQuestionCard onAnswer={vi.fn()} options={options} prompt="May I pair?" />);
+    await user.click(screen.getByRole("radio", { name: "Allow isolated test pairing" }));
+    screen.getByRole("button", { name: "Submit" }).focus();
+    await user.keyboard("2");
+    expect(screen.getByRole("radio", { name: "Keep existing pairings only" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  it("keeps digits typed into the answer field as text", async () => {
+    const user = userEvent.setup();
+    render(<ProviderQuestionCard onAnswer={vi.fn()} options={options} prompt="May I pair?" />);
+    await user.click(screen.getByRole("radio", { name: "Type your own answer" }));
+    const field = screen.getByLabelText("Your answer");
+    await user.type(field, "12");
+    expect(field).toHaveValue("12");
+    expect(screen.getByRole("radio", { name: "Type your own answer" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+});

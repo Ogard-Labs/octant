@@ -533,6 +533,42 @@ describe("Chat Stop", () => {
   });
 });
 
+describe("Chat questions", () => {
+  it("docks a reply's pending question directly above the composer, not inside the reply", async () => {
+    const waiting = viewWithAttempt("waiting");
+    const view = decodeChatThreadView({
+      ...waiting,
+      turns: waiting.turns.map((turn) => ({
+        ...turn,
+        attempts: turn.attempts.map((attempt) => ({
+          ...attempt,
+          pendingQuestion: {
+            requestId: "q1",
+            prompt: "May I pair?",
+            options: [{ label: "Allow" }, { label: "Keep existing" }],
+          },
+        })),
+      })),
+    });
+    render(
+      <ChatWorkspace
+        messageQueueClient={queueTestHost()}
+        providerSnapshot={providerSnapshot()}
+        controller={controllerFixture({ activeView: view })}
+      />,
+    );
+    const question = await screen.findByRole("region", { name: "Provider question" });
+    expect(question.closest("article")).toBeNull();
+    const requests = question.closest(".thread-pending-requests");
+    expect(requests).not.toBeNull();
+    const next = requests?.nextElementSibling;
+    expect(next instanceof HTMLElement && within(next).queryAllByRole("textbox").length > 0).toBe(
+      true,
+    );
+    expect(screen.getByText("Waiting for your answer")).toBeVisible();
+  });
+});
+
 describe("Chat host queue", () => {
   it("queues multiple messages without sending on settlement or unmount", async () => {
     const host = queueTestHost();
