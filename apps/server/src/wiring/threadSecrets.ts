@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
+  decodeBrowserThreadId,
   decodeCodeThreadId,
+  decodeWindowId,
   decodeWorkThreadId,
   type CodeThread,
   type WindowId,
@@ -24,10 +26,14 @@ import {
   threadSecretMemoryJournal,
 } from "../threadSecrets/rememberedThreadSecrets";
 import { createThreadSecretFiles } from "../threadSecrets/threadSecretFiles";
-import { createThreadSecretRoutes } from "../threadSecrets/threadSecretRoutes";
+import {
+  createPairedThreadSecretRoutes,
+  createThreadSecretRoutes,
+} from "../threadSecrets/threadSecretRoutes";
 import {
   ThreadSecretService,
   type ThreadSecretAuthority,
+  type ThreadSecretServiceOptions,
 } from "../threadSecrets/threadSecretService";
 import { threadSecretsJournal } from "../threadSecrets/threadSecretsJournal";
 import {
@@ -41,6 +47,9 @@ import type { ServerStart } from "./serverShape";
 export type ThreadSecretsDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     AuthorityWiring,
+    | "isPairedDeviceScope"
+    | "isPairedDeviceSessionCurrent"
+    | "isRestrictedDeviceScope"
     | "machineChangeFeed"
     | "onThreadArchived"
     | "onWaitingAsk"
@@ -48,7 +57,7 @@ export type ThreadSecretsDependencies = Pick<ServerStart, "options" | "persisten
     | "processAuthorityTime"
     | "windowAuthorityStore"
   > &
-  Pick<FoundationsWiring, "workThreadProjection"> & {
+  Pick<FoundationsWiring, "browserAuthority" | "workThreadProjection"> & {
     readonly readReference?:
       | ((
           reference: CredentialRequestReference,
@@ -63,6 +72,11 @@ export type ThreadSecretsDependencies = Pick<ServerStart, "options" | "persisten
 /** The secrets people give threads: one service for the host, and its private routes. */
 export function wireThreadSecrets(deps: ThreadSecretsDependencies) {
   const { options, persistence } = deps;
+  const reach = threadSecretReach({
+    ...deps,
+    isLocalWindow: (id) =>
+      deps.windowAuthorityStore.listWindowIds().some((window) => String(window) === String(id)),
+  });
   const now = () => new Date().toISOString();
   const journal = {
     journal: persistence.journal,
@@ -95,6 +109,7 @@ export function wireThreadSecrets(deps: ThreadSecretsDependencies) {
     threadTitle: (threadId) =>
       persistence.readCodeThread(decodeCodeThreadId(threadId))?.title ??
       deps.workThreadProjection.read(decodeWorkThreadId(threadId))?.title,
+    mayAnswer: reach.mayAnswer,
     onAsked: deps.onWaitingAsk,
     onChanged: () => deps.machineChangeFeed.publish(["tool-approvals"]),
   });
@@ -103,6 +118,44 @@ export function wireThreadSecrets(deps: ThreadSecretsDependencies) {
   return {
     threadSecrets,
     threadSecretRoutes: createThreadSecretRoutes(threadSecrets, deps.windowAuthorityStore),
+    pairedThreadSecretRoutes: createPairedThreadSecretRoutes(threadSecrets, {
+      sessionCurrent: deps.isPairedDeviceSessionCurrent,
+    }),
+    threadSecretScopeCurrent: reach.scopeCurrent,
+  };
+}
+
+/** Where the person can be when a card waits: at a window here, or at a device they paired. */
+export function threadSecretReach(
+  deps: Pick<AuthorityWiring, "isPairedDeviceScope" | "isRestrictedDeviceScope"> &
+    Pick<FoundationsWiring, "browserAuthority"> & {
+      readonly isLocalWindow: (windowId: WindowId) => boolean;
+    },
+): {
+  readonly mayAnswer: NonNullable<ThreadSecretServiceOptions["mayAnswer"]>;
+  readonly scopeCurrent: (scopeId: WindowId) => boolean;
+} {
+  const scopeCurrent = (scopeId: WindowId): boolean =>
+    deps.isLocalWindow(scopeId) ||
+    (deps.isPairedDeviceScope(scopeId) && !deps.isRestrictedDeviceScope(scopeId));
+  return {
+    scopeCurrent,
+    mayAnswer: (reader, raised) => {
+      const scopeId = decodeWindowId(reader.scopeId);
+      if (!scopeCurrent(scopeId)) return false;
+      if (reader.paired) return !deps.isLocalWindow(scopeId);
+      // A window answers a paired device's card, never another window's, and
+      // only for a thread it could drive itself.
+      return (
+        deps.isLocalWindow(scopeId) &&
+        deps.isPairedDeviceScope(decodeWindowId(raised.windowId)) &&
+        deps.browserAuthority.canAccessWindow(
+          scopeId,
+          decodeBrowserThreadId(raised.threadId),
+          raised.mode,
+        )
+      );
+    },
   };
 }
 
