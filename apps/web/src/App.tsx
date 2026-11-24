@@ -9799,9 +9799,8 @@ function LaunchedShell(
               void controller.openDraftThread("code");
             }}
             onReady={setOpenBootstrap}
-            serverUrl={props.launch.serverUrl}
+            sourceBootstrapPort={launchedClients.accessActivityPort}
             transports={hostFederationTransports}
-            windowCapability={props.projectWindowCapability}
           />
         </Suspense>
       )}

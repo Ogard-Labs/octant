@@ -30,8 +30,11 @@ export interface RepositoryBootstrapHostProps {
   readonly transports: HostFederationTransports;
   readonly allProjects: ReadonlyArray<ProjectSummary>;
   readonly hosts: ReadonlyArray<{ readonly hostId: HostId; readonly displayName: string }>;
-  readonly serverUrl: string;
-  readonly windowCapability: string;
+  readonly sourceBootstrapPort: Readonly<{
+    readonly baseUrl: string;
+    readonly fetch?: typeof globalThis.fetch;
+    readonly windowCapability?: string;
+  }>;
   readonly onReady: Dispatch<SetStateAction<OpenRepositoryBootstrap | undefined>>;
   readonly onCompleted: (selection: RepositoryBootstrapSelection) => void;
 }
@@ -54,11 +57,11 @@ export default function RepositoryBootstrapHost(props: RepositoryBootstrapHostPr
 
   const sourceBootstrapPort = useMemo(
     () => ({
-      baseUrl: props.serverUrl,
-      fetch: globalThis.fetch,
-      windowCapability: props.windowCapability,
+      baseUrl: props.sourceBootstrapPort.baseUrl,
+      fetch: props.sourceBootstrapPort.fetch ?? globalThis.fetch,
+      windowCapability: props.sourceBootstrapPort.windowCapability ?? "",
     }),
-    [props.serverUrl, props.windowCapability],
+    [props.sourceBootstrapPort],
   );
 
   const sourceHostName =
