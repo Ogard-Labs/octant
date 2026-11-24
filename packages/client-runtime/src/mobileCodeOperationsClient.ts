@@ -373,6 +373,9 @@ export async function setMobileMergeWhenReady(
 export interface MobileCodeConversationTurn {
   readonly operationId: string;
   readonly status: CodeConversationTurn["status"];
+  readonly providerInstanceId?: string;
+  readonly modelId?: string;
+  readonly handoff?: CodeConversationTurn["handoff"];
   readonly prompt: string;
   readonly assistant: ReadonlyArray<string>;
   /** The routines the turn's tool calls created, for the receipt cards under it. */
@@ -465,6 +468,9 @@ export async function loadMobileCodeConversation(
     turns: kept.map((turn) => ({
       operationId: String(turn.operationId),
       status: turn.status,
+      providerInstanceId: String(turn.providerInstanceId),
+      modelId: String(turn.modelId),
+      ...(turn.handoff === undefined ? {} : { handoff: turn.handoff }),
       prompt: resolve(String(turn.operationId), String(turn.prompt.contentId)),
       assistant: turn.assistant
         .map((part) => resolve(String(turn.operationId), String(part.contentId)))

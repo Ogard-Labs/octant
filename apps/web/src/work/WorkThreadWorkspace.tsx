@@ -220,6 +220,11 @@ import {
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
 import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
+import {
+  TranscriptHandoff,
+  resolveTranscriptHandoff,
+  type TranscriptHandoffEntry,
+} from "../transcript/TranscriptHandoff";
 import { HarnessRetryStatus, type HarnessRetryStreamEvent } from "../transcript/HarnessRetryStatus";
 import {
   pendingThreadHandoffNotice,
@@ -249,6 +254,11 @@ function workRowHappenedAt(row: WorkTranscriptRow): string | undefined {
 
 type WorkTranscriptRow =
   | { readonly kind: "empty"; readonly key: "empty" }
+  | {
+      readonly kind: "handoff";
+      readonly key: string;
+      readonly entry: TranscriptHandoffEntry;
+    }
   | {
       readonly kind: "message";
       readonly key: string;
@@ -454,13 +464,6 @@ function WorkTurnHeader(props: {
       !showsStrictNotice(props.turn.strictKept, props.previousStrictKept) ? null : (
         <p className="work-thread-workspace__handoff" role="note">
           {strictKeptSentence(props.turn.strictKept)}
-        </p>
-      )}
-      {props.turn.handoff === undefined ? null : (
-        <p className="work-thread-workspace__handoff" role="note">
-          {threadHandoffDisclosure(props.turn.handoff, (selection) =>
-            providerModelLabel(props.providerGroups, selection),
-          )}
         </p>
       )}
       <TurnLoopStallNotice
@@ -1643,7 +1646,27 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (turns.length === 0 && firstPageSettled) rows.push({ kind: "empty", key: "empty" });
     // A key names the turn, never its position: earlier pages arrive above,
     // and the list keeps the reader's row in place by its key.
-    for (const turn of turns) {
+    const groups = props.providerGroups ?? [];
+    for (const [turnIndex, turn] of turns.entries()) {
+      const previousTurn = turnIndex > 0 ? turns[turnIndex - 1] : undefined;
+      const handoffEntry = resolveTranscriptHandoff({
+        previous: previousTurn?.authority,
+        current: turn.authority,
+        handoff: turn.handoff,
+        disclosure:
+          turn.handoff === undefined
+            ? undefined
+            : threadHandoffDisclosure(turn.handoff, (selection) =>
+                providerModelLabel(groups, selection),
+              ),
+      });
+      if (handoffEntry !== undefined) {
+        rows.push({
+          kind: "handoff",
+          key: `handoff-${String(turn.requestId)}`,
+          entry: handoffEntry,
+        });
+      }
       const head: WorkTranscriptRow = {
         kind: "head",
         key: `${String(turn.requestId)}-head`,
@@ -1739,6 +1762,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     firstPageSettled,
     loadedTurnIds,
     pendingRequests,
+    props.providerGroups,
     sideTasks,
     status,
     turns,
@@ -2758,6 +2782,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   <p className="work-thread-workspace__opening">
                     Describe what to make. Files stay in this task’s folder.
                   </p>
+                );
+              }
+              if (row.kind === "handoff") {
+                return (
+                  <TranscriptHandoff
+                    entry={row.entry}
+                    providerGroups={props.providerGroups ?? []}
+                  />
                 );
               }
               if (row.kind === "message") {

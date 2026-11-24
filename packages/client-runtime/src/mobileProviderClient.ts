@@ -11,6 +11,7 @@ export interface MobileModelOption {
   readonly modelId: string;
   readonly label: string;
   readonly detail: string;
+  readonly driverKind?: string;
   /**
    * What the model takes as a native attachment: its declared input
    * modalities when its provider takes native attachments, and none otherwise.
@@ -59,6 +60,7 @@ export function normalizeMobileModelOptions(
         modelId: String(model.id),
         label: model.displayName,
         detail: instance.displayName,
+        driverKind: instance.driverKind,
         attachmentModalities:
           observation.capabilities.nativeAttachments === "supported" ? model.inputModalities : [],
       });

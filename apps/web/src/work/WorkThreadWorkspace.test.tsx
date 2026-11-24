@@ -829,12 +829,20 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
 
+    const separator = await screen.findByRole("separator", { name: /context handoff/i });
+    expect(separator).toHaveTextContent("Context handoff");
+    expect(separator).toHaveTextContent("Model Two");
+    expect(separator).toHaveTextContent("Model One");
     const note = await screen.findByRole("note");
     expect(note).toHaveTextContent(
       "Handed over 4 recent messages from Remote Provider — Model Two",
     );
     expect(note).toHaveTextContent("Left out: 1 attachment.");
     expect(note).toHaveTextContent("did not transfer");
+    const transcript = screen.getByRole("region", { name: "Task workspace" });
+    expect(transcript.textContent).toMatch(
+      /Context handoff[\s\S]*Model Two[\s\S]*Model One[\s\S]*Summarize the brief/,
+    );
   });
 
   it("says once what Strict kept for a launch, and again only when what it kept changes", async () => {

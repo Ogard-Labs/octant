@@ -237,7 +237,11 @@ describe("ChatTranscript", () => {
     expect(screen.queryByText(/managed\//i)).not.toBeInTheDocument();
     expect(screen.getByText("Interrupted")).toBeVisible();
     expect(screen.queryByText("Completed")).not.toBeInTheDocument();
-    expect(screen.getByText("Provider handoff · model-b")).toBeVisible();
+    const handoffSeparator = screen.getByRole("separator", { name: /context handoff/i });
+    expect(handoffSeparator).toBeVisible();
+    expect(handoffSeparator).toHaveTextContent("Context handoff");
+    expect(handoffSeparator).toHaveTextContent("model-a");
+    expect(handoffSeparator).toHaveTextContent("model-b");
     expect(screen.getByRole("link", { name: "Octant guide · Octant web search" })).toHaveAttribute(
       "href",
       "https://example.test/guide",
@@ -246,7 +250,7 @@ describe("ChatTranscript", () => {
     const content = screen.getByRole("list", { name: "Chat transcript" });
     expect(content.textContent).toMatch(
       // Exceptional outcomes stay visible; successful replies speak for themselves.
-      /Please summarize this\.\s*diagram\.png[\s\S]*Interrupted[\s\S]*Provider handoff · model-b[\s\S]*Here is the summary\./,
+      /Please summarize this\.\s*diagram\.png[\s\S]*Interrupted[\s\S]*Context handoff[\s\S]*model-a[\s\S]*model-b[\s\S]*Here is the summary\./,
     );
   });
 
@@ -1650,6 +1654,60 @@ describe("ChatTranscript", () => {
       render(<ChatTranscript view={viewFixture()} />);
 
       expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    });
+
+    it("places a turn-to-turn context handoff divider ahead of the next user message", () => {
+      const base = viewFixture();
+      const firstTurn = base.turns[0]!;
+      const firstAttempt = firstTurn.attempts[0]!;
+      const secondAttempt = firstTurn.attempts[1]!;
+      const secondUserContentId = "60000000-0000-4000-8000-000000000099";
+      const secondReplyContentId = "60000000-0000-4000-8000-000000000098";
+      const multiTurnView = {
+        ...base,
+        contents: [
+          ...base.contents,
+          body(secondUserContentId, "user", "Continue on the second provider.", "e"),
+          body(secondReplyContentId, "assistant", "Taking over now.", "f"),
+        ],
+        turns: [
+          {
+            ...firstTurn,
+            attempts: [{ ...firstAttempt, outcome: "completed" }],
+          },
+          {
+            ...firstTurn,
+            id: "50000000-0000-4000-8000-000000000099",
+            sequence: 2,
+            userMessageRef: reference(secondUserContentId, "e"),
+            attachmentIds: [],
+            attempts: [
+              {
+                ...secondAttempt,
+                id: "51000000-0000-4000-8000-000000000099",
+                turnId: "50000000-0000-4000-8000-000000000099",
+                attemptNumber: 1,
+                responseRefs: [reference(secondReplyContentId, "f")],
+              },
+            ],
+          },
+        ],
+      } as never;
+
+      render(
+        <ChatTranscript
+          providerGroups={[
+            providerGroup("10000000-0000-4000-8000-000000000001", "replayed"),
+            providerGroup("10000000-0000-4000-8000-000000000002", "native"),
+          ]}
+          view={multiTurnView}
+        />,
+      );
+
+      const content = screen.getByRole("list", { name: "Chat transcript" });
+      expect(content.textContent).toMatch(
+        /Please summarize this\.[\s\S]*Context handoff[\s\S]*model-a[\s\S]*model-b[\s\S]*Continue on the second provider\.[\s\S]*Taking over now\./,
+      );
     });
   });
 

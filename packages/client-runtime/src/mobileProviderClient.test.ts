@@ -130,6 +130,7 @@ describe("mobile provider catalog", () => {
         modelId: "model-a",
         label: "Model A",
         detail: "Alpha",
+        driverKind: "openai-compatible",
         attachmentModalities: ["text"],
       },
       {
@@ -138,6 +139,7 @@ describe("mobile provider catalog", () => {
         modelId: "model-b",
         label: "Model B",
         detail: "Alpha",
+        driverKind: "openai-compatible",
         attachmentModalities: ["text"],
       },
     ]);
@@ -248,6 +250,7 @@ describe("mobile provider catalog", () => {
         modelId: "model-a",
         label: "Model A",
         detail: "Alpha",
+        driverKind: "openai-compatible",
         attachmentModalities: ["text"],
       },
     ]);
