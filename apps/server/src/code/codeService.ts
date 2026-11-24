@@ -740,6 +740,8 @@ export interface CodeServiceOptions {
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
   /** Reads the thread's latest finished receipt so Done attaches fresh proof. */
   readonly readLatestFinishedReceipt?: (threadId: string) => ThreadFinishedReceipt | undefined;
+  /** The person's Settings choice to put a thread away once it is done; absent is off. */
+  readonly putAwayWhenDone?: () => boolean;
   readonly gitHistory?: Pick<GitHistoryPort, "read">;
   /**
    * The history of a thread in a server Project, read by Git on its server,
@@ -996,6 +998,20 @@ const CODE_MOVE_REFUSALS = {
     "This thread's checkout would not stay valid in that Project. A Code thread can only move to a Project bound to the same repository folder.",
 } as const;
 
+/** A merged pull request as the put-away pass names it. */
+export interface MergedPullRequest {
+  readonly baseRepository: string;
+  readonly number: number;
+}
+
+/** What putting a thread away for its merged pull request did. */
+export type MergedThreadPutAwayOutcome =
+  | { readonly status: "put-away" | "recorded" }
+  | {
+      readonly status: "skipped";
+      readonly reason: "not-found" | "not-active" | "already-put-away" | "busy";
+    };
+
 const COMPLETE_REFUSALS = {
   archived: "An archived thread cannot be put away.",
   executing: "Wait for the running turn to finish before putting this thread away.",
@@ -1107,6 +1123,7 @@ export class CodeService {
   readonly #readLatestFinishedReceipt:
     | ((threadId: string) => ThreadFinishedReceipt | undefined)
     | undefined;
+  readonly #putAwayWhenDone: () => boolean;
   readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #awaitsHarnessApproval: ((threadId: string) => boolean) | undefined;
   readonly #issueContext?: GithubIssueContextPort;
@@ -1175,6 +1192,7 @@ export class CodeService {
     this.#liveTurns = options.liveTurns;
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     this.#readLatestFinishedReceipt = options.readLatestFinishedReceipt;
+    this.#putAwayWhenDone = options.putAwayWhenDone ?? (() => false);
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
     }
@@ -3114,8 +3132,18 @@ export class CodeService {
                                       const completionReceiptId = selectCompletionReceiptId(
                                         this.#readLatestFinishedReceipt?.(String(current.id)),
                                       );
+                                      // Marking Done also puts the thread away when Settings
+                                      // says so, unless a turn is still running or waits on
+                                      // the person: then the mark stands and the row stays.
+                                      const putAway =
+                                        this.#putAwayWhenDone() && this.#mayPutAwayDone(current);
                                       return {
-                                        ...current,
+                                        ...(putAway
+                                          ? {
+                                              ...withoutPinned(withoutRest(current)),
+                                              completedAt: updatedAt,
+                                            }
+                                          : current),
                                         markedDoneAt: updatedAt,
                                         ...(completionReceiptId === undefined
                                           ? {}
@@ -3306,6 +3334,82 @@ export class CodeService {
     this.#sessionAuthority.revokeThreadEverywhere(current.id);
     this.#onThreadArchived?.(current.id);
     return { status: "archived" };
+  }
+
+  /**
+   * Put a thread away on the host's behalf because a pull request linked to
+   * it merged. Re-reads the thread and decides from the authoritative record:
+   * when every merge named here is one the thread was already put away for,
+   * it is left alone, so a thread a person took back out of the shelf stays
+   * out until another pull request merges. A thread with a turn running or
+   * waiting on the person is skipped and nothing is recorded, so the next
+   * pass tries again. A thread the person already put away only records the
+   * merges.
+   */
+  putAwayMergedThread(
+    threadId: CodeThreadId,
+    merges: ReadonlyArray<MergedPullRequest>,
+    samePullRequest: (left: MergedPullRequest, right: MergedPullRequest) => boolean,
+  ): MergedThreadPutAwayOutcome {
+    const current = this.#persistence.readCodeThread(threadId);
+    if (current === undefined) return { status: "skipped", reason: "not-found" };
+    if (current.lifecycle !== "active") return { status: "skipped", reason: "not-active" };
+    const recorded = current.putAwayForPullRequests ?? [];
+    const unrecorded = merges.filter(
+      (merge) => !recorded.some((known) => samePullRequest(known, merge)),
+    );
+    if (unrecorded.length === 0) return { status: "skipped", reason: "already-put-away" };
+    const alreadyPutAway = current.completedAt !== undefined;
+    if (!alreadyPutAway && !this.#mayPutAwayDone(current)) {
+      return { status: "skipped", reason: "busy" };
+    }
+    const updatedAt = decodeTimestamp(this.#clock());
+    const next = decodeCodeThread({
+      ...(alreadyPutAway
+        ? current
+        : { ...withoutPinned(withoutRest(current)), completedAt: updatedAt }),
+      // Merges still visible come first and are never the ones dropped at the
+      // bound, so a full record does not evict a merge it would then read as
+      // new on the next pass.
+      putAwayForPullRequests: [
+        ...merges,
+        ...recorded.filter((known) => !merges.some((merge) => samePullRequest(known, merge))),
+      ]
+        .slice(0, 32)
+        .map((merge) => ({ baseRepository: merge.baseRepository, number: merge.number })),
+      version: current.version + 1,
+      updatedAt,
+    });
+    this.#append(
+      "code-thread",
+      current.id,
+      current.version,
+      "code.thread-updated@1",
+      { kind: "thread-updated", thread: next },
+      "system",
+    );
+    return alreadyPutAway ? { status: "recorded" } : { status: "put-away" };
+  }
+
+  /**
+   * Whether a thread that is done may also be put away now. A turn's runtime
+   * work alone misses two states: a live turn the work journal has not caught
+   * up with, and an agent's harness approval that outlived a restart which
+   * ended its turn. Either keeps the row in view, since it still needs the
+   * person or is still working.
+   */
+  #mayPutAwayDone(thread: CodeThread): boolean {
+    const signals = boardRuntimeActivityFromWorks(
+      this.#persistence.readCodeRuntimeWorks(thread.id),
+    );
+    return (
+      decideCompleteThread({
+        lifecycle: thread.lifecycle,
+        executing: signals.executing || this.#liveTurns?.read(String(thread.id)) !== undefined,
+        awaitingInput:
+          signals.awaitingInput || this.#awaitsHarnessApproval?.(String(thread.id)) === true,
+      }).status !== "refused"
+    );
   }
 
   async *subscribe(

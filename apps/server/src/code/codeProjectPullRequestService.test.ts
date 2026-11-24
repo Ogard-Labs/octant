@@ -861,6 +861,41 @@ describe("CodeProjectPullRequestService", () => {
     ).toEqual([]);
   });
 
+  it("tells the host which of a thread's own pull requests a refresh recovered as merged outside Octant, and nothing once GitHub access is revoked", async () => {
+    // A merge made on GitHub leaves the open list; the refresh recovers it by
+    // the thread's journal-known number, which is how the put-away pass sees it.
+    const { service, observeReviewByIdentity } = serviceFixture({
+      knownPullRequests: [{ number: 11, observedAt: "2026-08-21T08:00:00Z" }],
+      list: async () => ({ status: "ok", rows: [] }),
+      detail: async () => ({
+        ...observedDetail,
+        pullRequest: {
+          ...observedDetail.pullRequest,
+          number: 11,
+          url: "https://github.com/octant/octant/pull/11",
+          title: "Merged pull request",
+          state: "merged",
+          mergeability: "unknown",
+          updatedAt: "2026-08-22T07:30:00Z",
+        },
+      }),
+    });
+    expect(service.mergedPullRequestsForThread(String(threadId))).toEqual([]);
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+
+    expect(observeReviewByIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({ number: 11 }),
+      expect.any(AbortSignal),
+    );
+    expect(service.mergedPullRequestsForThread(String(threadId))).toEqual([
+      { baseRepository: "octant/octant", number: 11 },
+    ]);
+    expect(service.mergedPullRequestsForThread("20000000-0000-4000-8000-0000000000ff")).toEqual([]);
+    service.revokeGithub();
+    expect(service.mergedPullRequestsForThread(String(threadId))).toEqual([]);
+  });
+
   it("reuses one board join for sidebar navigation reads until it ages out or a refresh replaces it", async () => {
     let clockMs = Date.parse(now);
     const remoteLookup = vi.fn(

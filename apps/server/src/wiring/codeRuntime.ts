@@ -1,4 +1,6 @@
 import { decodeBrowserThreadId } from "@octant/contracts";
+import { splitRepositoryName } from "../code/pullRequestLinkService";
+import { MergedThreadPutAway } from "../code/mergedThreadPutAway";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { designSystemTurnContext } from "../designSystems/designSystemContext";
 import {
@@ -2246,6 +2248,38 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       },
       pullRequestLinks: pullRequestLinkService,
     });
+    // Puts a Code thread away once its pull request merged, read from the same
+    // cached projection the board shows. Only the in-process service can act
+    // as the host; an injected route service is a test double and gets none.
+    const hostCodeService = builtCodeService;
+    const mergedThreadPutAway =
+      hostCodeService === undefined
+        ? undefined
+        : new MergedThreadPutAway({
+            threads: () => persistence.readCodeThreads(),
+            projectExists: (projectId) => persistence.readProject(projectId) !== undefined,
+            metadata: codeThreadMetadataService,
+            cachedMerges: (threadId) =>
+              projectPullRequestService.mergedPullRequestsForThread(String(threadId)),
+            decisionPending: (thread) => codeTurnDecisions.forThread(thread) !== undefined,
+            samePullRequest: (projectId, left, right) => {
+              if (left.number !== right.number) return false;
+              const leftRepository = splitRepositoryName(left.baseRepository);
+              const rightRepository = splitRepositoryName(right.baseRepository);
+              return leftRepository !== undefined && rightRepository !== undefined
+                ? pullRequestLinkService.areSameRepository(
+                    projectId,
+                    leftRepository,
+                    rightRepository,
+                  )
+                : left.baseRepository === right.baseRepository;
+            },
+            putAway: (threadId, merges, samePullRequest) =>
+              hostCodeService.putAwayMergedThread(threadId, merges, samePullRequest),
+            enabled: () =>
+              (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                .putAwayThreadsWhenDone,
+          });
     // Persistent Code follow-up. Follow-up is a durable user
     // obligation independent of unread and runtime status; it reuses the
     // mode-neutral `thread-follow-up` aggregate so a single normalized model
@@ -3136,6 +3170,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeOperationRuntime,
       codeService,
       codeTurnDecisions,
+      mergedThreadPutAway,
       contributeCodeTools,
       registerCodeEditDiagnostics,
       contributeServerCodeTools,

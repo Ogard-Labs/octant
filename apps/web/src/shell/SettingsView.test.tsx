@@ -257,6 +257,15 @@ describe("SettingsView", () => {
     expect(props.onSettingsChange).toHaveBeenCalledWith({ completedThreadArchiveAfterDays: null });
   });
 
+  it("puts threads away when they're done by default and lets the person turn it off", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    const toggle = screen.getByRole("switch", { name: "Put away threads when they're done" });
+    expect(toggle).toBeChecked();
+    await user.click(toggle);
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ putAwayThreadsWhenDone: false });
+  });
+
   it("compacts Octant threads at 85% by default and leaves runtimes to themselves", async () => {
     const user = userEvent.setup();
     const { props } = renderSettings();

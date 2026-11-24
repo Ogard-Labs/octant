@@ -2181,6 +2181,34 @@ describe("WorkThreadService", () => {
     );
   });
 
+  it("puts a Work thread away when a person marks it Done and Settings says to, but not while its turn runs", async () => {
+    const fixture = serviceFixture({ threads: [thread()], putAwayWhenDone: () => true });
+    const marked = await fixture.service.execute(ids.window, {
+      kind: "confirm-work-thread-completion",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      deliveryTarget: "Draft brief",
+    });
+    if (!("thread" in marked)) throw new Error("Expected the marked thread.");
+    expect(marked.thread).toMatchObject({ completionConfirmed: true });
+    expect(marked.thread.completedAt).toBeDefined();
+
+    const running = serviceFixture({
+      threads: [thread()],
+      putAwayWhenDone: () => true,
+      observeRuntime: () => ({ executing: true, awaitingInput: false }) as never,
+    });
+    const markedWhileRunning = await running.service.execute(ids.window, {
+      kind: "confirm-work-thread-completion",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      deliveryTarget: "Draft brief",
+    });
+    if (!("thread" in markedWhileRunning)) throw new Error("Expected the marked thread.");
+    expect(markedWhileRunning.thread).toMatchObject({ completionConfirmed: true });
+    expect(markedWhileRunning.thread).not.toHaveProperty("completedAt");
+  });
+
   it("keeps an evidence note an older client sends with the mark", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
 
@@ -2714,6 +2742,7 @@ function serviceFixture(
     readonly turnProjection?: WorkThreadServiceDependencies["turnProjection"];
     readonly isMarked?: WorkThreadServiceDependencies["isMarked"];
     readonly readLatestFinishedReceipt?: WorkThreadServiceDependencies["readLatestFinishedReceipt"];
+    readonly putAwayWhenDone?: WorkThreadServiceDependencies["putAwayWhenDone"];
     readonly uuid?: () => string;
     readonly serverProjects?: WorkThreadServiceDependencies["serverProjects"];
   } = {},
@@ -2813,6 +2842,7 @@ function serviceFixture(
       ? {}
       : { linearIssueContext: options.linearIssueContext }),
     ...(options.observeRuntime === undefined ? {} : { observeRuntime: options.observeRuntime }),
+    ...(options.putAwayWhenDone === undefined ? {} : { putAwayWhenDone: options.putAwayWhenDone }),
     ...(options.projectDueReminder === undefined
       ? {}
       : { projectDueReminder: options.projectDueReminder }),

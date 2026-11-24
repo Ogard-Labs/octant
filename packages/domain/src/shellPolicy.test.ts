@@ -218,6 +218,7 @@ describe("shell settings policy", () => {
       marketplaceFetchesEnabled: true,
       // A completed thread rests a week before the host archives it.
       completedThreadArchiveAfterDays: 7,
+      putAwayThreadsWhenDone: true,
       autoCompactOctantWindowPercent: 85,
       autoCompactRuntimeWindowPercent: null,
       autoCompactIdleMinutes: null,

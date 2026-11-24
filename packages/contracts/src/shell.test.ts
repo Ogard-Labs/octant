@@ -97,6 +97,7 @@ const settings = {
   quitShortcutNeedsSecondPress: true,
   marketplaceFetchesEnabled: true,
   completedThreadArchiveAfterDays: 7,
+  putAwayThreadsWhenDone: true,
   autoCompactOctantWindowPercent: 85,
   autoCompactRuntimeWindowPercent: null,
   autoCompactIdleMinutes: null,

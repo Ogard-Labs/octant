@@ -995,6 +995,7 @@ export function startOctantServer(
       codeOperationRuntime,
       codeService,
       codeTurnDecisions,
+      mergedThreadPutAway,
       contributeCodeTools,
       registerCodeEditDiagnostics,
       contributeServerCodeTools,
@@ -2377,6 +2378,7 @@ export function startOctantServer(
           // so a host that fails to bind never archives anything on its own,
           // and the stop below is registered before the first pass runs.
           completedThreadArchiveSweep.start();
+          mergedThreadPutAway?.start();
           idleCompactions.start();
           stopBenchmarkRunner = benchmarkRunner.start();
           personMemorySweep.start();
@@ -2483,6 +2485,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           completedThreadArchiveSweep.stop();
+          mergedThreadPutAway?.stop();
           idleCompactions.stop();
           personMemorySweep.stop();
           personMemory.close();
