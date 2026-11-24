@@ -87,6 +87,7 @@
     "./preview-client": "./src/previewClient.ts",
     "./project-client": "./src/projectClient.ts",
     "./folder-browse-client": "./src/folderBrowseClient.ts",
+    "./repository-bootstrap-client": "./src/repositoryBootstrapClient.ts",
     "./replica-membership-client": "./src/replicaMembershipClient.ts",
     "./replica-store-settings-client": "./src/replicaStoreSettingsClient.ts",
     "./secret-stores-client": "./src/secretStoresClient.ts",

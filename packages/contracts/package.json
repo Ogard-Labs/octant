@@ -62,6 +62,7 @@
     "./extension-rpc": "./src/extensionRpc.ts",
     "./outside-driver-protocol": "./src/outsideDriverProtocol.ts",
     "./folder-browse": "./src/folderBrowse.ts",
+    "./repository-bootstrap": "./src/repositoryBootstrap.ts",
     "./browser-automation": "./src/browserAutomation.ts",
     "./browser-automation-rpc": "./src/browserAutomationRpc.ts",
     "./browser-capture": "./src/browserCapture.ts",
