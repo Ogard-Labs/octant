@@ -17,7 +17,7 @@ export interface ZenRootProps {
 
 function isEditableTarget(target: EventTarget | null): boolean {
   // A surface that handles its own keys (Browser drawing's undo and redo, on an
-  // SVG) is treated like a text field: Mod+Shift+Z there is its redo, not Zen.
+  // SVG) is treated like a text field: a chord there is its own, not Zen's.
   if (target instanceof Element && target.closest("[data-owns-chords]") !== null) return true;
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
@@ -39,9 +39,9 @@ export function ZenRoot(props: ZenRootProps) {
       if (props.enabled === false) return;
       const action = matchKeybinding(keybindings, event, isApplePlatform());
       if (action === undefined) return;
-      // A text field keeps its own chords whether or not Zen is showing. The
-      // default Zen chord is Mod+Shift+Z, which is Redo: guarded only while
-      // Zen was active, redoing in the composer opened Zen instead.
+      // A text field keeps its own chords whether or not Zen is showing: while
+      // this was guarded only with Zen active, a chord pressed in the composer
+      // threw the window into Zen.
       if (isEditableTarget(event.target)) return;
       if (action === "zen-mode") {
         event.preventDefault();

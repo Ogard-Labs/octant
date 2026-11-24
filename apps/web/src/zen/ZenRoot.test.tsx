@@ -41,7 +41,7 @@ describe("ZenRoot", () => {
       </ZenRoot>,
     );
 
-    fireEvent.keyDown(window, { key: "z", metaKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: "e", metaKey: true, shiftKey: true });
     expect(onToggle).toHaveBeenCalledOnce();
   });
 
@@ -59,13 +59,13 @@ describe("ZenRoot", () => {
       </ZenRoot>,
     );
 
-    const notHandled = fireEvent.keyDown(window, { key: "z", metaKey: true, shiftKey: true });
+    const notHandled = fireEvent.keyDown(window, { key: "e", metaKey: true, shiftKey: true });
 
     expect(onToggle).not.toHaveBeenCalled();
     expect(notHandled).toBe(true);
   });
 
-  it("leaves Redo to the composer instead of opening Zen while someone is typing", () => {
+  it("leaves its chord to the composer instead of opening Zen while someone is typing", () => {
     const onToggle = vi.fn();
     render(
       <ZenRoot active={false} onExit={() => undefined} onToggle={onToggle} zen={<div>Zen</div>}>
@@ -73,16 +73,16 @@ describe("ZenRoot", () => {
       </ZenRoot>,
     );
 
-    // Mod+Shift+Z is Redo in every text field. Outside Zen the chord was taken
-    // anyway, so redoing in the composer threw the window into Zen.
-    const redo = fireEvent.keyDown(screen.getByLabelText("Message"), {
-      key: "z",
+    // Outside Zen the chord was once taken even in a text field, which threw
+    // the window into Zen while someone was typing.
+    const pressed = fireEvent.keyDown(screen.getByLabelText("Message"), {
+      key: "e",
       metaKey: true,
       shiftKey: true,
     });
 
     expect(onToggle).not.toHaveBeenCalled();
-    // `fireEvent` returns false when the event was cancelled; Redo must survive.
-    expect(redo).toBe(true);
+    // `fireEvent` returns false when the event was cancelled; the key must survive.
+    expect(pressed).toBe(true);
   });
 });

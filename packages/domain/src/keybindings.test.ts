@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  OCTANT_KEYBINDING_ACTIONS,
   formatChord,
   isShadowedKeybinding,
   matchKeybinding,
@@ -38,6 +39,76 @@ describe("parseChord", () => {
     expect(parseChord("Mod+Tab")).toMatchObject({ status: "invalid" });
     expect(parseChord("Mod")).toMatchObject({ status: "invalid" });
     expect(parseChord("Mod+K+P")).toMatchObject({ status: "invalid" });
+  });
+});
+
+describe("the text editing chords", () => {
+  const editing = [
+    ["Mod+Z", "Undo"],
+    ["Mod+Shift+Z", "Redo"],
+    ["Mod+Y", "Redo"],
+    ["Mod+Shift+Y", "Redo"],
+    ["Mod+X", "Cut"],
+    ["Mod+C", "Copy"],
+    ["Mod+V", "Paste"],
+    ["Mod+A", "Select All"],
+  ] as const;
+
+  it("refuses to bind an action to the editor's undo chord and says why", () => {
+    for (const [chord, command] of editing) {
+      expect(parseChord(chord)).toEqual({
+        status: "invalid",
+        reason: `${chord} is ${command} in text fields.`,
+      });
+    }
+    // However it is written, and only for the exact chord.
+    expect(parseChord("shift+ctrl+z")).toMatchObject({ status: "invalid" });
+    expect(parseChord("Mod+Alt+Z")).toMatchObject({ status: "ok" });
+    expect(parseChord("Mod+Shift+C")).toMatchObject({ status: "ok" });
+  });
+
+  it("a saved override on an editor chord falls back to the default and is reported", () => {
+    const resolved = resolveKeybindings({ dictate: "Mod+Z", "zen-mode": "Mod+Shift+Z" });
+
+    expect(resolved.rejected).toEqual([
+      { actionId: "dictate", chord: "Mod+Z", reason: "Mod+Z is Undo in text fields." },
+      {
+        actionId: "zen-mode",
+        chord: "Mod+Shift+Z",
+        reason: "Mod+Shift+Z is Redo in text fields.",
+      },
+    ]);
+    expect(matchKeybinding(resolved, keyEvent("z", { meta: true }), true)).toBeUndefined();
+    expect(matchKeybinding(resolved, keyEvent("m", { meta: true, shift: true }), true)).toBe(
+      "dictate",
+    );
+    expect(matchKeybinding(resolved, keyEvent("e", { meta: true, shift: true }), true)).toBe(
+      "zen-mode",
+    );
+  });
+
+  it("leaves a page's and a terminal's own chords to their own rules", () => {
+    const resolved = resolveKeybindings({
+      "review-snooze": "Mod+Z",
+      "terminal-focus-next": "Mod+Y",
+    });
+
+    expect(resolved.rejected).toEqual([]);
+  });
+
+  it("binds every action by default, none of them on an editor chord", () => {
+    const resolved = resolveKeybindings();
+
+    expect(resolved.bindings.size).toBe(OCTANT_KEYBINDING_ACTIONS.length);
+    expect(resolved.conflicts).toEqual([]);
+  });
+
+  it("keeps a chord saved on another action before Zen's default moved onto it", () => {
+    const resolved = resolveKeybindings({ home: "Mod+Shift+E" });
+
+    expect(matchKeybinding(resolved, keyEvent("e", { meta: true, shift: true }), true)).toBe(
+      "home",
+    );
   });
 });
 

@@ -54,7 +54,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 7         | 4       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
-| [Workspace](#workspace)                                                               | 19        | 14      | 5            | 0                   |
+| [Workspace](#workspace)                                                               | 20        | 15      | 5            | 0                   |
 | [Start screen](#start-screen)                                                         | 4         | 4       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 5       | 7            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **297**   | **178** | **115**      | **4**               |
+| **All areas**                                                                         | **298**   | **179** | **115**      | **4**               |
 
 ## Principles and hard lines
 
@@ -3293,6 +3293,15 @@ A thread has a person-visible recap of what it asked, did and left open, and the
 - Neither changes the thread's authority, level or Done.
 
 Status: Built. Since: 2026-11-14. Detail: [Thread view: Thread recap and notes](thread-view.md#thread-recap-and-notes).
+
+### Reserved keybindings
+
+A remapped shortcut never runs alongside, or instead of, undo, redo, the clipboard or Select All.
+
+- A global action cannot be bound to a chord text fields, the message editor or the desktop Edit menu already answer: Mod+Z, Mod+Shift+Z, Mod+Y, Mod+Shift+Y, Mod+X, Mod+C, Mod+V or Mod+A. Settings › Keybindings refuses it and names the command; a saved override on one is reported and the default applies. Review-page and terminal actions keep their own chord rules.
+- Zen's default chord is Mod+Shift+E, no longer Mod+Shift+Z, which is Redo (maintainer decision, 2026-11-24). A chord already saved on another action keeps working.
+
+Status: Built. Since: 2026-11-24. Detail: [Workspace: Reserved keybindings](workspace.md#reserved-keybindings).
 
 ## Start screen
 
