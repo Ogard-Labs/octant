@@ -91,8 +91,14 @@ export function createDesktopComputerUsePort(
     return JSON.parse(Buffer.concat(chunks, length).toString("utf8"));
   }
   return {
-    hostDisplay: async (scope, command, signal) =>
-      decodeHostDisplayAnswer(await request({ operation: "host-display", scope, command }, signal)),
+    ...(environment.OCTANT_PACKAGED_RUNTIME === "1"
+      ? {
+          hostDisplay: async (scope, command, signal) =>
+            decodeHostDisplayAnswer(
+              await request({ operation: "host-display", scope, command }, signal),
+            ),
+        }
+      : {}),
     status: async () => decodeComputerUseStatus(await request({ operation: "status" })),
     configure: async (settings) => {
       await request({ operation: "configure", settings });

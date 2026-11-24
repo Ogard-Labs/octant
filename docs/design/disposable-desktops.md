@@ -1004,8 +1004,8 @@ Rules this slice resolved:
   thread below Full access is tainted, and Plan refuses. A desktop's approval is also asked in the
   thread, where any client that may open the thread can answer it
   ([decision 3](#maintainer-decisions)); the first answer, there or on a
-  local approval card, decides and withdraws the other. This Mac's approvals
-  stay local. An agent's transfer asks in the thread, with its path, size,
+  local approval card, decides and withdraws the other. For This Mac, a turn from the host person’s directly paired Code window
+  also asks for app approval in the thread. A local turn asks on the Mac. An agent's transfer asks in the thread, with its path, size,
   SHA-256, and destination, below Full access, once per thread; a cloud
   desktop asks every time while "Confirm each billed desktop" is on. The posture is the turn's, which may sit below the
   thread's, so a turn sent at approval-gated on a Full access thread asks.
