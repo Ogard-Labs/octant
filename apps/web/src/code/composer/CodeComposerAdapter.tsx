@@ -2,6 +2,7 @@ import { useDroppedFolderMentions } from "../../composer/useDroppedFolderMention
 import { attachAllowingFiles } from "../../composer/attachmentMediaType";
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
 import type { AutoReview } from "../autoReview";
+import { WorktreeLaunchContext } from "../worktreeLaunchContext";
 import {
   mentionChipsFromDraft,
   mentionChipsToDraft,
@@ -62,6 +63,8 @@ import {
   serverPlacementNoticeKey,
 } from "./serverCodeComposer";
 import {
+  lazy,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -299,6 +302,11 @@ export interface CodeComposerSubmitInput {
  * have.
  */
 const LAST_RESORT_BASE_BRANCH = "development";
+const WorktreeLaunchProgress = lazy(() =>
+  import("../WorktreeLaunchProgress").then(({ WorktreeLaunchProgress }) => ({
+    default: WorktreeLaunchProgress,
+  })),
+);
 
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const suggestionDescriptionId = useId();
@@ -339,6 +347,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   });
   const textareaRef = useRef<ComposerInputElement>(null);
   const composerIdRef = useRef(globalThis.crypto.randomUUID());
+  const launches = useContext(WorktreeLaunchContext)?.launches;
   useEffect(() => {
     const update = props.hostBridge?.updateCodeOperationApprovalAnchor;
     if (update === undefined || props.projectId === undefined) return;
@@ -941,6 +950,16 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       />
     </>
   ) : null;
+  const worktreeLaunch =
+    workspace !== "managed-worktree" || launches === undefined
+      ? undefined
+      : Array.from(launches.values()).findLast(
+          (launch) =>
+            launch.composerId === composerIdRef.current &&
+            String(launch.projectId) === String(props.projectId) &&
+            launch.target === undefined &&
+            (props.creating === true ? launch.blocked !== true : launch.blocked === true),
+        );
   const environmentControl = (
     <HostSelector
       presentation="environment"
@@ -1055,7 +1074,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                         ),
                       },
                     ]),
-              ...(props.creating
+              ...(props.creating && worktreeLaunch === undefined
                 ? [
                     {
                       key: "first-turn",
@@ -1288,6 +1307,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           />
         </div>
 
+        {worktreeLaunch === undefined ? null : (
+          <Suspense fallback={<span role="status">Setting up worktree…</span>}>
+            <WorktreeLaunchProgress key={worktreeLaunch.threadId} launch={worktreeLaunch} />
+          </Suspense>
+        )}
         {props.projectSetup}
 
         {/* Settings for what the composer starts (a new coordinator's) belong

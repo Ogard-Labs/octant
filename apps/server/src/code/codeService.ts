@@ -80,6 +80,7 @@ import {
   type CodeCheckoutIdentity,
   type CodeCommand,
   type CodeCommandResult,
+  type CodeWorktreeCreationProgress,
   type ForkCodeThreadCommand,
   type CodeForkMergeBackOutcome,
   type CodeThreadCheckoutRebindRefusal,
@@ -700,6 +701,7 @@ export interface CodeServiceExecutionContext {
   readonly inheritedMark?: InheritedExternalContentMark;
   /** Host observer, called before the first worktree or thread-creation mutation. */
   readonly onCreationBoundary?: () => void;
+  readonly onWorktreeProgress?: (progress: CodeWorktreeCreationProgress) => void;
   /**
    * The files a thread moved here from another computer starts from: the
    * index and working-tree snapshots its move carried, already fetched into
@@ -1813,12 +1815,16 @@ export class CodeService {
           executionPolicy: managedAuthority.executionPolicy,
         };
         const creationSignal = signal ?? new AbortController().signal;
+        const progress = executionContext?.onWorktreeProgress;
+        const sourceStarted = performance.now();
+        progress?.({ phase: "source" });
         // Prepare resolves the exact source without mutating the user's checkout.
         const prepared = await this.#managedThreadCreation.prepare(creationInput, creationSignal);
         if (prepared.status !== "prepared") {
           throw this.#managedCreationFailure(prepared);
         }
         const preparation = prepared.preparation;
+        const sourceMs = Math.round(performance.now() - sourceStarted);
         // Octant has no confinement on a server to hold Plan read-only, so a
         // worktree there, which is a Git change, is not made for a Plan thread.
         if (
@@ -1876,6 +1882,8 @@ export class CodeService {
           ),
         );
         // Commit creates the worktree (the only mutation) and confirms the HEAD.
+        const checkoutStarted = performance.now();
+        progress?.({ phase: "checkout", sourceMs });
         executionContext?.onCreationBoundary?.();
         const committed = await this.#managedThreadCreation.commit(
           creationInput,
@@ -2023,6 +2031,7 @@ export class CodeService {
           );
         }
         this.#bindCreateIssueContexts(String(thread.id), preparedIssueContexts, command);
+        progress?.({ phase: "ready", checkoutMs: Math.round(performance.now() - checkoutStarted) });
         return {
           kind: "managed-thread-created",
           thread,

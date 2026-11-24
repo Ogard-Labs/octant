@@ -31,6 +31,8 @@ const CHANNEL_TOLERANCE = 24;
 const PIXEL_LIMIT = 50;
 /** The clock every scene sees. */
 const FIXED_TIME = new Date("2026-08-18T09:00:00.000Z");
+/** Bounded context concurrency so the 4-vCPU runner renders shots in parallel without thrashing. */
+const VISUAL_CONCURRENCY = 4;
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const baselineDir = resolve(webRoot, "visual-baselines");
@@ -203,7 +205,6 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
         args: ["--font-render-hinting=none", "--force-color-profile=srgb", "--disable-lcd-text"],
       });
       browser.once("disconnected", stop);
-      const comparer = await browser.newPage();
       // One visit first: Vite's first load of a dependency can reload the page,
       // and that must not land in the middle of a shot.
       const warm = await browser.newContext({ viewport: WIDE });
@@ -217,73 +218,115 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
       } finally {
         await warm.close();
       }
-      const failures: string[] = [];
-      for (const shot of shots()) {
-        const context = await browser.newContext({
-          viewport: shot.size,
-          deviceScaleFactor: 1,
-          colorScheme: shot.scheme,
-          reducedMotion: "reduce",
-          locale: "en-US",
-          timezoneId: "UTC",
-        });
+      interface ShotOutcome {
+        readonly changed?: string;
+        readonly missing?: string;
+        readonly written?: string;
+        readonly noise?: string;
+        readonly failures: ReadonlyArray<string>;
+      }
+      const allShots = shots();
+      const outcomes: Array<ShotOutcome | undefined> = Array.from({ length: allShots.length });
+      let nextIndex = 0;
+      const ownedBrowser = browser;
+      const runWorker = async (): Promise<void> => {
+        const comparer = await ownedBrowser.newPage();
         try {
-          await context.clock.setFixedTime(FIXED_TIME);
-          // Only the dev server answers: a font or picture from the network
-          // would make the picture depend on it.
-          await context.route("**/*", (route) =>
-            new URL(route.request().url()).origin === origin ? route.continue() : route.abort(),
-          );
-          const page = await context.newPage();
-          page.on("pageerror", (error) => failures.push(`${shot.name}: ${error.message}`));
-          await page.goto(`${origin}/visual-check.html?scene=${shot.scene}&scheme=${shot.scheme}`);
-          await page.waitForSelector("html[data-visual-ready='true']", { timeout: 30_000 });
-          const actual = await page.screenshot({ animations: "disabled", caret: "hide" });
-          const baselinePath = resolve(baselineDir, `${shot.name}.png`);
-          const actualPath = resolve(artifacts, `${shot.name}.actual.png`);
-          const baseline = existsSync(baselinePath) ? await readFile(baselinePath) : undefined;
-          if (baseline === undefined) {
-            await writeFile(actualPath, actual);
-            if (!update) {
-              missing.push(shot.name);
-            } else {
-              await writeFile(baselinePath, actual);
-              written.push(shot.name);
+          for (;;) {
+            const index = nextIndex;
+            nextIndex += 1;
+            const shot = allShots[index];
+            if (shot === undefined) return;
+            const shotFailures: string[] = [];
+            const context = await ownedBrowser.newContext({
+              viewport: shot.size,
+              deviceScaleFactor: 1,
+              colorScheme: shot.scheme,
+              reducedMotion: "reduce",
+              locale: "en-US",
+              timezoneId: "UTC",
+            });
+            try {
+              await context.clock.setFixedTime(FIXED_TIME);
+              // Only the dev server answers: a font or picture from the network
+              // would make the picture depend on it.
+              await context.route("**/*", (route) =>
+                new URL(route.request().url()).origin === origin ? route.continue() : route.abort(),
+              );
+              const page = await context.newPage();
+              page.on("pageerror", (error) => shotFailures.push(`${shot.name}: ${error.message}`));
+              await page.goto(
+                `${origin}/visual-check.html?scene=${shot.scene}&scheme=${shot.scheme}`,
+              );
+              await page.waitForSelector("html[data-visual-ready='true']", { timeout: 30_000 });
+              const actual = await page.screenshot({ animations: "disabled", caret: "hide" });
+              const baselinePath = resolve(baselineDir, `${shot.name}.png`);
+              const actualPath = resolve(artifacts, `${shot.name}.actual.png`);
+              const baseline = existsSync(baselinePath) ? await readFile(baselinePath) : undefined;
+              if (baseline === undefined) {
+                await writeFile(actualPath, actual);
+                if (!update) {
+                  outcomes[index] = { missing: shot.name, failures: shotFailures };
+                } else {
+                  await writeFile(baselinePath, actual);
+                  outcomes[index] = { written: shot.name, failures: shotFailures };
+                }
+                continue;
+              }
+              if (mode === "all") {
+                await writeFile(actualPath, actual);
+                await writeFile(baselinePath, actual);
+                outcomes[index] = { written: shot.name, failures: shotFailures };
+                continue;
+              }
+              if (actual.equals(baseline)) {
+                outcomes[index] = { failures: shotFailures };
+                continue;
+              }
+              const result = await compare(comparer, actual, baseline);
+              if (result.sizesMatch && result.differing <= PIXEL_LIMIT) {
+                outcomes[index] = {
+                  noise: `${shot.name}=${String(result.differing)}`,
+                  failures: shotFailures,
+                };
+                continue;
+              }
+              await writeFile(actualPath, actual);
+              if (update) {
+                await writeFile(baselinePath, actual);
+                outcomes[index] = { written: shot.name, failures: shotFailures };
+                continue;
+              }
+              await writeFile(resolve(artifacts, `${shot.name}.baseline.png`), baseline);
+              if (result.sizesMatch)
+                await writeFile(
+                  resolve(artifacts, `${shot.name}.diff.png`),
+                  Buffer.from(result.diff, "base64"),
+                );
+              outcomes[index] = {
+                changed: result.sizesMatch
+                  ? `${shot.name} (${String(result.differing)} pixels differ)`
+                  : `${shot.name} (size ${result.actualSize}, baseline ${result.baselineSize})`,
+                failures: shotFailures,
+              };
+            } finally {
+              await context.close();
             }
-            continue;
           }
-          if (mode === "all") {
-            await writeFile(actualPath, actual);
-            await writeFile(baselinePath, actual);
-            written.push(shot.name);
-            continue;
-          }
-          if (actual.equals(baseline)) continue;
-          const result = await compare(comparer, actual, baseline);
-          if (result.sizesMatch && result.differing <= PIXEL_LIMIT) {
-            noise.push(`${shot.name}=${String(result.differing)}`);
-            continue;
-          }
-          await writeFile(actualPath, actual);
-          if (update) {
-            await writeFile(baselinePath, actual);
-            written.push(shot.name);
-            continue;
-          }
-          await writeFile(resolve(artifacts, `${shot.name}.baseline.png`), baseline);
-          if (result.sizesMatch)
-            await writeFile(
-              resolve(artifacts, `${shot.name}.diff.png`),
-              Buffer.from(result.diff, "base64"),
-            );
-          changed.push(
-            result.sizesMatch
-              ? `${shot.name} (${String(result.differing)} pixels differ)`
-              : `${shot.name} (size ${result.actualSize}, baseline ${result.baselineSize})`,
-          );
         } finally {
-          await context.close();
+          await comparer.close().catch(() => undefined);
         }
+      };
+      const workerCount = Math.min(VISUAL_CONCURRENCY, allShots.length);
+      await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+      const failures: string[] = [];
+      for (const outcome of outcomes) {
+        if (outcome === undefined) continue;
+        failures.push(...outcome.failures);
+        if (outcome.changed !== undefined) changed.push(outcome.changed);
+        if (outcome.missing !== undefined) missing.push(outcome.missing);
+        if (outcome.written !== undefined) written.push(outcome.written);
+        if (outcome.noise !== undefined) noise.push(outcome.noise);
       }
       console.log(
         `Noise on passing screens (pixels, limit ${String(PIXEL_LIMIT)}): ${noise.length === 0 ? "none" : noise.join(", ")}`,

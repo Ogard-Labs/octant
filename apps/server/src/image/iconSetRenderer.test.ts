@@ -1,5 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { encode as encodeJpeg } from "jpeg-js";
+import { GifWriter } from "omggif";
+import { PNG } from "pngjs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
@@ -40,7 +44,13 @@ function pngHeader(width: number, height: number): Uint8Array {
 }
 
 /** A valid PNG of one colour: RGB, or RGBA with every pixel at `alpha`. */
-function solidPng(size: number, alpha?: number): Uint8Array {
+function solidPng(
+  size: number | { readonly width: number; readonly height: number },
+  alpha?: number,
+  extra?: ReadonlyArray<{ readonly type: string; readonly data: Uint8Array }>,
+): Uint8Array {
+  const width = typeof size === "number" ? size : size.width;
+  const height = typeof size === "number" ? size : size.height;
   const channels = alpha === undefined ? 3 : 4;
   const crcTable = Array.from({ length: 256 }, (_, n) => {
     let c = n;
@@ -63,17 +73,18 @@ function solidPng(size: number, alpha?: number): Uint8Array {
   };
   const header = new Uint8Array(13);
   const headerView = new DataView(header.buffer);
-  headerView.setUint32(0, size);
-  headerView.setUint32(4, size);
+  headerView.setUint32(0, width);
+  headerView.setUint32(4, height);
   header.set([8, alpha === undefined ? 2 : 6, 0, 0, 0], 8);
-  const row = new Uint8Array(1 + size * channels);
+  const row = new Uint8Array(1 + width * channels);
   const pixel = alpha === undefined ? [30, 120, 200] : [30, 120, 200, alpha];
-  for (let x = 0; x < size; x += 1) row.set(pixel, 1 + x * channels);
-  const raw = new Uint8Array(row.byteLength * size);
-  for (let y = 0; y < size; y += 1) raw.set(row, y * row.byteLength);
+  for (let x = 0; x < width; x += 1) row.set(pixel, 1 + x * channels);
+  const raw = new Uint8Array(row.byteLength * height);
+  for (let y = 0; y < height; y += 1) raw.set(row, y * row.byteLength);
   const parts = [
     Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),
+    ...(extra ?? []).map(({ type, data }) => chunk(type, data)),
     chunk("IDAT", new Uint8Array(deflateSync(raw))),
     chunk("IEND", new Uint8Array()),
   ];
@@ -84,6 +95,20 @@ function solidPng(size: number, alpha?: number): Uint8Array {
     offset += part.byteLength;
   }
   return png;
+}
+
+/** The chunk types a PNG carries, in order — how a re-encode's colour chunks are checked. */
+function pngChunkTypes(bytes: Uint8Array): string[] {
+  const types: string[] = [];
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 8;
+  while (offset + 8 <= bytes.byteLength) {
+    const length = view.getUint32(offset);
+    types.push(String.fromCharCode(...bytes.subarray(offset + 4, offset + 8)));
+    if (offset + 8 + length + 4 > bytes.byteLength) break;
+    offset += 12 + length;
+  }
+  return types;
 }
 
 /** Stands in for `sips`: answers the probe and writes a PNG of the asked size for each resize. */
@@ -262,27 +287,245 @@ describe("icon set rendering", () => {
     expect(rendered).toMatchObject({ status: "refused" });
   });
 
-  it("is not offered off macOS or without sips", () => {
-    const directory = workDirectory();
-    expect(hostIconSetRenderer({ workDirectory: directory, platform: "linux" })).toBeUndefined();
-    expect(hostIconSetRenderer({ workDirectory: directory, platform: "win32" })).toBeUndefined();
+  it("resizes in pure JavaScript off macOS and in sips on it", async () => {
+    // The pure-JavaScript renderer answers on every platform without sips.
+    for (const platform of ["linux", "win32", "darwin"] as const) {
+      const render = hostIconSetRenderer({
+        workDirectory: workDirectory(),
+        platform,
+        sipsExists: () => false,
+      });
+      const rendered = await render({ bytes: solidPng(1024), mime: "image/png", target: "web" });
+      expect(rendered.status).toBe("rendered");
+    }
     expect(
       hostIconSetRenderer({
-        workDirectory: directory,
+        workDirectory: workDirectory(),
         platform: "darwin",
-        sipsExists: () => false,
+        sipsExists: () => true,
       }),
-    ).toBeUndefined();
-    expect(
-      hostIconSetRenderer({ workDirectory: directory, platform: "darwin", sipsExists: () => true }),
     ).toBeTypeOf("function");
+  });
+});
+
+describe("icon set rendering in pure JavaScript", () => {
+  const render = () =>
+    hostIconSetRenderer({
+      workDirectory: workDirectory(),
+      platform: "linux",
+      sipsExists: () => false,
+    });
+
+  /** A JPEG source encoded in the test, so no fixture file is checked in. */
+  function solidJpeg(size: number): Uint8Array {
+    const data = new Uint8Array(size * size * 4);
+    for (let index = 0; index < data.length; index += 4) {
+      data[index] = 30;
+      data[index + 1] = 90;
+      data[index + 2] = 200;
+      data[index + 3] = 255;
+    }
+    return new Uint8Array(
+      encodeJpeg({ data: Buffer.from(data), width: size, height: size }, 90).data,
+    );
+  }
+
+  /** A WebP source encoded through libwebp's WebAssembly module, as decoding is. */
+  async function solidWebp(size: number): Promise<Uint8Array> {
+    const encoder = await import("@jsquash/webp/encode.js");
+    const wasm = createRequire(import.meta.url).resolve("@jsquash/webp/codec/enc/webp_enc.wasm");
+    await encoder.init({ wasmBinary: new Uint8Array(readFileSync(wasm)).buffer });
+    const data = new Uint8ClampedArray(size * size * 4);
+    for (let index = 0; index < data.length; index += 4) {
+      data[index] = 30;
+      data[index + 1] = 90;
+      data[index + 2] = 200;
+      data[index + 3] = 255;
+    }
+    return new Uint8Array(
+      await encoder.default({ data, width: size, height: size, colorSpace: "srgb" }),
+    );
+  }
+
+  it.each([
+    ["image/png", () => Promise.resolve(solidPng(1024))],
+    ["image/jpeg", () => Promise.resolve(solidJpeg(1024))],
+    ["image/webp", () => solidWebp(1024)],
+  ] as const)("makes every web icon from a %s source", async (mime, bytes) => {
+    const rendered = await render()({ bytes: await bytes(), mime, target: "web" });
+    if (rendered.status !== "rendered") throw new Error(rendered.reason);
+    expect(rendered.files.map((file) => [file.path, pngDimensions(file.bytes)?.width])).toEqual(
+      ICON_SET_SPECS.web.map((spec) => [spec.path, spec.pixels]),
+    );
+  });
+
+  it("carries the Android launcher alternates its caller refuses beside", async () => {
+    const rendered = await render()({
+      bytes: solidPng(1024),
+      mime: "image/png",
+      target: "android",
+    });
+    if (rendered.status !== "rendered") throw new Error(rendered.reason);
+    const launcher = rendered.files.find((file) => file.path === "mipmap-hdpi/ic_launcher.png");
+    expect(launcher?.conflicts).toContain("mipmap-hdpi/ic_launcher.webp");
+  });
+
+  it("refuses an iOS icon that shows any transparency", async () => {
+    const rendered = await render()({
+      bytes: solidPng(1024, 128),
+      mime: "image/png",
+      target: "apple-ios",
+    });
+    expect(rendered).toEqual({
+      status: "refused",
+      reason: expect.stringMatching(/must not be transparent/),
+    });
+  });
+
+  it("refuses a source smaller than the minimum", async () => {
+    const rendered = await render()({ bytes: solidPng(512), mime: "image/png", target: "web" });
+    expect(rendered).toEqual({
+      status: "refused",
+      reason: expect.stringMatching(/at least 1024/),
+    });
+  });
+
+  it("refuses a non-square source", async () => {
+    const width = 1024;
+    const height = 768;
+    const data = new Uint8Array(width * height * 4).fill(255);
+    const rendered = await render()({
+      bytes: new Uint8Array(encodeJpeg({ data: Buffer.from(data), width, height }, 90).data),
+      mime: "image/jpeg",
+      target: "web",
+    });
+    expect(rendered).toEqual({
+      status: "refused",
+      reason: expect.stringMatching(/square/),
+    });
+  });
+
+  it("refuses a non-square source whose prescaled raster would read as square", async () => {
+    // 2049×2048 averages down to a 1024×1024 raster the sizes render from;
+    // the square check still reads the decoded source's own dimensions.
+    const rendered = await render()({
+      bytes: solidPng({ width: 2049, height: 2048 }),
+      mime: "image/png",
+      target: "web",
+    });
+    expect(rendered).toEqual({
+      status: "refused",
+      reason: expect.stringMatching(/square/),
+    });
+  });
+
+  it("refuses a source whose bytes are no image it reads", async () => {
+    const rendered = await render()({
+      bytes: new Uint8Array([1, 2, 3, 4]),
+      mime: "image/png",
+      target: "web",
+    });
+    expect(rendered).toEqual({
+      status: "refused",
+      reason: "The image's size could not be read.",
+    });
+  });
+
+  it("refuses an iOS icon whose decoded source shows even faint transparency", async () => {
+    const rendered = await render()({
+      bytes: solidPng(1024, 254),
+      mime: "image/png",
+      target: "apple-ios",
+    });
+    expect(rendered).toEqual({
+      status: "refused",
+      reason: expect.stringMatching(/must not be transparent/),
+    });
+  });
+
+  it("refuses an iOS icon whose one faint pixel would average to opaque in the prescale", async () => {
+    // A single alpha-254 pixel in a 2048 source rounds to fully opaque in the
+    // 1024 raster the outputs render from; the check reads the source.
+    const png = new PNG({ width: 2048, height: 2048 });
+    png.data.fill(255);
+    png.data[3] = 254;
+    const rendered = await render()({
+      bytes: new Uint8Array(PNG.sync.write(png)),
+      mime: "image/png",
+      target: "apple-ios",
+    });
+    expect(rendered).toEqual({
+      status: "refused",
+      reason: expect.stringMatching(/must not be transparent/),
+    });
+  });
+
+  it("makes every web icon from a GIF source's first frame", async () => {
+    const size = 1024;
+    const gif: number[] = [];
+    const writer = new GifWriter(gif, size, size, { loop: 0 });
+    writer.addFrame(0, 0, size, size, new Array<number>(size * size).fill(0), {
+      palette: [0x1e78c8, 0x000000],
+    });
+    const rendered = await render()({
+      bytes: new Uint8Array(gif.slice(0, writer.end())),
+      mime: "image/gif",
+      target: "web",
+    });
+    if (rendered.status !== "rendered") throw new Error(rendered.reason);
+    expect(rendered.files.map((file) => pngDimensions(file.bytes)?.width)).toEqual(
+      ICON_SET_SPECS.web.map((spec) => spec.pixels),
+    );
+  });
+
+  it("carries the source PNG's colour chunks into every output", async () => {
+    const colour = [
+      { type: "gAMA", data: Uint8Array.from([0, 0, 0xcf, 0x7a]) },
+      {
+        type: "cHRM",
+        data: Uint8Array.from([
+          0, 0, 0x7a, 0x26, 0, 0, 0x80, 0x84, 0, 0, 0xfa, 0, 0, 0, 0x80, 0xe8, 0, 0, 0x75, 0x30, 0,
+          0, 0xea, 0x60, 0, 0, 0x3a, 0x98, 0, 0, 0x17, 0x70,
+        ]),
+      },
+      { type: "sRGB", data: Uint8Array.from([0]) },
+    ];
+    const rendered = await render()({
+      bytes: solidPng(1024, undefined, colour),
+      mime: "image/png",
+      target: "web",
+    });
+    if (rendered.status !== "rendered") throw new Error(rendered.reason);
+    for (const file of rendered.files.filter((candidate) => candidate.path.endsWith(".png"))) {
+      const types = pngChunkTypes(file.bytes);
+      for (const { type } of colour) expect(types).toContain(type);
+    }
+  });
+
+  it("stops a large source's render when the caller's stop lands between outputs", async () => {
+    let stopped = false;
+    const rendered = await render()({
+      bytes: solidPng(2048),
+      mime: "image/png",
+      target: "web",
+      beforeOutput: () => {
+        if (stopped) return "The turn was stopped.";
+        // The stop can only be observed if the render yields to the event
+        // loop before the next output is asked for.
+        setImmediate(() => {
+          stopped = true;
+        });
+        return undefined;
+      },
+    });
+    expect(rendered).toEqual({ status: "refused", reason: "The turn was stopped." });
   });
 });
 
 describe.runIf(process.platform === "darwin")("icon set rendering with macOS's sips", () => {
   it.each(targets)("makes every %s icon at its size", async (target) => {
+    if (!existsSync(SIPS_PATH)) throw new Error(`${SIPS_PATH} is missing on this Mac.`);
     const render = hostIconSetRenderer({ workDirectory: workDirectory() });
-    if (render === undefined) throw new Error(`${SIPS_PATH} is missing on this Mac.`);
     const rendered = await render({ bytes: solidPng(1024), mime: "image/png", target });
     if (rendered.status !== "rendered") throw new Error(rendered.reason);
     const check = workDirectory();
@@ -299,8 +542,8 @@ describe.runIf(process.platform === "darwin")("icon set rendering with macOS's s
   });
 
   it("saves an opaque RGBA source as an iOS icon with no alpha channel", async () => {
+    if (!existsSync(SIPS_PATH)) throw new Error(`${SIPS_PATH} is missing on this Mac.`);
     const render = hostIconSetRenderer({ workDirectory: workDirectory() });
-    if (render === undefined) throw new Error(`${SIPS_PATH} is missing on this Mac.`);
     const rendered = await render({
       bytes: solidPng(1024, 255),
       mime: "image/png",

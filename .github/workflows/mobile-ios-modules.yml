@@ -38,6 +38,16 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
+      - uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: ios-cocoapods-${{ runner.os }}-${{ hashFiles('bun.lock', 'apps/mobile/package.json', 'apps/mobile/app.config.ts') }}
+          restore-keys: ios-cocoapods-${{ runner.os }}-
       # The Expo version the app pins builds a Swift package that needs Swift
       # tools 6.2 and C++ interop that Xcode 26.3 rejects (the first run on
       # macos-15 stopped at package resolution, the second at

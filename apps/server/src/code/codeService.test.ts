@@ -4157,6 +4157,29 @@ describe("CodeService managed thread creation", () => {
     }
   });
 
+  it("reports the source and checkout stages while the host carries them out", async () => {
+    const progress = vi.fn();
+    const port = mockCreationPort({
+      prepare: async () => {
+        expect(progress.mock.calls).toEqual([[{ phase: "source" }]]);
+        return { status: "prepared", preparation: preparation() };
+      },
+      commit: async () => {
+        expect(progress.mock.lastCall).toEqual([
+          { phase: "checkout", sourceMs: expect.any(Number) },
+        ]);
+        return { status: "created", receiptId, expectedHead: resolvedHead };
+      },
+    });
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+    await expect(
+      fixture.service.execute(ids.window, managedCommand, undefined, {
+        onWorktreeProgress: progress,
+      }),
+    ).resolves.toMatchObject({ kind: "managed-thread-created" });
+    expect(progress.mock.lastCall).toEqual([{ phase: "ready", checkoutMs: expect.any(Number) }]);
+  });
+
   it("refuses an unrecognized approved-folder identity before creating a managed worktree", async () => {
     const port = {
       prepare: vi.fn<ManagedCodeThreadCreationPort["prepare"]>(),

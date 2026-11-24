@@ -131,6 +131,8 @@ import {
   type CodeNavigation,
   type CodeCommand,
   type CodeCommandResult,
+  type CodeWorktreeCreationFrame,
+  type CodeWorktreeCreationProgress,
   type CodeEvidenceReference,
   type CodeEvidenceBatchRequest,
   type CodeEvidenceBatchResponse,
@@ -1082,6 +1084,23 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             );
           }
           if (command !== undefined) {
+            if (
+              command.kind === "create-managed-code-thread" &&
+              callerAuthority === "local-window" &&
+              !agentGrantSession &&
+              request.headers.get("accept") === "application/x-ndjson"
+            ) {
+              const creation = command;
+              return worktreeCreationResponse(
+                request.signal,
+                origin,
+                (signal, onWorktreeProgress) =>
+                  dependencies.service.execute(authenticatedWindowId, creation, signal, {
+                    actor: callerActor,
+                    onWorktreeProgress,
+                  }),
+              );
+            }
             return jsonResponse(
               await dependencies.service.execute(authenticatedWindowId, command, request.signal, {
                 actor: callerActor,
@@ -3343,6 +3362,53 @@ function parseJson(bytes: Uint8Array): unknown {
   } catch {
     throw new CodeRouteRejected("Command body must be valid JSON.", 400);
   }
+}
+
+function worktreeCreationResponse(
+  signal: AbortSignal,
+  origin: string | null,
+  execute: (
+    signal: AbortSignal,
+    progress: (progress: CodeWorktreeCreationProgress) => void,
+  ) => CodeCommandResult | Promise<CodeCommandResult>,
+): Response {
+  const cancellation = new AbortController();
+  const executionSignal = AbortSignal.any([signal, cancellation.signal]);
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (frame: typeof CodeWorktreeCreationFrame.Type) => {
+        if (!cancellation.signal.aborted) {
+          controller.enqueue(encoder.encode(`${JSON.stringify(frame)}\n`));
+        }
+      };
+      try {
+        const result = await execute(executionSignal, (progress) =>
+          send({ kind: "progress", progress }),
+        );
+        if (result.kind !== "managed-thread-created") throw new Error("Unexpected creation result");
+        send({ kind: "result", result });
+      } catch (error) {
+        send({
+          kind: "failure",
+          failure: serviceFailureFrom(error) ?? {
+            category: "unavailable",
+            message: "Octant Code service is unavailable.",
+          },
+        });
+      } finally {
+        if (!cancellation.signal.aborted) controller.close();
+      }
+    },
+    cancel: () => cancellation.abort(),
+  });
+  return new Response(body, {
+    headers: {
+      ...Object.fromEntries(corsHeaders(origin).entries()),
+      "content-type": "application/x-ndjson",
+      "cache-control": "no-store",
+    },
+  });
 }
 
 function ndjsonResponse(

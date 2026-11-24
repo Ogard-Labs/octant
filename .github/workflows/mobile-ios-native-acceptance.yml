@@ -34,6 +34,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 26
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
+      - uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: ios-cocoapods-${{ runner.os }}-${{ hashFiles('bun.lock', 'apps/mobile/package.json', 'apps/mobile/app.config.ts') }}
+          restore-keys: ios-cocoapods-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - name: Build and exercise the Release app without accounts or store signing
         run: python3 scripts/mobile-ios-native/run.py
