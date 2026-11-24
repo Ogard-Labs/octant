@@ -3,9 +3,11 @@ import { Schema } from "effect";
 import { ProviderDriverKind } from "@octant/contracts/providers";
 import {
   admittedBundledImageDriverKinds,
+  admittedBundledVideoDriverKinds,
   admittedBundledProviderDriverKinds,
   bundledImageDriverPlugins,
   bundledProviderDriverPlugins,
+  bundledVideoDriverPlugins,
   bundledProviderDriverCatalog,
   bundledProviderDriverComponent,
   bundledProviderDriverPlugin,
@@ -202,9 +204,23 @@ describe("bundled image-driver plugins", () => {
         imageDriverKinds.includes(listing.entry.driverKind),
       ),
     ).toBe(false);
-    const every = [...bundledProviderDriverPlugins(), ...bundledImageDriverPlugins()];
+    const every = [
+      ...bundledProviderDriverPlugins(),
+      ...bundledImageDriverPlugins(),
+      ...bundledVideoDriverPlugins(),
+    ];
     expect(new Set(every.map((plugin) => plugin.manifest.digest)).size).toBe(every.length);
     expect(new Set(every.map((plugin) => plugin.manifest.extensionId)).size).toBe(every.length);
+  });
+
+  it("admits the bundled video provider by default and stops when its plugin is disabled", () => {
+    expect([...admittedBundledVideoDriverKinds()]).toEqual(["gemini-video"]);
+    expect(admittedBundledVideoDriverKinds({ "gemini-video": { pluginDesired: false } }).size).toBe(
+      0,
+    );
+    expect(
+      bundledProviderDriverCatalog().some((listing) => listing.entry.driverKind === "gemini-video"),
+    ).toBe(false);
   });
 
   it("stops admitting an image provider whose plugin is disabled", () => {

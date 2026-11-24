@@ -57,6 +57,8 @@ import type {
   GeminiImageAspectRatio,
   GeminiImageProviderConfiguration,
   GeminiImageProviderInstance,
+  GeminiVideoProviderConfiguration,
+  GeminiVideoProviderInstance,
   GeminiImageResolution,
   IdeogramImageProviderConfiguration,
   IdeogramImageProviderInstance,
@@ -126,6 +128,21 @@ export function isImageProfileDriverKind(
     driverKind === "bfl-image" ||
     driverKind === "ideogram-image"
   );
+}
+
+/**
+ * Video profiles: like image profiles they are never a turn driver, and they
+ * reach the host only through the video seam's capability-scoped ports.
+ */
+export function isVideoProfileDriverKind(
+  driverKind: ProviderDriverKind,
+): driverKind is "gemini-video" {
+  return driverKind === "gemini-video";
+}
+
+/** A media profile, image or video: one that generates media and cannot start a turn. */
+export function isMediaProfileDriverKind(driverKind: ProviderDriverKind): boolean {
+  return isImageProfileDriverKind(driverKind) || isVideoProfileDriverKind(driverKind);
 }
 
 /**
@@ -247,7 +264,7 @@ export function isNativeHarnessDriverKind(
  * refusal.
  */
 export function providerKeepsConversation(driverKind: ProviderDriverKind): boolean {
-  return !(isNativeHarnessDriverKind(driverKind) || isImageProfileDriverKind(driverKind));
+  return !(isNativeHarnessDriverKind(driverKind) || isMediaProfileDriverKind(driverKind));
 }
 
 function nextVersion(version: AggregateVersion): AggregateVersion {
@@ -1695,6 +1712,22 @@ export interface GeminiImageConfigurationInput {
   readonly resolution?: GeminiImageResolution | undefined;
 }
 
+export interface GeminiVideoConfigurationInput {
+  readonly kind: GeminiVideoProviderConfiguration["kind"];
+  readonly modelAllowlist: ReadonlyArray<string>;
+  readonly defaultModel: string;
+}
+
+function normalizeGeminiVideoConfiguration(
+  configuration: GeminiVideoConfigurationInput,
+): GeminiVideoProviderConfiguration {
+  const { modelAllowlist, defaultModel } = normalizeImageModelSelection(
+    configuration.modelAllowlist,
+    configuration.defaultModel,
+  );
+  return { kind: "gemini-video-http", modelAllowlist, defaultModel };
+}
+
 function normalizeGeminiImageConfiguration(
   configuration: GeminiImageConfigurationInput,
 ): GeminiImageProviderConfiguration {
@@ -1860,6 +1893,45 @@ export function createGeminiImageProvider(
     version: nextVersion(input.expectedVersion),
     createdAt: input.createdAt,
     updatedAt: input.createdAt,
+  };
+}
+
+interface CreateGeminiVideoProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: GeminiVideoConfigurationInput;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+export function createGeminiVideoProvider(
+  input: CreateGeminiVideoProviderInput,
+): GeminiVideoProviderInstance {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "gemini-video",
+    configuration: normalizeGeminiVideoConfiguration(input.configuration),
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+export function changeGeminiVideoConfiguration(
+  current: GeminiVideoProviderInstance,
+  input: GeminiVideoConfigurationInput,
+  updatedAt: UtcTimestamp,
+): GeminiVideoProviderInstance {
+  return {
+    ...current,
+    configuration: normalizeGeminiVideoConfiguration(input),
+    version: nextVersion(current.version),
+    updatedAt,
   };
 }
 

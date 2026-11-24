@@ -30,7 +30,7 @@ import {
   ThreadMentionCommandResult,
   decodeHostAnswer,
 } from "@octant/contracts";
-import { isImageProfileDriverKind, isNativeHarnessDriverKind } from "@octant/domain";
+import { isMediaProfileDriverKind, isNativeHarnessDriverKind } from "@octant/domain";
 import type { OpenedLocalControlSession } from "./localControl";
 
 /**
@@ -621,7 +621,7 @@ export async function listAgentModels(
   const instances = snapshot.instances.filter(
     (instance) =>
       instance.enabled &&
-      !isImageProfileDriverKind(instance.driverKind) &&
+      !isMediaProfileDriverKind(instance.driverKind) &&
       (scope !== "harness" || isNativeHarnessDriverKind(instance.driverKind)),
   );
   const observations = [...snapshot.observedStates];

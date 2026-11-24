@@ -1685,7 +1685,7 @@ Short video clips run as a journaled job through provider-neutral video driver p
 - Clips are stored beside generated images, exported and deleted with their thread, and the provider's copy is removed as soon as the clip is kept where the driver can; otherwise the card says how long the provider keeps it.
 - After a restart, a running job with a recorded provider id resumes within its declared resume window; one without settles at its estimate as interrupted.
 
-Status: Partly built. Since: 2026-11-22. Built: the video seam in `@octant/provider-sdk/video-generation` with its conformance harness, the declared-capability contract and pricing rules, and the Gemini API driver (Gemini Omni Flash). Not yet built: the host job service, the agent tool and card, the viewer and save, and the Runway and fal drivers. Detail: [Video generation](video-generation.md).
+Status: Partly built. Since: 2026-11-22. Built: the video seam in `@octant/provider-sdk/video-generation` with its conformance harness, the declared-capability contract and pricing rules, the Gemini API driver (Gemini Omni Flash), the Gemini video profile in Settings behind its bundled driver plugin, and the host video job service (spend reservation and settlement attributed to the thread and Project, two running and sixteen waiting jobs, MP4 clip storage, provider-copy removal with retries, and restart recovery). Not yet built: the agent tool and card, the viewer and save, and the Runway and fal drivers. Detail: [Video generation](video-generation.md).
 
 ### Provider reach Octant no longer narrows
 

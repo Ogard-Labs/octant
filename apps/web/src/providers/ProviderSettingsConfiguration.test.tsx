@@ -26,6 +26,7 @@ function props(overrides: Partial<ProviderCreateFormProps> = {}): ProviderCreate
     onCreateAcpAgent: callback,
     onCreateClaude: callback,
     onCreateGeminiImage: callback,
+    onCreateGeminiVideo: callback,
     onCreateIdeogramImage: callback,
     onCreateOllama: callback,
     onCreateOpenAiCompatible: callback,
