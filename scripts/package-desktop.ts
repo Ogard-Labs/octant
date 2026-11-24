@@ -233,6 +233,12 @@ export const EXTERNAL_RUNTIME_PACKAGES = [
   "@anthropic-ai/claude-agent-sdk",
   "playwright-core",
   "yaml",
+  // The icon-set resizer's decoders off macOS: the WebAssembly module ships
+  // inside the package, which only staged-whole packages keep.
+  "@jsquash/webp",
+  "pngjs",
+  "jpeg-js",
+  "omggif",
 ] as const;
 
 export const PACKAGED_RUNTIME_IMPORTS = [
@@ -242,6 +248,10 @@ export const PACKAGED_RUNTIME_IMPORTS = [
   "node-pty",
   "playwright-core",
   "yaml",
+  "@jsquash/webp",
+  "pngjs",
+  "jpeg-js",
+  "omggif",
 ] as const;
 
 /** Staged app payload shared by every desktop packaging target. */
@@ -276,6 +286,9 @@ export const REQUIRED_STAGED_PACKAGED_FILES = [
   "apps/server/node_modules/node-pty/build/Release/pty.node",
   "apps/server/node_modules/playwright-core/package.json",
   "apps/server/node_modules/yaml/package.json",
+  "apps/server/node_modules/@jsquash/webp/codec/dec/webp_dec.wasm",
+  "apps/server/node_modules/pngjs/package.json",
+  "apps/server/node_modules/jpeg-js/package.json",
 ] as const;
 
 /** Flavor-specific code Stable cannot reach and therefore must not ship. */
@@ -1263,12 +1276,35 @@ export async function validatePackagedRuntimeImports(
   imports: ReadonlyArray<string> = PACKAGED_RUNTIME_IMPORTS,
   runtimePath = "apps/server",
 ): Promise<void> {
+  // The WebAssembly decoder proves itself the way the server uses it: the
+  // staged `.wasm` is found beside its glue and decodes an image, so a
+  // package whose binary did not stage fails here, not only at an import.
+  const webp = imports.includes("@jsquash/webp")
+    ? `,(async () => {
+        const decoder = await import("@jsquash/webp/decode.js");
+        const { createRequire } = await import("node:module");
+        const { readFileSync } = await import("node:fs");
+        const wasm = createRequire(process.cwd() + "/package.json").resolve(
+          "@jsquash/webp/codec/dec/webp_dec.wasm",
+        );
+        await decoder.init({ wasmBinary: readFileSync(wasm).buffer });
+        const bytes = new Uint8Array(
+          Buffer.from(
+            "UklGRjIAAABXRUJQVlA4ICYAAABwAQCdASoBAAEAAMASJZQCdAFAAAD+/qV09a8/ciVHBskU12AAAA==",
+            "base64",
+          ),
+        );
+        const image = await decoder.default(bytes.buffer);
+        if (image.width !== 1 || image.height !== 1)
+          throw new Error("the staged WebP decoder read a different image");
+      })()`
+    : "";
   const probe = imports.map((packageName) => `import(${JSON.stringify(packageName)})`).join(",");
   const nodeExecutable = resolveNodeExecutable();
   await new Promise<void>((resolvePromise, reject) => {
     execFile(
       nodeExecutable,
-      ["--input-type=module", "--eval", `await Promise.all([${probe}])`],
+      ["--input-type=module", "--eval", `await Promise.all([${probe}${webp}])`],
       {
         cwd: resolve(stageRoot, runtimePath),
         env:
