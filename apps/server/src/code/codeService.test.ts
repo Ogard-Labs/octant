@@ -6881,7 +6881,7 @@ describe("completing and snoozing a Code thread", () => {
     const afterLaterMerge = takenBack.persistence.journal.append.mock.calls.at(-1)?.[0] as {
       events: Array<{ payload: { thread: Record<string, unknown> } }>;
     };
-    expect(afterLaterMerge.events[0]?.payload.thread.putAwayForPullRequests).toEqual([pr42, pr41]);
+    expect(afterLaterMerge.events[0]?.payload.thread.putAwayForPullRequests).toEqual([pr41, pr42]);
 
     const running = serviceFixture();
     running.persistence.readCodeRuntimeWorks.mockReturnValue(providerTurn("running"));

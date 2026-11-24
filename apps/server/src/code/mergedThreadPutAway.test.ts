@@ -47,7 +47,13 @@ function fixture(options: {
   readonly decisionPending?: ReadonlyArray<string>;
   readonly enabled?: boolean;
 }) {
-  const putAway = vi.fn((): MergedThreadPutAwayOutcome => ({ status: "put-away" }));
+  const putAway = vi.fn(
+    (
+      _threadId: CodeThreadId,
+      _merges: ReadonlyArray<MergedPullRequest>,
+      _same: (left: MergedPullRequest, right: MergedPullRequest) => boolean,
+    ): MergedThreadPutAwayOutcome => ({ status: "put-away" }),
+  );
   const project = vi.fn(async (entries: ReadonlyArray<{ readonly thread: CodeThread }>) => {
     const threadId = entries[0]?.thread.id;
     const evidence = threadId === undefined ? undefined : options.evidence[String(threadId)];
@@ -169,8 +175,8 @@ describe("merged thread put-away", () => {
     expect(putAway).toHaveBeenCalledWith(
       "taken-back",
       [
-        { baseRepository: "acme/app", number: 42 },
         { baseRepository: "acme/app", number: 41 },
+        { baseRepository: "acme/app", number: 42 },
       ],
       expect.any(Function),
     );
@@ -187,6 +193,39 @@ describe("merged thread put-away", () => {
         }),
       ],
       evidence: { "taken-back": { linkedPullRequest: { ...merged, number: 41 } } },
+    });
+
+    expect(await pass.pass()).toEqual([]);
+    expect(putAway).not.toHaveBeenCalled();
+  });
+
+  it("names a merge both sources show once, and keeps one fixed set past the record's bound", async () => {
+    const many = Array.from({ length: 40 }, (_, index) => ({
+      baseRepository: "acme/app",
+      number: 100 + index,
+    }));
+    const { pass, putAway } = fixture({
+      threads: [codeThread("busy-repo")],
+      evidence: { "busy-repo": { linkedPullRequest: { ...merged, number: 100 } } },
+      cachedMerges: { "busy-repo": many },
+    });
+
+    await pass.pass();
+    const named = putAway.mock.calls[0]?.[1] ?? [];
+    expect(named).toHaveLength(32);
+    expect(named.filter((merge) => merge.number === 100)).toHaveLength(1);
+    expect(named.map((merge) => merge.number)).toEqual(many.slice(0, 32).map((m) => m.number));
+  });
+
+  it("does not put away a thread whose record already holds the fixed set past the bound", async () => {
+    const many = Array.from({ length: 40 }, (_, index) => ({
+      baseRepository: "acme/app",
+      number: 100 + index,
+    }));
+    const { pass, putAway } = fixture({
+      threads: [codeThread("busy-repo", { putAwayForPullRequests: many.slice(0, 32) })],
+      evidence: { "busy-repo": { linkedPullRequest: { ...merged, number: 100 } } },
+      cachedMerges: { "busy-repo": many },
     });
 
     expect(await pass.pass()).toEqual([]);

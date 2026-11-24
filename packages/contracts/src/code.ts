@@ -457,7 +457,7 @@ export const CodeThread = Schema.Struct({
   markedDoneAt: Schema.optional(UtcTimestamp),
   /**
    * Every merged pull request the host has already accounted for when it put
-   * this thread away, newest last and at most 32. A thread a person takes back
+   * this thread away, those still visible first, at most 32. A thread a person takes back
    * out of the Put away shelf stays out until a pull request merges that is
    * not here, whatever its number and whichever cache still shows the older
    * ones. Absent until a merge put the thread away.

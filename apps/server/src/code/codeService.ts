@@ -3368,8 +3368,14 @@ export class CodeService {
       ...(alreadyPutAway
         ? current
         : { ...withoutPinned(withoutRest(current)), completedAt: updatedAt }),
-      putAwayForPullRequests: [...recorded, ...unrecorded]
-        .slice(-32)
+      // Merges still visible come first and are never the ones dropped at the
+      // bound, so a full record does not evict a merge it would then read as
+      // new on the next pass.
+      putAwayForPullRequests: [
+        ...merges,
+        ...recorded.filter((known) => !merges.some((merge) => samePullRequest(known, merge))),
+      ]
+        .slice(0, 32)
         .map((merge) => ({ baseRepository: merge.baseRepository, number: merge.number })),
       version: current.version + 1,
       updatedAt,

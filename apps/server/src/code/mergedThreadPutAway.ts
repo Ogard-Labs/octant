@@ -9,6 +9,9 @@ import type { CodeThreadMetadataService } from "./codeThreadMetadataService";
  */
 export const MERGED_THREAD_PUT_AWAY_INTERVAL_MS = 2 * 60 * 1_000;
 
+/** As many merged pull requests as a thread records; matches its contract bound. */
+export const MAX_RECORDED_MERGES = 32;
+
 /** Threads looked at between yields to the event loop, as in the archive sweep. */
 const MERGED_THREAD_PUT_AWAY_BATCH = 25;
 
@@ -134,12 +137,30 @@ export class MergedThreadPutAway {
       return [];
     }
     const linked = metadata.linkedPullRequest;
-    return [
+    const seen = [
       ...(linked.kind === "linked" && linked.state === "merged" && linked.matchesDeliveryBranch
         ? [{ baseRepository: linked.baseRepository, number: linked.number }]
         : []),
       ...this.#options.cachedMerges(thread.id),
     ];
+    // Both sources often name the same merge; it is one merge. Past the
+    // record's bound the same fixed slice is kept every pass, so a thread with
+    // more merged pull requests than it can record does not trade one for
+    // another on each pass and read the dropped one as new.
+    const distinct: MergedPullRequest[] = [];
+    for (const merge of seen) {
+      if (
+        !distinct.some((known) => this.#options.samePullRequest(thread.projectId, known, merge))
+      ) {
+        distinct.push(merge);
+      }
+    }
+    return distinct
+      .sort(
+        (left, right) =>
+          left.baseRepository.localeCompare(right.baseRepository) || left.number - right.number,
+      )
+      .slice(0, MAX_RECORDED_MERGES);
   }
 
   async #runPassThenSchedule(): Promise<void> {
