@@ -643,7 +643,25 @@ describe("fal video driver", () => {
     });
     const polled = await adapter.poll(`fal-ai/veo3.1#${requestId}`, new AbortController().signal);
     expect(polled.status).toBe("failed");
+    expect(polled).not.toHaveProperty("billed");
     expect(fetched).toBe(0);
+  });
+
+  it("keeps the reported charge when a result has no clip address", async () => {
+    const recorder = ports((request) =>
+      new URL(request.url).pathname.endsWith("/status")
+        ? Response.json({ status: "COMPLETED" })
+        : Response.json({ video: {} }, { headers: { "x-fal-billable-units": "8" } }),
+    );
+    const adapter = falVideoDriver.create({ profile, ports: recorder.ports });
+    expect(
+      await adapter.poll(`fal-ai/veo3.1#${requestId}`, new AbortController().signal),
+    ).toMatchObject({
+      status: "failed",
+      providerFailure: { category: "protocol" },
+      billed: true,
+      usage: { billedSeconds: 8 },
+    });
   });
 
   it.each([undefined, "8"])(

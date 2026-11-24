@@ -708,6 +708,7 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
             "protocol",
             "fal returned a clip address outside fal's media hosts.",
           ),
+          ...(usage === undefined ? {} : { billed: true, usage }),
         };
       }
       const fetched = await ports.fetchApprovedVideoUrl({ url: videoUrl, ...withSignal });
