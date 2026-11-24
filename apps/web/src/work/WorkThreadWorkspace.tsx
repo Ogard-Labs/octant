@@ -96,6 +96,7 @@ import {
   useState,
   type ClipboardEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import {
   applyComposerCaret,
@@ -235,6 +236,11 @@ import {
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
 import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
+import {
+  TranscriptHandoff,
+  resolveTranscriptHandoff,
+  type TranscriptHandoffEntry,
+} from "../transcript/TranscriptHandoff";
 import { HarnessRetryStatus, type HarnessRetryStreamEvent } from "../transcript/HarnessRetryStatus";
 import {
   pendingThreadHandoffNotice,
@@ -275,6 +281,8 @@ type WorkTranscriptRow =
       readonly delivered?: true;
       /** The turn header, when this is the turn's first reply and so opens with it. */
       readonly head?: WorkTurnState;
+      /** The context handoff or model switch opening this turn, kept on the turn's first row. */
+      readonly handoff?: TranscriptHandoffEntry;
       /** The turn this entry belongs to, which a turn action names. */
       readonly turn: WorkTurnState;
     }
@@ -324,6 +332,7 @@ type WorkTranscriptRow =
       readonly kind: "head";
       readonly key: string;
       readonly turn: WorkTurnState;
+      readonly handoff?: TranscriptHandoffEntry;
     };
 
 const WORK_TRANSCRIPT_RECONNECTING_MESSAGE = "Work transcript is reconnecting.";
@@ -473,13 +482,6 @@ function WorkTurnHeader(props: {
       !showsStrictNotice(props.turn.strictKept, props.previousStrictKept) ? null : (
         <p className="work-thread-workspace__handoff" role="note">
           {strictKeptSentence(props.turn.strictKept)}
-        </p>
-      )}
-      {props.turn.handoff === undefined ? null : (
-        <p className="work-thread-workspace__handoff" role="note">
-          {threadHandoffDisclosure(props.turn.handoff, (selection) =>
-            providerModelLabel(props.providerGroups, selection),
-          )}
         </p>
       )}
       <TurnLoopStallNotice
@@ -1693,11 +1695,27 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (turns.length === 0 && firstPageSettled) rows.push({ kind: "empty", key: "empty" });
     // A key names the turn, never its position: earlier pages arrive above,
     // and the list keeps the reader's row in place by its key.
-    for (const turn of turns) {
+    const groups = props.providerGroups ?? [];
+    for (const [turnIndex, turn] of turns.entries()) {
+      const previousTurn = turnIndex > 0 ? turns[turnIndex - 1] : undefined;
+      const handoffEntry = resolveTranscriptHandoff({
+        previous: previousTurn?.authority,
+        current: turn.authority,
+        handoff: turn.handoff,
+        disclosure:
+          turn.handoff === undefined
+            ? undefined
+            : threadHandoffDisclosure(turn.handoff, (selection) =>
+                providerModelLabel(groups, selection),
+              ),
+      });
       const head: WorkTranscriptRow = {
         kind: "head",
         key: `${String(turn.requestId)}-head`,
         turn,
+        ...(handoffEntry !== undefined && turn.transcript.length === 0
+          ? { handoff: handoffEntry }
+          : {}),
       };
       let headPlaced = false;
       for (const [index, entry] of turn.transcript.entries()) {
@@ -1718,6 +1736,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             ? { delivered: true as const }
             : {}),
           ...(opensTurn ? { head: turn } : {}),
+          // Keep the handoff on the turn's opening row so threadTurnSpans and
+          // placeCompactions see the turn's real boundary and start timestamp.
+          ...(index === 0 && handoffEntry !== undefined ? { handoff: handoffEntry } : {}),
         });
       }
       if (!headPlaced) rows.push(head);
@@ -1786,7 +1807,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
     if (status !== undefined) rows.push({ kind: "status", key: "status", text: status });
     return rows;
-  }, [finishedReceipts, firstPageSettled, loadedTurnIds, sideTasks, status, turns]);
+  }, [
+    finishedReceipts,
+    firstPageSettled,
+    loadedTurnIds,
+    props.providerGroups,
+    sideTasks,
+    status,
+    turns,
+  ]);
   // The turn's first row, whichever kind opens it (its prompt, or the header
   // a reply opens with), is where the reader lands.
   const revealKey =
@@ -2877,6 +2906,21 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   ),
                 })}
             renderItem={(row) => {
+              const withRowHandoff = (
+                handoff: TranscriptHandoffEntry | undefined,
+                content: ReactNode,
+              ) =>
+                handoff === undefined ? (
+                  content
+                ) : (
+                  <div className="code-thread-workspace__row">
+                    <TranscriptHandoff
+                      entry={handoff}
+                      providerGroups={props.providerGroups ?? []}
+                    />
+                    {content}
+                  </div>
+                );
               if (row.kind === "empty") {
                 return (
                   <p className="work-thread-workspace__opening">
@@ -2887,18 +2931,20 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               if (row.kind === "message") {
                 if (row.entry.role === "user") {
                   if (row.delivered === true) {
-                    return (
+                    return withRowHandoff(
+                      row.handoff,
                       <article aria-label="Subagent results" className="turn-child-result">
                         <ChildResultCards
                           providerGroups={props.providerGroups}
                           text={row.entry.text}
                         />
-                      </article>
+                      </article>,
                     );
                   }
                   const followUpPrompt = parseAutomationFollowUpTurnPrompt(row.entry.text);
                   if (followUpPrompt !== undefined) {
-                    return (
+                    return withRowHandoff(
+                      row.handoff,
                       <article aria-label="Scheduled follow-up" className="turn-user">
                         <ScheduledFollowUpMark />
                         <div className="bubble">
@@ -2907,11 +2953,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         {row.at === undefined ? null : (
                           <TurnTime at={row.at} copyValue={followUpPrompt} />
                         )}
-                      </article>
+                      </article>,
                     );
                   }
                   const sentBy = agentTurnSender(String(props.threadId), String(row.turn.turnId));
-                  return (
+                  return withRowHandoff(
+                    row.handoff,
                     <article
                       aria-label={sentBy === undefined ? "Your message" : `Message from ${sentBy}`}
                       className="turn-user"
@@ -2928,12 +2975,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         )}
                         <AgentTurnSender agentName={sentBy} />
                       </TurnActionMenu>
-                    </article>
+                    </article>,
                   );
                 }
                 // A reply is markdown, as it is in Chat and Code: the same headings,
                 // lists, and code blocks render the same way here.
-                return (
+                return withRowHandoff(
+                  row.handoff,
                   <article aria-label="Assistant message" className="turn-agent">
                     <TurnActionMenu
                       actions={turnActionsFor("assistant", row.turn).actions}
@@ -3002,11 +3050,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         ? workTurnActions(row.turn, row.entry.text)
                         : null}
                     </TurnActionMenu>
-                  </article>
+                  </article>,
                 );
               }
               if (row.kind === "head") {
-                return (
+                return withRowHandoff(
+                  row.handoff,
                   <div className="turn-agent">
                     <WorkTurnHeader
                       serverUrl={props.serverUrl}
@@ -3048,7 +3097,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         : { canvasClient: props.canvasClient })}
                     />
                     {workTurnActions(row.turn, undefined)}
-                  </div>
+                  </div>,
                 );
               }
               if (row.kind === "files") {

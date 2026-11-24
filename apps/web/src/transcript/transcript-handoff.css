@@ -1,0 +1,86 @@
+/* One quiet hairline boundary across Chat, Work, and Code when a thread hands
+   context to another provider, switches models, or starts from a fork, branch,
+   or rewind. Meta ink for the frame, clearer ink for the endpoints, no card. */
+.transcript-handoff {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--oct-space-2);
+  width: 100%;
+  min-width: 0;
+  margin: var(--oct-space-1) 0;
+}
+
+.transcript-handoff__rule {
+  width: 100%;
+  gap: var(--oct-space-3);
+  color: var(--oct-meta);
+}
+
+.transcript-handoff__content {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  max-width: 100%;
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+}
+
+.transcript-handoff__lead {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-meta);
+  white-space: nowrap;
+}
+
+.transcript-handoff__icon,
+.transcript-handoff__arrow {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.transcript-handoff__route {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.transcript-handoff__endpoint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  color: var(--oct-muted);
+}
+
+.transcript-handoff__endpoint--to {
+  color: var(--oct-fg-2);
+  font-weight: 500;
+}
+
+.transcript-handoff__glyph {
+  flex: none;
+}
+
+.transcript-handoff__model {
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transcript-handoff__note {
+  margin: 0;
+  max-width: 64ch;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: 1.45;
+  text-align: center;
+  text-wrap: balance;
+}

@@ -68,6 +68,17 @@ describe("resolveKeybindings", () => {
     // The collision is reported, not silently resolved by dropping a binding.
     expect(formatChord(resolved.bindings.get("code-file-search")!)).toBe("Mod+K");
   });
+
+  it("keeps a chord saved before Dictate existed on the action it was saved for", () => {
+    const resolved = resolveKeybindings({ "code-file-search": "Mod+Shift+M" });
+
+    expect(resolved.conflicts).toEqual([
+      { chord: "Mod+Shift+M", actionIds: ["code-file-search", "dictate"] },
+    ]);
+    expect(matchKeybinding(resolved, keyEvent("M", { meta: true, shift: true }), true)).toBe(
+      "code-file-search",
+    );
+  });
 });
 
 describe("matchKeybinding", () => {

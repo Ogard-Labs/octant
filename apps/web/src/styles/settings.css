@@ -861,6 +861,30 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   font-variant-numeric: tabular-nums;
 }
 
+.voice-settings__test-controls > .settings-view__text-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Dictionary terms wrap as small pills, each with its own remove button. */
+.voice-settings__terms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.voice-settings__terms > li {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-inline-start: var(--oct-space-2);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
 .voice-settings__test > audio {
   width: 100%;
   max-width: 420px;
@@ -886,14 +910,16 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="sidebar-destinations"],
 .setrow[data-setting-id="remote-listener"],
 .setrow[data-setting-id="remote-pairing"],
-.setrow[data-setting-id="sync-bucket"] {
+.setrow[data-setting-id="sync-bucket"],
+.setrow[data-setting-id="dictation-dictionary"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
 .setrow[data-setting-id="sidebar-destinations"] > .setrow-control,
 .setrow[data-setting-id="remote-listener"] > .setrow-control,
 .setrow[data-setting-id="remote-pairing"] > .setrow-control,
-.setrow[data-setting-id="sync-bucket"] > .setrow-control {
+.setrow[data-setting-id="sync-bucket"] > .setrow-control,
+.setrow[data-setting-id="dictation-dictionary"] > .setrow-control {
   grid-column: 1;
   grid-row: auto;
   justify-self: stretch;

@@ -126,6 +126,21 @@ export function mobileChatMessages(view: ChatThreadView): ReadonlyArray<MobileCh
   const hidden = new Set(
     view.turns.filter((turn) => !activeIds.has(String(turn.id))).flatMap((turn) => turnRefs(turn)),
   );
+  // Image descriptions written by Sees images and citation snippets live in
+  // `view.contents` for host history/compaction, not as chat message bubbles.
+  const auxiliary = new Set<string>();
+  for (const turn of view.turns) {
+    for (const attempt of turn.attempts) {
+      for (const image of attempt.describedImages ?? []) {
+        auxiliary.add(String(image.description.contentId));
+      }
+    }
+  }
+  for (const citation of view.citations ?? []) {
+    if (citation.snippetRef !== undefined) {
+      auxiliary.add(String(citation.snippetRef.contentId));
+    }
+  }
   const byId = new Map(view.contents.map((content) => [String(content.contentId), content]));
   const targetsFor = new Map<string, MobileTurnTargets>();
   active.forEach((turn, index) => {
@@ -156,12 +171,26 @@ export function mobileChatMessages(view: ChatThreadView): ReadonlyArray<MobileCh
       });
     }
   });
-  return view.contents
-    .filter((content) => !hidden.has(String(content.contentId)))
-    .map((content) => {
-      const targets = targetsFor.get(String(content.contentId));
-      return targets === undefined ? { content } : { content, targets };
-    });
+  // Emit contents in active turn and attempt order rather than the host's
+  // content-id order (random UUIDs), so prompts, retry replies, and anchored
+  // handoff dividers always appear chronologically.
+  const ordered: MobileChatMessage[] = [];
+  const emitted = new Set<string>();
+  const emit = (contentId: string): void => {
+    if (emitted.has(contentId) || hidden.has(contentId) || auxiliary.has(contentId)) return;
+    const content = byId.get(contentId);
+    if (content === undefined) return;
+    emitted.add(contentId);
+    const targets = targetsFor.get(contentId);
+    ordered.push(targets === undefined ? { content } : { content, targets });
+  };
+  for (const turn of active) {
+    for (const contentId of turnRefs(turn)) emit(contentId);
+  }
+  for (const content of view.contents) {
+    emit(String(content.contentId));
+  }
+  return ordered;
 }
 
 async function postJson<T>(input: {

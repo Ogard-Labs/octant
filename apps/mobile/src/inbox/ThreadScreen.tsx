@@ -722,6 +722,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 allowProductMutations={staleGate.allowProductMutations}
                 chat={chat}
                 codeConversation={code.conversation}
+                modelOptions={models.options}
+                providerDirectory={models.providerDirectory}
                 replyDetail={replyDetail}
                 turnActionsFor={turnActions.actionsFor}
                 workTurns={work.turns}
