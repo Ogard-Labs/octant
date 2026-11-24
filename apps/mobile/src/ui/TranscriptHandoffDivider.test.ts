@@ -2,7 +2,11 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { MobileModelOption, MobileProviderDirectoryEntry } from "@octant/client-runtime";
+import {
+  mobileChatMessages,
+  type MobileModelOption,
+  type MobileProviderDirectoryEntry,
+} from "@octant/client-runtime";
 import { decodeChatThreadView } from "@octant/contracts/chat";
 import { ThemeProvider } from "../../design-system/theme";
 import { TranscriptHandoffDivider } from "./TranscriptHandoffDivider";
@@ -487,5 +491,140 @@ describe("TranscriptHandoffDivider on the phone", () => {
     expect(afterUser?.[0]?.disclosure).toContain("Handed over 4 recent messages");
     expect(afterUser?.[1]?.route?.from.label).toBe("GPT-5.3");
     expect(afterUser?.[1]?.route?.to.label).toBe("Sonnet 4");
+  });
+
+  it("keeps a replyless retry handoff ahead of a later retry reply even when reply ids sort before prompt ids", () => {
+    const now = "2026-11-24T12:00:00.000Z";
+    const threadId = "00000000-0000-4000-8000-000000000951";
+    const turnId = "00000000-0000-4000-8000-000000000952";
+    // Reply UUID sorts before user UUID, reproducing SQLite content_id ASC order.
+    const replyId = "00000000-0000-4000-8000-000000000010";
+    const userId = "00000000-0000-4000-8000-000000000999";
+    const ref = (contentId: string) => ({ contentId, digest: "c".repeat(64), byteLength: 10 });
+    const view = decodeChatThreadView({
+      thread: {
+        id: threadId,
+        title: "Retry ordering",
+        lifecycle: "active",
+        providerInstanceId: claudeId,
+        modelId: "claude-opus-4",
+        researchEnabled: false,
+        researchRouting: "automatic",
+        personalityInstructions: "Be calm.",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+      lastSequence: 1,
+      turns: [
+        {
+          id: turnId,
+          threadId,
+          sequence: 1,
+          userMessageRef: ref(userId),
+          attachmentIds: [],
+          attempts: [
+            {
+              id: "10000000-0000-4000-8000-000000000961",
+              turnId,
+              threadId,
+              providerInstanceId: codexId,
+              providerSessionId: "20000000-0000-4000-8000-000000000961",
+              modelId: "gpt-5.3",
+              contextManifestId: "30000000-0000-4000-8000-000000000961",
+              outcome: "interrupted",
+              responseRefs: [],
+              citationIds: [],
+              createdAt: now,
+              updatedAt: now,
+            },
+            {
+              id: "10000000-0000-4000-8000-000000000962",
+              turnId,
+              threadId,
+              providerInstanceId: claudeId,
+              providerSessionId: "20000000-0000-4000-8000-000000000962",
+              modelId: "claude-sonnet-4",
+              contextManifestId: "30000000-0000-4000-8000-000000000962",
+              outcome: "failed",
+              responseRefs: [],
+              citationIds: [],
+              handoff: {
+                reason: "provider-switch",
+                previousProviderInstanceId: codexId,
+                previousModelId: "gpt-5.3",
+                messages: 2,
+                omissions: emptyOmissions,
+                externalContentIngested: false,
+                nativeSessionTransferred: false,
+                hiddenReasoningTransferred: false,
+              },
+              createdAt: now,
+              updatedAt: now,
+            },
+            {
+              id: "10000000-0000-4000-8000-000000000963",
+              turnId,
+              threadId,
+              providerInstanceId: claudeId,
+              providerSessionId: "20000000-0000-4000-8000-000000000962",
+              modelId: "claude-opus-4",
+              contextManifestId: "30000000-0000-4000-8000-000000000963",
+              outcome: "completed",
+              responseRefs: [ref(replyId)],
+              citationIds: [],
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+          createdAt: now,
+        },
+      ],
+      contents: [
+        {
+          contentId: replyId,
+          role: "assistant",
+          body: "Recovered on Opus 4",
+          byteLength: 19,
+          digest: "c".repeat(64),
+        },
+        {
+          contentId: userId,
+          role: "user",
+          body: "Try again",
+          byteLength: 9,
+          digest: "c".repeat(64),
+        },
+      ],
+      attachments: [],
+      citations: [],
+      workItems: [],
+      workListVersion: 0,
+      followUpVersion: 0,
+    });
+
+    const messages = mobileChatMessages(view);
+    const placements = mobileChatHandoffPlacements(view, modelOptions);
+    const renderedSequence: string[] = [];
+    for (const { content } of messages) {
+      const id = String(content.contentId);
+      for (const entry of placements.beforeContentId.get(id) ?? []) {
+        renderedSequence.push(`divider:${entry.heading}:${entry.route?.to.label ?? ""}`);
+      }
+      renderedSequence.push(`message:${content.body}`);
+      for (const entry of placements.afterContentId.get(id) ?? []) {
+        renderedSequence.push(`divider:${entry.heading}:${entry.route?.to.label ?? ""}`);
+      }
+    }
+    for (const entry of placements.trailing) {
+      renderedSequence.push(`divider:${entry.heading}:${entry.route?.to.label ?? ""}`);
+    }
+
+    expect(renderedSequence).toEqual([
+      "message:Try again",
+      "divider:Context handoff:Sonnet 4",
+      "divider:Model switch:Opus 4",
+      "message:Recovered on Opus 4",
+    ]);
   });
 });

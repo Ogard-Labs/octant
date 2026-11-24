@@ -169,6 +169,67 @@ describe("mobile provider catalog", () => {
     ]);
   });
 
+  it("falls back to persisted catalog model names when a probe clears an account's observed models", () => {
+    const probed = decodeProviderRegistrySnapshot({
+      ...snapshot(),
+      observedStates: [
+        {
+          instanceId: instanceA,
+          readiness: "ready",
+          processState: "running",
+          models: [model("model-a", "Model A Live")],
+          capabilities,
+          observedAt: now,
+        },
+        {
+          instanceId: instanceB,
+          readiness: "unavailable",
+          processState: "stopped",
+          models: [],
+          capabilities,
+          observedAt: now,
+        },
+      ],
+      catalogs: [
+        {
+          instanceId: instanceA,
+          version: 1,
+          models: [model("model-a", "Model A Persisted"), model("model-b", "Model B Persisted")],
+          manualModelOrder: [],
+          invalidated: false,
+          updatedAt: now,
+        },
+        {
+          instanceId: instanceB,
+          version: 1,
+          models: [model("model-x", "Historical Model X")],
+          manualModelOrder: [],
+          invalidated: false,
+          updatedAt: now,
+        },
+      ],
+    });
+
+    const directory = normalizeMobileProviderDirectory(probed);
+    expect(directory).toEqual([
+      {
+        providerInstanceId: String(instanceA),
+        displayName: "Alpha",
+        driverKind: "openai-compatible",
+        models: [
+          { modelId: "model-a", displayName: "Model A Live" },
+          { modelId: "model-b", displayName: "Model B Persisted" },
+        ],
+      },
+      {
+        providerInstanceId: String(instanceB),
+        displayName: "Bravo",
+        driverKind: "openai-compatible",
+        models: [{ modelId: "model-x", displayName: "Historical Model X" }],
+      },
+    ]);
+  });
+
   it("skips unavailable readiness and fetches via bootstrap", async () => {
     const unavailable = decodeProviderRegistrySnapshot({
       ...snapshot(),

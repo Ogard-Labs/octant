@@ -84,6 +84,8 @@ export function normalizeMobileModelOptions(
 /**
  * Full provider directory for display attribution (handoff dividers and
  * disclosures), including disabled and unready instances that pickers omit.
+ * Falls back to persisted catalog snapshots when a runtime probe clears an
+ * account's observed model list.
  */
 export function normalizeMobileProviderDirectory(
   snapshot: ProviderRegistrySnapshot,
@@ -92,14 +94,22 @@ export function normalizeMobileProviderDirectory(
     const observation = snapshot.observedStates.find(
       (candidate) => candidate.instanceId === instance.id,
     );
+    const catalog = snapshot.catalogs?.find((candidate) => candidate.instanceId === instance.id);
+    const modelsById = new Map<string, string>();
+    for (const model of observation?.models ?? []) {
+      modelsById.set(String(model.id), model.displayName);
+    }
+    for (const model of catalog?.models ?? []) {
+      const modelId = String(model.id);
+      if (!modelsById.has(modelId)) {
+        modelsById.set(modelId, model.displayName);
+      }
+    }
     return {
       providerInstanceId: String(instance.id),
       displayName: instance.displayName,
       driverKind: instance.driverKind,
-      models: (observation?.models ?? []).map((model) => ({
-        modelId: String(model.id),
-        displayName: model.displayName,
-      })),
+      models: Array.from(modelsById, ([modelId, displayName]) => ({ modelId, displayName })),
     };
   });
 }

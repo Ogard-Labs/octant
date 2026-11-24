@@ -156,12 +156,26 @@ export function mobileChatMessages(view: ChatThreadView): ReadonlyArray<MobileCh
       });
     }
   });
-  return view.contents
-    .filter((content) => !hidden.has(String(content.contentId)))
-    .map((content) => {
-      const targets = targetsFor.get(String(content.contentId));
-      return targets === undefined ? { content } : { content, targets };
-    });
+  // Emit contents in active turn and attempt order rather than the host's
+  // content-id order (random UUIDs), so prompts, retry replies, and anchored
+  // handoff dividers always appear chronologically.
+  const ordered: MobileChatMessage[] = [];
+  const emitted = new Set<string>();
+  const emit = (contentId: string): void => {
+    if (emitted.has(contentId) || hidden.has(contentId)) return;
+    const content = byId.get(contentId);
+    if (content === undefined) return;
+    emitted.add(contentId);
+    const targets = targetsFor.get(contentId);
+    ordered.push(targets === undefined ? { content } : { content, targets });
+  };
+  for (const turn of active) {
+    for (const contentId of turnRefs(turn)) emit(contentId);
+  }
+  for (const content of view.contents) {
+    emit(String(content.contentId));
+  }
+  return ordered;
 }
 
 async function postJson<T>(input: {

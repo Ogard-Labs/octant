@@ -106,6 +106,40 @@ describe("mobile fork and rewind", () => {
     expect(replyTwo?.targets?.forkThroughId).toBe(uuid(2));
   });
 
+  it("orders Chat messages by active turn and attempt even when host content ids sort backwards", () => {
+    const viewWithUuidSortedContents = {
+      thread: chatView.thread,
+      turns: [
+        {
+          id: uuid(1),
+          sequence: 1,
+          userMessageRef: ref(90),
+          attempts: [
+            { id: uuid(501), outcome: "interrupted", responseRefs: [] },
+            { id: uuid(502), outcome: "failed", responseRefs: [] },
+            { id: uuid(503), outcome: "completed", responseRefs: [ref(10)] },
+          ],
+        },
+        turn(2, 50, 20),
+      ],
+      // Mirrors SQLite readChatContentBodies ordering by content_id ASC.
+      contents: [
+        content(10, "assistant", "later retry reply"),
+        content(20, "assistant", "second reply"),
+        content(50, "user", "second prompt"),
+        content(90, "user", "first prompt"),
+      ],
+    };
+
+    const messages = mobileChatMessages(viewWithUuidSortedContents as never);
+    expect(messages.map((message) => message.content.body)).toEqual([
+      "first prompt",
+      "later retry reply",
+      "second prompt",
+      "second reply",
+    ]);
+  });
+
   it("returns the removed message above a draft already in the composer", () => {
     expect(composerAfterRewind("old message", "")).toBe("old message");
     expect(composerAfterRewind("old message", "half typed")).toBe("old message\n\nhalf typed");

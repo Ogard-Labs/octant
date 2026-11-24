@@ -418,6 +418,10 @@ export function mobileChatHandoffPlacements(
         const id = String(ref.contentId);
         if (storedContentIds.has(id)) lastVisibleAnchor = id;
       }
+      if (firstAttempt.researchRef !== undefined) {
+        const researchId = String(firstAttempt.researchRef.contentId);
+        if (storedContentIds.has(researchId)) lastVisibleAnchor = researchId;
+      }
     }
 
     for (let index = 1; index < turn.attempts.length; index += 1) {
@@ -446,6 +450,10 @@ export function mobileChatHandoffPlacements(
       for (const ref of attempt.responseRefs) {
         const id = String(ref.contentId);
         if (storedContentIds.has(id)) lastVisibleAnchor = id;
+      }
+      if (attempt.researchRef !== undefined) {
+        const researchId = String(attempt.researchRef.contentId);
+        if (storedContentIds.has(researchId)) lastVisibleAnchor = researchId;
       }
     }
 
