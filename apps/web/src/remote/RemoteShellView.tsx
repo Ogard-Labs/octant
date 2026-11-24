@@ -86,6 +86,8 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       setStandingRead((previous) =>
         previous?.connection === connection &&
         previous.sessionId === sessionId &&
+        (previous.standing === RESTRICTED_REMOTE_SESSION) ===
+          (standing === RESTRICTED_REMOTE_SESSION) &&
         previous.standing.actsAsHostPerson === standing.actsAsHostPerson &&
         previous.standing.accessLevel === standing.accessLevel
           ? previous
@@ -240,6 +242,10 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       >
         <RemoteWorkspace
           actsAsHostPerson={standing.actsAsHostPerson}
+          canWatchVideoClips={
+            standing !== RESTRICTED_REMOTE_SESSION &&
+            (standing.actsAsHostPerson || standing.accessLevel !== undefined)
+          }
           clients={clients}
           connected={connected}
           extensionClient={extensionClient}

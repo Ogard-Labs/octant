@@ -141,6 +141,7 @@ import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import { ServiceOfferPrompt } from "../offers/ServiceOfferPrompt";
+import { ThreadVideoClips } from "../video/ThreadVideoClips";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
@@ -3354,6 +3355,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           scopeId={decodeImageGenerationScopeId(String(props.threadId))}
           threadKind="work-thread"
           turnActive={turnRunning}
+        />
+        <ThreadVideoClips
+          className="thread-column"
+          scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+          threadKind="work-thread"
         />
         {readOnly || pendingBrowserApproval === undefined ? null : (
           <OctantApprovalCard

@@ -25,6 +25,7 @@ import {
   readRemoteSessionInvalidation,
 } from "./persistence/remoteAccessProjection";
 import type { SqliteConnection } from "./persistence/sqlitePort";
+import type { ClientPrincipal } from "./clientPrincipal";
 
 const CHALLENGE_TTL_MS = 60_000;
 const MAX_NONCES_PER_SESSION = 4_096;
@@ -682,13 +683,37 @@ export class RemoteRequestProofService {
   }
 }
 
+interface DeviceSessionBinding {
+  readonly deviceId: unknown;
+  readonly sessionId: unknown;
+  readonly credentialGeneration: number;
+}
+
 export function isPairedDeviceSessionCurrent(
   connection: SqliteConnection,
-  principal: {
-    readonly deviceId: unknown;
-    readonly sessionId: unknown;
-    readonly credentialGeneration: number;
-  },
+  principal: DeviceSessionBinding,
+  nowMs: number,
+): boolean {
+  return (
+    isDeviceSessionCurrent(connection, principal, nowMs) &&
+    readDeviceApprovedByPerson(connection, String(principal.deviceId))
+  );
+}
+
+/** Recheck a session whose pairing approval was already verified by the gateway. */
+export function isAuthenticatedPairedDeviceSessionCurrent(
+  connection: SqliteConnection,
+  principal: Extract<ClientPrincipal, { kind: "remote-device" }>,
+  nowMs: number,
+): boolean {
+  return (
+    principal.admittedBy === "host-person" && isDeviceSessionCurrent(connection, principal, nowMs)
+  );
+}
+
+function isDeviceSessionCurrent(
+  connection: SqliteConnection,
+  principal: DeviceSessionBinding,
   nowMs: number,
 ): boolean {
   const deviceId = String(principal.deviceId);
@@ -702,7 +727,6 @@ export function isPairedDeviceSessionCurrent(
     return false;
   }
   if (registration.credentialGeneration !== principal.credentialGeneration) return false;
-  if (!readDeviceApprovedByPerson(connection, deviceId)) return false;
 
   const sessionIdDigest = digest(String(principal.sessionId));
   if (readRemoteSessionInvalidation(connection, sessionIdDigest) !== undefined) {

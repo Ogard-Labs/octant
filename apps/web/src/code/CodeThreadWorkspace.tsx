@@ -90,6 +90,7 @@ import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import { ServiceOfferPrompt } from "../offers/ServiceOfferPrompt";
+import { ThreadVideoClips } from "../video/ThreadVideoClips";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import { ThreadWakeups } from "../wakeups/ThreadWakeups";
@@ -2871,6 +2872,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           scopeId={decodeImageGenerationScopeId(String(props.threadId))}
           threadKind="code-thread"
           turnActive={busy}
+        />
+        <ThreadVideoClips
+          className="thread-column"
+          scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+          threadKind="code-thread"
         />
         <ThreadComposer
           readOnly={readOnly}

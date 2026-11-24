@@ -420,6 +420,10 @@ export function RemoteTodoDraft(props: {
           mode={thread.mode}
           connected={props.connected}
           actsAsHostPerson={standing.actsAsHostPerson}
+          canWatchVideoClips={
+            standing !== RESTRICTED_REMOTE_SESSION &&
+            (standing.actsAsHostPerson || standing.accessLevel !== undefined)
+          }
           extensionClient={extensionClient}
           initialThread={thread}
           stashScope={stashScope}

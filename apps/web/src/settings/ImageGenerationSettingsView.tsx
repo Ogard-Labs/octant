@@ -7,7 +7,7 @@ import {
   type ProviderInstanceId,
   type ProviderModelId,
 } from "@octant/contracts";
-import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
+import type { ProviderDriverKind, ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { ShellSettings } from "@octant/contracts/shell";
 import {
   isImageProfileDriverKind,
@@ -228,10 +228,34 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
 }
 
 function ImageProviderSettings(props: { readonly controller: ProviderController }): ReactNode {
+  return (
+    <MediaProviderSettings
+      controller={props.controller}
+      createForm={<ImageProviderCreateForm controller={props.controller} />}
+      heading="Image providers"
+      includes={(driverKind) =>
+        isImageProfileDriverKind(driverKind) || driverKind === "openai-compatible"
+      }
+      note="Connect, configure, and choose models for dedicated image APIs or custom endpoints."
+    />
+  );
+}
+
+/**
+ * The provider list for one kind of media: the profiles it includes, with the
+ * same connect, configure and model controls the provider list gives
+ * everywhere. Image and video Settings each show their own.
+ */
+export function MediaProviderSettings(props: {
+  readonly controller: ProviderController;
+  readonly includes: (driverKind: ProviderDriverKind) => boolean;
+  readonly heading: string;
+  readonly note: string;
+  readonly createForm: ReactNode;
+}): ReactNode {
   const controller = props.controller;
-  const imageInstances = controller.instances.filter(
-    (instance) =>
-      isImageProfileDriverKind(instance.driverKind) || instance.driverKind === "openai-compatible",
+  const imageInstances = controller.instances.filter((instance) =>
+    props.includes(instance.driverKind),
   );
   return (
     <div className="provider-settings">
@@ -244,13 +268,13 @@ function ImageProviderSettings(props: { readonly controller: ProviderController 
       </div>
       <ProviderSettingsList
         busy={controller.busy}
-        createForm={<ImageProviderCreateForm controller={controller} />}
+        createForm={props.createForm}
         credentialManagementAvailable={controller.credentialManagementAvailable}
         defaults={controller.defaults}
         discoverySnapshot={undefined}
-        heading="Image providers"
+        heading={props.heading}
         instances={imageInstances}
-        note="Connect, configure, and choose models for dedicated image APIs or custom endpoints."
+        note={props.note}
         observedByInstance={controller.observedByInstance}
         onAgentEligibleModelsChange={controller.updateAgentEligibleModels}
         onBeginProviderAuthentication={controller.beginProviderAuthentication}

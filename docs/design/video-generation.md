@@ -322,6 +322,17 @@ which the person sets, like any turn.
 - Clips are deleted with their thread. They are included in a thread export
   as files, with the export's size shown before it starts, because a person
   exporting a thread expects its results in it.
+  A local window exports a thread with completed clips as an uncompressed
+  `.octant-thread.tar`. Its `manifest.json` identifies `octant.thread-bundle/2`,
+  contains the usual JSON thread bundle, and records each clip's size and
+  digest. The MP4s live at `video/<clip-id>.mp4`. Opening the confirmation
+  prepares the manifest and exact archive size without reading the videos.
+  Confirming streams the archive from the host after checking that the window
+  can still open the thread. The desktop asks its native download surface to
+  start that ticket on its own loopback host, keeping the renderer on the
+  current thread. Archive negotiation uses the original export route. The
+  older `.octant-thread.json` format stays readable and remains the response
+  for threads without clips and older hosts.
 - Saving a clip as a file uses the same confined, create-only write as an
   image save, at the turn's level. Plan refuses; Ask first and Auto show a card
   naming the path; Accept edits and Full access write at once.
@@ -338,9 +349,32 @@ which the person sets, like any turn.
 - The clip is served by a host route that answers byte-range requests, so
   seeking does not download the whole clip. The route checks the window's or
   device's authority over the thread on every request, as image routes do.
+- A `<video>` element cannot send the window's credential, so the window asks
+  for a ten-minute ticket for one clip and plays from its address, asking for a
+  new one before it runs out. Each clip request rechecks the issuer's access
+  to its thread. Window revocation drops its tickets. A paired device's ticket
+  requires the original session and credential generation to remain current.
+  The ticket retains the pairing approval verified by the gateway at issuance.
+  A ticket grants only that clip.
+- A running job shows its state in the thread with Stop; a failed or stopped
+  one says why. Deleting a thread stops its jobs and removes its clips.
 - A paired browser or phone can watch and download clips from threads it can
   open, and answer its own video cards in the thread, as it answers image
-  cards. A client that cannot show the card's price cannot approve it.
+  cards. A client that cannot show the card's price cannot approve it. A
+  paired client does not stop jobs. A paired browser or a desktop Code pane
+  showing a paired computer reads clips through that computer's session in
+  byte ranges, up to 512 MB, and plays them from memory.
+  Leaving the thread stops requesting clip ranges and frees its playback copy.
+  The desktop main process can finish one already-submitted bounded range.
+  The phone reads authenticated byte ranges into a disposable app-cache file and
+  opens it in the native Expo Video player without autoplay. Closing the clip,
+  leaving or deleting its thread, or losing host access discards the cached copy.
+  A temporary list failure or reconnection leaves the already-downloaded clip playing.
+  **Save video** copies the file into a folder the person chooses on the phone.
+  A saved copy remains in that folder when the temporary player file is removed.
+  On iOS, Octant opens access to the chosen folder for each copy and releases it
+  when the copy finishes. If thread access is lost while the picker is open,
+  selecting a folder does not copy the clip.
 - A clip can be placed in a Canvas design as a `generated-video` asset in a
   later change. This design does not add the asset kind.
 

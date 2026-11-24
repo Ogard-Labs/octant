@@ -99,6 +99,7 @@ import type {
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
 import { ServiceOfferPrompt } from "../offers/ServiceOfferPrompt";
+import { ThreadVideoClips } from "../video/ThreadVideoClips";
 import {
   decodeBrowserThreadId,
   decodeImageGenerationScopeId,
@@ -1734,6 +1735,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             }
             threadKind="chat-thread"
             turnActive={turnActive}
+          />
+          <ThreadVideoClips
+            className="thread-column"
+            scopeId={
+              activeThreadId === undefined
+                ? undefined
+                : decodeImageGenerationScopeId(String(activeThreadId))
+            }
+            threadKind="chat-thread"
           />
           {readOnly || pendingBrowserApproval === undefined ? null : (
             <OctantApprovalCard

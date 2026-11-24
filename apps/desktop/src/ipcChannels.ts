@@ -101,6 +101,7 @@ export const DESKTOP_IPC_CHANNELS = {
   selectSkillFolder: "octant:extensions:select-skill-folder",
   selectRuntimeBinary: "octant:providers:select-runtime-binary",
   saveSupportBundle: "octant:diagnostics:save-support-bundle",
+  downloadThreadVideoArchive: "octant:thread-export:download-video-archive",
   saveBrowserProofScreenshots: "octant:browser:save-proof-screenshots",
   windowCaptureList: "octant:window-capture:list",
   windowCapturePermission: "octant:window-capture:permission",

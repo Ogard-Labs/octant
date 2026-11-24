@@ -1068,6 +1068,9 @@ export function wireWork(deps: WorkDependencies) {
               jobs: videoJobService,
               recordExternalContentIngestion: (input) =>
                 externalContentIngestionStore.record(input),
+              defaultProfileInstanceId: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .videoGeneration.defaultProfileInstanceId,
               imageSources: workImageSources,
               imageJobs: imageJobService,
               save: {
@@ -1551,6 +1554,7 @@ export function wireWork(deps: WorkDependencies) {
     const threadExportRoutes = createThreadExportRouteHandler({
       service: threadExportService,
       windowAuthorityStore,
+      videoJobs: videoJobService,
     });
     // One bounded, tool-free request to a thread's own provider, shared with
     // the agent's summary turn in a handover note.
