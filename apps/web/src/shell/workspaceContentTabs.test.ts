@@ -162,6 +162,26 @@ describe("what a pane keeps in its row", () => {
       withPullRequest,
     );
     expect(row.get(codePane.paneId)?.map((tab) => tab.title)).toEqual(["Fix flakes", "#917"]);
+
+    // Back on the conversation a single click opened, a reload drops that
+    // conversation's reference and keeps the pull request the person opened.
+    const back = openSurface(
+      withPullRequest,
+      surface("code-overview", "00000000-0000-4000-8000-000000000942", "Fix flakes"),
+    );
+    const stored = encodeWorkspaceContent(
+      back,
+      rememberWorkspaceContent(row, withPullRequest, back),
+      new Set([threadId]),
+    );
+    const restored = decodeWorkspaceContent(stored, back);
+    expect([...restored.values()].flat().map((tab) => tab.title)).toEqual(["#917"]);
+    expect(
+      rememberWorkspaceContent(restored, back, back)
+        .get(codePane.paneId)
+        ?.map((tab) => tab.title)
+        .sort(),
+    ).toEqual(["#917", "Fix flakes"]);
   });
 
   it("keeps a canvas beside the conversation, where it stood, when another thread opens", () => {

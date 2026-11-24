@@ -61,7 +61,10 @@ export function encodeWorkspaceContent(
           .filter(
             (tab) =>
               isContent(tab) &&
-              !("threadId" in tab && tab.threadId !== null && preview.has(String(tab.threadId))),
+              // A pull request the person opened beside a previewed thread is
+              // no preview itself.
+              (isThreadPullRequestTab(tab) ||
+                !("threadId" in tab && tab.threadId !== null && preview.has(String(tab.threadId)))),
           )
           .slice(-128),
       })),
