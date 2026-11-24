@@ -3643,7 +3643,7 @@ opens that pull request in the app; a "…" menu beside it (More for pull reques
 #N), shown on hover and keyboard focus and always on touch, offers Open on
 GitHub and Copy link. The list is the host's cached reading: opening the strip
 reaches no forge, and the link is built from the repository and number, never
-taken as text. The host sends at most three and a count of the rest, which the
+taken as text. The host sends at most 50 and a count of the rest, which the
 list says as "N more not shown". A thread with no pull request shows no caption
 and no row, and the folded Changes summary adds the count ("Clean · 1 PR").
 The Project's own open pull requests stay under Delivery (maintainer request,

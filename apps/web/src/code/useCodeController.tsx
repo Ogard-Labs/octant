@@ -2125,15 +2125,15 @@ export function useCodeController(options: CodeControllerOptions) {
       }
     >();
     for (const entry of bootstrap?.runtime ?? []) {
+      // The whole list from a host that sends it, else the board's three.
+      const pullRequestSummaries = entry.threadPullRequests ?? entry.pullRequestSummaries;
       byThread.set(String(entry.threadId), {
         executing: entry.executing,
         ...(entry.awaitingInput === true ? { awaitingInput: true } : {}),
         ...(entry.turnStartedAt === undefined ? {} : { turnStartedAt: entry.turnStartedAt }),
         ...(entry.liveStep === undefined ? {} : { liveStep: entry.liveStep }),
         ...(entry.checkoutChip === undefined ? {} : { checkoutChip: entry.checkoutChip }),
-        ...(entry.pullRequestSummaries === undefined
-          ? {}
-          : { pullRequestSummaries: entry.pullRequestSummaries }),
+        ...(pullRequestSummaries === undefined ? {} : { pullRequestSummaries }),
       });
     }
     return byThread;

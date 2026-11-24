@@ -170,6 +170,7 @@ import type { CodeTranscriptSearchRows } from "../persistence/codeTranscriptSear
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import {
+  joinCodeThreadBoardPullRequests,
   joinCodeThreadNavigationPullRequests,
   type ThreadBoardPullRequestSnapshot,
 } from "./threadBoardPullRequestJoin";
@@ -1510,7 +1511,13 @@ export class CodeService {
       );
       const checkout = this.#persistence.readCodeCheckout(thread.checkoutId);
       const checkoutChip = codeNavigationCheckoutChip(checkout);
+      // The board's three for clients that know only `pullRequestSummaries`,
+      // and the whole list for those that read `threadPullRequests`.
       const pullRequestSummaries =
+        pullRequests === undefined
+          ? undefined
+          : joinCodeThreadBoardPullRequests({ threadId: thread.id, snapshot: pullRequests });
+      const threadPullRequests =
         pullRequests === undefined
           ? undefined
           : joinCodeThreadNavigationPullRequests({ threadId: thread.id, snapshot: pullRequests });
@@ -1526,7 +1533,7 @@ export class CodeService {
         executing: activity.executing && !parked,
         ...(parked ? { awaitingInput: true as const } : {}),
         ...(checkoutChip === undefined ? {} : { checkoutChip }),
-        ...(hasPullRequests ? { pullRequestSummaries } : {}),
+        ...(hasPullRequests ? { pullRequestSummaries, threadPullRequests } : {}),
         // Rides on the row the caller was already allowed to see: `threads`
         // is the authority-filtered list, so a window never learns what a
         // thread it cannot browse is running.

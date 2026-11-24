@@ -1,4 +1,8 @@
-import { decodeCodeOperationId, decodeProjectWorkingFolderId } from "@octant/contracts";
+import {
+  decodeThreadBoardPullRequestSummaries,
+  decodeCodeOperationId,
+  decodeProjectWorkingFolderId,
+} from "@octant/contracts";
 import type { CodeTranscriptSearchRows } from "../persistence/codeTranscriptSearchProjection";
 import {
   decodeCodeRelativePath,
@@ -583,6 +587,26 @@ describe("CodeService reads", () => {
           ],
           hiddenCount: 0,
         },
+        threadPullRequests: {
+          items: [
+            {
+              identity: {
+                projectId: ids.project,
+                repositoryOwner: "octant",
+                repositoryName: "octant",
+                number: 12,
+              },
+              title: "Sidebar pull request",
+              state: "open",
+              checks: "passing",
+              review: "approved",
+              mergeability: "mergeable",
+              freshness: "fresh",
+              readyToMerge: true,
+            },
+          ],
+          hiddenCount: 0,
+        },
       },
       {
         threadId: quiet.id,
@@ -590,6 +614,48 @@ describe("CodeService reads", () => {
         checkoutChip: { checkoutKind: "existing-worktree", label: "feature/phase-7" },
       },
     ]);
+  });
+
+  it("keeps a navigation row readable by an older client: the board's three in pullRequestSummaries, every one in threadPullRequests", async () => {
+    const linked = thread();
+    const row = (number: number) => ({
+      projectId: ids.project,
+      projectName: "Octant",
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number,
+      title: `Pull request ${String(number)}`,
+      draft: false,
+      state: "open" as const,
+      mergeability: "mergeable" as const,
+      author: "octocat",
+      baseBranch: "main",
+      headBranch: `feature/${String(number)}`,
+      updatedAt: `2026-08-22T0${String(number)}:00:00Z`,
+      checks: "passing" as const,
+      review: "approved" as const,
+      linkedThreads: [{ threadId: linked.id, title: linked.title }],
+    });
+    const fixture = serviceFixture({
+      threads: [linked],
+      pullRequests: {
+        snapshot: () => ({
+          rows: [row(1), row(2), row(3), row(4)],
+          freshness: { status: "fresh" as const, lastSuccessfulRefreshAt: decodeUtcTimestamp(now) },
+          githubRevoked: false,
+        }),
+      },
+    });
+
+    const [runtime] = (await fixture.service.navigation(ids.window)).runtime;
+
+    expect(runtime?.pullRequestSummaries?.items).toHaveLength(3);
+    expect(runtime?.pullRequestSummaries?.hiddenCount).toBe(1);
+    expect(runtime?.threadPullRequests?.items).toHaveLength(4);
+    // The decode a previous build runs accepts the row.
+    expect(() =>
+      decodeThreadBoardPullRequestSummaries(runtime?.pullRequestSummaries),
+    ).not.toThrow();
   });
 
   it("keeps navigation rows without pull-request facts when the snapshot source fails or GitHub is revoked", async () => {

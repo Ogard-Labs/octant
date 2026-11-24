@@ -2241,11 +2241,11 @@ html[data-octant-density="compact"]
   display: flex;
   flex: 1 1 auto;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-2);
   min-width: 0;
   height: auto;
   min-height: 0;
-  padding: 3px var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2);
   font-size: var(--oct-text-xs);
   font-weight: 400;
   line-height: 1.35;
