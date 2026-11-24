@@ -123,6 +123,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
   // The surfaces on offer come from the shared remote matrix, so a host that
   // would refuse one never has it shown here.
   const standing = useRemoteSessionStanding(transport, offlineDemo);
+  const watchingOnly = standing.accessLevel === "read-only";
   const surfaces = useMemo(
     () => listMobileThreadSurfaces({ mode: selected?.mode ?? "chat", session: standing }),
     [selected?.mode, standing],
@@ -588,6 +589,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
                   actsAsHostPerson={standing.actsAsHostPerson}
                   threadId={selected.threadId}
                   transport={transport}
+                  watchingOnly={watchingOnly}
                 />
               )}
               {offlineDemo || transport === undefined ? null : (
@@ -607,7 +609,11 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 </>
               )}
               {offlineDemo || transport === undefined ? null : (
-                <NativeHarnessSessionPanel threadId={selected.threadId} transport={transport} />
+                <NativeHarnessSessionPanel
+                  threadId={selected.threadId}
+                  transport={transport}
+                  watchingOnly={watchingOnly}
+                />
               )}
               {offlineDemo || transport === undefined || !standing.actsAsHostPerson ? null : (
                 <ServiceOfferCard
@@ -626,6 +632,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
                   projectId={String(work.thread.projectId)}
                   threadId={String(work.thread.id)}
                   transport={transport}
+                  watchingOnly={watchingOnly}
                 />
               )}
               {busy && chat.activeAttempt === undefined ? (

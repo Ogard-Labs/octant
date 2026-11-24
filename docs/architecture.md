@@ -18559,6 +18559,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
     device `remote-device`, so every check of the host's person refuses it and
     the product dispatch holds it to the catalogue, and at Read only to the
     reads, before any route runs; a narrowed device can never raise itself.
+    Read only keeps eligible pending Work, harness and MCP tool requests
+    visible on the phone. The cards omit decisions and editable answers.
     Routes that change something but rode a read action before (revising or
     refreshing a Canvas, a connector's sign-in and operations) carry their own
     write actions, and the local-servers commands route and the server proxy

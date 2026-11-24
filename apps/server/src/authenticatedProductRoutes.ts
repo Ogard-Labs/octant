@@ -47,8 +47,16 @@ export function createAuthenticatedProductDispatch(
     // A device the person paired below Full is held there too, and a read-only
     // one to the catalogue's reads.
     if (!principalActsAsHostPerson(handoff.principal)) {
-      const action = classifyProductAction(handoff.request);
+      const classified = classifyProductAction(handoff.request);
       const accessLevel = principalAccessLevel(handoff.principal);
+      // The extension approval route accepts an exact list command and a
+      // separate decision command on the same POST endpoint.
+      const action =
+        accessLevel === "read-only" &&
+        classified === "extension.tool-call.answer-once" &&
+        (await listsExtensionToolApprovals(handoff.request))
+          ? "settings.read-non-secret"
+          : classified;
       const decision = authorizePrincipalAction({
         principalKind: principalAuthorityKind(handoff.principal),
         action: action ?? "",
@@ -70,6 +78,21 @@ export function createAuthenticatedProductDispatch(
     bindPrincipalRouteContext(internalRequest, context);
     return options.dispatch(internalRequest, context);
   };
+}
+
+async function listsExtensionToolApprovals(request: Request): Promise<boolean> {
+  try {
+    const body: unknown = await request.clone().json();
+    return (
+      typeof body === "object" &&
+      body !== null &&
+      "kind" in body &&
+      body.kind === "list" &&
+      Object.keys(body).length === 1
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Map only the bounded authenticated web product surface to catalogued actions. */

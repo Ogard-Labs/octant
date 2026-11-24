@@ -21,9 +21,10 @@ const principal = createRemoteDevicePrincipal({
   sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
 });
 
-function handoff(path: string, method = "GET") {
+function handoff(path: string, method = "GET", body?: unknown) {
   const request = new Request(`https://octant.example${path}`, {
     method,
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     headers: { host: "octant.example", origin: "https://octant.example" },
   });
   return {
@@ -364,6 +365,16 @@ describe("authenticated product route dispatch", () => {
       expect((await product({ ...handoff(path, "POST"), principal: steer }))?.status).toBe(200);
     }
     expect(dispatch).toHaveBeenCalledTimes(5);
+    const mcp = "/api/extensions/tool-approvals";
+    expect(
+      (await product({ ...handoff(mcp, "POST", { kind: "list" }), principal: reader }))?.status,
+    ).toBe(200);
+    for (const body of [{ kind: "decide" }, { kind: "list", decision: "approved" }]) {
+      expect((await product({ ...handoff(mcp, "POST", body), principal: reader }))?.status).toBe(
+        403,
+      );
+    }
+    expect(dispatch).toHaveBeenCalledTimes(6);
   });
 
   it("passes a shared remote principal context to the existing product route chain", async () => {
