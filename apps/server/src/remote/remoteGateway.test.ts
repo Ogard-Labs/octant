@@ -1,4 +1,17 @@
-import { createHash, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
+import {
+  createHash,
+  createPublicKey,
+  generateKeyPairSync,
+  sign,
+  verify,
+  type KeyObject,
+} from "node:crypto";
+import { decodeEventActor, decodeWindowId, type EventActor } from "@octant/contracts";
+import { rebuildProjection } from "../persistence/projection";
+import { ReplayCursor } from "@octant/contracts/events";
+import { Schema } from "effect";
+
+const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,6 +67,9 @@ import {
   type RemoteGatewayOptions,
 } from "./remoteGateway";
 import { canonicalDeviceKeyFacts } from "./deviceKeyFacts";
+import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { createLocalDeviceAdministrationRouteHandler } from "./localDeviceAdministrationRoutes";
 import { executeFinalizationSequence } from "./remoteGatewayFinalization";
 import { createPushNotificationTokenStore } from "./pushNotificationTokenStore";
 
@@ -136,6 +152,8 @@ interface SetupOptions {
   readonly uuid?: () => string;
   readonly onDevicePaired?: RemoteGatewayOptions["onDevicePaired"];
   readonly onDeviceRemoved?: RemoteGatewayOptions["onDeviceRemoved"];
+  readonly agentAccess?: RemoteGatewayOptions["agentAccess"];
+  readonly hubLink?: RemoteGatewayOptions["hubLink"];
 }
 
 function setup(options: SetupOptions = {}) {
@@ -215,6 +233,8 @@ function setup(options: SetupOptions = {}) {
       : { registrationLifetime: options.registrationLifetime }),
     ...(options.onDevicePaired === undefined ? {} : { onDevicePaired: options.onDevicePaired }),
     ...(options.onDeviceRemoved === undefined ? {} : { onDeviceRemoved: options.onDeviceRemoved }),
+    ...(options.agentAccess === undefined ? {} : { agentAccess: options.agentAccess }),
+    ...(options.hubLink === undefined ? {} : { hubLink: options.hubLink }),
     pushTokenStore: pushRegistrations,
     config: options.config ?? makeConfig(),
   };
@@ -1818,6 +1838,469 @@ describe("RemoteGateway — approval for a window that never finished", () => {
         lanFacts,
       );
       expect(challengeAfterCorrection.status).toBe(200);
+    } finally {
+      await gateway.stop();
+    }
+  });
+});
+
+describe("RemoteGateway — a paired device's access level and the pause", () => {
+  const sessionId = "33333333-3333-4333-8333-333333333333";
+  const csrfToken = "csrf-token-value";
+  const csrfDigest = createHash("sha256").update(csrfToken, "utf8").digest("hex");
+  const localPerson: EventActor = decodeEventActor({
+    kind: "local-user",
+    actorId: "77777777-7777-4777-8777-777777777777",
+  });
+
+  /** A device the person approved, optionally with one open session, as the host records them. */
+  function pairDevice(
+    connection: ReturnType<typeof openSqlite>,
+    deviceId: string,
+    withSession: boolean,
+  ): KeyObject {
+    const keys = generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const publicPem = keys.publicKey.export({ format: "pem", type: "spki" }).toString().trim();
+    const facts = canonicalDeviceKeyFacts(publicPem);
+    if (facts === undefined) throw new Error("Expected valid P-256 key facts");
+    connection
+      .prepare(
+        `INSERT INTO remote_device_projection (
+           device_id, host_id, device_key_fingerprint, device_public_key,
+           device_label, origin, protocol_floor, credential_generation,
+           created_at, expires_at, last_seen_at, state, revoked_at, revoked_reason
+         ) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, 'active', NULL, NULL)`,
+      )
+      .run(
+        deviceId,
+        hostId,
+        facts.fingerprint,
+        publicPem,
+        "Phone",
+        ORIGIN,
+        nowIso,
+        new Date(nowMs + 7 * 24 * 60 * 60_000).toISOString(),
+        nowIso,
+      );
+    connection
+      .prepare(
+        `INSERT INTO remote_security_audit_projection (
+           event_kind, host_id, device_id, protocol_version, credential_generation,
+           source_class, result_category, reason_code, correlation_id, occurred_at
+         ) VALUES ('device-approved', ?, ?, 1, 1, 'lan-private', 'approved', 'user-approved', ?, ?)`,
+      )
+      .run(hostId, deviceId, "44444444-4444-4444-8444-444444444444", nowIso);
+    if (withSession) {
+      connection
+        .prepare(
+          `INSERT INTO remote_session_store (
+             session_id_digest, host_id, device_id, credential_generation, origin,
+             protocol_version, capability_digest, issued_at, last_seen_at,
+             idle_expires_at, absolute_expires_at, csrf_digest, state
+           ) VALUES (?, ?, ?, 1, ?, 1, ?, ?, ?, ?, ?, ?, 'active')`,
+        )
+        .run(
+          createHash("sha256").update(sessionId, "utf8").digest("hex"),
+          hostId,
+          deviceId,
+          ORIGIN,
+          "c".repeat(64),
+          nowMs,
+          nowMs,
+          nowMs + 15 * 60_000,
+          nowMs + 60 * 60_000,
+          csrfDigest,
+        );
+    }
+    return keys.privateKey;
+  }
+
+  function signedRequest(
+    privateKey: KeyObject,
+    nonce: string,
+    path = "/api/browser/contexts/current",
+    value: unknown = { threadId: "55555555-5555-4555-8555-555555555555" },
+  ): Request {
+    const body = JSON.stringify(value);
+    const proof = {
+      method: "POST",
+      canonicalPathQuery: path,
+      timestamp: nowIso,
+      nonce,
+      bodyDigest: createHash("sha256").update(body, "utf8").digest("hex"),
+      csrfDigest,
+    };
+    const payload = buildRemoteRequestProofPayload({ sessionId, proof });
+    const signature = sign("sha256", Buffer.from(payload, "utf8"), {
+      key: privateKey,
+      dsaEncoding: "ieee-p1363",
+    }).toString("base64url");
+    return new Request(`${ORIGIN}${path}`, {
+      method: "POST",
+      headers: {
+        host: "192.168.1.20:9443",
+        origin: ORIGIN,
+        "sec-fetch-site": "same-origin",
+        "content-type": "application/json",
+        cookie: `__Secure-octant-remote-session=${sessionId}`,
+        "x-octant-csrf": csrfToken,
+        "x-octant-command-id": `66666666-6666-4666-8666-${nonce.padStart(12, "0")}`,
+        "x-octant-device-proof": Buffer.from(
+          JSON.stringify({ ...proof, signature }),
+          "utf8",
+        ).toString("base64url"),
+      },
+      body,
+    });
+  }
+
+  it("marks the next request with a changed level, refuses every request while paused, and keeps the device", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const capturing = createCapturingServe();
+    const { gateway, connection, journal } = setup({
+      serve: capturing.serve,
+      productDispatch: async (handoff) => {
+        seen.push({ ...handoff.principal });
+        return Response.json({ ok: true });
+      },
+    });
+    await gateway.start();
+    try {
+      const fetch = capturing.getFetch();
+      if (fetch === undefined) throw new Error("Expected captured gateway fetch");
+      const deviceId = "22222222-2222-4222-8222-222222222222";
+      const privateKey = pairDevice(connection, deviceId, true);
+      const admin = gateway.localDeviceAdministration();
+      if (admin === undefined) throw new Error("Expected device administration");
+
+      expect((await fetch(signedRequest(privateKey, "1"), lanFacts)).status).toBe(200);
+      expect(seen[0]).toMatchObject({ admittedBy: "host-person" });
+      expect(seen[0]).not.toHaveProperty("accessLevel");
+
+      admin.setDeviceAccessLevel({ deviceId, accessLevel: "read-only", actor: localPerson });
+      expect((await fetch(signedRequest(privateKey, "2"), lanFacts)).status).toBe(200);
+      expect(seen[1]).toMatchObject({ admittedBy: "host-person", accessLevel: "read-only" });
+      expect(admin.deviceAccessLevel(deviceId)).toBe("read-only");
+
+      admin.setRemoteAccessPaused({ paused: true, actor: localPerson });
+      const refused = await fetch(signedRequest(privateKey, "3"), lanFacts);
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({ reasonCode: "remote-access-paused" });
+      expect(seen).toHaveLength(2);
+      // A paused host makes no new session either, and forgets no device or key.
+      const session = await fetch(
+        postJson("/api/remote/auth/session", {
+          challengeId: "88888888-8888-4888-8888-888888888888",
+          hostId,
+          deviceId,
+          credentialGeneration: 1,
+          nonce: "n".repeat(32),
+          issuedAt: nowIso,
+          expiresAt: new Date(nowMs + 60_000).toISOString(),
+          signature: "s".repeat(86),
+        }),
+        lanFacts,
+      );
+      expect(session.status).toBe(403);
+      expect(await session.json()).toMatchObject({ reasonCode: "remote-access-paused" });
+      expect(admin.listDevices().map((device) => device.state)).toEqual(["active"]);
+      expect(countActiveSessions(connection)).toBe(1);
+
+      admin.setRemoteAccessPaused({ paused: false, actor: localPerson });
+      expect((await fetch(signedRequest(privateKey, "4"), lanFacts)).status).toBe(200);
+
+      const recorded = journal
+        .replay(decodeReplayCursor({ afterSequence: 0, limit: 1_000 }))
+        .filter(
+          (event) =>
+            event.eventName === "remote.device-access-level-changed@1" ||
+            event.eventName === "remote.access-pause-changed@1",
+        );
+      expect(recorded.map((event) => [event.eventName, event.actor, event.payload])).toEqual([
+        [
+          "remote.device-access-level-changed@1",
+          localPerson,
+          expect.objectContaining({ deviceId, previousLevel: "full", accessLevel: "read-only" }),
+        ],
+        ["remote.access-pause-changed@1", localPerson, expect.objectContaining({ paused: true })],
+        ["remote.access-pause-changed@1", localPerson, expect.objectContaining({ paused: false })],
+      ]);
+    } finally {
+      await gateway.stop();
+    }
+  });
+
+  it("ends the asking device's other open work when it pauses access, and still answers its pause", async () => {
+    const capturing = createCapturingServe();
+    let administration: ((request: Request) => Promise<Response | undefined>) | undefined;
+    const { gateway, connection } = setup({
+      serve: capturing.serve,
+      productDispatch: createAuthenticatedProductDispatch({
+        dispatch: async (request) => await administration?.(request),
+      }),
+    });
+    await gateway.start();
+    try {
+      const fetch = capturing.getFetch();
+      if (fetch === undefined) throw new Error("Expected captured gateway fetch");
+      const deviceId = "22222222-2222-4222-8222-222222222222";
+      const privateKey = pairDevice(connection, deviceId, true);
+      administration = createLocalDeviceAdministrationRouteHandler({
+        desktopBridgeSecret: undefined,
+        windowAuthorityStore: new WindowAuthorityStore(),
+        control: () => gateway.localDeviceAdministration(),
+      });
+      // Another of the asking device's requests, still streaming.
+      const registry = capturedRegistries.at(-1);
+      if (registry === undefined) throw new Error("The gateway made no request registry.");
+      let otherStreamEnded = false;
+      registry.register({
+        hostId,
+        deviceId,
+        sessionIdDigest: createHash("sha256").update(sessionId, "utf8").digest("hex"),
+        cancel: () => {
+          otherStreamEnded = true;
+        },
+      });
+
+      const response = await fetch(
+        signedRequest(privateKey, "9", "/api/remote/access-pause", { paused: true }),
+        lanFacts,
+      );
+
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({ paused: true });
+      expect(otherStreamEnded).toBe(true);
+      expect(gateway.localDeviceAdministration()?.remoteAccessPaused()).toBe(true);
+    } finally {
+      await gateway.stop();
+    }
+  });
+
+  it("keeps a pause a device made through a restart, and resumes it over this computer's own channel", async () => {
+    const capturing = createCapturingServe();
+    const windowAuthority = new WindowAuthorityStore();
+    const capability = "A".repeat(43);
+    windowAuthority.register({
+      windowId: decodeWindowId("33333333-3333-4333-8333-333333333333"),
+      capability,
+      now: Date.now(),
+    });
+    let gatewayRef: ReturnType<typeof createRemoteGateway> | undefined;
+    const administration = createLocalDeviceAdministrationRouteHandler({
+      desktopBridgeSecret: "bridge-secret",
+      windowAuthorityStore: windowAuthority,
+      control: () => gatewayRef?.localDeviceAdministration(),
+    });
+    const { gateway, connection, journal } = setup({
+      serve: capturing.serve,
+      productDispatch: createAuthenticatedProductDispatch({
+        dispatch: async (request) => await administration(request),
+      }),
+    });
+    gatewayRef = gateway;
+    await gateway.start();
+    try {
+      const fetch = capturing.getFetch();
+      if (fetch === undefined) throw new Error("Expected captured gateway fetch");
+      const privateKey = pairDevice(connection, "22222222-2222-4222-8222-222222222222", true);
+      const paused = await fetch(
+        signedRequest(privateKey, "7", "/api/remote/access-pause", { paused: true }),
+        lanFacts,
+      );
+      expect(paused.status).toBe(201);
+
+      // The host stops and starts again with its projections rebuilt from the journal.
+      await gateway.stop();
+      const projection = createPhase1RuntimeRegistries().projections.get("remote-access");
+      if (projection === undefined) throw new Error("Expected the remote-access projection");
+      rebuildProjection({ connection, journal, projection, clock: () => nowIso });
+      await gateway.start();
+
+      const local = (method: "GET" | "POST", body?: unknown) =>
+        administration(
+          new Request("http://127.0.0.1/api/desktop/remote/access-pause", {
+            method,
+            headers: {
+              "x-octant-desktop-secret": "bridge-secret",
+              "x-octant-window-capability": capability,
+              ...(body === undefined ? {} : { "content-type": "application/json" }),
+            },
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          }),
+        );
+      expect(await (await local("GET"))?.json()).toEqual({ paused: true });
+      const resumed = await local("POST", { paused: false });
+      expect(resumed?.status).toBe(201);
+      expect(await resumed?.json()).toEqual({ paused: false });
+      expect(gateway.localDeviceAdministration()?.remoteAccessPaused()).toBe(false);
+      const changes = journal
+        .replay(decodeReplayCursor({ afterSequence: 0, limit: 1_000 }))
+        .filter((event) => event.eventName === "remote.access-pause-changed@1");
+      expect(changes.map((event) => [event.actor.kind, event.payload])).toEqual([
+        ["remote-device", expect.objectContaining({ paused: true })],
+        ["local-user", expect.objectContaining({ paused: false })],
+      ]);
+    } finally {
+      await gateway.stop();
+    }
+  });
+
+  it("refuses an outside agent while paused and keeps the person's own computers' hub links", async () => {
+    const agentAccess = vi.fn(async () => Response.json({ jsonrpc: "2.0", id: 1, result: {} }));
+    const hubLink = vi.fn(async () => Response.json({ ok: true }));
+    const capturing = createCapturingServe();
+    const { gateway } = setup({ serve: capturing.serve, agentAccess, hubLink });
+    await gateway.start();
+    try {
+      const fetch = capturing.getFetch();
+      if (fetch === undefined) throw new Error("Expected captured gateway fetch");
+      const admin = gateway.localDeviceAdministration();
+      if (admin === undefined) throw new Error("Expected device administration");
+      const agentCall = () =>
+        fetch(
+          new Request(`${ORIGIN}/api/agent-access/mcp`, {
+            method: "POST",
+            headers: {
+              host: "192.168.1.20:9443",
+              "content-type": "application/json",
+              authorization: "Bearer agent-key",
+            },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+          }),
+          lanFacts,
+        );
+      const hubCall = () =>
+        fetch(
+          new Request(`${ORIGIN}/api/hub/status`, { headers: { host: "192.168.1.20:9443" } }),
+          lanFacts,
+        );
+
+      expect((await agentCall()).status).toBe(200);
+      expect(agentAccess).toHaveBeenCalledTimes(1);
+
+      admin.setRemoteAccessPaused({ paused: true, actor: localPerson });
+      const refused = await agentCall();
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({ reasonCode: "remote-access-paused" });
+      expect(agentAccess).toHaveBeenCalledTimes(1);
+      expect((await hubCall()).status).toBe(200);
+      expect(hubLink).toHaveBeenCalledTimes(1);
+
+      admin.setRemoteAccessPaused({ paused: false, actor: localPerson });
+      expect((await agentCall()).status).toBe(200);
+      expect(agentAccess).toHaveBeenCalledTimes(2);
+    } finally {
+      await gateway.stop();
+    }
+  });
+
+  it("ends an in-flight outside agent call's pause epoch, and issues a fresh one on resume", async () => {
+    const signals: Array<AbortSignal | undefined> = [];
+    const agentAccess: NonNullable<RemoteGatewayOptions["agentAccess"]> = async (
+      _request,
+      _facts,
+      pauseSignal,
+    ) => {
+      signals.push(pauseSignal);
+      return Response.json({ jsonrpc: "2.0", id: 1, result: {} });
+    };
+    const hubLink = vi.fn(async () => Response.json({ ok: true }));
+    const capturing = createCapturingServe();
+    const { gateway } = setup({ serve: capturing.serve, agentAccess, hubLink });
+    await gateway.start();
+    try {
+      const fetch = capturing.getFetch();
+      if (fetch === undefined) throw new Error("Expected captured gateway fetch");
+      const admin = gateway.localDeviceAdministration();
+      if (admin === undefined) throw new Error("Expected device administration");
+      const agentCall = () =>
+        fetch(
+          new Request(`${ORIGIN}/api/agent-access/mcp`, {
+            method: "POST",
+            headers: {
+              host: "192.168.1.20:9443",
+              "content-type": "application/json",
+              authorization: "Bearer agent-key",
+            },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+          }),
+          lanFacts,
+        );
+      const hubCall = () =>
+        fetch(
+          new Request(`${ORIGIN}/api/hub/status`, { headers: { host: "192.168.1.20:9443" } }),
+          lanFacts,
+        );
+
+      expect((await agentCall()).status).toBe(200);
+      const first = signals[0];
+      expect(first?.aborted).toBe(false);
+
+      const uploadStarted = Promise.withResolvers<void>();
+      const finishUpload = Promise.withResolvers<void>();
+      const encoded = new TextEncoder().encode(
+        JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+      );
+      const upload = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoded.subarray(0, 1));
+        },
+        async pull(controller) {
+          uploadStarted.resolve();
+          await finishUpload.promise;
+          controller.enqueue(encoded.subarray(1));
+          controller.close();
+        },
+      });
+      const init: RequestInit & { duplex: "half" } = {
+        method: "POST",
+        headers: {
+          host: "192.168.1.20:9443",
+          "content-type": "application/json",
+          authorization: "Bearer agent-key",
+        },
+        body: upload,
+        duplex: "half",
+      };
+      const oldCall = fetch(new Request(`${ORIGIN}/api/agent-access/mcp`, init), lanFacts);
+      await uploadStarted.promise;
+
+      admin.setRemoteAccessPaused({ paused: true, actor: localPerson });
+      // The epoch the in-flight call bound to ended with the pause and stays
+      // ended: a resume issues a fresh one, it never reopens.
+      expect(first?.aborted).toBe(true);
+
+      admin.setRemoteAccessPaused({ paused: false, actor: localPerson });
+      finishUpload.resolve();
+      expect((await oldCall).status).toBe(403);
+      expect((await agentCall()).status).toBe(200);
+      const resumed = signals[1];
+      expect(resumed).not.toBe(first);
+      expect(resumed?.aborted).toBe(false);
+      expect(first?.aborted).toBe(true);
+      expect((await hubCall()).status).toBe(200);
+      expect(hubLink).toHaveBeenCalledTimes(1);
+    } finally {
+      await gateway.stop();
+    }
+  });
+
+  it("signs out every other device and keeps the one that asked", async () => {
+    const { gateway, connection } = setup();
+    await gateway.start();
+    try {
+      const asking = "22222222-2222-4222-8222-222222222222";
+      const other = "22222222-2222-4222-8222-222222222223";
+      pairDevice(connection, asking, false);
+      pairDevice(connection, other, false);
+      const admin = gateway.localDeviceAdministration();
+      if (admin === undefined) throw new Error("Expected device administration");
+      admin.revokeAll({ actor: localPerson, exceptDeviceId: asking });
+      expect(admin.listDevices().map((device) => [String(device.deviceId), device.state])).toEqual([
+        [asking, "active"],
+        [other, "revoked"],
+      ]);
     } finally {
       await gateway.stop();
     }

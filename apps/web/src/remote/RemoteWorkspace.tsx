@@ -54,6 +54,7 @@ export interface RemoteWorkspaceProps {
    * absent, the session is shown as restricted.
    */
   readonly actsAsHostPerson?: boolean;
+  readonly readOnly?: boolean;
   /** Shows each thread its waiting tool prompts; absent, none is shown. */
   readonly extensionClient?: ExtensionClient;
 }
@@ -190,6 +191,7 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
           initialThread={props.initialThread}
           connected={props.connected}
           actsAsHostPerson={props.actsAsHostPerson === true}
+          readOnly={props.readOnly === true}
           extensionClient={props.extensionClient}
           onNavigate={onNavigate}
           onOpenCanvas={onOpenCanvas}
@@ -207,6 +209,7 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
           initialThread={props.initialThread}
           connected={props.connected}
           actsAsHostPerson={props.actsAsHostPerson === true}
+          readOnly={props.readOnly === true}
           extensionClient={props.extensionClient}
           onNavigate={onNavigate}
           onOpenCanvas={onOpenCanvas}
@@ -221,6 +224,7 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
           initialThread={props.initialThread}
           connected={props.connected}
           actsAsHostPerson={props.actsAsHostPerson === true}
+          readOnly={props.readOnly === true}
           extensionClient={props.extensionClient}
           onNavigate={onNavigate}
           onOpenCanvas={onOpenCanvas}
@@ -285,6 +289,7 @@ interface RemoteSurfaceProps {
   readonly clients: RemoteProductClients;
   /** A browser the host's own person paired starts threads as a window does. */
   readonly actsAsHostPerson: boolean;
+  readonly readOnly?: boolean;
   readonly extensionClient: ExtensionClient | undefined;
   readonly connected: boolean;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
@@ -354,6 +359,7 @@ function RemoteChatSurface(
   return (
     <RemoteThreadPane
       mode="chat"
+      readOnly={props.readOnly === true}
       threads={threads}
       activeThreadId={activeThreadId}
       onSelect={(thread) => {
@@ -363,15 +369,17 @@ function RemoteChatSurface(
       status={controller.status === "disconnected" ? "disconnected" : "ready"}
       errorMessage={createError ?? controller.errorMessage}
       action={
-        <OctantButton
-          disabled={!props.connected}
-          onClick={() => void createThread()}
-          size="sm"
-          type="button"
-          variant="secondary"
-        >
-          New thread
-        </OctantButton>
+        props.readOnly === true ? undefined : (
+          <OctantButton
+            disabled={!props.connected}
+            onClick={() => void createThread()}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            New thread
+          </OctantButton>
+        )
       }
     >
       {activeThreadId === undefined ? null : (
@@ -386,6 +394,7 @@ function RemoteChatSurface(
               ? {}
               : { extensionClient: props.extensionClient })}
             narrow
+            readOnly={props.readOnly === true}
             onOpenCanvas={props.onOpenCanvas}
             providerGroups={props.providerGroups}
             {...(props.providerSnapshot === undefined
@@ -422,6 +431,7 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
   return (
     <RemoteThreadPane
       mode="work"
+      readOnly={props.readOnly === true}
       threads={threads}
       activeThreadId={activeThreadId}
       onSelect={(thread) => {
@@ -457,6 +467,7 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
           fallback={<OctantEmpty message="Loading work." state="loading" title="Loading work" />}
         >
           <WorkThreadWorkspace
+            readOnly={props.readOnly === true}
             key={String(activeThread.id)}
             {...serviceOfferProps(props)}
             title={activeThread.title}
@@ -546,6 +557,7 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
   return (
     <RemoteThreadPane
       mode="code"
+      readOnly={props.readOnly === true}
       threads={threads}
       activeThreadId={activeThreadId}
       onSelect={(thread) => {
@@ -564,21 +576,23 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
       // Code Projects the member's Act item names and refuses a start
       // anywhere else, so with none named the form draws nothing.
       start={
-        <RemoteCodeThreadStart
-          actsAsHostPerson={props.actsAsHostPerson}
-          codeClient={props.clients.code}
-          connected={props.connected}
-          controller={controller}
-          {...(props.actsAsHostPerson && props.clients.folderBrowse !== undefined
-            ? { folderBrowse: props.clients.folderBrowse }
-            : {})}
-          onCreated={(thread) => {
-            props.onNavigate();
-            setActiveThreadId(thread.id);
-          }}
-          projectClient={props.clients.project}
-          providerGroups={props.providerGroups}
-        />
+        props.readOnly === true ? undefined : (
+          <RemoteCodeThreadStart
+            actsAsHostPerson={props.actsAsHostPerson}
+            codeClient={props.clients.code}
+            connected={props.connected}
+            controller={controller}
+            {...(props.actsAsHostPerson && props.clients.folderBrowse !== undefined
+              ? { folderBrowse: props.clients.folderBrowse }
+              : {})}
+            onCreated={(thread) => {
+              props.onNavigate();
+              setActiveThreadId(thread.id);
+            }}
+            projectClient={props.clients.project}
+            providerGroups={props.providerGroups}
+          />
+        )
       }
     >
       {activeThreadId === undefined ? null : (
@@ -593,7 +607,7 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
               )}
           {activeThread === undefined ? null : (
             <RemoteCoordinatorProposals
-              actsAsHostPerson={props.actsAsHostPerson}
+              actsAsHostPerson={props.actsAsHostPerson && props.readOnly !== true}
               client={props.clients.code}
               connected={props.connected}
               thread={activeThread}
@@ -618,6 +632,7 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
               ? {}
               : { extensionClient: props.extensionClient })}
             pairedDevice
+            readOnly={props.readOnly === true}
             threadId={activeThreadId}
             providerGroups={props.providerGroups}
           />
@@ -674,6 +689,7 @@ interface RemoteThreadPaneProps<T extends RemoteThread> {
   readonly activeThreadId: T["id"] | undefined;
   readonly onSelect: (thread: T) => void;
   readonly status: "loading" | "ready" | "disconnected";
+  readonly readOnly: boolean;
   readonly errorMessage?: string | undefined;
   readonly emptyMessage?: string;
   readonly action?: React.ReactNode;
@@ -742,7 +758,11 @@ function RemoteThreadPane<T extends RemoteThread>(props: RemoteThreadPaneProps<T
         {props.children ?? null}
         {props.children === null || props.children === undefined ? (
           <OctantEmpty
-            message={`Choose a ${label} thread to read it here and send a turn to the host.`}
+            message={
+              props.readOnly
+                ? `Choose a ${label} thread to watch it here.`
+                : `Choose a ${label} thread to read it here and send a turn to the host.`
+            }
             state="neutral"
             title={`${label} on the paired host`}
           />

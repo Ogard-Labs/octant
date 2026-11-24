@@ -1,4 +1,4 @@
-import type { OctantMode, ProjectId, WindowId } from "@octant/contracts";
+import type { DeviceAccessLevel, OctantMode, ProjectId, WindowId } from "@octant/contracts";
 import { authorizePrincipalAction } from "@octant/domain";
 import { hubActRefusal, type HubActScopePort } from "../hub/hubActScope";
 import type { ThreadMessageQueuePortDependencies } from "./threadMessageQueuePorts";
@@ -7,6 +7,8 @@ export interface ThreadMessageQueueAuthorityDependencies {
   readonly isLocalWindowLive: (scopeId: WindowId) => boolean;
   /** Whether a scope is a device still paired with this host. */
   readonly isPairedDevice: (scopeId: WindowId) => boolean;
+  /** The current level of a person-paired device. Hub-introduced devices have no level. */
+  readonly deviceAccessLevel: (scopeId: WindowId) => DeviceAccessLevel | undefined;
   readonly localWindowCanAccess: (
     scopeId: WindowId,
     mode: OctantMode,
@@ -30,21 +32,21 @@ const DEVICE_SEND_ACTION: Readonly<Record<OctantMode, string>> = {
 /**
  * Whose authority a queued message may wait under. A local window keeps its
  * own rule. A paired device has no window and no workspace, so it is judged
- * as its own send would be: still paired, allowed the mode's send action, and
- * the thread's Project one that mode serves (for Code, an active one). The
- * queue asks at enqueue and again at every dispatch, so a device unpaired in
- * between holds nothing.
+ * against its current level and the thread's Project. A snapshot uses the
+ * route's read action. A change or dispatch requires the mode's send action.
  */
 export function createThreadMessageQueueAuthority(
   deps: ThreadMessageQueueAuthorityDependencies,
 ): Pick<ThreadMessageQueuePortDependencies, "isWindowLive" | "canAccess"> {
   return {
     isWindowLive: (scopeId) => deps.isLocalWindowLive(scopeId) || deps.isPairedDevice(scopeId),
-    canAccess: (scopeId, mode, projectId) => {
+    canAccess: (scopeId, mode, projectId, intent) => {
       if (!deps.isPairedDevice(scopeId)) return deps.localWindowCanAccess(scopeId, mode, projectId);
+      const accessLevel = deps.deviceAccessLevel(scopeId);
       const decision = authorizePrincipalAction({
         principalKind: "remote-device",
-        action: DEVICE_SEND_ACTION[mode],
+        action: intent === "read" ? "project.overview.read" : DEVICE_SEND_ACTION[mode],
+        ...(accessLevel === undefined ? {} : { accessLevel }),
       });
       if (decision.kind !== "allow") return false;
       if (mode === "chat") return projectId === undefined || deps.projectType(projectId) === "chat";

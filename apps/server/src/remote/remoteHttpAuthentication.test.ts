@@ -30,6 +30,7 @@ import {
 } from "../remoteRoutePolicy";
 import { canonicalDeviceKeyFacts } from "./deviceKeyFacts";
 import { createRemoteRequestRegistry, type RemoteRequestRegistry } from "./remoteRequestRegistry";
+import { RemoteServerProxySessions } from "./remoteServerProxySessions";
 import {
   createRemoteHttpAuthentication,
   REMOTE_SESSION_COOKIE,
@@ -130,6 +131,8 @@ interface SetupOptions {
    */
   readonly skipRequiredSecureBundle?: boolean;
   readonly deviceAdmittedBy?: (deviceId: string) => "host-person" | "hub-roster";
+  readonly deviceAccessLevel?: (deviceId: string) => "full" | "approve-and-steer" | "read-only";
+  readonly remoteAccessPaused?: () => boolean;
 }
 
 function setup(options: SetupOptions = {}) {
@@ -278,6 +281,12 @@ function setup(options: SetupOptions = {}) {
     ...(options.deviceAdmittedBy === undefined
       ? {}
       : { deviceAdmittedBy: options.deviceAdmittedBy }),
+    ...(options.deviceAccessLevel === undefined
+      ? {}
+      : { deviceAccessLevel: options.deviceAccessLevel }),
+    ...(options.remoteAccessPaused === undefined
+      ? {}
+      : { remoteAccessPaused: options.remoteAccessPaused }),
   });
   return {
     connection,
@@ -463,6 +472,66 @@ function productRequest(
 }
 
 describe("remote HTTP authentication boundary", () => {
+  it("checks the pause again before issuing a proxy session", async () => {
+    const { service, connection } = setup();
+    const sessions = new RemoteServerProxySessions({
+      proofs: service,
+      onSessionEnded: () => undefined,
+    });
+    const issue = vi.spyOn(sessions, "issue");
+    let paused = false;
+    const auth = createRemoteHttpAuthentication({
+      proofService: service,
+      signNegotiationMetadata: vi.fn(),
+      remoteAccessPaused: () => paused,
+      serverProxy: {
+        sessions,
+        grants: { open: vi.fn(), relay: vi.fn(), relayUpgrade: vi.fn() },
+      },
+    });
+    const route: RemoteRouteDefinition = {
+      ...sessionRoute,
+      id: "remote-auth-server-proxy-session",
+      match: { kind: "exact", path: "/api/remote/auth/server-proxy-session" },
+    };
+    const post = jsonPost("/api/remote/auth/server-proxy-session", {
+      challengeId: "88888888-8888-4888-8888-888888888888",
+      hostId,
+      deviceId,
+      credentialGeneration: 1,
+      nonce: "n".repeat(43),
+      issuedAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + 60_000).toISOString(),
+      signature: "s".repeat(86),
+    });
+    const payload = await post.text();
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          paused = true;
+          controller.enqueue(new TextEncoder().encode(payload));
+          controller.close();
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const request = new Request(post.url, {
+      method: post.method,
+      headers: post.headers,
+      body,
+      duplex: "half",
+    } as RequestInit);
+    try {
+      const response = await auth.handlePreAuthRoute(request, route, transport);
+      expect(response?.status).toBe(403);
+      expect(await response?.json()).toMatchObject({ reasonCode: "remote-access-paused" });
+      expect(response?.headers.get("set-cookie")).toBeNull();
+      expect(issue).not.toHaveBeenCalled();
+    } finally {
+      connection.close();
+    }
+  });
+
   it("issues challenges and sessions over exact routes with an HttpOnly cookie and a wire-safe body", async () => {
     const { auth, privateKey, connection } = setup();
     const { challengeResponse, sessionResponse, session, body, setCookie } =
@@ -692,6 +761,101 @@ describe("remote HTTP authentication boundary", () => {
 
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ deviceId, actsAsHostPerson: expected });
+      connection.close();
+    }
+  });
+
+  /** The signed request, with its body held open until `finish` sends it. */
+  function slowBodyRequest(session: { sessionId: string; csrfToken: string }, privateKey: string) {
+    const signed = productRequest(session, privateKey);
+    let finish = () => {};
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        finish = () => {
+          controller.enqueue(new TextEncoder().encode(JSON.stringify({ hello: "world" })));
+          controller.close();
+        };
+      },
+    });
+    const request = new Request(signed.url, {
+      method: "POST",
+      headers: signed.headers,
+      body,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    return { request, finish: () => finish() };
+  }
+
+  it("refuses a request whose upload was still arriving when remote access was paused", async () => {
+    let paused = false;
+    const { auth, privateKey, dispatched, connection } = setup({
+      withDispatch: true,
+      deviceAdmittedBy: () => "host-person",
+      remoteAccessPaused: () => paused,
+    });
+    const { session } = await issueSessionOverHttp(auth, privateKey);
+    const slow = slowBodyRequest(session, privateKey);
+
+    const pending = auth.handleAuthenticated(slow.request, transport);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    paused = true;
+    slow.finish();
+    const response = await pending;
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ reasonCode: "remote-access-paused" });
+    expect(dispatched).toHaveLength(0);
+    connection.close();
+  });
+
+  it("judges a request by the level its device holds once its upload has arrived", async () => {
+    let level: "full" | "read-only" = "full";
+    const { auth, privateKey, dispatched, connection } = setup({
+      withDispatch: true,
+      deviceAdmittedBy: () => "host-person",
+      deviceAccessLevel: () => level,
+    });
+    const { session } = await issueSessionOverHttp(auth, privateKey);
+    const slow = slowBodyRequest(session, privateKey);
+
+    const pending = auth.handleAuthenticated(slow.request, transport);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    level = "read-only";
+    slow.finish();
+    await pending;
+
+    expect(dispatched[0]?.principal).toMatchObject({ accessLevel: "read-only" });
+    connection.close();
+  });
+
+  it("tells a device the access level its person chose, and says none for a device the hub introduced", async () => {
+    for (const [admittedBy, level, expected] of [
+      ["host-person", "full", { actsAsHostPerson: true, accessLevel: "full" }],
+      ["host-person", "read-only", { actsAsHostPerson: false, accessLevel: "read-only" }],
+      [
+        "host-person",
+        "approve-and-steer",
+        { actsAsHostPerson: false, accessLevel: "approve-and-steer" },
+      ],
+      ["hub-roster", "read-only", { actsAsHostPerson: false }],
+    ] as const) {
+      const { auth, privateKey, connection } = setup({
+        withSelfService: true,
+        withDispatch: true,
+        deviceAdmittedBy: () => admittedBy,
+        deviceAccessLevel: () => level,
+      });
+      const { session } = await issueSessionOverHttp(auth, privateKey);
+
+      const response = await auth.handleAuthenticated(
+        productRequest(session, privateKey, { method: "GET", target: "/api/remote/auth/device" }),
+        transport,
+        ownDeviceRoute,
+      );
+
+      const body = await response.json();
+      expect(body).toMatchObject(expected);
+      if (!("accessLevel" in expected)) expect(body).not.toHaveProperty("accessLevel");
       connection.close();
     }
   });

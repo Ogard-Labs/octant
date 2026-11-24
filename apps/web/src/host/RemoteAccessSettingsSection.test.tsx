@@ -170,6 +170,35 @@ describe("RemoteAccessSettingsSection", () => {
     ).toBeInTheDocument();
   });
 
+  it("offers the pause switch once the listener it reads through has started", async () => {
+    const user = userEvent.setup();
+    let listenerOn = false;
+    const host = bridge(off, {
+      // With no listener the host has no gateway to answer, as it refuses here.
+      getRemoteDeviceInventory: async () => {
+        if (!listenerOn) throw new Error("Octant local device controls are unavailable.");
+        return [device];
+      },
+      enablePrivateListener: vi.fn(async () => {
+        listenerOn = true;
+        return listening;
+      }),
+      getRemoteAccessPaused: vi.fn(async () => false),
+      setRemoteAccessPaused: vi.fn(async (paused: boolean) => paused),
+    });
+    render(<RemoteAccessSettingsSection bridge={host} />);
+
+    expect(await screen.findByText("Off")).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Pause remote access" })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Hostname"), "192.168.1.20");
+    await user.type(screen.getByLabelText("Certificate (PEM)"), "-----BEGIN CERTIFICATE-----");
+    await user.type(screen.getByLabelText("Private key (PEM)"), "-----BEGIN PRIVATE KEY-----");
+    await user.click(screen.getByRole("button", { name: "Enable listener…" }));
+    await user.click(screen.getByRole("button", { name: "Confirm enable" }));
+
+    expect(await screen.findByRole("switch", { name: "Pause remote access" })).not.toBeChecked();
+  });
+
   it("asks for confirmation naming address, origin, and reach before enabling, and cancel changes nothing", async () => {
     const user = userEvent.setup();
     const host = bridge(off);
@@ -333,6 +362,43 @@ describe("RemoteAccessSettingsSection", () => {
     await waitFor(() => expect(host.revokeAllRemoteDevices).toHaveBeenCalledTimes(1));
   });
 
+  it("approves a new device at the level picked, changes a device's level, and pauses remote access", async () => {
+    const user = userEvent.setup();
+    const host = bridge(listening, {
+      getRemoteDeviceInventory: async () => [{ ...device, accessLevel: "full" as const }],
+      setRemoteDeviceAccessLevel: vi.fn(async () => undefined),
+      getRemoteAccessPaused: vi.fn(async () => false),
+      setRemoteAccessPaused: vi.fn(async (paused: boolean) => paused),
+    });
+    render(<RemoteAccessSettingsSection bridge={host} />);
+
+    const requests = await screen.findByRole("list", { name: "Pairing requests" });
+    const picker = within(requests).getByRole("combobox", {
+      name: "Access for Safari on iPad",
+    });
+    expect(picker).toHaveTextContent("Full");
+    await user.click(picker);
+    await user.click(await screen.findByRole("option", { name: "Read only" }));
+    await user.click(within(requests).getByRole("button", { name: "Approve Safari on iPad" }));
+    await waitFor(() =>
+      expect(host.approveRemotePairingRequest).toHaveBeenCalledWith(ticketId, "read-only"),
+    );
+
+    const devices = screen.getByRole("list", { name: "Paired devices" });
+    const level = within(devices).getByRole("combobox", { name: "Access for Living room laptop" });
+    await user.click(level);
+    await user.click(await screen.findByRole("option", { name: "Approve and steer" }));
+    await waitFor(() =>
+      expect(host.setRemoteDeviceAccessLevel).toHaveBeenCalledWith(deviceId, "approve-and-steer"),
+    );
+
+    const pause = screen.getByRole("switch", { name: "Pause remote access" });
+    expect(pause).not.toBeChecked();
+    await user.click(pause);
+    await waitFor(() => expect(host.setRemoteAccessPaused).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(pause).toBeChecked());
+  });
+
   it("lets the person choose how long a paired device stays paired, saying Never leaves only Revoke", async () => {
     const user = userEvent.setup();
     const onPairedDeviceLifetimeChange = vi.fn();
@@ -392,7 +458,9 @@ describe("RemoteAccessSettingsSection", () => {
     const requests = screen.getByRole("list", { name: "Pairing requests" });
     expect(within(requests).getByText("482913")).toBeInTheDocument();
     await user.click(within(requests).getByRole("button", { name: "Approve Safari on iPad" }));
-    await waitFor(() => expect(host.approveRemotePairingRequest).toHaveBeenCalledWith(ticketId));
+    await waitFor(() =>
+      expect(host.approveRemotePairingRequest).toHaveBeenCalledWith(ticketId, "full"),
+    );
     expect(await screen.findByText("Approved Safari on iPad.")).toBeInTheDocument();
 
     const devices = screen.getByRole("list", { name: "Paired devices" });

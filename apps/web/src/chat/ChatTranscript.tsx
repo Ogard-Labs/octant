@@ -66,6 +66,7 @@ import {
 import type { ChatTranscriptWindowState, ChatWindowPageState } from "./chatTranscriptWindow";
 
 export interface ChatTranscriptProps {
+  readonly readOnly?: boolean;
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
   /** The decoded, authoritative transcript projection. */
@@ -409,8 +410,10 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       <section aria-label="Conversation" className="chat-transcript transcript-scroll">
         {lead}
         <div className="chat-transcript__empty">
-          <h2>Start the conversation</h2>
-          <p>Ask a question, draft something, or explore an idea.</p>
+          <h2>{props.readOnly === true ? "No messages yet" : "Start the conversation"}</h2>
+          {props.readOnly === true ? null : (
+            <p>Ask a question, draft something, or explore an idea.</p>
+          )}
         </div>
         {trail}
       </section>
@@ -631,6 +634,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
               {routeDecision === undefined ? null : <RouteReceipt decision={routeDecision} />}
               {turn.attempts.map((attempt, index) => (
                 <AttemptBlock
+                  readOnly={props.readOnly === true}
                   serverUrl={props.serverUrl}
                   windowCapability={props.windowCapability}
                   attempt={attempt}
@@ -943,6 +947,8 @@ function subagentsUntil(at: string | undefined): { readonly subagentsUntil?: str
 }
 
 const AttemptBlock = memo(function AttemptBlock(props: {
+  /** A viewer who may not answer reads a pending question in the reply instead. */
+  readonly readOnly: boolean;
   readonly attempt: ChatAttempt;
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
@@ -1179,6 +1185,21 @@ const AttemptBlock = memo(function AttemptBlock(props: {
           <SupportCorrelationControl correlationId={String(props.attempt.id)} />
         ) : null}
         {props.citations.length > 0 ? <CitationList citations={props.citations} /> : null}
+        {/* A viewer who cannot answer reads the question here; one who can
+            answers it in the card docked above the composer. */}
+        {props.attempt.pendingQuestion === undefined || !props.readOnly ? null : (
+          <div className="approval-row approval-row--request">
+            <div className="approval-row__text">
+              {props.attempt.pendingQuestion.questionnaire === undefined ? (
+                <p>{props.attempt.pendingQuestion.prompt}</p>
+              ) : (
+                props.attempt.pendingQuestion.questionnaire.questions.map((question) => (
+                  <p key={question.id}>{question.prompt}</p>
+                ))
+              )}
+            </div>
+          </div>
+        )}
         {(props.attempt.answeredQuestions ?? []).length === 0
           ? null
           : props.attempt.answeredQuestions!.map((question) => (

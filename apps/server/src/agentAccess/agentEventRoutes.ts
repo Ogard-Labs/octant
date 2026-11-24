@@ -27,6 +27,8 @@ export interface AgentEventAccess {
 
 interface EventRequest {
   readonly request: Request;
+  /** Includes the host's remote-pause signal for requests on the private listener. */
+  readonly requestSignal?: AbortSignal;
   readonly id: RpcId;
   readonly method: string;
   readonly params: JsonObject | undefined;
@@ -263,7 +265,7 @@ export class AgentEventRoutes {
       },
       this.#events.position(filter, cursor, maxAgeMs),
       ttlMs,
-      request.signal,
+      input.requestSignal ?? request.signal,
     );
     switch (subscription.kind) {
       case "subscribed":
@@ -302,7 +304,7 @@ export class AgentEventRoutes {
     this.#streamsByGrant.set(filter.grantId, byGrant + 1);
     const stop = new AbortController();
     const events = this.#events;
-    const requestSignal = input.request.signal;
+    const requestSignal = input.requestSignal ?? input.request.signal;
     const grantSignal = input.access.grantSignal;
     let removeListeners = () => {};
     const release = () => {

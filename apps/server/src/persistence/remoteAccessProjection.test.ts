@@ -10,6 +10,8 @@ import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
 import { openSqlite } from "./sqlitePort";
 import {
   RemoteAccessProjection,
+  readDeviceAccessLevel,
+  readRemoteAccessPaused,
   readDeviceRegistrations,
   readHostIdentity,
   readRemoteCommandReceipt,
@@ -99,6 +101,108 @@ describe("RemoteAccessProjection", () => {
     expect(readDeviceRegistrations(connection)).toHaveLength(1);
     rebuildProjection({ connection, journal, projection: projection!, clock: () => now });
     expect(readDeviceRegistrations(connection)).toHaveLength(1);
+    connection.close();
+  });
+
+  it("projects a device's chosen and changed access level and the pause, and rebuilds them the same", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-remote-projection-"));
+    directories.push(directory);
+    const connection = openSqlite(join(directory, "store.sqlite3"));
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const runtime = createPhase1RuntimeRegistries();
+    const projection = runtime.projections.get("remote-access");
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => now,
+    });
+    const otherDevice = "77777777-7777-4777-8777-777777777777";
+    const approval = (id: string, eventId: string, accessLevel?: "read-only") => ({
+      eventId,
+      eventName: "remote.security-audit-recorded@1",
+      eventVersion: 1,
+      correlationId,
+      actor: { kind: "system" as const, actorId },
+      occurredAt: now,
+      payload: {
+        record: {
+          eventKind: "device-approved",
+          hostId,
+          deviceId: id,
+          protocolVersion: 1,
+          credentialGeneration: 1,
+          sourceClass: "lan-private",
+          resultCategory: "approved",
+          reasonCode: "user-approved",
+          correlationId,
+          occurredAt: now,
+          ...(accessLevel === undefined ? {} : { accessLevel }),
+        },
+      },
+    });
+    journal.append({
+      aggregate: { aggregateType: "remote-device", aggregateId: deviceId },
+      expectedVersion: 0,
+      events: [approval(deviceId, "88888888-8888-4888-8888-888888888881", "read-only")],
+    });
+    journal.append({
+      aggregate: { aggregateType: "remote-device", aggregateId: otherDevice },
+      expectedVersion: 0,
+      events: [approval(otherDevice, "88888888-8888-4888-8888-888888888882")],
+    });
+    journal.append({
+      aggregate: { aggregateType: "remote-device", aggregateId: deviceId },
+      expectedVersion: 1,
+      events: [
+        {
+          eventId: "88888888-8888-4888-8888-888888888883",
+          eventName: "remote.device-access-level-changed@1",
+          eventVersion: 1,
+          correlationId,
+          actor: { kind: "local-user", actorId },
+          occurredAt: now,
+          payload: {
+            hostId,
+            deviceId,
+            previousLevel: "read-only",
+            accessLevel: "approve-and-steer",
+            changedAt: now,
+          },
+        },
+      ],
+    });
+    journal.append({
+      aggregate: { aggregateType: "remote-host", aggregateId: hostId },
+      expectedVersion: 0,
+      events: [
+        {
+          eventId: "88888888-8888-4888-8888-888888888884",
+          eventName: "remote.access-pause-changed@1",
+          eventVersion: 1,
+          correlationId,
+          actor: { kind: "local-user", actorId },
+          occurredAt: now,
+          payload: { hostId, paused: true, changedAt: now },
+        },
+      ],
+    });
+
+    const read = () => ({
+      changed: readDeviceAccessLevel(connection, deviceId),
+      untouched: readDeviceAccessLevel(connection, otherDevice),
+      unknown: readDeviceAccessLevel(connection, "99999999-9999-4999-8999-999999999999"),
+      paused: readRemoteAccessPaused(connection),
+    });
+    const expected = {
+      changed: "approve-and-steer",
+      untouched: "full",
+      unknown: "full",
+      paused: true,
+    };
+    expect(read()).toEqual(expected);
+    rebuildProjection({ connection, journal, projection: projection!, clock: () => now });
+    expect(read()).toEqual(expected);
     connection.close();
   });
 

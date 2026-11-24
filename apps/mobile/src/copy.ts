@@ -89,6 +89,9 @@ export const MOBILE_COPY = {
   pairHostHeadline: "Connect this phone to your laptop.",
   pairHostSubhead: "Use the short-lived ticket from desktop Remote Access.",
   pairBeforeCreate: "Pair a computer before starting a thread.",
+  threadCreationWatchingOnly: "Watching only. Start new threads on your computer.",
+  threadCreationAccessUnconfirmed:
+    "Starting a thread requires the computer to confirm this phone’s access.",
   pairEnterCode: "Enter a code instead",
   pairTypeDetails: "Type the details instead",
   pairCompareHint: "Check that this code matches the one on your computer, then approve there.",
