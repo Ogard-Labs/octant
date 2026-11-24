@@ -15,7 +15,7 @@ import {
   Link2,
   MessageSquare,
   MoreHorizontal,
-  Unlink,
+  Unplug,
   RefreshCw,
   TriangleAlert,
 } from "../ui/icons";
@@ -358,7 +358,7 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                     <OctantMenuPopup aria-label="More actions" className="min-w-[13rem]">
                       {props.onUnlinkFromThread === undefined ? null : (
                         <OctantMenuItem onClick={() => void unlinkFromThread()}>
-                          <Unlink aria-hidden="true" size={14} />
+                          <Unplug aria-hidden="true" size={14} />
                           Unlink from this thread
                         </OctantMenuItem>
                       )}

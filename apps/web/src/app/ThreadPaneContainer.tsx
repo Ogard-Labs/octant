@@ -1,10 +1,6 @@
 import { VideoClientContext } from "../video/ThreadVideoClips";
 import type { PreparationTarget } from "../projects/WorktreePreparationDialog";
-import { ProjectReviewModule } from "../dockModules/ProjectReviewModule";
-import {
-  mergeProjectPullRequestFor,
-  projectPullRequestReviewActions,
-} from "./projectPullRequestReviewWiring";
+import { HostPullRequestReviewModule } from "../dockModules/HostPullRequestReviewModule";
 import type { HostId } from "@octant/contracts/host";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -889,22 +885,17 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                       void openCodeSurface({ kind: "code-pr", threadId, title, pullRequest })
                     }
                     renderThreadPullRequest={({ pullRequest, onUnlink }) => (
-                      <ProjectReviewModule
+                      <HostPullRequestReviewModule
+                        codeClient={codeClient}
                         layout="page"
-                        load={(query) => codeClient.queryProjectPullRequestDetail(query)}
-                        onMerge={mergeProjectPullRequestFor(codeClient, pullRequest)}
-                        {...projectPullRequestReviewActions({
-                          codeClient,
-                          onSendLineNotes: sendPullRequestLineNotes,
-                          pullRequestReviewClient,
-                        })}
                         onOpenChat={openProjectPullRequestChat}
                         onOpenLinkedThread={(thread) =>
                           openLinkedProjectPullRequestThread(thread, pullRequest.projectId)
                         }
+                        onSendLineNotes={sendPullRequestLineNotes}
                         onUnlinkFromThread={onUnlink}
+                        pullRequestReviewClient={pullRequestReviewClient}
                         query={pullRequest}
-                        refresh={(command) => codeClient.refreshProjectPullRequestDetail(command)}
                       />
                     )}
                     onOpenPullRequests={() => setCodePullRequestsOpen(true)}

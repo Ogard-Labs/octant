@@ -27,8 +27,7 @@ import type { createChatReadCursorStore } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
 import { composerContextOccupancy } from "../context/composerContextMeterReading";
 import type { ComposerContextMeterProvider } from "../context/composerContextMeterScope";
-import { ProjectReviewModule as DockProjectPullRequestReviewTool } from "../dockModules/ProjectReviewModule";
-import { projectPullRequestReviewActions } from "./projectPullRequestReviewWiring";
+import { HostPullRequestReviewModule } from "../dockModules/HostPullRequestReviewModule";
 import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import { modelDisplayName } from "../providers/providerModelLabel";
 import type { ProviderController } from "../providers/useProviderController";
@@ -489,26 +488,20 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
     );
   }
 
-  const projectPullRequestSwitchActions = projectPullRequestReviewActions({
-    codeClient,
-    onSendLineNotes: actions.sendPullRequestLineNotes,
-    pullRequestReviewClient,
-  });
-
   function bottomToolContent(surface: RightUtilityDockSurfaceId) {
     if (surface === "review" && projectPullRequestReviewOpen && selectedProjectPullRequest) {
       return (
-        <DockProjectPullRequestReviewTool
+        <HostPullRequestReviewModule
           key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
-          load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+          codeClient={codeClient}
           onMerge={actions.mergeProjectPullRequest}
-          {...projectPullRequestSwitchActions}
+          onSendLineNotes={actions.sendPullRequestLineNotes}
+          pullRequestReviewClient={pullRequestReviewClient}
           onOpenChat={actions.openProjectPullRequestChat}
           onOpenLinkedThread={(thread) =>
             actions.openLinkedProjectPullRequestThread(thread, selectedProjectPullRequest.projectId)
           }
           query={selectedProjectPullRequest}
-          refresh={(command) => codeClient.refreshProjectPullRequestDetail(command)}
         />
       );
     }
@@ -736,11 +729,12 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
           bottomPanelOpen &&
           activeBottomSurface?.id === "review" ? undefined : projectPullRequestReviewOpen &&
             selectedProjectPullRequest !== undefined ? (
-            <DockProjectPullRequestReviewTool
+            <HostPullRequestReviewModule
               key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
-              load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+              codeClient={codeClient}
               onMerge={actions.mergeProjectPullRequest}
-              {...projectPullRequestSwitchActions}
+              onSendLineNotes={actions.sendPullRequestLineNotes}
+              pullRequestReviewClient={pullRequestReviewClient}
               onOpenChat={actions.openProjectPullRequestChat}
               onOpenLinkedThread={(thread) =>
                 actions.openLinkedProjectPullRequestThread(
@@ -749,7 +743,6 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
                 )
               }
               query={selectedProjectPullRequest}
-              refresh={(command) => codeClient.refreshProjectPullRequestDetail(command)}
             />
           ) : (
             threadUtility("review")
@@ -909,11 +902,12 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
             selectedProjectPullRequest !== undefined
           ) {
             return (
-              <DockProjectPullRequestReviewTool
+              <HostPullRequestReviewModule
                 key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
-                load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+                codeClient={codeClient}
                 onMerge={actions.mergeProjectPullRequest}
-                {...projectPullRequestSwitchActions}
+                onSendLineNotes={actions.sendPullRequestLineNotes}
+                pullRequestReviewClient={pullRequestReviewClient}
                 onOpenChat={actions.openProjectPullRequestChat}
                 onOpenLinkedThread={(thread) =>
                   actions.openLinkedProjectPullRequestThread(
@@ -922,7 +916,6 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
                   )
                 }
                 query={selectedProjectPullRequest}
-                refresh={(command) => codeClient.refreshProjectPullRequestDetail(command)}
               />
             );
           }
