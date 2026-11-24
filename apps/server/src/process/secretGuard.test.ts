@@ -279,6 +279,29 @@ describe("secret guard refusals for host file tools", () => {
   });
 });
 
+describe("a thread's secrets and Octant's own file tools", () => {
+  it.each([true, false])("are refused at every level (Full access %s)", (fullAccess) => {
+    const home = fakeHome();
+    const runtime = join(home, "runtime");
+    const file = join(runtime, "thread-secrets", "host", "thread", "TOKEN");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, "private-value");
+    symlinkSync(file, join(home, "project", "link"));
+    configureSecretGuardLocations({ dataDirectory: join(home, "data"), runtimeDirectory: runtime });
+    applyProtectedFilesChoice({ added: [], removed: ["octant-credentials"] });
+    const options = { homeDirectory: home, platform: "darwin", fullAccess } as const;
+    expect(secretGuardRefusal(file, options)).toContain("Thread secrets");
+    expect(secretGuardRefusal(join(home, "project", "link"), options)).toBeDefined();
+    expect(secretGuardSearchRefusal(runtime, options)).toContain("Thread secrets");
+    expect(secretGuardRefusal(join(runtime, "other"), options)).toBeUndefined();
+    expect(secretGuardSearchRefusal(join(home, "project"), options)).toBeUndefined();
+    // Empty, the folder stops no search of what is above it, and still no search of itself.
+    rmSync(file);
+    expect(secretGuardSearchRefusal(runtime, options)).toBeUndefined();
+    expect(secretGuardSearchRefusal(join(runtime, "thread-secrets"), options)).toBeDefined();
+  });
+});
+
 describe("secret guard on a Windows host", () => {
   const options = { platform: "win32" as const, homeDirectory: "C:\\Users\\Person" };
 

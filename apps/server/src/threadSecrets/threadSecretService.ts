@@ -113,8 +113,8 @@ interface ActiveSecret {
   readonly value: string;
   readonly path: string | undefined;
   readonly endsAt: number | undefined;
-  /** Stops redacting the value that was granted. */
-  readonly release: () => void;
+  /** Stops redacting the value that was granted; none for a value that is no secret. */
+  readonly release: (() => void) | undefined;
   /** Stops redacting the latest value its item was rotated to. */
   readonly releaseRotated: (() => void) | undefined;
 }
@@ -166,6 +166,8 @@ const MAX_HANDLES_PER_SECRET = 8;
 const MAX_RETRY_KEYS_PER_THREAD = 128;
 /** Threads whose answered retry keys are kept; the longest unused leaves first. */
 const MAX_RETRY_THREADS = 256;
+/** Each costs every redaction pass; past this the longest ended leaves. */
+const MAX_ENDED_VALUES = 128;
 const LOOKUP_TIMEOUT_MS = 60_000;
 const SWEEP_INTERVAL_MS = 1_000;
 const LIFETIME_MS: Readonly<Partial<Record<ThreadSecretLifetime, number>>> = {
@@ -207,7 +209,8 @@ const refusal = (failure: ThreadSecretFailure): ThreadSecretRequestResult => ({
  * expiry until it is answered, its turn stops, its thread is archived, its
  * window goes or the host stops. A granted value stays in this process and,
  * where a file was granted, in that file. Nothing is usable before the journal
- * has recorded it, and nothing but a record of its end outlives it.
+ * has recorded it. An ended value is kept only to redact it, and only until the
+ * host stops.
  */
 export class ThreadSecretService {
   readonly #options: ThreadSecretServiceOptions;
@@ -219,6 +222,13 @@ export class ThreadSecretService {
   /** Retry key to its one answer, per thread. */
   readonly #answers = new Map<string, Map<string, RetriedAnswer>>();
   readonly #leases = new Set<Lease>();
+  /**
+   * What stops redacting each ended value, oldest first. A token usually works
+   * after its secret ends, and the agent may still have it in its context, so
+   * the value stays redacted until the host stops (maintainer decision,
+   * 2026-11-24). Only this redaction still has it.
+   */
+  readonly #ended: Array<() => void> = [];
   readonly #lastLifetimes = new Map<string, ThreadSecretLifetime>();
   /** Files whose removal failed, tried again until they are gone. */
   readonly #leftover = new Map<string, { readonly threadId: string; readonly name: string }>();
@@ -489,6 +499,7 @@ export class ThreadSecretService {
     for (const pending of this.#pending.values()) this.#cancel(pending);
     this.#end([...this.#active.values()], "host-stopped");
     this.#endLeases(() => true);
+    for (const release of this.#ended.splice(0)) this.#attempt(release);
     this.#attempt(() => this.#options.files?.sweep());
     this.#answers.clear();
     this.#handles.clear();
@@ -765,7 +776,7 @@ export class ThreadSecretService {
     const secrets: ActiveSecret[] = [];
     const undo = () => {
       for (const file of [...prepared].reverse()) this.#attempt(() => file.discard());
-      for (const secret of secrets) this.#attempt(secret.release);
+      for (const secret of secrets) this.#attempt(() => secret.release?.());
     };
     const replaced: ActiveSecret[] = [];
     try {
@@ -780,7 +791,7 @@ export class ThreadSecretService {
         // person typed and saw; it never spares an account's own password, or
         // a stored value nobody looked at.
         const plain = !shown.secret && value.source === "pasted" && input.kind === "token";
-        const release = plain ? () => undefined : this.#options.hold(value.value);
+        const release = plain ? undefined : this.#options.hold(value.value);
         const secret: ActiveSecret = {
           id: this.#options.uuid(),
           threadId: caller.threadId,
@@ -860,8 +871,12 @@ export class ThreadSecretService {
     try {
       return this.#savedResult(input, secrets, delivery);
     } catch {
-      // The agent was told of nothing, so it holds nothing.
-      this.#end(secrets, "delivery-failed");
+      // The agent was told of nothing, so nothing of it stays.
+      for (const secret of secrets) {
+        this.#forget(secret, false, "never-used");
+        this.#attempt(() => secret.release?.());
+      }
+      this.#recordEnd(secrets, "delivery-failed");
       return "unavailable";
     } finally {
       this.#changed();
@@ -943,7 +958,7 @@ export class ThreadSecretService {
       );
   }
 
-  #forget(secret: ActiveSecret, fileReplaced: boolean): void {
+  #forget(secret: ActiveSecret, fileReplaced: boolean, use?: "never-used"): void {
     this.#active.delete(secret.id);
     for (const [handle, secretId] of this.#handles)
       if (secretId === secret.id) this.#handles.delete(handle);
@@ -956,8 +971,11 @@ export class ThreadSecretService {
         threadId: secret.threadId,
         name: secret.secretName,
       });
-    this.#attempt(secret.release);
-    this.#attempt(() => secret.releaseRotated?.());
+    if (use === "never-used") return;
+    for (const release of [secret.release, secret.releaseRotated])
+      if (release !== undefined) this.#ended.push(release);
+    for (const release of this.#ended.splice(0, this.#ended.length - MAX_ENDED_VALUES))
+      this.#attempt(release);
   }
 
   #endLease(lease: Lease): void {

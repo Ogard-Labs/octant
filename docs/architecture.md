@@ -15484,7 +15484,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     credentials, the Provider sign-ins group (each provider's stored sign-in
     and Octant's managed account homes), with the same plain message, as the
     account's sign-in stays out of the instruction files Octant reads for
-    Claude at every level. Below Full access they refuse every protected path.
+    Claude at every level, and the folder of the
+    [secrets a person gave a thread](#thread-secrets) (maintainer decision,
+    2026-11-24). Below Full access they refuse every protected path.
     OpenCode's own file tools are held to the same narrowing: at Full access
     its read and list refusals, on 1.x and 2.x, name only the Provider
     sign-ins group ([detail](design/provider-runtimes.md#key-providers)).
@@ -15856,8 +15858,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     files Octant protects (`~/.aws`, kube, docker, npm and `gh`
     configuration, `.netrc`) at every level, as on its own, so `aws`,
     `kubectl`, `docker push`, private registries and `gh` work. Octant's own
-    file tools keep refusing them below Full access, and provider sign-ins
-    at Full access. Strict refuses them for every tool. Built for Claude
+    file tools keep refusing them below Full access, and at Full access the
+    provider sign-ins and the folder of thread secrets. Strict refuses them for every tool. Built for Claude
     Code's own file tools (its gate refuses only another provider's sign-in
     outside Strict) and for the confinement of Pi and the ACP agents
     (`protectedFiles: "provider-sign-ins"`), read at each launch. Built for
@@ -19713,7 +19715,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     admits its owner and the system alone. No file is written until what an
     earlier host left is gone. Every launch Octant confines is denied the folder,
     apart from the protected list: the person cannot remove that rule, and it
-    holds for launches that carry only the sign-in rules.
+    holds for launches that carry only the sign-in rules. Octant's own file tools
+    refuse it at every level, Full access included (maintainer decision,
+    2026-11-24); an agent's own shell there can still read it.
   - **Record first.** Values are redacted, written under a name nothing knows,
     recorded, and only then put in place. A refused journal append leaves nothing
     behind, and a file that cannot be put in place leaves an earlier secret of the
@@ -19725,14 +19729,18 @@ approval-gated` command that undoes it. The terminal shows no one-time
     service log, exports and tool-call records, at any depth, and in a key unless
     it reads as a field name. An agent cannot switch this off: a field it calls
     not secret is spared only when the person typed it for a token. Matches are
-    found in the original text and overlapping ones replaced as one.
+    found in the original text and overlapping ones replaced as one. An ended
+    value stays redacted, and is kept for nothing else, until the host stops
+    (maintainer decision, 2026-11-24): the token usually still works and may
+    still be in the agent's context. At most 128 ended values are kept, the
+    longest ended leaving first.
   - **What it does not cover.** A command that runs without a sandbox (Full
     access, and most providers below it outside Strict) can read any thread's
     file, print it, encode it or send it, and may keep a hard link. Redaction
     misses other encodings (hex, letter case, HTML, shell quoting, wrapped
     base64), a value split across streamed chunks, short lines of a multi-line
     value, values under six characters and plain ones under eight, and tool or
-    approval requests; it ends with the secret; and it is host-wide, so a value
+    approval requests; a value the host no longer keeps; and it is host-wide, so a value
     that is an ordinary word is hidden everywhere. Anything a runtime shows its
     model directly is outside it. Consent is to the thread, the name and the
     lifetime, so a repeat request may state another reason. A handle names no
@@ -20694,8 +20702,8 @@ cards; general Azure CLI credentials remain unavailable by design.
   - **Octant's own secrets:** the bridge secret, the data directory's
     `remote` and `integrations` folders, the runtime directory's `*.secret`
     files, and the `thread-secrets` folder in either. Every confined launch
-    denies that last folder whatever this list keeps
-    ([thread secrets](#thread-secrets)).
+    denies that last folder, and Octant's own file tools refuse it at every
+    level, whatever this list keeps ([thread secrets](#thread-secrets)).
   - **Provider sign-ins:** each provider's stored sign-in file in the home
     folder, and Octant's managed account homes (`providers/` in the data
     directory). A runtime may read its own sign-in and no other tool's: a

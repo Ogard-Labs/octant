@@ -169,7 +169,7 @@ export function secretGuardEntries(input: {
 
 /**
  * The folders of the secrets people gave threads, denied to every launch
- * Octant confines. Apart from the protected list on purpose: that list is the
+ * Octant confines and to Octant's own file tools at every level. Apart from the protected list on purpose: that list is the
  * person's to change, and a launch may carry only its sign-in rules.
  */
 export function threadSecretGuardEntries(
@@ -194,6 +194,22 @@ export function threadSecretGuardEntries(
       },
     ];
   });
+}
+
+/** Whether any host's thread has a file there. A folder that cannot be read may. */
+function holdsThreadSecret(entry: ResolvedProtectedEntry): boolean {
+  if (entry.kind !== "path") return false;
+  const holds = (path: string, depth: number): boolean => {
+    try {
+      return readdirSync(path, { withFileTypes: true }).some(
+        (child) => !child.isDirectory() || depth === 0 || holds(join(path, child.name), depth - 1),
+      );
+    } catch (error) {
+      return !(error instanceof Error && "code" in error && error.code === "ENOENT");
+    }
+  };
+  // A Windows guard path is spelled `/c:/…`.
+  return holds(entry.foldCase === true ? entry.path.slice(1) : entry.path, 2);
 }
 
 /**
@@ -300,7 +316,8 @@ export function protectedAtLevel<T extends { readonly ruleId: ResolvedProtectedE
  *
  * `fullAccess` is a Full access caller's own file tool: there the guard is
  * soft and only the provider sign-ins stay refused (see
- * {@link FULL_ACCESS_PROTECTED_RULES}).
+ * {@link FULL_ACCESS_PROTECTED_RULES}), and the threads' secrets, whose values
+ * Octant never hands a model at any level (maintainer decision, 2026-11-24).
  */
 export function secretGuardRefusal(
   path: string,
@@ -316,7 +333,10 @@ export function secretGuardRefusal(
   const unjudged = unjudgedPathRefusal(path, platform, homeDirectory);
   if (unjudged !== "judge") return unjudged;
   const listed = secretGuardEntries({ platform, homeDirectory });
-  const entries = protectedAtLevel(listed, options.fullAccess === true);
+  const entries = [
+    ...protectedAtLevel(listed, options.fullAccess === true),
+    ...threadSecretGuardEntries(platform),
+  ];
   const entry = protectedEntryFor(
     pathForms(path, platform),
     withResolvedForms(entries, platform),
@@ -401,7 +421,7 @@ export function secretGuardSearchRefusal(
     readonly ownAccountPaths?: ReadonlyArray<string>;
     readonly platform?: NodeJS.Platform;
     readonly homeDirectory?: string;
-    /** As for {@link secretGuardRefusal}: only the provider sign-ins count. */
+    /** As for {@link secretGuardRefusal}: only the sign-ins and the threads' secrets count. */
     readonly fullAccess?: boolean;
   } = {},
 ): string | undefined {
@@ -410,7 +430,17 @@ export function secretGuardSearchRefusal(
   const unjudged = unjudgedPathRefusal(root, platform, homeDirectory);
   if (unjudged !== "judge") return unjudged;
   const entries = withResolvedForms(
-    protectedAtLevel(secretGuardEntries({ platform, homeDirectory }), options.fullAccess === true),
+    [
+      ...protectedAtLevel(
+        secretGuardEntries({ platform, homeDirectory }),
+        options.fullAccess === true,
+      ),
+      // The folder always exists, under /tmp on Linux: empty, it is no reason
+      // to refuse a search of everything above it.
+      ...threadSecretGuardEntries(platform).filter(
+        (entry) => holdsThreadSecret(entry) || secretGuardRefusal(root, options) !== undefined,
+      ),
+    ],
     platform,
   );
   const own = uniqueForms(options.ownAccountPaths ?? [], platform);
