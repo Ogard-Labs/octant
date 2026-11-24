@@ -79,7 +79,10 @@ import {
   createFollowUpSuggestionRouteHandler,
   type FollowUpSuggestionActionDependencies,
 } from "../followUps/followUpSuggestionRoutes";
-import { createSideTaskRouteHandler, type SideTaskRouteDependencies } from "../sideTasks/sideTaskRoutes";
+import {
+  createSideTaskRouteHandler,
+  type SideTaskRouteDependencies,
+} from "../sideTasks/sideTaskRoutes";
 import { createFinishedReceiptRouteHandler } from "../finishedReceipts/finishedReceiptRoutes";
 import type { SideTaskStartDependencies } from "../sideTasks/sideTaskStart";
 import {

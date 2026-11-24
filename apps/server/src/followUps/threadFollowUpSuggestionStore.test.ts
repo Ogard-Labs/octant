@@ -226,12 +226,16 @@ describe("thread follow-up suggestions", () => {
       suggestedBy: claude,
       followUps: suggestions(),
     });
-    store.activate(threadId, suggestionId as never, {
-      kind: "new-thread",
-      mode: "chat",
-      title: "Add tests",
-      threadId: followUpChild,
-    } as never);
+    store.activate(
+      threadId,
+      suggestionId as never,
+      {
+        kind: "new-thread",
+        mode: "chat",
+        title: "Add tests",
+        threadId: followUpChild,
+      } as never,
+    );
     expect(store.links().map((link) => link.threadId)).toEqual([followUpChild, child]);
     expect(store.sideTaskParentOf(followUpChild)).toBeUndefined();
   });
