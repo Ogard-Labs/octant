@@ -806,6 +806,20 @@ export function guardrailLowered(from: PermissionMode, to: PermissionMode): bool
 }
 
 /**
+ * Whether a thread's level moved strictly up the level order (Plan, Ask first,
+ * Auto or Accept edits, Full access): the new level holds the old one and
+ * more. A move between Auto and Accept edits is sideways, since neither holds
+ * the other, so it is not a raise. A change notice is raised only for this.
+ */
+export function threadAccessRaised(from: PermissionMode, to: PermissionMode): boolean {
+  return (
+    from !== to &&
+    workAccessWithin(workAccessOfPermissionMode(from), workAccessOfPermissionMode(to)) &&
+    !workAccessWithin(workAccessOfPermissionMode(to), workAccessOfPermissionMode(from))
+  );
+}
+
+/**
  * Whether a new thread that starts at Full access keeps the sandbox, when the
  * request that created it did not say: the Project's choice, else Settings',
  * else off (Full access stays open, as it always was).

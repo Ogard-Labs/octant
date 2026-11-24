@@ -7,6 +7,7 @@ import {
   defaultPermissionModeFor,
   defaultWorkPermissionModeFor,
   guardrailLowered,
+  threadAccessRaised,
   guardrailScopeOf,
   guardrailLevelOf,
   hostProviderTurnRefusal,
@@ -722,6 +723,17 @@ describe("lowering and scope", () => {
     expect(guardrailLowered("full-access", "ask-first")).toBe(false);
     expect(guardrailLowered("full-access", "plan")).toBe(false);
     expect(guardrailLowered("auto", "auto")).toBe(false);
+  });
+
+  it("calls a level raised only when the new level holds the old one and more", () => {
+    expect(threadAccessRaised("ask-first", "full-access")).toBe(true);
+    expect(threadAccessRaised("plan", "ask-first")).toBe(true);
+    expect(threadAccessRaised("ask-first", "auto")).toBe(true);
+    expect(threadAccessRaised("accept-edits", "full-access")).toBe(true);
+    // Auto and Accept edits widen different things, so neither is above the other.
+    expect(threadAccessRaised("auto", "accept-edits")).toBe(false);
+    expect(threadAccessRaised("full-access", "auto")).toBe(false);
+    expect(threadAccessRaised("auto", "auto")).toBe(false);
   });
 
   it("starts a Work thread at its Project's mode, else Work's default, else Ask first", () => {

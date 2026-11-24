@@ -16,6 +16,8 @@ export const MachineChangeTopic = Schema.Literal(
   "thread-message-queue",
   "todos",
   "canvas-choice-answers",
+  "access-activity",
+  "change-notices",
 );
 export type MachineChangeTopic = typeof MachineChangeTopic.Type;
 
@@ -33,7 +35,7 @@ export const MachineChangeFrame = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("changed"),
     sequence: Schema.Int.pipe(Schema.positive()),
-    topics: Schema.Array(MachineChangeTopic).pipe(Schema.maxItems(13)),
+    topics: Schema.Array(MachineChangeTopic).pipe(Schema.maxItems(15)),
     epoch: Schema.optional(MachineChangeEpoch),
   }).annotations(strict),
   Schema.Struct({

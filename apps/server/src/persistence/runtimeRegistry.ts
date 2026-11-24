@@ -1,3 +1,4 @@
+import { CHANGE_NOTICE_DISMISSED, ChangeNoticeDismissed } from "@octant/contracts/access-activity";
 import {
   BROWSER_DOWNLOAD_PERMISSION_EVENT,
   BrowserDownloadPermissionChanged,
@@ -114,7 +115,10 @@ import {
   WorkProjectActionsChanged,
   WorkProjectPermissionModeChanged,
   GUARDRAIL_LEVEL_LOWERED,
+  GUARDRAIL_ACCESS_RAISED,
+  GUARDRAIL_LEVEL_CHANGED,
   GuardrailLevelLowered,
+  GuardrailLevelChange,
   PROVIDER_TOOLING_APPLIED,
   ProviderToolingAppliedRecordSchema,
   PROVIDER_ACP_AGENT_INSTALL_SCRIPTS_RAN,
@@ -635,6 +639,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     )
     .register(CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED, 1, CodeProjectPullRequestMergeRecorded)
     .register(GUARDRAIL_LEVEL_LOWERED, 1, GuardrailLevelLowered)
+    .register(GUARDRAIL_ACCESS_RAISED, 1, GuardrailLevelChange)
+    .register(GUARDRAIL_LEVEL_CHANGED, 1, GuardrailLevelChange)
+    .register(CHANGE_NOTICE_DISMISSED, 1, ChangeNoticeDismissed)
     .register(PROVIDER_TOOLING_APPLIED, 1, ProviderToolingAppliedRecordSchema)
     .register(CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED, 1, CodeProjectPullRequestActionRecorded)
     .register(

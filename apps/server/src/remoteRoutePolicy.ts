@@ -28,6 +28,7 @@ import { PENDING_REQUESTS_PATH } from "./pendingRequestRoutes";
 import { NEW_DEVICE_ALERTS_PATH } from "./hub/newDeviceAlertRoutes";
 import { PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS } from "./providers/providerCredentialRoutes";
 import { PAIRED_DEVICE_ADMINISTRATION_ROUTES } from "./remote/localDeviceAdministrationRoutes";
+import { PAIRED_DEVICE_ACCESS_ACTIVITY_ROUTES } from "./remote/accessActivityRoutes";
 import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";
 
 const DEFAULT_BODY_BYTES = 1_048_576;
@@ -1255,6 +1256,14 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   // Paired devices and pairing requests, for a device the host's own person
   // paired: the lists are reads, every change a POST.
   ...PAIRED_DEVICE_ADMINISTRATION_ROUTES.map(({ path, method }) => ({
+    kind: "exact" as const,
+    path,
+    methods: [method],
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  })),
+  // Access activity and change notices; the route answers only a device
+  // paired at Full and no restricted device reaches it through the catalogue.
+  ...PAIRED_DEVICE_ACCESS_ACTIVITY_ROUTES.map(({ path, method }) => ({
     kind: "exact" as const,
     path,
     methods: [method],

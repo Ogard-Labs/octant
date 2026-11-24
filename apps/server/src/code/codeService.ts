@@ -25,10 +25,15 @@ import {
   fullAccessSandboxSupported,
   guardrailLowered,
   permissionModeOf,
+  threadAccessRaised,
 } from "@octant/domain/guardrail-policy";
 import { selectCompletionReceiptId } from "@octant/domain/finished-receipt-policy";
 import {
+  decodeGuardrailAccessRaised,
+  decodeGuardrailLevelChange,
   decodeGuardrailLevelLowered,
+  GUARDRAIL_ACCESS_RAISED,
+  GUARDRAIL_LEVEL_CHANGED,
   GUARDRAIL_LEVEL_LOWERED,
 } from "@octant/contracts/guardrail-lowering";
 import type { PermissionMode } from "@octant/contracts/providers";
@@ -1613,7 +1618,7 @@ export class CodeService {
         },
         actor,
       );
-      this.#journalLowering(
+      this.#journalLevelChange(
         {
           scope: "thread",
           from: permissionModeOf(current),
@@ -2240,7 +2245,7 @@ export class CodeService {
             { kind: "settings-updated", settings },
             actor,
           );
-          this.#journalLowering(
+          this.#journalLevelChange(
             {
               scope: "global",
               from: permissionModeOf({
@@ -3180,7 +3185,7 @@ export class CodeService {
             actor,
           );
           if (command.kind === "change-code-thread-access") {
-            this.#journalLowering(
+            this.#journalLevelChange(
               {
                 scope: "thread",
                 from: permissionModeOf(current),
@@ -4870,12 +4875,14 @@ export class CodeService {
   }
 
   /**
-   * Records a lowered guardrail as its own single-event aggregate, so no
+   * Records a guardrail change as its own single-event aggregate, so no
    * other writer's version waits on it. The envelope names the local user and
-   * the time; the payload names the scope and both levels. A change that does
-   * not lower the guardrail records nothing.
+   * the time; the payload names the scope and both levels. Every change is
+   * recorded under the event that means it — a lowering, an access raise
+   * into a still-gated level, or any other change — because the access
+   * notices read raised levels from this same journal.
    */
-  #journalLowering(
+  #journalLevelChange(
     change: {
       readonly scope: "global" | "project" | "thread";
       readonly from: PermissionMode;
@@ -4885,15 +4892,14 @@ export class CodeService {
     },
     actor?: EventActor,
   ): void {
-    if (!guardrailLowered(change.from, change.to)) return;
-    this.#append(
-      "guardrail-change",
-      this.#uuid(),
-      0,
-      GUARDRAIL_LEVEL_LOWERED,
-      decodeGuardrailLevelLowered({ surface: "code", ...change }),
-      actor,
-    );
+    if (change.from === change.to) return;
+    const payload = { surface: "code" as const, ...change };
+    const [eventName, body] = guardrailLowered(change.from, change.to)
+      ? ([GUARDRAIL_LEVEL_LOWERED, decodeGuardrailLevelLowered(payload)] as const)
+      : threadAccessRaised(change.from, change.to)
+        ? ([GUARDRAIL_ACCESS_RAISED, decodeGuardrailAccessRaised(payload)] as const)
+        : ([GUARDRAIL_LEVEL_CHANGED, decodeGuardrailLevelChange(payload)] as const);
+    this.#append("guardrail-change", this.#uuid(), 0, eventName, body, actor);
   }
 
   /**

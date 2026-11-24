@@ -1,4 +1,8 @@
 import { randomUUID as defaultRandomUUID } from "node:crypto";
+import {
+  CHANGE_NOTICE_ACTION_PATHS,
+  decodeChangeNoticeRequest,
+} from "@octant/contracts/access-activity";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
@@ -100,6 +104,7 @@ export interface RemoteDeviceControlRuntime {
   }) => Promise<void>;
   readonly readRemoteAccessPaused: () => Promise<boolean>;
   readonly setRemoteAccessPaused: (input: { readonly paused: boolean }) => Promise<boolean>;
+  readonly undoAccessChangeNotice: (input: { readonly noticeId: string }) => Promise<void>;
   readonly denyPairingRequest: (input: {
     readonly ticketId: string;
     readonly reasonCode: string;
@@ -134,6 +139,7 @@ export interface RemoteDeviceControlService {
   readonly setDeviceAccessLevel: (deviceId: string, accessLevel: unknown) => Promise<void>;
   readonly readRemoteAccessPaused: () => Promise<boolean>;
   readonly setRemoteAccessPaused: (paused: unknown) => Promise<boolean>;
+  readonly undoAccessChangeNotice: (noticeId: unknown) => Promise<void>;
   readonly denyPairingRequest: (
     ticketId: string,
     reasonCode: string,
@@ -188,6 +194,11 @@ export function createRemoteDeviceControlService(options: {
     setRemoteAccessPaused: async (paused: unknown) => {
       if (typeof paused !== "boolean") throw new RemoteDeviceControlFailure("invalid");
       return await invoke(() => options.runtime.setRemoteAccessPaused({ paused }));
+    },
+    undoAccessChangeNotice: async (noticeId: unknown) => {
+      if (typeof noticeId !== "string") throw new RemoteDeviceControlFailure("invalid");
+      validateUuid(noticeId, "change notice");
+      await invoke(() => options.runtime.undoAccessChangeNotice({ noticeId }));
     },
     denyPairingRequest: async (ticketId: string, reasonCode: string) => {
       validateUuid(ticketId, "pairing request");
@@ -256,6 +267,19 @@ export function createRemoteDeviceControlHttpRuntime(
       decodePaused(
         await request(fetch, options, "POST", "/api/desktop/remote/access-pause", input),
       ),
+    undoAccessChangeNotice: async (input) => {
+      // The credential-bearing call: a redirect would follow it with the
+      // bridge's secret headers, so it is refused outright.
+      const value = await request(
+        fetch,
+        options,
+        "POST",
+        CHANGE_NOTICE_ACTION_PATHS.undo,
+        decodeChangeNoticeRequest(input),
+        "error",
+      );
+      requireExactKeys(value, ["status"]);
+    },
     denyPairingRequest: async (input) =>
       decodeDecision(
         await request(fetch, options, "POST", "/api/desktop/remote/pairing-requests/deny", input),
@@ -293,6 +317,7 @@ async function request(
   method: "GET" | "POST",
   path: string,
   body?: unknown,
+  redirect?: RequestRedirect,
 ): Promise<unknown> {
   let response: Response;
   try {
@@ -304,6 +329,7 @@ async function request(
         ...(body === undefined ? {} : { "content-type": "application/json" }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(redirect === undefined ? {} : { redirect }),
     });
   } catch {
     throw new RemoteDeviceControlFailure("unavailable");

@@ -115,6 +115,7 @@
     "./linear-issues": "./src/linearIssues.ts",
     "./linear-issue-context": "./src/linearIssueContext.ts",
     "./remote-access": "./src/remoteAccess.ts",
+    "./access-activity": "./src/accessActivity.ts",
     "./remote-push-notifications": "./src/remotePushNotifications.ts",
     "./remote-request-proof": "./src/remoteRequestProof.ts",
     "./launch-session": "./src/launchSession.ts",

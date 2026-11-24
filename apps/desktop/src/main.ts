@@ -781,6 +781,9 @@ export function installRemoteDeviceIpcHandlers(options: {
   options.handle(IPC_CHANNELS.remoteAccessPauseSet, (event, paused) =>
     run(event, (service) => service.setRemoteAccessPaused(paused)),
   );
+  options.handle(IPC_CHANNELS.undoAccessChangeNotice, (event, noticeId) =>
+    run(event, (service) => service.undoAccessChangeNotice(noticeId)),
+  );
   options.handle(IPC_CHANNELS.remotePairingDeny, (event, ticketId, reasonCode) =>
     run(event, (service) => service.denyPairingRequest(ticketId as string, reasonCode as string)),
   );

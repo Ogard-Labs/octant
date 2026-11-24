@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { decodeProviderInstance, decodeWindowId, type ProviderInstance } from "@octant/contracts";
-import { addApiKey } from "@octant/host-runtime";
+import {
+  decodeEventActor,
+  decodeProviderInstance,
+  decodeWindowId,
+  type ProviderInstance,
+} from "@octant/contracts";
+import { addApiKey, apiKeyPoolFingerprint, setActiveApiKey } from "@octant/host-runtime";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import type { ProviderKeyReference } from "./credentialBrokerClient";
 import type { ProviderKeyJournal } from "./providerKeyJournal";
-import { createProviderCredentialRouteHandler } from "./providerCredentialRoutes";
+import {
+  createProviderCredentialRouteHandler,
+  removeProviderApiKey,
+  type ProviderCredentialRouteOptions,
+} from "./providerCredentialRoutes";
 import { createRemoteDevicePrincipal } from "../clientPrincipal";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 
@@ -74,6 +83,8 @@ function setup(
         ...common,
         windowId: request.windowId,
         ...(request.actor === undefined ? {} : { actor: request.actor }),
+        ...(request.keyChange === undefined ? {} : { keyChange: request.keyChange }),
+        ...(request.keyId === undefined ? {} : { keyId: request.keyId }),
       });
       return {
         complete: (outcome) => records.push({ name: "completed", ...common, outcome }),
@@ -94,7 +105,7 @@ function setup(
       ...(input.failingCause === undefined ? {} : { cause: input.failingCause }),
     };
   };
-  const handle = createProviderCredentialRouteHandler({
+  const options: ProviderCredentialRouteOptions = {
     desktopBridgeSecret: secret,
     windowAuthorityStore: authority,
     readProviderInstances: () => instances,
@@ -143,8 +154,9 @@ function setup(
               return stored.get(id) ?? "";
             },
           },
-  });
-  return { handle, stored, instances, records, reads };
+  };
+  const handle = createProviderCredentialRouteHandler(options);
+  return { handle, options, stored, instances, records, reads };
 }
 
 function hostLocal(
@@ -436,7 +448,14 @@ describe("host-local provider key routes", () => {
     await handle(hostLocal(REMOVE, { instance: GATEWAY_ID }));
 
     expect(records).toEqual([
-      { name: "requested", instanceId: GATEWAY_ID, action: "set", windowId },
+      {
+        name: "requested",
+        instanceId: GATEWAY_ID,
+        action: "set",
+        windowId,
+        keyChange: "added",
+        keyId: "default",
+      },
       { name: "completed", instanceId: GATEWAY_ID, action: "set", outcome: "stored" },
       { name: "requested", instanceId: GATEWAY_ID, action: "remove", windowId },
       { name: "completed", instanceId: GATEWAY_ID, action: "remove", outcome: "removed" },
@@ -621,6 +640,166 @@ describe("host-local provider key pool routes", () => {
     expect(records.filter((record) => record.name === "requested")).toHaveLength(8);
     expect(records.at(-2)).toMatchObject({ name: "requested", action: "remove" });
     expect(JSON.stringify(records)).not.toContain(KEY);
+  });
+
+  it("records which key a write added or that it replaced one, never the key, so a notice can name it", async () => {
+    const { handle, records } = setup();
+    await handle(hostLocal(SET, { instance: GATEWAY_ID, credential: KEY, replace: false }));
+    await handle(hostLocal(SET, { instance: GATEWAY_ID, credential: `${KEY}-2`, replace: true }));
+    const added = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: `${KEY}-3` }))
+    )?.json()) as { key: { id: string } };
+    await handle(
+      keys("replace", { instance: GATEWAY_ID, keyId: added.key.id, credential: `${KEY}-4` }),
+    );
+    await handle(keys("rename", { instance: GATEWAY_ID, keyId: "default", label: "Work" }));
+    const requested = records.filter((record) => record.name === "requested");
+    expect(requested.map(({ keyChange, keyId }) => ({ keyChange, keyId }))).toEqual([
+      { keyChange: "added", keyId: "default" },
+      { keyChange: "replaced", keyId: undefined },
+      { keyChange: "added", keyId: added.key.id },
+      { keyChange: "replaced", keyId: undefined },
+      { keyChange: undefined, keyId: undefined },
+    ]);
+    expect(JSON.stringify(records)).not.toContain(KEY);
+  });
+
+  it("removes exactly the key a notice's Undo names, journaled as the person who pressed it", async () => {
+    const { handle, options, stored, records } = setup();
+    const kept = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: KEY, label: "Kept" }))
+    )?.json()) as { key: { id: string } };
+    const added = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: `${KEY}-2`, label: "Added" }))
+    )?.json()) as { key: { id: string } };
+    const actor = decodeEventActor({
+      kind: "local-user",
+      actorId: "44444444-4444-4444-8444-444444444444",
+    });
+    expect(
+      await removeProviderApiKey(options, {
+        instanceId: GATEWAY_ID,
+        keyId: added.key.id,
+        windowId,
+        actor,
+      }),
+    ).toEqual({ status: "done" });
+    expect(stored.get(GATEWAY_ID)).toContain(kept.key.id);
+    expect(stored.get(GATEWAY_ID)).not.toContain(added.key.id);
+    expect(records.at(-2)).toMatchObject({ name: "requested", action: "set", actor });
+    expect(
+      await removeProviderApiKey(options, {
+        instanceId: GATEWAY_ID,
+        keyId: added.key.id,
+        windowId,
+        actor,
+      }),
+    ).toEqual({ status: "refused", message: "That API key is no longer stored." });
+  });
+
+  it("refuses a notice's Undo when another change reached the pool first", async () => {
+    const { handle, options, stored } = setup();
+    const first = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: KEY }))
+    )?.json()) as { key: { id: string } };
+    const noticed = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: `${KEY}-2` }))
+    )?.json()) as { key: { id: string } };
+    const third = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: `${KEY}-3` }))
+    )?.json()) as { key: { id: string } };
+    const actor = decodeEventActor({
+      kind: "local-user",
+      actorId: "44444444-4444-4444-8444-444444444444",
+    });
+    const expected = { keyIds: [first.key.id, noticed.key.id, third.key.id] };
+    const [raced, undone] = await Promise.all([
+      removeProviderApiKey(options, {
+        instanceId: GATEWAY_ID,
+        keyId: third.key.id,
+        windowId,
+        actor,
+      }),
+      removeProviderApiKey(options, {
+        instanceId: GATEWAY_ID,
+        keyId: noticed.key.id,
+        windowId,
+        actor,
+        expected,
+      }),
+    ]);
+    expect(raced).toEqual({ status: "done" });
+    expect(undone).toMatchObject({
+      status: "refused",
+      message: expect.stringContaining("changed again"),
+    });
+    // The refused Undo removed nothing.
+    expect(stored.get(GATEWAY_ID)).toContain(noticed.key.id);
+  });
+
+  it("refuses a notice's Undo when a desktop edit the journal never saw changed the pool", async () => {
+    const { handle, options, stored } = setup();
+    const first = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: KEY }))
+    )?.json()) as { key: { id: string } };
+    const noticed = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: `${KEY}-2` }))
+    )?.json()) as { key: { id: string } };
+    const actor = decodeEventActor({
+      kind: "local-user",
+      actorId: "44444444-4444-4444-8444-444444444444",
+    });
+    // A desktop key control writes the pool without a journaled record.
+    stored.set(
+      GATEWAY_ID,
+      addApiKey(stored.get(GATEWAY_ID) ?? "", {
+        secret: `${KEY}-9`,
+        label: "Desktop",
+      }).stored,
+    );
+    const undone = await removeProviderApiKey(options, {
+      instanceId: GATEWAY_ID,
+      keyId: noticed.key.id,
+      windowId,
+      actor,
+      expected: { keyIds: [first.key.id, noticed.key.id] },
+    });
+    expect(undone).toMatchObject({
+      status: "refused",
+      message: expect.stringContaining("changed again"),
+    });
+    expect(stored.get(GATEWAY_ID)).toContain(noticed.key.id);
+  });
+
+  it("refuses a notice's Undo when a desktop edit changed the active key the journal never saw", async () => {
+    const { handle, options, stored } = setup();
+    const first = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: KEY }))
+    )?.json()) as { key: { id: string } };
+    const noticed = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: `${KEY}-2` }))
+    )?.json()) as { key: { id: string } };
+    const actor = decodeEventActor({
+      kind: "local-user",
+      actorId: "44444444-4444-4444-8444-444444444444",
+    });
+    // The notice holds the pool to the state it recorded when the change was
+    // journaled — the same key ids under a different active key are a
+    // different pool.
+    const fingerprint = apiKeyPoolFingerprint(stored.get(GATEWAY_ID) ?? "");
+    stored.set(GATEWAY_ID, setActiveApiKey(stored.get(GATEWAY_ID) ?? "", first.key.id));
+    const undone = await removeProviderApiKey(options, {
+      instanceId: GATEWAY_ID,
+      keyId: noticed.key.id,
+      windowId,
+      actor,
+      expected: { keyIds: [first.key.id, noticed.key.id], fingerprint },
+    });
+    expect(undone).toMatchObject({
+      status: "refused",
+      message: expect.stringContaining("changed again"),
+    });
+    expect(stored.get(GATEWAY_ID)).toContain(noticed.key.id);
   });
 
   it("answers the pool's own refusal for a key that is no longer stored", async () => {
@@ -810,7 +989,10 @@ describe("provider key routes for a paired device", () => {
       action: "set",
       windowId: deviceId,
       actor: { kind: "remote-device", actorId: deviceId, deviceId },
+      keyChange: "added",
+      keyId: "default",
     });
+    expect(records[2]).toMatchObject({ name: "requested", keyChange: "replaced" });
     expect(JSON.stringify([first.body, replaced.body, records])).not.toContain(KEY);
   });
 
