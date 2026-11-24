@@ -19,6 +19,7 @@ const TOOL_GROUPS: ReadonlyArray<{
       "environment",
       "side-chat",
       "plan",
+      "tasks",
       "delivery",
       "agents",
       "document",

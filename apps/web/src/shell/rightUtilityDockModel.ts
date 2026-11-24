@@ -24,7 +24,8 @@ export type RightUtilityDockSurfaceId =
   | "android-emulator"
   | "desktop"
   | "debug"
-  | "vitals";
+  | "vitals"
+  | "tasks";
 
 /**
  * What a panel answers for, and therefore what makes it truthful.
@@ -519,6 +520,13 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
     modes: ["work", "code"],
     scope: "thread",
   },
+  {
+    // The thread's newest task list, kept in view; opened only by the person.
+    id: "tasks",
+    label: "Tasks",
+    modes: ["chat", "work", "code"],
+    scope: "thread",
+  },
 ] as const satisfies ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
 
 const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSurfaceDescriptor>> =
@@ -542,6 +550,7 @@ const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSu
     debug: RIGHT_UTILITY_DOCK_SURFACES[16],
     vitals: RIGHT_UTILITY_DOCK_SURFACES[17],
     artifacts: RIGHT_UTILITY_DOCK_SURFACES[18],
+    tasks: RIGHT_UTILITY_DOCK_SURFACES[19],
   };
 
 export function resolveRightUtilityDockSurface(

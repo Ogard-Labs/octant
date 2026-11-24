@@ -8,8 +8,28 @@ import { VoiceSettingsView } from "./VoiceSettingsView";
 const now = "2026-09-05T10:00:00.000Z";
 const compatibleId = "00000000-0000-4000-8000-00000000c001";
 const imageId = "00000000-0000-4000-8000-00000000c003";
+const groqId = "00000000-0000-4000-8000-00000000c004";
 
-function providerSnapshot(options: { readonly enabled?: boolean } = {}): ProviderRegistrySnapshot {
+function providerSnapshot(
+  options: { readonly enabled?: boolean; readonly withGroq?: boolean } = {},
+): ProviderRegistrySnapshot {
+  const groq = {
+    id: groqId as never,
+    displayName: "Groq",
+    enabled: true,
+    environmentPolicy: "inherit-host" as const,
+    version: 1 as never,
+    createdAt: now as never,
+    updatedAt: now as never,
+    driverKind: "openai-compatible" as const,
+    configuration: {
+      kind: "openai-compatible-http" as const,
+      baseUrl: "https://api.groq.com/openai/v1",
+      authentication: "bearer" as const,
+      protocol: "chat-completions" as const,
+      manualModelIds: [],
+    },
+  };
   return {
     defaults: { permissionPersistence: "current-session", version: 1 as never },
     instances: [
@@ -45,9 +65,24 @@ function providerSnapshot(options: { readonly enabled?: boolean } = {}): Provide
           defaultModel: "gpt-image-2" as never,
         },
       },
+      ...(options.withGroq === true ? [groq] : []),
     ],
-    observedStates: [],
+    // Groq lists its models; the OpenAI endpoint has not been checked yet, so
+    // its preset's known transcription model stands in.
+    observedStates:
+      options.withGroq === true
+        ? [
+            {
+              instanceId: groqId,
+              models: [{ id: "llama-3.3-70b" }, { id: "whisper-large-v3" }],
+            } as never,
+          ]
+        : [],
   };
+}
+
+function transcriptionRow(): HTMLElement {
+  return screen.getByLabelText("Transcribe with setting");
 }
 
 describe("VoiceSettingsView", () => {
@@ -60,30 +95,93 @@ describe("VoiceSettingsView", () => {
         settings={{}}
       />,
     );
-    expect(screen.getByText("No eligible provider yet")).toBeVisible();
+    expect(screen.getByText("No endpoint for voice yet")).toBeVisible();
     expect(
       screen.getByText(
-        "Voice needs an enabled OpenAI-compatible endpoint, added under Octant Harness › Model endpoints.",
+        "Voice runs on an OpenAI-compatible endpoint. An OpenAI API or Mistral key can transcribe; add one under Octant Harness › Model endpoints.",
       ),
     ).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Save transcription endpoint" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Transcribe with" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Open Model endpoints" }));
     expect(onOpenModelEndpoints).toHaveBeenCalledOnce();
   });
 
-  it("persists a transcription endpoint through one shell settings patch", async () => {
+  it("lists every endpoint that can transcribe and saves the one picked without a save button", async () => {
     const user = userEvent.setup();
     const onSettingsChange = vi.fn<(patch: Partial<ShellSettings>) => void>();
     render(
+      <VoiceSettingsView
+        onSettingsChange={onSettingsChange}
+        providerSnapshot={providerSnapshot({ withGroq: true })}
+        settings={{}}
+      />,
+    );
+    const menu = screen.getByRole("combobox", { name: "Transcribe with" });
+    expect(menu.textContent).toContain("Off");
+    expect(within(transcriptionRow()).getByRole("status").textContent).toBe(
+      "Transcription is off, so microphone controls stay hidden.",
+    );
+
+    await user.click(menu);
+    const options = (await screen.findAllByRole("option")).map((option) => option.textContent);
+    expect(options).toEqual([
+      "Off",
+      "gpt-4o-mini-transcribe on OpenAI",
+      "whisper-large-v3 on Groq",
+      "Other model…",
+    ]);
+    await user.click(screen.getByRole("option", { name: "whisper-large-v3 on Groq" }));
+
+    expect(onSettingsChange).toHaveBeenCalledWith({
+      voice: { transcription: { providerInstanceId: groqId, modelId: "whisper-large-v3" } },
+    });
+    expect(screen.queryByRole("button", { name: /Save transcription/ })).toBeNull();
+  });
+
+  it("turning transcription off clears the setting and keeps speech", async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn<(patch: Partial<ShellSettings>) => void>();
+    const synthesis = {
+      providerInstanceId: compatibleId as never,
+      modelId: "gpt-4o-mini-tts" as never,
+      voice: "coral" as never,
+    };
+    render(
+      <VoiceSettingsView
+        onSettingsChange={onSettingsChange}
+        providerSnapshot={providerSnapshot()}
+        settings={{
+          transcription: {
+            providerInstanceId: compatibleId as never,
+            modelId: "gpt-4o-mini-transcribe" as never,
+          },
+          synthesis,
+        }}
+      />,
+    );
+    const menu = screen.getByRole("combobox", { name: "Transcribe with" });
+    expect(menu.textContent).toContain("gpt-4o-mini-transcribe on OpenAI");
+
+    await user.click(menu);
+    await user.click(await screen.findByRole("option", { name: "Off" }));
+    expect(onSettingsChange).toHaveBeenCalledWith({ voice: { synthesis } });
+  });
+
+  it("keeps a typed model id reachable under Other model and names a saved one no endpoint lists", async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn<(patch: Partial<ShellSettings>) => void>();
+    const { rerender } = render(
       <VoiceSettingsView
         onSettingsChange={onSettingsChange}
         providerSnapshot={providerSnapshot()}
         settings={{}}
       />,
     );
+    await user.click(screen.getByRole("combobox", { name: "Transcribe with" }));
+    await user.click(await screen.findByRole("option", { name: "Other model…" }));
+
     const form = screen.getByRole("form", { name: "Transcription endpoint" });
     expect(within(form).queryByText("OpenAI Image")).toBeNull();
-
     await user.click(within(form).getByRole("button", { name: "Save transcription endpoint" }));
     expect(within(form).getByRole("alert").textContent).toBe("Enter a model ID.");
     expect(onSettingsChange).not.toHaveBeenCalled();
@@ -93,12 +191,22 @@ describe("VoiceSettingsView", () => {
       "whisper-1",
     );
     await user.click(within(form).getByRole("button", { name: "Save transcription endpoint" }));
+    const saved = { providerInstanceId: compatibleId, modelId: "whisper-1" };
+    expect(onSettingsChange).toHaveBeenCalledWith({ voice: { transcription: saved } });
 
-    expect(onSettingsChange).toHaveBeenCalledWith({
-      voice: {
-        transcription: { providerInstanceId: compatibleId, modelId: "whisper-1" },
-      },
-    });
+    rerender(
+      <VoiceSettingsView
+        onSettingsChange={onSettingsChange}
+        providerSnapshot={providerSnapshot()}
+        settings={{ transcription: saved as never }}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "Transcribe with" }).textContent).toContain(
+      "whisper-1 on OpenAI",
+    );
+    expect(within(transcriptionRow()).getByRole("status").textContent).toBe(
+      "Transcription runs on OpenAI with whisper-1.",
+    );
   });
 
   it("requires a voice for speech and keeps the other direction untouched", async () => {
@@ -145,12 +253,12 @@ describe("VoiceSettingsView", () => {
         settings={{ transcription }}
       />,
     );
-    const form = screen.getByRole("form", { name: "Transcription endpoint" });
-    expect(within(form).getByRole("status").textContent).toBe(
+    expect(within(transcriptionRow()).getByRole("status").textContent).toBe(
       "Transcription is unavailable: The chosen provider is disabled.",
     );
 
-    await user.click(within(form).getByRole("button", { name: "Clear transcription endpoint" }));
+    await user.click(screen.getByRole("combobox", { name: "Transcribe with" }));
+    await user.click(await screen.findByRole("option", { name: "Off" }));
     expect(onSettingsChange).toHaveBeenCalledWith({ voice: {} });
   });
 });

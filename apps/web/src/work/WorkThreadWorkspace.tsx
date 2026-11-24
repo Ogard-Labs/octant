@@ -202,7 +202,8 @@ import {
   LoadEarlierMessages,
   type LoadEarlierMessagesState,
 } from "../transcript/LoadEarlierMessages";
-import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
+import { ThreadTasksPanel, type ThreadTaskRow } from "../transcript/ThreadTasksPanel";
+import { usePublishThreadTaskList } from "../transcript/threadTaskLists";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import { TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { RewindDialog, composerAfterRewind } from "../transcript/RewindDialog";
@@ -227,6 +228,7 @@ import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TurnActions } from "../transcript/TurnActions";
 import {
   TurnHeader,
+  TurnLiveLine,
   TurnTime,
   turnWorkedFor,
   type TurnHeaderOutcome,
@@ -293,6 +295,11 @@ type WorkTranscriptRow =
       readonly key: string;
       readonly turn: WorkTurnState;
       readonly tasks: NonNullable<WorkTurnState["tasks"]>;
+    }
+  | {
+      readonly kind: "live";
+      readonly key: string;
+      readonly turn: WorkTurnState;
     }
   | {
       readonly kind: "steered";
@@ -588,6 +595,16 @@ function WorkToolGroup(props: {
  */
 function workTurnWorkedFor(turn: WorkTurnState): string | undefined {
   return turnWorkedFor(turnHeaderOutcome(turn), turn.acceptedAt, turn.updatedAt);
+}
+
+/** A journaled Work task as the task list draws it. */
+function threadTaskRow(task: NonNullable<WorkTurnState["tasks"]>[number]): ThreadTaskRow {
+  return {
+    id: task.taskId,
+    state: task.state,
+    summary: task.summary,
+    ...(task.runningSummary === undefined ? {} : { runningSummary: task.runningSummary }),
+  };
 }
 
 function turnHeaderOutcome(turn: WorkTurnState): TurnHeaderOutcome {
@@ -1032,6 +1049,18 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   });
   const [loaded, setLoaded] = useState<WorkLoadedTurns>(NO_LOADED_TURNS);
   const turns = loaded.turns;
+  // The newest turn's task list, for the Tasks dock panel: the provider
+  // restates its whole plan as a turn proceeds, so older lists are history,
+  // and a list it cleared (an empty one) means there is no current list.
+  const latestTasks = useMemo(() => {
+    const turn = turns.findLast((candidate) => candidate.tasks !== undefined);
+    if (turn?.tasks === undefined || turn.tasks.length === 0) return undefined;
+    return {
+      running: turn.status === "accepted" || turn.status === "running",
+      tasks: turn.tasks.map(threadTaskRow),
+    };
+  }, [turns]);
+  usePublishThreadTaskList(String(props.threadId), latestTasks);
   // Each turn owns the subagents started between its start and the next
   // turn's: the host links a subagent to the thread, not to a turn.
   const nextTurnStart = useMemo(
@@ -1736,6 +1765,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           turn,
           tasks: turn.tasks,
         });
+      }
+      // The running line closes the running turn, under its task list, so it
+      // stays beside the newest content however long the turn grows.
+      if (turnHeaderOutcome(turn) === "running") {
+        rows.push({ kind: "live", key: `${String(turn.requestId)}-live`, turn });
       }
       // The files land after the turn that produced them, so the transcript
       // reads as what was said and then what came out of it.
@@ -3062,15 +3096,23 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   <ThreadTasksPanel
                     tasks={{
                       running: row.turn.status === "accepted" || row.turn.status === "running",
-                      tasks: row.tasks.map((task) => ({
-                        id: task.taskId,
-                        state: task.state,
-                        summary: task.summary,
-                        ...(task.runningSummary === undefined
-                          ? {}
-                          : { runningSummary: task.runningSummary }),
-                      })),
+                      tasks: row.tasks.map(threadTaskRow),
                     }}
+                  />
+                );
+              }
+              if (row.kind === "live") {
+                return (
+                  <TurnLiveLine
+                    outcome={turnHeaderOutcome(row.turn)}
+                    startedAt={row.turn.acceptedAt}
+                    step={runningStepTitle(
+                      toolStepsActivity(
+                        row.turn.toolSteps,
+                        row.turn.toolStepsTruncated,
+                        row.turn.reasoningMs,
+                      ),
+                    )}
                   />
                 );
               }

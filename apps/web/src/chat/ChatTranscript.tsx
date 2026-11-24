@@ -24,7 +24,7 @@ import type { PickerGroup } from "@octant/domain";
 import { threadHandoffDisclosure } from "../providers/conversationHandoff";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { TurnActions } from "../transcript/TurnActions";
-import { TurnHeader, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
+import { TurnHeader, TurnLiveLine, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
 import { TranscriptHandoff, resolveTranscriptHandoff } from "../transcript/TranscriptHandoff";
 import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
@@ -46,6 +46,7 @@ import { SideTaskInline } from "../followUps/SideTaskCards";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
+import { usePublishThreadTaskList } from "../transcript/threadTaskLists";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import {
   runningStepTitle,
@@ -281,6 +282,31 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       ),
     ),
   );
+
+  // The newest reply's task list, for the Tasks dock panel. Read from the live
+  // view, not a detached jump back, so the panel always shows current work.
+  const liveTurns = props.view.turns;
+  // Every reply stays on screen, a regenerated one beside the original, so the
+  // newest reply that wrote a list is the current one; a list it cleared
+  // (an empty one) ends the search rather than reviving an older list.
+  const latestTasks = useMemo(() => {
+    const attempts = activeChatTurns(liveTurns).flatMap((turn) => turn.attempts);
+    for (const attempt of attempts.toReversed()) {
+      if (attempt.tasks === undefined) continue;
+      if (attempt.tasks.length === 0) return undefined;
+      return {
+        running: attempt.outcome === "queued" || attempt.outcome === "streaming",
+        tasks: attempt.tasks.map((task) => ({
+          id: task.taskId,
+          state: task.state,
+          summary: task.summary,
+          ...(task.runningSummary === undefined ? {} : { runningSummary: task.runningSummary }),
+        })),
+      };
+    }
+    return undefined;
+  }, [liveTurns]);
+  usePublishThreadTaskList(String(props.view.thread.id), latestTasks);
 
   const [checkpointDraft, setCheckpointDraft] = useState<
     { readonly turnId: string; readonly kind: "mark" | "restore" } | undefined
@@ -1246,6 +1272,15 @@ const AttemptBlock = memo(function AttemptBlock(props: {
             response
           </OctantButton>
         ) : null}
+        <TurnLiveLine
+          outcome={props.attempt.outcome}
+          {...(props.attempt.pendingQuestion === undefined
+            ? {}
+            : { label: "Waiting for your answer" })}
+          {...(usageLimit === undefined ? {} : { label: usageLimitLabels[usageLimit.kind] })}
+          startedAt={props.attempt.createdAt}
+          step={runningStepTitle(toolActivity)}
+        />
         <TurnActions
           at={props.attempt.updatedAt}
           copyValue={responseBody}

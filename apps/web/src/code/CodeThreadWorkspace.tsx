@@ -164,7 +164,8 @@ import { CodeTurnReviewPreviewCard } from "./CodeTurnReviewPreviewCard";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import { runningStepTitle, settledTurnFoldsActivity } from "../transcript/turnActivity";
-import { liveTaskProgress } from "./transcriptActivity";
+import { latestTurnTasks, splitTurnTasks } from "./transcriptActivity";
+import { usePublishThreadTaskList } from "../transcript/threadTaskLists";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import {
@@ -181,6 +182,7 @@ import {
 import { TurnActions } from "../transcript/TurnActions";
 import {
   TurnHeader,
+  TurnLiveLine,
   TurnTime,
   turnWorkedFor,
   type TurnHeaderOutcome,
@@ -923,6 +925,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       return { status: "accepted" };
     },
   );
+  const conversation = props.controller.conversation;
+  const turnActivity = props.controller.turnActivity;
+  const latestTasks = useMemo(
+    () =>
+      latestTurnTasks(
+        conversation.flatMap((message) =>
+          message.role !== "assistant" || message.operationId === undefined
+            ? []
+            : [
+                {
+                  activity: turnActivity.get(String(message.operationId)),
+                  running: message.status === "incomplete",
+                },
+              ],
+        ),
+      ),
+    [conversation, turnActivity],
+  );
+  usePublishThreadTaskList(String(props.threadId), latestTasks);
   if (props.controller.status === "disconnected") {
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
@@ -1209,14 +1230,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     rowKeys: messages.map((message) => message.id),
     canvasesByRow: canvasesByTurnRow(canvasPlacement),
   });
-  const liveTasks = liveTaskProgress(
-    messages.flatMap((message) => {
-      if (message.role !== "assistant" || message.operationId === undefined) return [];
-      const activity = props.controller.turnActivity.get(String(message.operationId));
-      if (activity === undefined) return [];
-      return [{ activity, running: message.status === "incomplete" }];
-    }),
-  );
   // The first prompt can be in flight before this surface reads its journal
   // entry. Keep it visible without adding queued messages to the transcript.
   const awaitedPrompt = messages.length === 0 ? firstPromptInFlight : undefined;
@@ -2069,10 +2082,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       : nextOwnUserMessage(messages, index);
                 const forkPoint = message.role === "assistant" ? message : previousAssistant;
                 const handoffEntry = handoffPlacements.get(message.id);
-                const activity =
+                const recorded =
                   message.role === "assistant" && message.operationId !== undefined
                     ? props.controller.turnActivity.get(String(message.operationId))
                     : undefined;
+                const split = recorded === undefined ? undefined : splitTurnTasks(recorded);
+                const activity = split?.activity;
+                const turnTasks = split?.tasks ?? [];
                 const markedCheckpoint =
                   message.operationId === undefined
                     ? undefined
@@ -2393,6 +2409,23 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             ) : (
                               <p>{busy ? "Thinking…" : ""}</p>
                             )}
+                            {turnTasks.length === 0 ? null : (
+                              <ThreadTasksPanel
+                                tasks={{
+                                  running: message.status === "incomplete",
+                                  tasks: turnTasks,
+                                }}
+                              />
+                            )}
+                            {/* Only an incomplete turn is live; a waiting one keeps its
+                            status in the header. */}
+                            <TurnLiveLine
+                              outcome={turnHeaderOutcome(message.status)}
+                              {...(message.startedAt === undefined
+                                ? {}
+                                : { startedAt: message.startedAt })}
+                              step={runningStepTitle(activity)}
+                            />
                           </>
                         )}
                         {/* After the reply, like Work's: the files are what the turn
@@ -2641,8 +2674,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             />
           </div>
         )}
-
-        {liveTasks === undefined ? null : <ThreadTasksPanel tasks={liveTasks} />}
 
         <InlineThreadPlan {...(changedFiles === undefined ? {} : { changedFiles })} />
         {!displayReady ||
