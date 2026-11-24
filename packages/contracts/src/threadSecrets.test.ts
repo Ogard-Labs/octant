@@ -9,6 +9,7 @@ import {
   ActiveThreadSecret,
   ThreadSecretAnswer,
   ThreadSecretJournalRecord,
+  ThreadSecretMemoryRecord,
   ThreadSecretRequestCard,
   ThreadSecretRequestInput,
   ThreadSecretRequestResult,
@@ -347,6 +348,31 @@ describe("what the journal keeps", () => {
 
   it("refuses a secret recorded for a Chat thread", () => {
     expect(() => decode({ ...records[2], mode: "chat" })).toThrow();
+  });
+});
+
+describe("what the host remembers", () => {
+  const decode = Schema.decodeUnknownSync(ThreadSecretMemoryRecord);
+
+  it("is a name and where its value is, never a value or a thread", () => {
+    const records = [
+      { name: "thread-secret.remembered", id: ID, secretName: "TOKEN", source: "pasted" },
+      {
+        name: "thread-secret.remembered",
+        id: ID,
+        secretName: "TOKEN",
+        source: "onepassword",
+        store: "onepassword",
+        reference: "op://Private/Deploy/credential",
+      },
+      { name: "thread-secret.forgotten", id: ID },
+    ];
+    for (const record of records) {
+      expect(decode(record)).toEqual(record);
+      for (const key of ["value", "secret", "threadId", "label"])
+        expect(() => decode({ ...record, [key]: "private" })).toThrow();
+    }
+    expect(() => decode({ ...records[0], reference: "op://Private/Deploy/credential" })).toThrow();
   });
 });
 

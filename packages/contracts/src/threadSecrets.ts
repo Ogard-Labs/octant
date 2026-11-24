@@ -449,6 +449,38 @@ export const ThreadSecretJournalRecord = Schema.Union(
 );
 export type ThreadSecretJournalRecord = typeof ThreadSecretJournalRecord.Type;
 
+export const THREAD_SECRET_MEMORY_EVENT_NAME = "thread-secret-memory.recorded@1";
+export const THREAD_SECRET_MEMORY_AGGREGATE_TYPE = "thread-secret-memory";
+
+/**
+ * What the host remembers across threads: a name, and where its value is. A
+ * value the person typed is in the system's credential store under the id; a
+ * linked item is its address. No thread is named, so a thread's purge leaves
+ * what the person asked to keep.
+ */
+export const ThreadSecretMemoryRecord = Schema.Union(
+  Schema.Struct({
+    name: Schema.Literal("thread-secret.remembered"),
+    id: Schema.UUID,
+    secretName: DeliveredName,
+    source: Schema.Literal("pasted"),
+  }).annotations(strict),
+  Schema.Struct({
+    name: Schema.Literal("thread-secret.remembered"),
+    id: Schema.UUID,
+    secretName: DeliveredName,
+    source: Schema.Literal("onepassword"),
+    store: SecretStoreKind,
+    reference: SecretStoreItemReference,
+  }).annotations(strict),
+  Schema.Struct({
+    name: Schema.Literal("thread-secret.forgotten"),
+    id: Schema.UUID,
+  }).annotations(strict),
+);
+export type ThreadSecretMemoryRecord = typeof ThreadSecretMemoryRecord.Type;
+
+export const decodeThreadSecretMemoryRecord = Schema.decodeUnknownSync(ThreadSecretMemoryRecord);
 export const decodeThreadSecretRunInput = Schema.decodeUnknownEither(ThreadSecretRunInput);
 export const decodeThreadSecretRequestInput = Schema.decodeUnknownEither(ThreadSecretRequestInput);
 export const decodeThreadSecretCommand = Schema.decodeUnknownEither(ThreadSecretCommand);

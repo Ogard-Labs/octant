@@ -24,6 +24,7 @@ import {
   threadSecretDeliveries,
 } from "@octant/domain/thread-secret-policy";
 import { whileAwaitingToolApproval } from "../toolEffects/toolEffectLedger";
+import type { RememberedThreadSecrets } from "./rememberedThreadSecrets";
 import type { PreparedThreadSecretFile, ThreadSecretFiles } from "./threadSecretFiles";
 import { lifetimeKey, type ThreadSecretsJournal } from "./threadSecretsJournal";
 
@@ -80,6 +81,8 @@ export interface ThreadSecretServiceOptions {
         signal: AbortSignal,
       ) => Promise<CredentialRequestResolution>)
     | undefined;
+  /** Absent on a host with no credential store, which offers to remember nothing. */
+  readonly remembered?: RememberedThreadSecrets | undefined;
   /** The waiting cards or the active list changed. */
   readonly onChanged?: (() => void) | undefined;
   /** A card began to wait. Names the thread and the card and nothing of its content. */
@@ -180,6 +183,7 @@ const MAX_PENDING_PER_THREAD = 2;
 const MAX_ACTIVE_PER_THREAD = 64;
 /** A handle the agent never uses is not kept past this many newer ones. */
 const MAX_HANDLES_PER_SECRET = 8;
+const MAX_REMEMBERED_SHOWN = 32;
 const MAX_RETRY_KEYS_PER_THREAD = 128;
 /** Threads whose answered retry keys are kept; the longest unused leaves first. */
 const MAX_RETRY_THREADS = 256;
@@ -617,6 +621,14 @@ export class ThreadSecretService {
         MAX_PENDING_PER_THREAD
     )
       return Promise.resolve(refusal("unavailable"));
+    const remembers = this.#options.remembered !== undefined;
+    // An account's own password is never one Octant keeps, so never one it offers.
+    const remembered =
+      input.kind === "account-password"
+        ? []
+        : (this.#options.remembered?.list(names.map(({ secretName }) => secretName)) ?? []).slice(
+            -MAX_REMEMBERED_SHOWN,
+          );
     const id = this.#options.uuid();
     const card: ThreadSecretRequestCard = {
       id,
@@ -645,10 +657,17 @@ export class ThreadSecretService {
               // The agent does not decide that a computer's password is shown.
               secret: input.kind === "account-password" || (field.secret ?? true),
             })),
-      lifetimes: offer.lifetimes.filter((lifetime) => lifetime !== "remember"),
-      defaultLifetime: offer.defaultLifetime === "remember" ? "24-hours" : offer.defaultLifetime,
-      sources: this.#options.readReference === undefined ? ["pasted"] : ["pasted", "onepassword"],
-      remembered: [],
+      lifetimes: remembers
+        ? offer.lifetimes
+        : offer.lifetimes.filter((lifetime) => lifetime !== "remember"),
+      defaultLifetime:
+        offer.defaultLifetime === "remember" && !remembers ? "24-hours" : offer.defaultLifetime,
+      sources: [
+        "pasted",
+        ...(this.#options.readReference === undefined ? [] : ["onepassword" as const]),
+        ...(remembered.length === 0 ? [] : ["remembered" as const]),
+      ],
+      remembered,
       state: "pending",
     };
     return whileAwaitingToolApproval(
@@ -743,7 +762,7 @@ export class ThreadSecretService {
       return "unavailable";
     const answered = new Map<string, AnsweredField>();
     for (const entry of answer.fields) {
-      const read = await this.#answeredField(entry, from, pending.lookup.signal);
+      const read = await this.#answeredField(pending, entry, from);
       if ("failure" in read) return read.failure;
       answered.set(entry.name, read);
     }
@@ -760,13 +779,67 @@ export class ThreadSecretService {
     if (!card.lifetimes.includes(answer.lifetime)) return "lifetime-not-offered";
     // The tool call is back on record before it has any effect.
     pending.answered();
-    return this.#grant(pending, answered, answer.lifetime, authority, authority.mode);
+    if (answer.lifetime !== "remember")
+      return this.#grant(pending, answered, answer.lifetime, authority, authority.mode);
+    const kept = await this.#remember(pending, answered);
+    if (kept === undefined) return "unavailable";
+    // Kept while the thread, window or Strict could change; granted only if they did not.
+    const still = this.#authority(caller);
+    const decision =
+      still === undefined
+        ? undefined
+        : decideThreadSecretLifetime({ ...still, kind: input.kind }, answer.lifetime);
+    if (
+      this.#pending.get(card.id) !== pending ||
+      still === undefined ||
+      still.mode === "chat" ||
+      decision?.status !== "allowed"
+    ) {
+      await this.#forgetAll(kept);
+      return decision?.status === "refused" ? decision.failure : "unavailable";
+    }
+    const result = this.#grant(pending, answered, answer.lifetime, still, still.mode);
+    if (typeof result === "string") await this.#forgetAll(kept);
+    else
+      for (const [secretName, id] of kept)
+        await this.#options.remembered?.forgetOthers(secretName, id);
+    return result;
+  }
+
+  /** Every field kept, by name, or none. One that came from memory is there already. */
+  async #remember(
+    pending: PendingRequest,
+    answered: ReadonlyMap<string, AnsweredField>,
+  ): Promise<ReadonlyMap<string, string> | undefined> {
+    const { remembered } = this.#options;
+    if (remembered === undefined) return undefined;
+    const kept = new Map<string, string>();
+    for (const { field, secretName } of deliveriesOf(pending.input)) {
+      const value = answered.get(field);
+      if (value === undefined || value.source === "remembered") continue;
+      const id = await remembered.remember(
+        secretName,
+        value.reference === undefined
+          ? { kind: "value", value: value.value }
+          : { kind: "reference", reference: value.reference },
+      );
+      if (id === undefined) {
+        await this.#forgetAll(kept);
+        return undefined;
+      }
+      kept.set(secretName, id);
+    }
+    return kept;
+  }
+
+  async #forgetAll(kept: ReadonlyMap<string, string>): Promise<void> {
+    for (const id of kept.values()) await this.#options.remembered?.forget(id);
   }
 
   async #answeredField(
+    pending: PendingRequest,
     entry: ThreadSecretAnswerField,
     from: { readonly paired: boolean },
-    signal: AbortSignal,
   ): Promise<AnsweredField | { readonly failure: ThreadSecretFailure }> {
     switch (entry.source) {
       case "pasted":
@@ -778,13 +851,33 @@ export class ThreadSecretService {
         // The store belongs to the person at this computer.
         if (from.paired) return { failure: "not-linked" };
         const reference = { store: entry.store, reference: entry.reference };
-        const read = await this.#read(reference, signal);
+        const read = await this.#read(reference, pending.lookup.signal);
         return typeof read === "string"
           ? { value: read, source: "onepassword", reference, eachUse: entry.freshEachUse }
           : read;
       }
-      case "remembered":
-        return { failure: "unavailable" };
+      case "remembered": {
+        // Only one this card offered: for this name, and never an account's password.
+        const secretName = deliveriesOf(pending.input).find(
+          ({ field }) => field === entry.name,
+        )?.secretName;
+        const { remembered } = this.#options;
+        if (
+          remembered === undefined ||
+          secretName === undefined ||
+          !pending.card.remembered.some(({ id }) => id === entry.rememberedId)
+        )
+          return { failure: "missing" };
+        const found = await remembered.resolve(entry.rememberedId, secretName);
+        if (found === undefined) return { failure: "missing" };
+        if (found.kind === "value")
+          return { value: found.value, source: "remembered", reference: undefined, eachUse: false };
+        if (from.paired) return { failure: "not-linked" };
+        const read = await this.#read(found.reference, pending.lookup.signal);
+        return typeof read === "string"
+          ? { value: read, source: "remembered", reference: found.reference, eachUse: false }
+          : read;
+      }
     }
   }
 

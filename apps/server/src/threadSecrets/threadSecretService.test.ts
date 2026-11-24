@@ -18,6 +18,7 @@ import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import { holdSecretValue, redactHostSecrets } from "../process/secretRedaction";
+import { RememberedThreadSecrets, threadSecretMemoryJournal } from "./rememberedThreadSecrets";
 import { createThreadSecretFiles, type ThreadSecretFiles } from "./threadSecretFiles";
 import { threadSecretsJournal, type ThreadSecretsJournal } from "./threadSecretsJournal";
 import {
@@ -68,6 +69,7 @@ function host(
     readonly read?: (reference: string) => Promise<CredentialRequestResolution>;
     readonly hold?: (value: string) => () => void;
     readonly uuid?: () => string;
+    readonly remembered?: RememberedThreadSecrets;
   } = {},
 ) {
   const state = {
@@ -99,6 +101,7 @@ function host(
       options.files === "none" ? undefined : (options.files ?? createThreadSecretFiles({ root })),
     hold: options.hold ?? holdSecretValue,
     ...(read === undefined ? {} : { readReference: (reference) => read(reference.reference) }),
+    ...(options.remembered === undefined ? {} : { remembered: options.remembered }),
     onAsked: (ask) => state.asked.push(ask),
   });
   services.push(service);
@@ -987,6 +990,244 @@ describe("a secret lent to one command", () => {
         signal: new AbortController().signal,
       }),
     ).toMatchObject({ status: "redeemed", value: "rotated-Value-9" });
+  });
+});
+
+describe("a secret the person asked Octant to remember", () => {
+  function memory(
+    over: {
+      readonly journalFails?: () => boolean;
+      readonly setFails?: () => boolean;
+      readonly deleteFails?: () => boolean;
+    } = {},
+  ) {
+    const stored = new Map<string, string>();
+    const real = threadSecretMemoryJournal({
+      journal,
+      connection,
+      uuid: () => crypto.randomUUID(),
+      now: () => NOW,
+    });
+    const open = () =>
+      new RememberedThreadSecrets({
+        journal: {
+          record: (record) => {
+            if (over.journalFails?.() === true) throw new Error("The journal refused.");
+            real.record(record);
+          },
+          history: real.history,
+        },
+        store: {
+          set: async (id, value) => {
+            if (over.setFails?.() === true) throw new Error("The store is locked.");
+            stored.set(id, value);
+          },
+          resolve: async (id) => {
+            const value = stored.get(id);
+            if (value === undefined) throw new Error("Missing.");
+            return value;
+          },
+          delete: async (id) => {
+            if (over.deleteFails?.() === true) throw new Error("The store is locked.");
+            stored.delete(id);
+          },
+        },
+        uuid: () => crypto.randomUUID(),
+      });
+    return { open, stored };
+  }
+  const memoryText = () =>
+    JSON.stringify(
+      connection
+        .prepare(
+          "SELECT payload_json FROM event_journal WHERE event_name = 'thread-secret-memory.recorded@1'",
+        )
+        .all(),
+    );
+
+  it("is offered on a later card for its name, in another thread and after a restart", async () => {
+    const { open, stored } = memory();
+    const first = host({ remembered: open() });
+    await grant(first, request(), { lifetime: "remember" });
+    expect([...stored.values()]).toEqual([VALUE]);
+    expect(memoryText()).not.toContain(VALUE);
+    first.service.close();
+    const second = host({ remembered: open() });
+    const asked = second.service.request(second.caller, request());
+    const offered = card(second.service);
+    expect(offered).toMatchObject({
+      sources: ["pasted", "remembered"],
+      remembered: [{ name: "DEPLOY_TOKEN", source: "pasted" }],
+      defaultLifetime: "remember",
+    });
+    expect(
+      await save(second.service, {
+        lifetime: "1-hour",
+        fields: [
+          {
+            name: "DEPLOY_TOKEN",
+            source: "remembered",
+            rememberedId: offered.remembered[0]?.id ?? "",
+          },
+        ],
+      }),
+    ).toEqual({ status: "accepted" });
+    expect(await asked).toMatchObject({ status: "saved" });
+    expect(readFileSync(join(root, THREAD, "DEPLOY_TOKEN"), "utf8")).toBe(VALUE);
+    expect(second.service.active()).toMatchObject([{ source: "remembered", lifetime: "1-hour" }]);
+    expect(stored.size).toBe(1);
+  });
+
+  it("is used only when the person picks it, never because it exists", async () => {
+    const { open } = memory();
+    const context = host({ remembered: open() });
+    await grant(context, request(), { lifetime: "remember" });
+    context.service.withdrawThread(THREAD);
+    void context.service.request(context.caller, request());
+    expect(context.service.view(WINDOW, THREAD).requests).toHaveLength(1);
+    expect(context.service.active()).toEqual([]);
+  });
+
+  it("is not offered for another name or for an account password", async () => {
+    const { open } = memory();
+    const context = host({ remembered: open() });
+    await grant(context, request(), { lifetime: "remember" });
+    const id = open().list()[0]?.id ?? "";
+    context.service.withdrawThread(THREAD);
+    for (const over of [{ name: "OTHER" }, { kind: "account-password" }]) {
+      void context.service.request(context.caller, request(over));
+      const offered = card(context.service);
+      expect(offered.remembered).toEqual([]);
+      expect(offered.sources).not.toContain("remembered");
+      expect(
+        await save(context.service, {
+          lifetime: "1-hour",
+          fields: [
+            { name: offered.fields[0]?.name ?? "", source: "remembered", rememberedId: id },
+          ],
+        }),
+      ).toEqual({ status: "refused", failure: "missing" });
+      context.service.withdrawThread(THREAD);
+    }
+  });
+
+  it("is an address and no value for a 1Password item, read again and never from a phone", async () => {
+    let value = VALUE;
+    const { open, stored } = memory();
+    const context = host({ remembered: open(), read: async () => ({ status: "read", value }) });
+    await grant(context, request({ delivery: "handle" }), {
+      lifetime: "remember",
+      fields: [
+        {
+          name: "DEPLOY_TOKEN",
+          source: "onepassword",
+          store: "onepassword",
+          reference: "op://Private/Deploy/credential",
+          freshEachUse: false,
+        },
+      ],
+    });
+    expect(stored.size).toBe(0);
+    expect(memoryText()).toContain("op://Private/Deploy/credential");
+    context.service.withdrawThread(THREAD);
+    value = "rotated-Value-9";
+    const asked = context.service.request(context.caller, request());
+    const fields = [
+      {
+        name: "DEPLOY_TOKEN",
+        source: "remembered" as const,
+        rememberedId: card(context.service).remembered[0]?.id ?? "",
+      },
+    ];
+    expect(await save(context.service, { fields, paired: true })).toEqual({
+      status: "refused",
+      failure: "not-linked",
+    });
+    expect(await save(context.service, { fields })).toEqual({ status: "accepted" });
+    await asked;
+    expect(readFileSync(join(root, THREAD, "DEPLOY_TOKEN"), "utf8")).toBe("rotated-Value-9");
+  });
+
+  it("replaces what was remembered under its name, and keeps one", async () => {
+    const { open, stored } = memory();
+    const context = host({ remembered: open() });
+    await grant(context, request(), { lifetime: "remember" });
+    context.service.withdrawThread(THREAD);
+    await grant(context, request(), { lifetime: "remember", value: "second-Value-1" });
+    expect([...stored.values()]).toEqual(["second-Value-1"]);
+    expect(open().list()).toHaveLength(1);
+  });
+
+  it.each(["journal", "store", "grant"] as const)(
+    "leaves nothing kept when the %s refuses",
+    async (what) => {
+      let fails = false;
+      const { open, stored } = memory({
+        journalFails: () => fails && what === "journal",
+        setFails: () => fails && what === "store",
+      });
+      const context = host({
+        remembered: open(),
+        journalFails: () => fails && what === "grant",
+      });
+      void context.service.request(context.caller, request());
+      fails = true;
+      expect(await save(context.service, { lifetime: "remember" })).toEqual({
+        status: "refused",
+        failure: "unavailable",
+      });
+      expect(stored.size).toBe(0);
+      expect(open().list()).toEqual([]);
+      expect(context.service.active()).toEqual([]);
+      expect(card(context.service).state).toBe("pending");
+    },
+  );
+
+  it("leaves nothing kept when the turn stops while it is being kept", async () => {
+    const stored = new Map<string, string>();
+    let finish: () => void = () => undefined;
+    const context = host({
+      remembered: new RememberedThreadSecrets({
+        journal: { record: () => undefined, history: () => [] },
+        store: {
+          set: (id, value) =>
+            new Promise((resolve) => {
+              stored.set(id, value);
+              finish = resolve;
+            }),
+          resolve: async () => "",
+          delete: async (id) => void stored.delete(id),
+        },
+        uuid: () => crypto.randomUUID(),
+      }),
+    });
+    void context.service.request(context.caller, request());
+    const answered = save(context.service, { lifetime: "remember" });
+    context.stop.abort();
+    finish();
+    expect(await answered).toEqual({ status: "gone" });
+    expect(stored.size).toBe(0);
+    expect(context.service.active()).toEqual([]);
+  });
+
+  it("stays listed when its value could not be removed", async () => {
+    let fails = true;
+    const { open, stored } = memory({ deleteFails: () => fails });
+    const remembered = open();
+    const id = await remembered.remember("TOKEN", { kind: "value", value: VALUE });
+    expect(await remembered.forget(id ?? "")).toBe(false);
+    expect(remembered.list()).toHaveLength(1);
+    fails = false;
+    expect(await remembered.forget(id ?? "")).toBe(true);
+    expect(remembered.list()).toEqual([]);
+    expect(stored.size).toBe(0);
+    expect(open().list()).toEqual([]);
+  });
+
+  it("is not offered on a host with no credential store", () => {
+    const context = host();
+    void context.service.request(context.caller, request());
+    expect(card(context.service).lifetimes).not.toContain("remember");
   });
 });
 
