@@ -1047,6 +1047,7 @@ function ActiveSectionContent({
     return (
       <PluginSettingsSection
         entryPoint={pluginEntryPoint}
+        focusedSetting={focusedSetting}
         githubClient={props.githubClient}
         integrationClient={props.integrationClient}
         linearProjects={props.linearProjects}

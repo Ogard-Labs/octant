@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
-import type { ProjectId, ProjectLinearTarget, ProjectSummary } from "@octant/contracts";
+import type {
+  ProjectId,
+  ProjectLinearTarget,
+  ProjectSummary,
+  SettingsSettingId,
+} from "@octant/contracts";
 import type {
   IntegrationAuthenticationSnapshot,
   IntegrationAuthenticationState,
@@ -11,7 +16,13 @@ import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { SettingRow, SettingsFactList, SettingsSection, SettingsState } from "./primitives";
+import {
+  SettingRow,
+  SettingsFactList,
+  SettingsSection,
+  SettingsState,
+  useRevealedFocus,
+} from "./primitives";
 
 const LINEAR_API_KEYS_URL = "https://linear.app/settings/account/security";
 const UNBOUND = "__none__";
@@ -26,6 +37,7 @@ export interface LinearConnectionSettingsProps {
     projectId: ProjectId,
     target: ProjectLinearTarget | null,
   ) => Promise<boolean>;
+  readonly focusedSetting?: SettingsSettingId | undefined;
 }
 
 type SnapshotState =
@@ -46,6 +58,7 @@ export function LinearConnectionSettings({
   client,
   projects,
   onProjectLinearTargetChange,
+  focusedSetting,
 }: LinearConnectionSettingsProps) {
   const [snapshotState, setSnapshotState] = useState<SnapshotState>({ kind: "loading" });
   const [refreshing, setRefreshing] = useState(false);
@@ -57,8 +70,10 @@ export function LinearConnectionSettings({
   const [personalBusy, setPersonalBusy] = useState(false);
   const [filters, setFilters] = useState<LinearIssueFilterOptions>();
   const [filtersLoading, setFiltersLoading] = useState(false);
+  const [catalogueRevision, setCatalogueRevision] = useState(0);
   const [savingProjectId, setSavingProjectId] = useState<string>();
   const [mappingError, setMappingError] = useState<string>();
+  const projectsGroupRef = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -66,6 +81,7 @@ export function LinearConnectionSettings({
     try {
       const snapshot = await client.authenticationSnapshot();
       setSnapshotState({ kind: "ready", snapshot });
+      setCatalogueRevision((revision) => revision + 1);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Linear status is unavailable.";
       setSnapshotState((current) =>
@@ -85,6 +101,9 @@ export function LinearConnectionSettings({
   const connectedSnapshot =
     snapshotState.kind === "ready" &&
     (snapshotState.snapshot.state === "ready" || snapshotState.snapshot.state === "scope-limited");
+  const catalogueKey = connectedSnapshot
+    ? `${snapshotState.snapshot.account?.login ?? ""}|${snapshotState.snapshot.account?.displayName ?? ""}|${snapshotState.snapshot.account?.source ?? ""}|${String(catalogueRevision)}`
+    : undefined;
 
   const bindableProjects = (projects ?? []).filter(
     (project): project is Exclude<ProjectSummary, { readonly type: "chat" }> =>
@@ -92,12 +111,13 @@ export function LinearConnectionSettings({
   );
 
   useEffect(() => {
-    if (!connectedSnapshot || bindableProjects.length === 0) {
+    if (catalogueKey === undefined || bindableProjects.length === 0) {
       setFilters(undefined);
       setFiltersLoading(false);
       return;
     }
     let active = true;
+    setFilters(undefined);
     setFiltersLoading(true);
     void client.listIssueFilters().then(
       (options) => {
@@ -114,7 +134,17 @@ export function LinearConnectionSettings({
     return () => {
       active = false;
     };
-  }, [client, connectedSnapshot, bindableProjects.length]);
+  }, [client, catalogueKey, bindableProjects.length]);
+
+  const focusedId = focusedSetting === undefined ? undefined : String(focusedSetting);
+
+  useRevealedFocus(
+    projectsGroupRef,
+    focusedId === "linear-projects" &&
+      connectedSnapshot &&
+      bindableProjects.length > 0 &&
+      !filtersLoading,
+  );
 
   const runCommand = async (kind: "setup" | "refresh" | "logout") => {
     setCommandBusy(true);
@@ -122,6 +152,7 @@ export function LinearConnectionSettings({
     try {
       const snapshot = await client.executeAuthenticationCommand({ kind });
       setSnapshotState({ kind: "ready", snapshot });
+      setCatalogueRevision((revision) => revision + 1);
     } catch (error) {
       setCommandError(
         error instanceof Error ? error.message : "The Linear command could not be delivered.",
@@ -241,6 +272,7 @@ export function LinearConnectionSettings({
         <div className="setgroup">
           <SettingRow
             description="Connect or reconnect, and refresh what Octant sees."
+            focused={focusedId === "linear-connection"}
             label="Connection"
             labelledBySection
             scope="host"
@@ -299,7 +331,7 @@ export function LinearConnectionSettings({
           {filtersLoading && teams.length === 0 ? (
             <p className="settings-section-line">Loading Linear teams…</p>
           ) : (
-            <div className="setgroup">
+            <div className="setgroup" ref={projectsGroupRef} tabIndex={-1}>
               {bindableProjects.map((project) => {
                 const current = project.linearTarget;
                 const busy = savingProjectId === String(project.id);
@@ -322,6 +354,7 @@ export function LinearConnectionSettings({
                 return (
                   <SettingRow
                     description={project.type === "code" ? "Code Project" : "Work Project"}
+                    focused={focusedId === `linear-project-${String(project.id)}`}
                     key={String(project.id)}
                     label={project.name}
                     scope="host"
@@ -345,7 +378,8 @@ export function LinearConnectionSettings({
                             teamId: found.id,
                             teamKey,
                             teamName,
-                            ...(current?.projectId !== undefined &&
+                            ...(found.id === current?.teamId &&
+                            current.projectId !== undefined &&
                             current.projectName !== undefined
                               ? { projectId: current.projectId, projectName: current.projectName }
                               : {}),
@@ -462,7 +496,7 @@ export function LinearConnectionSettings({
                 Store key
               </OctantButton>
               <OctantButton
-                disabled={personalBusy || snapshot.personalCredentialStored === false}
+                disabled={personalBusy || !personalKeyStored}
                 onClick={() => {
                   setPersonalBusy(true);
                   void client
@@ -492,6 +526,7 @@ export function LinearConnectionSettings({
           <div className="setgroup">
             <SettingRow
               description="Removes Octant's Linear sign-in from this host. Your Linear workspace is untouched."
+              focused={focusedId === "linear-disconnect"}
               label="Disconnect Linear"
               scope="host"
               settingId="linear-disconnect"

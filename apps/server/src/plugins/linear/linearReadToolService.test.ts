@@ -62,7 +62,7 @@ function makeHarness(
               {
                 id: "issue-1",
                 identifier: "OCT-42",
-                title: "Ship mapping with key AKIAIOSFODNN7EXAMPLE",
+                title: "Rotate lin_api_SECRET12345678901234567890 and AKIAIOSFODNN7EXAMPLE",
                 state: { name: "In Progress", type: "started" },
                 assignee: "Henrik",
                 teamId: "team-oct",
@@ -87,7 +87,7 @@ function makeHarness(
           teamKey: "OCT",
           projectId: "proj-v1",
           url: "https://linear.app/ogard-labs/issue/OCT-42",
-          description: "Body with key AKIAIOSFODNN7EXAMPLE",
+          description: "Body with lin_api_SECRET12345678901234567890 and AKIAIOSFODNN7EXAMPLE",
           descriptionTruncated: false,
           comments: [],
         },
@@ -130,7 +130,7 @@ describe("LinearReadToolService", () => {
 
     const outcome = await toolSet.execute({
       name: LINEAR_READ_TOOL_NAME,
-      inputJson: JSON.stringify({ operation: "list", state: "open", assignee: "me", pageSize: 10 }),
+      inputJson: JSON.stringify({ operation: "list", assignee: "me", pageSize: 10 }),
     });
     expect(outcome.isError).toBe(false);
     expect(executeOperation).toHaveBeenCalledWith(
@@ -147,11 +147,29 @@ describe("LinearReadToolService", () => {
       expect.any(AbortSignal),
     );
     expect(JSON.stringify(outcome.result)).not.toContain("AKIAIOSFODNN7EXAMPLE");
+    expect(JSON.stringify(outcome.result)).not.toContain("lin_api_");
     expect(JSON.stringify(outcome.result)).toContain("[redacted]");
     expect(ingestion.record).toHaveBeenCalledWith(
       expect.objectContaining({
         provenance: { origin: "tool-result", sourceLabel: "linear-issues" },
       }),
+    );
+
+    const allStates = await toolSet.execute({
+      name: LINEAR_READ_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "list", state: "all" }),
+    });
+    expect(allStates.isError).toBe(false);
+    expect(executeOperation).toHaveBeenLastCalledWith(
+      LINEAR_ISSUE_LIST_OPERATION,
+      {
+        filter: {
+          teamId: "team-oct",
+          projectId: "proj-v1",
+        },
+        pageSize: 20,
+      },
+      expect.any(AbortSignal),
     );
 
     const rejectedExtra = await toolSet.execute({
@@ -161,7 +179,7 @@ describe("LinearReadToolService", () => {
     expect(rejectedExtra).toEqual({ result: { error: "invalid-linear-input" }, isError: true });
   });
 
-  it("reads an issue by identifier inside the bound scope and refuses issues from another team or project", async () => {
+  it("reads an issue by identifier inside the bound scope and withholds out-of-scope issues identically to missing ones", async () => {
     const { toolSet, executeOperation, ingestion } = makeHarness();
     const ok = await toolSet.execute({
       name: LINEAR_READ_TOOL_NAME,
@@ -174,36 +192,46 @@ describe("LinearReadToolService", () => {
       expect.any(AbortSignal),
     );
     expect(JSON.stringify(ok.result)).not.toContain("AKIAIOSFODNN7EXAMPLE");
+    expect(JSON.stringify(ok.result)).not.toContain("lin_api_");
     expect(ingestion.record).toHaveBeenCalledWith(
       expect.objectContaining({
         provenance: { origin: "tool-result", sourceLabel: "linear-issue" },
       }),
     );
 
-    const foreign = makeHarness({
-      executeOperation: vi.fn(async () => ({
-        kind: "ok" as const,
-        value: {
-          id: "issue-2",
-          identifier: "OTHER-9",
-          title: "Other team issue",
-          state: { name: "Todo", type: "unstarted" },
-          teamId: "team-other",
-          teamKey: "OTHER",
-          url: "https://linear.app/ogard-labs/issue/OTHER-9",
-          description: "Private",
-          descriptionTruncated: false,
-          comments: [],
-        },
-      })),
-    });
-    const refused = await foreign.toolSet.execute({
+    const foreignExecute = vi.fn(async () => ({
+      kind: "ok" as const,
+      value: {
+        id: "issue-2",
+        identifier: "OTHER-9",
+        title: "Other team issue",
+        state: { name: "Todo", type: "unstarted" },
+        teamId: "team-other",
+        teamKey: "OTHER",
+        url: "https://linear.app/ogard-labs/issue/OTHER-9",
+        description: "Private",
+        descriptionTruncated: false,
+        comments: [],
+      },
+    }));
+    const foreign = makeHarness({ executeOperation: foreignExecute });
+    const refusedByPrefix = await foreign.toolSet.execute({
       name: LINEAR_READ_TOOL_NAME,
       inputJson: JSON.stringify({ operation: "get", identifier: "OTHER-9" }),
     });
-    expect(refused).toMatchObject({
+    expect(refusedByPrefix).toMatchObject({
       isError: true,
-      result: { error: "issue-outside-project" },
+      result: { error: "issue-not-found" },
+    });
+    expect(foreignExecute).not.toHaveBeenCalled();
+
+    const refusedById = await foreign.toolSet.execute({
+      name: LINEAR_READ_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "get", identifier: "issue-2" }),
+    });
+    expect(refusedById).toMatchObject({
+      isError: true,
+      result: { error: "issue-not-found" },
     });
     expect(foreign.ingestion.record).not.toHaveBeenCalled();
   });

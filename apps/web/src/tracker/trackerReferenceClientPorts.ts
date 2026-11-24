@@ -85,13 +85,24 @@ export function createTrackerReferenceClientPorts(
             getIssue: async (key: string) => {
               try {
                 if (typeof linearInput.client.getIssueByIdentifier === "function") {
-                  const detail = await linearInput.client.getIssueByIdentifier({ identifier: key });
-                  return {
-                    kind: "resolved" as const,
-                    title: detail.title,
-                    url: detail.url,
-                    state: linearStateToChipState(detail.state.type),
-                  };
+                  try {
+                    const detail = await linearInput.client.getIssueByIdentifier({
+                      identifier: key,
+                    });
+                    return {
+                      kind: "resolved" as const,
+                      title: detail.title,
+                      url: detail.url,
+                      state: linearStateToChipState(detail.state.type),
+                    };
+                  } catch (error) {
+                    if (
+                      !(error instanceof IntegrationClientFailure) ||
+                      !isUnsupportedDirectLookup(error)
+                    ) {
+                      throw error;
+                    }
+                  }
                 }
                 const page = await linearInput.client.listIssues({
                   search: key,
@@ -117,4 +128,14 @@ export function createTrackerReferenceClientPorts(
           },
         }),
   };
+}
+
+function isUnsupportedDirectLookup(error: IntegrationClientFailure): boolean {
+  const normalized = error.message.toLowerCase();
+  return (
+    normalized.includes("not available") ||
+    normalized.includes("not supported") ||
+    normalized.includes("unsupported") ||
+    normalized.includes("unknown operation")
+  );
 }

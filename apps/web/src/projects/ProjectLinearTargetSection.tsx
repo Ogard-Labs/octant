@@ -102,7 +102,9 @@ export function ProjectLinearTargetSection(props: ProjectLinearTargetSectionProp
       teamId: found.id,
       teamKey,
       teamName,
-      ...(current?.projectId !== undefined && current.projectName !== undefined
+      ...(found.id === current?.teamId &&
+      current.projectId !== undefined &&
+      current.projectName !== undefined
         ? { projectId: current.projectId, projectName: current.projectName }
         : {}),
     });

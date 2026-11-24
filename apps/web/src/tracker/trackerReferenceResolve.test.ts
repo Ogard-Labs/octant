@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import type { IntegrationClient } from "@octant/client-runtime/integration-client";
+import {
+  IntegrationClientFailure,
+  type IntegrationClient,
+} from "@octant/client-runtime/integration-client";
 import type { TrackerReference } from "@octant/contracts";
 import { createTrackerReferenceClientPorts } from "./trackerReferenceClientPorts";
 import {
@@ -219,6 +222,47 @@ describe("tracker reference helpers", () => {
         kind: "issue",
         title: "Direct chip lookup",
         url: "https://linear.app/ogard-labs/issue/OCT-42",
+        state: "open",
+      },
+    ]);
+  });
+
+  it("falls back to listIssues when the host does not support direct identifier lookup", async () => {
+    const getIssueByIdentifier = vi.fn(async () => {
+      throw new IntegrationClientFailure("Linear issue operations are not available.", 400);
+    });
+    const listIssues = vi.fn(async () => ({
+      rows: [
+        {
+          id: "issue-2",
+          identifier: "ENG-99",
+          title: "Fallback chip lookup",
+          state: { name: "Todo", type: "unstarted" },
+          url: "https://linear.app/ogard-labs/issue/ENG-99",
+        },
+      ],
+      hasNextPage: false,
+    }));
+    const client = {
+      getIssueByIdentifier,
+      listIssues,
+    } as unknown as IntegrationClient;
+    const ports = createTrackerReferenceClientPorts({
+      linear: { available: true, client },
+    });
+    const resolved = await resolveTrackerReferences(
+      [{ patternKind: "tracker-key", raw: "ENG-99", key: "ENG-99" }],
+      ports,
+    );
+    expect(getIssueByIdentifier).toHaveBeenCalledWith({ identifier: "ENG-99" });
+    expect(listIssues).toHaveBeenCalledWith({ search: "ENG-99", pageSize: 50 });
+    expect(resolved).toEqual([
+      {
+        status: "resolved",
+        reference: { patternKind: "tracker-key", raw: "ENG-99", key: "ENG-99" },
+        kind: "issue",
+        title: "Fallback chip lookup",
+        url: "https://linear.app/ogard-labs/issue/ENG-99",
         state: "open",
       },
     ]);

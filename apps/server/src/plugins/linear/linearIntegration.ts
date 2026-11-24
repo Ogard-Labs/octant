@@ -172,8 +172,8 @@ async function observeAuthentication(
     return identitySnapshot(hostPort, personal.reference, "personal-api-key", signal);
   }
   const clientId = configuredClientId(config.clientId);
-  if (clientId === undefined) return unauthorized(LINEAR_OAUTH_UNCONFIGURED, false);
-  return unauthorized("Connect Linear to authorize this host.", false);
+  if (clientId === undefined) return unauthorized(LINEAR_OAUTH_UNCONFIGURED);
+  return unauthorized("Connect Linear to authorize this host.");
 }
 
 async function identitySnapshot(

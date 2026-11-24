@@ -1,7 +1,12 @@
 import { createElement, type ComponentType, type ReactElement } from "react";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
-import type { ProjectId, ProjectLinearTarget, ProjectSummary } from "@octant/contracts";
+import type {
+  ProjectId,
+  ProjectLinearTarget,
+  ProjectSummary,
+  SettingsSettingId,
+} from "@octant/contracts";
 import GitHubSettingsSectionModule from "../settings/GitHubSettingsSectionModule";
 import LinearSettingsSectionModule from "../settings/LinearSettingsSectionModule";
 
@@ -16,6 +21,7 @@ export interface PluginSettingsSectionProps {
   readonly onProjectLinearTargetChange?:
     | ((projectId: ProjectId, target: ProjectLinearTarget | null) => Promise<boolean>)
     | undefined;
+  readonly focusedSetting?: SettingsSettingId | undefined;
 }
 
 export type PluginSettingsSectionModule = ComponentType<PluginSettingsSectionProps>;
@@ -40,6 +46,7 @@ function LinearSettingsAdapter(props: PluginSettingsSectionProps): ReactElement 
     ...(props.onProjectLinearTargetChange === undefined
       ? {}
       : { onProjectLinearTargetChange: props.onProjectLinearTargetChange }),
+    ...(props.focusedSetting === undefined ? {} : { focusedSetting: props.focusedSetting }),
   });
 }
 

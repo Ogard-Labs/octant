@@ -1,5 +1,10 @@
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
-import type { ProjectId, ProjectLinearTarget, ProjectSummary } from "@octant/contracts";
+import type {
+  ProjectId,
+  ProjectLinearTarget,
+  ProjectSummary,
+  SettingsSettingId,
+} from "@octant/contracts";
 import { LinearConnectionSettings } from "./LinearConnectionSettings";
 
 export interface LinearSettingsSectionModuleProps {
@@ -8,6 +13,7 @@ export interface LinearSettingsSectionModuleProps {
   readonly onProjectLinearTargetChange?:
     | ((projectId: ProjectId, target: ProjectLinearTarget | null) => Promise<boolean>)
     | undefined;
+  readonly focusedSetting?: SettingsSettingId | undefined;
 }
 
 /**
@@ -33,6 +39,7 @@ export default function LinearSettingsSectionModule(props: LinearSettingsSection
       {...(props.onProjectLinearTargetChange === undefined
         ? {}
         : { onProjectLinearTargetChange: props.onProjectLinearTargetChange })}
+      {...(props.focusedSetting === undefined ? {} : { focusedSetting: props.focusedSetting })}
     />
   );
 }

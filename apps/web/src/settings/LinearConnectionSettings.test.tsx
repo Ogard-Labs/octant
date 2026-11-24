@@ -224,4 +224,70 @@ describe("LinearConnectionSettings", () => {
       "Stored secret, enter a new key to replace",
     );
   });
+
+  it("reloads Linear team options after a ready-to-ready personal API key replacement", async () => {
+    let workspace = "workspace-a";
+    const listIssueFilters = vi.fn(async () => ({
+      teams:
+        workspace === "workspace-a"
+          ? [{ id: "team-a", label: "Alpha (ALP)", key: "ALP", name: "Alpha" }]
+          : [{ id: "team-b", label: "Beta (BET)", key: "BET", name: "Beta" }],
+      states: [],
+      assignees: [],
+      projects: [],
+    }));
+    const client: IntegrationClient = {
+      ...makeClient({
+        authenticationSnapshot: async () => ({
+          state: "ready",
+          account: {
+            login: workspace,
+            source: "personal-api-key",
+            scopes: ["read"],
+          },
+          capabilities: [{ operationId: "list-issues", available: true }],
+          personalCredentialStored: true,
+        }),
+      }),
+      storePersonalCredential: async () => {
+        workspace = "workspace-b";
+      },
+      listIssueFilters,
+    };
+    const projects = [
+      decodeProjectSummary({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "octant",
+        type: "code",
+        lifecycle: "active",
+        pinned: false,
+        rank: "1/1",
+        version: 1,
+        createdAt: "2026-11-24T00:00:00.000Z",
+        updatedAt: "2026-11-24T00:00:00.000Z",
+        binding: { canonicalRoot: "/tmp/octant" },
+        bindingRevisionId: "22222222-2222-4222-8222-222222222222",
+        codeAccessPersistence: "current-session",
+      }),
+    ];
+
+    render(
+      <LinearConnectionSettings
+        client={client}
+        onProjectLinearTargetChange={vi.fn(async () => true)}
+        projects={projects}
+      />,
+    );
+    expect(await screen.findByText("workspace-a")).toBeInTheDocument();
+    expect(listIssueFilters).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Personal API key" }));
+    fireEvent.change(screen.getByLabelText("Personal API key"), {
+      target: { value: "new-secret-value" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Store key" }));
+
+    expect(await screen.findByText("workspace-b")).toBeInTheDocument();
+    expect(listIssueFilters).toHaveBeenCalledTimes(2);
+  });
 });

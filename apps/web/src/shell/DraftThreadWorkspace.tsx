@@ -814,9 +814,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   };
   const pickLinearWork = (row: LinearIssueRow) => {
     const matchedProject = matchProjectForLinearIssue(
-      (props.projects ?? []).filter(
-        (project): project is Exclude<ProjectSummary, { readonly type: "chat" }> =>
-          project.type !== "chat",
+      compatibleProjects.filter(
+        (project): project is Extract<ProjectSummary, { readonly type: "code" }> =>
+          project.type === "code",
       ),
       row,
     );
