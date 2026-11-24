@@ -9,7 +9,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { projectPullRequestKey } from "./projectPullRequestKey";
-import { switchRefusalCopy } from "./ProjectPullRequestSupport";
+import { pullRequestControlsLoadMessage, switchRefusalCopy } from "./ProjectPullRequestSupport";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import {
   OctantField,
@@ -140,8 +140,13 @@ export function BulkBabysitDialog(props: {
           else if (outcome.status === "refused" && outcome.reason === "already-active")
             result = { done: true, text: "Already active with another owner or rules" };
           else result = { done: false, text: switchRefusalCopy("auto-fix", outcome) };
-        } catch {
-          result = { done: false, text: "Could not confirm the watch. Retry to check." };
+        } catch (error) {
+          result = {
+            done: false,
+            text:
+              pullRequestControlsLoadMessage(error) ??
+              "Could not confirm the watch. Retry to check.",
+          };
         }
         setResults((previous) => ({ ...previous, [key]: result }));
       }

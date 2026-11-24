@@ -16,12 +16,17 @@ import {
   type PullRequestReviewTarget,
 } from "@octant/contracts";
 import { useState } from "react";
+import { PullRequestControlsUnavailableError } from "@octant/client-runtime/code-client";
 import { type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { PullRequestHandBackSwitch } from "./PullRequestReviewerSettings";
 
 /** What the dock's review and the page's reading pane both say about a pull request. */
+
+export function pullRequestControlsLoadMessage(error: unknown): string | undefined {
+  return error instanceof PullRequestControlsUnavailableError ? error.message : undefined;
+}
 
 export const CHECK_STATE_LABELS: Record<
   CodeProjectPullRequestDetailObserved["checks"][number]["state"],

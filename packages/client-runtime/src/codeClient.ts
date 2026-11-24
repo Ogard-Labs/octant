@@ -425,10 +425,16 @@ const loadPullRequestSwitchContracts = () =>
   );
 
 function pullRequestControlsUnavailable(): never {
-  throw new CodeClientFailure({
-    category: "unavailable",
-    message: "Pull request controls could not load. Reload Octant and try again.",
-  });
+  throw new PullRequestControlsUnavailableError();
+}
+
+export class PullRequestControlsUnavailableError extends CodeClientFailure {
+  constructor() {
+    super({
+      category: "unavailable",
+      message: "Pull request controls could not load. Reload Octant and try again.",
+    });
+  }
 }
 
 export function createCodeClient(options: CodeClientOptions): CodeClient {

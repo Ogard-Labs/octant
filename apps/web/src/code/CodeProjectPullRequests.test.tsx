@@ -13,6 +13,7 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadWatchHandoff } from "./PullRequestHandoff";
 import type { CodeClient } from "@octant/client-runtime";
+import { PullRequestControlsUnavailableError } from "@octant/client-runtime/code-client";
 import { CodeProjectPullRequests } from "./CodeProjectPullRequests";
 
 const projectA = "10000000-0000-4000-8000-000000000001";
@@ -207,6 +208,29 @@ function renderWorkspace(
 }
 
 describe("CodeProjectPullRequests", () => {
+  it("shows reload instructions when the overview or watch settings cannot load their controls", async () => {
+    const user = userEvent.setup();
+    const failure = new PullRequestControlsUnavailableError();
+    const unavailable = vi.fn().mockRejectedValue(failure);
+    const { unmount } = render(
+      <CodeProjectPullRequests load={unavailable} refresh={unavailable} />,
+    );
+    expect(await screen.findByText(failure.message)).toBeVisible();
+    unmount();
+    render(
+      <CodeProjectPullRequests
+        load={async () => view()}
+        refresh={async () => view()}
+        babysitClient={{
+          queryProjectPullRequestSwitches: unavailable,
+          setProjectPullRequestAutoFix: vi.fn(),
+        }}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Babysit octant/octant#12" }));
+    expect(await screen.findByText(failure.message)).toBeVisible();
+  });
+
   it("starts babysitting the chosen PR from the list in the selected linked thread", async () => {
     const user = userEvent.setup();
     const otherThread = "20000000-0000-4000-8000-000000000002";

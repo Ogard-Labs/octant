@@ -13,7 +13,11 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { autoFixCopy, switchRefusalCopy } from "./ProjectPullRequestSupport";
+import {
+  autoFixCopy,
+  pullRequestControlsLoadMessage,
+  switchRefusalCopy,
+} from "./ProjectPullRequestSupport";
 
 import {
   BulkBabysitDialog,
@@ -58,8 +62,12 @@ export function PullRequestBabysitDialog(props: {
           ),
         );
       })
-      .catch(() => {
-        if (live) setError("Octant could not read this thread’s pull requests.");
+      .catch((error: unknown) => {
+        if (live)
+          setError(
+            pullRequestControlsLoadMessage(error) ??
+              "Octant could not read this thread’s pull requests.",
+          );
       });
     return () => {
       live = false;
@@ -213,7 +221,7 @@ function BabysitControls(props: {
   const seededStop = useRef<string | undefined>(undefined);
   const revision = useRef(0);
   const writing = useRef(false);
-  const [readError, setReadError] = useState(false);
+  const [readError, setReadError] = useState("");
   useEffect(() => {
     let live = true;
     const read = () => {
@@ -235,11 +243,15 @@ function BabysitControls(props: {
               seededStop.current = watch.stoppedAt;
             }
             setState(watch);
-            setReadError(false);
+            setReadError("");
           }
         })
-        .catch(() => {
-          if (live && revision.current === pendingRead) setReadError(true);
+        .catch((error: unknown) => {
+          if (live && revision.current === pendingRead)
+            setReadError(
+              pullRequestControlsLoadMessage(error) ??
+                "Octant could not read the current Auto-fix settings.",
+            );
         });
     };
     read();
@@ -282,9 +294,10 @@ function BabysitControls(props: {
       );
       if (outcome.status === "applied") setState(outcome.view.autoFix);
       else setError(switchRefusalCopy("auto-fix", outcome));
-    } catch {
+    } catch (error) {
       setError(
-        "Octant could not update this pull request. Reopen the command to check its status.",
+        pullRequestControlsLoadMessage(error) ??
+          "Octant could not update this pull request. Reopen the command to check its status.",
       );
     } finally {
       writing.current = false;
@@ -318,11 +331,7 @@ function BabysitControls(props: {
           </>
         )
       )}
-      {readError && (
-        <OctantAlert tone="warning">
-          Octant could not read the current Auto-fix settings.
-        </OctantAlert>
-      )}
+      {readError && <OctantAlert tone="warning">{readError}</OctantAlert>}
       {error && <OctantAlert tone="warning">{error}</OctantAlert>}
       <div className="octant-dialog__actions">
         <OctantButton type="button" variant="outline" onClick={props.onClose}>

@@ -17,7 +17,12 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { type BabysitClient, targetFor } from "./BulkBabysitDialog";
-import { isMergeMethod, mergeOutcomeCopy, switchRefusalCopy } from "./ProjectPullRequestSupport";
+import {
+  isMergeMethod,
+  mergeOutcomeCopy,
+  pullRequestControlsLoadMessage,
+  switchRefusalCopy,
+} from "./ProjectPullRequestSupport";
 
 function pullRequestRef(row: CodeProjectPullRequestRow) {
   return `${row.repositoryOwner}/${row.repositoryName}#${row.number}`;
@@ -66,8 +71,11 @@ function ReadyMerge({
       setDone(outcome.status === "merged");
       setMessage(outcome.status === "merged" ? `Merged ${ref}.` : mergeOutcomeCopy(outcome));
       if (outcome.status === "merged") onMerged?.();
-    } catch {
-      setMessage("Octant could not confirm the merge. Check the pull request before retrying.");
+    } catch (error) {
+      setMessage(
+        pullRequestControlsLoadMessage(error) ??
+          "Octant could not confirm the merge. Check the pull request before retrying.",
+      );
     } finally {
       setBusy(false);
       running.current = false;
@@ -189,8 +197,8 @@ export function RowWatchHandoff({
       const outcome = await client.setProjectPullRequestAutoFix(command);
       if (outcome.status !== "applied") setError(switchRefusalCopy("auto-fix", outcome));
       onUpdated();
-    } catch {
-      setError("Octant could not resume this watch.");
+    } catch (error) {
+      setError(pullRequestControlsLoadMessage(error) ?? "Octant could not resume this watch.");
     } finally {
       running.current = false;
       setBusy(false);
@@ -276,8 +284,10 @@ export function ThreadWatchHandoff({
       ? followUp.reason
       : undefined;
   const [rows, setRows] = useState<ReadonlyArray<CodeProjectPullRequestRow>>([]);
+  const [loadMessage, setLoadMessage] = useState<string>();
   useEffect(() => {
     setRows([]);
+    setLoadMessage(undefined);
     if (!reason?.includes(readyPullRequestNotice("")) || !client.mergeProjectPullRequest) return;
     let live = true;
     let reading = false;
@@ -288,7 +298,8 @@ export function ThreadWatchHandoff({
       reading = true;
       try {
         const view = await client.queryProjectPullRequests({ version: 1, threadId });
-        if (live)
+        if (live) {
+          setLoadMessage(undefined);
           setRows(
             view.rows.filter(
               (row) =>
@@ -298,8 +309,12 @@ export function ThreadWatchHandoff({
                 row.linkedThreads.some((link) => String(link.threadId) === String(threadId)),
             ),
           );
-      } catch {
-        if (live) setRows([]);
+        }
+      } catch (error) {
+        if (live) {
+          setRows([]);
+          setLoadMessage(pullRequestControlsLoadMessage(error));
+        }
       } finally {
         reading = false;
       }
@@ -322,6 +337,7 @@ export function ThreadWatchHandoff({
   return (
     <section aria-label="Pull request updates">
       <strong>Pull request updates</strong>
+      {loadMessage && <OctantAlert tone="warning">{loadMessage}</OctantAlert>}
       <ul>
         {reason
           .slice(PULL_REQUEST_HANDOFF_HEADING.length)

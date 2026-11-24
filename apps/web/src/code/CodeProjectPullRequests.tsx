@@ -37,6 +37,7 @@ import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { RowWatchHandoff } from "./PullRequestHandoff";
 import { BulkBabysitDialog } from "./BulkBabysitDialog";
+import { pullRequestControlsLoadMessage } from "./ProjectPullRequestSupport";
 import { OverviewBabysitDialog, type BabysitClient } from "./PullRequestBabysitDialog";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -230,11 +231,16 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
     try {
       const view = await loadRef.current({ version: 1 });
       if (listRevision.current === revision) setWorkspace({ status: "ready", view });
-    } catch {
+    } catch (error) {
       if (listRevision.current === revision)
         setWorkspace((previous) =>
           previous.status === "loading"
-            ? { status: "error", message: "The pull-request list could not be read." }
+            ? {
+                status: "error",
+                message:
+                  pullRequestControlsLoadMessage(error) ??
+                  "The pull-request list could not be read.",
+              }
             : previous,
         );
     }
@@ -267,11 +273,12 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       const view = await props.refresh(command);
       if (listRevision.current !== revision) return;
       setWorkspace({ status: "ready", view });
-    } catch {
+    } catch (error) {
       if (listRevision.current !== revision) return;
       setWorkspace((previous) => ({
         status: "error",
-        message: "The pull-request list could not be refreshed.",
+        message:
+          pullRequestControlsLoadMessage(error) ?? "The pull-request list could not be refreshed.",
         ...(previous.status === "ready" || previous.status === "refreshing"
           ? { view: previous.view }
           : previous.status === "error" && previous.view !== undefined
