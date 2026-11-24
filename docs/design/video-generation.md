@@ -244,7 +244,9 @@ holds that choice or exactly one video profile is ready, and with several
 ready, on the profile Settings names for Full access, else the first ready one.
 As for images:
 
-- Full access asks again after the person chooses Ask again.
+- In Project settings, the **Video generation** row names the kept model
+  and offers **Ask again**. It restores the video confirmation at Full access
+  and keeps the Project's image choice.
 - A kept choice the host can no longer run (its profile turned off, its driver
   plugin disabled or its model removed) is dropped and the person is asked. It
   is never swapped for another model.

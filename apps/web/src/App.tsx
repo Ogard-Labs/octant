@@ -6312,7 +6312,7 @@ function LaunchedShell(
       setProjectPermissionMode: projectController.setCodePermissionMode,
       setProjectAutoReviewer: projectController.setCodeAutoReviewer,
       setProjectAgentMemoryWrites: projectController.setAgentMemoryWrites,
-      askAgainForProjectImageGeneration: projectController.askAgainForImageGeneration,
+      askAgainForProjectGeneration: projectController.askAgainForGeneration,
       setProjectBrandKit: projectController.setBrandKit,
       setProjectDesignSystem: projectController.setDesignSystem,
       setProjectDesktopRecipe: projectController.setDesktopRecipe,

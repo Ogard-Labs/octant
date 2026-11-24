@@ -103,6 +103,7 @@ function harness(options: {
     readonly modelId: typeof model.modelId;
   };
   readonly fullAccess?: boolean;
+  readonly asksAgain?: boolean;
   readonly posture?: "refuse" | "ask" | "allow";
   readonly answer?: Awaited<ReturnType<VideoAgentToolPort["askGenerate"]>>;
   readonly pending?: boolean;
@@ -168,7 +169,7 @@ function harness(options: {
       askGenerate,
       askSave,
       remembered: () => options.kept,
-      asksAgain: () => false,
+      asksAgain: () => options.asksAgain === true,
       forget: () => undefined,
       fullAccess: () => options.fullAccess === true,
       save: { posture: () => options.posture ?? "ask", write },
@@ -216,6 +217,13 @@ describe("octant_create_video on the host", () => {
     await declined.call({ prompt: "A paper boat on a pond" });
     expect(declined.askGenerate).toHaveBeenCalledOnce();
     expect(declined.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("asks again at Full access after the Project drops its video choice", async () => {
+    const { call, askGenerate, enqueue } = harness({ fullAccess: true, asksAgain: true });
+    await call({ prompt: "A paper boat on a pond" });
+    expect(askGenerate).toHaveBeenCalledOnce();
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it("refuses options the model does not declare before any card or job", async () => {
