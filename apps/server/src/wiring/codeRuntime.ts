@@ -1,5 +1,5 @@
 import { decodeBrowserThreadId } from "@octant/contracts";
-import { pullRequestIdentitiesFromHistory } from "../code/codeThreadMetadataService";
+import { ownPullRequestsFromHistory } from "../code/codeThreadMetadataService";
 import { splitRepositoryName } from "../code/pullRequestLinkService";
 import { MergedThreadPutAway, threadDeliversPullRequest } from "../code/mergedThreadPutAway";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
@@ -2261,7 +2261,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             projectExists: (projectId) => persistence.readProject(projectId) !== undefined,
             metadata: codeThreadMetadataService,
             cachedMerges: (thread) => {
-              const known = pullRequestIdentitiesFromHistory(
+              const own = ownPullRequestsFromHistory(
                 codeBoardEventStore.summaryForThread(thread.id),
               );
               return projectPullRequestService.mergedPullRequestsForThread(
@@ -2269,7 +2269,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                 (pullRequest) =>
                   threadDeliversPullRequest({
                     thread,
-                    known,
+                    own,
                     pullRequest,
                     sameRepository: (projectId, left, right) =>
                       pullRequestLinkService.areSameRepository(projectId, left, right),

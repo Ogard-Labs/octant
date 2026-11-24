@@ -1,7 +1,7 @@
 import type { CodeThread, CodeThreadId } from "@octant/contracts";
 import type { MergedPullRequest, MergedThreadPutAwayOutcome } from "./codeService";
 import type {
-  CodeThreadKnownPullRequest,
+  CodeThreadOwnPullRequest,
   CodeThreadMetadataService,
 } from "./codeThreadMetadataService";
 import { splitRepositoryName } from "./pullRequestLinkService";
@@ -56,16 +56,18 @@ export interface MergedThreadPutAwayOptions {
 }
 
 /**
- * Whether a cached pull request is what the thread delivers: in its delivery
- * repository, and on its delivery branch or recorded there by Octant's own
- * pull-request operations (those carry no repository). A thread is also linked
- * to pull requests its tool calls reviewed or commented on, in any of the
- * Project's repositories, and merging one of those delivers nothing here, even
- * when it shares a number or a branch name with the thread's own.
+ * Whether a cached pull request is what the thread delivers: one Octant's own
+ * pull-request operations recorded for it, or one on its delivery branch in its
+ * delivery repository. That is the repository its target names, and the one
+ * those operations ran in: a server thread's target is a `local/…` placeholder,
+ * which only the operation resolves. A thread is also linked to pull requests
+ * its tool calls reviewed or commented on, in any of the Project's
+ * repositories, and merging one of those delivers nothing here, even when it
+ * shares a number or a branch name with the thread's own.
  */
 export function threadDeliversPullRequest(input: {
   readonly thread: Pick<CodeThread, "deliveryTarget" | "projectId">;
-  readonly known: ReadonlyArray<CodeThreadKnownPullRequest>;
+  readonly own: ReadonlyArray<CodeThreadOwnPullRequest>;
   readonly pullRequest: {
     readonly repositoryOwner: string;
     readonly repositoryName: string;
@@ -78,23 +80,16 @@ export function threadDeliversPullRequest(input: {
     right: { readonly owner: string; readonly name: string },
   ) => boolean;
 }): boolean {
-  const { thread, pullRequest } = input;
-  const delivery = splitRepositoryName(thread.deliveryTarget.proposedBaseRepository);
-  if (
-    delivery === undefined ||
-    !input.sameRepository(thread.projectId, delivery, {
-      owner: pullRequest.repositoryOwner,
-      name: pullRequest.repositoryName,
-    })
-  ) {
-    return false;
+  const { thread, own, pullRequest } = input;
+  const here = { owner: pullRequest.repositoryOwner, name: pullRequest.repositoryName };
+  const same = (repository: { readonly owner: string; readonly name: string }) =>
+    input.sameRepository(thread.projectId, repository, here);
+  if (own.some((entry) => entry.number === pullRequest.number && same(entry.repository))) {
+    return true;
   }
-  return (
-    pullRequest.headBranch === thread.deliveryTarget.branchIntent ||
-    input.known.some(
-      (entry) => entry.repository === undefined && entry.number === pullRequest.number,
-    )
-  );
+  if (pullRequest.headBranch !== thread.deliveryTarget.branchIntent) return false;
+  const target = splitRepositoryName(thread.deliveryTarget.proposedBaseRepository);
+  return (target !== undefined && same(target)) || own.some((entry) => same(entry.repository));
 }
 
 /**

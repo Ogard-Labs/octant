@@ -666,6 +666,41 @@ export function pullRequestIdentitiesFromHistory(
     .slice(0, MAX_CODE_THREAD_KNOWN_PULL_REQUESTS);
 }
 
+/** A pull request Octant's own operations handled for a thread, where they ran. */
+export interface CodeThreadOwnPullRequest {
+  readonly number: number;
+  readonly repository: { readonly owner: string; readonly name: string };
+}
+
+/**
+ * The pull requests Octant's own operations opened, reviewed or merged for the
+ * thread, each with the repository GitHub answered for. Tool calls never count.
+ */
+export function ownPullRequestsFromHistory(
+  history: CodeThreadOperationHistory,
+): ReadonlyArray<CodeThreadOwnPullRequest> {
+  if (history.status !== "ok") return [];
+  const own = new Map<string, CodeThreadOwnPullRequest>();
+  for (const { event } of history.frames) {
+    if (event.kind !== "operation-result") continue;
+    const result = event.result;
+    const named =
+      (result.kind === "pull-request-review" && result.state === "observed") ||
+      (result.kind === "pull-request-state" &&
+        (result.state === "created" || result.state === "existing" || result.state === "merged"))
+        ? result
+        : undefined;
+    if (named === undefined) continue;
+    const repository = splitRepositoryName(named.baseRepository);
+    if (repository === undefined) continue;
+    own.set(`${named.baseRepository.toLowerCase()}#${String(named.number)}`, {
+      number: named.number,
+      repository,
+    });
+  }
+  return [...own.values()];
+}
+
 /** An issue a tool call of this thread wrote to, as the call's result last described it. */
 export type CodeThreadTouchedIssue = (
   | {

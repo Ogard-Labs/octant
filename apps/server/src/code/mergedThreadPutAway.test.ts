@@ -102,14 +102,7 @@ describe("merged thread put-away", () => {
     ) =>
       threadDeliversPullRequest({
         thread,
-        known: [
-          { number: 12, observedAt: "2026-11-24T09:00:00Z" },
-          {
-            number: 30,
-            observedAt: "2026-11-24T09:00:00Z",
-            repository: { owner: "acme", name: "app" },
-          },
-        ],
+        own: [{ number: 12, repository: { owner: "acme", name: "app" } }],
         pullRequest: {
           repositoryOwner: "acme",
           repositoryName: "app",
@@ -126,11 +119,39 @@ describe("merged thread put-away", () => {
     expect(delivers({ headBranch: "feature/thing" })).toBe(true);
     expect(delivers({ number: 12 })).toBe(true);
     expect(delivers({ number: 12, repositoryName: "app-next" })).toBe(true);
-    // Linked by a tool call that only touched it.
+    // Linked by a tool call that only touched it: no operation of Octant's own.
     expect(delivers({ number: 30 })).toBe(false);
     // Another of the Project's repositories, by the same number or branch.
     expect(delivers({ number: 12, repositoryName: "docs" })).toBe(false);
     expect(delivers({ headBranch: "feature/thing", repositoryName: "docs" })).toBe(false);
+  });
+
+  it("finds a server thread's delivery repository in the pull request Octant opened for it", () => {
+    // A composer reads no remote of a server, so the target is a placeholder.
+    const thread = codeThread("on-a-server", {
+      deliveryTarget: {
+        proposedBaseRepository: "local/App",
+        branchIntent: "feature/thing",
+      } as CodeThread["deliveryTarget"],
+    });
+    const delivers = (
+      own: Parameters<typeof threadDeliversPullRequest>[0]["own"],
+      pullRequest: { readonly number: number; readonly headBranch: string },
+      repositoryName = "app",
+    ) =>
+      threadDeliversPullRequest({
+        thread,
+        own,
+        pullRequest: { repositoryOwner: "acme", repositoryName, ...pullRequest },
+        sameRepository: (_projectId, left, right) =>
+          left.owner === right.owner && left.name === right.name,
+      });
+    const opened = [{ number: 12, repository: { owner: "acme", name: "app" } }];
+
+    expect(delivers(opened, { number: 12, headBranch: "feature/thing" })).toBe(true);
+    expect(delivers(opened, { number: 40, headBranch: "feature/thing" })).toBe(true);
+    expect(delivers(opened, { number: 12, headBranch: "feature/thing" }, "docs")).toBe(false);
+    expect(delivers([], { number: 12, headBranch: "feature/thing" })).toBe(false);
   });
 
   it("puts away a thread whose pull request merged, and leaves an open one, an unmerged one and a coordinator", async () => {
