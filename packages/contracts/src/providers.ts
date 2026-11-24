@@ -86,6 +86,8 @@ export const ProviderDriverKind = Schema.Literal(
   "ideogram-image",
   // Video drivers; `VIDEO_DRIVER_KINDS` in videoGeneration.ts lists the same kinds.
   "gemini-video",
+  "runway-video",
+  "fal-video",
   // The one family for every driver package that does not ship with Octant.
   // Which driver an instance runs is package data in its configuration, never
   // a new value here, so the exhaustive checks over this set stay closed.
@@ -1037,6 +1039,31 @@ export const GeminiVideoProviderConfiguration = Schema.Struct({
   .pipe(Schema.filter(imageAllowlistContainsDefault))
   .annotations(strict);
 export type GeminiVideoProviderConfiguration = typeof GeminiVideoProviderConfiguration.Type;
+
+/** Runway's own video models, as Settings suggests them. */
+export const RUNWAY_VIDEO_MODEL_PRESETS = ["gen4.5", "gen4_turbo"] as const;
+export const RunwayVideoProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("runway-video-http"),
+  modelAllowlist: UniqueManualModelIds,
+  defaultModel: ProviderModelId,
+})
+  .pipe(Schema.filter(imageAllowlistContainsDefault))
+  .annotations(strict);
+export type RunwayVideoProviderConfiguration = typeof RunwayVideoProviderConfiguration.Type;
+
+/**
+ * fal endpoint ids Settings suggests; any fal video endpoint id may be listed,
+ * and the driver reads its options from fal's published schema.
+ */
+export const FAL_VIDEO_MODEL_PRESETS = ["fal-ai/veo3.1", "fal-ai/veo3.1/image-to-video"] as const;
+export const FalVideoProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("fal-video-http"),
+  modelAllowlist: UniqueManualModelIds,
+  defaultModel: ProviderModelId,
+})
+  .pipe(Schema.filter(imageAllowlistContainsDefault))
+  .annotations(strict);
+export type FalVideoProviderConfiguration = typeof FalVideoProviderConfiguration.Type;
 /**
  * How a Claude account signs in: its own claude.ai login, an Anthropic API
  * key, or a gateway (an address the runtime calls as `ANTHROPIC_BASE_URL`
@@ -1339,6 +1366,20 @@ export const GeminiVideoProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type GeminiVideoProviderInstance = typeof GeminiVideoProviderInstance.Type;
 
+export const RunwayVideoProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("runway-video"),
+  configuration: RunwayVideoProviderConfiguration,
+}).annotations(strict);
+export type RunwayVideoProviderInstance = typeof RunwayVideoProviderInstance.Type;
+
+export const FalVideoProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("fal-video"),
+  configuration: FalVideoProviderConfiguration,
+}).annotations(strict);
+export type FalVideoProviderInstance = typeof FalVideoProviderInstance.Type;
+
 /**
  * The host's hold on an outside instance's driver at one digest. The process
  * owner sets it when the driver crashes past its limit (a third crash within
@@ -1380,6 +1421,8 @@ export const ProviderInstance = Schema.Union(
   BflImageProviderInstance,
   IdeogramImageProviderInstance,
   GeminiVideoProviderInstance,
+  RunwayVideoProviderInstance,
+  FalVideoProviderInstance,
   OutsideHarnessEndpointProviderInstance,
 );
 export type ProviderInstance = typeof ProviderInstance.Type;
@@ -1471,6 +1514,8 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     BflImageProviderInstance,
     IdeogramImageProviderInstance,
     GeminiVideoProviderInstance,
+    RunwayVideoProviderInstance,
+    FalVideoProviderInstance,
     ClaudeProviderInstance,
     AcpAgentProviderInstance,
     AddedAcpAgentProviderInstance,
@@ -2576,6 +2621,18 @@ export const ProviderRegistryCommand = Schema.Union(
     configuration: GeminiVideoProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("create-runway-video-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: RunwayVideoProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("create-fal-video-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: FalVideoProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("create-codex-provider"),
     ...CreateProviderCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
@@ -2682,6 +2739,16 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("change-gemini-video-configuration"),
     ...ProviderInstanceCommandFields,
     configuration: GeminiVideoProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-runway-video-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: RunwayVideoProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-fal-video-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: FalVideoProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-claude-configuration"),

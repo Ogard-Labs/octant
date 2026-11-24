@@ -189,21 +189,39 @@ export async function runVideoGenerationConformance(
     "the fixture's model is not one the profile declares",
   );
 
+  // The host always reads a profile's models before it starts a job, and a
+  // driver that learns its models from the provider (an aggregator reading
+  // each endpoint's schema and price) makes those reads then. The promise
+  // checked below is that start itself sends nothing for a refused request,
+  // so calls are counted from after the models are read.
+  const adapterWithModels = async (ports: VideoGenerationPorts) => {
+    const adapter = build(ports);
+    await contained("models", () => adapter.models());
+    return adapter;
+  };
+
   const cancelled = scripted();
   const controller = new AbortController();
   controller.abort();
+  const cancelledAdapter = await adapterWithModels(cancelled.ports);
+  const cancelledBefore = cancelled.calls();
   const cancelledStart = await contained("start", () =>
-    build(cancelled.ports).start({ ...fixture.request, signal: controller.signal }),
+    cancelledAdapter.start({ ...fixture.request, signal: controller.signal }),
   );
   assertConformance(
     failureCategory(cancelledStart) === "interrupted",
     "a cancelled request did not fail as interrupted",
   );
-  assertConformance(cancelled.calls() === 0, "a cancelled request still called the provider");
+  assertConformance(
+    cancelled.calls() === cancelledBefore,
+    "a cancelled request still called the provider",
+  );
 
   const empty = scripted();
+  const emptyAdapter = await adapterWithModels(empty.ports);
+  const emptyBefore = empty.calls();
   const emptyStart = await contained("start", () =>
-    build(empty.ports).start({
+    emptyAdapter.start({
       ...fixture.request,
       prompt: "   ",
       signal: new AbortController().signal,
@@ -213,11 +231,13 @@ export async function runVideoGenerationConformance(
     failureCategory(emptyStart) === "invalid-configuration",
     "an empty prompt did not fail as invalid configuration",
   );
-  assertConformance(empty.calls() === 0, "an empty prompt still called the provider");
+  assertConformance(empty.calls() === emptyBefore, "an empty prompt still called the provider");
 
   const outside = scripted();
+  const outsideAdapter = await adapterWithModels(outside.ports);
+  const outsideBefore = outside.calls();
   const outsideStart = await contained("start", () =>
-    build(outside.ports).start({
+    outsideAdapter.start({
       ...outsideDeclaration(models, fixture.request),
       signal: new AbortController().signal,
     }),
@@ -227,7 +247,7 @@ export async function runVideoGenerationConformance(
     "a request outside the declared capabilities did not fail as invalid configuration",
   );
   assertConformance(
-    outside.calls() === 0,
+    outside.calls() === outsideBefore,
     "a request outside the declared capabilities still called the provider",
   );
 

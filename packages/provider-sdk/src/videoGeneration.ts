@@ -35,6 +35,8 @@ export interface VideoAdapterUsage {
   readonly inputTokens?: number;
   readonly outputTokens?: number;
   readonly billedSeconds?: number;
+  /** The amount the provider says it charged, in US micro-dollars, where it reports one. */
+  readonly costUsdMicros?: number;
 }
 
 export interface VideoAdapterClip {
@@ -45,7 +47,12 @@ export interface VideoAdapterClip {
 export type VideoAdapterStart =
   | { readonly status: "started"; readonly remoteId: string }
   | { readonly status: "refused"; readonly safetyRefusal: string }
-  | { readonly status: "failed"; readonly providerFailure: ProviderFailure };
+  | {
+      readonly status: "failed";
+      readonly providerFailure: ProviderFailure;
+      /** The attempt ended before the provider could start a job. */
+      readonly notStarted?: true;
+    };
 
 export type VideoAdapterPoll =
   | { readonly status: "running" }
@@ -54,7 +61,14 @@ export type VideoAdapterPoll =
       readonly video: VideoAdapterClip;
       readonly usage?: VideoAdapterUsage;
     }
-  | { readonly status: "refused"; readonly safetyRefusal: string }
+  | {
+      readonly status: "refused";
+      readonly safetyRefusal: string;
+      /** The refusal is billed even if the provider does not report the charge. */
+      readonly billed?: true;
+      /** What the provider charged for the refusal, where it bills one. */
+      readonly usage?: VideoAdapterUsage;
+    }
   | {
       readonly status: "failed";
       readonly providerFailure: ProviderFailure;
@@ -69,18 +83,19 @@ export type VideoAdapterForget =
   | { readonly status: "failed"; readonly providerFailure: ProviderFailure };
 
 /**
- * One video profile's generator. No method rejects: every refusal and
- * failure is a result the job records, so a broken adapter cannot leave a
- * job running.
+ * One video profile's generator. Job operations report refusals and failures
+ * as results so the host can record them. Discovery may reject if it fails.
  */
 export interface VideoGenerationAdapter {
-  /** The models this profile offers, each with what it declares about itself. */
-  readonly models: () => Promise<ReadonlyArray<VideoModelCapabilities>>;
+  /** The profile's declared models. Network discovery must honor the caller's signal. */
+  readonly models: (signal?: AbortSignal) => Promise<ReadonlyArray<VideoModelCapabilities>>;
   readonly start: (request: VideoAdapterRequest) => Promise<VideoAdapterStart>;
   readonly poll: (remoteId: string, signal: AbortSignal) => Promise<VideoAdapterPoll>;
+  /** All accepted jobs on this adapter can be cancelled by ID without consulting the catalog. */
+  readonly cancelRunningWithoutDiscovery?: true;
   /**
    * Asks the provider to stop, then reports the job's state with any usage it
-   * states. Called only when the model declares it can cancel. A result still
+   * states. Called when the model or adapter declares it can cancel. A result still
    * `running` means the stop is not yet confirmed: the job service keeps
    * polling until a terminal state or the job time runs out. The signal
    * bounds the call: once the job time has run out, the host asks for a stop
@@ -90,6 +105,9 @@ export interface VideoGenerationAdapter {
   /**
    * Removes the provider's stored copy. Called after every terminal state when
    * the model declares `removal: delete`; the job service retries a failure.
+   * For a model that declares `removal: expires` the host also calls it once,
+   * best-effort: a refusal there falls back to the declared expiry, and any
+   * other failure is retried only until that expiry has passed.
    */
   readonly forget: (remoteId: string) => Promise<VideoAdapterForget>;
 }
@@ -214,6 +232,27 @@ export function refuseOutsideDeclaration(
     : undefined;
 }
 
+/** The gateway could not reach the origin, or the submission was rate limited. */
+export function isVideoStartRejection(response: Response): boolean {
+  const { status, headers } = response;
+  if (status === 429) return true;
+  // Cloudflare adds both diagnostic headers to its own errors. A forwarded
+  // 52x status alone cannot establish whether the start reached the provider.
+  return (
+    (status === 521 || status === 523 || status === 525 || status === 526) &&
+    headers.get("cf-error-type") === "52x" &&
+    Boolean(headers.get("cf-error-origin"))
+  );
+}
+
+export function classifyVideoStartHttpFailure(response: Response): VideoAdapterStart {
+  return {
+    status: "failed",
+    providerFailure: classifyVideoHttpFailure(response),
+    ...(isVideoStartRejection(response) ? { notStarted: true } : {}),
+  };
+}
+
 export function classifyVideoHttpFailure(response: Response, now = Date.now()): ProviderFailure {
   switch (response.status) {
     case 401:
@@ -238,15 +277,8 @@ export function classifyVideoHttpFailure(response: Response, now = Date.now()): 
       );
     case 408:
     case 504:
+    case 524:
       return videoFailure("unavailable", "The provider request timed out.");
-    case 500:
-    case 502:
-    case 503:
-    case 529:
-      return videoFailure(
-        "unavailable",
-        `The provider is unavailable (HTTP ${response.status}). Try again shortly.`,
-      );
     case 429: {
       const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"), now);
       return {
@@ -256,6 +288,12 @@ export function classifyVideoHttpFailure(response: Response, now = Date.now()): 
       };
     }
     default:
+      if (response.status >= 500 && response.status < 600) {
+        return videoFailure(
+          "unavailable",
+          `The provider is unavailable (HTTP ${response.status}). Try again shortly.`,
+        );
+      }
       return videoFailure(
         "provider-failed",
         `The provider request failed with HTTP ${response.status}.`,

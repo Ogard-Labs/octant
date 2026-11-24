@@ -359,8 +359,10 @@ async function generateVideo(
       prompt: request.prompt,
       options: clip,
       ...counts,
+      ...(signal === undefined ? {} : { signal }),
     });
   const first = await quoteFor(proposed);
+  if (signal?.aborted) return { status: "cancelled", reason: "aborted" };
   if (first.status === "refused") return { status: "refused", error: first.reason };
 
   let clip = proposed;
@@ -398,6 +400,7 @@ async function generateVideo(
   const refusalNow = port.refusal?.();
   if (refusalNow !== undefined) return { status: "refused", error: refusalNow };
   const final = await quoteFor(clip);
+  if (signal?.aborted) return { status: "cancelled", reason: "aborted" };
   if (final.status === "refused") return { status: "refused", error: final.reason };
 
   try {
@@ -436,12 +439,14 @@ async function generateVideo(
       prompt: request.prompt,
       options: clip,
       references,
+      ...(signal === undefined ? {} : { signal }),
       ...(firstFrame === undefined ? {} : { firstFrame }),
       ...(lastFrame === undefined ? {} : { lastFrame }),
     };
     const job = await port.jobs.enqueue(input);
     return await settledOutcome(port, job, signal);
   } catch (error) {
+    if (signal?.aborted) return { status: "cancelled", reason: "aborted" };
     return {
       status: "refused",
       error: error instanceof Error ? error.message : "The video job could not be started.",

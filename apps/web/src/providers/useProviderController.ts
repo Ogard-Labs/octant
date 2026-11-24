@@ -1,3 +1,4 @@
+import type { VideoProviderConfiguration } from "./configuration/configurationValues";
 import {
   acpAgentChangeCommandKind,
   acpAgentCreateCommandKind,
@@ -17,7 +18,6 @@ import {
   type CodexProviderConfiguration,
   type IdeogramImageProviderConfiguration,
   type GeminiImageProviderConfiguration,
-  type GeminiVideoProviderConfiguration,
   type OpenAiCompatibleProviderConfiguration,
   type OpenAiImageProviderConfiguration,
   type OllamaProviderConfiguration,
@@ -49,6 +49,7 @@ import {
   claudeAccountUsesStoredKey,
   isAcpAgentInstance,
   providerLatestVersionNpmPackage,
+  isVideoProfileDriverKind,
 } from "@octant/domain";
 import { parseClaudeAccountAccent } from "./configuration/claudeAccountValues";
 import { runProviderOAuthCommand } from "./providerOAuthClient";
@@ -920,10 +921,10 @@ export function useProviderController(options: ProviderControllerOptions) {
     },
     [client, hostBridge, install, recoverRegistryFailure],
   );
-  const createGeminiVideo = useCallback(
+  const createVideo = useCallback(
     (
       displayName: string,
-      configuration: GeminiVideoProviderConfiguration,
+      configuration: VideoProviderConfiguration,
       credential: TransientProviderCredential,
     ) => {
       const instanceId = decodeProviderInstanceId(crypto.randomUUID());
@@ -937,7 +938,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (credentialValue.length === 0) {
             if (mounted.current) {
-              setMessage("Enter a Gemini API key before creating this video profile.");
+              setMessage("Enter an API key before creating this video profile.");
             }
             return false;
           }
@@ -945,13 +946,14 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (client === undefined || current === undefined) return false;
           try {
             applyResult(
-              await client.execute({
-                kind: "create-gemini-video-provider",
-                instanceId,
-                expectedVersion: 0 as ProviderDefaults["version"],
-                displayName,
-                configuration,
-              }),
+              await client.execute(
+                createVideoProviderCommand({
+                  instanceId,
+                  expectedVersion: 0 as ProviderDefaults["version"],
+                  displayName,
+                  configuration,
+                }),
+              ),
               current,
               install,
             );
@@ -1911,10 +1913,10 @@ export function useProviderController(options: ProviderControllerOptions) {
       ),
     [client, hostBridge, install, recoverRegistryFailure],
   );
-  const changeGeminiVideoConfiguration = useCallback(
+  const changeVideoConfiguration = useCallback(
     (
       instanceId: ProviderInstanceId,
-      configuration: GeminiVideoProviderConfiguration,
+      configuration: VideoProviderConfiguration,
       credential: TransientProviderCredential,
     ) =>
       queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
@@ -1924,18 +1926,20 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (
             client === undefined ||
             current === undefined ||
-            instance?.driverKind !== "gemini-video"
+            instance === undefined ||
+            !isVideoProfileDriverKind(instance.driverKind)
           ) {
             return false;
           }
           try {
             applyResult(
-              await client.execute({
-                kind: "change-gemini-video-configuration",
-                instanceId,
-                expectedVersion: instance.version,
-                configuration,
-              }),
+              await client.execute(
+                changeVideoConfigurationCommand({
+                  instanceId,
+                  expectedVersion: instance.version,
+                  configuration,
+                }),
+              ),
               current,
               install,
             );
@@ -2496,7 +2500,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           instance.driverKind === "azure-foundry" ||
           instance.driverKind === "openai-image" ||
           instance.driverKind === "gemini-native-image" ||
-          instance.driverKind === "gemini-video" ||
+          isVideoProfileDriverKind(instance.driverKind) ||
           instance.driverKind === "bfl-image" ||
           instance.driverKind === "ideogram-image" ||
           (instance.driverKind === "anthropic-compatible" &&
@@ -2847,7 +2851,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     createAmazonBedrock,
     createOpenAiImage,
     createGeminiImage,
-    createGeminiVideo,
+    createVideo,
     createBflImage,
     createIdeogramImage,
     rename,
@@ -2862,7 +2866,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     changeOpenAiCompatibleConfiguration,
     changeOpenAiImageConfiguration,
     changeGeminiImageConfiguration,
-    changeGeminiVideoConfiguration,
+    changeVideoConfiguration,
     changeBflImageConfiguration,
     changeIdeogramImageConfiguration,
     changeAnthropicCompatibleConfiguration,
@@ -3154,4 +3158,39 @@ function isInterruptedFailure(error: unknown): boolean {
     "category" in error &&
     error.category === "interrupted"
   );
+}
+
+/** The create command for a video profile, by the kind its configuration names. */
+function createVideoProviderCommand(input: {
+  readonly instanceId: ProviderInstanceId;
+  readonly expectedVersion: ProviderDefaults["version"];
+  readonly displayName: string;
+  readonly configuration: VideoProviderConfiguration;
+}) {
+  const { configuration, ...rest } = input;
+  switch (configuration.kind) {
+    case "gemini-video-http":
+      return { kind: "create-gemini-video-provider" as const, ...rest, configuration };
+    case "runway-video-http":
+      return { kind: "create-runway-video-provider" as const, ...rest, configuration };
+    case "fal-video-http":
+      return { kind: "create-fal-video-provider" as const, ...rest, configuration };
+  }
+}
+
+/** The change command for a video profile, by the kind its configuration names. */
+function changeVideoConfigurationCommand(input: {
+  readonly instanceId: ProviderInstanceId;
+  readonly expectedVersion: ProviderInstance["version"];
+  readonly configuration: VideoProviderConfiguration;
+}) {
+  const { configuration, ...rest } = input;
+  switch (configuration.kind) {
+    case "gemini-video-http":
+      return { kind: "change-gemini-video-configuration" as const, ...rest, configuration };
+    case "runway-video-http":
+      return { kind: "change-runway-video-configuration" as const, ...rest, configuration };
+    case "fal-video-http":
+      return { kind: "change-fal-video-configuration" as const, ...rest, configuration };
+  }
 }
