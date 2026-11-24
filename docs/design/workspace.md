@@ -1713,7 +1713,7 @@ the terminal's start in the journal records `program: "provider"`.
 Not built yet: the other ACP agents (offered once a CLI's interactive mode is
 confirmed), an added ACP agent, and the other providers with a command-line
 program.
-A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). A focused Browser page does not trap the window's shortcuts either: at their default chords the command palette (`Mod+K`), sidebar (`Mod+\`), dock (`Mod+Shift+J`) and focus composer (`Ctrl+Escape`) are held back from the page and handed to the window, and Settings (`Mod+,`) stays a menu accelerator; Zen's `Mod+Shift+Z` is Redo, which a page's text field keeps as the renderer's do. **Minimised tools.** A thread's Browser and Terminal can be minimised into small
+A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). A focused Browser page does not trap the window's shortcuts either: at their default chords the command palette (`Mod+K`), sidebar (`Mod+\`), dock (`Mod+Shift+J`) and focus composer (`Ctrl+Escape`) are held back from the page and handed to the window, and Settings (`Mod+,`) stays a menu accelerator; Zen's `Mod+Shift+E` stays with the page, as the renderer leaves it to a focused text field. **Minimised tools.** A thread's Browser and Terminal can be minimised into small
 live cards on a shelf at the foot of the dock, so a page or a shell can be
 watched, and seen to answer, while another tool or only the dock's overview is
 in front. A floating preview of the Browser, drawn over the thread, covered the
@@ -4154,6 +4154,25 @@ by a later operation, rather than expiring while work is still running. The
 compact notice has a keyboard-accessible Dismiss action. Export files remain in
 downloads and hand-off documents remain in the dock; this single latest-result
 surface is not a notification history or queue.
+
+### Reserved keybindings
+
+Settings › Keybindings refuses to bind a global action to a chord that text
+fields, the message editor or the desktop Edit menu already answer, and says
+which command the chord is: `Mod+Z` (Undo); `Mod+Shift+Z`, `Mod+Y` and
+`Mod+Shift+Y` (Redo); `Mod+X` (Cut); `Mod+C` (Copy); `Mod+V` (Paste); `Mod+A`
+(Select All). A saved override on one is reported and the action uses its
+default. The Review page's and the terminal's own actions keep their own chord
+rules. Rationale: the message editor and the window listeners act on the same
+key press, in a browser and in the desktop app alike. Bound to `Mod+Z`, Dictate
+undid the text and started recording; bound to `Mod+C`, it recorded instead of
+copying.
+
+Zen's default is `Mod+Shift+E`, because its first default, `Mod+Shift+Z`, is
+Redo. It is listed last among the actions, so a chord a person had already saved
+on another action keeps working. The other way round, a chord saved for Zen that
+another action also holds now stays with that action, and Settings marks Zen as
+the one that will not run.
 
 ### Command palette and agent-page strip
 
