@@ -520,13 +520,26 @@ async function readyBridge(
   actsAsHostPerson?: boolean,
   withToolPrompt = false,
   withBoundProjects = false,
-  accessLevel?: "read-only" | "approve-and-steer",
+  accessLevel?: "read-only" | "approve-and-steer" | (() => "read-only" | "full"),
 ) {
-  const server = createFakeRemoteServer({
-    handleProductRequest: answerProduct(seen, withCanvas, withToolPrompt, withBoundProjects),
-    ...(actsAsHostPerson === undefined ? {} : { actsAsHostPerson }),
-    ...(accessLevel === undefined ? {} : { accessLevel }),
-  });
+  const handleProductRequest = answerProduct(seen, withCanvas, withToolPrompt, withBoundProjects);
+  const server = createFakeRemoteServer(
+    typeof accessLevel === "function"
+      ? {
+          handleProductRequest,
+          get accessLevel() {
+            return accessLevel();
+          },
+          get actsAsHostPerson() {
+            return accessLevel() === "full";
+          },
+        }
+      : {
+          handleProductRequest,
+          ...(actsAsHostPerson === undefined ? {} : { actsAsHostPerson }),
+          ...(accessLevel === undefined ? {} : { accessLevel }),
+        },
+  );
   const pairingStore = createInMemoryDeviceKeyStore();
   const keyPair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [
     "sign",
@@ -642,6 +655,35 @@ describe("RemoteShellView", () => {
       await user.click(screen.getByRole("button", { name: "Code" }));
       const code = await screen.findByRole("navigation", { name: "Code thread list" });
       expect(within(code).queryByRole("button", { name: "Start thread" })).not.toBeInTheDocument();
+    } finally {
+      bridge.disconnect();
+    }
+  });
+
+  it("updates an open browser when the host changes its device access level", async () => {
+    const user = userEvent.setup();
+    let level: "read-only" | "full" = "read-only";
+    const { bridge, server } = await readyBridge([], false, false, true, true, () => level);
+    const sessionId = server.issuedSessionId();
+    try {
+      render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+      const list = await screen.findByRole("navigation", { name: "Chat thread list" });
+      await user.click(await within(list).findByRole("button", { name: chatThread.title }));
+      await screen.findByRole("region", { name: "Conversation" });
+      expect(screen.queryByRole("textbox", { name: /message/i })).not.toBeInTheDocument();
+
+      level = "full";
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(await screen.findByRole("textbox", { name: /message/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "New thread" })).toBeInTheDocument();
+
+      level = "read-only";
+      document.dispatchEvent(new Event("visibilitychange"));
+      await waitFor(() => {
+        expect(screen.queryByRole("textbox", { name: /message/i })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "New thread" })).not.toBeInTheDocument();
+      });
+      expect(server.issuedSessionId()).toBe(sessionId);
     } finally {
       bridge.disconnect();
     }
