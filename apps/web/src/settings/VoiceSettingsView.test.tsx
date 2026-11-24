@@ -261,4 +261,67 @@ describe("VoiceSettingsView", () => {
     await user.click(await screen.findByRole("option", { name: "Off" }));
     expect(onSettingsChange).toHaveBeenCalledWith({ voice: {} });
   });
+
+  it("saves the dictation language, and Automatic removes it", async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn<(patch: Partial<ShellSettings>) => void>();
+    const { rerender } = render(
+      <VoiceSettingsView
+        onSettingsChange={onSettingsChange}
+        providerSnapshot={providerSnapshot()}
+        settings={{}}
+      />,
+    );
+    const menu = screen.getByRole("combobox", { name: "Dictation language" });
+    expect(menu.textContent).toContain("Automatic");
+    await user.click(menu);
+    await user.click(await screen.findByRole("option", { name: "Swedish" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ voice: { language: "sv" } });
+
+    rerender(
+      <VoiceSettingsView
+        onSettingsChange={onSettingsChange}
+        providerSnapshot={providerSnapshot()}
+        settings={{ language: "sv" }}
+      />,
+    );
+    await user.click(screen.getByRole("combobox", { name: "Dictation language" }));
+    await user.click(await screen.findByRole("option", { name: "Automatic" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ voice: {} });
+  });
+
+  it("adds comma-separated terms to the dictionary and removes one", async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn<(patch: Partial<ShellSettings>) => void>();
+    const { rerender } = render(
+      <VoiceSettingsView
+        onSettingsChange={onSettingsChange}
+        providerSnapshot={providerSnapshot()}
+        settings={{}}
+      />,
+    );
+    const field = screen.getByRole("textbox", { name: "Words to add" });
+    await user.type(field, "Octant, OAuth,octant");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({
+      voice: { dictionary: ["Octant", "OAuth"] },
+    });
+    expect(field).toHaveValue("");
+
+    rerender(
+      <VoiceSettingsView
+        onSettingsChange={onSettingsChange}
+        providerSnapshot={providerSnapshot()}
+        settings={{ dictionary: ["Octant", "OAuth"] }}
+      />,
+    );
+    await user.type(screen.getByRole("textbox", { name: "Words to add" }), "oauth");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Those terms are already in your dictionary.",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Remove OAuth" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ voice: { dictionary: ["Octant"] } });
+  });
 });

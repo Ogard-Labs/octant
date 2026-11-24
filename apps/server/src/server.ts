@@ -32,7 +32,10 @@ import {
 } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
 import { resolveSpeechEndpoint } from "@octant/domain";
-import { makeOpenAiCompatibleSpeechAdapter } from "./speech/speechAdapter";
+import {
+  makeOpenAiCompatibleSpeechAdapter,
+  transcriptionPreferencesOf,
+} from "./speech/speechAdapter";
 import type { NarrationForTurn } from "./speech/narrationTool";
 import type { TranscriptionForTurn } from "./speech/transcriptionTool";
 import { CredentialRequests } from "./credentials/credentialRequests";
@@ -676,9 +679,12 @@ export function startOctantServer(
             persistence.readShellSettings()?.settings.voice.transcription,
             persistence.readProviderInstances(),
           ),
-        adapter: ({ instance }) =>
+        preferences: () =>
+          transcriptionPreferencesOf(persistence.readShellSettings()?.settings.voice ?? {}),
+        adapter: ({ instance }, preferences) =>
           makeOpenAiCompatibleSpeechAdapter({
             instance,
+            transcriptionPreferences: preferences,
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
           }),
       });

@@ -1,13 +1,15 @@
-import type {
-  OpenAiCompatibleProviderInstance,
-  ProviderInstance,
-  ProviderModelId,
-  SettingsDeepLink,
-  SpeechCapabilityStatus,
-  SpeechEndpointRef,
-  SpeechSynthesisEndpointRef,
-  SpeechSynthesisVoice,
-  VoiceSettings,
+import {
+  MAX_VOICE_DICTIONARY_TERMS,
+  type OpenAiCompatibleProviderInstance,
+  type ProviderInstance,
+  type ProviderModelId,
+  type SettingsDeepLink,
+  type SpeechCapabilityStatus,
+  type SpeechEndpointRef,
+  type SpeechSynthesisEndpointRef,
+  type SpeechSynthesisVoice,
+  type VoiceDictionaryTerm,
+  type VoiceSettings,
 } from "@octant/contracts";
 
 /** Deep link to the Voice transcription setting. */
@@ -194,4 +196,74 @@ export function admitRemoteTranscription(input: {
     };
   }
   return { kind: "admit", recent: [...recent, input.now] };
+}
+
+/** The longest term Voice keeps, matching the contract's bound. */
+const MAX_VOICE_DICTIONARY_TERM_LENGTH = 64;
+
+export type VoiceDictionaryAddition =
+  | { readonly status: "added"; readonly dictionary: ReadonlyArray<VoiceDictionaryTerm> }
+  | { readonly status: "refused"; readonly reason: string };
+
+/**
+ * Adds what a person typed (terms separated by commas or new lines) to the
+ * dictionary. A term already there in any letter case is kept once, in its
+ * first spelling; anything over the bounds is refused whole, so a paste never
+ * half-lands.
+ */
+export function addVoiceDictionaryTerms(
+  existing: ReadonlyArray<VoiceDictionaryTerm>,
+  text: string,
+): VoiceDictionaryAddition {
+  const typed = text
+    .split(/[,\n]/)
+    .map((term) => term.trim())
+    .filter((term) => term.length > 0);
+  if (typed.length === 0) return { status: "refused", reason: "Enter a word or phrase." };
+  const tooLong = typed.find((term) => term.length > MAX_VOICE_DICTIONARY_TERM_LENGTH);
+  if (tooLong !== undefined) {
+    return {
+      status: "refused",
+      reason: `“${tooLong.slice(0, 24)}…” is longer than ${String(MAX_VOICE_DICTIONARY_TERM_LENGTH)} characters.`,
+    };
+  }
+  const seen = new Set(existing.map((term) => term.toLowerCase()));
+  const added: Array<VoiceDictionaryTerm> = [];
+  for (const term of typed) {
+    const key = term.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    added.push(term);
+  }
+  if (added.length === 0) {
+    return { status: "refused", reason: "Those terms are already in your dictionary." };
+  }
+  if (existing.length + added.length > MAX_VOICE_DICTIONARY_TERMS) {
+    return {
+      status: "refused",
+      reason: `Your dictionary holds at most ${String(MAX_VOICE_DICTIONARY_TERMS)} terms.`,
+    };
+  }
+  return { status: "added", dictionary: [...existing, ...added] };
+}
+
+/**
+ * OpenAI-shaped transcription reads at most the last 224 tokens of `prompt`,
+ * so a long dictionary would lose its first terms silently. Stopping at about
+ * 800 characters keeps the prompt inside that window; the terms added first
+ * are the ones kept.
+ */
+export const MAX_TRANSCRIPTION_PROMPT_CHARACTERS = 800;
+
+/** The dictionary as one transcription prompt, or `undefined` when it is empty. */
+export function transcriptionPromptOf(
+  dictionary: ReadonlyArray<VoiceDictionaryTerm> | undefined,
+): string | undefined {
+  let prompt = "";
+  for (const term of dictionary ?? []) {
+    const next = prompt.length === 0 ? term : `${prompt}, ${term}`;
+    if (next.length > MAX_TRANSCRIPTION_PROMPT_CHARACTERS) break;
+    prompt = next;
+  }
+  return prompt.length === 0 ? undefined : prompt;
 }
