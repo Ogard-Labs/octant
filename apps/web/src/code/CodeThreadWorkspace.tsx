@@ -1,4 +1,5 @@
 import "../styles/code-thread.css";
+import { settledThreadNotice } from "../composer/settledThreadNotice";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
@@ -3207,6 +3208,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             providerChanging ? { text: "Checking the selected provider…" } : undefined
           }
           notices={[
+            ...[
+              settledThreadNotice({
+                settledAt: view?.thread.completedAt,
+                onUnsettle: () => void props.controller.reopenThread(props.threadId),
+              }),
+            ].filter((notice) => notice !== undefined),
             ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
             ...(projectTrustNotice === undefined ? [] : [projectTrustNotice]),
             ...(attachments.message === undefined
