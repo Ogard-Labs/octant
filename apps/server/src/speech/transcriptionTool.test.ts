@@ -49,6 +49,7 @@ function fixture(
     root: folder,
     address: "http://127.0.0.1:7401/v1",
     model: "meeting-model",
+    preferences: {} as { readonly language?: string; readonly dictionary?: ReadonlyArray<string> },
   };
   const toolConstraints: string[] = [];
   const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
@@ -98,7 +99,13 @@ function fixture(
           [instance],
         );
       },
-      adapter: (ready) => makeOpenAiCompatibleSpeechAdapter({ instance: ready.instance, fetch }),
+      preferences: () => settings.preferences,
+      adapter: (ready, preferences) =>
+        makeOpenAiCompatibleSpeechAdapter({
+          instance: ready.instance,
+          fetch,
+          transcriptionPreferences: preferences,
+        }),
     });
   const call = (args: Record<string, unknown> = {}, thread = scopeId) => {
     const t = tool(thread);
@@ -353,4 +360,20 @@ it("evicts the oldest of eight transcripts and never charges for a missing conti
   await writeFile(join(folder, path), audio);
   expect((await f.call({ offset: 32_000 })).result).toMatchObject({ status: "refused" });
   expect(f.fetch).toHaveBeenCalledTimes(9);
+});
+
+it("asks the provider again when the Voice dictionary changes instead of reusing the old transcript", async () => {
+  const f = fixture();
+  const first = f.call();
+  await f.answer(true);
+  expect((await first).result).toMatchObject({ status: "transcribed" });
+  expect((await f.call()).result).toMatchObject({ status: "transcribed" });
+  expect(f.fetch).toHaveBeenCalledTimes(1);
+
+  f.settings.preferences = { dictionary: ["Octant"] };
+  expect((await f.call()).result).toMatchObject({ status: "transcribed" });
+  expect(f.fetch).toHaveBeenCalledTimes(2);
+  const form = f.fetch.mock.calls[1]?.[1]?.body;
+  if (!(form instanceof FormData)) throw new Error("expected a multipart request");
+  expect(form.get("prompt")).toBe("Octant");
 });

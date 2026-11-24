@@ -1,6 +1,7 @@
 /**
- * Which microphone this window records from. It lives in the window's own
- * storage, not in journaled settings: a browser device id is scoped to this
+ * Which microphone dictation records from on this computer. It lives in this
+ * app's browser storage, which every window of the app on this computer
+ * shares, not in journaled settings: a browser device id is scoped to this
  * browser profile and means nothing on another computer or a paired device.
  * Absent means the system default.
  */

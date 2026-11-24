@@ -247,4 +247,13 @@ describe("the Dictate shortcut", () => {
     fireEvent.keyDown(window, dictateChord);
     expect(getUserMedia).not.toHaveBeenCalled();
   });
+
+  it("does not start from the composer's own buttons, only its text field", () => {
+    const { getUserMedia } = installFakeMicrophone();
+    renderComposer();
+    screen.getByRole("button", { name: "Dictate message" }).focus();
+
+    fireEvent.keyDown(window, dictateChord);
+    expect(getUserMedia).not.toHaveBeenCalled();
+  });
 });

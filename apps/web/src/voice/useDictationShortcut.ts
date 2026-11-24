@@ -110,19 +110,21 @@ export function useDictationShortcut(target: DictationShortcutTarget): void {
   }, [keybindings]);
 }
 
+const TEXT_FIELD = "textarea, [contenteditable='true'], input[type='text']";
+
 /**
- * Whether focus is inside the composer that holds `anchor`. The composer is
- * the nearest ancestor that also holds a text field, so the microphone needs
- * no knowledge of which composer it sits in.
+ * Whether the text field of the composer that holds `anchor` has focus. The
+ * composer is the nearest ancestor that also holds a text field, so the
+ * microphone needs no knowledge of which composer it sits in. Focus on the
+ * composer's own buttons (Send, Attach) does not count: the chord dictates
+ * into the field a person is typing in.
  */
 function composerHasFocus(anchor: HTMLElement | null): boolean {
   const focused = document.activeElement;
-  if (anchor === null || focused === null) return false;
+  if (anchor === null || focused === null || focused.closest(TEXT_FIELD) === null) return false;
   let node: HTMLElement | null = anchor.parentElement;
   while (node !== null) {
-    if (node.querySelector("textarea, [contenteditable='true'], input[type='text']") !== null) {
-      return node.contains(focused);
-    }
+    if (node.querySelector(TEXT_FIELD) !== null) return node.contains(focused);
     node = node.parentElement;
   }
   return false;

@@ -676,12 +676,12 @@ export function startOctantServer(
             persistence.readShellSettings()?.settings.voice.transcription,
             persistence.readProviderInstances(),
           ),
-        adapter: ({ instance }) =>
+        preferences: () =>
+          transcriptionPreferencesOf(persistence.readShellSettings()?.settings.voice ?? {}),
+        adapter: ({ instance }, preferences) =>
           makeOpenAiCompatibleSpeechAdapter({
             instance,
-            transcriptionPreferences: transcriptionPreferencesOf(
-              persistence.readShellSettings()?.settings.voice ?? {},
-            ),
+            transcriptionPreferences: preferences,
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
           }),
       });

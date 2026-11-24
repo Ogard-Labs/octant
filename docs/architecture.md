@@ -8207,8 +8207,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   Every desktop composer (Chat, Work, Code, the welcome and draft composers) and
   Navigator show a microphone beside the attach control only while
   transcription is `ready`; the clip is recorded by the browser's own encoder
-  from the microphone the window's Voice settings name (kept in the window's
-  storage, falling back to the system default when it is not connected); the
+  from the microphone Voice settings name on this computer (kept in the app's
+  browser storage, falling back to the system default when it is not
+  connected); the
   microphone button or the remappable Dictate chord on the focused composer
   (tap to toggle, hold to talk) starts it, the transcript is appended to the
   draft, and the person still sends. Navigator

@@ -104,15 +104,6 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     defaultChord: "Mod+Shift+D",
   },
   {
-    id: "dictate",
-    label: "Dictate into the focused message (tap to toggle, hold to talk)",
-    area: "Shell",
-    // M for microphone. The desktop menu holds Mod+M (Minimize) but not this,
-    // and no other default does. It answers in a text field, which is where
-    // dictation goes.
-    defaultChord: "Mod+Shift+M",
-  },
-  {
     id: "zen-next-space",
     label: "Show the next focus space",
     area: "Shell",
@@ -193,6 +184,17 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     area: "Terminal",
     defaultChord: "Mod+Shift+Escape",
     scope: "terminal",
+  },
+  {
+    id: "dictate",
+    label: "Dictate into the focused message (tap to toggle, hold to talk)",
+    area: "Shell",
+    // M for microphone. The desktop menu holds Mod+M (Minimize) but not this,
+    // and no other default does. It answers in a text field, which is where
+    // dictation goes. Last in the table because it arrived last: a chord a
+    // person saved for an older action before this default existed keeps
+    // working, since the earlier action wins a shared chord.
+    defaultChord: "Mod+Shift+M",
   },
 ];
 

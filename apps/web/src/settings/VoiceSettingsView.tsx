@@ -155,7 +155,7 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
       <SettingsSection title="Microphone">
         <div className="setgroup">
           <SettingRow
-            description="Dictation records from this microphone in this window."
+            description="Dictation records from this microphone on this computer."
             focused={props.focusedSetting === settingId("microphone")}
             label="Microphone"
             scope="app"

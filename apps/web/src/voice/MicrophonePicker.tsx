@@ -18,7 +18,7 @@ interface AudioInput {
 
 /**
  * Lists this computer's microphones and remembers the one dictation records
- * from in this window. Chromium lists the default and communications
+ * from on this computer. Chromium lists the default and communications
  * pseudo-devices beside the real ones; they are left out, because System
  * default already means the first and the second is a role, not a microphone.
  */
@@ -29,6 +29,9 @@ export function MicrophonePicker() {
     () => undefined,
   );
   const [inputs, setInputs] = useState<ReadonlyArray<AudioInput> | undefined>(undefined);
+  // Before the microphone is allowed, some browsers list inputs with no id
+  // at all, which cannot be chosen; the row then says how to reveal them.
+  const [hidden, setHidden] = useState(false);
   const supported =
     typeof navigator !== "undefined" &&
     typeof navigator.mediaDevices?.enumerateDevices === "function";
@@ -37,6 +40,9 @@ export function MicrophonePicker() {
     if (!supported) return;
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
+      setHidden(
+        devices.some((device) => device.kind === "audioinput" && device.deviceId.length === 0),
+      );
       setInputs(
         devices
           .filter(
@@ -112,9 +118,9 @@ export function MicrophonePicker() {
         <p className="provider-settings__field-guidance" role="status">
           That microphone isn't connected, so the system default records instead.
         </p>
-      ) : unnamed ? (
+      ) : unnamed || hidden ? (
         <p className="provider-settings__field-guidance">
-          Names appear once you allow the microphone, for example with Test microphone.
+          Allow the microphone once, for example with Test microphone, to see each one by name.
         </p>
       ) : null}
     </div>

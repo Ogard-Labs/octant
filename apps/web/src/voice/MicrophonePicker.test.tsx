@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 describe("MicrophonePicker", () => {
-  it("lists real microphones and remembers the one picked in this window", async () => {
+  it("lists real microphones and remembers the one picked on this computer", async () => {
     const user = userEvent.setup();
     installDevices([
       { kind: "audioinput", deviceId: "default", label: "Default - MacBook Microphone" },
@@ -55,5 +55,16 @@ describe("MicrophonePicker", () => {
     expect((await screen.findByRole("status")).textContent).toBe(
       "That microphone isn't connected, so the system default records instead.",
     );
+  });
+
+  it("says how to reveal microphones the browser hides until it is allowed", async () => {
+    installDevices([{ kind: "audioinput", deviceId: "", label: "" }]);
+    render(<MicrophonePicker />);
+
+    expect(
+      await screen.findByText(
+        "Allow the microphone once, for example with Test microphone, to see each one by name.",
+      ),
+    ).toBeVisible();
   });
 });
