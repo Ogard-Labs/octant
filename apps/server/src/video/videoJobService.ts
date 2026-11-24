@@ -606,15 +606,30 @@ export class VideoJobService {
     const sending = this.#transition(job, "running", {
       startedAt: decodeUtcTimestamp(this.#options.clock()),
     });
-    const started = await adapter.start({
-      modelId: job.modelId,
-      prompt: inputs.prompt,
-      options: job.options,
-      references: inputs.references,
-      ...(inputs.firstFrame === undefined ? {} : { firstFrame: inputs.firstFrame }),
-      ...(inputs.lastFrame === undefined ? {} : { lastFrame: inputs.lastFrame }),
-      signal: running.controller.signal,
-    });
+    const remainingMs =
+      Date.parse(sending.startedAt ?? sending.createdAt) + VIDEO_JOB_TIMEOUT_MS - this.#now();
+    // The HTTP port's connection timer ends at the headers. The same signal
+    // stays attached to the response body until the start has been decoded.
+    let startTimedOut = false;
+    const startTimer = setTimeout(
+      () => {
+        startTimedOut = true;
+        running.controller.abort();
+      },
+      Math.max(1, remainingMs),
+    );
+    startTimer.unref();
+    const started = await adapter
+      .start({
+        modelId: job.modelId,
+        prompt: inputs.prompt,
+        options: job.options,
+        references: inputs.references,
+        ...(inputs.firstFrame === undefined ? {} : { firstFrame: inputs.firstFrame }),
+        ...(inputs.lastFrame === undefined ? {} : { lastFrame: inputs.lastFrame }),
+        signal: running.controller.signal,
+      })
+      .finally(() => clearTimeout(startTimer));
     if (started.status === "refused") {
       this.#finish(sending, "failed", { safetyRefusal: started.safetyRefusal });
       return;
@@ -636,12 +651,18 @@ export class VideoJobService {
         });
         return;
       }
+      if (startTimedOut && this.#knownUnsent(running)) {
+        this.#finish(sending, "failed", {
+          failure: videoFailure("unavailable", "The clip timed out before it was sent."),
+        });
+        return;
+      }
       // An unavailable answer may mean the request reached the provider
       // after all: the job ends interrupted and settles at the estimate,
       // since the provider may still make and bill the clip. Nothing is
       // forgotten — there is no remote id to forget. A definite rejection,
       // rate-limited or otherwise, bills nothing.
-      if (startMayHaveReachedProvider(started.providerFailure)) {
+      if (startTimedOut || startMayHaveReachedProvider(started.providerFailure)) {
         this.#finish(sending, "failed", {
           failure: videoFailure(
             "interrupted",

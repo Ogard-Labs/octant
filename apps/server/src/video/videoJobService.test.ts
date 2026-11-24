@@ -9,6 +9,7 @@ import {
 } from "@octant/contracts";
 import {
   decodeVideoModelCapabilities,
+  VIDEO_JOB_TIMEOUT_MS,
   type VideoModelCapabilities,
 } from "@octant/contracts/video-generation";
 import type {
@@ -77,6 +78,7 @@ function profile(): ProviderInstance {
 
 interface Script {
   start?: (ports: VideoGenerationPorts, request: VideoAdapterRequest) => Promise<VideoAdapterStart>;
+  response?: () => Response;
   polls?: Array<VideoAdapterPoll>;
   poll?: (signal: AbortSignal) => Promise<VideoAdapterPoll>;
   cancel?: (signal: AbortSignal | undefined) => Promise<VideoAdapterPoll>;
@@ -190,7 +192,7 @@ function harness(script: Script, directory?: string) {
     },
     fetch: async (input) => {
       fetched.push(String(input));
-      return new Response("{}", { status: 200 });
+      return script.response?.() ?? new Response("{}", { status: 200 });
     },
     uuid: () => crypto.randomUUID(),
     clock: () => new Date(clockMs++).toISOString(),
@@ -387,6 +389,66 @@ describe("video jobs", () => {
     expect(job?.settledCostUsdMicros).toBeUndefined();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(fetched).toEqual([]);
+  });
+
+  it("releases both slots when start responses stall past the job deadline", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const reading = Promise.withResolvers<void>();
+    let responses = 0;
+    let cancelledBodies = 0;
+    const { service, calls } = harness({
+      response: () => {
+        responses += 1;
+        if (responses === 2) reading.resolve();
+        return responses > 2
+          ? Response.json({ id: "remote-next" })
+          : new Response(
+              new ReadableStream<Uint8Array>({
+                cancel: () => {
+                  cancelledBodies += 1;
+                },
+              }),
+            );
+      },
+      start: async (ports, request) => {
+        try {
+          const response = await ports.request({
+            url: "https://video.example.test/start",
+            method: "POST",
+            auth: { header: "authorization", scheme: "Bearer" },
+            signal: request.signal,
+          });
+          await response.json();
+          return { status: "started", remoteId: "remote-next" };
+        } catch {
+          return {
+            status: "failed",
+            providerFailure: { category: "interrupted", message: "Aborted." },
+          };
+        }
+      },
+    });
+    try {
+      const first = await enqueue(service);
+      const second = await enqueue(service);
+      const next = await enqueue(service);
+      await reading.promise;
+      expect(calls.start).toBe(2);
+      await vi.advanceTimersByTimeAsync(VIDEO_JOB_TIMEOUT_MS);
+      for (const clip of [first, second]) {
+        expect(service.getById(clip.id)).toMatchObject({
+          status: "failed",
+          settledCostUsdMicros: 695_040,
+          failure: { category: "interrupted" },
+        });
+      }
+      expect(cancelledBodies).toBe(2);
+      expect(await service.whenTerminal(next.id)).toMatchObject({ status: "completed" });
+    } finally {
+      service.close();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      vi.useRealTimers();
+    }
   });
 
   it("settles a job whose time ran out without waiting on the provider's stop", async () => {

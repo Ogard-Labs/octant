@@ -338,6 +338,11 @@ which the person sets, like any turn.
 
 ### Interruption recovery
 
+The 30-minute job clock starts before the provider start request and covers
+reading its reply. If the start times out, the slot opens for another job.
+The failed start settles at the estimate when the provider may have received
+it. A start the host knows it never sent bills nothing.
+
 At startup the host reconciles every video job the journal left unfinished:
 
 - A job that was **queued**, so nothing was sent, is marked failed as
