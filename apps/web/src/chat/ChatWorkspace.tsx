@@ -76,7 +76,7 @@ import {
 import { attemptCanForceStop } from "./attemptForceStop";
 import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
-import { ChatTranscript, type ChatTranscriptProps } from "./ChatTranscript";
+import { ChatPendingQuestions, ChatTranscript, type ChatTranscriptProps } from "./ChatTranscript";
 import { canvasCardsForShownRun, madeInShownRun } from "./chatTranscriptWindow";
 import { formatOutgoingMessageWithQuotes, type TranscriptQuoteChip } from "./quoteSelection";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
@@ -1682,36 +1682,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                         return { value: undefined, base: baseFromResult(result) };
                       }).catch(() => undefined);
                     },
-                    onAnswerQuestion: ({ turnId, attemptId, requestId, answer, secret }) => {
-                      return enqueueThreadCommand(async (previous) => {
-                        const result = await props.controller.execute({
-                          kind: "answer-chat-turn-question",
-                          threadId: view.thread.id,
-                          expectedVersion: queuedVersion(previous),
-                          turnId,
-                          attemptId,
-                          requestId,
-                          // A secret question's answer rides in the command only.
-                          ...(secret === true ? { secretAnswer: answer } : { answer }),
-                        });
-                        return {
-                          value: result?.kind === "attempt-updated",
-                          base: baseFromResult(result),
-                        };
-                      }).catch(() => false);
-                    },
-                    onDismissQuestion: (turnId, attemptId) => {
-                      void enqueueThreadCommand(async (previous) => {
-                        const result = await props.controller.execute({
-                          kind: "interrupt-chat-turn",
-                          threadId: view.thread.id,
-                          expectedVersion: queuedVersion(previous),
-                          turnId,
-                          attemptId,
-                        });
-                        return { value: undefined, base: baseFromResult(result) };
-                      }).catch(() => undefined);
-                    },
                   } satisfies Partial<ChatTranscriptProps>))}
               readOnly={readOnly}
               view={view}
@@ -1813,6 +1783,41 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               />
             ) : null}
           </OctantDialogPresence>
+          {readOnly ? null : (
+            <ChatPendingQuestions
+              onAnswerQuestion={({ turnId, attemptId, requestId, answer, secret }) => {
+                return enqueueThreadCommand(async (previous) => {
+                  const result = await props.controller.execute({
+                    kind: "answer-chat-turn-question",
+                    threadId: view.thread.id,
+                    expectedVersion: queuedVersion(previous),
+                    turnId,
+                    attemptId,
+                    requestId,
+                    // A secret question's answer rides in the command only.
+                    ...(secret === true ? { secretAnswer: answer } : { answer }),
+                  });
+                  return {
+                    value: result?.kind === "attempt-updated",
+                    base: baseFromResult(result),
+                  };
+                }).catch(() => false);
+              }}
+              onDismissQuestion={(turnId, attemptId) => {
+                void enqueueThreadCommand(async (previous) => {
+                  const result = await props.controller.execute({
+                    kind: "interrupt-chat-turn",
+                    threadId: view.thread.id,
+                    expectedVersion: queuedVersion(previous),
+                    turnId,
+                    attemptId,
+                  });
+                  return { value: undefined, base: baseFromResult(result) };
+                }).catch(() => undefined);
+              }}
+              view={view}
+            />
+          )}
           <ChatComposer
             stash={stash}
             readOnly={readOnly}

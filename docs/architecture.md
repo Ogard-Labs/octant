@@ -451,7 +451,7 @@ The renderer's first load has a byte budget, recorded in
 `scripts/initial-renderer-budget.json` and enforced by `bun run renderer:check`
 in CI. The budget counts the static graph Vite loads for `index.html`: the main
 entry is at most 1,577,833 B (1,541 KiB), the initial CSS at most 648,943 B
-(634 KiB), and the initial JavaScript and CSS at most 1,143,031 B after gzip
+(634 KiB), and the initial JavaScript and CSS at most 1,143,364 B after gzip
 level 6. A change that grows any measure past its budget fails. A change that
 shrinks one lowers the recorded budget. Raising a budget is a maintainer
 decision; the editable composer prompt that holds inline `@model` chips raised

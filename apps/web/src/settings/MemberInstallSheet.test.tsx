@@ -6,7 +6,7 @@ import type {
   ShieldServer,
 } from "@octant/contracts/shield-servers";
 import { ShieldServersClientFailure } from "@octant/client-runtime/shield-servers-client";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MemberInstallSheet } from "./MemberInstallSheet";
@@ -167,44 +167,54 @@ describe("Make this an Octant computer", () => {
       { ...download, state: "verifying", version: "1.2.3" },
       { ...download, state: "ready", version: "1.2.3" },
     ] as const;
-    let prepares = 0;
-    let read = 0;
-    const { memberInstall } = setup((command) => {
-      if (command.kind === "prepare-member-install") {
-        prepares += 1;
-        return prepares === 1
-          ? { kind: "member-build-download", download: { ...download, state: "downloading" } }
-          : { kind: "member-install-plan", plan: PLAN };
-      }
-      const next = reads[Math.min(read, reads.length - 1)];
-      read += 1;
-      return { kind: "member-build-download", download: { ...download, ...next } };
-    });
+    vi.useFakeTimers();
+    try {
+      let prepares = 0;
+      let read = 0;
+      const { memberInstall } = await act(async () =>
+        setup((command) => {
+          if (command.kind === "prepare-member-install") {
+            prepares += 1;
+            return prepares === 1
+              ? { kind: "member-build-download", download: { ...download, state: "downloading" } }
+              : { kind: "member-install-plan", plan: PLAN };
+          }
+          const next = reads[Math.min(read, reads.length - 1)];
+          read += 1;
+          return { kind: "member-build-download", download: { ...download, ...next } };
+        }),
+      );
 
-    const stages = await screen.findByRole("list", { name: "Download" });
-    expect(
-      within(stages)
-        .getAllByRole("listitem")
-        .map((item) => item.textContent),
-    ).toEqual([
-      "Download Octant for linux-x64 from the candidate releaseRunning…",
-      "Verify the release's signed listing, the digest and the build's signatureWaiting",
-      "ReadyWaiting",
-    ]);
-    expect(
-      await screen.findByText("Download Octant 1.2.3 for linux-x64 from the candidate release"),
-    ).toBeTruthy();
-    // Once the build is ready the sheet reads its plan again, and only then
-    // offers the install.
-    expect(
-      await screen.findByLabelText("What Octant will do", {}, { timeout: 4_000 }),
-    ).toBeTruthy();
-    expect(memberInstall.mock.calls.map(([command]) => command.kind)).toEqual([
-      "prepare-member-install",
-      "read-member-build-download",
-      "read-member-build-download",
-      "prepare-member-install",
-    ]);
+      const stages = screen.getByRole("list", { name: "Download" });
+      expect(
+        within(stages)
+          .getAllByRole("listitem")
+          .map((item) => item.textContent),
+      ).toEqual([
+        "Download Octant for linux-x64 from the candidate releaseRunning…",
+        "Verify the release's signed listing, the digest and the build's signatureWaiting",
+        "ReadyWaiting",
+      ]);
+      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      expect(
+        screen.getByText("Download Octant 1.2.3 for linux-x64 from the candidate release"),
+      ).toBeTruthy();
+      expect(
+        screen
+          .getByText("Verify the release's signed listing, the digest and the build's signature")
+          .closest("li"),
+      ).toHaveTextContent("Running…");
+      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      expect(screen.getByLabelText("What Octant will do")).toBeVisible();
+      expect(memberInstall.mock.calls.map(([command]) => command.kind)).toEqual([
+        "prepare-member-install",
+        "read-member-build-download",
+        "read-member-build-download",
+        "prepare-member-install",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("closing the sheet ends its prepare request and stops reading the build it was downloading", async () => {
