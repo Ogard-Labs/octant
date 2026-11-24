@@ -255,15 +255,15 @@ Side Chat never gets the tool.
 Octant offers what each model declares. It adds only the bounds a host needs
 to stay healthy:
 
-| Bound                    | Value                                                                                         | Why                                                                                                                                                                                                                                   |
-| ------------------------ | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Clip length              | The model's declared range; default its declared default, else the allowed length nearest 8 s | The provider's own range; a short default keeps a first clip quick and cheap                                                                                                                                                          |
-| Resolution, ratio, audio | The model's declared values; default its declared default                                     | The provider's own range                                                                                                                                                                                                              |
-| Stored size of one clip  | 1 GB                                                                                          | Far above a 30-second 4K MP4; a larger response is refused, not truncated, so a broken one cannot fill the disk                                                                                                                       |
-| Job time                 | 30 minutes                                                                                    | Long enough for a 4K clip under load; the job then fails as `timeout`, and the driver is asked to cancel and forget it                                                                                                                |
-| Running jobs             | The image job service's host concurrency                                                      | Video jobs share the bounded queue image jobs already use                                                                                                                                                                             |
-| Queued jobs              | 16 video jobs per host, counting only video jobs waiting to start                             | A kept choice lets calls start without a card, so a runaway loop cannot queue without end; image jobs waiting in the shared queue do not count against it, and a further video call is refused with "Too many video jobs are queued." |
-| Agent call wait          | 2 minutes                                                                                     | As for images; after that the call answers `generating` and the clip appears when done                                                                                                                                                |
+| Bound                    | Value                                                                                         | Why                                                                                                                                                                                                                                  |
+| ------------------------ | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Clip length              | The model's declared range; default its declared default, else the allowed length nearest 8 s | The provider's own range; a short default keeps a first clip quick and cheap                                                                                                                                                         |
+| Resolution, ratio, audio | The model's declared values; default its declared default                                     | The provider's own range                                                                                                                                                                                                             |
+| Stored size of one clip  | 1 GB                                                                                          | Far above a 30-second 4K MP4; a larger response is refused, not truncated, so a broken one cannot fill the disk                                                                                                                      |
+| Job time                 | 30 minutes                                                                                    | Long enough for a 4K clip under load; the job then fails as `timeout`, and the driver is asked to cancel and forget it                                                                                                               |
+| Running jobs             | Two video jobs at a time per host, in slots of their own beside the image queue               | A clip runs for minutes, so sharing the image slots would hold image generations back behind it; restart recovery resumes jobs through the same two slots                                                                            |
+| Queued jobs              | 16 video jobs per host, counting only video jobs waiting to start                             | A kept choice lets calls start without a card, so a runaway loop cannot queue without end; image jobs waiting in their own queue do not count against it, and a further video call is refused with "Too many video jobs are queued." |
+| Agent call wait          | 2 minutes                                                                                     | As for images; after that the call answers `generating` and the clip appears when done                                                                                                                                               |
 
 ### Spend ceilings
 
@@ -283,8 +283,10 @@ which the person sets, like any turn.
 - **Settle.** When the job ends, the reservation settles to the cost the
   driver computes from the usage the provider reports (Gemini's token count),
   or to the estimate when the provider reports none.
-  - A job that fails before any output is billed nothing and releases its
-    reservation.
+  - A confirmed failure before output releases its reservation when there
+    is no charged usage. An unconfirmed start follows the interruption
+    rule below. A confirmed completion with invalid output still settles to
+    reported usage or to the estimate when no usage was reported.
   - A cancelled job settles at the reported usage, or at the estimate when
     none is reported, because a provider may bill a job it had already
     started.
@@ -338,6 +340,18 @@ which the person sets, like any turn.
 
 ### Interruption recovery
 
+The 30-minute job clock starts before the provider start request and covers
+reading its reply. If the start times out, the slot opens for another job.
+The failed start settles at the estimate when the provider may have received
+it. A start the host knows it never sent bills nothing.
+
+If a provider rejects authentication on a status check for an accepted clip,
+the host keeps polling within the job time. It settles at the estimate if it
+still cannot confirm the outcome at the deadline.
+
+Shutdown stops handing out slots and leaves waiting jobs in the journal.
+If a clip write finishes after shutdown starts, the host discards that file
+and leaves the running job for recovery.
 At startup the host reconciles every video job the journal left unfinished:
 
 - A job that was **queued**, so nothing was sent, is marked failed as
@@ -413,6 +427,7 @@ export interface VideoModelCapabilities {
   readonly inputs: {
     readonly firstFrame: boolean;
     readonly lastFrame: boolean;
+    readonly maxDurationSecondsWithBothFrames?: number;
     /** 0 when the model takes no reference images. */
     readonly maxReferenceImages: number;
   };
@@ -462,7 +477,7 @@ export type VideoPrice =
   | { readonly kind: "unpublished" };
 ```
 
-Gemini Omni Flash, for example, declares 3–15 s; 360p, 720p, 1080p and 4K;
+Gemini Omni Flash, for example, declares 3–15 s (up to 10 s with both frames); 360p, 720p, 1080p and 4K;
 16:9 and 9:16; audio `always`; up to six reference images; a per-token price;
 and `cancel: "running"`, `removal: delete`, with a resume window of 55 days.
 xAI would declare `cancel: "none"`, which puts the Stop line on the card.
@@ -524,7 +539,13 @@ export type VideoAdapterPoll =
       readonly usage?: VideoAdapterUsage;
     }
   | { readonly status: "refused"; readonly safetyRefusal: string }
-  | { readonly status: "failed"; readonly providerFailure: ProviderFailure }
+  | {
+      readonly status: "failed";
+      readonly providerFailure: ProviderFailure;
+      /** The provider billed generation even though no usable clip was returned. */
+      readonly billed?: true;
+      readonly usage?: VideoAdapterUsage;
+    }
   | { readonly status: "cancelled"; readonly usage?: VideoAdapterUsage };
 
 /**

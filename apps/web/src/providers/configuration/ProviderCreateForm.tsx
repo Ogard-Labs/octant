@@ -36,12 +36,14 @@ import {
   foundryConfigurationFrom,
   openAiImageConfigurationFrom,
   geminiImageConfigurationFrom,
+  geminiVideoConfigurationFrom,
   bflImageConfigurationFrom,
   ideogramImageConfigurationFrom,
 } from "./configurationValues";
 import {
   BflImageFields,
   GeminiImageFields,
+  GeminiVideoFields,
   IdeogramImageFields,
   OpenAiImageFields,
 } from "./ImageConfigurationForms";
@@ -57,6 +59,7 @@ export type ProviderCreateFormProps = Pick<
   | "onCreateAzureFoundry"
   | "onCreateOpenAiImage"
   | "onCreateGeminiImage"
+  | "onCreateGeminiVideo"
   | "onCreateBflImage"
   | "onCreateIdeogramImage"
   | "onCreateClaude"
@@ -78,7 +81,8 @@ export type ProviderCreateProviderType =
   | "openai-image"
   | "gemini-native-image"
   | "bfl-image"
-  | "ideogram-image";
+  | "ideogram-image"
+  | "gemini-video";
 
 /**
  * Optional presentation limits for embedded creation flows. Settings can
@@ -157,6 +161,7 @@ export function ProviderCreateForm(
     providerType === "gemini-native-image" ||
     providerType === "bfl-image" ||
     providerType === "ideogram-image" ||
+    providerType === "gemini-video" ||
     acpAuthentication === "api-key"
       ? "required"
       : providerType === "openai-compatible" || providerType === "anthropic-compatible"
@@ -225,13 +230,15 @@ export function ProviderCreateForm(
                           ? "Add Black Forest Labs image profile"
                           : providerType === "ideogram-image"
                             ? "Add Ideogram image profile"
-                            : providerType === "ollama"
-                              ? "Add Ollama provider"
-                              : providerType === "claude"
-                                ? "Add Claude provider"
-                                : isAcpAgentKind(providerType)
-                                  ? `Add ${acpAgentProfile(providerType).name} provider`
-                                  : "Add provider"
+                            : providerType === "gemini-video"
+                              ? "Add Gemini video profile"
+                              : providerType === "ollama"
+                                ? "Add Ollama provider"
+                                : providerType === "claude"
+                                  ? "Add Claude provider"
+                                  : isAcpAgentKind(providerType)
+                                    ? `Add ${acpAgentProfile(providerType).name} provider`
+                                    : "Add provider"
             }
             className={`provider-settings__create provider-settings__create--${providerType}`}
             noValidate
@@ -365,6 +372,14 @@ export function ProviderCreateForm(
                   configuration,
                   enteredCredential,
                 );
+              } else if (providerType === "gemini-video") {
+                const configuration = geminiVideoConfigurationFrom(data);
+                const enteredCredential = transientCredential(credentialInput.current);
+                operation = props.onCreateGeminiVideo(
+                  String(data.get("displayName") ?? ""),
+                  configuration,
+                  enteredCredential,
+                );
               } else {
                 const configuration = configurationFrom(data);
                 const enteredCredential = transientCredential(credentialInput.current);
@@ -440,6 +455,7 @@ export function ProviderCreateForm(
                     label: "Black Forest Labs Image",
                   },
                   { id: "ideogram-image", group: "Image generation", label: "Ideogram Image" },
+                  { id: "gemini-video", group: "Video generation", label: "Gemini Video" },
                 ].filter(
                   (option) =>
                     allowedProviderTypes === undefined ||
@@ -468,6 +484,7 @@ export function ProviderCreateForm(
             providerType !== "gemini-native-image" &&
             providerType !== "bfl-image" &&
             providerType !== "ideogram-image" &&
+            providerType !== "gemini-video" &&
             providerType !== "ollama" ? (
               <label>
                 <span>{selectedDriverLabel} binary</span>
@@ -674,6 +691,11 @@ export function ProviderCreateForm(
                 credentialInput={credentialInput}
                 credentialManagementAvailable={props.credentialManagementAvailable}
               />
+            ) : providerType === "gemini-video" ? (
+              <GeminiVideoFields
+                credentialInput={credentialInput}
+                credentialManagementAvailable={props.credentialManagementAvailable}
+              />
             ) : (
               <>
                 <label>
@@ -806,7 +828,8 @@ export function ProviderCreateForm(
                 ((providerType === "openai-image" ||
                   providerType === "gemini-native-image" ||
                   providerType === "bfl-image" ||
-                  providerType === "ideogram-image") &&
+                  providerType === "ideogram-image" ||
+                  providerType === "gemini-video") &&
                   !props.credentialManagementAvailable)
               }
               type="submit"
@@ -829,7 +852,9 @@ export function ProviderCreateForm(
                               ? "Add Black Forest Labs image profile"
                               : providerType === "ideogram-image"
                                 ? "Add Ideogram image profile"
-                                : `Add ${selectedDriverLabel}`}
+                                : providerType === "gemini-video"
+                                  ? "Add Gemini video profile"
+                                  : `Add ${selectedDriverLabel}`}
             </OctantButton>
           </form>
           {providerType === "openai-compatible" ? <BedrockMantleGuide /> : null}

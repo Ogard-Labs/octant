@@ -91,6 +91,7 @@ export class ContextProjection implements Projection {
     if (
       event.eventName === "context.usage-reconciled@1" &&
       (event.aggregateType === "image-job" ||
+        event.aggregateType === "video-job" ||
         event.aggregateType === PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE ||
         event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE ||
         event.aggregateType === SHIELD_REVIEW_USAGE_AGGREGATE_TYPE ||

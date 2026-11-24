@@ -58,6 +58,7 @@ import {
   changeAmazonBedrockConfiguration,
   changeBflImageConfiguration,
   changeIdeogramImageConfiguration,
+  changeGeminiVideoConfiguration,
   changeClaudeConfiguration,
   claudeChangeKeepsRuntime,
   changeGeminiImageConfiguration,
@@ -72,6 +73,7 @@ import {
   createAmazonBedrockProvider,
   createBflImageProvider,
   createIdeogramImageProvider,
+  createGeminiVideoProvider,
   assignedClaudeAccountConfigDirectory,
   claudeAccountUsesStoredKey,
   assignedCodexHome,
@@ -107,7 +109,7 @@ import {
   orderProviderModels,
   describeProviderConfigurationChange,
   invalidateModelCapabilityEvidence,
-  isImageProfileDriverKind,
+  isMediaProfileDriverKind,
   isNativeHarnessDriverKind,
   providerLatestVersionNpmPackage,
   type CapabilityEvidenceChange,
@@ -755,7 +757,7 @@ export class ProviderService implements ProviderServiceApi {
       if (this.#runtime.hasRuntime(instance.id)) continue;
       // Nothing to warm: an image profile is a generation endpoint, not a
       // runtime the probe path can start.
-      if (isImageProfileDriverKind(instance.driverKind)) continue;
+      if (isMediaProfileDriverKind(instance.driverKind)) continue;
       // An outside driver's process starts on a person's check or a turn,
       // never because the host started.
       if (instance.driverKind === "outside-harness-endpoint") continue;
@@ -1098,6 +1100,7 @@ export class ProviderService implements ProviderServiceApi {
             command.kind === "create-gemini-native-image-provider" ||
             command.kind === "create-bfl-image-provider" ||
             command.kind === "create-ideogram-image-provider" ||
+            command.kind === "create-gemini-video-provider" ||
             command.kind === "create-outside-harness-endpoint-provider"
           ) {
             if (current !== undefined || command.expectedVersion !== 0) {
@@ -1234,6 +1237,12 @@ export class ProviderService implements ProviderServiceApi {
                 break;
               case "create-ideogram-image-provider":
                 instance = createIdeogramImageProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-gemini-video-provider":
+                instance = createGeminiVideoProvider({
                   ...common,
                   configuration: command.configuration,
                 });
@@ -1504,6 +1513,13 @@ export class ProviderService implements ProviderServiceApi {
               throw this.#unsupported("This provider does not use Ideogram image configuration.");
             }
             instance = changeIdeogramImageConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-gemini-video-configuration") {
+            if (current.driverKind !== "gemini-video") {
+              throw this.#unsupported("This provider does not use Gemini video configuration.");
+            }
+            instance = changeGeminiVideoConfiguration(current, command.configuration, updatedAt);
             await this.#runtime.invalidateRuntime(current.id);
             eventName = "provider.instance-configuration-changed@1";
           } else if (command.kind === "change-claude-configuration") {
@@ -1927,13 +1943,13 @@ export class ProviderService implements ProviderServiceApi {
             message: OUTSIDE_DRIVER_QUARANTINED_MESSAGE,
           });
         }
-        if (isImageProfileDriverKind(instance.driverKind)) {
+        if (isMediaProfileDriverKind(instance.driverKind)) {
           // Image profiles are generation endpoints with a stored credential,
           // not runtimes to probe — the chat-model driver cannot be built for
           // them and would only ever report "incompatible".
           this.#runtime.clearObservedState(instanceId);
           this.#clearRuntimeUsageLimits?.(instanceId);
-          throw this.#unsupported("Image profiles have no runtime to probe.");
+          throw this.#unsupported("Image and video profiles have no runtime to probe.");
         }
         if (this.#claudeAccountNeedsOwnConfigDirectory(instance)) {
           this.#runtime.clearObservedState(instanceId);
@@ -2262,7 +2278,7 @@ export class ProviderService implements ProviderServiceApi {
     // Image profiles are generation endpoints with a stored credential, not
     // runtimes: the chat-model driver factory cannot be built for them, so an
     // earlier recorded observation is stale rather than proof of trouble.
-    if (isImageProfileDriverKind(instance.driverKind)) {
+    if (isMediaProfileDriverKind(instance.driverKind)) {
       this.#runtime.clearObservedState(instance.id);
       return undefined;
     }
@@ -2928,7 +2944,7 @@ export class ProviderService implements ProviderServiceApi {
       return this.#isOutsideDriverAdmitted(instance);
     }
     return (
-      isImageProfileDriverKind(instance.driverKind) ||
+      isMediaProfileDriverKind(instance.driverKind) ||
       this.#isDriverPluginEffective(instance.driverKind)
     );
   }

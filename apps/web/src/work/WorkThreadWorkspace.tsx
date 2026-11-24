@@ -87,6 +87,7 @@ import type {
 import { announceShellSettingsWritten } from "../shell/shellSettingsNotifications";
 import { Check, CirclePause, FileText, FolderOpen } from "../ui/icons";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useId,
@@ -224,6 +225,7 @@ import {
   finishedReceiptsAfterTurn,
 } from "../finishedReceipts/FinishedReceiptCard";
 import { useThreadFinishedReceipts } from "../finishedReceipts/FinishedReceiptProvider";
+import { PendingRequests } from "../transcript/PendingRequests";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TurnActions } from "../transcript/TurnActions";
@@ -285,7 +287,6 @@ type WorkTranscriptRow =
       /** The turn this entry belongs to, which a turn action names. */
       readonly turn: WorkTurnState;
     }
-  | { readonly kind: "request"; readonly key: string; readonly request: WorkRequest }
   | {
       readonly kind: "files";
       readonly key: string;
@@ -1805,16 +1806,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         });
       }
     }
-    for (const request of pendingRequests) {
-      rows.push({ kind: "request", key: `request-${String(request.requestId)}`, request });
-    }
     if (status !== undefined) rows.push({ kind: "status", key: "status", text: status });
     return rows;
   }, [
     finishedReceipts,
     firstPageSettled,
     loadedTurnIds,
-    pendingRequests,
     props.providerGroups,
     sideTasks,
     status,
@@ -2751,6 +2748,85 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     onClear: composerDraft.clear,
   });
 
+  // A pending question or approval, docked above the composer where it is
+  // answered, rather than a row that scrolls away with the transcript.
+  function renderRequest(request: WorkRequest) {
+    if (!readOnly && props.requestClient !== undefined && request.detail.kind === "approval") {
+      const levelChange = request.detail.levelChange;
+      return (
+        <ProviderApprovalPrompt
+          onAnswer={(decision) => {
+            void answerWorkRequest(request, {
+              kind: "approval",
+              approved: decision === "approved",
+            });
+          }}
+          summary={`${request.detail.action}: ${request.detail.description}`}
+          {...(levelChange === undefined
+            ? {}
+            : {
+                levelChange: {
+                  to: workThreadAccessOf(levelChange.to).executionPolicy,
+                  toLabel: PERMISSION_MODE_LABEL[workModeOf(levelChange.to)],
+                  ...(levelChange.plan === undefined ? {} : { plan: levelChange.plan }),
+                },
+              })}
+        />
+      );
+    }
+    if (!readOnly && props.requestClient !== undefined && request.detail.kind === "user-input") {
+      return (
+        <ProviderQuestionCard
+          onDismiss={
+            request.detail.questionnaire === undefined
+              ? undefined
+              : () => {
+                  void dismissWorkRequest(request);
+                }
+          }
+          draftIdentity={{
+            scope: `work-request:${String(props.threadId)}`,
+            requestId: String(request.requestId),
+          }}
+          {...(request.detail.questionnaire === undefined
+            ? {}
+            : { questionnaire: request.detail.questionnaire })}
+          onAnswer={(answer) => {
+            if (request.detail.kind === "user-input" && request.detail.secret)
+              return answerWorkRequest(request, { kind: "user-input", secret: true }, answer);
+            try {
+              const detail = request.detail;
+              const value =
+                detail.kind === "user-input" && detail.questionnaire !== undefined
+                  ? decodeWorkQuestionnaireResponse(JSON.parse(answer))
+                  : answer;
+              return answerWorkRequest(request, {
+                kind: "user-input",
+                answer: value,
+              });
+            } catch {
+              setStatus("The answer contains text that Work cannot deliver.");
+              return false;
+            }
+          }}
+          options={request.detail.options.map((label) => ({ label }))}
+          prompt={request.detail.prompt}
+          secret={request.detail.secret === true}
+        />
+      );
+    }
+    return (
+      <div className="approval-row approval-row--request" role="status">
+        <CirclePause aria-hidden="true" size={14} />
+        <span className="approval-row__text">
+          {request.detail.kind === "approval"
+            ? `Approval required — ${request.detail.action}: ${request.detail.description}`
+            : `Input required — ${request.detail.prompt}`}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <ThreadReplyDetailScope thread={{ mode: "work", threadId: String(props.threadId) }}>
       <section aria-label="Task workspace" className="work-thread-workspace">
@@ -3118,94 +3194,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   />
                 );
               }
-              if (row.kind === "request") {
-                if (
-                  !readOnly &&
-                  props.requestClient !== undefined &&
-                  row.request.detail.kind === "approval"
-                ) {
-                  const levelChange = row.request.detail.levelChange;
-                  return (
-                    <ProviderApprovalPrompt
-                      onAnswer={(decision) => {
-                        void answerWorkRequest(row.request, {
-                          kind: "approval",
-                          approved: decision === "approved",
-                        });
-                      }}
-                      summary={`${row.request.detail.action}: ${row.request.detail.description}`}
-                      {...(levelChange === undefined
-                        ? {}
-                        : {
-                            levelChange: {
-                              to: workThreadAccessOf(levelChange.to).executionPolicy,
-                              toLabel: PERMISSION_MODE_LABEL[workModeOf(levelChange.to)],
-                              ...(levelChange.plan === undefined ? {} : { plan: levelChange.plan }),
-                            },
-                          })}
-                    />
-                  );
-                }
-                if (
-                  !readOnly &&
-                  props.requestClient !== undefined &&
-                  row.request.detail.kind === "user-input"
-                ) {
-                  return (
-                    <ProviderQuestionCard
-                      onDismiss={
-                        row.request.detail.questionnaire === undefined
-                          ? undefined
-                          : () => {
-                              void dismissWorkRequest(row.request);
-                            }
-                      }
-                      draftIdentity={{
-                        scope: `work-request:${String(props.threadId)}`,
-                        requestId: String(row.request.requestId),
-                      }}
-                      {...(row.request.detail.questionnaire === undefined
-                        ? {}
-                        : { questionnaire: row.request.detail.questionnaire })}
-                      onAnswer={(answer) => {
-                        if (row.request.detail.kind === "user-input" && row.request.detail.secret)
-                          return answerWorkRequest(
-                            row.request,
-                            { kind: "user-input", secret: true },
-                            answer,
-                          );
-                        try {
-                          const detail = row.request.detail;
-                          const value =
-                            detail.kind === "user-input" && detail.questionnaire !== undefined
-                              ? decodeWorkQuestionnaireResponse(JSON.parse(answer))
-                              : answer;
-                          return answerWorkRequest(row.request, {
-                            kind: "user-input",
-                            answer: value,
-                          });
-                        } catch {
-                          setStatus("The answer contains text that Work cannot deliver.");
-                          return false;
-                        }
-                      }}
-                      options={row.request.detail.options.map((label) => ({ label }))}
-                      prompt={row.request.detail.prompt}
-                      secret={row.request.detail.secret === true}
-                    />
-                  );
-                }
-                return (
-                  <div className="approval-row approval-row--request" role="status">
-                    <CirclePause aria-hidden="true" size={14} />
-                    <span className="approval-row__text">
-                      {row.request.detail.kind === "approval"
-                        ? `Approval required — ${row.request.detail.action}: ${row.request.detail.description}`
-                        : `Input required — ${row.request.detail.prompt}`}
-                    </span>
-                  </div>
-                );
-              }
               return (
                 // The surrounding list is already a live region; a nested status
                 // here would announce the same trail line twice.
@@ -3384,6 +3372,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             }
             summary={browserApprovalSummary(pendingBrowserApproval)}
           />
+        )}
+        {pendingRequests.length === 0 ? null : (
+          <PendingRequests>
+            {pendingRequests.map((request) => (
+              <Fragment key={String(request.requestId)}>{renderRequest(request)}</Fragment>
+            ))}
+          </PendingRequests>
         )}
         <ThreadComposer
           readOnly={readOnly}

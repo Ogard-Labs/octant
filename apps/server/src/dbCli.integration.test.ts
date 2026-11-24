@@ -208,6 +208,7 @@ describe("database CLI runtime composition", () => {
         { name: "automations", lastSequence: 1, lag: 0 },
         { name: "github-clones", lastSequence: 1, lag: 0 },
         { name: "image-jobs", lastSequence: 1, lag: 0 },
+        { name: "video-jobs", lastSequence: 1, lag: 0 },
         { name: "benchmarks", lastSequence: 1, lag: 0 },
         { name: "desktop-leases", lastSequence: 1, lag: 0 },
         { name: "zen", lastSequence: 1, lag: 0 },
