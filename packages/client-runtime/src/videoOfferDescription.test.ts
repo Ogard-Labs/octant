@@ -49,7 +49,10 @@ describe("video card description", () => {
   it("only offers lengths within the model's limit for both frames", () => {
     const pending = offer(
       { cancel: "running", removal: { kind: "delete" }, resumeWindowHours: 24 },
-      { kind: "unknown" },
+      {
+        kind: "per-second",
+        rates: [{ resolution: "720p", usdMicrosPerSecond: 70_000 }],
+      },
     );
     const first = { role: "first-frame", label: "First photo" } as const;
     const last = { role: "last-frame", label: "Last photo" } as const;
@@ -62,12 +65,13 @@ describe("video card description", () => {
         maxDurationSecondsWithBothFrames: 10,
       },
     };
-    expect(videoOfferChoices({ ...pending, model, images: [first] }).durations).toContain(15);
+    const one = { ...pending, model, images: [first] };
+    const options = { ...pending.options, durationSeconds: 11 };
+    expect(videoOfferChoices(one).durations).toContain(15);
+    expect(describeVideoOffer(one, options).approvable).toBe(true);
     const both = { ...pending, model, images: [first, last] };
     expect(videoOfferChoices(both).durations).toEqual([3, 4, 5, 6, 7, 8, 9, 10]);
-    expect(describeVideoOffer(both, { ...pending.options, durationSeconds: 11 }).approvable).toBe(
-      false,
-    );
+    expect(describeVideoOffer(both, options).approvable).toBe(false);
   });
 
   it("offers only what the model declares and cannot approve an unpublished combination", () => {
