@@ -8,6 +8,7 @@ import {
 import { enteredMobileForeground } from "./threadRefreshPolicy";
 
 type SessionStandingTransport = Parameters<typeof readRemoteSessionStanding>[0];
+const DEMO_STANDING: RemoteSessionStanding = { actsAsHostPerson: true };
 
 /**
  * What the host says this phone's session is, asked per host. Until it
@@ -20,20 +21,17 @@ export function useRemoteSessionStanding(
   transport: SessionStandingTransport | undefined,
   offlineDemo: boolean,
 ): RemoteSessionStanding {
-  const [standing, setStanding] = useState<RemoteSessionStanding>(RESTRICTED_REMOTE_SESSION);
+  const [read, setRead] = useState<{
+    readonly transport: SessionStandingTransport;
+    readonly standing: RemoteSessionStanding;
+  }>();
   useEffect(() => {
-    // The offline demo has no host to ask or to refuse: its sample session
-    // acts as the person, the only answer the fail-closed rule is exempt for.
-    if (offlineDemo) {
-      setStanding({ actsAsHostPerson: true });
-      return;
-    }
-    setStanding(RESTRICTED_REMOTE_SESSION);
-    if (transport === undefined) return;
+    setRead(undefined);
+    if (offlineDemo || transport === undefined) return;
     let current = true;
     const reread = () => {
       void readRemoteSessionStanding(transport).then((answer) => {
-        if (current) setStanding(answer);
+        if (current) setRead({ transport, standing: answer });
       });
     };
     reread();
@@ -48,5 +46,10 @@ export function useRemoteSessionStanding(
       subscription.remove();
     };
   }, [transport, offlineDemo]);
-  return standing;
+  // The offline demo has no host to ask. For live sessions, access from the
+  // previous computer cannot apply while the new one is still answering.
+  if (offlineDemo) return DEMO_STANDING;
+  return read !== undefined && read.transport === transport
+    ? read.standing
+    : RESTRICTED_REMOTE_SESSION;
 }

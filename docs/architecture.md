@@ -18561,6 +18561,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     reads, before any route runs; a narrowed device can never raise itself.
     Read only keeps eligible pending Work, harness and MCP tool requests
     visible on the phone. The cards omit decisions and editable answers.
+    On the phone's start screens, the selected computer's standing disables
+    new Chat, Work and Code threads with a watching-only explanation. Existing
+    threads remain openable, and new threads wait for standing to be confirmed
+    whenever the phone switches its selected computer.
     Routes that change something but rode a read action before (revising or
     refreshing a Canvas, a connector's sign-in and operations) carry their own
     write actions, and the local-servers commands route and the server proxy

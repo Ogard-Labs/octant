@@ -104,6 +104,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
   const {
     placementTransport,
     placementLabel,
+    placementAccessReason,
     placementDisabledReason,
     staleGate,
     models,
@@ -162,6 +163,10 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
     }
     if (!staleGate.allowProductMutations) {
       setComposerError(staleGate.message);
+      return;
+    }
+    if (placementAccessReason !== undefined) {
+      setComposerError(placementAccessReason);
       return;
     }
     setCreating(true);
@@ -343,6 +348,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
             />
             <ToolbarButton
               accessibilityLabel="New Chat thread"
+              disabled={placementAccessReason !== undefined}
               icon="create-outline"
               onPress={() => setComposerOpen(true)}
               testID="mobile-agents-compose"
@@ -501,10 +507,19 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
           {staleGate.message}
         </Text>
       ) : null}
+      {placementAccessReason === undefined ? null : (
+        <Text accessibilityLiveRegion="polite" style={styles.help}>
+          {placementAccessReason}
+        </Text>
+      )}
       <HomeComposerSheet
         availableModes={["chat"]}
         busy={creating}
-        editable={staleGate.allowProductMutations && placementTransport !== undefined}
+        editable={
+          staleGate.allowProductMutations &&
+          placementTransport !== undefined &&
+          placementAccessReason === undefined
+        }
         error={composerError}
         mode="chat"
         modelLabel={modelLabel}
