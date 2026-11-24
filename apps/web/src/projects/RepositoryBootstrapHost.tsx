@@ -8,6 +8,7 @@ import {
   useMemo,
   useState,
   type Dispatch,
+  type ReactNode,
   type SetStateAction,
 } from "react";
 import { useBootstrapDestinations } from "../host/useBootstrapDestinations";
@@ -39,7 +40,7 @@ export interface RepositoryBootstrapHostProps {
   readonly onCompleted: (selection: RepositoryBootstrapSelection) => void;
 }
 
-export default function RepositoryBootstrapHost(props: RepositoryBootstrapHostProps) {
+export default function RepositoryBootstrapHost(props: RepositoryBootstrapHostProps): ReactNode {
   const [refreshKey, setRefreshKey] = useState(0);
   const [request, setRequest] = useState<RepositoryBootstrapRequest | undefined>(undefined);
   const destinations = useBootstrapDestinations(props.transports, refreshKey);

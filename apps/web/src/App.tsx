@@ -742,11 +742,15 @@ const PairedComputerCodeSurface = lazy(() =>
   })),
 );
 const FederatedHostsLifecycleStrip = lazy(() =>
-  import("./host/FederatedHostsLifecyclePanel").then(({ FederatedHostsLifecycleStrip }) => ({
-    default: FederatedHostsLifecycleStrip,
-  })),
+  import("./host/FederatedHostsLifecyclePanel")
+    .then(({ FederatedHostsLifecycleStrip }) => ({
+      default: FederatedHostsLifecycleStrip,
+    }))
+    .catch(() => ({ default: () => null })),
 );
-const RepositoryBootstrapHost = lazy(() => import("./projects/RepositoryBootstrapHost"));
+const RepositoryBootstrapHost = lazy(() =>
+  import("./projects/RepositoryBootstrapHost").catch(() => ({ default: () => null })),
+);
 const MoveThreadToProjectDialog = lazy(() =>
   import("./projects/MoveThreadToProjectDialog").then(({ MoveThreadToProjectDialog }) => ({
     default: MoveThreadToProjectDialog,
@@ -9128,7 +9132,10 @@ function LaunchedShell(
         ? {}
         : { workProviderTerminal: zenWorkProviderTerminal })}
     >
-      {hostFederationLifecycle === undefined ? null : (
+      {hostFederationLifecycle === undefined ||
+      !computerSnapshots.some(
+        (entry) => String(entry.hostId) !== String(LOCAL_HOST_ID) && entry.state !== "ready",
+      ) ? null : (
         <Suspense fallback={null}>
           <FederatedHostsLifecycleStrip lifecycle={hostFederationLifecycle} />
         </Suspense>
@@ -9793,7 +9800,8 @@ function LaunchedShell(
       <OctantDialogPresence>
         <FilesClosePrompt />
       </OctantDialogPresence>
-      {hostFederationTransports === undefined ? null : (
+      {hostFederationTransports === undefined ||
+      !computerSnapshots.some((entry) => String(entry.hostId) !== String(LOCAL_HOST_ID)) ? null : (
         <Suspense fallback={null}>
           <RepositoryBootstrapHost
             allProjects={projectController.allProjects}
