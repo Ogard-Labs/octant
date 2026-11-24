@@ -764,7 +764,10 @@ export class VideoJobService {
           // A failed answer is a failure of the cancel REQUEST, not proof
           // about the job: it falls through to an immediate poll, and only a
           // terminal answer from there — or the deadline — concludes the job.
-          if (answer.status !== "running" && answer.status !== "failed") {
+          if (
+            answer.status !== "running" &&
+            (answer.status !== "failed" || answer.billed === true)
+          ) {
             await this.#conclude(job, answer, true);
             return;
           }
@@ -810,6 +813,7 @@ export class VideoJobService {
       if (this.#closing.signal.aborted) return;
       if (
         poll.status === "failed" &&
+        poll.billed !== true &&
         ((!cancelAsked && waitSignal.aborted) || this.#now() >= deadline)
       )
         continue;
@@ -817,7 +821,11 @@ export class VideoJobService {
       // clip. Retry until the provider reports an outcome or the job expires.
       if (
         poll.status !== "running" &&
-        !(poll.status === "failed" && pollFailureLeavesJobUnconfirmed(poll.providerFailure))
+        !(
+          poll.status === "failed" &&
+          poll.billed !== true &&
+          pollFailureLeavesJobUnconfirmed(poll.providerFailure)
+        )
       ) {
         await this.#conclude(job, poll, running.stopRequested);
         return;
@@ -905,11 +913,16 @@ export class VideoJobService {
         });
         break;
       case "failed":
-        this.#finish(
-          current,
-          stopped ? "cancelled" : "failed",
-          stopped ? {} : { failure: answer.providerFailure },
-        );
+        this.#finish(current, stopped ? "cancelled" : "failed", {
+          ...(stopped ? {} : { failure: answer.providerFailure }),
+          ...(answer.billed === true
+            ? {
+                billed: true,
+                settledCostUsdMicros: this.#settled(current, answer.usage),
+                ...(answer.usage === undefined ? {} : { usage: answer.usage }),
+              }
+            : {}),
+        });
         break;
       case "cancelled":
         this.#finish(current, "cancelled", {

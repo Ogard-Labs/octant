@@ -301,6 +301,8 @@ async function readInteraction(
           return {
             status: "failed",
             providerFailure: videoFailure("protocol", "Google returned a clip that is not an MP4."),
+            billed: true,
+            ...(usage === undefined ? {} : { usage }),
           };
         }
         return {

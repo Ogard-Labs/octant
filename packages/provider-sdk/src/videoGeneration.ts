@@ -55,7 +55,13 @@ export type VideoAdapterPoll =
       readonly usage?: VideoAdapterUsage;
     }
   | { readonly status: "refused"; readonly safetyRefusal: string }
-  | { readonly status: "failed"; readonly providerFailure: ProviderFailure }
+  | {
+      readonly status: "failed";
+      readonly providerFailure: ProviderFailure;
+      /** The provider billed generation even though no usable clip was returned. */
+      readonly billed?: true;
+      readonly usage?: VideoAdapterUsage;
+    }
   | { readonly status: "cancelled"; readonly usage?: VideoAdapterUsage };
 
 export type VideoAdapterForget =

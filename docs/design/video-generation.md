@@ -285,7 +285,8 @@ which the person sets, like any turn.
   or to the estimate when the provider reports none.
   - A confirmed failure before output releases its reservation when there
     is no charged usage. An unconfirmed start follows the interruption
-    rule below.
+    rule below. A confirmed completion with invalid output still settles to
+    reported usage or to the estimate when no usage was reported.
   - A cancelled job settles at the reported usage, or at the estimate when
     none is reported, because a provider may bill a job it had already
     started.

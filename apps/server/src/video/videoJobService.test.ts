@@ -256,6 +256,34 @@ describe("video jobs", () => {
     expect(spend.settle).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    [{ outputTokens: 28_960 }, 347_520],
+    [undefined, 695_040],
+  ] as const)(
+    "settles a billed failure with usage %j without keeping a clip",
+    async (usage, cost) => {
+      const { service, spend } = harness({
+        polls: [
+          {
+            status: "failed",
+            providerFailure: {
+              category: "protocol",
+              message: "The provider returned an invalid clip.",
+            },
+            billed: true,
+            ...(usage === undefined ? {} : { usage }),
+          },
+        ],
+      });
+      const queued = await enqueue(service);
+      const done = await service.whenTerminal(queued.id);
+      expect(done).toMatchObject({ status: "failed", settledCostUsdMicros: cost });
+      expect(done?.clip).toBeUndefined();
+      expect(spend.settle).toHaveBeenCalledOnce();
+      expect(spend.abandon).not.toHaveBeenCalled();
+    },
+  );
+
   it("refuses options the model does not declare before anything is reserved or sent", async () => {
     const { service, calls, spend } = harness({});
     await expect(enqueue(service, { resolution: "4k" })).rejects.toThrow("does not offer 4k");
