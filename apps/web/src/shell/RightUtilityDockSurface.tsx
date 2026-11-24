@@ -108,6 +108,7 @@ export interface RightUtilityDockSurfaceProps {
   readonly debug?: ReactNode;
   readonly vitals?: ReactNode;
   readonly artifacts?: ReactNode;
+  readonly tasks?: ReactNode;
   readonly onClose?: () => void;
   readonly onCloseTab: (tabId: string) => void;
   readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
@@ -470,6 +471,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     debug: props.debug,
     vitals: props.vitals,
     artifacts: props.artifacts,
+    tasks: props.tasks,
     plan: props.plan,
     "side-chat": props.sideChat,
     terminal: props.terminal,

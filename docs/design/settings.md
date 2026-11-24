@@ -76,7 +76,11 @@ opens with Model endpoints, every endpoint Octant calls over an API itself
 by model roles ([Model endpoints: Model roles](model-endpoints.md#model-roles)), helper agents, and Navigator's models; with no endpoint yet it offers three ways
 in instead (Sign in with ChatGPT, Sign in with OpenRouter, Add endpoint), each
 sign-in one click with its terms as a consent line under the button. Voice &
-images holds speech, transcription, the image profiles, custom image
+images holds transcription (one Transcribe with menu: Off, each endpoint's
+transcription model, Other model…), the dictation Language and Your
+dictionary, speech, the Microphone dictation records from on this computer, a Test
+microphone row that plays a
+short clip back on this computer, the image profiles, custom image
 sources, and, once two image profiles are ready, **At Full access** with one
 select, **Image profile at Full access** (First ready profile, then each ready
 profile by name), the profile a thread at Full access uses instead of asking. The Provider catalog lists every bundled driver of both kinds and

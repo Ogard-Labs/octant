@@ -165,9 +165,15 @@ import { CodeTurnReviewPreviewCard } from "./CodeTurnReviewPreviewCard";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import { runningStepTitle, settledTurnFoldsActivity } from "../transcript/turnActivity";
-import { liveTaskProgress } from "./transcriptActivity";
+import { latestTurnTasks, splitTurnTasks } from "./transcriptActivity";
+import { usePublishThreadTaskList } from "../transcript/threadTaskLists";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
-import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
+import { providerModelLabel } from "../providers/providerModelLabel";
+import {
+  TranscriptHandoff,
+  resolveTranscriptHandoff,
+  type TranscriptHandoffEntry,
+} from "../transcript/TranscriptHandoff";
 import {
   pendingProviderSwitchNotice,
   conversationHandoffDisclosure,
@@ -177,6 +183,7 @@ import {
 import { TurnActions } from "../transcript/TurnActions";
 import {
   TurnHeader,
+  TurnLiveLine,
   TurnTime,
   turnWorkedFor,
   type TurnHeaderOutcome,
@@ -919,6 +926,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       return { status: "accepted" };
     },
   );
+  const conversation = props.controller.conversation;
+  const turnActivity = props.controller.turnActivity;
+  const latestTasks = useMemo(
+    () =>
+      latestTurnTasks(
+        conversation.flatMap((message) =>
+          message.role !== "assistant" || message.operationId === undefined
+            ? []
+            : [
+                {
+                  activity: turnActivity.get(String(message.operationId)),
+                  running: message.status === "incomplete",
+                },
+              ],
+        ),
+      ),
+    [conversation, turnActivity],
+  );
+  usePublishThreadTaskList(String(props.threadId), latestTasks);
   if (props.controller.status === "disconnected") {
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
@@ -1067,6 +1093,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   };
   const messages = props.controller.conversation;
   const subagentWindows = codeSubagentWindows(messages);
+  const handoffPlacements = codeHandoffPlacements(messages, providerGroups);
   // Only a coordinator's worker carries a host move's reason.
   const continuedOnFallback =
     view?.thread.coordinatorThreadId === undefined || view.thread.coordinatorChoice === undefined
@@ -1204,14 +1231,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     rowKeys: messages.map((message) => message.id),
     canvasesByRow: canvasesByTurnRow(canvasPlacement),
   });
-  const liveTasks = liveTaskProgress(
-    messages.flatMap((message) => {
-      if (message.role !== "assistant" || message.operationId === undefined) return [];
-      const activity = props.controller.turnActivity.get(String(message.operationId));
-      if (activity === undefined) return [];
-      return [{ activity, running: message.status === "incomplete" }];
-    }),
-  );
   // The first prompt can be in flight before this surface reads its journal
   // entry. Keep it visible without adding queued messages to the transcript.
   const awaitedPrompt = messages.length === 0 ? firstPromptInFlight : undefined;
@@ -2063,14 +2082,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       ? message
                       : nextOwnUserMessage(messages, index);
                 const forkPoint = message.role === "assistant" ? message : previousAssistant;
-                const handoff =
-                  message.role === "assistant" && previousAssistant !== undefined
-                    ? providerIdentityChange(previousAssistant, message)
-                    : undefined;
-                const activity =
+                const handoffEntry = handoffPlacements.get(message.id);
+                const recorded =
                   message.role === "assistant" && message.operationId !== undefined
                     ? props.controller.turnActivity.get(String(message.operationId))
                     : undefined;
+                const split = recorded === undefined ? undefined : splitTurnTasks(recorded);
+                const activity = split?.activity;
+                const turnTasks = split?.tasks ?? [];
                 const markedCheckpoint =
                   message.operationId === undefined
                     ? undefined
@@ -2123,23 +2142,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   settledTurnFoldsActivity(activity);
                 return (
                   <div className="code-thread-workspace__row">
-                    {handoff === "provider" ? (
-                      <OctantSeparatorWithLabel aria-label="Provider handoff">
-                        Provider handoff ·{" "}
-                        {providerModelLabel(providerGroups, {
-                          providerInstanceId: message.providerInstanceId,
-                          modelId: message.modelId,
-                        })}
-                      </OctantSeparatorWithLabel>
-                    ) : handoff === "model" ? (
-                      <OctantSeparatorWithLabel aria-label="Model switch">
-                        Switched to{" "}
-                        {modelDisplayName(providerGroups, {
-                          providerInstanceId: message.providerInstanceId,
-                          modelId: message.modelId,
-                        })}
-                      </OctantSeparatorWithLabel>
-                    ) : null}
+                    {handoffEntry === undefined ? null : (
+                      <TranscriptHandoff entry={handoffEntry} providerGroups={providerGroups} />
+                    )}
                     {message.role === "assistant" &&
                     message.operationId !== undefined &&
                     message.handoff !== undefined &&
@@ -2159,13 +2164,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     showsStrictNotice(message.strictKept, previousAssistant?.strictKept) ? (
                       <p className="code-thread-workspace__handoff" role="note">
                         {strictKeptSentence(message.strictKept)}
-                      </p>
-                    ) : null}
-                    {message.role === "assistant" && message.handoff !== undefined ? (
-                      <p className="code-thread-workspace__handoff" role="note">
-                        {conversationHandoffDisclosure(message.handoff, (selection) =>
-                          providerModelLabel(providerGroups, selection),
-                        )}
                       </p>
                     ) : null}
                     {message.role === "assistant"
@@ -2412,6 +2410,23 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             ) : (
                               <p>{busy ? "Thinking…" : ""}</p>
                             )}
+                            {turnTasks.length === 0 ? null : (
+                              <ThreadTasksPanel
+                                tasks={{
+                                  running: message.status === "incomplete",
+                                  tasks: turnTasks,
+                                }}
+                              />
+                            )}
+                            {/* Only an incomplete turn is live; a waiting one keeps its
+                            status in the header. */}
+                            <TurnLiveLine
+                              outcome={turnHeaderOutcome(message.status)}
+                              {...(message.startedAt === undefined
+                                ? {}
+                                : { startedAt: message.startedAt })}
+                              step={runningStepTitle(activity)}
+                            />
                           </>
                         )}
                         {/* After the reply, like Work's: the files are what the turn
@@ -2660,8 +2675,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             />
           </div>
         )}
-
-        {liveTasks === undefined ? null : <ThreadTasksPanel tasks={liveTasks} />}
 
         <InlineThreadPlan {...(changedFiles === undefined ? {} : { changedFiles })} />
         {!displayReady ||
@@ -3582,22 +3595,58 @@ function waitingTurnLabel(requests: CodeController["providerRequests"]): string 
   return "Waiting";
 }
 
-function providerIdentityChange(
-  previous: CodeController["conversation"][number],
-  current: CodeController["conversation"][number],
-): "provider" | "model" | undefined {
-  if (
-    previous.providerInstanceId === undefined ||
-    previous.modelId === undefined ||
-    current.providerInstanceId === undefined ||
-    current.modelId === undefined
-  ) {
-    return undefined;
+function codeHandoffPlacements(
+  messages: ReadonlyArray<CodeConversationMessage>,
+  providerGroups: ReadonlyArray<PickerGroup>,
+): ReadonlyMap<string, TranscriptHandoffEntry> {
+  const placements = new Map<string, TranscriptHandoffEntry>();
+  let previousAssistant: CodeConversationMessage | undefined;
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message === undefined || message.role !== "assistant") continue;
+    const previous =
+      previousAssistant !== undefined &&
+      previousAssistant.providerInstanceId !== undefined &&
+      previousAssistant.modelId !== undefined
+        ? {
+            providerInstanceId: previousAssistant.providerInstanceId,
+            modelId: previousAssistant.modelId,
+          }
+        : undefined;
+    const current =
+      message.providerInstanceId !== undefined && message.modelId !== undefined
+        ? {
+            providerInstanceId: message.providerInstanceId,
+            modelId: message.modelId,
+          }
+        : undefined;
+    const disclosure =
+      message.handoff === undefined
+        ? undefined
+        : conversationHandoffDisclosure(message.handoff, (selection) =>
+            providerModelLabel(providerGroups, selection),
+          );
+    const entry = resolveTranscriptHandoff({
+      previous,
+      current,
+      handoff: message.handoff,
+      disclosure,
+    });
+    if (entry !== undefined) {
+      // Place the boundary ahead of this turn's prompt so it reads between the
+      // previous reply and the message sent to the new provider or model.
+      const prior = messages[index - 1];
+      const belongsToTurn =
+        prior?.role === "user" &&
+        ((prior.operationId !== undefined &&
+          message.operationId !== undefined &&
+          String(prior.operationId) === String(message.operationId)) ||
+          (prior.operationId === undefined && message.operationId === undefined));
+      placements.set(belongsToTurn && prior !== undefined ? prior.id : message.id, entry);
+    }
+    if (current !== undefined) previousAssistant = message;
   }
-  // Same provider with a new model is a model switch; calling it a provider
-  // handoff read as if the provider had changed.
-  if (previous.providerInstanceId !== current.providerInstanceId) return "provider";
-  return previous.modelId !== current.modelId ? "model" : undefined;
+  return placements;
 }
 
 /**

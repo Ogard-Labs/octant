@@ -29,7 +29,11 @@ import type { ClientPrincipal } from "../clientPrincipal";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
-import { makeOpenAiCompatibleSpeechAdapter, type SpeechAdapter } from "./speechAdapter";
+import {
+  makeOpenAiCompatibleSpeechAdapter,
+  transcriptionPreferencesOf,
+  type SpeechAdapter,
+} from "./speechAdapter";
 import { sniffSpeechAudioMediaType } from "./speechAudio";
 import type { SpeechGates } from "./speechGates";
 
@@ -88,6 +92,7 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
     ((resolution) =>
       makeOpenAiCompatibleSpeechAdapter({
         instance: resolution.instance,
+        transcriptionPreferences: transcriptionPreferencesOf(dependencies.readVoiceSettings()),
         ...(dependencies.credentialResolver === undefined
           ? {}
           : { credentialResolver: dependencies.credentialResolver }),

@@ -96,6 +96,7 @@ import {
   useState,
   type ClipboardEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import {
   applyComposerCaret,
@@ -202,7 +203,8 @@ import {
   LoadEarlierMessages,
   type LoadEarlierMessagesState,
 } from "../transcript/LoadEarlierMessages";
-import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
+import { ThreadTasksPanel, type ThreadTaskRow } from "../transcript/ThreadTasksPanel";
+import { usePublishThreadTaskList } from "../transcript/threadTaskLists";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import { TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { RewindDialog, composerAfterRewind } from "../transcript/RewindDialog";
@@ -227,11 +229,17 @@ import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TurnActions } from "../transcript/TurnActions";
 import {
   TurnHeader,
+  TurnLiveLine,
   TurnTime,
   turnWorkedFor,
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
 import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
+import {
+  TranscriptHandoff,
+  resolveTranscriptHandoff,
+  type TranscriptHandoffEntry,
+} from "../transcript/TranscriptHandoff";
 import { HarnessRetryStatus, type HarnessRetryStreamEvent } from "../transcript/HarnessRetryStatus";
 import {
   pendingThreadHandoffNotice,
@@ -272,6 +280,8 @@ type WorkTranscriptRow =
       readonly delivered?: true;
       /** The turn header, when this is the turn's first reply and so opens with it. */
       readonly head?: WorkTurnState;
+      /** The context handoff or model switch opening this turn, kept on the turn's first row. */
+      readonly handoff?: TranscriptHandoffEntry;
       /** The turn this entry belongs to, which a turn action names. */
       readonly turn: WorkTurnState;
     }
@@ -286,6 +296,11 @@ type WorkTranscriptRow =
       readonly key: string;
       readonly turn: WorkTurnState;
       readonly tasks: NonNullable<WorkTurnState["tasks"]>;
+    }
+  | {
+      readonly kind: "live";
+      readonly key: string;
+      readonly turn: WorkTurnState;
     }
   | {
       readonly kind: "steered";
@@ -317,6 +332,7 @@ type WorkTranscriptRow =
       readonly kind: "head";
       readonly key: string;
       readonly turn: WorkTurnState;
+      readonly handoff?: TranscriptHandoffEntry;
     };
 
 const WORK_TRANSCRIPT_RECONNECTING_MESSAGE = "Work transcript is reconnecting.";
@@ -468,13 +484,6 @@ function WorkTurnHeader(props: {
           {strictKeptSentence(props.turn.strictKept)}
         </p>
       )}
-      {props.turn.handoff === undefined ? null : (
-        <p className="work-thread-workspace__handoff" role="note">
-          {threadHandoffDisclosure(props.turn.handoff, (selection) =>
-            providerModelLabel(props.providerGroups, selection),
-          )}
-        </p>
-      )}
       <TurnLoopStallNotice
         {...(props.turn.loopNotice === undefined ? {} : { loopNotice: props.turn.loopNotice })}
         {...(props.turn.stallNotice === undefined ? {} : { stallNotice: props.turn.stallNotice })}
@@ -587,6 +596,16 @@ function WorkToolGroup(props: {
  */
 function workTurnWorkedFor(turn: WorkTurnState): string | undefined {
   return turnWorkedFor(turnHeaderOutcome(turn), turn.acceptedAt, turn.updatedAt);
+}
+
+/** A journaled Work task as the task list draws it. */
+function threadTaskRow(task: NonNullable<WorkTurnState["tasks"]>[number]): ThreadTaskRow {
+  return {
+    id: task.taskId,
+    state: task.state,
+    summary: task.summary,
+    ...(task.runningSummary === undefined ? {} : { runningSummary: task.runningSummary }),
+  };
 }
 
 function turnHeaderOutcome(turn: WorkTurnState): TurnHeaderOutcome {
@@ -1031,6 +1050,18 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   });
   const [loaded, setLoaded] = useState<WorkLoadedTurns>(NO_LOADED_TURNS);
   const turns = loaded.turns;
+  // The newest turn's task list, for the Tasks dock panel: the provider
+  // restates its whole plan as a turn proceeds, so older lists are history,
+  // and a list it cleared (an empty one) means there is no current list.
+  const latestTasks = useMemo(() => {
+    const turn = turns.findLast((candidate) => candidate.tasks !== undefined);
+    if (turn?.tasks === undefined || turn.tasks.length === 0) return undefined;
+    return {
+      running: turn.status === "accepted" || turn.status === "running",
+      tasks: turn.tasks.map(threadTaskRow),
+    };
+  }, [turns]);
+  usePublishThreadTaskList(String(props.threadId), latestTasks);
   // Each turn owns the subagents started between its start and the next
   // turn's: the host links a subagent to the thread, not to a turn.
   const nextTurnStart = useMemo(
@@ -1664,11 +1695,27 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (turns.length === 0 && firstPageSettled) rows.push({ kind: "empty", key: "empty" });
     // A key names the turn, never its position: earlier pages arrive above,
     // and the list keeps the reader's row in place by its key.
-    for (const turn of turns) {
+    const groups = props.providerGroups ?? [];
+    for (const [turnIndex, turn] of turns.entries()) {
+      const previousTurn = turnIndex > 0 ? turns[turnIndex - 1] : undefined;
+      const handoffEntry = resolveTranscriptHandoff({
+        previous: previousTurn?.authority,
+        current: turn.authority,
+        handoff: turn.handoff,
+        disclosure:
+          turn.handoff === undefined
+            ? undefined
+            : threadHandoffDisclosure(turn.handoff, (selection) =>
+                providerModelLabel(groups, selection),
+              ),
+      });
       const head: WorkTranscriptRow = {
         kind: "head",
         key: `${String(turn.requestId)}-head`,
         turn,
+        ...(handoffEntry !== undefined && turn.transcript.length === 0
+          ? { handoff: handoffEntry }
+          : {}),
       };
       let headPlaced = false;
       for (const [index, entry] of turn.transcript.entries()) {
@@ -1689,6 +1736,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             ? { delivered: true as const }
             : {}),
           ...(opensTurn ? { head: turn } : {}),
+          // Keep the handoff on the turn's opening row so threadTurnSpans and
+          // placeCompactions see the turn's real boundary and start timestamp.
+          ...(index === 0 && handoffEntry !== undefined ? { handoff: handoffEntry } : {}),
         });
       }
       if (!headPlaced) rows.push(head);
@@ -1716,6 +1766,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           turn,
           tasks: turn.tasks,
         });
+      }
+      // The running line closes the running turn, under its task list, so it
+      // stays beside the newest content however long the turn grows.
+      if (turnHeaderOutcome(turn) === "running") {
+        rows.push({ kind: "live", key: `${String(turn.requestId)}-live`, turn });
       }
       // The files land after the turn that produced them, so the transcript
       // reads as what was said and then what came out of it.
@@ -1760,6 +1815,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     firstPageSettled,
     loadedTurnIds,
     pendingRequests,
+    props.providerGroups,
     sideTasks,
     status,
     turns,
@@ -2776,6 +2832,21 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   ),
                 })}
             renderItem={(row) => {
+              const withRowHandoff = (
+                handoff: TranscriptHandoffEntry | undefined,
+                content: ReactNode,
+              ) =>
+                handoff === undefined ? (
+                  content
+                ) : (
+                  <div className="code-thread-workspace__row">
+                    <TranscriptHandoff
+                      entry={handoff}
+                      providerGroups={props.providerGroups ?? []}
+                    />
+                    {content}
+                  </div>
+                );
               if (row.kind === "empty") {
                 return (
                   <p className="work-thread-workspace__opening">
@@ -2786,18 +2857,20 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               if (row.kind === "message") {
                 if (row.entry.role === "user") {
                   if (row.delivered === true) {
-                    return (
+                    return withRowHandoff(
+                      row.handoff,
                       <article aria-label="Subagent results" className="turn-child-result">
                         <ChildResultCards
                           providerGroups={props.providerGroups}
                           text={row.entry.text}
                         />
-                      </article>
+                      </article>,
                     );
                   }
                   const followUpPrompt = parseAutomationFollowUpTurnPrompt(row.entry.text);
                   if (followUpPrompt !== undefined) {
-                    return (
+                    return withRowHandoff(
+                      row.handoff,
                       <article aria-label="Scheduled follow-up" className="turn-user">
                         <ScheduledFollowUpMark />
                         <div className="bubble">
@@ -2806,11 +2879,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         {row.at === undefined ? null : (
                           <TurnTime at={row.at} copyValue={followUpPrompt} />
                         )}
-                      </article>
+                      </article>,
                     );
                   }
                   const sentBy = agentTurnSender(String(props.threadId), String(row.turn.turnId));
-                  return (
+                  return withRowHandoff(
+                    row.handoff,
                     <article
                       aria-label={sentBy === undefined ? "Your message" : `Message from ${sentBy}`}
                       className="turn-user"
@@ -2827,12 +2901,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         )}
                         <AgentTurnSender agentName={sentBy} />
                       </TurnActionMenu>
-                    </article>
+                    </article>,
                   );
                 }
                 // A reply is markdown, as it is in Chat and Code: the same headings,
                 // lists, and code blocks render the same way here.
-                return (
+                return withRowHandoff(
+                  row.handoff,
                   <article aria-label="Assistant message" className="turn-agent">
                     <TurnActionMenu
                       actions={turnActionsFor("assistant", row.turn).actions}
@@ -2901,11 +2976,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         ? workTurnActions(row.turn, row.entry.text)
                         : null}
                     </TurnActionMenu>
-                  </article>
+                  </article>,
                 );
               }
               if (row.kind === "head") {
-                return (
+                return withRowHandoff(
+                  row.handoff,
                   <div className="turn-agent">
                     <WorkTurnHeader
                       serverUrl={props.serverUrl}
@@ -2947,7 +3023,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         : { canvasClient: props.canvasClient })}
                     />
                     {workTurnActions(row.turn, undefined)}
-                  </div>
+                  </div>,
                 );
               }
               if (row.kind === "files") {
@@ -3022,15 +3098,23 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   <ThreadTasksPanel
                     tasks={{
                       running: row.turn.status === "accepted" || row.turn.status === "running",
-                      tasks: row.tasks.map((task) => ({
-                        id: task.taskId,
-                        state: task.state,
-                        summary: task.summary,
-                        ...(task.runningSummary === undefined
-                          ? {}
-                          : { runningSummary: task.runningSummary }),
-                      })),
+                      tasks: row.tasks.map(threadTaskRow),
                     }}
+                  />
+                );
+              }
+              if (row.kind === "live") {
+                return (
+                  <TurnLiveLine
+                    outcome={turnHeaderOutcome(row.turn)}
+                    startedAt={row.turn.acceptedAt}
+                    step={runningStepTitle(
+                      toolStepsActivity(
+                        row.turn.toolSteps,
+                        row.turn.toolStepsTruncated,
+                        row.turn.reasoningMs,
+                      ),
+                    )}
                   />
                 );
               }

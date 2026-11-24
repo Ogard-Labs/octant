@@ -8198,11 +8198,20 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and credential. Mistral's speech route is the one dialect the adapter
   speaks besides OpenAI's: on `api.mistral.ai` the voice goes as `voice_id`
   and the reply is JSON with base64 `audio_data`, as Mistral's OpenAPI
-  description lays out; transcription there is OpenAI-shaped and needs no
-  dialect. An endpoint page, and Add endpoint's last step, offer the
-  endpoint's voice models to Voice settings when it lists any (a preset's
-  known models, or ids that read as transcription or speech models): one
-  click makes a transcription model the one Voice uses, and speech is named
+  description lays out; transcription there is OpenAI-shaped except for Voice
+  settings' dictionary, which an OpenAI-shaped route reads as one `prompt` of
+  at most about 800 characters and Mistral as one `context_bias` field per
+  term. Every transcription the host makes (dictation, a paired phone's clips,
+  the agent's tool) carries the dictionary, and Voice settings' language when
+  the request names none. Voice settings choose transcription from one menu: Off, then each
+  enabled OpenAI-compatible endpoint with the transcription model it lists or
+  its preset knows, saved on choice, with Other model… for a typed id; a
+  Test microphone row plays a ten-second clip back in the window and sends it
+  to the transcription route only on request. An endpoint page, and Add
+  endpoint's last step, offer the endpoint's voice models to Voice settings
+  when it lists any (a preset's known models, or ids that read as
+  transcription or speech models): one click makes a transcription model the
+  one Voice uses, and speech is named
   with what it still needs, a voice from the provider, since Octant cannot
   choose one. The host serves `/api/speech/status`, `/api/speech/transcriptions`,
   and `/api/speech/synthesis` behind window authority, sniffs and bounds the
@@ -8245,8 +8254,13 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   leaving one for local read-aloud.
   Every desktop composer (Chat, Work, Code, the welcome and draft composers) and
   Navigator show a microphone beside the attach control only while
-  transcription is `ready`; the clip is recorded by the browser's own encoder,
-  the transcript is appended to the draft, and the person still sends. Navigator
+  transcription is `ready`; the clip is recorded by the browser's own encoder
+  from the microphone Voice settings name on this computer (kept in the app's
+  browser storage, falling back to the system default when it is not
+  connected); the
+  microphone button or the remappable Dictate chord on the focused composer
+  (tap to toggle, hold to talk) starts it, the transcript is appended to the
+  draft, and the person still sends. Navigator
   can read replies aloud through the configured synthesis endpoint, or with the
   operating system's voices when none is set. A paired device reaches the
   status and transcription routes only: the listener forwards those two routes

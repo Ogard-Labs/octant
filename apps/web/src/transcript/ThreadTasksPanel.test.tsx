@@ -35,6 +35,39 @@ describe("ThreadTasksPanel", () => {
     expect(screen.getByRole("list", { name: "Task list" }).children).toHaveLength(3);
   });
 
+  it("tells a screen reader each task's own state, not only the count", () => {
+    render(
+      <ThreadTasksPanel
+        tasks={{
+          running: true,
+          tasks: [
+            { id: "t1", state: "completed", summary: "Update parser" },
+            { id: "t2", state: "pending", summary: "Run tests" },
+          ],
+        }}
+      />,
+    );
+    const items = screen.getByRole("list", { name: "Task list" }).children;
+    expect(items[0]).toHaveTextContent(/Update parser, done$/);
+    expect(items[1]).toHaveTextContent(/Run tests, not started$/);
+  });
+
+  it("does not read or draw a stopped turn's task in hand as still in progress", () => {
+    render(
+      <ThreadTasksPanel
+        alwaysOpen
+        tasks={{
+          running: false,
+          tasks: [{ id: "t1", state: "running", summary: "Run tests" }],
+        }}
+      />,
+    );
+    const row = screen.getByRole("list", { name: "Task list" }).children[0];
+    expect(row).toHaveTextContent(/Run tests, not finished$/);
+    // No spinner: the row is not drawn as running once its turn stopped.
+    expect(row).not.toHaveAttribute("data-task-state", "running");
+  });
+
   it("names the task in its running wording only while the turn is running", () => {
     const tasks = [
       {

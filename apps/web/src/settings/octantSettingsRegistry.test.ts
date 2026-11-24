@@ -45,6 +45,18 @@ describe("octantSettingsRegistry", () => {
     );
   });
 
+  it.each(["transcribe", "transcription"])("finds the Transcribe with menu by %s", (query) => {
+    expect(
+      searchSettings(
+        listAvailableSections(octantSettingsRegistry, capabilities),
+        capabilities,
+        query,
+      ),
+    ).toContainEqual(
+      expect.objectContaining({ kind: "setting", sectionId: "voice", settingId: "transcription" }),
+    );
+  });
+
   it.each(["changed identity", "read-only check"])(
     "finds the read-only remote setup journey for %s",
     (query) => {

@@ -1,7 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { TurnHeader, turnTimeTitle } from "./TurnHeader";
+import { TurnHeader, TurnLiveLine, turnTimeTitle } from "./TurnHeader";
 
 describe("TurnHeader", () => {
   it("keeps successful reply status without a Completed word and leaves the actions to the reply's end", () => {
@@ -49,7 +49,7 @@ describe("TurnHeader", () => {
 
     it("counts from the turn's own start, once a second, and stops when it unmounts", () => {
       runningAt(12);
-      const { unmount } = render(<TurnHeader outcome="running" startedAt={startedAt} />);
+      const { unmount } = render(<TurnLiveLine outcome="running" startedAt={startedAt} />);
       expect(screen.getByText("Working")).toBeVisible();
       expect(screen.getByText("12s")).toBeVisible();
 
@@ -65,7 +65,7 @@ describe("TurnHeader", () => {
     it("names the current step in the live region and keeps the clock out of it", () => {
       runningAt(3);
       const { rerender } = render(
-        <TurnHeader outcome="running" startedAt={startedAt} step="Read" />,
+        <TurnLiveLine outcome="running" startedAt={startedAt} step="Read" />,
       );
       const live = screen.getByRole("status");
       expect(live).toHaveTextContent("Read");
@@ -75,16 +75,45 @@ describe("TurnHeader", () => {
       act(() => void vi.advanceTimersByTime(1000));
       expect(live).not.toHaveTextContent(/\d+s/);
 
-      rerender(<TurnHeader outcome="running" startedAt={startedAt} />);
+      rerender(<TurnLiveLine outcome="running" startedAt={startedAt} />);
       expect(screen.getByRole("status")).toBeEmptyDOMElement();
       expect(screen.getByText("4s")).toBeVisible();
     });
 
     it("names a step again once a later tool runs, whatever the reply said before", () => {
       runningAt(3);
-      const { rerender } = render(<TurnHeader outcome="running" startedAt={startedAt} />);
-      rerender(<TurnHeader outcome="running" startedAt={startedAt} step="Bash" />);
+      const { rerender } = render(<TurnLiveLine outcome="running" startedAt={startedAt} />);
+      rerender(<TurnLiveLine outcome="running" startedAt={startedAt} step="Bash" />);
       expect(screen.getByRole("status")).toHaveTextContent("Bash");
+    });
+
+    it("leaves the header without a status while the line at the turn's end shows it", () => {
+      runningAt(5);
+      render(
+        <>
+          <TurnHeader outcome="running" startedAt={startedAt} step="Read" />
+          <p>Reply so far</p>
+          <TurnLiveLine outcome="running" startedAt={startedAt} step="Read" />
+        </>,
+      );
+      expect(screen.getAllByText("Working")).toHaveLength(1);
+      expect(
+        screen.getByText("Reply so far").compareDocumentPosition(screen.getByText("Working")),
+      ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+
+    it("draws no live line for a turn waiting on the person or already settled", () => {
+      for (const outcome of ["waiting", "completed", "failed"] as const) {
+        const { container, unmount } = render(
+          <TurnLiveLine outcome={outcome} startedAt={startedAt} />,
+        );
+        expect(container).toBeEmptyDOMElement();
+        unmount();
+      }
+      const { container } = render(
+        <TurnLiveLine label="Waiting for your answer" outcome="running" startedAt={startedAt} />,
+      );
+      expect(container).toBeEmptyDOMElement();
     });
 
     it("keeps the plain line for a turn with no start time", () => {
