@@ -30,6 +30,23 @@ describe("repository bootstrap policy", () => {
       defaultTransport: "https",
     });
 
+    const fromAbsoluteScp = deriveBootstrapCloneRemotes("git@git.example.com:/srv/git/demo.git");
+    expect(fromAbsoluteScp.repositoryName).toBe("demo");
+    expect(fromAbsoluteScp.remotes).toEqual({
+      originUrl: "git@git.example.com:/srv/git/demo.git",
+      sshUrl: "git@git.example.com:/srv/git/demo.git",
+      httpsUrl: "https://git.example.com/srv/git/demo.git",
+      defaultTransport: "ssh",
+    });
+    expect(validateBootstrapCloneUrl("git@git.example.com:/srv/git/demo.git", "ssh")).toEqual({
+      ok: true,
+      normalizedUrl: "git@git.example.com:/srv/git/demo.git",
+    });
+    expect(validateBootstrapCloneUrl("git@github.com:org/my-app.git", "ssh")).toEqual({
+      ok: true,
+      normalizedUrl: "git@github.com:org/my-app.git",
+    });
+
     const fromSshSchemeCustomPort = deriveBootstrapCloneRemotes(
       "ssh://git@git.internal:2222/team/tool.git",
     );
@@ -110,6 +127,17 @@ describe("repository bootstrap policy", () => {
     expect(validateBootstrapDestinationInput("~/../etc").ok).toBe(false);
     expect(validateBootstrapDestinationInput("~").ok).toBe(false);
     expect(validateBootstrapDestinationInput("-flag").ok).toBe(false);
+    expect(
+      validateBootstrapDestinationInput("C:\\Users\\dev\\src\\demo", { platform: "win32" }),
+    ).toEqual({ ok: true, trimmed: "C:\\Users\\dev\\src\\demo" });
+    expect(validateBootstrapDestinationInput("~\\src\\demo", { platform: "win32" }).ok).toBe(true);
+    expect(
+      validateBootstrapDestinationInput("C:\\Users\\dev\\..\\secret", { platform: "win32" }).ok,
+    ).toBe(false);
+    expect(validateBootstrapDestinationInput("C:\\", { platform: "win32" }).ok).toBe(false);
+    expect(
+      validateBootstrapDestinationInput("\\\\server\\share\\repo", { platform: "win32" }).ok,
+    ).toBe(false);
 
     expect(
       classifyBootstrapCloneStderr(

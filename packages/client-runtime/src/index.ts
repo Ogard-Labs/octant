@@ -135,4 +135,3 @@ export * from "./ownerThreadWake";
 export { createBrowserPresentationClient } from "./browserPresentationClient";
 
 export * from "./ownerApprovals";
-export * from "./repositoryBootstrapClient";

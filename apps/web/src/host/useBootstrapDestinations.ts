@@ -1,13 +1,14 @@
 import {
   createRemoteProductFetch,
   readRemoteSessionStanding,
+  type RemoteConnection,
   type RemoteSessionBridge,
 } from "@octant/client-runtime";
 import type { HostFederationTransports } from "@octant/client-runtime/host-federation-transports";
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
-import {
-  createRepositoryBootstrapClient,
-  type RepositoryBootstrapClient,
+import type {
+  RepositoryBootstrapClient,
+  RepositoryBootstrapClientOptions,
 } from "@octant/client-runtime/repository-bootstrap-client";
 import type { HostId } from "@octant/contracts/host";
 import type { ProjectSummary } from "@octant/contracts/projects";
@@ -20,13 +21,41 @@ export interface BootstrapDestinationTarget {
   readonly displayName: string;
   readonly connected: boolean;
   readonly actsAsHostPerson: boolean;
-  readonly bootstrapClient: RepositoryBootstrapClient;
+  readonly bootstrapPort?: RepositoryBootstrapClientOptions;
+  readonly bootstrapClient?: RepositoryBootstrapClient;
   readonly projectClient: ProjectClient;
   /** Lowercased names and connected `owner/repo` keys already bound on that computer. */
   readonly boundRepositoryKeys: ReadonlySet<string>;
 }
 
 type CodeProjectSummary = Extract<ProjectSummary, { readonly type: "code" }>;
+
+const connectionTokens = new WeakMap<RemoteConnection, number>();
+let nextConnectionToken = 1;
+
+function connectionIdentity(connection: RemoteConnection | undefined): number {
+  if (connection === undefined) return 0;
+  let token = connectionTokens.get(connection);
+  if (token === undefined) {
+    token = nextConnectionToken;
+    nextConnectionToken += 1;
+    connectionTokens.set(connection, token);
+  }
+  return token;
+}
+
+function readyRemoteSignature(transports: HostFederationTransports): string {
+  const parts: string[] = [];
+  for (const slot of transports.list()) {
+    if (slot.kind !== "remote" || slot.bridge === undefined || slot.state.kind !== "ready") {
+      continue;
+    }
+    parts.push(
+      `${String(slot.hostId)}:${slot.displayName}:${String(connectionIdentity(slot.bridge.connection()))}`,
+    );
+  }
+  return parts.sort().join("|");
+}
 
 /** Canonical matching keys for comparing whether a Code Project is already bound on a destination computer. */
 export function codeProjectRepositoryKeys(
@@ -65,7 +94,7 @@ export function createBootstrapTargetForBridge(input: {
   readonly actsAsHostPerson: boolean;
   readonly boundRepositoryKeys?: ReadonlySet<string>;
 }): BootstrapDestinationTarget {
-  const port = {
+  const port: RepositoryBootstrapClientOptions = {
     baseUrl: REMOTE_CLIENT_BASE_URL,
     fetch: createRemoteProductFetch({ bridge: input.bridge }),
     windowCapability: "",
@@ -75,7 +104,7 @@ export function createBootstrapTargetForBridge(input: {
     displayName: input.displayName,
     connected: input.connected,
     actsAsHostPerson: input.actsAsHostPerson,
-    bootstrapClient: createRepositoryBootstrapClient(port),
+    bootstrapPort: port,
     projectClient: createProjectClient(port),
     boundRepositoryKeys: input.boundRepositoryKeys ?? new Set(),
   };
@@ -84,16 +113,33 @@ export function createBootstrapTargetForBridge(input: {
 /**
  * Tracks connected paired computers where this window acts as that computer's
  * own person (`actsAsHostPerson`), along with which Code Projects are already
- * bound on each computer. Refreshes cleanly when the transport list changes.
+ * bound on each computer. Subscribes to transport updates so computers that
+ * connect or reconnect after initial mount become eligible immediately.
  */
 export function useBootstrapDestinations(
   transports: HostFederationTransports | undefined,
   refreshKey?: number,
 ): ReadonlyArray<BootstrapDestinationTarget> {
   const [targets, setTargets] = useState<ReadonlyArray<BootstrapDestinationTarget>>([]);
+  const [readySignature, setReadySignature] = useState<string>(() =>
+    transports === undefined ? "" : readyRemoteSignature(transports),
+  );
 
   useEffect(() => {
     if (transports === undefined) {
+      setReadySignature("");
+      return;
+    }
+    const syncSignature = () => {
+      const next = readyRemoteSignature(transports);
+      setReadySignature((current) => (current === next ? current : next));
+    };
+    syncSignature();
+    return transports.subscribe(syncSignature);
+  }, [transports]);
+
+  useEffect(() => {
+    if (transports === undefined || readySignature === "") {
       setTargets([]);
       return;
     }
@@ -142,7 +188,20 @@ export function useBootstrapDestinations(
     return () => {
       active = false;
     };
-  }, [transports, refreshKey]);
+  }, [transports, readySignature, refreshKey]);
 
   return targets;
+}
+
+/** Lazy-mounted observer that keeps paired-computer destination discovery off the initial bundle. */
+export function BootstrapDestinationsBridge(props: {
+  readonly transports: HostFederationTransports;
+  readonly refreshKey: number;
+  readonly onTargetsChange: (targets: ReadonlyArray<BootstrapDestinationTarget>) => void;
+}) {
+  const targets = useBootstrapDestinations(props.transports, props.refreshKey);
+  useEffect(() => {
+    props.onTargetsChange(targets);
+  }, [targets, props.onTargetsChange]);
+  return null;
 }

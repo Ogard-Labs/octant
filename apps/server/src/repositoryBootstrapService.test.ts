@@ -117,7 +117,13 @@ describe("repository bootstrap service", () => {
     });
 
     try {
-      const result = await service.inspect({ projectId: PROJECT_ID }, new AbortController().signal);
+      const inspectResult = await service.inspect(
+        { projectId: PROJECT_ID },
+        new AbortController().signal,
+      );
+      expect(inspectResult.status).toBe("ok");
+      if (inspectResult.status !== "ok") throw new Error("Expected ok inspect result");
+      const result = inspectResult.value;
       expect(result.repositoryName).toBe("demo");
       expect(result.defaultDestinationPath).toBe("~/demo");
       expect(result.remotes).toEqual({
@@ -139,6 +145,50 @@ describe("repository bootstrap service", () => {
     }
   });
 
+  it("discovers and reads files ignored only by the user's configured global core.excludesFile", async () => {
+    const repoDir = makeTempDir("octant-repo-global-ignore-");
+    const fakeHome = makeTempDir("octant-repo-global-home-");
+    initGitRepo(repoDir, "git@github.com:org/demo.git");
+
+    const globalExcludes = join(fakeHome, "my-global-ignore");
+    writeFileSync(globalExcludes, "personal-secrets.local\n");
+    const globalConfig = join(fakeHome, "gitconfig");
+    writeFileSync(globalConfig, `[core]\n\texcludesFile = ${globalExcludes}\n`);
+    writeFileSync(join(repoDir, "personal-secrets.local"), "TOKEN=from-global\n", { mode: 0o600 });
+
+    const service = new RepositoryBootstrapService({
+      readProject: () => makeCodeProject(repoDir),
+      bindingReceiptStore: new BindingReceiptStore(),
+      projectRootPort: new ProjectRootPort(),
+      homeDir: fakeHome,
+      env: { ...process.env, HOME: fakeHome, GIT_CONFIG_GLOBAL: globalConfig },
+    });
+
+    try {
+      const inspectResult = await service.inspect(
+        { projectId: PROJECT_ID },
+        new AbortController().signal,
+      );
+      expect(inspectResult.status).toBe("ok");
+      if (inspectResult.status !== "ok") throw new Error("Expected ok inspect result");
+      expect(inspectResult.value.ignoredFiles.map((file) => file.path)).toContain(
+        "personal-secrets.local",
+      );
+
+      const readResult = await service.readIgnoredFile(
+        { projectId: PROJECT_ID, relativePath: "personal-secrets.local" },
+        new AbortController().signal,
+      );
+      expect(readResult.status).toBe("ok");
+      if (readResult.status !== "ok") throw new Error("Expected ok read result");
+      expect(Buffer.from(readResult.value.contentBase64, "base64").toString("utf8")).toBe(
+        "TOKEN=from-global\n",
+      );
+    } finally {
+      service.close();
+    }
+  });
+
   it("reports structured truncation metadata when entry or byte caps are exceeded", async () => {
     const repoDir = makeTempDir("octant-repo-caps-");
     initGitRepo(repoDir, "https://github.com/org/demo.git");
@@ -155,7 +205,13 @@ describe("repository bootstrap service", () => {
     });
 
     try {
-      const result = await service.inspect({ projectId: PROJECT_ID }, new AbortController().signal);
+      const inspectResult = await service.inspect(
+        { projectId: PROJECT_ID },
+        new AbortController().signal,
+      );
+      expect(inspectResult.status).toBe("ok");
+      if (inspectResult.status !== "ok") throw new Error("Expected ok inspect result");
+      const result = inspectResult.value;
       expect(result.ignoredFiles).toEqual([{ path: "a.log", bytes: 5, secretGuardMatched: false }]);
       expect(result.truncated).toBe(true);
       expect(result.omittedCount).toBe(1);
@@ -183,41 +239,45 @@ describe("repository bootstrap service", () => {
     });
 
     try {
-      const file = await service.readIgnoredFile(
+      const fileResult = await service.readIgnoredFile(
         { projectId: PROJECT_ID, relativePath: ".env" },
         new AbortController().signal,
       );
+      expect(fileResult.status).toBe("ok");
+      if (fileResult.status !== "ok") throw new Error("Expected ok file read");
+      const file = fileResult.value;
       expect(file.relativePath).toBe(".env");
       expect(file.bytes).toBe(9);
       expect(file.mode).toBe(0o600);
       expect(Buffer.from(file.contentBase64, "base64").toString("utf8")).toBe("SECRET=1\n");
       expect(file.sha256).toBe(createHash("sha256").update("SECRET=1\n").digest("hex"));
 
-      await expect(
-        service.readIgnoredFile(
+      expect(
+        await service.readIgnoredFile(
           { projectId: PROJECT_ID, relativePath: "README.md" },
           new AbortController().signal,
         ),
-      ).rejects.toThrow();
-      await expect(
-        service.readIgnoredFile(
+      ).toMatchObject({ status: "refused", failure: { code: "invalid" } });
+      expect(
+        await service.readIgnoredFile(
           { projectId: PROJECT_ID, relativePath: "secret-link" },
           new AbortController().signal,
         ),
-      ).rejects.toThrow();
-      await expect(
-        service.readIgnoredFile(
+      ).toMatchObject({ status: "refused" });
+      expect(
+        await service.readIgnoredFile(
           { projectId: PROJECT_ID, relativePath: ".git/config" },
           new AbortController().signal,
         ),
-      ).rejects.toThrow();
+      ).toMatchObject({ status: "refused", failure: { code: "invalid" } });
     } finally {
       service.close();
     }
   });
 
-  it("clones into a clean destination folder, issues a binding receipt, and lands only chosen ignored files with mode & 0o777", async () => {
+  it("clones into an existing empty destination folder, issues a binding receipt, refuses overwriting tracked files, and lands only chosen ignored files with mode & 0o777", async () => {
     const homeDir = makeTempDir("octant-dest-home-");
+    mkdirSync(join(homeDir, "demo"), { recursive: true });
     const receiptStore = new BindingReceiptStore();
     const runner: RepositoryBootstrapCloneRunner = {
       clone: async ({ stagingPath, onProgress }) => {
@@ -243,20 +303,30 @@ describe("repository bootstrap service", () => {
     );
 
     try {
-      await service.startClone(WINDOW_ID, {
+      const started = await service.startClone(WINDOW_ID, {
         operationId,
         remoteUrl: "git@github.com:org/demo.git",
         transport: "ssh",
         destinationPath: "~/demo",
       });
+      expect(started.status).toBe("ok");
 
       // Wait briefly for the fake async clone runner to settle.
-      let status = service.cloneStatus(WINDOW_ID, { operationId }).operation;
-      for (let attempt = 0; attempt < 20 && status.state === "cloning"; attempt += 1) {
+      let statusResult = service.cloneStatus(WINDOW_ID, { operationId });
+      for (
+        let attempt = 0;
+        attempt < 20 &&
+        statusResult.status === "ok" &&
+        statusResult.value.operation.state === "cloning";
+        attempt += 1
+      ) {
         await new Promise((resolve) => setTimeout(resolve, 10));
-        status = service.cloneStatus(WINDOW_ID, { operationId }).operation;
+        statusResult = service.cloneStatus(WINDOW_ID, { operationId });
       }
 
+      expect(statusResult.status).toBe("ok");
+      if (statusResult.status !== "ok") throw new Error("Expected ok status");
+      const status = statusResult.value.operation;
       expect(status.state).toBe("cloned");
       if (status.state !== "cloned") throw new Error("Expected cloned state");
       expect(status.projectName).toBe("demo");
@@ -270,17 +340,20 @@ describe("repository bootstrap service", () => {
       });
       expect(consumed.canonicalRoot).toBe(status.canonicalDestination);
 
-      // Cross-window status read is refused.
-      expect(() => service.cloneStatus(OTHER_WINDOW_ID, { operationId })).toThrow();
+      // Cross-window status read is refused with a typed refusal.
+      expect(service.cloneStatus(OTHER_WINDOW_ID, { operationId })).toMatchObject({
+        status: "refused",
+        failure: { code: "unauthorized" },
+      });
 
-      // Land one valid file plus several forbidden payloads (symlink escape, .., .git/config, bad hash).
+      // Land one valid file plus forbidden payloads (tracked file overwrite, symlink escape, .., .git/config, bad hash).
       const outsideDir = makeTempDir("octant-symlink-target-");
       symlinkSync(outsideDir, join(status.canonicalDestination, "escape-dir"));
 
       const envBytes = Buffer.from("TOKEN=abc\n", "utf8");
       const envSha = createHash("sha256").update(envBytes).digest("hex");
 
-      const landed = await service.landFiles(WINDOW_ID, {
+      const landedResult = await service.landFiles(WINDOW_ID, {
         operationId,
         files: [
           {
@@ -288,6 +361,13 @@ describe("repository bootstrap service", () => {
             bytes: envBytes.byteLength,
             sha256: envSha,
             mode: 0o600,
+            contentBase64: envBytes.toString("base64"),
+          },
+          {
+            relativePath: "README.md",
+            bytes: envBytes.byteLength,
+            sha256: envSha,
+            mode: 0o644,
             contentBase64: envBytes.toString("base64"),
           },
           {
@@ -321,14 +401,20 @@ describe("repository bootstrap service", () => {
         ],
       });
 
+      expect(landedResult.status).toBe("ok");
+      if (landedResult.status !== "ok") throw new Error("Expected ok landFiles result");
+      const landed = landedResult.value;
       expect(landed.status).toBe("partial-copy");
       expect(landed.landed).toEqual(["apps/web/.env.local"]);
       expect(landed.failed.map((item) => [item.relativePath, item.reason])).toEqual([
+        ["README.md", "invalid-path"],
         ["escape-dir/.env", "symlink-refused"],
         ["../escape.env", "invalid-path"],
         [".git/config", "git-internal-refused"],
         ["bad-hash.env", "hash-mismatch"],
       ]);
+      // Tracked README.md was never overwritten.
+      expect(readFileSync(join(status.canonicalDestination, "README.md"), "utf8")).toBe("# demo\n");
 
       const landedPath = join(status.canonicalDestination, "apps", "web", ".env.local");
       expect(readFileSync(landedPath, "utf8")).toBe("TOKEN=abc\n");
@@ -351,32 +437,32 @@ describe("repository bootstrap service", () => {
     });
 
     try {
-      await expect(
-        service.startClone(WINDOW_ID, {
+      expect(
+        await service.startClone(WINDOW_ID, {
           operationId: decodeRepositoryBootstrapOperationId("66666666-6666-4666-8666-666666666666"),
           remoteUrl: "file:///tmp/repo",
           transport: "https",
           destinationPath: "~/clean",
         }),
-      ).rejects.toMatchObject({ failure: { code: "invalid-url" } });
+      ).toMatchObject({ status: "refused", failure: { code: "invalid-url" } });
 
-      await expect(
-        service.startClone(WINDOW_ID, {
+      expect(
+        await service.startClone(WINDOW_ID, {
           operationId: decodeRepositoryBootstrapOperationId("77777777-7777-4777-8777-777777777777"),
           remoteUrl: "-oProxyCommand=id",
           transport: "ssh",
           destinationPath: "~/clean",
         }),
-      ).rejects.toMatchObject({ failure: { code: "invalid-url" } });
+      ).toMatchObject({ status: "refused", failure: { code: "invalid-url" } });
 
-      await expect(
-        service.startClone(WINDOW_ID, {
+      expect(
+        await service.startClone(WINDOW_ID, {
           operationId: decodeRepositoryBootstrapOperationId("88888888-8888-4888-8888-888888888888"),
           remoteUrl: "git@github.com:org/demo.git",
           transport: "ssh",
           destinationPath: "~/occupied",
         }),
-      ).rejects.toMatchObject({ failure: { code: "destination-not-empty" } });
+      ).toMatchObject({ status: "refused", failure: { code: "destination-not-empty" } });
     } finally {
       service.close();
     }

@@ -635,7 +635,7 @@ import {
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
 import { createPairedComputerFetch } from "./host/pairedComputerFetch";
 import { usePairedComputerReads } from "./host/usePairedComputerReads";
-import { destinationNeedsProject, useBootstrapDestinations } from "./host/useBootstrapDestinations";
+import type { BootstrapDestinationTarget } from "./host/useBootstrapDestinations";
 import {
   isPairedComputerAsk,
   isPairedComputerThread,
@@ -743,6 +743,11 @@ const PairedComputerCodeSurface = lazy(() =>
 const AddRepositoryToComputerDialog = lazy(() =>
   import("./projects/AddRepositoryToComputerDialog").then(({ AddRepositoryToComputerDialog }) => ({
     default: AddRepositoryToComputerDialog,
+  })),
+);
+const BootstrapDestinationsBridge = lazy(() =>
+  import("./host/useBootstrapDestinations").then(({ BootstrapDestinationsBridge }) => ({
+    default: BootstrapDestinationsBridge,
   })),
 );
 const MoveThreadToProjectDialog = lazy(() =>
@@ -2726,10 +2731,9 @@ function LaunchedShell(
     { readonly hostId: string; readonly projectId: string; readonly sequence: number } | undefined
   >(undefined);
   const [bootstrapRefreshKey, setBootstrapRefreshKey] = useState(0);
-  const bootstrapDestinations = useBootstrapDestinations(
-    hostFederationTransports,
-    bootstrapRefreshKey,
-  );
+  const [bootstrapDestinations, setBootstrapDestinations] = useState<
+    ReadonlyArray<BootstrapDestinationTarget>
+  >([]);
   const [bootstrapDialog, setBootstrapDialog] = useState<
     | {
         readonly projectId?: ProjectId;
@@ -3201,6 +3205,15 @@ function LaunchedShell(
           project.type === "code" && project.lifecycle === "active",
       ),
     [projectController.allProjects],
+  );
+  const bootstrapDialogTargetProject = useMemo(
+    () =>
+      bootstrapDialog?.projectId === undefined
+        ? undefined
+        : localActiveCodeProjects.find(
+            (candidate) => String(candidate.id) === String(bootstrapDialog.projectId),
+          ),
+    [bootstrapDialog?.projectId, localActiveCodeProjects],
   );
   // Where the list lives: this host by default, or another computer the
   // person chose in Settings › To-dos, reached through this window's own
@@ -9821,58 +9834,46 @@ function LaunchedShell(
           hostBridge={props.hostBridge}
           onOpenHubSettings={() => void controller.openSettings({ section: "remote-access" })}
         />
+        {hostFederationTransports === undefined ? null : (
+          <BootstrapDestinationsBridge
+            onTargetsChange={setBootstrapDestinations}
+            refreshKey={bootstrapRefreshKey}
+            transports={hostFederationTransports}
+          />
+        )}
       </Suspense>
       <OctantDialogPresence>
         <FilesClosePrompt />
       </OctantDialogPresence>
       <Suspense fallback={null}>
         <OctantDialogPresence>
-          {bootstrapDialog === undefined
-            ? null
-            : (() => {
-                const targetProject =
-                  bootstrapDialog.projectId === undefined
-                    ? undefined
-                    : localActiveCodeProjects.find(
-                        (candidate) => String(candidate.id) === String(bootstrapDialog.projectId),
-                      );
-                const orderedDestinations =
-                  targetProject === undefined
-                    ? bootstrapDestinations
-                    : [
-                        ...bootstrapDestinations.filter((dest) =>
-                          destinationNeedsProject(dest, targetProject),
-                        ),
-                        ...bootstrapDestinations.filter(
-                          (dest) => !destinationNeedsProject(dest, targetProject),
-                        ),
-                      ];
-                return (
-                  <AddRepositoryToComputerDialog
-                    destinations={orderedDestinations}
-                    {...(bootstrapDialog.destinationHostId === undefined
-                      ? {}
-                      : { initialDestinationHostId: bootstrapDialog.destinationHostId })}
-                    localProjects={localActiveCodeProjects}
-                    onClose={() => setBootstrapDialog(undefined)}
-                    onCompleted={(result) => {
-                      setBootstrapRefreshKey((count) => count + 1);
-                      handleSelectCreateHost(result.destinationHostId);
-                      setPairedProjectToSelect((previous) => ({
-                        hostId: String(result.destinationHostId),
-                        projectId: String(result.projectId),
-                        sequence: (previous?.sequence ?? 0) + 1,
-                      }));
-                      closeWorkspaceReaders();
-                      void controller.openDraftThread("code");
-                    }}
-                    open
-                    {...(targetProject === undefined ? {} : { project: targetProject })}
-                    sourceBootstrapClient={launchedClients.repositoryBootstrapClient}
-                    sourceHostName={bootstrapSourceHostName}
-                  />
-                );
-              })()}
+          {bootstrapDialog === undefined ? null : (
+            <AddRepositoryToComputerDialog
+              destinations={bootstrapDestinations}
+              {...(bootstrapDialog.destinationHostId === undefined
+                ? {}
+                : { initialDestinationHostId: bootstrapDialog.destinationHostId })}
+              localProjects={localActiveCodeProjects}
+              onClose={() => setBootstrapDialog(undefined)}
+              onCompleted={(result) => {
+                setBootstrapRefreshKey((count) => count + 1);
+                handleSelectCreateHost(result.destinationHostId);
+                setPairedProjectToSelect((previous) => ({
+                  hostId: String(result.destinationHostId),
+                  projectId: String(result.projectId),
+                  sequence: (previous?.sequence ?? 0) + 1,
+                }));
+                closeWorkspaceReaders();
+                void controller.openDraftThread("code");
+              }}
+              open
+              {...(bootstrapDialogTargetProject === undefined
+                ? {}
+                : { project: bootstrapDialogTargetProject })}
+              sourceBootstrapPort={launchedClients.repositoryBootstrapPort}
+              sourceHostName={bootstrapSourceHostName}
+            />
+          )}
         </OctantDialogPresence>
       </Suspense>
       <Suspense fallback={null}>

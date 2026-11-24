@@ -1,7 +1,9 @@
 import "../styles/repository-bootstrap-dialog.css";
 import {
   RepositoryBootstrapClientFailure,
+  createRepositoryBootstrapClient,
   type RepositoryBootstrapClient,
+  type RepositoryBootstrapClientOptions,
 } from "@octant/client-runtime/repository-bootstrap-client";
 import { AggregateVersion } from "@octant/contracts/events";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
@@ -18,7 +20,10 @@ import {
 } from "@octant/contracts/repository-bootstrap";
 import { X } from "../ui/icons";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import type { BootstrapDestinationTarget } from "../host/useBootstrapDestinations";
+import {
+  destinationNeedsProject,
+  type BootstrapDestinationTarget,
+} from "../host/useBootstrapDestinations";
 import { homeRelativePath } from "../lib/homeRelativePath";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -49,7 +54,8 @@ export interface AddRepositoryToComputerDialogProps {
   readonly localProjects?: ReadonlyArray<CodeProjectSummary>;
   readonly destinations: ReadonlyArray<BootstrapDestinationTarget>;
   readonly initialDestinationHostId?: HostId;
-  readonly sourceBootstrapClient: RepositoryBootstrapClient;
+  readonly sourceBootstrapClient?: RepositoryBootstrapClient;
+  readonly sourceBootstrapPort?: RepositoryBootstrapClientOptions;
   readonly onClose: () => void;
   readonly onCompleted?: (result: AddRepositoryToComputerCompleted) => void;
 }
@@ -77,10 +83,15 @@ type RunPhase =
 export function AddRepositoryToComputerDialog(props: AddRepositoryToComputerDialogProps) {
   const titleId = useId();
   const folderInputId = useId();
-  const eligibleDestinations = useMemo(
-    () => props.destinations.filter((target) => target.actsAsHostPerson),
-    [props.destinations],
-  );
+  const eligibleDestinations = useMemo(() => {
+    const eligible = props.destinations.filter((target) => target.actsAsHostPerson);
+    const project = props.project;
+    if (project === undefined) return eligible;
+    return [
+      ...eligible.filter((target) => destinationNeedsProject(target, project)),
+      ...eligible.filter((target) => !destinationNeedsProject(target, project)),
+    ];
+  }, [props.destinations, props.project]);
   const selectableProjects = useMemo(
     () => (props.project !== undefined ? [props.project] : (props.localProjects ?? [])),
     [props.project, props.localProjects],
@@ -119,34 +130,62 @@ export function AddRepositoryToComputerDialog(props: AddRepositoryToComputerDial
   const [selectedFiles, setSelectedFiles] = useState<ReadonlySet<string>>(() => new Set());
   const [phase, setPhase] = useState<RunPhase>({ kind: "idle" });
 
+  const resolvedSourceClient = useMemo(
+    () =>
+      props.sourceBootstrapClient ??
+      (props.sourceBootstrapPort === undefined
+        ? undefined
+        : createRepositoryBootstrapClient(props.sourceBootstrapPort)),
+    [props.sourceBootstrapClient, props.sourceBootstrapPort],
+  );
+  const destinationClientsRef = useRef(
+    new WeakMap<RepositoryBootstrapClientOptions, RepositoryBootstrapClient>(),
+  );
+  const resolveDestinationClient = (
+    target: BootstrapDestinationTarget,
+  ): RepositoryBootstrapClient | undefined => {
+    if (target.bootstrapClient !== undefined) return target.bootstrapClient;
+    if (target.bootstrapPort === undefined) return undefined;
+    let client = destinationClientsRef.current.get(target.bootstrapPort);
+    if (client === undefined) {
+      client = createRepositoryBootstrapClient(target.bootstrapPort);
+      destinationClientsRef.current.set(target.bootstrapPort, client);
+    }
+    return client;
+  };
+
   const runAbortRef = useRef<AbortController | undefined>(undefined);
   const activeRunTargetRef = useRef<
     | {
-        readonly destination: BootstrapDestinationTarget;
+        readonly client: RepositoryBootstrapClient;
         readonly operationId: RepositoryBootstrapOperationId;
       }
     | undefined
   >(undefined);
+  const wasOpenRef = useRef(false);
+  const lastInspectedProjectIdRef = useRef<string | undefined>(undefined);
 
-  // Sync project and destination defaults whenever the modal opens.
+  // Reset form defaults and run phase only when the dialog opens (never when
+  // parent polling refreshes the destinations array during an active run or
+  // partial-copy summary).
   useEffect(() => {
-    if (!props.open) return;
-    if (props.project !== undefined) setSelectedProjectId(String(props.project.id));
-    else if (selectableProjects[0] !== undefined) {
-      setSelectedProjectId((current) =>
-        selectableProjects.some((item) => String(item.id) === current)
-          ? current
-          : String(selectableProjects[0]?.id ?? ""),
-      );
+    const justOpened = props.open && !wasOpenRef.current;
+    wasOpenRef.current = props.open;
+    if (!props.open) {
+      lastInspectedProjectIdRef.current = undefined;
+      return;
+    }
+    if (!justOpened) return;
+
+    if (props.project !== undefined) {
+      setSelectedProjectId(String(props.project.id));
+    } else if (selectableProjects[0] !== undefined) {
+      setSelectedProjectId(String(selectableProjects[0].id));
     }
     if (props.initialDestinationHostId !== undefined) {
       setSelectedHostId(String(props.initialDestinationHostId));
     } else if (eligibleDestinations[0] !== undefined) {
-      setSelectedHostId((current) =>
-        eligibleDestinations.some((item) => String(item.hostId) === current)
-          ? current
-          : String(eligibleDestinations[0]?.hostId ?? ""),
-      );
+      setSelectedHostId(String(eligibleDestinations[0].hostId));
     }
     setPhase({ kind: "idle" });
   }, [
@@ -157,15 +196,46 @@ export function AddRepositoryToComputerDialog(props: AddRepositoryToComputerDial
     eligibleDestinations,
   ]);
 
+  // Keep selected project/destination valid while idle if the available lists change.
+  useEffect(() => {
+    if (!props.open || phase.kind !== "idle") return;
+    if (props.project !== undefined) {
+      setSelectedProjectId(String(props.project.id));
+    } else if (
+      selectableProjects[0] !== undefined &&
+      !selectableProjects.some((item) => String(item.id) === selectedProjectId)
+    ) {
+      setSelectedProjectId(String(selectableProjects[0].id));
+    }
+    if (
+      eligibleDestinations[0] !== undefined &&
+      !eligibleDestinations.some((item) => String(item.hostId) === selectedHostId)
+    ) {
+      setSelectedHostId(String(eligibleDestinations[0].hostId));
+    }
+  }, [
+    props.open,
+    phase.kind,
+    props.project,
+    selectableProjects,
+    eligibleDestinations,
+    selectedProjectId,
+    selectedHostId,
+  ]);
+
   // Inspect the selected local Code Project whenever it changes while open.
   useEffect(() => {
-    if (!props.open || activeProject === undefined) return;
+    if (!props.open || activeProject === undefined || resolvedSourceClient === undefined) return;
+    const projectKey = String(activeProject.id);
+    if (lastInspectedProjectIdRef.current === projectKey) return;
+    lastInspectedProjectIdRef.current = projectKey;
+
     const controller = new AbortController();
     setInspectState({ kind: "loading" });
     setSelectedFiles(new Set());
-    setPhase({ kind: "idle" });
+    setPhase((current) => (current.kind === "running" ? current : { kind: "idle" }));
 
-    void props.sourceBootstrapClient
+    void resolvedSourceClient
       .inspect({ projectId: activeProject.id }, controller.signal)
       .then((result) => {
         if (controller.signal.aborted) return;
@@ -190,7 +260,7 @@ export function AddRepositoryToComputerDialog(props: AddRepositoryToComputerDial
     return () => {
       controller.abort();
     };
-  }, [props.open, activeProject?.id, props.sourceBootstrapClient]);
+  }, [props.open, activeProject?.id, resolvedSourceClient]);
 
   // Clean up any in-flight client abort when unmounting.
   useEffect(
@@ -244,9 +314,7 @@ export function AddRepositoryToComputerDialog(props: AddRepositoryToComputerDial
     const active = activeRunTargetRef.current;
     runAbortRef.current?.abort();
     if (active !== undefined) {
-      await active.destination.bootstrapClient
-        .cancelClone({ operationId: active.operationId })
-        .catch(() => undefined);
+      await active.client.cancelClone({ operationId: active.operationId }).catch(() => undefined);
     }
     activeRunTargetRef.current = undefined;
     setPhase({ kind: "idle" });
@@ -261,13 +329,21 @@ export function AddRepositoryToComputerDialog(props: AddRepositoryToComputerDial
   }
 
   async function handleSubmit(): Promise<void> {
-    if (!canSubmit || activeProject === undefined || activeDestination === undefined) return;
-    if (resolvedRemoteUrl === undefined) return;
+    if (
+      !canSubmit ||
+      activeProject === undefined ||
+      activeDestination === undefined ||
+      resolvedSourceClient === undefined
+    ) {
+      return;
+    }
+    const destinationClient = resolveDestinationClient(activeDestination);
+    if (destinationClient === undefined || resolvedRemoteUrl === undefined) return;
 
     const controller = new AbortController();
     runAbortRef.current = controller;
     const operationId = decodeRepositoryBootstrapOperationId(globalThis.crypto.randomUUID());
-    activeRunTargetRef.current = { destination: activeDestination, operationId };
+    activeRunTargetRef.current = { client: destinationClient, operationId };
 
     const targetFolder = destinationPath.trim();
     const projectName = inspectData?.repositoryName ?? activeProject.name;
@@ -283,7 +359,7 @@ export function AddRepositoryToComputerDialog(props: AddRepositoryToComputerDial
     });
 
     try {
-      const started = await activeDestination.bootstrapClient.startClone(
+      const started = await destinationClient.startClone(
         {
           operationId,
           remoteUrl: resolvedRemoteUrl,
@@ -313,10 +389,7 @@ export function AddRepositoryToComputerDialog(props: AddRepositoryToComputerDial
           setPhase({ kind: "idle" });
           return;
         }
-        const polled = await activeDestination.bootstrapClient.cloneStatus(
-          { operationId },
-          controller.signal,
-        );
+        const polled = await destinationClient.cloneStatus({ operationId }, controller.signal);
         currentOp = polled.operation;
       }
 
@@ -377,7 +450,7 @@ export function AddRepositoryToComputerDialog(props: AddRepositoryToComputerDial
           batch = [];
           batchBytes = 0;
           try {
-            const outcome = await activeDestination.bootstrapClient.landFiles(
+            const outcome = await destinationClient.landFiles(
               { operationId, files: sending },
               controller.signal,
             );
@@ -406,7 +479,7 @@ export function AddRepositoryToComputerDialog(props: AddRepositoryToComputerDial
             detail: `Copying ignored file ${String(index + 1)} of ${String(tickedPaths.length)}: ${relativePath}`,
           });
           try {
-            const read = await props.sourceBootstrapClient.readIgnoredFile(
+            const read = await resolvedSourceClient.readIgnoredFile(
               { projectId: activeProject.id, relativePath },
               controller.signal,
             );

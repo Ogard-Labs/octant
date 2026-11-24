@@ -11,8 +11,8 @@ import {
 import { isAgentGrantSession, principalActsAsHostPerson } from "./clientPrincipal";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import {
-  RepositoryBootstrapServiceError,
   type RepositoryBootstrapService,
+  type RepositoryBootstrapServiceResult,
 } from "./repositoryBootstrapService";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -64,7 +64,7 @@ function failureResponse(failure: RepositoryBootstrapFailure, origin: string | n
 }
 
 function isAllowedOrigin(origin: string): boolean {
-  if (origin === "file://") return true;
+  if (origin === "file://" || origin === "null") return true;
   try {
     const url = new URL(origin);
     return isLoopbackHostname(url.hostname);
@@ -194,51 +194,53 @@ export function createRepositoryBootstrapRouteHandler(
       );
     }
 
+    const respond = <T>(result: RepositoryBootstrapServiceResult<T>): Response =>
+      result.status === "refused"
+        ? failureResponse(result.failure, origin)
+        : Response.json(result.value, { status: 200, headers: corsHeaders(origin) });
+
     try {
       if (isInspect) {
-        const payload = decodeOrThrow(() =>
+        const payload = decodePayload(() =>
           decodeRepositoryBootstrapInspectRequest(decodedBody.value),
         );
-        const result = await dependencies.service.inspect(payload, request.signal);
-        return Response.json(result, { status: 200, headers: corsHeaders(origin) });
+        if (payload.status === "refused") return failureResponse(payload.failure, origin);
+        return respond(await dependencies.service.inspect(payload.value, request.signal));
       }
       if (isReadIgnoredFile) {
-        const payload = decodeOrThrow(() =>
+        const payload = decodePayload(() =>
           decodeRepositoryBootstrapReadFileRequest(decodedBody.value),
         );
-        const result = await dependencies.service.readIgnoredFile(payload, request.signal);
-        return Response.json(result, { status: 200, headers: corsHeaders(origin) });
+        if (payload.status === "refused") return failureResponse(payload.failure, origin);
+        return respond(await dependencies.service.readIgnoredFile(payload.value, request.signal));
       }
       if (isStartClone) {
-        const payload = decodeOrThrow(() =>
+        const payload = decodePayload(() =>
           decodeRepositoryBootstrapStartCloneRequest(decodedBody.value),
         );
-        const result = await dependencies.service.startClone(windowId, payload);
-        return Response.json(result, { status: 200, headers: corsHeaders(origin) });
+        if (payload.status === "refused") return failureResponse(payload.failure, origin);
+        return respond(await dependencies.service.startClone(windowId, payload.value));
       }
       if (isCloneStatus) {
-        const payload = decodeOrThrow(() =>
+        const payload = decodePayload(() =>
           decodeRepositoryBootstrapCloneStatusRequest(decodedBody.value),
         );
-        const result = dependencies.service.cloneStatus(windowId, payload);
-        return Response.json(result, { status: 200, headers: corsHeaders(origin) });
+        if (payload.status === "refused") return failureResponse(payload.failure, origin);
+        return respond(dependencies.service.cloneStatus(windowId, payload.value));
       }
       if (isCancelClone) {
-        const payload = decodeOrThrow(() =>
+        const payload = decodePayload(() =>
           decodeRepositoryBootstrapCancelCloneRequest(decodedBody.value),
         );
-        const result = await dependencies.service.cancelClone(windowId, payload);
-        return Response.json(result, { status: 200, headers: corsHeaders(origin) });
+        if (payload.status === "refused") return failureResponse(payload.failure, origin);
+        return respond(await dependencies.service.cancelClone(windowId, payload.value));
       }
-      const payload = decodeOrThrow(() =>
+      const payload = decodePayload(() =>
         decodeRepositoryBootstrapLandFilesRequest(decodedBody.value),
       );
-      const result = await dependencies.service.landFiles(windowId, payload);
-      return Response.json(result, { status: 200, headers: corsHeaders(origin) });
-    } catch (error) {
-      if (error instanceof RepositoryBootstrapServiceError) {
-        return failureResponse(error.failure, origin);
-      }
+      if (payload.status === "refused") return failureResponse(payload.failure, origin);
+      return respond(await dependencies.service.landFiles(windowId, payload.value));
+    } catch {
       return failureResponse(
         { code: "unavailable", message: "Repository bootstrap service is unavailable." },
         origin,
@@ -247,13 +249,16 @@ export function createRepositoryBootstrapRouteHandler(
   };
 }
 
-function decodeOrThrow<T>(decode: () => T): T {
+function decodePayload<T>(decode: () => T): RepositoryBootstrapServiceResult<T> {
   try {
-    return decode();
+    return { status: "ok", value: decode() };
   } catch {
-    throw new RepositoryBootstrapServiceError({
-      code: "invalid",
-      message: "Repository bootstrap request payload is invalid.",
-    });
+    return {
+      status: "refused",
+      failure: {
+        code: "invalid",
+        message: "Repository bootstrap request payload is invalid.",
+      },
+    };
   }
 }

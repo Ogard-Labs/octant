@@ -151,7 +151,8 @@ export function deriveBootstrapCloneRemotes(
   // 4. SCP-style SSH remote: [user@]<host>:<path>
   const scp = parseScpRemote(trimmed);
   if (scp !== undefined) {
-    const sshUrl = `${scp.user}@${scp.host}:${scp.path}`;
+    const scpPathPrefix = scp.absolutePath ? "/" : "";
+    const sshUrl = `${scp.user}@${scp.host}:${scpPathPrefix}${scp.path}`;
     const httpsUrl = `https://${scp.host}/${scp.path}`;
     return {
       remotes: {
@@ -218,7 +219,8 @@ export function validateBootstrapCloneUrl(
   if (scp === undefined) {
     return { ok: false, message: "The SSH clone URL is invalid." };
   }
-  return { ok: true, normalizedUrl: `${scp.user}@${scp.host}:${scp.path}` };
+  const scpPathPrefix = scp.absolutePath ? "/" : "";
+  return { ok: true, normalizedUrl: `${scp.user}@${scp.host}:${scpPathPrefix}${scp.path}` };
 }
 
 /** True when a POSIX relative path names OS-generated metadata junk excluded by default. */
@@ -287,31 +289,45 @@ export function validateBootstrapRelativePath(
 /**
  * Validates the user-editable destination folder string before expanding `~/`
  * on the receiving host. Rejects control characters, NUL bytes, leading `-`,
- * and `..` traversal segments.
+ * and `..` traversal segments. On Windows receivers, backslashes are
+ * normalized as path separators while keeping traversal checks strict.
  */
 export function validateBootstrapDestinationInput(
   destinationPath: string,
+  options?: { readonly platform?: string },
 ):
   | { readonly ok: true; readonly trimmed: string }
   | { readonly ok: false; readonly message: string } {
   const trimmed = destinationPath.trim();
+  const isWindows = options?.platform === "win32";
   if (
     trimmed.length === 0 ||
     trimmed.length > 1024 ||
     trimmed.startsWith("-") ||
     hasControlChars(trimmed, false) ||
-    trimmed.includes("\\")
+    (!isWindows && trimmed.includes("\\"))
   ) {
     return { ok: false, message: "Destination folder path is invalid." };
   }
-  if (trimmed === "~" || trimmed === "~/") {
+  const normalized = isWindows ? trimmed.replaceAll("\\", "/") : trimmed;
+  if (normalized === "~" || normalized === "~/") {
     return { ok: false, message: "Choose a subfolder inside your home folder." };
   }
-  const body = trimmed.startsWith("~/")
-    ? trimmed.slice(2)
-    : trimmed.startsWith("/")
-      ? trimmed.slice(1)
-      : trimmed;
+  if (isWindows && normalized.startsWith("//")) {
+    return { ok: false, message: "Network UNC destination paths are not supported." };
+  }
+  let body: string;
+  if (normalized.startsWith("~/")) {
+    body = normalized.slice(2);
+  } else if (isWindows && /^[A-Za-z]:\//.test(normalized)) {
+    body = normalized.slice(3);
+  } else if (isWindows && /^[A-Za-z]:/.test(normalized)) {
+    return { ok: false, message: "Destination folder path is invalid." };
+  } else if (normalized.startsWith("/")) {
+    body = normalized.slice(1);
+  } else {
+    body = normalized;
+  }
   if (body.length === 0) {
     return { ok: false, message: "Destination folder path is invalid." };
   }
@@ -351,7 +367,12 @@ export function defaultBootstrapFolderName(
   fallbackName: string,
 ): string {
   const candidate = (repositoryName ?? fallbackName).trim().replace(/\.git$/i, "");
-  const cleaned = candidate.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  const replaced = candidate.replace(/[^A-Za-z0-9._-]+/g, "-");
+  let start = 0;
+  let end = replaced.length;
+  while (start < end && replaced.charCodeAt(start) === 45) start += 1;
+  while (end > start && replaced.charCodeAt(end - 1) === 45) end -= 1;
+  const cleaned = replaced.slice(start, end);
   if (cleaned === "" || cleaned === "." || cleaned === "..") return "repository";
   return cleaned.slice(0, 128);
 }
@@ -411,7 +432,9 @@ function parseSshSchemeRemote(raw: string): ParsedRemote | undefined {
   };
 }
 
-function parseScpRemote(raw: string): (ParsedRemote & { readonly user: string }) | undefined {
+function parseScpRemote(
+  raw: string,
+): (ParsedRemote & { readonly user: string; readonly absolutePath: boolean }) | undefined {
   const match = /^([^@:/\s]+)@([^:/\s]+):(.+)$/.exec(raw);
   if (match === null) return undefined;
   const user = match[1] ?? "";
@@ -419,7 +442,8 @@ function parseScpRemote(raw: string): (ParsedRemote & { readonly user: string })
   const rawPath = match[3] ?? "";
   if (!SAFE_USER_PATTERN.test(user) || !SAFE_HOST_PATTERN.test(host)) return undefined;
   if (rawPath.startsWith("//") || rawPath.includes("?") || rawPath.includes("#")) return undefined;
-  const stripped = rawPath.replace(/^\/+/, "");
+  const absolutePath = rawPath.startsWith("/");
+  const stripped = absolutePath ? rawPath.slice(1) : rawPath;
   if (!SAFE_SCP_PATH_PATTERN.test(stripped)) return undefined;
   const path = normalizeRemotePath(stripped);
   if (path === undefined) return undefined;
@@ -428,6 +452,7 @@ function parseScpRemote(raw: string): (ParsedRemote & { readonly user: string })
     user,
     host,
     path,
+    absolutePath,
     ...(repoName === undefined ? {} : { repoName }),
   };
 }

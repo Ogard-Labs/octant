@@ -257,4 +257,3 @@ export * from "./persistentBrowserOwner";
 
 export * from "./hostResourcePolicy";
 export * from "./providerFolderScan";
-export * from "./repositoryBootstrap";

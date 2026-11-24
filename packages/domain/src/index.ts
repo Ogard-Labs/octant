@@ -277,4 +277,3 @@ export * from "./pullRequestIdentityPolicy";
 export * from "./editDiagnosticsPolicy";
 export * from "./providerFolderScanPolicy";
 export * from "./subagentModelTag";
-export * from "./repositoryBootstrapPolicy";

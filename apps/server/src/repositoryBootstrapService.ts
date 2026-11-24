@@ -1,7 +1,7 @@
-import { spawn as nodeSpawn } from "node:child_process";
+import { execFile as nodeExecFile, spawn as nodeSpawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { lstat, mkdir, open, readdir, realpath, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, realpath, rename, rm, rmdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import type { Project, ProjectId, UtcTimestamp, WindowId } from "@octant/contracts";
@@ -69,12 +69,19 @@ const BASE_ENV_ALLOWLIST = [
   "DBUS_SESSION_BUS_ADDRESS",
 ] as const;
 
-export class RepositoryBootstrapServiceError extends Error {
-  override readonly name = "RepositoryBootstrapServiceError";
+export type RepositoryBootstrapServiceResult<T> =
+  | { readonly status: "ok"; readonly value: T }
+  | { readonly status: "refused"; readonly failure: RepositoryBootstrapFailure };
 
-  constructor(readonly failure: RepositoryBootstrapFailure) {
-    super(failure.message);
-  }
+function okResult<T>(value: T): RepositoryBootstrapServiceResult<T> {
+  return { status: "ok", value };
+}
+
+function refusedResult(failure: RepositoryBootstrapFailure): {
+  readonly status: "refused";
+  readonly failure: RepositoryBootstrapFailure;
+} {
+  return { status: "refused", failure };
 }
 
 export type RepositoryBootstrapCloneRunResult =
@@ -111,6 +118,8 @@ export interface RepositoryBootstrapServiceOptions {
   readonly homeDir: string;
   readonly cloneRunner?: RepositoryBootstrapCloneRunner;
   readonly caps?: Partial<RepositoryBootstrapCapsConfig>;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly platform?: NodeJS.Platform;
   readonly clock?: () => string;
   readonly now?: () => number;
   readonly uuid?: () => string;
@@ -131,6 +140,7 @@ interface OperationRecord {
   readonly projectName: string;
   readonly controller: AbortController;
   readonly completion: Promise<void>;
+  readonly landedPaths: Set<string>;
   state: RepositoryBootstrapOperation;
   canonicalDestination?: string;
   landedBytes: number;
@@ -386,6 +396,8 @@ export class RepositoryBootstrapService {
   readonly #homeDir: string;
   readonly #cloneRunner: RepositoryBootstrapCloneRunner;
   readonly #caps: RepositoryBootstrapCapsConfig;
+  readonly #env: NodeJS.ProcessEnv;
+  readonly #platform: NodeJS.Platform;
   readonly #clock: () => string;
   readonly #now: () => number;
   readonly #uuid: () => string;
@@ -402,6 +414,8 @@ export class RepositoryBootstrapService {
       maxFileBytes: options.caps?.maxFileBytes ?? REPOSITORY_BOOTSTRAP_MAX_FILE_BYTES,
       maxTotalBytes: options.caps?.maxTotalBytes ?? REPOSITORY_BOOTSTRAP_MAX_TOTAL_BYTES,
     };
+    this.#env = options.env ?? process.env;
+    this.#platform = options.platform ?? process.platform;
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#now = options.now ?? Date.now;
     this.#uuid = options.uuid ?? randomUUID;
@@ -411,9 +425,13 @@ export class RepositoryBootstrapService {
   async inspect(
     request: RepositoryBootstrapInspectRequest,
     signal: AbortSignal,
-  ): Promise<RepositoryBootstrapInspectResult> {
-    const project = this.#requireCodeProject(request.projectId);
-    const canonicalRoot = await this.#canonicalProjectRoot(project.binding.canonicalRoot);
+  ): Promise<RepositoryBootstrapServiceResult<RepositoryBootstrapInspectResult>> {
+    const projectResult = this.#requireCodeProject(request.projectId);
+    if (projectResult.status === "refused") return projectResult;
+    const project = projectResult.value;
+    const rootResult = await this.#canonicalProjectRoot(project.binding.canonicalRoot);
+    if (rootResult.status === "refused") return rootResult;
+    const canonicalRoot = rootResult.value;
 
     const originRead = await runHostGit(
       ["-C", canonicalRoot, "remote", "get-url", "--", "origin"],
@@ -426,8 +444,10 @@ export class RepositoryBootstrapService {
     const derived = deriveBootstrapCloneRemotes(originUrl);
     const repositoryName = defaultBootstrapFolderName(derived.repositoryName, project.name);
 
+    const excludesArgs = await this.#globalExcludesArgs(signal);
     const ignoredRead = await runHostGit(
       [
+        ...excludesArgs,
         "-C",
         canonicalRoot,
         "ls-files",
@@ -469,7 +489,15 @@ export class RepositoryBootstrapService {
         const checkedDir = validateBootstrapRelativePath(rawDir);
         if (!checkedDir.ok) continue;
         const dirIgnored = await runHostGit(
-          ["-C", canonicalRoot, "check-ignore", "-q", "--", `${checkedDir.normalized}/`],
+          [
+            ...excludesArgs,
+            "-C",
+            canonicalRoot,
+            "check-ignore",
+            "-q",
+            "--",
+            `${checkedDir.normalized}/`,
+          ],
           signal,
         );
         if (dirIgnored.exitCode === 0) continue;
@@ -485,7 +513,7 @@ export class RepositoryBootstrapService {
             dirQueue.push(childRel);
           } else if (child.isFile()) {
             const fileIgnored = await runHostGit(
-              ["-C", canonicalRoot, "check-ignore", "-q", "--", childRel],
+              [...excludesArgs, "-C", canonicalRoot, "check-ignore", "-q", "--", childRel],
               signal,
             );
             if (fileIgnored.exitCode === 0) rawFiles.push(childRel);
@@ -541,7 +569,7 @@ export class RepositoryBootstrapService {
       }
     }
 
-    return {
+    return okResult({
       projectId: project.id,
       projectName: project.name,
       sourcePath: canonicalRoot,
@@ -553,7 +581,7 @@ export class RepositoryBootstrapService {
       omittedCount,
       omittedOversizedCount,
       caps: this.#caps,
-    };
+    });
   }
 
   /**
@@ -563,25 +591,30 @@ export class RepositoryBootstrapService {
   async readIgnoredFile(
     request: RepositoryBootstrapReadFileRequest,
     signal: AbortSignal,
-  ): Promise<RepositoryBootstrapReadFileResult> {
-    const project = this.#requireCodeProject(request.projectId);
-    const canonicalRoot = await this.#canonicalProjectRoot(project.binding.canonicalRoot);
+  ): Promise<RepositoryBootstrapServiceResult<RepositoryBootstrapReadFileResult>> {
+    const projectResult = this.#requireCodeProject(request.projectId);
+    if (projectResult.status === "refused") return projectResult;
+    const project = projectResult.value;
+    const rootResult = await this.#canonicalProjectRoot(project.binding.canonicalRoot);
+    if (rootResult.status === "refused") return rootResult;
+    const canonicalRoot = rootResult.value;
 
     const checked = validateBootstrapRelativePath(request.relativePath);
     if (!checked.ok) {
-      throw new RepositoryBootstrapServiceError({
+      return refusedResult({
         code: "invalid",
         message: checked.message,
       });
     }
 
     // Confirm Git actually considers this path ignored in this repository.
+    const excludesArgs = await this.#globalExcludesArgs(signal);
     const ignoreCheck = await runHostGit(
-      ["-C", canonicalRoot, "check-ignore", "-q", "--", checked.normalized],
+      [...excludesArgs, "-C", canonicalRoot, "check-ignore", "-q", "--", checked.normalized],
       signal,
     );
     if (ignoreCheck.exitCode !== 0) {
-      throw new RepositoryBootstrapServiceError({
+      return refusedResult({
         code: "invalid",
         message: "Only gitignored files can be read for repository bootstrap.",
       });
@@ -592,7 +625,7 @@ export class RepositoryBootstrapService {
     try {
       handle = await open(fullPath, NO_FOLLOW_READ_FLAGS);
     } catch {
-      throw new RepositoryBootstrapServiceError({
+      return refusedResult({
         code: "not-found",
         message: `Could not open ${checked.normalized}.`,
       });
@@ -600,39 +633,39 @@ export class RepositoryBootstrapService {
     try {
       const info = await handle.stat();
       if (!info.isFile()) {
-        throw new RepositoryBootstrapServiceError({
+        return refusedResult({
           code: "invalid",
           message: `${checked.normalized} is not a regular file.`,
         });
       }
       const resolved = await realpath(fullPath).catch(() => "");
       if (resolved !== join(canonicalRoot, ...checked.segments)) {
-        throw new RepositoryBootstrapServiceError({
+        return refusedResult({
           code: "invalid",
           message: `${checked.normalized} escapes the repository root.`,
         });
       }
       if (info.size > this.#caps.maxFileBytes) {
-        throw new RepositoryBootstrapServiceError({
+        return refusedResult({
           code: "invalid",
           message: `${checked.normalized} exceeds the ${formatMiB(this.#caps.maxFileBytes)} per-file limit.`,
         });
       }
       const bytes = await handle.readFile();
       if (bytes.byteLength > this.#caps.maxFileBytes) {
-        throw new RepositoryBootstrapServiceError({
+        return refusedResult({
           code: "invalid",
           message: `${checked.normalized} exceeds the ${formatMiB(this.#caps.maxFileBytes)} per-file limit.`,
         });
       }
       const sha256 = createHash("sha256").update(bytes).digest("hex");
-      return {
+      return okResult({
         relativePath: checked.normalized,
         bytes: bytes.byteLength,
         sha256,
         mode: info.mode & 0o777,
         contentBase64: bytes.toString("base64"),
-      };
+      });
     } finally {
       await handle.close();
     }
@@ -642,22 +675,22 @@ export class RepositoryBootstrapService {
   async startClone(
     windowId: WindowId,
     request: RepositoryBootstrapStartCloneRequest,
-  ): Promise<RepositoryBootstrapOperationResponse> {
+  ): Promise<RepositoryBootstrapServiceResult<RepositoryBootstrapOperationResponse>> {
     this.#purgeExpired();
 
     const existing = this.#operations.get(String(request.operationId));
     if (existing !== undefined) {
       if (String(existing.windowId) !== String(windowId)) {
-        throw new RepositoryBootstrapServiceError({
+        return refusedResult({
           code: "unauthorized",
           message: "Clone operation belongs to a different session.",
         });
       }
-      return { operation: existing.state };
+      return okResult({ operation: existing.state });
     }
 
     if (this.#operations.size >= MAX_ACTIVE_OPERATIONS) {
-      throw new RepositoryBootstrapServiceError({
+      return refusedResult({
         code: "unavailable",
         message: "Too many repository clones are active on this computer.",
       });
@@ -665,21 +698,25 @@ export class RepositoryBootstrapService {
 
     const validUrl = validateBootstrapCloneUrl(request.remoteUrl, request.transport);
     if (!validUrl.ok) {
-      throw new RepositoryBootstrapServiceError({
+      return refusedResult({
         code: "invalid-url",
         message: validUrl.message,
       });
     }
 
-    const validDestination = validateBootstrapDestinationInput(request.destinationPath);
+    const validDestination = validateBootstrapDestinationInput(request.destinationPath, {
+      platform: this.#platform,
+    });
     if (!validDestination.ok) {
-      throw new RepositoryBootstrapServiceError({
+      return refusedResult({
         code: "invalid",
         message: validDestination.message,
       });
     }
 
-    const resolvedTarget = await this.#prepareDestination(validDestination.trimmed);
+    const targetResult = await this.#prepareDestination(validDestination.trimmed);
+    if (targetResult.status === "refused") return targetResult;
+    const resolvedTarget = targetResult.value;
     const projectName =
       request.projectName?.trim() ||
       defaultBootstrapFolderName(basename(resolvedTarget.finalPath), "repository");
@@ -707,6 +744,7 @@ export class RepositoryBootstrapService {
       projectName,
       controller,
       completion,
+      landedPaths: new Set(),
       state: initialState,
       landedBytes: 0,
       landedCount: 0,
@@ -723,46 +761,52 @@ export class RepositoryBootstrapService {
       finishCompletion();
     });
 
-    return { operation: record.state };
+    return okResult({ operation: record.state });
   }
 
   /** Reads the current status of a clone operation owned by this caller. */
   cloneStatus(
     windowId: WindowId,
     request: RepositoryBootstrapCloneStatusRequest,
-  ): RepositoryBootstrapOperationResponse {
+  ): RepositoryBootstrapServiceResult<RepositoryBootstrapOperationResponse> {
     this.#purgeExpired();
-    const record = this.#requireOperation(windowId, request.operationId);
-    return { operation: record.state };
+    const recordResult = this.#requireOperation(windowId, request.operationId);
+    if (recordResult.status === "refused") return recordResult;
+    return okResult({ operation: recordResult.value.state });
   }
 
   /** Cancels an active clone operation and cleans up its staging directory. */
   async cancelClone(
     windowId: WindowId,
     request: RepositoryBootstrapCancelCloneRequest,
-  ): Promise<RepositoryBootstrapOperationResponse> {
+  ): Promise<RepositoryBootstrapServiceResult<RepositoryBootstrapOperationResponse>> {
     this.#purgeExpired();
-    const record = this.#requireOperation(windowId, request.operationId);
+    const recordResult = this.#requireOperation(windowId, request.operationId);
+    if (recordResult.status === "refused") return recordResult;
+    const record = recordResult.value;
     if (record.state.state === "cloning") {
       record.controller.abort(new Error("cancelled"));
       await record.completion;
     }
-    return { operation: record.state };
+    return okResult({ operation: record.state });
   }
 
   /**
    * Lands explicitly chosen ignored files into a freshly cloned repository root.
-   * Refuses traversal, symlinks, `.git/**`, oversized payloads, and hash mismatches.
-   * Preserves the clone and returns exact failed paths on partial copy.
+   * Refuses traversal, symlinks, `.git/**`, tracked/existing checkout files,
+   * oversized payloads, and hash mismatches. Preserves the clone and returns
+   * exact failed paths on partial copy.
    */
   async landFiles(
     windowId: WindowId,
     request: RepositoryBootstrapLandFilesRequest,
-  ): Promise<RepositoryBootstrapLandFilesResult> {
+  ): Promise<RepositoryBootstrapServiceResult<RepositoryBootstrapLandFilesResult>> {
     this.#purgeExpired();
-    const record = this.#requireOperation(windowId, request.operationId);
+    const recordResult = this.#requireOperation(windowId, request.operationId);
+    if (recordResult.status === "refused") return recordResult;
+    const record = recordResult.value;
     if (record.state.state !== "cloned" || record.canonicalDestination === undefined) {
-      throw new RepositoryBootstrapServiceError({
+      return refusedResult({
         code: "invalid",
         message: "Files can only be copied after the repository clone completes.",
       });
@@ -770,10 +814,35 @@ export class RepositoryBootstrapService {
 
     const cloneRoot = await realpath(record.canonicalDestination).catch(() => undefined);
     if (cloneRoot === undefined || cloneRoot !== record.canonicalDestination) {
-      throw new RepositoryBootstrapServiceError({
+      return refusedResult({
         code: "unavailable",
         message: "The cloned repository folder is no longer available.",
       });
+    }
+
+    // Batch-check whether any requested path is tracked in the receiving clone's
+    // checked-out branch so an ignored file from a source branch never overwrites
+    // a committed file on the destination checkout.
+    const validPaths: string[] = [];
+    for (const file of request.files) {
+      const checked = validateBootstrapRelativePath(file.relativePath);
+      if (checked.ok) validPaths.push(checked.normalized);
+    }
+    const trackedPaths = new Set<string>();
+    if (validPaths.length > 0) {
+      const trackedRead = await runHostGit(
+        ["-C", cloneRoot, "ls-files", "-z", "--", ...validPaths],
+        new AbortController().signal,
+      );
+      if (trackedRead.exitCode !== 0) {
+        return refusedResult({
+          code: "unavailable",
+          message: "Could not verify tracked files in the cloned repository.",
+        });
+      }
+      for (const entry of trackedRead.stdout.split("\0")) {
+        if (entry.length > 0) trackedPaths.add(entry);
+      }
     }
 
     const landed: string[] = [];
@@ -786,6 +855,15 @@ export class RepositoryBootstrapService {
           relativePath: file.relativePath,
           reason: checked.reason,
           message: checked.message,
+        });
+        continue;
+      }
+
+      if (trackedPaths.has(checked.normalized)) {
+        failed.push({
+          relativePath: checked.normalized,
+          reason: "invalid-path",
+          message: "Refused to overwrite a file tracked in the cloned repository.",
         });
         continue;
       }
@@ -835,6 +913,7 @@ export class RepositoryBootstrapService {
         segments: checked.segments,
         content,
         mode: file.mode & 0o777,
+        allowReplace: record.landedPaths.has(checked.normalized),
       });
       if (!landOutcome.ok) {
         failed.push({
@@ -845,17 +924,18 @@ export class RepositoryBootstrapService {
         continue;
       }
 
+      record.landedPaths.add(checked.normalized);
       record.landedBytes += content.byteLength;
       record.landedCount += 1;
       record.expiresAt = this.#now() + OPERATION_TTL_MS;
       landed.push(checked.normalized);
     }
 
-    return {
+    return okResult({
       status: failed.length === 0 ? "landed" : "partial-copy",
       landed,
       failed,
-    };
+    });
   }
 
   /** Cancels in-flight clones and cleans up owned temporary git config on shutdown. */
@@ -937,7 +1017,7 @@ export class RepositoryBootstrapService {
         return;
       }
       if (destinationCheck.existsEmptyDir) {
-        await rm(target.finalPath, { recursive: false, force: false });
+        await rmdir(target.finalPath);
       }
 
       await rename(stagingPath, target.finalPath);
@@ -993,25 +1073,30 @@ export class RepositoryBootstrapService {
 
   async #prepareDestination(
     destinationInput: string,
-  ): Promise<{ readonly parentDir: string; readonly finalPath: string }> {
+  ): Promise<
+    RepositoryBootstrapServiceResult<{ readonly parentDir: string; readonly finalPath: string }>
+  > {
+    const isWindows = this.#platform === "win32";
+    const splitSegments = (value: string) =>
+      value.split(isWindows ? /[\\/]+/ : "/").filter((segment) => segment.length > 0);
+    const isHomePrefixed =
+      destinationInput.startsWith("~/") || (isWindows && destinationInput.startsWith("~\\"));
+
     let rawTarget: string;
-    if (destinationInput.startsWith("~/")) {
+    if (isHomePrefixed) {
       let canonicalHome: string;
       try {
         canonicalHome = await realpath(this.#homeDir);
       } catch {
-        throw new RepositoryBootstrapServiceError({
+        return refusedResult({
           code: "unavailable",
           message: "The home folder on this computer is not accessible.",
         });
       }
-      const segments = destinationInput
-        .slice(2)
-        .split("/")
-        .filter((segment) => segment.length > 0);
+      const segments = splitSegments(destinationInput.slice(2));
       rawTarget = join(canonicalHome, ...segments);
       if (!isPathInside(canonicalHome, rawTarget) || rawTarget === canonicalHome) {
-        throw new RepositoryBootstrapServiceError({
+        return refusedResult({
           code: "invalid",
           message: "Destination folder must be a subfolder inside your home folder.",
         });
@@ -1023,18 +1108,18 @@ export class RepositoryBootstrapService {
       try {
         canonicalHome = await realpath(this.#homeDir);
       } catch {
-        throw new RepositoryBootstrapServiceError({
+        return refusedResult({
           code: "unavailable",
           message: "The home folder on this computer is not accessible.",
         });
       }
-      const segments = destinationInput.split("/").filter((segment) => segment.length > 0);
+      const segments = splitSegments(destinationInput);
       rawTarget = join(canonicalHome, ...segments);
     }
 
     const targetCheck = await this.#checkDestinationEmpty(rawTarget);
     if (!targetCheck.ok) {
-      throw new RepositoryBootstrapServiceError({
+      return refusedResult({
         code: "destination-not-empty",
         message: targetCheck.message,
       });
@@ -1044,9 +1129,12 @@ export class RepositoryBootstrapService {
     try {
       await mkdir(parentDir, { recursive: true });
       const canonicalParent = await realpath(parentDir);
-      return { parentDir: canonicalParent, finalPath: join(canonicalParent, basename(rawTarget)) };
+      return okResult({
+        parentDir: canonicalParent,
+        finalPath: join(canonicalParent, basename(rawTarget)),
+      });
     } catch {
-      throw new RepositoryBootstrapServiceError({
+      return refusedResult({
         code: "unavailable",
         message: "Could not create or access the destination parent folder.",
       });
@@ -1091,6 +1179,7 @@ export class RepositoryBootstrapService {
     readonly segments: ReadonlyArray<string>;
     readonly content: Buffer;
     readonly mode: number;
+    readonly allowReplace: boolean;
   }): Promise<
     | { readonly ok: true }
     | {
@@ -1160,15 +1249,21 @@ export class RepositoryBootstrapService {
         message: "Could not inspect destination file path.",
       };
     }
-    if (
-      existingTarget !== undefined &&
-      (existingTarget.isSymbolicLink() || !existingTarget.isFile())
-    ) {
-      return {
-        ok: false,
-        reason: "symlink-refused",
-        message: "Refused to overwrite a symlink or non-regular file.",
-      };
+    if (existingTarget !== undefined) {
+      if (existingTarget.isSymbolicLink() || !existingTarget.isFile()) {
+        return {
+          ok: false,
+          reason: "symlink-refused",
+          message: "Refused to overwrite a symlink or non-regular file.",
+        };
+      }
+      if (!input.allowReplace) {
+        return {
+          ok: false,
+          reason: "invalid-path",
+          message: "Refused to overwrite an existing file in the cloned repository.",
+        };
+      }
     }
 
     const tempPath = join(currentDir, `.octant-copy-${this.#uuid().slice(0, 8)}`);
@@ -1202,16 +1297,31 @@ export class RepositoryBootstrapService {
       const recheckTarget = await lstat(targetPath).catch((error: unknown) =>
         isNotFound(error) ? undefined : "error",
       );
-      if (
-        recheckTarget === "error" ||
-        (recheckTarget !== undefined && (recheckTarget.isSymbolicLink() || !recheckTarget.isFile()))
-      ) {
+      if (recheckTarget === "error") {
         await rm(tempPath, { force: true }).catch(() => undefined);
         return {
           ok: false,
-          reason: "symlink-refused",
-          message: "Refused to replace a symlink or non-regular file.",
+          reason: "write-failed",
+          message: "Could not verify destination file path before placement.",
         };
+      }
+      if (recheckTarget !== undefined) {
+        if (recheckTarget.isSymbolicLink() || !recheckTarget.isFile()) {
+          await rm(tempPath, { force: true }).catch(() => undefined);
+          return {
+            ok: false,
+            reason: "symlink-refused",
+            message: "Refused to replace a symlink or non-regular file.",
+          };
+        }
+        if (!input.allowReplace) {
+          await rm(tempPath, { force: true }).catch(() => undefined);
+          return {
+            ok: false,
+            reason: "invalid-path",
+            message: "Refused to overwrite an existing file in the cloned repository.",
+          };
+        }
       }
       await rename(tempPath, targetPath);
       return { ok: true };
@@ -1225,31 +1335,85 @@ export class RepositoryBootstrapService {
     }
   }
 
-  #requireCodeProject(projectId: ProjectId): Extract<Project, { readonly type: "code" }> {
+  /**
+   * Resolves the user's effective global `core.excludesFile` without enabling
+   * arbitrary global Git configuration during repository reads, so files ignored
+   * only by the user's global excludes file remain discoverable and readable.
+   */
+  async #globalExcludesArgs(signal: AbortSignal): Promise<ReadonlyArray<string>> {
+    const env: NodeJS.ProcessEnv = {
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_CONFIG_NOSYSTEM: "1",
+    };
+    for (const key of ["PATH", "HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL"] as const) {
+      const value = this.#env[key];
+      if (value !== undefined && value !== "") env[key] = value;
+    }
+
+    const configured = await new Promise<string | undefined>((resolve) => {
+      nodeExecFile(
+        "git",
+        ["config", "--global", "--path", "--get", "core.excludesFile"],
+        {
+          encoding: "utf8",
+          env,
+          shell: false,
+          signal,
+          timeout: 3_000,
+          windowsHide: true,
+        },
+        (error, stdout) => {
+          if (error) {
+            resolve(undefined);
+            return;
+          }
+          const trimmed = stdout.trim();
+          resolve(trimmed === "" ? undefined : trimmed);
+        },
+      );
+    });
+    if (configured !== undefined) {
+      return ["-c", `core.excludesFile=${configured}`];
+    }
+
+    const xdgHome = this.#env.XDG_CONFIG_HOME;
+    const defaultGlobalIgnore =
+      xdgHome !== undefined && xdgHome !== ""
+        ? join(xdgHome, "git", "ignore")
+        : join(this.#homeDir, ".config", "git", "ignore");
+    const info = await lstat(defaultGlobalIgnore).catch(() => undefined);
+    if (info !== undefined && info.isFile()) {
+      return ["-c", `core.excludesFile=${defaultGlobalIgnore}`];
+    }
+    return [];
+  }
+
+  #requireCodeProject(
+    projectId: ProjectId,
+  ): RepositoryBootstrapServiceResult<Extract<Project, { readonly type: "code" }>> {
     const project = this.#readProject(projectId);
     if (project === undefined || project.type !== "code") {
-      throw new RepositoryBootstrapServiceError({
+      return refusedResult({
         code: "not-found",
         message: "Code Project was not found.",
       });
     }
-    return project;
+    return okResult(project);
   }
 
-  async #canonicalProjectRoot(rootPath: string): Promise<string> {
+  async #canonicalProjectRoot(rootPath: string): Promise<RepositoryBootstrapServiceResult<string>> {
     try {
       const canonical = await realpath(rootPath);
       const info = await lstat(canonical);
       if (!info.isDirectory()) {
-        throw new RepositoryBootstrapServiceError({
+        return refusedResult({
           code: "unavailable",
           message: "The Code Project folder is not accessible.",
         });
       }
-      return canonical;
-    } catch (error) {
-      if (error instanceof RepositoryBootstrapServiceError) throw error;
-      throw new RepositoryBootstrapServiceError({
+      return okResult(canonical);
+    } catch {
+      return refusedResult({
         code: "unavailable",
         message: "The Code Project folder is not accessible.",
       });
@@ -1259,21 +1423,21 @@ export class RepositoryBootstrapService {
   #requireOperation(
     windowId: WindowId,
     operationId: RepositoryBootstrapOperationId,
-  ): OperationRecord {
+  ): RepositoryBootstrapServiceResult<OperationRecord> {
     const record = this.#operations.get(String(operationId));
     if (record === undefined) {
-      throw new RepositoryBootstrapServiceError({
+      return refusedResult({
         code: "not-found",
         message: "Clone operation was not found or has expired.",
       });
     }
     if (String(record.windowId) !== String(windowId)) {
-      throw new RepositoryBootstrapServiceError({
+      return refusedResult({
         code: "unauthorized",
         message: "Clone operation belongs to a different session.",
       });
     }
-    return record;
+    return okResult(record);
   }
 
   #purgeExpired(): void {

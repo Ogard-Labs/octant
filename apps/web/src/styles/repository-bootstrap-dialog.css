@@ -72,7 +72,7 @@
   align-items: center;
   gap: 2px;
   padding: var(--oct-space-1) var(--oct-space-3);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   background: var(--octant-control);
   border: 1px solid var(--octant-border);
   font-size: var(--oct-text-xs);
@@ -169,7 +169,7 @@
   display: inline-flex;
   align-items: center;
   padding: 2px var(--oct-space-2);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
   color: var(--octant-warning-text);

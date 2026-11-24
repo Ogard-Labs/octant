@@ -90,8 +90,8 @@ function makeSourceClient(
 
 function makeDestination(
   overrides: Partial<BootstrapDestinationTarget> = {},
-): BootstrapDestinationTarget {
-  const bootstrapClient: RepositoryBootstrapClient = {
+): BootstrapDestinationTarget & { readonly bootstrapClient: RepositoryBootstrapClient } {
+  const bootstrapClient: RepositoryBootstrapClient = overrides.bootstrapClient ?? {
     inspect: vi.fn(),
     readIgnoredFile: vi.fn(),
     startClone: vi.fn().mockImplementation(async (req) => ({
@@ -129,10 +129,10 @@ function makeDestination(
     displayName: "Linux Devbox",
     connected: true,
     actsAsHostPerson: true,
-    bootstrapClient,
     projectClient,
     boundRepositoryKeys: new Set(),
     ...overrides,
+    bootstrapClient,
   };
 }
 
@@ -255,7 +255,7 @@ describe("AddRepositoryToComputerDialog", () => {
       }),
     );
 
-    render(
+    const { rerender } = render(
       <AddRepositoryToComputerDialog
         destinations={[destination]}
         onClose={vi.fn()}
@@ -307,6 +307,20 @@ describe("AddRepositoryToComputerDialog", () => {
       expect(screen.getByText(/Cloned and added octant on Linux Devbox/)).toBeTruthy();
     });
     expect(screen.getByText(/Refused symlink/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open on Linux Devbox" })).toBeTruthy();
+
+    // Parent rerendering with a fresh destinations array identity must preserve the partial-copy summary.
+    rerender(
+      <AddRepositoryToComputerDialog
+        destinations={[makeDestination({ bootstrapClient: destination.bootstrapClient })]}
+        onClose={vi.fn()}
+        open
+        project={localCodeProject()}
+        sourceBootstrapClient={sourceClient}
+        sourceHostName="MacBook Pro"
+      />,
+    );
+    expect(screen.getByText(/Cloned and added octant on Linux Devbox/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Open on Linux Devbox" })).toBeTruthy();
   });
 
