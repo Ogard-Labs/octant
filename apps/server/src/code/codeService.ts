@@ -3342,16 +3342,16 @@ export class CodeService {
   putAwayMergedThread(
     threadId: CodeThreadId,
     pullRequest: { readonly baseRepository: string; readonly number: number },
+    alreadyPutAwayFor: (recorded: {
+      readonly baseRepository: string;
+      readonly number: number;
+    }) => boolean,
   ): MergedThreadPutAwayOutcome {
     const current = this.#persistence.readCodeThread(threadId);
     if (current === undefined) return { status: "skipped", reason: "not-found" };
     if (current.lifecycle !== "active") return { status: "skipped", reason: "not-active" };
     const recorded = current.putAwayForPullRequest;
-    if (
-      recorded !== undefined &&
-      recorded.number === pullRequest.number &&
-      recorded.baseRepository === pullRequest.baseRepository
-    ) {
+    if (recorded !== undefined && alreadyPutAwayFor(recorded)) {
       return { status: "skipped", reason: "already-put-away" };
     }
     const alreadyPutAway = current.completedAt !== undefined;

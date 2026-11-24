@@ -6,7 +6,7 @@ import type {
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { MergedThreadPutAwayOutcome } from "./codeService";
-import { MergedThreadPutAway } from "./mergedThreadPutAway";
+import { MergedThreadPutAway, type MergedPullRequest } from "./mergedThreadPutAway";
 
 const merged: CodeThreadLinkedPullRequest = {
   kind: "linked",
@@ -38,11 +38,13 @@ function fixture(options: {
     Record<
       string,
       {
-        readonly deliverySatisfaction: "pending" | "waiting" | "done";
         readonly linkedPullRequest: CodeThreadLinkedPullRequest;
+        readonly childAgentsActive?: number;
       }
     >
   >;
+  readonly cachedMerges?: Readonly<Record<string, ReadonlyArray<MergedPullRequest>>>;
+  readonly decisionPending?: ReadonlyArray<string>;
   readonly enabled?: boolean;
 }) {
   const putAway = vi.fn((): MergedThreadPutAwayOutcome => ({ status: "put-away" }));
@@ -51,13 +53,26 @@ function fixture(options: {
     const evidence = threadId === undefined ? undefined : options.evidence[String(threadId)];
     return {
       version: 1,
-      threads: evidence === undefined ? [] : [{ threadId, ...evidence }],
+      threads:
+        evidence === undefined
+          ? []
+          : [
+              {
+                threadId,
+                linkedPullRequest: evidence.linkedPullRequest,
+                childAgents: { active: evidence.childAgentsActive ?? 0, unacknowledgedResults: 0 },
+              },
+            ],
     } as unknown as CodeThreadOperationalMetadataView;
   });
   const pass = new MergedThreadPutAway({
     threads: () => options.threads,
     projectExists: () => true,
     metadata: { project },
+    cachedMerges: (threadId) => options.cachedMerges?.[String(threadId)] ?? [],
+    decisionPending: (thread) => options.decisionPending?.includes(String(thread.id)) === true,
+    samePullRequest: (_projectId, left, right) =>
+      left.number === right.number && left.baseRepository === right.baseRepository,
     putAway,
     enabled: () => options.enabled ?? true,
   });
@@ -65,7 +80,7 @@ function fixture(options: {
 }
 
 describe("merged thread put-away", () => {
-  it("puts away a Done thread whose pull request merged, and leaves an open one, an unmerged Done one and a coordinator", async () => {
+  it("puts away a thread whose pull request merged, and leaves an open one, an unmerged one and a coordinator", async () => {
     const { pass, putAway } = fixture({
       threads: [
         codeThread("merged"),
@@ -75,23 +90,54 @@ describe("merged thread put-away", () => {
         codeThread("archived", { lifecycle: "archived" }),
       ],
       evidence: {
-        merged: { deliverySatisfaction: "done", linkedPullRequest: merged },
+        merged: { linkedPullRequest: merged },
         open: {
-          deliverySatisfaction: "done",
           linkedPullRequest: { ...merged, state: "open" },
         },
         investigated: {
-          deliverySatisfaction: "done",
           linkedPullRequest: { kind: "none", freshness: "fresh" },
         },
-        coordinator: { deliverySatisfaction: "done", linkedPullRequest: merged },
-        archived: { deliverySatisfaction: "done", linkedPullRequest: merged },
+        coordinator: { linkedPullRequest: merged },
+        archived: { linkedPullRequest: merged },
       },
     });
 
     expect(await pass.pass()).toEqual(["merged"]);
     expect(putAway).toHaveBeenCalledTimes(1);
-    expect(putAway).toHaveBeenCalledWith("merged", { baseRepository: "acme/app", number: 42 });
+    expect(putAway).toHaveBeenCalledWith(
+      "merged",
+      { baseRepository: "acme/app", number: 42 },
+      expect.any(Function),
+    );
+  });
+
+  it("puts a thread away for a merge only the Pull requests refresh saw, with the thread's history still open", async () => {
+    const { pass, putAway } = fixture({
+      threads: [codeThread("refreshed")],
+      evidence: { refreshed: { linkedPullRequest: { ...merged, state: "open" } } },
+      cachedMerges: { refreshed: [{ baseRepository: "acme/app", number: 42 }] },
+    });
+
+    expect(await pass.pass()).toEqual(["refreshed"]);
+    expect(putAway).toHaveBeenCalledWith(
+      "refreshed",
+      { baseRepository: "acme/app", number: 42 },
+      expect.any(Function),
+    );
+  });
+
+  it("keeps a merged thread in view while a decision waits on the person or its child work is unfinished", async () => {
+    const { pass, putAway } = fixture({
+      threads: [codeThread("deciding"), codeThread("delegating")],
+      evidence: {
+        deciding: { linkedPullRequest: merged },
+        delegating: { linkedPullRequest: merged, childAgentsActive: 1 },
+      },
+      decisionPending: ["deciding"],
+    });
+
+    expect(await pass.pass()).toEqual([]);
+    expect(putAway).not.toHaveBeenCalled();
   });
 
   it("does not put a thread away again for the pull request it was already put away for", async () => {
@@ -101,7 +147,7 @@ describe("merged thread put-away", () => {
           putAwayForPullRequest: { baseRepository: "acme/app", number: 42 },
         }),
       ],
-      evidence: { "taken-back": { deliverySatisfaction: "done", linkedPullRequest: merged } },
+      evidence: { "taken-back": { linkedPullRequest: merged } },
     });
 
     expect(await pass.pass()).toEqual([]);
@@ -111,7 +157,7 @@ describe("merged thread put-away", () => {
   it("reads and writes nothing while the person has the setting off", async () => {
     const { pass, putAway, project } = fixture({
       threads: [codeThread("merged")],
-      evidence: { merged: { deliverySatisfaction: "done", linkedPullRequest: merged } },
+      evidence: { merged: { linkedPullRequest: merged } },
       enabled: false,
     });
 

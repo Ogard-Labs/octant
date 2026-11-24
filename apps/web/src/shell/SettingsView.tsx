@@ -2734,7 +2734,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Threads">
         <div className="setgroup">
           <SettingRow
-            description="Marking a Work or Code thread Done puts it away, and so does its pull request merging. Reopen, or a new message, brings it back."
+            description="Marking a Work or Code thread Done puts it away, and so does a Code thread's pull request merging. Reopen brings it back."
             focused={focusedSetting === settingId("put-away-when-done")}
             label="Put away threads when they're done"
             scope="host"

@@ -463,6 +463,32 @@ export class CodeProjectPullRequestService {
   }
 
   /**
+   * The merged pull requests the refresh cache links to one thread, read by
+   * the host's own put-away pass, which acts on its own threads and has no
+   * window. Never reaches GitHub, and returns nothing while GitHub access is
+   * revoked. The background refresh keeps merged rows for each thread's known
+   * pull requests, so a merge made outside Octant shows here even though the
+   * thread's own operation history still holds the open state it last saw.
+   */
+  mergedPullRequestsForThread(threadId: string): ReadonlyArray<{
+    readonly baseRepository: string;
+    readonly number: number;
+  }> {
+    if (this.#githubRevoked || this.#cache === undefined) return [];
+    return this.#cache.rows
+      .filter(
+        (row) =>
+          row.state === "merged" &&
+          row.linkedThreads.some((thread) => String(thread.threadId) === threadId),
+      )
+      .map((row) => this.#canonicalizeRow(row))
+      .map((row) => ({
+        baseRepository: `${row.repositoryOwner}/${row.repositoryName}`,
+        number: row.number,
+      }));
+  }
+
+  /**
    * The board join for a sidebar navigation read. Same rows and authority as
    * `boardSnapshot`, reused for a bounded time so the two-second navigation
    * tick does not pay the full join each time. A snapshot that failed to

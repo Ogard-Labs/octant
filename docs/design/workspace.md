@@ -656,19 +656,25 @@ journaling the ordinary thread update as the `system` actor. It archives only.
 they're done**, `putAwayThreadsWhenDone`, on by default; maintainer request,
 2026-11-24) files a thread in the Put away shelf once it is done, so finished
 work leaves the sidebar without a second click. A person's **Mark done** on a
-Work or Code thread also puts it away in the same journaled update. A Code
-thread is also put away by the host, journaled as the `system` actor, once its
-linked pull request merged on its delivery branch and its delivery target reads
-Done, from the same cached evidence the board reads (no extra GitHub call). An
-opened pull request, a finished investigation and a local commit are Done on
-the board but are not put away: a merge is the only evidence that the work is
-over. The host checks every two minutes, never a coordinator, and records the
-pull request on the thread (`putAwayForPullRequest`) so a thread a person
-brings back with Reopen or a new message stays out of the shelf until another
-pull request merges. A thread whose turn runs or waits on the person keeps its
-row: Mark done still marks it, and the host tries again on its next pass.
-Putting away never marks a thread Done; with the setting off nothing is put
-away on its own and the host reads nothing for it.
+Work or Code thread also puts it away in the same journaled update; **Reopen**
+brings it back (a Work thread marked Done takes no message until reopened). A
+Code thread is also put away by the host, journaled as the `system` actor, once
+a pull request linked to it merged: on its delivery branch by the thread's own
+evidence, or as the Pull requests refresh cache records it, since a merge made
+outside Octant reaches that cache and not the thread's history. Both are cached
+reads; the host makes no GitHub call for this. An opened pull request, a
+finished investigation and a local commit are Done on the board but are not put
+away: a merge is the only evidence that the work is over. The host checks every
+two minutes and leaves alone a coordinator, a thread whose child work is still
+running or unread, and a thread whose finished turn left a decision for the
+person. It records the pull request on the thread (`putAwayForPullRequest`,
+matched across a repository rename) so a thread a person brings back with
+Reopen or a new message stays out of the shelf until another pull request
+merges. A thread whose turn runs or waits on the person, including an agent's
+approval that outlived a restart, keeps its row: Mark done still marks it, and
+the host tries again on its next pass. Putting away never marks a thread Done;
+with the setting off nothing is put away on its own and the host reads nothing
+for it.
 
 **Put away** is the only name people see for this state, beside the board's
 Done: the sidebar shelf, the row-menu action, the Review page action, the

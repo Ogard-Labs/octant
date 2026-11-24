@@ -1,4 +1,5 @@
 import { decodeBrowserThreadId } from "@octant/contracts";
+import { splitRepositoryName } from "../code/pullRequestLinkService";
 import { MergedThreadPutAway } from "../code/mergedThreadPutAway";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { designSystemTurnContext } from "../designSystems/designSystemContext";
@@ -2254,8 +2255,23 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             threads: () => persistence.readCodeThreads(),
             projectExists: (projectId) => persistence.readProject(projectId) !== undefined,
             metadata: codeThreadMetadataService,
-            putAway: (threadId, pullRequest) =>
-              hostCodeService.putAwayMergedThread(threadId, pullRequest),
+            cachedMerges: (threadId) =>
+              projectPullRequestService.mergedPullRequestsForThread(String(threadId)),
+            decisionPending: (thread) => codeTurnDecisions.forThread(thread) !== undefined,
+            samePullRequest: (projectId, left, right) => {
+              if (left.number !== right.number) return false;
+              const leftRepository = splitRepositoryName(left.baseRepository);
+              const rightRepository = splitRepositoryName(right.baseRepository);
+              return leftRepository !== undefined && rightRepository !== undefined
+                ? pullRequestLinkService.areSameRepository(
+                    projectId,
+                    leftRepository,
+                    rightRepository,
+                  )
+                : left.baseRepository === right.baseRepository;
+            },
+            putAway: (threadId, pullRequest, alreadyPutAwayFor) =>
+              hostCodeService.putAwayMergedThread(threadId, pullRequest, alreadyPutAwayFor),
             enabled: () =>
               (persistence.readShellSettings()?.settings ?? defaultShellSettings())
                 .putAwayThreadsWhenDone,

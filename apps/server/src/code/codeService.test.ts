@@ -6835,8 +6835,11 @@ describe("completing and snoozing a Code thread", () => {
 
   it("puts a thread away once for its merged pull request, as the host, and not again after the person takes it back", async () => {
     const pullRequest = { baseRepository: "acme/app", number: 42 };
+    const samePullRequest = (recorded: typeof pullRequest) =>
+      recorded.number === pullRequest.number &&
+      recorded.baseRepository === pullRequest.baseRepository;
     const fixture = serviceFixture();
-    expect(fixture.service.putAwayMergedThread(ids.thread, pullRequest)).toEqual({
+    expect(fixture.service.putAwayMergedThread(ids.thread, pullRequest, samePullRequest)).toEqual({
       status: "put-away",
     });
     const append = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as {
@@ -6851,17 +6854,23 @@ describe("completing and snoozing a Code thread", () => {
     const takenBack = serviceFixture({
       threads: [thread({ putAwayForPullRequest: pullRequest })],
     });
-    expect(takenBack.service.putAwayMergedThread(ids.thread, pullRequest)).toEqual({
-      status: "skipped",
-      reason: "already-put-away",
-    });
+    expect(takenBack.service.putAwayMergedThread(ids.thread, pullRequest, samePullRequest)).toEqual(
+      {
+        status: "skipped",
+        reason: "already-put-away",
+      },
+    );
     expect(
-      takenBack.service.putAwayMergedThread(ids.thread, { ...pullRequest, number: 43 }),
+      takenBack.service.putAwayMergedThread(
+        ids.thread,
+        { ...pullRequest, number: 43 },
+        (recorded) => recorded.number === 43,
+      ),
     ).toEqual({ status: "put-away" });
 
     const running = serviceFixture();
     running.persistence.readCodeRuntimeWorks.mockReturnValue(providerTurn("running"));
-    expect(running.service.putAwayMergedThread(ids.thread, pullRequest)).toEqual({
+    expect(running.service.putAwayMergedThread(ids.thread, pullRequest, samePullRequest)).toEqual({
       status: "skipped",
       reason: "busy",
     });
