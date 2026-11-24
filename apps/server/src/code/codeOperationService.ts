@@ -2319,7 +2319,9 @@ export class CodeOperationService {
                         admissionCurrent,
                         initiator,
                         options.routineRun,
-                        initiator === "user" && options.limitRecovery !== true,
+                        initiator === "user" &&
+                          options.limitRecovery !== true &&
+                          (options.actor === undefined || options.actor.kind === "local-user"),
                         options.actor,
                       );
               } catch (error) {
