@@ -36,6 +36,69 @@ const questionnaire = {
 };
 
 describe("inline questionnaires", () => {
+  it("leaves the answer alone when a disabled option's number is pressed", async () => {
+    const user = userEvent.setup();
+    render(
+      <QuestionnaireCard
+        prompt="Provider form"
+        questionnaire={{
+          allowComment: false,
+          questions: [
+            {
+              id: "formats",
+              prompt: "Which formats?",
+              selection: "multiple",
+              maxSelections: 1,
+              options: [
+                { id: "pdf", label: "PDF" },
+                { id: "md", label: "Markdown" },
+                { id: "html", label: "HTML" },
+              ],
+            },
+          ],
+        }}
+        onAnswer={vi.fn(async () => true)}
+      />,
+    );
+    await user.click(screen.getByRole("checkbox", { name: /PDF/ }));
+    expect(screen.getByRole("checkbox", { name: "Markdown" })).toBeDisabled();
+    await user.keyboard("2");
+    expect(screen.getByRole("checkbox", { name: /PDF/ })).toBeChecked();
+    expect(screen.queryByRole("textbox", { name: "Your answer" })).not.toBeInTheDocument();
+  });
+
+  it("picks options by number within the question that has focus", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn(async () => true);
+    render(
+      <QuestionnaireCard
+        prompt="Provider form"
+        questionnaire={{ ...questionnaire, allowComment: false }}
+        onAnswer={submit}
+      />,
+    );
+    screen.getByRole("checkbox", { name: "Markdown" }).focus();
+    await user.keyboard("2");
+    screen.getByRole("radio", { name: "Save only" }).focus();
+    await user.keyboard("2");
+    expect(screen.getByRole("checkbox", { name: "Markdown" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Open the file" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(submit).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Send answers" }));
+    expect(submit).toHaveBeenCalledExactlyOnceWith(
+      JSON.stringify({
+        version: 1,
+        answers: [
+          { questionId: "formats", selectedOptionIds: ["md"] },
+          { questionId: "open", selectedOptionIds: ["open"] },
+        ],
+      }),
+    );
+  });
+
   it("omits the global comment input when the form cannot receive a comment", async () => {
     const submit = vi.fn(async () => true);
     render(
