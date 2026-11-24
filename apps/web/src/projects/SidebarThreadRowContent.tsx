@@ -19,6 +19,12 @@ const PULL_REQUEST_STATE_WORD: Readonly<Record<ThreadRowPullRequest["state"], st
   unknown: "status unknown",
 };
 
+/** " and 15 more pull requests", or nothing when the row's pull request is the only one. */
+function morePullRequestsWords(more: number | undefined): string {
+  if (more === undefined || more <= 0) return "";
+  return ` and ${String(more)} more ${more === 1 ? "pull request" : "pull requests"}`;
+}
+
 /** The longest branch a row writes out before it folds the middle away. */
 const BRANCH_CHARACTERS = 22;
 
@@ -55,6 +61,8 @@ export function sidebarThreadRowLabel(input: {
   readonly state?: string | undefined;
   readonly age?: string | undefined;
   readonly pullRequest?: ThreadRowPullRequest | undefined;
+  /** The thread's pull requests beyond `pullRequest`. */
+  readonly morePullRequests?: number | undefined;
 }): string {
   return [
     input.title,
@@ -62,7 +70,7 @@ export function sidebarThreadRowLabel(input: {
     input.branch,
     input.pullRequest === undefined
       ? undefined
-      : `pull request #${String(input.pullRequest.identity.number)} ${PULL_REQUEST_STATE_WORD[input.pullRequest.state]}`,
+      : `pull request #${String(input.pullRequest.identity.number)} ${PULL_REQUEST_STATE_WORD[input.pullRequest.state]}${morePullRequestsWords(input.morePullRequests)}`,
     input.state ?? input.age,
   ]
     .filter((part): part is string => part !== undefined && part !== "")
@@ -109,6 +117,11 @@ export function SidebarThreadRowContent(props: {
   /** The Project the mark names; absent for "No Project", which keeps the folder and asks for nothing. */
   readonly projectId?: string;
   readonly pullRequest?: ThreadRowPullRequest;
+  /**
+   * The thread's pull requests beyond `pullRequest`, counted after it as "+15"
+   * so a thread that worked through many is not read as having one.
+   */
+  readonly morePullRequests?: number;
   readonly checkout?: ThreadCheckoutChip;
   /** The short age, or the time a snoozed thread returns. */
   readonly age?: { readonly label: string; readonly title?: string };
@@ -228,10 +241,15 @@ export function SidebarThreadRowContent(props: {
             <span
               className="sidebar-navigation__thread-pr sidebar-navigation__thread-pr-mark"
               data-state={props.pullRequest.state}
-              title={`Pull request #${String(props.pullRequest.identity.number)} · ${PULL_REQUEST_STATE_WORD[props.pullRequest.state]}${props.pullRequest.checks === "passing" ? " · checks passing" : ""}`}
+              title={`Pull request #${String(props.pullRequest.identity.number)} · ${PULL_REQUEST_STATE_WORD[props.pullRequest.state]}${props.pullRequest.checks === "passing" ? " · checks passing" : ""}${morePullRequestsWords(props.morePullRequests)}`}
             >
               <GitPullRequest aria-hidden="true" size={12} />
               {`#${String(props.pullRequest.identity.number)} ${PULL_REQUEST_STATE_WORD[props.pullRequest.state]}`}
+              {props.morePullRequests === undefined || props.morePullRequests <= 0 ? null : (
+                <span className="sidebar-navigation__thread-pr-more">
+                  +{String(props.morePullRequests)}
+                </span>
+              )}
             </span>
           )}
           {provider}
