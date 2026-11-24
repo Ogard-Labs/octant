@@ -382,14 +382,26 @@
   -webkit-line-clamp: 2;
 }
 
-/* The next step a pull request waits on, at the row's end: Resolve and Fix in
-   the danger ink, since something is broken, and Merge in the quiet ink. */
+/* The next step a pull request waits on sits at the end of the row's second
+   line, so the title keeps the row's width: beside the title it crushed both
+   lines to a few letters. It stays a sibling of the row's button, laid over
+   the meta line, which leaves it the room. Resolve and Fix are in the danger
+   ink, since something is broken; Merge is in the quiet ink. */
+.environment-thread-pr {
+  position: relative;
+}
+
+.environment-thread-pr[data-step] .environment-thread-pr__meta {
+  padding-inline-end: 76px;
+}
+
 .environment-thread-pr__step {
-  flex: none;
+  position: absolute;
+  inset-inline-end: calc(var(--oct-space-1) + 28px);
+  bottom: var(--oct-space-1);
   gap: 2px;
-  height: 22px;
-  min-height: 22px;
-  margin-inline-end: var(--oct-space-1);
+  height: 20px;
+  min-height: 20px;
   padding: 0 var(--oct-space-2);
   font-size: var(--oct-text-xs);
 }

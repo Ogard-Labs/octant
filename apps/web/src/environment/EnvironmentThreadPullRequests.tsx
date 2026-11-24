@@ -308,7 +308,16 @@ function ThreadPullRequestRow(props: {
     </>
   );
   return (
-    <li className="environment-thread-pr">
+    <li
+      className="environment-thread-pr"
+      data-step={
+        step === undefined ||
+        (step.kind !== "merge" && props.onOpenExternal === undefined) ||
+        (step.kind === "merge" && onOpen === undefined)
+          ? undefined
+          : step.kind
+      }
+    >
       {onOpen === undefined ? (
         <div aria-label={rowName(summary)} className="environment-thread-pr__open" role="group">
           {content}
