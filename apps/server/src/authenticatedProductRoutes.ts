@@ -81,11 +81,12 @@ export function classifyProductAction(request: Request): string | undefined {
   // Private credential entry is host-local and is never a forwarded product action.
   if (path === "/api/credential-requests") return undefined;
 
-  if (/^\/api\/native-harness\/sessions\/[^/]+(?:\/(?:approvals|questions))?$/.test(path)) {
-    return (method === "GET" && !path.endsWith("/approvals") && !path.endsWith("/questions")) ||
-      (method === "POST" && (path.endsWith("/approvals") || path.endsWith("/questions")))
-      ? "agent-run.request.answer-once"
-      : undefined;
+  const harnessSession =
+    /^\/api\/native-harness\/sessions\/[^/]+(?:\/(approvals|questions))?$/.exec(path);
+  if (harnessSession !== null) {
+    if (harnessSession[1] === undefined)
+      return method === "GET" ? "project.overview.read" : undefined;
+    return method === "POST" ? "agent-run.request.answer-once" : undefined;
   }
   if (path.startsWith("/api/chat/")) {
     if (method === "POST" && (path.endsWith("/commands") || path === "/api/chat/attachments")) {

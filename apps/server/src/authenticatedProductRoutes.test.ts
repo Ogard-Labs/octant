@@ -354,7 +354,16 @@ describe("authenticated product route dispatch", () => {
     expect(
       (await product({ ...handoff("/api/chat/threads/t", "GET"), principal: reader }))?.status,
     ).toBe(200);
-    expect(dispatch).toHaveBeenCalledTimes(2);
+    const harnessSession = "/api/native-harness/sessions/00000000-0000-4000-8000-000000000020";
+    expect((await product({ ...handoff(harnessSession), principal: reader }))?.status).toBe(200);
+    for (const action of ["approvals", "questions"]) {
+      const path = `${harnessSession}/${action}`;
+      const response = await product({ ...handoff(path, "POST"), principal: reader });
+      expect(response?.status).toBe(403);
+      expect(await response?.json()).toMatchObject({ reasonCode: "device-access-level" });
+      expect((await product({ ...handoff(path, "POST"), principal: steer }))?.status).toBe(200);
+    }
+    expect(dispatch).toHaveBeenCalledTimes(5);
   });
 
   it("passes a shared remote principal context to the existing product route chain", async () => {
@@ -1032,7 +1041,10 @@ describe("authenticated product route dispatch", () => {
 
 it("admits only child request reads and responses from the harness session surface", () => {
   const base = "http://127.0.0.1/api/native-harness/sessions/00000000-0000-4000-8000-000000000020";
-  expect(classifyProductAction(new Request(base))).toBe("agent-run.request.answer-once");
+  expect(classifyProductAction(new Request(base))).toBe("project.overview.read");
+  expect(classifyProductAction(new Request(base, { method: "POST" }))).toBeUndefined();
+  expect(classifyProductAction(new Request(`${base}/approvals`))).toBeUndefined();
+  expect(classifyProductAction(new Request(`${base}/questions`))).toBeUndefined();
   expect(classifyProductAction(new Request(`${base}/approvals`, { method: "POST" }))).toBe(
     "agent-run.request.answer-once",
   );
