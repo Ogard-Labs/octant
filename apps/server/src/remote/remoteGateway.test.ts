@@ -342,17 +342,21 @@ function seedPairedRequests(connection: ReturnType<typeof openSqlite>) {
       csrfDigest,
     );
 
-  const signedPost = (path: string, payloadBody: object, timestampMs: number) => {
-    const body = JSON.stringify(payloadBody);
+  const signedRequest = (
+    path: string,
+    timestampMs: number,
+    input: { method: "POST"; body: object } | { method: "GET"; range: string },
+  ) => {
+    const body = input.method === "POST" ? JSON.stringify(input.body) : "";
     const bodyDigest = createHash("sha256").update(body, "utf8").digest("hex");
     const timestamp = new Date(timestampMs).toISOString();
     const proof = {
-      method: "POST",
+      method: input.method,
       canonicalPathQuery: path,
       timestamp,
       nonce: randomUUID(),
       bodyDigest,
-      csrfDigest,
+      ...(input.method === "POST" ? { csrfDigest } : {}),
     };
     const payload = buildRemoteRequestProofPayload({
       sessionId,
@@ -366,21 +370,25 @@ function seedPairedRequests(connection: ReturnType<typeof openSqlite>) {
       "base64url",
     );
     return new Request(`${ORIGIN}${path}`, {
-      method: "POST",
+      method: input.method,
       headers: {
         host: "192.168.1.20:9443",
         origin: ORIGIN,
         "sec-fetch-site": "same-origin",
-        "content-type": "application/json",
         cookie: `__Secure-octant-remote-session=${sessionId}`,
-        "x-octant-csrf": csrfToken,
-        "x-octant-command-id": randomUUID(),
+        ...(input.method === "POST"
+          ? {
+              "content-type": "application/json",
+              "x-octant-csrf": csrfToken,
+              "x-octant-command-id": randomUUID(),
+            }
+          : { range: input.range }),
         "x-octant-device-proof": encodedProof,
       },
-      body,
+      ...(input.method === "POST" ? { body } : {}),
     });
   };
-  return { deviceId, sessionId, signedPost };
+  return { deviceId, sessionId, signedRequest };
 }
 
 function countActiveSessions(connection: ReturnType<typeof openSqlite>): number {
@@ -1812,26 +1820,33 @@ describe("RemoteGateway — approval for a window that never finished", () => {
     });
 
     try {
-      const { signedPost } = seedPairedRequests(connection);
+      const { signedRequest } = seedPairedRequests(connection);
       await gateway.start();
       const fetch = capturing.getFetch();
       if (fetch === undefined) throw new Error("Expected captured gateway fetch");
 
-      const issued = await fetch(signedPost("/api/video/clip", { jobId: job.id }, nowMs), lanFacts);
+      const issued = await fetch(
+        signedRequest("/api/video/clip", nowMs, { method: "POST", body: { jobId: job.id } }),
+        lanFacts,
+      );
       expect(issued.status).toBe(200);
       const { url } = decodeVideoClipTicketResponse(await issued.json());
-      const readRange = () =>
-        videoRoutes(
-          new Request(`http://127.0.0.1:3100${url}`, { headers: { range: "bytes=0-2" } }),
-        );
-      const playing = await readRange();
-      expect(playing?.status).toBe(206);
-      expect(playing?.headers.get("content-range")).toBe("bytes 0-2/3");
-      expect(new Uint8Array((await playing?.arrayBuffer()) ?? new ArrayBuffer(0))).toEqual(bytes);
+      const range = "bytes=0-2";
+      const playing = await fetch(signedRequest(url, nowMs, { method: "GET", range }), lanFacts);
+      expect(playing.status).toBe(206);
+      expect(playing.headers.get("content-range")).toBe("bytes 0-2/3");
+      expect(new Uint8Array(await playing.arrayBuffer())).toEqual(bytes);
 
-      const signedOut = await fetch(signedPost("/api/remote/auth/sign-out", {}, nowMs), lanFacts);
+      const signedOut = await fetch(
+        signedRequest("/api/remote/auth/sign-out", nowMs, { method: "POST", body: {} }),
+        lanFacts,
+      );
       expect(signedOut.status).toBe(200);
-      expect((await readRange())?.status).toBe(404);
+      // The gateway would reject the session first. Check that the route also refuses its ticket.
+      const afterSignOut = await videoRoutes(
+        new Request(`http://127.0.0.1:3100${url}`, { headers: { range } }),
+      );
+      expect(afterSignOut?.status).toBe(404);
       expect(readClipRange).toHaveBeenCalledOnce();
     } finally {
       await gateway.stop();
@@ -1858,10 +1873,10 @@ describe("RemoteGateway — approval for a window that never finished", () => {
       const fetch = capturing.getFetch();
       if (fetch === undefined) throw new Error("Expected captured gateway fetch");
 
-      const { deviceId, sessionId, signedPost } = seedPairedRequests(connection);
+      const { deviceId, sessionId, signedRequest } = seedPairedRequests(connection);
       const path = "/api/browser/contexts/current";
       const body = { threadId: "55555555-5555-4555-8555-555555555555" };
-      const first = await fetch(signedPost(path, body, wallMs), lanFacts);
+      const first = await fetch(signedRequest(path, wallMs, { method: "POST", body }), lanFacts);
       expect(first.status).toBe(200);
       if (capturedSessionNow === undefined) {
         throw new Error("Expected product dispatch to receive gateway sessionNow");
@@ -1902,7 +1917,10 @@ describe("RemoteGateway — approval for a window that never finished", () => {
       // Even while wall time is still jumped, the gateway's bounded clock has
       // not ratcheted, so product dispatch and Browser checks agree the session
       // is still active.
-      const secondDuringJump = await fetch(signedPost(path, body, boundedNow), lanFacts);
+      const secondDuringJump = await fetch(
+        signedRequest(path, boundedNow, { method: "POST", body }),
+        lanFacts,
+      );
       expect(secondDuringJump.status).toBe(200);
 
       // Correcting wall time back to true elapsed time recovers gateway posture
