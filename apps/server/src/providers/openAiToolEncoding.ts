@@ -4,15 +4,17 @@ import type {
   ProviderToolDefinition,
   ProviderToolImage,
 } from "@octant/contracts";
-import { MAX_PROVIDER_TOOL_RESULT_BYTES, MAX_PROVIDER_TOOLS } from "@octant/contracts";
+import { MAX_PROVIDER_TOOL_RESULT_BYTES } from "@octant/contracts";
 
 /**
  * OpenAI function name grammar: ^[a-zA-Z0-9_-]{1,64}$
  * The contracts bound tool names to 128 characters; OpenAI-compatible endpoints enforce 64.
  */
 const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
-// One bound for every tool set that reaches a provider; the harness alone offers thirteen.
-const MAX_ENCODED_TOOLS = MAX_PROVIDER_TOOLS;
+// The harness's seventeen tools and every tool Octant offers a Code thread reach one
+// request together, past the thirty-two one source of tools may bring; a request over
+// this bound fails the whole turn.
+export const MAX_ENCODED_TOOLS = 64;
 const MAX_TOOL_CALL_ID_LENGTH = 128;
 const MAX_TOOL_OUTPUT_BYTES = MAX_PROVIDER_TOOL_RESULT_BYTES;
 const MAX_TOOL_OUTPUT_DEPTH = 16;
