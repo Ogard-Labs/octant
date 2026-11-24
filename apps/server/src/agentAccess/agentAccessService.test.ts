@@ -2,7 +2,7 @@ import { generateKeyPairSync, randomUUID, sign, createHash, type KeyObject } fro
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AGENT_CONNECTION_CODE_PREFIX,
   DEFAULT_AGENT_GRANT_LIMITS,
@@ -15,7 +15,10 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { agentProofPayload } from "@octant/domain";
-import { createAgentAccessListenerRouteHandler } from "./agentAccessRoutes";
+import {
+  createAgentAccessListenerRouteHandler,
+  type AgentAccessListenerRouteOptions,
+} from "./agentAccessRoutes";
 import { AgentEventRoutes } from "./agentEventRoutes";
 import { AgentEventWebhooks } from "./agentEventWebhooks";
 import { AgentMilestoneEvents } from "./agentMilestoneEvents";
@@ -419,7 +422,11 @@ describe("agent grants", () => {
 });
 
 describe("the agent endpoint for an MCP client on this computer", () => {
-  function endpoint(service: AgentAccessService, events?: AgentEventRoutes) {
+  function endpoint(
+    service: AgentAccessService,
+    options?: Pick<AgentAccessListenerRouteOptions, "remoteAccessPaused" | "events">,
+    threadProject: AgentSessionDependencies["threadProject"] = () => undefined,
+  ) {
     const dispatched: Array<string> = [];
     const session: AgentSessionDependencies = {
       service,
@@ -428,7 +435,7 @@ describe("the agent endpoint for an MCP client on this computer", () => {
         return undefined;
       },
       hostId: () => hostId,
-      threadProject: () => undefined,
+      threadProject,
       threadAccess: () => undefined,
       markOutsideContent: () => undefined,
     };
@@ -436,7 +443,7 @@ describe("the agent endpoint for an MCP client on this computer", () => {
       service,
       session,
       version: "test",
-      ...(events === undefined ? {} : { events }),
+      ...options,
     });
     return { routes, dispatched };
   }
@@ -486,10 +493,9 @@ describe("the agent endpoint for an MCP client on this computer", () => {
   it("advertises milestones only to a confirmed grant with thread-read access", async () => {
     const { service, clock, journal } = harness();
     const source = new AgentMilestoneEvents(journal, () => Buffer.alloc(32, 7));
-    const { routes } = endpoint(
-      service,
-      new AgentEventRoutes(source, new AgentEventWebhooks(source, new Map()), false),
-    );
+    const { routes } = endpoint(service, {
+      events: new AgentEventRoutes(source, new AgentEventWebhooks(source, new Map()), false),
+    });
     for (const canRead of [true, false]) {
       const grantId = created(
         service.execute(
@@ -613,5 +619,241 @@ describe("the agent endpoint for an MCP client on this computer", () => {
       error: { code: -32602, message: "Unknown tool: start_work" },
     });
     expect(dispatched).toEqual([]);
+  });
+
+  it("refuses a call whose body was still uploading when access was paused, before its tool runs", async () => {
+    const { service, clock } = harness();
+    const grantId = created(
+      service.execute(
+        { kind: "create", draft: { name: "Editor", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const { pair, fingerprint } = confirmedKey(service, grantId);
+    let paused = false;
+    const { routes, dispatched } = endpoint(service, {
+      remoteAccessPaused: () => paused,
+    });
+
+    const text = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: { name: "read_thread", arguments: { threadId: crypto.randomUUID() } },
+    });
+    const body = new TextEncoder().encode(text);
+    // The pause lands while the route pulls the rest of the body: the
+    // gateway's check ran before this request began, so only a recheck after
+    // the body read can refuse it.
+    const streamed = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(body.subarray(0, 10));
+      },
+      pull(controller) {
+        paused = true;
+        controller.enqueue(body.subarray(10));
+        controller.close();
+      },
+    });
+    nonce += 1;
+    const init: RequestInit & { duplex: "half" } = {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-agent-proof": proof({
+          grantId,
+          fingerprint,
+          privateKey: pair.privateKey,
+          at: clock.now,
+          nonce: `paused-${String(nonce).padStart(4, "0")}`,
+          body,
+        }),
+      },
+      body: streamed,
+      duplex: "half",
+    };
+    const response = await routes(new Request("http://127.0.0.1:4800/api/agent-access/mcp", init), {
+      sourceClass: "lan-private",
+    });
+    expect(response?.status).toBe(403);
+    expect(dispatched).toEqual([]);
+  });
+
+  it("refuses a call whose pause epoch ended while its body uploaded, before any session opens", async () => {
+    const { service, clock } = harness();
+    const grantId = created(
+      service.execute(
+        { kind: "create", draft: { name: "Editor", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const { pair, fingerprint } = confirmedKey(service, grantId);
+    // No remoteAccessPaused port: the request's own epoch alone refuses it.
+    const { routes, dispatched } = endpoint(service);
+    const epoch = new AbortController();
+
+    const text = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 10,
+      method: "tools/call",
+      params: { name: "read_thread", arguments: { threadId: crypto.randomUUID() } },
+    });
+    const body = new TextEncoder().encode(text);
+    // The epoch ends while the route pulls the rest of the body: the signal
+    // handed in at the call's entry is the check that refuses it.
+    const streamed = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(body.subarray(0, 10));
+      },
+      pull(controller) {
+        epoch.abort();
+        controller.enqueue(body.subarray(10));
+        controller.close();
+      },
+    });
+    nonce += 1;
+    const init: RequestInit & { duplex: "half" } = {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-agent-proof": proof({
+          grantId,
+          fingerprint,
+          privateKey: pair.privateKey,
+          at: clock.now,
+          nonce: `paused-epoch-${String(nonce).padStart(4, "0")}`,
+          body,
+        }),
+      },
+      body: streamed,
+      duplex: "half",
+    };
+    const response = await routes(
+      new Request("http://127.0.0.1:4800/api/agent-access/mcp", init),
+      { sourceClass: "lan-private" },
+      epoch.signal,
+    );
+    expect(response?.status).toBe(403);
+    expect(dispatched).toEqual([]);
+  });
+
+  it("ends a call's held step when its pause epoch ends, and nothing further runs", async () => {
+    const { service, clock } = harness();
+    const grantId = created(
+      service.execute(
+        { kind: "create", draft: { name: "Editor", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const { pair, fingerprint } = confirmedKey(service, grantId);
+    const threadId = crypto.randomUUID();
+    service.recordThreadStarted({ grantId, threadId, mode: "code" });
+    const epoch = new AbortController();
+    const dispatched: Array<string> = [];
+    let abortReached = false;
+    const session: AgentSessionDependencies = {
+      service,
+      // The step a signed call is waiting on when the epoch ends: the epoch
+      // reaches it through the signal the session passes every dispatch.
+      dispatch: async (handoff) => {
+        dispatched.push(new URL(handoff.request.url).pathname);
+        const abortSignal = handoff.abortSignal;
+        if (abortSignal === undefined) return undefined;
+        await new Promise<void>((resolve) => {
+          abortSignal.addEventListener(
+            "abort",
+            () => {
+              abortReached = true;
+              resolve();
+            },
+            { once: true },
+          );
+        });
+        return undefined;
+      },
+      hostId: () => hostId,
+      threadProject: () => ({ projectId: codeProject }),
+      threadAccess: () => undefined,
+      markOutsideContent: () => undefined,
+    };
+    const routes = createAgentAccessListenerRouteHandler({ service, session, version: "test" });
+
+    const call = routes(
+      loopbackCall({ grantId, fingerprint, privateKey: pair.privateKey }, clock.now, {
+        id: 11,
+        method: "tools/call",
+        params: { name: "read_thread", arguments: { threadId } },
+      }),
+      { sourceClass: "lan-private" },
+      epoch.signal,
+    );
+    await vi.waitFor(() => expect(dispatched).toHaveLength(1));
+    epoch.abort();
+    const response = await call;
+    expect(abortReached).toBe(true);
+    expect(response?.status).toBe(200);
+    const answer = (await response?.json()) as {
+      readonly result?: { readonly isError?: boolean };
+    };
+    expect(answer.result?.isError).toBe(true);
+    expect(dispatched).toHaveLength(1);
+  });
+
+  it("closes a remote milestone stream on pause while leaving the grant active", async () => {
+    const { service, clock, journal } = harness();
+    const grantId = created(
+      service.execute(
+        { kind: "create", draft: { name: "Reader", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const { pair, fingerprint } = confirmedKey(service, grantId);
+    const threadId = crypto.randomUUID();
+    service.recordThreadStarted({ grantId, threadId, mode: "code" });
+    const source = new AgentMilestoneEvents(journal, () => Buffer.alloc(32, 7));
+    const { routes } = endpoint(
+      service,
+      { events: new AgentEventRoutes(source, new AgentEventWebhooks(source, new Map()), false) },
+      () => ({ projectId: codeProject }),
+    );
+    const epoch = new AbortController();
+    const response = await routes(
+      loopbackCall(
+        { grantId, fingerprint, privateKey: pair.privateKey },
+        clock.now,
+        {
+          id: 12,
+          method: "events/stream",
+          params: {
+            name: "thread.turn_settled",
+            arguments: { threadId },
+            _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" },
+          },
+        },
+        {
+          accept: "text/event-stream",
+          "mcp-method": "events/stream",
+          "mcp-name": "thread.turn_settled",
+          "mcp-protocol-version": "2026-07-28",
+        },
+      ),
+      { sourceClass: "lan-private" },
+      epoch.signal,
+    );
+    expect(response?.headers.get("content-type")).toBe("text/event-stream");
+    const reader = response?.body?.getReader();
+    if (reader === undefined) throw new Error("Expected an event stream");
+    try {
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain(
+        "notifications/events/active",
+      );
+      epoch.abort();
+      const closed = vi.fn();
+      void reader.read().then(closed);
+      await vi.waitFor(() => expect(closed).toHaveBeenCalledWith({ done: true, value: undefined }));
+      expect(service.readActive(grantId)).toBeDefined();
+    } finally {
+      await reader.cancel();
+    }
   });
 });

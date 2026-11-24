@@ -151,6 +151,7 @@ async function renderPanel(
   view: NativeHarnessSessionReadView,
   panelTransport: MobileRemoteTransport = transport,
   authenticator: BiometricAuthenticator = confirming(),
+  watchingOnly = false,
 ): Promise<HTMLElement> {
   vi.mocked(loadMobileNativeHarnessSession).mockResolvedValue(view);
   const container = document.createElement("div");
@@ -167,6 +168,7 @@ async function renderPanel(
           authenticator,
           threadId,
           refreshIntervalMs: 60_000,
+          watchingOnly,
         }),
       }),
     );
@@ -175,6 +177,53 @@ async function renderPanel(
 }
 
 describe("phone harness approvals", () => {
+  const questionView = () =>
+    decodeNativeHarnessSessionView({
+      ...pendingLeadApproval(),
+      questions: [
+        {
+          id: "00000000-0000-4000-8000-000000000092",
+          prompt: "What should the run use?",
+          options: ["The current configuration"],
+          status: "pending",
+          askedAt: "2026-09-05T12:06:00.000Z",
+        },
+      ],
+    });
+
+  it("shows pending approvals and questions without actions when watching", async () => {
+    const container = await renderPanel(questionView(), transport, confirming(), true);
+    expect(container.textContent).toContain("bun run test");
+    expect(container.textContent).toContain("What should the run use?");
+    expect(container.textContent).toContain("The current configuration");
+    expect(approvalChoices(container)).toEqual([]);
+    expect(container.querySelector('[aria-label="Answer"]')).toBeNull();
+    expect(container.querySelector('[data-testid="mobile-native-harness-pause"]')).toBeNull();
+    expect(container.querySelector('[data-testid="mobile-native-harness-answer"]')).toBeNull();
+  });
+
+  it("keeps a typed answer when the host refuses it", async () => {
+    const authenticatedFetch = vi.fn(async () =>
+      Response.json({ error: "Refused" }, { status: 403 }),
+    );
+    const container = await renderPanel(questionView(), { ...transport, authenticatedFetch });
+    const field = container.querySelector<HTMLInputElement>('[aria-label="Answer"]');
+    if (field === null) throw new Error("Expected an answer field.");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        field,
+        "Keep this",
+      );
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () =>
+      container.querySelector<HTMLElement>('[data-testid="mobile-native-harness-answer"]')?.click(),
+    );
+    expect(authenticatedFetch).toHaveBeenCalledOnce();
+    expect(field.value).toBe("Keep this");
+    expect(container.textContent).toContain("The answer was refused.");
+  });
+
   it("offers Allow and Deny only when a child asks", async () => {
     const full = sessionView({
       id: "00000000-0000-4000-8000-000000000061",

@@ -606,6 +606,7 @@ function turnHeaderOutcome(turn: WorkTurnState): TurnHeaderOutcome {
 }
 
 export interface WorkThreadWorkspaceProps {
+  readonly readOnly?: boolean;
   readonly title: string;
   readonly threadId: WorkThreadId;
   /**
@@ -978,6 +979,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const [projectId, setProjectId] = useState<ProjectId | undefined>(given.initialThread?.projectId);
   const serverWorkProject = serverCodeProjectFor(useServerCodeProjects().workProjects, projectId);
   const props = serverWorkProject === undefined ? given : withoutHostTools(given);
+  const readOnly = props.readOnly === true;
   const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
   const continuation = useContinuationInputPolicy("work", String(props.threadId), props.serverUrl);
   // A Work turn keeps the turn id its sender chose, which is how a turn an
@@ -1302,7 +1304,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     const forkPoint = role === "assistant" ? turn : turns[index - 1];
     const rewindFrom = role === "user" ? turn : turns[index + 1];
     const actions: TurnAction[] = [];
-    if (anyTurnActive) return { actions, forkPoint: undefined, rewindFrom: undefined };
+    if (readOnly || anyTurnActive) return { actions, forkPoint: undefined, rewindFrom: undefined };
     if (forkPoint !== undefined && props.onOpenWorkThread !== undefined && thread !== undefined)
       actions.push({
         label: forking ? "Forking…" : "Fork from here",
@@ -2696,7 +2698,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       <section aria-label="Task workspace" className="work-thread-workspace">
         <h1 className="sr-only">{props.title}</h1>
         <OctantDialogPresence>
-          {confirmArtifacts ? (
+          {!readOnly && confirmArtifacts ? (
             <ThreadArtifactsConfirm
               onCancel={() => setConfirmArtifacts(false)}
               onConfirm={() => void changeDocumentDelivery("native-artifacts")}
@@ -2839,20 +2841,21 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                           <WorkTurnHeader
                             serverUrl={props.serverUrl}
                             windowCapability={props.windowCapability}
-                            onRestorePrompt={composerDraft.setDraft}
-                            onCancelResume={cancelUsageResume}
-                            onScheduleResume={scheduleUsageResume}
+                            {...(readOnly ? {} : { onRestorePrompt: composerDraft.setDraft })}
+                            {...(readOnly ? {} : { onCancelResume: cancelUsageResume })}
+                            {...(readOnly ? {} : { onScheduleResume: scheduleUsageResume })}
                             providerGroups={props.providerGroups ?? []}
                             resumable={
                               String(row.head.turnId) === String(turns.at(-1)?.turnId) &&
                               row.head.status === "waiting"
                             }
-                            {...(thread?.snooze === undefined
+                            {...(!readOnly && thread?.snooze === undefined
                               ? { onSnoozeAtReset: snoozeAtUsageReset }
                               : {})}
                             turn={row.head}
                             previousStrictKept={previousStrictKeptOf(row.head)}
-                            {...(props.turnClient === undefined ||
+                            {...(readOnly ||
+                            props.turnClient === undefined ||
                             stoppableTurn === undefined ||
                             String(stoppableTurn.requestId) !== String(row.head.requestId)
                               ? {}
@@ -2905,20 +2908,21 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     <WorkTurnHeader
                       serverUrl={props.serverUrl}
                       windowCapability={props.windowCapability}
-                      onCancelResume={cancelUsageResume}
-                      onRestorePrompt={composerDraft.setDraft}
-                      onScheduleResume={scheduleUsageResume}
+                      {...(readOnly ? {} : { onCancelResume: cancelUsageResume })}
+                      {...(readOnly ? {} : { onRestorePrompt: composerDraft.setDraft })}
+                      {...(readOnly ? {} : { onScheduleResume: scheduleUsageResume })}
                       providerGroups={props.providerGroups ?? []}
                       resumable={
                         String(row.turn.turnId) === String(turns.at(-1)?.turnId) &&
                         row.turn.status === "waiting"
                       }
-                      {...(thread?.snooze === undefined
+                      {...(!readOnly && thread?.snooze === undefined
                         ? { onSnoozeAtReset: snoozeAtUsageReset }
                         : {})}
                       turn={row.turn}
                       previousStrictKept={previousStrictKeptOf(row.turn)}
-                      {...(props.turnClient === undefined ||
+                      {...(readOnly ||
+                      props.turnClient === undefined ||
                       stoppableTurn === undefined ||
                       String(stoppableTurn.requestId) !== String(row.turn.requestId)
                         ? {}
@@ -3029,7 +3033,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 );
               }
               if (row.kind === "request") {
-                if (props.requestClient !== undefined && row.request.detail.kind === "approval") {
+                if (
+                  !readOnly &&
+                  props.requestClient !== undefined &&
+                  row.request.detail.kind === "approval"
+                ) {
                   const levelChange = row.request.detail.levelChange;
                   return (
                     <ProviderApprovalPrompt
@@ -3052,7 +3060,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     />
                   );
                 }
-                if (props.requestClient !== undefined && row.request.detail.kind === "user-input") {
+                if (
+                  !readOnly &&
+                  props.requestClient !== undefined &&
+                  row.request.detail.kind === "user-input"
+                ) {
                   return (
                     <ProviderQuestionCard
                       onDismiss={
@@ -3148,7 +3160,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           />
         </SelectionThreadScope>
         <OctantDialogPresence>
-          {rewind !== undefined ? (
+          {!readOnly && rewind !== undefined ? (
             <RewindDialog
               busy={rewind?.busy === true}
               files={{
@@ -3180,7 +3192,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
 
         <ExtensionToolApprovalPrompt
           className="thread-column"
-          client={props.extensionClient}
+          client={readOnly ? undefined : props.extensionClient}
           threadId={String(props.threadId)}
           turnActive={turnRunning}
         />
@@ -3205,7 +3217,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           threadKind="work-thread"
           turnActive={turnRunning}
         />
-        {pendingBrowserApproval === undefined ? null : (
+        {readOnly || pendingBrowserApproval === undefined ? null : (
           <OctantApprovalCard
             actions={
               <>
@@ -3288,6 +3300,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           />
         )}
         <ThreadComposer
+          readOnly={readOnly}
           queue={
             <>
               <ThreadWakeups

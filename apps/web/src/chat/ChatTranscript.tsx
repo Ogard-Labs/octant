@@ -65,6 +65,7 @@ import {
 import type { ChatTranscriptWindowState, ChatWindowPageState } from "./chatTranscriptWindow";
 
 export interface ChatTranscriptProps {
+  readonly readOnly?: boolean;
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
   /** The decoded, authoritative transcript projection. */
@@ -423,8 +424,10 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       <section aria-label="Conversation" className="chat-transcript transcript-scroll">
         {lead}
         <div className="chat-transcript__empty">
-          <h2>Start the conversation</h2>
-          <p>Ask a question, draft something, or explore an idea.</p>
+          <h2>{props.readOnly === true ? "No messages yet" : "Start the conversation"}</h2>
+          {props.readOnly === true ? null : (
+            <p>Ask a question, draft something, or explore an idea.</p>
+          )}
         </div>
         {trail}
       </section>
@@ -1130,8 +1133,20 @@ const AttemptBlock = memo(function AttemptBlock(props: {
           <SupportCorrelationControl correlationId={String(props.attempt.id)} />
         ) : null}
         {props.citations.length > 0 ? <CitationList citations={props.citations} /> : null}
-        {props.attempt.pendingQuestion === undefined ||
-        props.onAnswerQuestion === undefined ? null : (
+        {props.attempt.pendingQuestion === undefined ? null : props.onAnswerQuestion ===
+          undefined ? (
+          <div className="approval-row approval-row--request">
+            <div className="approval-row__text">
+              {props.attempt.pendingQuestion.questionnaire === undefined ? (
+                <p>{props.attempt.pendingQuestion.prompt}</p>
+              ) : (
+                props.attempt.pendingQuestion.questionnaire.questions.map((question) => (
+                  <p key={question.id}>{question.prompt}</p>
+                ))
+              )}
+            </div>
+          </div>
+        ) : (
           <ProviderQuestionCard
             key={props.attempt.pendingQuestion.requestId}
             draftIdentity={{

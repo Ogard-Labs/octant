@@ -429,6 +429,38 @@ async function connectThrough(
   return Buffer.from(received[0]?.data ?? []).toString("utf8");
 }
 
+describe("a port forward for a device its person paired at Approve and steer", () => {
+  it("forwards a thread's running server outside the hub's Act item, where the hub's device is refused", async () => {
+    const port = await echoServer();
+    const member = hubMember({ value: { kind: "held", threadId: OTHER_THREAD, port } });
+    const open = (asker: "steering-device" | "hub-introduced") =>
+      member.forwards.open({
+        deviceId: DEVICE,
+        asker,
+        sessionIdDigest: SESSION,
+        request: threadServer(String(OTHER_THREAD), OTHER_PROJECT),
+        observeServer: member.observeServer,
+      });
+
+    expect(await open("hub-introduced")).toMatchObject({
+      kind: "remote-port-forward-refused",
+      reason: "outside-act",
+    });
+    const opened = await open("steering-device");
+    expect(opened).toMatchObject({ kind: "remote-port-forward-opened", forward: { port } });
+    // Still only a thread's own server, never a port it names.
+    expect(
+      await member.forwards.open({
+        deviceId: DEVICE,
+        asker: "steering-device",
+        sessionIdDigest: SESSION,
+        request: request(5173),
+        observeServer: member.observeServer,
+      }),
+    ).toMatchObject({ kind: "remote-port-forward-refused", reason: "source-required" });
+  });
+});
+
 describe("a port forward for a device the hub introduced", () => {
   it("a hub-introduced device forwards a port of a running server of a thread in an Act-named Project", async () => {
     const port = await echoServer();

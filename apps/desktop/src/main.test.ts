@@ -1648,6 +1648,9 @@ describe("local remote device IPC handlers", () => {
         result: "applied" as const,
         occurredAt: "2026-08-01T10:00:00.000Z",
       })),
+      setDeviceAccessLevel: vi.fn(async () => undefined),
+      readRemoteAccessPaused: vi.fn(async () => false),
+      setRemoteAccessPaused: vi.fn(async (paused) => paused === true),
     };
     installRemoteDeviceIpcHandlers({
       handle,

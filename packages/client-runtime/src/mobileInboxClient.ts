@@ -22,6 +22,7 @@ import {
   type WaitingAskKind,
 } from "@octant/contracts/pending-requests";
 import { ChatNdjsonFailure, iterateChatEventNdjson } from "./chatNdjsonStream";
+import { remoteRefusalCopy } from "./remoteConnection";
 
 export type MobileInboxMode = "chat" | "work" | "code";
 export type MobileCodeReviewState = CodeThreadReviewState["state"];
@@ -135,9 +136,15 @@ async function decodeJson<T>(
   failureMessage: string,
 ): Promise<T> {
   if (!response.ok) {
+    // A paused host or this device's access level is the person's to change,
+    // so the phone says which rather than a generic failure.
+    const refusal =
+      response.status === 403
+        ? remoteRefusalCopy(await response.json().catch(() => undefined))
+        : undefined;
     throw new MobileInboxFailure(
       response.status === 403 ? "rejected" : "unavailable",
-      failureMessage,
+      refusal === undefined ? failureMessage : `${failureMessage} ${refusal}`,
     );
   }
   try {
