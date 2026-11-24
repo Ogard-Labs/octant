@@ -65,6 +65,32 @@ describe("ZenRoot", () => {
     expect(notHandled).toBe(true);
   });
 
+  it("steps through focus spaces only while Zen is showing", () => {
+    const onCycleSpace = vi.fn();
+    const root = (active: boolean) => (
+      <ZenRoot
+        active={active}
+        onCycleSpace={onCycleSpace}
+        onExit={() => undefined}
+        onToggle={() => undefined}
+        zen={<div>Zen</div>}
+      >
+        <div>Shell</div>
+      </ZenRoot>
+    );
+    const press = (key: string) => fireEvent.keyDown(window, { key, metaKey: true, altKey: true });
+    const view = render(root(false));
+
+    // `fireEvent` returns true when nothing cancelled the event.
+    expect(press("]")).toBe(true);
+    expect(onCycleSpace).not.toHaveBeenCalled();
+
+    view.rerender(root(true));
+    expect(press("]")).toBe(false);
+    expect(press("[")).toBe(false);
+    expect(onCycleSpace.mock.calls).toEqual([[1], [-1]]);
+  });
+
   it("stays shut when the page already took the key for a command of its own", () => {
     const onToggle = vi.fn();
     render(
