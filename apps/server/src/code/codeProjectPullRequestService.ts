@@ -469,7 +469,7 @@ export class CodeProjectPullRequestService {
         const fact = factById.get(String(linked.threadId));
         return (
           fact === undefined ||
-          !threadUnlinkedPullRequest(fact, {
+          !this.#unlinkedFrom(fact, row.projectId, {
             repository: { owner: row.repositoryOwner, name: row.repositoryName },
             number: row.number,
           })
@@ -780,7 +780,7 @@ export class CodeProjectPullRequestService {
           const fact = factById.get(id);
           return (
             fact === undefined ||
-            !threadUnlinkedPullRequest(fact, {
+            !this.#unlinkedFrom(fact, target.projectId, {
               repository: {
                 owner: canonicalTarget.repositoryOwner,
                 name: canonicalTarget.repositoryName,
@@ -1844,7 +1844,7 @@ export class CodeProjectPullRequestService {
           .flatMap((id) => {
             const fact = threadById.get(String(id));
             return fact === undefined ||
-              threadUnlinkedPullRequest(fact, {
+              this.#unlinkedFrom(fact, project.projectId, {
                 repository: { owner: link.repositoryOwner, name: link.repositoryName },
                 number: link.number,
               })
@@ -1887,7 +1887,11 @@ export class CodeProjectPullRequestService {
           ) {
             continue;
           }
-          if (threadUnlinkedPullRequest(thread, { repository, number: identity.number })) continue;
+          if (
+            this.#unlinkedFrom(thread, project.projectId, { repository, number: identity.number })
+          ) {
+            continue;
+          }
           const link = this.#resolveLink({
             projectId: project.projectId,
             repositoryOwner: repository.owner,
@@ -2484,7 +2488,7 @@ export class CodeProjectPullRequestService {
         // linking evidence, until the thread touches the pull request again.
         if (
           fact !== undefined &&
-          !threadUnlinkedPullRequest(fact, {
+          !this.#unlinkedFrom(fact, project.projectId, {
             repository: { owner: target.owner, name: target.name },
             number: target.number,
           })
@@ -2493,15 +2497,6 @@ export class CodeProjectPullRequestService {
         }
       }
     }
-    const normalizedThreads = threads.map((thread) =>
-      thread.projectId === String(project.projectId) &&
-      this.#areSameRepository(project.projectId, thread.repository, {
-        owner: target.owner,
-        name: target.name,
-      })
-        ? { ...thread, repository: { owner: target.owner, name: target.name } }
-        : thread,
-    );
     for (const thread of matchLinkedThreadsToPullRequest({
       pullRequest: {
         repository: { owner: target.owner, name: target.name },
@@ -2510,7 +2505,8 @@ export class CodeProjectPullRequestService {
         headBranch: target.headBranch,
         title: target.title,
       },
-      threads: normalizedThreads,
+      threads,
+      sameRepository: (left, right) => this.#areSameRepository(project.projectId, left, right),
     })) {
       add(thread.threadId, thread.title);
     }
@@ -2589,6 +2585,17 @@ export class CodeProjectPullRequestService {
     readonly pullRequestNodeId?: string;
   }): PullRequestLinkRecord | undefined {
     return this.#pullRequestLinks?.resolveLink?.(query);
+  }
+
+  /** A person's unlink of a pull request, matched across a repository rename. */
+  #unlinkedFrom(
+    thread: CodeProjectLinkedThreadFact,
+    projectId: ProjectId,
+    pullRequest: Parameters<typeof threadUnlinkedPullRequest>[1],
+  ): boolean {
+    return threadUnlinkedPullRequest(thread, pullRequest, (left, right) =>
+      this.#areSameRepository(projectId, left, right),
+    );
   }
 
   #areSameRepository(
