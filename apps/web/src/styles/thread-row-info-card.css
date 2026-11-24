@@ -91,7 +91,9 @@
    reads at a glance; past ten lines the list scrolls inside the card and the
    header above it stays put. */
 .thread-row-info-card__pr-list {
-  --thread-row-info-card-pr-line: 26px;
+  /* The line's own button is 27.4px with its border: at 26px the tenth line
+     was cut in half at the list's edge. */
+  --thread-row-info-card-pr-line: 28px;
 
   display: flex;
   flex-direction: column;
