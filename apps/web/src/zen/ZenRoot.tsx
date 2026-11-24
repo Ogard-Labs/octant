@@ -17,7 +17,7 @@ export interface ZenRootProps {
 
 function isEditableTarget(target: EventTarget | null): boolean {
   // A surface that handles its own keys (Browser drawing's undo and redo, on an
-  // SVG) is treated like a text field: Mod+Shift+Z there is its redo, not Zen.
+  // SVG) is treated like a text field: a chord there is its own, not Zen's.
   if (target instanceof Element && target.closest("[data-owns-chords]") !== null) return true;
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
@@ -36,13 +36,15 @@ export function ZenRoot(props: ZenRootProps) {
 
   useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent): void {
-      if (props.enabled === false) return;
-      const action = matchKeybinding(keybindings, event, isApplePlatform());
-      if (action === undefined) return;
-      // A text field keeps its own chords whether or not Zen is showing. The
-      // default Zen chord is Mod+Shift+Z, which is Redo: guarded only while
-      // Zen was active, redoing in the composer opened Zen instead.
+      // A page's own command may be saved on Zen's chord. It answers first and
+      // marks the key as handled; without this the key also opened Zen. Inside
+      // Zen no page is in front, and a focused card marks the arrows it uses.
+      if (props.enabled === false || (event.defaultPrevented && !props.active)) return;
+      // A text field keeps its own chords whether or not Zen is showing: while
+      // this was guarded only with Zen active, a chord pressed in the composer
+      // threw the window into Zen.
       if (isEditableTarget(event.target)) return;
+      const action = matchKeybinding(keybindings, event, isApplePlatform());
       if (action === "zen-mode") {
         event.preventDefault();
         props.onToggle();
@@ -51,15 +53,9 @@ export function ZenRoot(props: ZenRootProps) {
       // Cycling only means anything while the focus zone is the surface; off
       // it the chord belongs to whatever the window is actually showing.
       if (!props.active) return;
-      if (action === "zen-next-space") {
-        event.preventDefault();
-        props.onCycleSpace?.(1);
-        return;
-      }
-      if (action === "zen-previous-space") {
-        event.preventDefault();
-        props.onCycleSpace?.(-1);
-      }
+      if (action !== "zen-next-space" && action !== "zen-previous-space") return;
+      event.preventDefault();
+      props.onCycleSpace?.(action === "zen-next-space" ? 1 : -1);
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
