@@ -56,6 +56,15 @@ const GH_SUCCESS_LINE = new RegExp(
   String.raw`\b(pull request|issue) (${OWNER})/(${REPOSITORY})#([1-9][0-9]{0,8})\b`,
   "g",
 );
+/**
+ * gh's success lines that open with the pull request: 'Pull request
+ * owner/repo#12 is marked as "ready for review"'. A refusal opens the same way
+ * ("Pull request owner/repo#12 is not mergeable"), so the verb must be one of these.
+ */
+const GH_SUCCESS_STATE_LINE = new RegExp(
+  String.raw`\b(Pull request) (${OWNER})/(${REPOSITORY})#([1-9][0-9]{0,8}) (?:is marked as|is converted to|will be) `,
+  "g",
+);
 const LINEAR_IDENTIFIER = /^[A-Z][A-Z0-9]{0,9}-[1-9][0-9]{0,8}$/;
 const LINEAR_URL = /https:\/\/linear\.app\/[^/\s]+\/issue\/([A-Z][A-Z0-9]{0,9}-[1-9][0-9]{0,8})\b/g;
 
@@ -96,11 +105,11 @@ function githubUrlsIn(text: string): ReadonlyArray<GithubIdentity> {
 
 function githubSuccessLinesIn(text: string): ReadonlyArray<GithubIdentity> {
   const found: GithubIdentity[] = [];
-  for (const match of text.matchAll(GH_SUCCESS_LINE)) {
-    const [, noun, owner, repository, number] = match;
+  const lines = [...text.matchAll(GH_SUCCESS_LINE), ...text.matchAll(GH_SUCCESS_STATE_LINE)];
+  for (const [, noun, owner, repository, number] of lines) {
     if (owner === undefined || repository === undefined || number === undefined) continue;
     found.push({
-      kind: noun === "pull request" ? "pull-request" : "issue",
+      kind: noun === "issue" ? "issue" : "pull-request",
       owner,
       repository,
       number: Number(number),
@@ -109,22 +118,26 @@ function githubSuccessLinesIn(text: string): ReadonlyArray<GithubIdentity> {
   return found;
 }
 
-/**
- * Splits a command line into words, honouring single and double quotes, and
- * into separate commands at `&&`, `||`, `;`, `|` and line breaks. It is not a
- * shell: it only has to find `gh` invocations and their arguments.
- */
-function shellCommands(command: string): {
-  readonly commands: ReadonlyArray<ReadonlyArray<string>>;
+interface ShellCommand {
+  readonly words: ReadonlyArray<string>;
   /**
-   * Whether the call's exit status speaks for every command in it: one
-   * command, or commands joined only by `&&`. After `||`, `;`, a pipe or `&`
-   * a later command can succeed after an earlier one failed.
+   * Whether the call's exit status says this command succeeded: it is in the
+   * call's last `;`-separated list, and that list joins its commands with `&&`
+   * alone. After `||`, a pipe or `&` a later command can succeed when this one
+   * failed, and an earlier list's exit status is not the call's.
    */
-  readonly exitSpeaksForEach: boolean;
-} {
-  const commands: string[][] = [];
-  let unsafeSeparator = false;
+  readonly exitSpeaks: boolean;
+}
+
+/**
+ * Splits a command line into words, honouring quotes, backslash escapes and
+ * comments, and into separate commands at `&&`, `||`, `;`, `|`, `&` and line
+ * breaks. It is not a shell: it only has to find `gh` invocations and their
+ * arguments, and which of them the exit status speaks for.
+ */
+function shellCommands(command: string): ReadonlyArray<ShellCommand> {
+  const lists: Array<{ readonly commands: string[][]; andOnly: boolean }> = [];
+  let list: { readonly commands: string[][]; andOnly: boolean } = { commands: [], andOnly: true };
   let words: string[] = [];
   let word = "";
   let quote: '"' | "'" | undefined;
@@ -136,11 +149,27 @@ function shellCommands(command: string): {
   };
   const endCommand = () => {
     endWord();
-    if (words.length > 0) commands.push(words);
+    if (words.length > 0) list.commands.push(words);
     words = [];
+  };
+  const endList = () => {
+    endCommand();
+    if (list.commands.length > 0) lists.push(list);
+    list = { commands: [], andOnly: true };
   };
   for (let index = 0; index < command.length; index += 1) {
     const character = command.charAt(index);
+    const next = command.charAt(index + 1);
+    if (character === "\\" && quote !== "'") {
+      // A backslash before a line break continues the line; before anything
+      // else it makes that character part of the word.
+      index += 1;
+      if (next !== "\n") {
+        word += next;
+        inWord = true;
+      }
+      continue;
+    }
     if (quote !== undefined) {
       if (character === quote) quote = undefined;
       else word += character;
@@ -151,15 +180,29 @@ function shellCommands(command: string): {
       inWord = true;
       continue;
     }
-    if (character === "&" && command.charAt(index + 1) === "&") {
+    if (character === "#" && !inWord) {
+      while (index + 1 < command.length && command.charAt(index + 1) !== "\n") index += 1;
+      continue;
+    }
+    if (character === "&" && next === "&") {
       endCommand();
       index += 1;
       continue;
     }
-    if (character === "\n" || character === ";" || character === "|" || character === "&") {
+    // `2>&1` and `&>file` redirect; they do not end the command.
+    if (character === "&" && (next === ">" || /[<>]$/.test(word))) {
+      word += character;
+      inWord = true;
+      continue;
+    }
+    if (character === "|" || character === "&") {
       endCommand();
-      if (command.charAt(index + 1) === character) index += 1;
-      unsafeSeparator = true;
+      if (character === "|" && (next === "|" || next === "&")) index += 1;
+      list.andOnly = false;
+      continue;
+    }
+    if (character === "\n" || character === ";") {
+      endList();
       continue;
     }
     if (character === " " || character === "\t") {
@@ -169,9 +212,13 @@ function shellCommands(command: string): {
     word += character;
     inWord = true;
   }
-  endCommand();
-  // A lone command is spoken for by the exit status whatever trails it.
-  return { commands, exitSpeaksForEach: !unsafeSeparator || commands.length <= 1 };
+  endList();
+  return lists.flatMap((each, index) =>
+    each.commands.map((found) => ({
+      words: found,
+      exitSpeaks: each.andOnly && index === lists.length - 1,
+    })),
+  );
 }
 
 interface GhInvocation {
@@ -182,11 +229,14 @@ interface GhInvocation {
   readonly named: GithubIdentity | undefined;
   /** The number the command names without a repository. */
   readonly number: number | undefined;
+  /** Whether the call's exit status says this command succeeded. */
+  readonly exitSpeaks: boolean;
 }
 
 /**
  * `gh pr|issue` options whose value is text or another ref, never the target:
- * a body or title can cite any pull request, and a base or head names a branch.
+ * a body or title can cite any pull request, a base or head names a branch,
+ * and a parent or duplicate is another issue's number.
  */
 const GH_VALUE_FLAGS: ReadonlySet<string> = new Set([
   "--body",
@@ -222,6 +272,20 @@ const GH_VALUE_FLAGS: ReadonlySet<string> = new Set([
   "--subject",
   "--match-head-commit",
   "--author-email",
+  "-A",
+  "--attach",
+  "--recover",
+  "--type",
+  "--parent",
+  "--duplicate-of",
+  "--blocked-by",
+  "--blocking",
+  "--add-blocked-by",
+  "--add-blocking",
+  "--add-sub-issue",
+  "--remove-blocked-by",
+  "--remove-blocking",
+  "--remove-sub-issue",
   "--comment",
   "-c",
   "--reason",
@@ -230,7 +294,13 @@ const GH_VALUE_FLAGS: ReadonlySet<string> = new Set([
   "-q",
 ]);
 
-function ghInvocation(words: ReadonlyArray<string>): GhInvocation | undefined {
+/** Flags of one subcommand that take no value, though others' of the same name do. */
+const GH_SWITCHES: Readonly<Record<string, ReadonlySet<string>>> = {
+  "pr review": new Set(["-a", "-c", "--comment", "-r"]),
+  "pr merge": new Set(["-m", "-r"]),
+};
+
+function ghInvocation({ words, exitSpeaks }: ShellCommand): GhInvocation | undefined {
   const at = words.findIndex((candidate) => candidate === "gh" || candidate.endsWith("/gh"));
   if (at === -1) return undefined;
   const noun = words[at + 1];
@@ -238,13 +308,14 @@ function ghInvocation(words: ReadonlyArray<string>): GhInvocation | undefined {
   if ((noun !== "pr" && noun !== "issue") || verb === undefined) return undefined;
   const kind: Kind = noun === "pr" ? "pull-request" : "issue";
   const action = (noun === "pr" ? GH_PR_WRITES : GH_ISSUE_WRITES)[verb];
+  const switches = GH_SWITCHES[`${noun} ${verb}`];
   const rest = words.slice(at + 3);
   let repository: { readonly owner: string; readonly repository: string } | undefined;
   let number: number | undefined;
   let named: GithubIdentity | undefined;
   for (let index = 0; index < rest.length; index += 1) {
     const argument = rest[index] ?? "";
-    if (GH_VALUE_FLAGS.has(argument)) {
+    if (GH_VALUE_FLAGS.has(argument) && switches?.has(argument) !== true) {
       index += 1;
       continue;
     }
@@ -286,15 +357,14 @@ function ghInvocation(words: ReadonlyArray<string>): GhInvocation | undefined {
   if (named === undefined && repository !== undefined && number !== undefined) {
     named = { kind, ...repository, number };
   }
-  return { kind, action, named, number };
+  return { kind, action, named, number, exitSpeaks };
 }
 
 function fromShell(
   command: string,
   output: string | undefined,
 ): ReadonlyArray<ThreadForgeReference> {
-  const parsed = shellCommands(command);
-  const invocations = parsed.commands
+  const invocations = shellCommands(command)
     .map(ghInvocation)
     .filter((invocation): invocation is GhInvocation => invocation !== undefined);
   const found = [...githubUrlsIn(output ?? ""), ...githubSuccessLinesIn(output ?? "")];
@@ -339,7 +409,7 @@ function fromShell(
     // When the call's exit status does not speak for this command (it ran
     // before a `||` fallback, say), only its own output confirms the write.
     if (
-      !parsed.exitSpeaksForEach &&
+      !invocation.exitSpeaks &&
       !confirmedByLine.has(identityKey(identity)) &&
       !(
         (action === "created" || action === "commented") &&
@@ -402,11 +472,26 @@ function objectsIn(value: unknown, limit = 200): ReadonlyArray<Readonly<Record<s
   return found;
 }
 
-function text(value: unknown, maximum: number): string | undefined {
+const encoder = new TextEncoder();
+
+/**
+ * A result's text, cut to at most `maximumBytes` of UTF-8 at a character
+ * boundary. The journal bounds these by encoded bytes and refuses the whole
+ * event past them, so a long title in a multibyte script must not cross.
+ */
+function text(value: unknown, maximumBytes: number): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   if (trimmed === "") return undefined;
-  return [...trimmed].slice(0, maximum).join("");
+  if (encoder.encode(trimmed).byteLength <= maximumBytes) return trimmed;
+  let bounded = "";
+  let bytes = 0;
+  for (const character of trimmed) {
+    bytes += encoder.encode(character).byteLength;
+    if (bytes > maximumBytes) break;
+    bounded += character;
+  }
+  return bounded.trimEnd();
 }
 
 /** The part of a structured tool's name after its server prefix, lower-cased. */
@@ -558,8 +643,11 @@ function fromLinearTool(call: ForgeToolCall): ReadonlyArray<ThreadForgeReference
   if (action === undefined) return [];
   const objects = objectsIn(parseJson(call.output));
   for (const object of objects) {
-    const identifier = text(object.identifier, 32);
-    if (identifier === undefined || !LINEAR_IDENTIFIER.test(identifier)) continue;
+    // Linear's own server gives the key as `id`; others give it as `identifier`.
+    const identifier = [object.identifier, object.id]
+      .map((value) => text(value, 32))
+      .find((value) => value !== undefined && LINEAR_IDENTIFIER.test(value));
+    if (identifier === undefined) continue;
     const title = text(object.title, 256);
     const state = linearState(object);
     const url = linearIssueUrl(text(object.url, 512), identifier);
@@ -607,7 +695,16 @@ export function forgeReferencesFromToolCall(
   const unique = new Map<string, ThreadForgeReference>();
   for (const reference of found) {
     const key = identityKey(reference);
-    if (!unique.has(key)) unique.set(key, reference);
+    const earlier = unique.get(key);
+    // One call can write to the same thing twice (comment, then close). The
+    // last write stands, with the state and title it did not report itself.
+    const state = reference.state ?? earlier?.state;
+    const title = reference.title ?? earlier?.title;
+    unique.set(key, {
+      ...reference,
+      ...(title === undefined ? {} : { title }),
+      ...(state === undefined ? {} : { state }),
+    });
   }
   const references = [...unique.values()].slice(0, MAX_THREAD_FORGE_REFERENCES_PER_CALL);
   return references.length === 0 ? undefined : references;

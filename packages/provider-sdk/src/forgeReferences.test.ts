@@ -1,3 +1,5 @@
+import { ThreadForgeReference } from "@octant/contracts";
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { forgeReferencesFromToolCall } from "./forgeReferences";
 
@@ -137,6 +139,107 @@ describe("forgeReferencesFromToolCall", () => {
     ]);
   });
 
+  it("keeps an issue's last reported state when one call writes to it more than once", () => {
+    const states = (command: string) =>
+      forgeReferencesFromToolCall({ toolName: "Bash", command })?.map((reference) => ({
+        key: "number" in reference ? reference.number : reference.identifier,
+        state: reference.state,
+      }));
+    expect(
+      states("gh issue comment 7 -R acme/app --body Fixed && gh issue close 7 -R acme/app"),
+    ).toEqual([{ key: 7, state: "closed" }]);
+    expect(states("gh issue close 7 -R acme/app && gh issue reopen 7 -R acme/app")).toEqual([
+      { key: 7, state: "open" },
+    ]);
+    expect(
+      states("gh issue close 7 -R acme/app && gh issue comment 7 -R acme/app --body Done"),
+    ).toEqual([{ key: 7, state: "closed" }]);
+  });
+
+  it("credits the last command after a semicolon to the call's exit status, and no earlier one", () => {
+    const numbers = (command: string, output?: string) =>
+      forgeReferencesFromToolCall({
+        toolName: "Bash",
+        command,
+        ...(output === undefined ? {} : { output }),
+      })?.map((reference) => ("number" in reference ? reference.number : 0));
+    expect(numbers("git status --short; gh pr ready 12 -R acme/app")).toEqual([12]);
+    expect(numbers("cd app\ngh pr ready 12 -R acme/app 2>&1")).toEqual([12]);
+    expect(numbers("gh pr close 11 -R acme/app; gh pr ready 12 -R acme/app")).toEqual([12]);
+    // The exit status belongs to the last command of a pipeline or a fallback.
+    expect(numbers("true; gh pr close 11 -R acme/app || true")).toBeUndefined();
+    expect(numbers("gh pr close 11 -R acme/app | cat")).toBeUndefined();
+    expect(numbers("gh pr close 11 -R acme/app & true")).toBeUndefined();
+    expect(numbers("true; # gh pr close 11 -R acme/app")).toBeUndefined();
+  });
+
+  it("credits a readiness change from gh's own line, and not a refused merge's", () => {
+    const numbers = (command: string, output: string) =>
+      forgeReferencesFromToolCall({ toolName: "Bash", command, output })?.map((reference) =>
+        "number" in reference ? reference.number : 0,
+      );
+    expect(
+      numbers(
+        "gh pr ready 12; git status",
+        '\u2713 Pull request acme/app#12 is marked as "ready for review"',
+      ),
+    ).toEqual([12]);
+    expect(
+      numbers(
+        "gh pr merge 12 --squash || true",
+        "X Pull request acme/app#12 is not mergeable: the base branch policy prohibits the merge.",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("reads a target after a subcommand's switch, and never takes an option's number for it", () => {
+    const numbers = (command: string) =>
+      forgeReferencesFromToolCall({ toolName: "Bash", command })?.map((reference) =>
+        "number" in reference ? reference.number : 0,
+      );
+    expect(numbers("gh pr review -a 12 -R acme/app && gh pr view 12 -R acme/app")).toEqual([12]);
+    expect(numbers("gh pr review --comment 12 -R acme/app -b ok && gh pr list")).toEqual([12]);
+    expect(numbers("gh pr merge -m 12 -R acme/app && gh pr list")).toEqual([12]);
+    expect(numbers("gh issue close --comment 44 7 -R acme/app")).toEqual([7]);
+    expect(numbers("gh issue close --duplicate-of 9 7 -R acme/app")).toEqual([7]);
+    expect(numbers("gh issue edit --add-sub-issue 9 7 -R acme/app")).toEqual([7]);
+  });
+
+  it("reads a command continued over lines and text with escaped quotes as one command", () => {
+    expect(
+      forgeReferencesFromToolCall({
+        toolName: "Bash",
+        command:
+          'gh pr comment 12 \\\n  --body "He said \\"see https://github.com/acme/app/pull/44\\"" \\\n  -R acme/app',
+      }),
+    ).toEqual([
+      {
+        forge: "github",
+        kind: "pull-request",
+        action: "commented",
+        owner: "acme",
+        repository: "app",
+        number: 12,
+      },
+    ]);
+  });
+
+  it("bounds a title and state to what the journal accepts in bytes, so a long one never loses the call", () => {
+    const [reference] =
+      forgeReferencesFromToolCall({
+        toolName: "mcp__github__create_issue",
+        input: { owner: "acme", repo: "app" },
+        output: JSON.stringify({
+          html_url: "https://github.com/acme/app/issues/7",
+          title: "\u6f22".repeat(200),
+          state: "\u72b6\u614b ".repeat(20),
+        }),
+      }) ?? [];
+    expect(reference).toBeDefined();
+    expect(() => Schema.decodeUnknownSync(ThreadForgeReference)(reference)).not.toThrow();
+    expect(reference?.title).toBe("\u6f22".repeat(85));
+  });
+
   it("records nothing for a command that only read pull requests", () => {
     expect(
       forgeReferencesFromToolCall({
@@ -246,6 +349,33 @@ describe("forgeReferencesFromToolCall", () => {
         output: JSON.stringify({ issues: [{ identifier: "ENG-1" }] }),
       }),
     ).toBeUndefined();
+  });
+
+  it("records a Linear issue whose result gives its key as the id, whatever other issues it cites", () => {
+    expect(
+      forgeReferencesFromToolCall({
+        toolName: "mcp__Linear__save_issue",
+        input: { id: "ENG-991", state: "Done" },
+        output: JSON.stringify({
+          id: "ENG-991",
+          uuid: "32c2b6df-5344-4aab-b419-e51e6a7c8036",
+          title: "Hover card",
+          description: "Related: https://linear.app/ogard/issue/ENG-5/other",
+          url: "https://linear.app/ogard/issue/ENG-991/hover-card",
+          status: "Done",
+        }),
+      }),
+    ).toEqual([
+      {
+        forge: "linear",
+        kind: "issue",
+        action: "edited",
+        identifier: "ENG-991",
+        url: "https://linear.app/ogard/issue/ENG-991/hover-card",
+        title: "Hover card",
+        state: "Done",
+      },
+    ]);
   });
 
   it("keeps a Linear issue's address only when it is that issue's own page", () => {

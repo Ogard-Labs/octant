@@ -734,7 +734,10 @@ and issues the call wrote to (created, merged, reviewed, commented on, edited,
 closed or reopened), at most ten, which the adapter reads from the call's own
 command or arguments and its result with the shared
 `forgeReferencesFromToolCall` rules in `@octant/provider-sdk`. A read never
-counts, and an identity the call does not pin down is left out. The Claude
+counts, an identity the call does not pin down is left out, and a shell write
+counts only when the call's exit status speaks for that command (it is in the
+last `;`-separated list, joined by `&&` alone) or `gh`'s own output confirms it.
+The Claude
 mapper keeps a shell, GitHub or Linear call's input until its result arrives
 for this; the Codex mapper reads a command that exited cleanly and its printed
 output, because its tool-server items arrive without arguments or result. The
