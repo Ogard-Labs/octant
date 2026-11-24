@@ -34,8 +34,25 @@ export async function readyPairedBridge(
   options: { readonly actsAsHostPerson?: boolean } = {},
 ): Promise<RemoteSessionBridge> {
   const server = createFakeRemoteServer({
-    handleProductRequest: () =>
-      new Response("", { headers: { "content-type": "application/x-ndjson" } }),
+    handleProductRequest: ({ method, path, headers }) => {
+      if (path === "/api/video/jobs") return Response.json({ jobs: [] });
+      if (path === "/api/video/clip") {
+        if (method === "POST") {
+          return Response.json({
+            url: `/api/video/clip?ticket=${"a".repeat(43)}`,
+            expiresAt: "2026-11-26T12:00:00.000Z",
+          });
+        }
+        if (headers.get("range") === "bytes=0-") {
+          return new Response(new Uint8Array([1, 2, 3]), {
+            status: 206,
+            headers: { "content-range": "bytes 0-2/3" },
+          });
+        }
+        return Response.json({ error: "Expected a byte range." }, { status: 400 });
+      }
+      return new Response("", { headers: { "content-type": "application/x-ndjson" } });
+    },
     ...(options.actsAsHostPerson === undefined
       ? {}
       : { actsAsHostPerson: options.actsAsHostPerson }),
