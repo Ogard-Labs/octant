@@ -2,11 +2,11 @@
  * Thread secrets: a secret an agent asks the person for in a Code or Work
  * thread, kept as long as the person chooses.
  *
- * A value appears in exactly two types here, both private to the host: the
- * answer the card submits, and the tool input that moves a secret the person
- * already pasted into chat. Every other type (the card, the tool's result, the
+ * A value appears in exactly one type here, private to the host: the answer the
+ * card submits. Every other type (the request, the card, the tool's result, the
  * active list, the journal record) has no field for one and refuses a field it
- * does not name.
+ * does not name. An agent can never hand Octant a value: the person enters it in
+ * the card, every time (maintainer decision, 2026-11-24).
  */
 
 import { Schema } from "effect";
@@ -163,17 +163,9 @@ export const ThreadSecretRequestInput = Schema.Struct({
     ),
   ),
   delivery: Schema.optional(ThreadSecretRequestedDelivery),
-  /** A secret the person already pasted in chat. It is saved with no card. */
-  value: Schema.optional(ThreadSecretValue),
   /** Asking again with the same key returns the same card and the same answer. */
   clientRequestId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((input) => input.value === undefined || input.fields === undefined, {
-      message: () => "A pasted value is one secret and takes no fields.",
-    }),
-  );
+}).annotations(strict);
 export type ThreadSecretRequestInput = typeof ThreadSecretRequestInput.Type;
 
 /** Short enough that whoever approves the command sees all of it. */

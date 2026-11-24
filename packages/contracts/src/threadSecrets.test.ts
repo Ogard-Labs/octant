@@ -113,14 +113,9 @@ describe("what an agent may ask for", () => {
     expect(() => decode({ ...input, fields: [field(1), field(1)] })).toThrow();
   });
 
-  it("keeps the spaces in a value pasted in chat", () => {
-    expect(decode({ ...input, value: "  two words  " }).value).toBe("  two words  ");
-  });
-
-  it("refuses a pasted value with fields, an empty one, and one no variable can carry", () => {
-    expect(() => decode({ ...input, value: "private", fields: [field(1)] })).toThrow();
-    expect(() => decode({ ...input, value: "" })).toThrow();
-    expect(() => decode({ ...input, value: "a\u0000b" })).toThrow();
+  it("refuses a value from the agent, wherever it got it", () => {
+    for (const key of ["value", "secret", "values"])
+      expect(() => decode({ ...input, [key]: "private" })).toThrow();
   });
 
   it("refuses a lifetime or a 1Password reference chosen by the agent", () => {
@@ -381,16 +376,19 @@ describe("what the agent is told", () => {
   it("tells the agent to ask in the card, how to use sudo, and to stop on a decline", () => {
     const { description } = OCTANT_CREDENTIAL_TOOL;
     expect(description).toContain("request-secret");
+    expect(description).toContain("run-with-secret");
     expect(description).toContain("Never ask for a secret in chat");
+    expect(description).toMatch(/pasted .* in chat, do not use it/i);
     expect(description).toContain("sudo -n");
     expect(description).toContain(`sudo -S -p '' <cmd> < "$file"`);
-    expect(description).toContain("printf");
+    expect(description).toContain("sandbox");
     expect(description).toContain("declined");
     expect(description).toMatch(/do not ask again/i);
   });
 
   it("advertises request-secret and its inputs only where the host offers it", () => {
     expect(CREDENTIAL_TOOL_OPERATIONS).toContain("request-secret");
+    expect(CREDENTIAL_TOOL_OPERATIONS).toContain("run-with-secret");
     expect(Object.keys(OCTANT_CREDENTIAL_TOOL.inputSchema.properties)).toEqual([
       "operation",
       "id",
@@ -402,13 +400,17 @@ describe("what the agent is told", () => {
       "placeholder",
       "fields",
       "delivery",
-      "value",
       "clientRequestId",
+      "command",
+      "secrets",
+      "timeoutMs",
     ]);
     expect(Object.keys(OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS.inputSchema.properties)).toEqual([
       "operation",
       "id",
     ]);
-    expect(OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS.description).not.toContain("request-secret");
+    const without = JSON.stringify(OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS);
+    expect(without).not.toContain("request-secret");
+    expect(without).not.toContain("run-with-secret");
   });
 });

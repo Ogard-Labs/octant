@@ -19678,11 +19678,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
 - **Thread secrets.** An agent in a Code or Work thread may ask the person for a
   secret its work needs: an API key, a token, or an account password for `sudo`
   (maintainer decision, 2026-11-24). The host half is built, with `run-with-secret`, Fresh each use and
-  Remember; the tool operation, the card and a secret already pasted in chat are
-  not built yet, so no agent is offered any of it.
+  Remember; the tool operation and the card are not built yet, so no agent is offered any of it.
   - **Request.** The agent names the secret, a label, a kind (`token` or
     `account-password`), a reason, an optional setup page, up to eight fields and
-    a delivery. Labels, reasons and placeholders are one line of visible text: no
+    a delivery. It can never pass a value: the person enters it in the card every
+    time, and one pasted in chat is not picked up, stays in the chat and should be
+    changed (maintainer decision, 2026-11-24). Labels, reasons and placeholders are one line of visible text: no
     control, reordering or zero-width character, so the card cannot imitate
     Octant's own words. A setup page is an http or https address with no sign-in
     in it, shown as the browser will open it. Chat is refused. A thread has at

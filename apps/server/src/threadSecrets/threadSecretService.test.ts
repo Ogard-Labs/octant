@@ -323,14 +323,6 @@ describe("where a secret may not be asked for", () => {
       failure: "refused-by-strict",
     });
   });
-
-  it("does not take a value the agent says was pasted without proof that it was", async () => {
-    const context = host();
-    expect(
-      await context.service.request(context.caller, request({ value: "anything" })),
-    ).toMatchObject({ status: "refused" });
-    expect(redactHostSecrets("anything")).toBe("anything");
-  });
 });
 
 describe("the card", () => {

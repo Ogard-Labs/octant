@@ -290,7 +290,7 @@ export class ThreadSecretService {
     signal?: AbortSignal,
   ): Promise<ThreadSecretRequestResult> {
     this.sweep();
-    const refused = this.#refusesCaller(caller, input);
+    const refused = this.#refusesCaller(caller);
     if (refused !== undefined) return Promise.resolve(refused);
     if (input.clientRequestId === undefined) return this.#ask(caller, input, signal);
     const answers = this.#answers.get(caller.threadId) ?? new Map<string, RetriedAnswer>();
@@ -612,18 +612,12 @@ export class ThreadSecretService {
         this.#leftover.delete(key);
   }
 
-  #refusesCaller(
-    caller: ThreadSecretCaller,
-    input: ThreadSecretRequestInput,
-  ): ThreadSecretRequestResult | undefined {
+  #refusesCaller(caller: ThreadSecretCaller): ThreadSecretRequestResult | undefined {
     if (this.#closed || caller.signal.aborted)
       return { status: "cancelled", note: NOTES.cancelled };
     const authority = this.#authority(caller);
     if (authority === undefined) return refusal("unavailable");
     if (authority.mode === "chat") return refusal("unsupported-mode");
-    // Moving a pasted value is its own step: it must be proved to be a value
-    // the person wrote before Octant hides it anywhere.
-    if (input.value !== undefined) return refusal("unavailable");
     return undefined;
   }
 
