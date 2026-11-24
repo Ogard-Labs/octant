@@ -659,10 +659,14 @@ work leaves the sidebar without a second click. A person's **Mark done** on a
 Work or Code thread also puts it away in the same journaled update; **Reopen**
 brings it back (a Work thread marked Done takes no message until reopened). A
 Code thread is also put away by the host, journaled as the `system` actor, once
-a pull request linked to it merged: on its delivery branch by the thread's own
-evidence, or as the Pull requests refresh cache records it, since a merge made
-outside Octant reaches that cache and not the thread's history. Both are cached
-reads; the host makes no GitHub call for this. An opened pull request, a
+a pull request it delivers merged: one in its delivery repository, on its
+delivery branch or recorded there by Octant's own pull-request operations. The
+merge counts from the thread's own evidence, or as the Pull requests refresh
+cache records it, since a merge made outside Octant reaches that cache and not
+the thread's history. A pull request a tool call of the thread only touched
+(reviewed, commented on, or merged for another thread) is linked to the thread,
+but its merge delivers nothing here and does not put the thread away. Both are
+cached reads; the host makes no GitHub call for this. An opened pull request, a
 finished investigation and a local commit are Done on the board but are not put
 away: a merge is the only evidence that the work is over. The host checks every
 two minutes and leaves alone a coordinator, a thread whose child work is still

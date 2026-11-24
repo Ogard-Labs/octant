@@ -1,6 +1,10 @@
 import type { CodeThread, CodeThreadId } from "@octant/contracts";
 import type { MergedPullRequest, MergedThreadPutAwayOutcome } from "./codeService";
-import type { CodeThreadMetadataService } from "./codeThreadMetadataService";
+import type {
+  CodeThreadKnownPullRequest,
+  CodeThreadMetadataService,
+} from "./codeThreadMetadataService";
+import { splitRepositoryName } from "./pullRequestLinkService";
 
 /**
  * How often the host looks for Code threads whose pull request merged. The
@@ -33,10 +37,10 @@ export interface MergedThreadPutAwayOptions {
   /** The board's cached-only projection: it never calls GitHub or Git. */
   readonly metadata: Pick<CodeThreadMetadataService, "project">;
   /**
-   * Merged pull requests the Pull requests refresh cache links to the thread.
-   * A merge made outside Octant reaches this cache, not the thread's history.
+   * The merged pull requests the Pull requests refresh cache shows as this
+   * thread's own delivery (`threadDeliversPullRequest`). A merge made outside
+   * Octant reaches this cache, not the thread's history.
    */
-  /** The merged pull requests the refresh cache shows as this thread's own delivery. */
   readonly cachedMerges: (thread: CodeThread) => ReadonlyArray<MergedPullRequest>;
   /** A finished turn's decision still waiting on the person keeps the thread in view. */
   readonly decisionPending: (thread: CodeThread) => boolean;
@@ -52,7 +56,49 @@ export interface MergedThreadPutAwayOptions {
 }
 
 /**
- * Puts a Code thread away once a pull request linked to it merged. Only a
+ * Whether a cached pull request is what the thread delivers: in its delivery
+ * repository, and on its delivery branch or recorded there by Octant's own
+ * pull-request operations (those carry no repository). A thread is also linked
+ * to pull requests its tool calls reviewed or commented on, in any of the
+ * Project's repositories, and merging one of those delivers nothing here, even
+ * when it shares a number or a branch name with the thread's own.
+ */
+export function threadDeliversPullRequest(input: {
+  readonly thread: Pick<CodeThread, "deliveryTarget" | "projectId">;
+  readonly known: ReadonlyArray<CodeThreadKnownPullRequest>;
+  readonly pullRequest: {
+    readonly repositoryOwner: string;
+    readonly repositoryName: string;
+    readonly number: number;
+    readonly headBranch: string;
+  };
+  readonly sameRepository: (
+    projectId: CodeThread["projectId"],
+    left: { readonly owner: string; readonly name: string },
+    right: { readonly owner: string; readonly name: string },
+  ) => boolean;
+}): boolean {
+  const { thread, pullRequest } = input;
+  const delivery = splitRepositoryName(thread.deliveryTarget.proposedBaseRepository);
+  if (
+    delivery === undefined ||
+    !input.sameRepository(thread.projectId, delivery, {
+      owner: pullRequest.repositoryOwner,
+      name: pullRequest.repositoryName,
+    })
+  ) {
+    return false;
+  }
+  return (
+    pullRequest.headBranch === thread.deliveryTarget.branchIntent ||
+    input.known.some(
+      (entry) => entry.repository === undefined && entry.number === pullRequest.number,
+    )
+  );
+}
+
+/**
+ * Puts a Code thread away once a pull request it delivers merged. Only a
  * merge settles a thread on its own: an opened pull request, a finished
  * investigation or a local commit is Done on the board yet still work the
  * person is likely to come back to the same day. Child work still running or

@@ -491,7 +491,12 @@ export class CodeProjectPullRequestService {
      * linked to pull requests its tool calls only reviewed or commented on,
      * and merging one of those does not deliver the thread.
      */
-    delivers: (row: { readonly number: number; readonly headBranch: string }) => boolean,
+    delivers: (
+      row: Pick<
+        CodeProjectPullRequestRow,
+        "repositoryOwner" | "repositoryName" | "number" | "headBranch"
+      >,
+    ) => boolean,
   ): ReadonlyArray<{
     readonly baseRepository: string;
     readonly number: number;

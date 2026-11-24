@@ -6,7 +6,11 @@ import type {
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { MergedThreadPutAwayOutcome } from "./codeService";
-import { MergedThreadPutAway, type MergedPullRequest } from "./mergedThreadPutAway";
+import {
+  MergedThreadPutAway,
+  threadDeliversPullRequest,
+  type MergedPullRequest,
+} from "./mergedThreadPutAway";
 
 const merged: CodeThreadLinkedPullRequest = {
   kind: "linked",
@@ -86,6 +90,49 @@ function fixture(options: {
 }
 
 describe("merged thread put-away", () => {
+  it("counts a merge as the thread's delivery only in its own repository, on its branch or recorded by Octant", () => {
+    const thread = codeThread("delivering", {
+      deliveryTarget: {
+        proposedBaseRepository: "acme/app",
+        branchIntent: "feature/thing",
+      } as CodeThread["deliveryTarget"],
+    });
+    const delivers = (
+      pullRequest: Partial<Parameters<typeof threadDeliversPullRequest>[0]["pullRequest"]>,
+    ) =>
+      threadDeliversPullRequest({
+        thread,
+        known: [
+          { number: 12, observedAt: "2026-11-24T09:00:00Z" },
+          {
+            number: 30,
+            observedAt: "2026-11-24T09:00:00Z",
+            repository: { owner: "acme", name: "app" },
+          },
+        ],
+        pullRequest: {
+          repositoryOwner: "acme",
+          repositoryName: "app",
+          number: 99,
+          headBranch: "feature/other",
+          ...pullRequest,
+        },
+        // `acme/app` was renamed `acme/app-next`.
+        sameRepository: (_projectId, left, right) =>
+          left.owner === right.owner &&
+          left.name.replace("-next", "") === right.name.replace("-next", ""),
+      });
+
+    expect(delivers({ headBranch: "feature/thing" })).toBe(true);
+    expect(delivers({ number: 12 })).toBe(true);
+    expect(delivers({ number: 12, repositoryName: "app-next" })).toBe(true);
+    // Linked by a tool call that only touched it.
+    expect(delivers({ number: 30 })).toBe(false);
+    // Another of the Project's repositories, by the same number or branch.
+    expect(delivers({ number: 12, repositoryName: "docs" })).toBe(false);
+    expect(delivers({ headBranch: "feature/thing", repositoryName: "docs" })).toBe(false);
+  });
+
   it("puts away a thread whose pull request merged, and leaves an open one, an unmerged one and a coordinator", async () => {
     const { pass, putAway } = fixture({
       threads: [

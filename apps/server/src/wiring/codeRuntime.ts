@@ -1,7 +1,7 @@
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { pullRequestIdentitiesFromHistory } from "../code/codeThreadMetadataService";
 import { splitRepositoryName } from "../code/pullRequestLinkService";
-import { MergedThreadPutAway } from "../code/mergedThreadPutAway";
+import { MergedThreadPutAway, threadDeliversPullRequest } from "../code/mergedThreadPutAway";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { designSystemTurnContext } from "../designSystems/designSystemContext";
 import {
@@ -2260,20 +2260,20 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             threads: () => persistence.readCodeThreads(),
             projectExists: (projectId) => persistence.readProject(projectId) !== undefined,
             metadata: codeThreadMetadataService,
-            // Only the thread's own delivery puts it away: a pull request on its
-            // delivery branch, or one Octant's own operations recorded for it
-            // (those carry no repository). One its tool calls merely reviewed
-            // or commented on is linked, but merging it delivers nothing here.
             cachedMerges: (thread) => {
-              const own = new Set(
-                pullRequestIdentitiesFromHistory(codeBoardEventStore.summaryForThread(thread.id))
-                  .filter((entry) => entry.repository === undefined)
-                  .map((entry) => entry.number),
+              const known = pullRequestIdentitiesFromHistory(
+                codeBoardEventStore.summaryForThread(thread.id),
               );
               return projectPullRequestService.mergedPullRequestsForThread(
                 String(thread.id),
-                (row) =>
-                  row.headBranch === thread.deliveryTarget.branchIntent || own.has(row.number),
+                (pullRequest) =>
+                  threadDeliversPullRequest({
+                    thread,
+                    known,
+                    pullRequest,
+                    sameRepository: (projectId, left, right) =>
+                      pullRequestLinkService.areSameRepository(projectId, left, right),
+                  }),
               );
             },
             decisionPending: (thread) => codeTurnDecisions.forThread(thread) !== undefined,
