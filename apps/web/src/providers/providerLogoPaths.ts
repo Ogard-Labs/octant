@@ -268,6 +268,7 @@ export const PROVIDER_LOGOS: Readonly<Record<string, ProviderLogoSpec>> = {
   devin: svgLogo(DEVIN, "devin", "0 0 256 294"),
   gemini: simpleIcon(GEMINI, "googlegemini"),
   "gemini-native-image": simpleIcon(GEMINI, "googlegemini"),
+  "gemini-video": simpleIcon(GEMINI, "googlegemini"),
   glm: officialAsset(
     GLM,
     "https://github.com/stefandevo/glm-acp-agent/blob/main/icon.svg",

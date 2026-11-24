@@ -1,6 +1,6 @@
 import {
   buildModelPickerGroups,
-  isImageProfileDriverKind,
+  isMediaProfileDriverKind,
   type PickerGroup,
   type RoleSuggestionModel,
 } from "@octant/domain";
@@ -15,7 +15,7 @@ export function modelRoleProviderOptions(
 ): ReadonlyArray<NativeHarnessProviderOption> {
   if (controller === undefined) return [];
   return controller.instances
-    .filter((instance) => instance.enabled && !isImageProfileDriverKind(instance.driverKind))
+    .filter((instance) => instance.enabled && !isMediaProfileDriverKind(instance.driverKind))
     .map((instance) => {
       const observed = controller.observedByInstance.get(instance.id);
       return {

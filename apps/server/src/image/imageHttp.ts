@@ -33,7 +33,8 @@ export interface ImageHttpLimits {
 
 interface AuthenticatedImageHttpRequest {
   readonly url: string;
-  readonly method: "POST" | "GET";
+  // Video drivers also cancel (PUT, POST) and delete (DELETE) provider jobs.
+  readonly method: "POST" | "GET" | "PUT" | "DELETE";
   readonly auth: ImageHttpAuth;
   readonly instanceId: string;
   readonly credentialResolver: ProviderCredentialResolver;

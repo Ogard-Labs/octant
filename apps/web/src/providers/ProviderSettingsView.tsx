@@ -13,6 +13,7 @@ import {
   type DiscoverySnapshot,
   type IdeogramImageProviderConfiguration,
   type GeminiImageProviderConfiguration,
+  type GeminiVideoProviderConfiguration,
   type OpenAiCompatibleProviderConfiguration,
   type OpenAiImageProviderConfiguration,
   type OllamaProviderConfiguration,
@@ -29,7 +30,7 @@ import {
   type ProviderModelId,
   type ProviderObservedState,
 } from "@octant/contracts";
-import { isImageProfileDriverKind } from "@octant/domain";
+import { isMediaProfileDriverKind } from "@octant/domain";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { SettingsSection } from "../settings/primitives";
@@ -120,6 +121,11 @@ export interface ProviderSettingsViewProps {
     configuration: GeminiImageProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
+  readonly onCreateGeminiVideo: (
+    displayName: string,
+    configuration: GeminiVideoProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
   readonly onCreateBflImage: (
     displayName: string,
     configuration: BflImageProviderConfiguration,
@@ -182,6 +188,11 @@ export interface ProviderSettingsViewProps {
   readonly onChangeGeminiImageConfiguration: (
     instanceId: ProviderInstanceId,
     configuration: GeminiImageProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeGeminiVideoConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: GeminiVideoProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onChangeBflImageConfiguration: (
@@ -442,11 +453,11 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         showDetectionGroups
         instances={props.instances.filter(
           (instance) =>
-            !isImageProfileDriverKind(instance.driverKind) &&
+            !isMediaProfileDriverKind(instance.driverKind) &&
             !isModelEndpointDriverKind(instance.driverKind),
         )}
         agentEligibleInstances={props.instances.filter(
-          (instance) => !isImageProfileDriverKind(instance.driverKind),
+          (instance) => !isMediaProfileDriverKind(instance.driverKind),
         )}
         observedByInstance={props.observedByInstance}
         {...(props.presentationObservedByInstance === undefined
@@ -486,6 +497,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeOpenAiCompatibleConfiguration={props.onChangeOpenAiCompatibleConfiguration}
         onChangeOpenAiImageConfiguration={props.onChangeOpenAiImageConfiguration}
         onChangeGeminiImageConfiguration={props.onChangeGeminiImageConfiguration}
+        onChangeGeminiVideoConfiguration={props.onChangeGeminiVideoConfiguration}
         onChangeBflImageConfiguration={props.onChangeBflImageConfiguration}
         onChangeIdeogramImageConfiguration={props.onChangeIdeogramImageConfiguration}
         onChangePiConfiguration={props.onChangePiConfiguration}
