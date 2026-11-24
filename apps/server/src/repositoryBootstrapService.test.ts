@@ -275,9 +275,13 @@ describe("repository bootstrap service", () => {
     }
   });
 
-  it("clones into an existing empty destination folder, issues a binding receipt, refuses overwriting tracked files, and lands only chosen ignored files with mode & 0o777", async () => {
+  it("clones into an existing empty destination folder, preserves pre-existing sibling folders, issues a binding receipt, refuses overwriting tracked files, and lands only chosen ignored files with mode & 0o777", async () => {
     const homeDir = makeTempDir("octant-dest-home-");
     mkdirSync(join(homeDir, "demo"), { recursive: true });
+    // Pre-existing sibling matching the client's operationId must never be touched.
+    const unownedSibling = join(homeDir, ".octant-clone-55555555-5555-4555-8555-555555555555");
+    mkdirSync(unownedSibling, { recursive: true });
+    writeFileSync(join(unownedSibling, "keep.txt"), "do-not-delete");
     const receiptStore = new BindingReceiptStore();
     const runner: RepositoryBootstrapCloneRunner = {
       clone: async ({ stagingPath, onProgress }) => {
@@ -330,6 +334,7 @@ describe("repository bootstrap service", () => {
       expect(status.state).toBe("cloned");
       if (status.state !== "cloned") throw new Error("Expected cloned state");
       expect(status.projectName).toBe("demo");
+      expect(readFileSync(join(unownedSibling, "keep.txt"), "utf8")).toBe("do-not-delete");
 
       // Receipt is bound to the exact caller window and canonical clone root.
       const consumed = receiptStore.consume({

@@ -1,7 +1,18 @@
 import { execFile as nodeExecFile, spawn as nodeSpawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { lstat, mkdir, open, readdir, realpath, rename, rm, rmdir } from "node:fs/promises";
+import {
+  link,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  rmdir,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import type { Project, ProjectId, UtcTimestamp, WindowId } from "@octant/contracts";
@@ -958,9 +969,12 @@ export class RepositoryBootstrapService {
       readonly finalPath: string;
     },
   ): Promise<void> {
-    const stagingPath = join(target.parentDir, `.octant-clone-${String(record.operationId)}`);
+    // Allocate a unique server-owned staging directory via mkdtemp so cleanup
+    // can never delete an unowned directory named by a client operationId.
+    let stagingRoot: string | undefined;
     try {
-      await rm(stagingPath, { recursive: true, force: true });
+      stagingRoot = await mkdtemp(join(target.parentDir, ".octant-clone-"));
+      const stagingPath = join(stagingRoot, "repo");
       const result = await this.#cloneRunner.clone({
         remoteUrl: target.remoteUrl,
         transport: target.transport,
@@ -978,7 +992,6 @@ export class RepositoryBootstrapService {
       });
 
       if (result.kind === "cancelled" || record.controller.signal.aborted) {
-        await rm(stagingPath, { recursive: true, force: true }).catch(() => undefined);
         record.state = {
           state: "cancelled",
           operationId: record.operationId,
@@ -991,7 +1004,6 @@ export class RepositoryBootstrapService {
       }
 
       if (result.kind === "failed") {
-        await rm(stagingPath, { recursive: true, force: true }).catch(() => undefined);
         this.#failOperation(record, result.code, result.message);
         return;
       }
@@ -1001,7 +1013,6 @@ export class RepositoryBootstrapService {
         record.controller.signal,
       );
       if (!verified) {
-        await rm(stagingPath, { recursive: true, force: true }).catch(() => undefined);
         this.#failOperation(
           record,
           "clone-failed",
@@ -1012,7 +1023,6 @@ export class RepositoryBootstrapService {
 
       const destinationCheck = await this.#checkDestinationEmpty(target.finalPath);
       if (!destinationCheck.ok) {
-        await rm(stagingPath, { recursive: true, force: true }).catch(() => undefined);
         this.#failOperation(record, "destination-not-empty", destinationCheck.message);
         return;
       }
@@ -1043,13 +1053,16 @@ export class RepositoryBootstrapService {
       };
       record.expiresAt = this.#now() + OPERATION_TTL_MS;
     } catch {
-      await rm(stagingPath, { recursive: true, force: true }).catch(() => undefined);
       if (record.state.state === "cloning") {
         this.#failOperation(
           record,
           "clone-failed",
           "Could not finish cloning the repository into the destination folder.",
         );
+      }
+    } finally {
+      if (stagingRoot !== undefined) {
+        await rm(stagingRoot, { recursive: true, force: true }).catch(() => undefined);
       }
     }
   }
@@ -1266,10 +1279,43 @@ export class RepositoryBootstrapService {
       }
     }
 
+    const parentStatBefore = await lstat(currentDir).catch(() => undefined);
+    if (
+      parentStatBefore === undefined ||
+      parentStatBefore.isSymbolicLink() ||
+      !parentStatBefore.isDirectory()
+    ) {
+      return {
+        ok: false,
+        reason: "symlink-refused",
+        message: "Destination parent is not a regular directory.",
+      };
+    }
+
     const tempPath = join(currentDir, `.octant-copy-${this.#uuid().slice(0, 8)}`);
     let handle;
     try {
       handle = await open(tempPath, NO_FOLLOW_CREATE_WRITE_FLAGS, input.mode);
+      // Confirm the parent directory still resolves inside the clone root and
+      // keeps the same device/inode identity before writing payload bytes.
+      const resolvedDuring = await realpath(currentDir).catch(() => undefined);
+      const parentStatDuring = await lstat(currentDir).catch(() => undefined);
+      if (
+        resolvedDuring === undefined ||
+        !isPathInside(input.cloneRoot, resolvedDuring) ||
+        parentStatDuring === undefined ||
+        parentStatDuring.dev !== parentStatBefore.dev ||
+        parentStatDuring.ino !== parentStatBefore.ino
+      ) {
+        await handle.close().catch(() => undefined);
+        handle = undefined;
+        await rm(tempPath, { force: true }).catch(() => undefined);
+        return {
+          ok: false,
+          reason: "symlink-refused",
+          message: "Destination parent changed outside the cloned repository.",
+        };
+      }
       await handle.writeFile(input.content);
       await handle.chmod(input.mode);
     } catch {
@@ -1284,9 +1330,14 @@ export class RepositoryBootstrapService {
     }
 
     try {
-      // Re-verify parent and target right before atomic rename.
+      // Re-verify parent identity and containment right before placement.
       const resolvedParent = await realpath(currentDir);
-      if (!isPathInside(input.cloneRoot, resolvedParent)) {
+      const parentStatAfter = await lstat(currentDir);
+      if (
+        !isPathInside(input.cloneRoot, resolvedParent) ||
+        parentStatAfter.dev !== parentStatBefore.dev ||
+        parentStatAfter.ino !== parentStatBefore.ino
+      ) {
         await rm(tempPath, { force: true }).catch(() => undefined);
         return {
           ok: false,
@@ -1321,6 +1372,29 @@ export class RepositoryBootstrapService {
             reason: "invalid-path",
             message: "Refused to overwrite an existing file in the cloned repository.",
           };
+        }
+      }
+      if (!input.allowReplace) {
+        // Atomic no-clobber placement via hard link + unlink so a racing file
+        // or symlink at targetPath fails with EEXIST instead of overwriting.
+        try {
+          await link(tempPath, targetPath);
+          await rm(tempPath, { force: true }).catch(() => undefined);
+          return { ok: true };
+        } catch (error: unknown) {
+          const code =
+            typeof error === "object" && error !== null && "code" in error
+              ? (error as { code?: unknown }).code
+              : undefined;
+          if (code === "EEXIST") {
+            await rm(tempPath, { force: true }).catch(() => undefined);
+            return {
+              ok: false,
+              reason: "invalid-path",
+              message: "Refused to overwrite an existing file in the cloned repository.",
+            };
+          }
+          if (code !== "EPERM" && code !== "EXDEV" && code !== "ENOTSUP") throw error;
         }
       }
       await rename(tempPath, targetPath);
