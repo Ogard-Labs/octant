@@ -365,6 +365,8 @@ which the person sets, like any turn.
   opens it in the native Expo Video player without autoplay. Closing the clip,
   leaving or deleting its thread, or losing host access discards the cached copy.
   A temporary list failure or reconnection leaves the already-downloaded clip playing.
+  **Save video** copies the file into a folder the person chooses on the phone.
+  A saved copy remains in that folder when the temporary player file is removed.
 - A clip can be placed in a Canvas design as a `generated-video` asset in a
   later change. This design does not add the asset kind.
 

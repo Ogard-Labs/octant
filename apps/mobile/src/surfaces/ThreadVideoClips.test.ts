@@ -6,7 +6,13 @@ import type { MobileRemoteTransport } from "@octant/client-runtime";
 import { ThemeProvider } from "../../design-system/theme";
 import { ThreadVideoClips } from "./ThreadVideoClips";
 
-const { cache, remove } = vi.hoisted(() => ({ cache: vi.fn(), remove: vi.fn() }));
+const { cache, remove, pickDirectory, copy } = vi.hoisted(() => ({
+  cache: vi.fn(),
+  remove: vi.fn(),
+  pickDirectory: vi.fn(),
+  copy: vi.fn(),
+}));
+vi.mock("expo-file-system", () => ({ Directory: { pickDirectoryAsync: pickDirectory } }));
 vi.mock("./videoClipCache", () => ({ cacheVideoClip: cache }));
 vi.mock("react-native", async () => ({
   ...(await vi.importActual<Record<string, unknown>>("react-native-web")),
@@ -24,9 +30,11 @@ vi.mock("../../design-system", async () => ({
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
-it("keeps a downloaded clip through reconnection and clears it when access is lost", async () => {
+it("keeps a saved copy while the player reconnects and refuses to export after access is lost", async () => {
   vi.useFakeTimers();
-  cache.mockResolvedValue({ uri: "file:///cache/clip.mp4", exists: true, delete: remove });
+  cache.mockResolvedValue({ uri: "file:///cache/clip.mp4", exists: true, delete: remove, copy });
+  const directory = { uri: "file:///chosen-folder" };
+  pickDirectory.mockResolvedValueOnce(directory);
   const threadId = "e4000000-0000-4000-8000-000000000002";
   const options = { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: true };
   const jobs = [
@@ -88,6 +96,12 @@ it("keeps a downloaded clip through reconnection and clears it when access is lo
     await act(async () => node.querySelector<HTMLElement>('[aria-label="Open video"]')?.click());
     const player = playing();
     expect(player).not.toBeNull();
+    const save = () => node.querySelector<HTMLElement>('[aria-label="Save video"]');
+    await act(async () => save()?.click());
+    expect(pickDirectory).toHaveBeenCalledOnce();
+    expect(copy).toHaveBeenCalledWith(directory, { overwrite: false });
+    expect(node.textContent).toContain("Video saved.");
+    expect(remove).not.toHaveBeenCalled();
     await render(undefined);
     await poll(503);
     expect(playing()).toBe(player);
@@ -100,7 +114,17 @@ it("keeps a downloaded clip through reconnection and clears it when access is lo
     expect(remove).not.toHaveBeenCalled();
     await poll(200);
     expect(cache).toHaveBeenCalledOnce();
+    let finishPicking: (value: typeof directory) => void = () => undefined;
+    pickDirectory.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishPicking = resolve;
+      }),
+    );
+    await act(async () => save()?.click());
+    expect(pickDirectory).toHaveBeenCalledTimes(2);
     await poll(404);
+    await act(async () => finishPicking(directory));
+    expect(copy).toHaveBeenCalledOnce();
     expect(playing()).toBeNull();
     expect(remove).toHaveBeenCalledOnce();
     await poll(503);

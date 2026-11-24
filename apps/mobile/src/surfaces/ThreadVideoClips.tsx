@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useEvent } from "expo";
-import type { File } from "expo-file-system";
+import { Directory, type File } from "expo-file-system";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { RemoteConnectionError, type MobileRemoteTransport } from "@octant/client-runtime";
 import {
@@ -115,7 +115,9 @@ function CachedClip(props: {
 }) {
   const { colors } = useTheme();
   const { client, jobId, size } = props;
-  const [state, setState] = useState<{ readonly uri: string } | { readonly failed: true }>();
+  const [state, setState] = useState<
+    { readonly file: File; readonly signal: AbortSignal } | { readonly failed: true }
+  >();
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -128,7 +130,7 @@ function CachedClip(props: {
           return;
         }
         cached = file;
-        setState({ uri: file.uri });
+        setState({ file, signal: controller.signal });
       },
       () => {
         if (!controller.signal.aborted) setState({ failed: true });
@@ -146,7 +148,7 @@ function CachedClip(props: {
         Preparing video…
       </Text>
     );
-  if ("uri" in state) return <ClipPlayer uri={state.uri} />;
+  if ("file" in state) return <ClipPlayer file={state.file} signal={state.signal} />;
 
   return (
     <View style={styles.clip}>
@@ -167,16 +169,60 @@ function CachedClip(props: {
   );
 }
 
-function ClipPlayer({ uri }: { readonly uri: string }) {
+function ClipPlayer({ file, signal }: { readonly file: File; readonly signal: AbortSignal }) {
   const { colors } = useTheme();
-  const player = useVideoPlayer(uri);
+  const player = useVideoPlayer(file.uri);
   const { status } = useEvent(player, "statusChange", { status: player.status });
-  return status === "error" ? (
-    <Text accessibilityLiveRegion="polite" style={{ color: colors.textPrimary }}>
-      This video could not be played.
-    </Text>
-  ) : (
-    <VideoView nativeControls player={player} style={styles.player} />
+  const [saveStatus, setSaveStatus] = useState<"saving" | "saved" | "failed">();
+  const saving = useRef(false);
+
+  const saveVideo = async () => {
+    if (saving.current || signal.aborted) return;
+    saving.current = true;
+    setSaveStatus("saving");
+    try {
+      const destination = await Directory.pickDirectoryAsync();
+      // The picker may still be open when the thread loses access to this file.
+      if (signal.aborted) return;
+      await file.copy(destination, { overwrite: false });
+      if (!signal.aborted) setSaveStatus("saved");
+    } catch (error) {
+      const code =
+        typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+      const cancelled = code === "ERR_PICKER_CANCELLED" || code === "ERR_FILE_PICKING_CANCELLED";
+      if (!signal.aborted) setSaveStatus(cancelled ? undefined : "failed");
+    } finally {
+      saving.current = false;
+    }
+  };
+
+  return (
+    <View style={styles.clip}>
+      {status === "error" ? (
+        <Text accessibilityLiveRegion="polite" style={{ color: colors.textPrimary }}>
+          This video could not be played.
+        </Text>
+      ) : (
+        <VideoView nativeControls player={player} style={styles.player} />
+      )}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Save video"
+        accessibilityState={{ disabled: saveStatus === "saving", busy: saveStatus === "saving" }}
+        disabled={saveStatus === "saving"}
+        onPress={() => void saveVideo()}
+        style={styles.action}
+      >
+        <Text style={{ color: colors.accent }}>
+          {saveStatus === "saving" ? "Saving video…" : "Save video"}
+        </Text>
+      </Pressable>
+      {saveStatus === "saved" || saveStatus === "failed" ? (
+        <Text accessibilityLiveRegion="polite" style={{ color: colors.textPrimary }}>
+          {saveStatus === "saved" ? "Video saved." : "Could not save the video."}
+        </Text>
+      ) : null}
+    </View>
   );
 }
 
