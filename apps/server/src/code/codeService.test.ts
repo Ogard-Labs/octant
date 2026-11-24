@@ -1,5 +1,7 @@
 import {
-  decodeThreadBoardPullRequestSummaries,
+  CodeNavigation,
+  CodeNavigationRuntime,
+  decodeHostAnswer,
   decodeCodeOperationId,
   decodeProjectWorkingFolderId,
 } from "@octant/contracts";
@@ -647,15 +649,26 @@ describe("CodeService reads", () => {
       },
     });
 
-    const [runtime] = (await fixture.service.navigation(ids.window)).runtime;
+    const answer = await fixture.service.navigation(ids.window);
+    const [runtime] = answer.runtime;
 
     expect(runtime?.pullRequestSummaries?.items).toHaveLength(3);
     expect(runtime?.pullRequestSummaries?.hiddenCount).toBe(1);
     expect(runtime?.threadPullRequests?.items).toHaveLength(4);
-    // The decode a previous build runs accepts the row.
-    expect(() =>
-      decodeThreadBoardPullRequestSummaries(runtime?.pullRequestSummaries),
-    ).not.toThrow();
+
+    // A previous build decodes the whole answer with a schema that has never
+    // heard of threadPullRequests: it drops that field and keeps every row.
+    const { threadPullRequests: _unknownToIt, ...previousRuntimeFields } =
+      CodeNavigationRuntime.fields;
+    const strict = { parseOptions: { onExcessProperty: "error" as const } };
+    const PreviousNavigation = Schema.Struct({
+      ...CodeNavigation.fields,
+      runtime: Schema.Array(Schema.Struct(previousRuntimeFields).annotations(strict)),
+    }).annotations(strict);
+    const received: unknown = JSON.parse(JSON.stringify(answer));
+    const read = decodeHostAnswer(PreviousNavigation)(received);
+    expect(read.runtime[0]?.pullRequestSummaries?.items).toHaveLength(3);
+    expect(read.runtime[0]).not.toHaveProperty("threadPullRequests");
   });
 
   it("keeps navigation rows without pull-request facts when the snapshot source fails or GitHub is revoked", async () => {
