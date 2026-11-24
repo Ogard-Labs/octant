@@ -33,7 +33,7 @@ import {
 } from "@octant/contracts";
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
 import { chatImageScopeAllowedForWindow } from "../image/imageScopeAuthority";
-import { principalActsAsHostPerson, type ClientPrincipal } from "../clientPrincipal";
+import { principalIsDirectlyPaired, type ClientPrincipal } from "../clientPrincipal";
 import { assertReadableChatThread } from "../chat/chatService";
 import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import { SessionCompactionService } from "../context/sessionCompaction";
@@ -171,7 +171,7 @@ export function wireContext(deps: ContextDependencies) {
         // A paired browser has no desktop layout. Read the same thread that its authenticated Chat Open admits.
         if (principal?.kind === "remote-device") {
           if (
-            !principalActsAsHostPerson(principal) ||
+            !principalIsDirectlyPaired(principal) ||
             String(principal.deviceId) !== String(windowId)
           )
             return false;

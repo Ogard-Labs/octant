@@ -888,6 +888,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         fullAccess: () => level() === "full-access",
         jobs: videoJobService,
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        defaultProfileInstanceId: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings()).videoGeneration
+            .defaultProfileInstanceId,
         imageSources: codeImageSources,
         imageJobs: imageJobService,
         ...(checkoutRoot === undefined

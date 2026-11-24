@@ -76,7 +76,7 @@ jobs:
       - name: Build the module targets for the Simulator
         working-directory: apps/mobile/ios
         run: |
-          for scheme in OctantDeviceProtection OctantPinnedTls OctantPush; do
+          for scheme in OctantDeviceProtection OctantPinnedTls OctantPush OctantVideoSave; do
             xcodebuild build \
               -workspace Octant.xcworkspace \
               -scheme "$scheme" \

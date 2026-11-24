@@ -146,6 +146,7 @@ import {
 import { createHostControlClient } from "@octant/client-runtime/host-control-client";
 import { createSafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import { createImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import { createVideoGenerationClient } from "@octant/client-runtime/video-generation-client";
 import { createSpeechClient } from "@octant/client-runtime/speech-client";
 import { createIntegrationClient } from "@octant/client-runtime/integration-client";
 import { createMachineChangeClient } from "@octant/client-runtime/machine-change-client";
@@ -241,6 +242,7 @@ export interface LaunchedShellClients {
   readonly safeNetworksClient: ReturnType<typeof createSafeNetworksClient>;
   readonly serviceOfferClient: ReturnType<typeof createServiceOfferClient>;
   readonly imageGenerationClient: ReturnType<typeof createImageGenerationClient>;
+  readonly videoGenerationClient: ReturnType<typeof createVideoGenerationClient>;
   readonly speechClient: ReturnType<typeof createSpeechClient>;
   readonly linearTransport: ReturnType<typeof createIntegrationClient>;
   readonly machineChangeClient: ReturnType<typeof createMachineChangeClient>;
@@ -437,6 +439,7 @@ export function createLaunchedShellClients(
     hostControlClient: createHostControlClient(port),
     safeNetworksClient: createSafeNetworksClient(port),
     imageGenerationClient: createImageGenerationClient(port),
+    videoGenerationClient: createVideoGenerationClient(port),
     serviceOfferClient: createServiceOfferClient(port),
     speechClient: createSpeechClient(port),
     linearTransport: createIntegrationClient({ ...port, slug: "linear" }),

@@ -203,6 +203,38 @@ describe("a window's request to a paired computer", () => {
     expect((await ask({ ...hello, path, method: "POST" })).answer.status).toBe("refused");
   });
 
+  it("supports video playback through the paired host with a single byte range", async () => {
+    const clip = { ...hello, path: `/api/video/clip?ticket=${"a".repeat(43)}` };
+    const request = await ask(
+      { ...clip, headers: { range: "bytes=0-" } },
+      {
+        answer: () =>
+          new Response(new Uint8Array([1, 2, 3]), {
+            status: 206,
+            headers: { "content-range": "bytes 0-2/3" },
+          }),
+      },
+    );
+    expect(request.sent.mock.calls[0]?.[1]?.headers).toMatchObject({ range: "bytes=0-" });
+    expect(request.answer).toMatchObject({ status: "answered", httpStatus: 206 });
+
+    for (const refused of [
+      clip,
+      { ...clip, headers: { range: "bytes=0-2,4-6" } },
+      { ...hello, headers: { range: "bytes=0-" } },
+      { ...clip, method: "POST", headers: { range: "bytes=0-" } },
+      {
+        ...hello,
+        method: "POST",
+        path: "/api/video/jobs/a1b2c3d4-0000-4000-8000-000000000001/stop",
+      },
+    ]) {
+      const result = await ask(refused);
+      expect(result.answer.status).toBe("refused");
+      expect(result.sent).not.toHaveBeenCalled();
+    }
+  });
+
   it("names no arbitrary URL: only the listed paths and methods get through", async () => {
     const refused = [
       { path: "//example.com/api/remote/hello" },
@@ -252,6 +284,9 @@ describe("a window's request to a paired computer", () => {
               ? filled
               : `${filled}?${query}`,
         ...(method === "GET" ? {} : { body: "{}" }),
+        ...(method === "GET" && path === "/api/video/clip"
+          ? { headers: { range: "bytes=0-" } }
+          : {}),
       });
       expect(answer.status, `${method} ${path}`).toBe("answered");
     }
@@ -310,6 +345,9 @@ describe("a window's request to a paired computer", () => {
         "DELETE /api/chat/attachments/:id",
         "GET /api/code/bootstrap",
         "GET /api/code/navigation",
+        "GET /api/video/jobs",
+        "POST /api/video/clip",
+        "GET /api/video/clip",
         "GET /api/code/threads/:id",
         "GET /api/code/threads/:id/conversation",
         "GET /api/code/threads/:id/conversation/window",

@@ -3,6 +3,10 @@ import {
   type DesktopPaneClient,
 } from "@octant/client-runtime/desktop-pane-client";
 import {
+  createThreadVideoResults,
+  type ThreadVideoResults,
+} from "@octant/client-runtime/video-generation-client";
+import {
   createConversationInputClient,
   type ConversationInputClient,
 } from "@octant/client-runtime/conversation-input-client";
@@ -92,6 +96,7 @@ export interface RemoteProductClients {
   readonly conversationInputs?: ConversationInputClient;
   readonly serviceOffers?: ServiceOfferClient;
   readonly imageResults?: ThreadImageResults;
+  readonly videoResults?: ThreadVideoResults;
   readonly chat: ChatClient;
   readonly canvas: CanvasClient;
   readonly desktop?: DesktopPaneClient;
@@ -236,6 +241,7 @@ export function createRemoteProductClients(
     conversationInputs: createConversationInputClient(port),
     serviceOffers: createServiceOfferClient(port),
     imageResults: createThreadImageResults(port),
+    videoResults: createThreadVideoResults(port),
     chat: createChatClient(port),
     // Reading a Canvas never grants a paired browser the host's export,
     // credential, editing or share-management authority.

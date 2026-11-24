@@ -138,6 +138,7 @@ export type RoutesDependencies = {
   Pick<
     WorkFilesWiring,
     | "imageRoutes"
+    | "videoRoutes"
     | "serviceOfferRoutes"
     | "previewHandoffBridgeRoutes"
     | "previewRoutes"
@@ -229,6 +230,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     goalLoopRoutes,
     goalRoutes,
     imageRoutes,
+    videoRoutes,
     serviceOfferRoutes,
     integrationRoutes,
     latencyStats,
@@ -380,6 +382,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await canvasRoutes(request)) ??
     (await serviceOfferRoutes(request)) ??
     (await imageRoutes(request)) ??
+    (await videoRoutes(request)) ??
     (await providerCloudSessionRoutes(request)) ??
     (await speechRoutes(request)) ??
     (await replyDetailRoutes(request)) ??

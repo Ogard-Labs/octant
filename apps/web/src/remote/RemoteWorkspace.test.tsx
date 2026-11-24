@@ -599,4 +599,46 @@ describe("RemoteWorkspace", () => {
       await screen.findByRole("article", { name: "Proposed worker: Fix the flaky test" }),
     ).toBeInTheDocument();
   });
+
+  it("loads thread video clips for a directly paired Read only browser without offering Stop", async () => {
+    const { clients, coordinator } = coordinatorFixture();
+    const list = vi.fn(async () => ({ jobs: [] }));
+    const videoResults = {
+      list,
+      clipUrl: vi.fn(),
+    };
+    const clientsWithVideo: RemoteProductClients = { ...clients, videoResults };
+
+    const { rerender } = render(
+      <RemoteWorkspace
+        actsAsHostPerson={false}
+        canWatchVideoClips
+        clients={clientsWithVideo}
+        connected
+        mode="code"
+        readOnly
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Backlog coordinator" }));
+    await waitFor(() =>
+      expect(list).toHaveBeenCalledWith({
+        threadKind: "code-thread",
+        scopeId: String(coordinator.id),
+      }),
+    );
+
+    list.mockClear();
+    rerender(
+      <RemoteWorkspace
+        actsAsHostPerson={false}
+        canWatchVideoClips={false}
+        clients={clientsWithVideo}
+        connected
+        mode="code"
+        readOnly
+      />,
+    );
+    expect(list).not.toHaveBeenCalled();
+  });
 });

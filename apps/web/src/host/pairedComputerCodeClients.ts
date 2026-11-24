@@ -14,12 +14,17 @@ import {
   createRepositoryBootstrapClient,
   type RepositoryBootstrapClient,
 } from "@octant/client-runtime/repository-bootstrap-client";
+import {
+  createThreadVideoResults,
+  type ThreadVideoResults,
+} from "@octant/client-runtime/video-generation-client";
 
 export interface PairedComputerCodeClients {
   readonly desktop: DesktopPaneClient;
   readonly code: CodeClient;
   readonly project: ProjectClient;
   readonly provider: ProviderClient;
+  readonly videoResults: ThreadVideoResults;
   /** That computer's folders, for a new Code Project there; it admits only its own person. */
   readonly folderBrowse: FolderBrowseClient;
   /** Cloning a local repository onto that computer; admits only its own person. */
@@ -51,6 +56,7 @@ export function createPairedComputerCodeClients(
     desktop: createDesktopPaneClient(port),
     project: createProjectClient(port),
     provider: createProviderClient(port),
+    videoResults: createThreadVideoResults(port),
     folderBrowse: createFolderBrowseClient(port),
     repositoryBootstrap: createRepositoryBootstrapClient(port),
   };

@@ -115,6 +115,9 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   { method: "DELETE", path: "/api/chat/attachments/:id" },
   { method: "GET", path: "/api/code/bootstrap" },
   { method: "GET", path: "/api/code/navigation" },
+  { method: "GET", path: "/api/video/jobs" },
+  { method: "POST", path: "/api/video/clip" },
+  { method: "GET", path: "/api/video/clip" },
   { method: "GET", path: "/api/code/threads/:id" },
   { method: "GET", path: "/api/code/threads/:id/conversation" },
   { method: "GET", path: "/api/code/threads/:id/conversation/window" },
@@ -304,21 +307,21 @@ function decodeRequest(value: unknown, pins: PairedComputerPins): DecodedRequest
   ) {
     return refuse("Octant doesn't send that request to another computer.");
   }
+  const pathname = new URL(path as string, origin).pathname;
   // Held to the recorded pin unless this is a pairing route.
-  if (
-    pins.reachPinFor(origin, PAIRING_PATHS.has(new URL(path as string, origin).pathname)) ===
-    undefined
-  ) {
+  if (pins.reachPinFor(origin, PAIRING_PATHS.has(pathname)) === undefined) {
     return refuse(NOT_PAIRED);
   }
-  const decodedHeaders = decodeHeaders(headers, origin, new URL(path as string, origin).pathname);
-  if (decodedHeaders === undefined) return refuse("Octant refused that request's headers.");
+  const rangedClip = method === "GET" && pathname === "/api/video/clip";
+  const decodedHeaders = decodeHeaders(headers, origin, pathname, rangedClip);
+  if (decodedHeaders === undefined || (rangedClip && decodedHeaders.range === undefined)) {
+    return refuse("Octant refused that request's headers.");
+  }
   let bytes: Uint8Array<ArrayBuffer> | undefined;
   if (body !== undefined && body !== null) {
     if (typeof body === "string") bytes = new TextEncoder().encode(body);
     else if (body instanceof Uint8Array) bytes = new Uint8Array(body);
     else return refuse("Octant refused that request's body.");
-    const pathname = new URL(path as string, origin).pathname;
     const limit =
       method === "POST" && pathname === "/api/chat/attachments"
         ? MAX_CODE_ATTACHMENT_BYTES
@@ -392,6 +395,7 @@ function decodeHeaders(
   value: unknown,
   origin: string,
   path: string,
+  rangedClip: boolean,
 ): Readonly<Record<string, string>> | undefined {
   if (value === undefined || value === null) return {};
   if (typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -409,7 +413,9 @@ function decodeHeaders(
     const attachmentHeader =
       attachment !== undefined &&
       new RegExp(`^x-octant-${attachment}-(?:thread-id|attachment-id|display-name)$`).test(name);
-    if ((!ALLOWED_REQUEST_HEADERS.has(name) && !attachmentHeader) || name in headers)
+    // The host caps each video range below the desktop channel's reply bound.
+    const videoRange = rangedClip && name === "range" && /^bytes=\d{1,10}-\d{0,10}$/.test(rawValue);
+    if ((!ALLOWED_REQUEST_HEADERS.has(name) && !attachmentHeader && !videoRange) || name in headers)
       return undefined;
     if (name === "cookie" && !SESSION_COOKIE_PATTERN.test(rawValue)) return undefined;
     if (name === "origin" && rawValue !== origin) return undefined;
