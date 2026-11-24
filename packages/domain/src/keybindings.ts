@@ -357,14 +357,38 @@ export interface OctantKeybindings {
    */
   readonly rejected: ReadonlyArray<OctantKeybindingRejection>;
   /**
-   * Actions that ended up sharing a chord. The first one listed for a chord
-   * keeps it; the rest are reported so the user can see the collision instead
-   * of discovering it by pressing the key.
+   * Actions that compete for a chord. The first one listed keeps it and the
+   * rest never run; they are reported so the user can see the collision instead
+   * of discovering it by pressing the key. Actions that share a chord but never
+   * answer in the same place are not here. A chord can appear more than once,
+   * one entry for each place its actions compete.
    */
   readonly conflicts: ReadonlyArray<{
     readonly chord: string;
     readonly actionIds: ReadonlyArray<OctantKeybindingActionId>;
   }>;
+}
+
+/**
+ * Split the actions on one chord, in table order, into the groups in which one
+ * keeps the chord and the rest never run.
+ *
+ * Global chords compete with each other, and a page's only with that page's.
+ * A terminal's compete with each other and yield to a global chord listed
+ * ahead of them. A global chord listed after one is not a conflict: the
+ * terminal keeps it, and the global action still runs everywhere else.
+ */
+function competingActions(
+  actions: ReadonlyArray<OctantKeybindingAction>,
+): ReadonlyArray<ReadonlyArray<OctantKeybindingAction>> {
+  const elsewhere = actions.filter((action) => action.page === undefined);
+  const pages = new Set(actions.flatMap((action) => action.page ?? []));
+  const holder = elsewhere[0];
+  return [
+    elsewhere.filter((action) => action.scope === undefined),
+    ...[...pages].map((page) => actions.filter((action) => action.page === page)),
+    elsewhere.filter((action) => action.scope === "terminal" || action === holder),
+  ].filter((group) => group.length > 1);
 }
 
 /**
@@ -401,18 +425,21 @@ export function resolveKeybindings(
     if (fallback.status === "ok") bindings.set(action.id, fallback.chord);
   }
 
-  const byChord = new Map<string, OctantKeybindingActionId[]>();
+  const byChord = new Map<string, OctantKeybindingAction[]>();
   // Iterate the action table, not the map, so a conflict resolves the same way
   // whatever order the override JSON happened to list its keys in.
   for (const action of OCTANT_KEYBINDING_ACTIONS) {
     const chord = bindings.get(action.id);
     if (chord === undefined) continue;
     const key = formatChord(chord);
-    byChord.set(key, [...(byChord.get(key) ?? []), action.id]);
+    byChord.set(key, [...(byChord.get(key) ?? []), action]);
   }
-  const conflicts = [...byChord.entries()]
-    .filter(([, actionIds]) => actionIds.length > 1)
-    .map(([chord, actionIds]) => ({ chord, actionIds: [...actionIds] }));
+  const conflicts = [...byChord.entries()].flatMap(([chord, actions]) =>
+    competingActions(actions).map((competing) => ({
+      chord,
+      actionIds: competing.map((action) => action.id),
+    })),
+  );
 
   return { bindings, rejected, conflicts };
 }

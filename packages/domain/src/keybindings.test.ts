@@ -69,6 +69,35 @@ describe("resolveKeybindings", () => {
     expect(formatChord(resolved.bindings.get("code-file-search")!)).toBe("Mod+K");
   });
 
+  it("does not report a Review-page key and a global action on the same chord as a conflict", () => {
+    const resolved = resolveKeybindings({ "review-next": "Mod+Shift+M" });
+
+    expect(resolved.conflicts).toEqual([]);
+    const pressed = keyEvent("M", { meta: true, shift: true });
+    expect(matchKeybinding(resolved, pressed, true)).toBe("dictate");
+    expect(matchPageKeybinding(resolved, "review", pressed, true)).toBe("review-next");
+  });
+
+  it("still reports two global actions on the same chord", () => {
+    const resolved = resolveKeybindings({
+      "review-next": "Mod+K",
+      "code-file-search": "Mod+K",
+    });
+
+    expect(resolved.conflicts).toEqual([
+      { chord: "Mod+K", actionIds: ["command-palette", "code-file-search"] },
+    ]);
+  });
+
+  it("still reports two commands of one page on the same key", () => {
+    const resolved = resolveKeybindings({ "review-previous": "J" });
+
+    expect(resolved.conflicts).toEqual([
+      { chord: "J", actionIds: ["review-next", "review-previous"] },
+    ]);
+    expect(matchPageKeybinding(resolved, "review", keyEvent("j"), true)).toBe("review-next");
+  });
+
   it("keeps a chord saved before Dictate existed on the action it was saved for", () => {
     const resolved = resolveKeybindings({ "code-file-search": "Mod+Shift+M" });
 
@@ -211,6 +240,41 @@ describe("the terminal's way out", () => {
     });
     expect(formatChord(resolved.bindings.get("terminal-focus-next")!)).toBe("Alt+Tab");
     expect(formatChord(resolved.bindings.get("command-palette")!)).toBe("Mod+K");
+  });
+
+  it("reports a terminal action that a global action shadows", () => {
+    const shared = resolveKeybindings({ "terminal-focus-next": "Mod+K" });
+    expect(shared.conflicts).toEqual([
+      { chord: "Mod+K", actionIds: ["command-palette", "terminal-focus-next"] },
+    ]);
+  });
+
+  it("still reports two terminal actions on the same chord", () => {
+    const shared = resolveKeybindings({ "terminal-focus-previous": "Mod+Escape" });
+    expect(shared.conflicts).toEqual([
+      { chord: "Mod+Escape", actionIds: ["terminal-focus-next", "terminal-focus-previous"] },
+    ]);
+  });
+
+  it("reports no conflict where both the terminal action and the global one run", () => {
+    // The terminal keeps a chord it holds ahead of a later global action, and
+    // that action still runs everywhere else.
+    const shared = resolveKeybindings({ "terminal-focus-next": "Mod+Shift+M" });
+    expect(shared.conflicts).toEqual([]);
+    const pressed = keyEvent("M", { meta: true, shift: true });
+    expect(matchTerminalKeybinding(shared, pressed, true)).toBe("terminal-focus-next");
+    expect(matchKeybinding(shared, pressed, true)).toBe("dictate");
+  });
+
+  it("runs a terminal command that shares its chord only with a page's command", () => {
+    const shared = resolveKeybindings({
+      "review-next": "Mod+Shift+Y",
+      "terminal-focus-next": "Mod+Shift+Y",
+    });
+    expect(shared.conflicts).toEqual([]);
+    expect(matchTerminalKeybinding(shared, keyEvent("Y", { meta: true, shift: true }), true)).toBe(
+      "terminal-focus-next",
+    );
   });
 
   it("does not run a terminal command whose chord a global action already holds", () => {
