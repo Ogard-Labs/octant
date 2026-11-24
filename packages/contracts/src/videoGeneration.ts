@@ -273,6 +273,8 @@ export const VideoOfferImage = Schema.Struct({
 }).annotations(strict);
 export type VideoOfferImage = typeof VideoOfferImage.Type;
 
+export const MAX_VIDEO_OFFER_PROFILE_NAME_LENGTH = 120;
+
 /**
  * An agent asking to make a clip. The card shows the prompt, the named
  * images, the profile and model with what the model declares, the chosen
@@ -288,7 +290,9 @@ export const VideoGenerateOffer = Schema.Struct({
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_VIDEO_PROMPT_CHARACTERS)),
   images: Schema.Array(VideoOfferImage).pipe(Schema.maxItems(8)),
   profileInstanceId: ProviderInstanceId,
-  profileName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120)),
+  profileName: Schema.NonEmptyTrimmedString.pipe(
+    Schema.maxLength(MAX_VIDEO_OFFER_PROFILE_NAME_LENGTH),
+  ),
   /** The provider that bills the clip and receives the prompt, by name. */
   providerName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120)),
   model: VideoModelCapabilities,

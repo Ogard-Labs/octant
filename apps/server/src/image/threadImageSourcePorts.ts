@@ -5,6 +5,7 @@ import {
 } from "@octant/contracts";
 import type { BrowserCaptureService } from "../browser/browserCaptureService";
 import { prepareCanvasDesignAssetFile } from "../canvas/canvasDesignAssets";
+import { isProtectedSecretPath } from "../process/secretGuard";
 import { liveWorkFilesystem } from "../work/workFilesystemPort";
 import type { ImageSource, ThreadImageSources } from "./threadImageSources";
 
@@ -65,6 +66,7 @@ export function workspaceImageSources(input: {
         root,
         path,
         maximumBytes: MAX_GENERATED_IMAGE_BYTES,
+        pathRefused: isProtectedSecretPath,
       });
       return prepared.status === "unavailable"
         ? undefined

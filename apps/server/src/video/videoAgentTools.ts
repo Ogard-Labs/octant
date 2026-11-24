@@ -1,5 +1,6 @@
 import {
   MAX_VIDEO_REFERENCES,
+  MAX_VIDEO_OFFER_PROFILE_NAME_LENGTH,
   type ImageGenerationSaveResult,
   type ImageGenerationScopeId,
   type ProviderInstance,
@@ -26,6 +27,7 @@ import {
   videoAspectRatioChoices,
   videoAudioChoices,
   videoDurationValues,
+  type VideoRequestInputs,
 } from "@octant/provider-sdk/video-generation";
 import type { ImageJobService } from "../image/imageJobService";
 import type { KeptImageGenerationChoices } from "../image/keptImageGenerationChoices";
@@ -138,6 +140,9 @@ export function describeReadyModels(ready: ReadonlyArray<ReadyProfile>): string 
               ? "always with audio,"
               : "no audio,",
           `first frame ${model.inputs.firstFrame ? "yes" : "no"}, last frame ${model.inputs.lastFrame ? "yes" : "no"},`,
+          ...(model.inputs.maxDurationSecondsWithBothFrames === undefined
+            ? []
+            : [`up to ${model.inputs.maxDurationSecondsWithBothFrames} s with both frames,`]),
           `up to ${String(model.inputs.maxReferenceImages)} reference images.`,
         ].join(" ");
       }),
@@ -268,9 +273,9 @@ function findModel(
 function requestedOptions(
   model: VideoModelCapabilities,
   request: MediaVideoGenerateRequest,
-  hasFirstFrame: boolean,
+  frames: Pick<VideoRequestInputs, "firstFrame" | "lastFrame">,
 ): VideoClipOptions | undefined {
-  const defaults = defaultVideoClipOptions(model, hasFirstFrame);
+  const defaults = defaultVideoClipOptions(model, frames.firstFrame, frames.lastFrame);
   if (defaults === undefined) return undefined;
   return {
     durationSeconds: request.durationSeconds ?? defaults.durationSeconds,
@@ -322,7 +327,7 @@ async function generateVideo(
   if (found === undefined) {
     return { status: "refused", error: "That video profile or model is not ready." };
   }
-  const proposed = requestedOptions(found.model, request, counts.firstFrame);
+  const proposed = requestedOptions(found.model, request, counts);
   if (proposed === undefined) {
     return { status: "refused", error: `${found.model.displayName} declares no usable options.` };
   }
@@ -352,7 +357,7 @@ async function generateVideo(
         prompt: request.prompt,
         images: offerImages(images),
         profileInstanceId: found.instance.id,
-        profileName: first.profileName,
+        profileName: first.profileName.slice(0, MAX_VIDEO_OFFER_PROFILE_NAME_LENGTH).trimEnd(),
         providerName: first.providerName,
         model: first.model,
         options: proposed,
@@ -495,7 +500,11 @@ function waitForTerminal(
  * at once. The write is confined to the folder and never overwrites.
  */
 async function saveVideo(
-  options: { readonly scopeId: ImageGenerationScopeId; readonly port: VideoAgentToolPort },
+  options: {
+    readonly scopeId: ImageGenerationScopeId;
+    readonly threadKind: ThreadKind;
+    readonly port: VideoAgentToolPort;
+  },
   request: MediaVideoSaveRequest,
 ): Promise<MediaVideoSaveOutcome> {
   const { port } = options;
@@ -505,7 +514,16 @@ async function saveVideo(
   }
   const job = port.jobs
     .listByScope(options.scopeId)
-    .find((candidate) => String(candidate.clip?.clipId) === String(request.clipId));
+    .find(
+      (candidate) =>
+        candidate.threadKind === options.threadKind &&
+        ("jobId" in request
+          ? String(candidate.id) === String(request.jobId)
+          : String(candidate.clip?.clipId) === String(request.clipId)),
+    );
+  if (job?.status === "queued" || job?.status === "running") {
+    return { status: "refused", error: "That job is still making its clip." };
+  }
   if (job === undefined || job.status !== "completed" || job.clip === undefined) {
     return { status: "refused", error: "That clip is not a finished clip of this thread." };
   }

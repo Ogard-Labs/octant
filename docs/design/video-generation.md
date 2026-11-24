@@ -636,7 +636,10 @@ tool plugin over a new optional `videoGeneration` capability on the public
 media tool port (`@octant/plugin-api/media-tools`). It has `generate` and
 `save` operations, and the same host-owned boundaries as
 `octant_create_image`: confinement, bytes, credentials, spend, consent and the
-access level stay in the host.
+access level stay in the host. Workspace references must pass protected-file
+checks both when offered and when read. A Work or Code turn can save a
+completed clip by its clip ID or by the job ID returned while generation
+was still running. The save refuses protected paths and existing files.
 
 It is offered in Chat, Work and Code only while an enabled profile has a
 video model. It is never offered in Plan or a Side Chat, and in an unattended

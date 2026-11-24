@@ -305,11 +305,10 @@ export type MediaVideoGenerateOutcome =
   | { readonly status: "failed"; readonly jobId: VideoJobId; readonly message: string }
   | { readonly status: "refused"; readonly error: string };
 
-export interface MediaVideoSaveRequest {
-  readonly clipId: VideoClipId;
+export type MediaVideoSaveRequest = {
   readonly relativePath: string;
   readonly signal?: AbortSignal;
-}
+} & ({ readonly clipId: VideoClipId } | { readonly jobId: VideoJobId });
 
 export type MediaVideoSaveOutcome =
   | { readonly status: "saved"; readonly relativePath: string }

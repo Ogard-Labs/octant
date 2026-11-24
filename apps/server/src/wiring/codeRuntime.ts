@@ -70,7 +70,7 @@ import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
 import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
-import { saveGeneratedImageUnder } from "../image/generatedImageSave";
+import { saveGeneratedImageUnder, writeConfinedNewFileUnder } from "../image/generatedImageSave";
 import { hostIconSetsUnder } from "../image/iconSetRenderer";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { createThreadVideoAgentTools } from "../video/videoAgentTools";
@@ -895,7 +895,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               save: {
                 posture: savePostureForMedia,
                 write: (relativePath: string, bytes: Uint8Array) =>
-                  saveGeneratedImageUnder({ root: checkoutRoot, relativePath, bytes }),
+                  writeConfinedNewFileUnder({ root: checkoutRoot, relativePath, bytes }),
               },
             }),
         refusal: () =>

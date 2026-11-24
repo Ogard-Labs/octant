@@ -46,6 +46,30 @@ describe("video card description", () => {
     });
   });
 
+  it("only offers lengths within the model's limit for both frames", () => {
+    const pending = offer(
+      { cancel: "running", removal: { kind: "delete" }, resumeWindowHours: 24 },
+      { kind: "unknown" },
+    );
+    const first = { role: "first-frame", label: "First photo" } as const;
+    const last = { role: "last-frame", label: "Last photo" } as const;
+    const model = {
+      ...pending.model,
+      durations: { kind: "range", min: 3, max: 15 } as const,
+      inputs: {
+        ...pending.model.inputs,
+        lastFrame: true,
+        maxDurationSecondsWithBothFrames: 10,
+      },
+    };
+    expect(videoOfferChoices({ ...pending, model, images: [first] }).durations).toContain(15);
+    const both = { ...pending, model, images: [first, last] };
+    expect(videoOfferChoices(both).durations).toEqual([3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(describeVideoOffer(both, { ...pending.options, durationSeconds: 11 }).approvable).toBe(
+      false,
+    );
+  });
+
   it("offers only what the model declares and cannot approve an unpublished combination", () => {
     const pending = offer(
       { cancel: "running", removal: { kind: "delete" }, resumeWindowHours: 24 },

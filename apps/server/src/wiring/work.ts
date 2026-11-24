@@ -132,7 +132,7 @@ import {
   type WorkBoardRuntimeActivity,
 } from "../work/workThreadBoardService";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
-import { saveGeneratedImageUnder } from "../image/generatedImageSave";
+import { saveGeneratedImageUnder, writeConfinedNewFileUnder } from "../image/generatedImageSave";
 import { hostIconSetsUnder } from "../image/iconSetRenderer";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { createThreadVideoAgentTools } from "../video/videoAgentTools";
@@ -1071,7 +1071,7 @@ export function wireWork(deps: WorkDependencies) {
               save: {
                 posture: () => runningLevel().imageSave,
                 write: (relativePath, bytes) =>
-                  saveGeneratedImageUnder({ root: input.projectRoot, relativePath, bytes }),
+                  writeConfinedNewFileUnder({ root: input.projectRoot, relativePath, bytes }),
               },
               refusal: () =>
                 runningLevel().imageRefusal === undefined

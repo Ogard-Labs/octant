@@ -144,7 +144,7 @@ function videoOfferInputs(offer: VideoGenerateOffer) {
 export function videoOfferChoices(offer: VideoGenerateOffer) {
   const inputs = videoOfferInputs(offer);
   return {
-    durations: videoDurationValues(offer.model),
+    durations: videoDurationValues(offer.model, inputs),
     resolutions: offer.model.resolutions,
     aspectRatios: videoAspectRatioChoices(offer.model, inputs.firstFrame),
     audio: videoAudioChoices(offer.model),

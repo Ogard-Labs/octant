@@ -7,6 +7,7 @@ import {
   MAX_GENERATED_IMAGE_BYTES,
 } from "@octant/contracts";
 import { expect, it, vi } from "vitest";
+import { applyProtectedFilesChoice, currentProtectedFilesChoice } from "../process/secretGuard";
 import { attachedImageSources, workspaceImageSources } from "./threadImageSourcePorts";
 import {
   describeImageSources,
@@ -53,6 +54,30 @@ it("confines a reference to the turn's folder and refuses a file that changes sc
     await expect(changed?.read()).resolves.toBeUndefined();
   } finally {
     await rm(base, { recursive: true, force: true });
+  }
+});
+
+it("refuses a protected reference before approval and again before reading it", async () => {
+  const folder = await realpath(await mkdtemp(join(tmpdir(), "octant-references-")));
+  const previous = currentProtectedFilesChoice();
+  try {
+    const photo = join(folder, "photo.png");
+    await writeFile(photo, png);
+    await symlink("photo.png", join(folder, "alias.png"));
+    const files = workspaceImageSources({
+      threadId,
+      browserCaptures: { list: () => [], read: async () => undefined },
+      root: async () => folder,
+    });
+    const source = await files.file?.("alias.png");
+    await expect(source?.read()).resolves.toEqual(png);
+    applyProtectedFilesChoice({ ...previous, added: [...previous.added, photo] });
+    await expect(files.file?.("photo.png")).resolves.toBeUndefined();
+    await expect(files.file?.("alias.png")).resolves.toBeUndefined();
+    await expect(source?.read()).resolves.toBeUndefined();
+  } finally {
+    applyProtectedFilesChoice(previous);
+    await rm(folder, { recursive: true, force: true });
   }
 });
 

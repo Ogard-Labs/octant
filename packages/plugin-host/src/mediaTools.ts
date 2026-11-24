@@ -18,6 +18,7 @@ import {
   decodeSpeechSynthesisFormat,
   decodeSpeechTranscriptionLanguage,
   decodeVideoClipId,
+  decodeVideoJobId,
   MAX_IMAGE_PROMPT_CHARACTERS,
   MAX_IMAGE_REFERENCE_LABEL_LENGTH,
   MAX_IMAGE_REFERENCES,
@@ -35,7 +36,6 @@ import {
   type ProviderToolDefinition,
   type SpeechSynthesisFormat,
   type SpeechTranscriptionLanguage,
-  type VideoClipId,
 } from "@octant/contracts";
 import {
   MEDIA_ICON_SET_TARGETS,
@@ -48,6 +48,7 @@ import {
   type MediaToolResult,
   type MediaToolSet,
   type MediaVideoGenerateRequest,
+  type MediaVideoSaveRequest,
 } from "@octant/plugin-api/media-tools";
 
 export const TRANSCRIBE_TOOL_NAME = "octant_transcribe" as const;
@@ -1096,7 +1097,7 @@ export const CREATE_IMAGE_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
 };
 
 const VIDEO_DESCRIPTION =
-  "Generate a short video clip with a video model the person set up in Octant. Call it only when the person asks for a video, instead of writing an animation by hand. Octant shows the person a card in this thread with the price, where they confirm, because each clip is billed to their video provider; nothing runs until they answer, unless they already said not to ask again or the thread runs at Full access. Describe the clip in prompt. durationSeconds, resolution, aspectRatio and audio are optional and must be ones the model declares; absent ones take the model's defaults. Use firstFrame, lastFrame and references (the same reference forms as octant_create_image; an attachment may also carry name to pick one upload, which a frame requires) where the model takes them; images always require confirmation. The result says what happened: completed with a clipId (the clip is shown in this thread), generating with a jobId when it takes longer than the call waits (it appears when done; do not start another), failed with the reason, or cancelled (do not ask again unless they do). In a Work or Code thread, operation save with a clipId from this thread and a relativePath ending in .mp4 stores the clip as a new file in the folder you work in: it never overwrites a file, Plan refuses it, and at Ask first the person confirms the path. Never invent a video URL.";
+  "Generate a short video clip with a video model the person set up in Octant. Call it only when the person asks for a video, instead of writing an animation by hand. Octant shows the person a card in this thread with the price, where they confirm, because each clip is billed to their video provider; nothing runs until they answer, unless they already said not to ask again or the thread runs at Full access. Describe the clip in prompt. durationSeconds, resolution, aspectRatio and audio are optional and must be ones the model declares; absent ones take the model's defaults. Use firstFrame, lastFrame and references (the same reference forms as octant_create_image; an attachment may also carry name to pick one upload, which a frame requires) where the model takes them; images always require confirmation. The result says what happened: completed with a clipId (the clip is shown in this thread), generating with a jobId when it takes longer than the call waits (it appears when done; do not start another), failed with the reason, or cancelled (do not ask again unless they do). In a Work or Code thread, operation save with a clipId or jobId from this thread and a relativePath ending in .mp4 stores the clip as a new file in the folder you work in: it never overwrites a file, Plan refuses it, and at Ask first the person confirms the path. Never invent a video URL.";
 
 const VIDEO_REFERENCE_SCHEMA = {
   type: "object",
@@ -1126,13 +1127,14 @@ const VIDEO_INPUT_SCHEMA = {
     lastFrame: VIDEO_REFERENCE_SCHEMA,
     references: { type: "array", maxItems: MAX_VIDEO_REFERENCES, items: VIDEO_REFERENCE_SCHEMA },
     clipId: { type: "string" },
+    jobId: { type: "string" },
     relativePath: { type: "string" },
   },
 } as const;
 
 type ParsedVideoInput =
   | ({ readonly operation: "generate" } & Omit<MediaVideoGenerateRequest, "signal">)
-  | { readonly operation: "save"; readonly clipId: VideoClipId; readonly relativePath: string }
+  | ({ readonly operation: "save" } & MediaVideoSaveRequest)
   | { readonly error: string };
 
 function parseOneVideoReference(
@@ -1169,14 +1171,20 @@ function parseVideoToolInput(inputJson: string): ParsedVideoInput {
     const canonical = canonicalizeRelativeReferencePath(relativePath);
     if (canonical === undefined)
       return { error: "The path must be inside the folder you work in." };
+    const clipId = raw["clipId"];
+    const jobId = raw["jobId"];
+    if ((clipId === undefined) === (jobId === undefined))
+      return { error: "Pass exactly one clipId or jobId from this thread." };
     try {
       return {
         operation: "save",
-        clipId: decodeVideoClipId(raw["clipId"]),
         relativePath: canonical,
+        ...(clipId === undefined
+          ? { jobId: decodeVideoJobId(jobId) }
+          : { clipId: decodeVideoClipId(clipId) }),
       };
     } catch {
-      return { error: "Pass the clipId of a clip from this thread." };
+      return { error: "Pass a valid clipId or jobId from this thread." };
     }
   }
   if (operation !== "generate") return { error: "The operation must be generate or save." };
@@ -1287,7 +1295,7 @@ export const CREATE_VIDEO_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
             );
           }
           const saved = await videoGeneration.save({
-            clipId: parsed.clipId,
+            ...("clipId" in parsed ? { clipId: parsed.clipId } : { jobId: parsed.jobId }),
             relativePath: parsed.relativePath,
             signal,
           });
@@ -1328,7 +1336,7 @@ export const CREATE_VIDEO_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
                 status: "generating",
                 jobId: outcome.jobId,
                 message:
-                  "The clip is still being made and appears in this thread when done. Do not start another.",
+                  "The clip is still being made and appears in this thread when done. To save it in Work or Code, use this jobId after it finishes. Do not start another.",
               },
             };
           case "cancelled":

@@ -1,3 +1,6 @@
+import { access, mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   decodeImageGenerationScopeId,
   decodeProviderInstanceId,
@@ -9,6 +12,8 @@ import {
 } from "@octant/contracts";
 import { CREATE_VIDEO_TOOL_NAME } from "@octant/plugin-host/media-tools";
 import { describe, expect, it, vi } from "vitest";
+import { writeConfinedNewFileUnder } from "../image/generatedImageSave";
+import { applyProtectedFilesChoice, currentProtectedFilesChoice } from "../process/secretGuard";
 import { createVideoAgentTools, type VideoAgentToolPort } from "./videoAgentTools";
 import type { VideoQuote } from "./videoJobService";
 
@@ -107,10 +112,13 @@ function harness(options: {
   readonly posture?: "refuse" | "ask" | "allow";
   readonly answer?: Awaited<ReturnType<VideoAgentToolPort["askGenerate"]>>;
   readonly pending?: boolean;
+  readonly profileName?: string;
+  readonly listJobs?: () => ReadonlyArray<VideoJob>;
   readonly waitMs?: number;
   readonly refusal?: () => string | undefined;
   readonly frameRead?: () => Promise<Uint8Array | undefined>;
   readonly readClip?: () => Promise<Uint8Array>;
+  readonly writeClip?: NonNullable<VideoAgentToolPort["save"]>["write"];
 }) {
   const quote = vi.fn(
     async (input: { readonly options: { readonly resolution: string } }): Promise<VideoQuote> =>
@@ -118,7 +126,7 @@ function harness(options: {
         ? {
             status: "ready",
             driverKind: "gemini-video",
-            profileName: "Gemini Video",
+            profileName: options.profileName ?? "Gemini Video",
             providerName: "Google",
             model,
             estimate: { kind: "estimate", usdMicros: 695_040 },
@@ -133,10 +141,11 @@ function harness(options: {
   const askGenerate = vi.fn(async () => options.answer ?? { status: "cancelled" as const });
   const askSave = vi.fn(async () => ({ status: "video-save" as const }));
   const write = vi.fn(
-    async (relativePath: string): Promise<ImageGenerationSaveResult> => ({
-      status: "saved",
-      relativePath,
-    }),
+    options.writeClip ??
+      (async (relativePath: string): Promise<ImageGenerationSaveResult> => ({
+        status: "saved",
+        relativePath,
+      })),
   );
   const set = createVideoAgentTools({
     threadKind: "work-thread",
@@ -148,7 +157,7 @@ function harness(options: {
         enqueue,
         stop,
         whenTerminal: options.pending === true ? () => new Promise(() => {}) : async () => finished,
-        listByScope: () => [finished],
+        listByScope: options.listJobs ?? (() => [finished]),
         readClip: async () => (await options.readClip?.()) ?? new Uint8Array(2048),
       },
       ...(options.refusal === undefined ? {} : { refusal: options.refusal }),
@@ -257,6 +266,46 @@ describe("octant_create_video on the host", () => {
     expect(slow.stop).not.toHaveBeenCalled();
   });
 
+  it("offers a long profile name within the card schema", async () => {
+    const { call, askGenerate } = harness({ profileName: "Profile ".repeat(20).trim() });
+    await call({ prompt: "A paper boat on a pond" });
+    expect(askGenerate).toHaveBeenCalledWith(
+      expect.objectContaining({ profileName: "Profile ".repeat(15).trim() }),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("saves a slow clip by its returned job ID once the job completes", async () => {
+    let job = running;
+    const options = { durationSeconds: 5, resolution: "720p", aspectRatio: "16:9", audio: true };
+    const slow = harness({
+      pending: true,
+      waitMs: 1,
+      listJobs: () => [job],
+      answer: { status: "video-generate", options, rememberForThread: false },
+    });
+    expect((await slow.call({ prompt: "A paper boat on a pond" })).result).toMatchObject({
+      status: "generating",
+      jobId: running.id,
+    });
+    const save = { operation: "save", jobId: running.id, relativePath: "media/boat.mp4" };
+    expect((await slow.call(save)).isError).toBe(true);
+    expect(slow.askSave).not.toHaveBeenCalled();
+    job = { ...finished, threadKind: "code-thread" };
+    expect((await slow.call(save)).isError).toBe(true);
+    expect(slow.askSave).not.toHaveBeenCalled();
+    job = finished;
+    expect((await slow.call({ ...save, clipId })).isError).toBe(true);
+    expect((await slow.call(save)).result).toEqual({
+      status: "saved",
+      relativePath: "media/boat.mp4",
+    });
+    expect(slow.askSave).toHaveBeenCalledWith(
+      expect.objectContaining({ clipId, jobId: running.id }),
+      expect.any(AbortSignal),
+    );
+  });
+
   it("saves a finished clip at the turn's level: asks first, and Plan refuses", async () => {
     const asking = harness({ posture: "ask" });
     await asking.call({ operation: "save", clipId, relativePath: "media/boat.mp4" });
@@ -273,6 +322,31 @@ describe("octant_create_video on the host", () => {
     const plan = harness({ posture: "refuse" });
     await plan.call({ operation: "save", clipId, relativePath: "media/boat.mp4" });
     expect(plan.write).not.toHaveBeenCalled();
+  });
+
+  it("refuses a protected video destination even when the turn can save without asking", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "octant-video-save-")));
+    const previous = currentProtectedFilesChoice();
+    try {
+      const relativePath = "private/boat.mp4";
+      applyProtectedFilesChoice({ ...previous, added: [...previous.added, join(root, "private")] });
+      const { call, askSave } = harness({
+        posture: "allow",
+        writeClip: (path, bytes) => writeConfinedNewFileUnder({ root, relativePath: path, bytes }),
+      });
+      const save = { operation: "save", clipId };
+      const protectedSave = await call({ ...save, relativePath });
+      expect(protectedSave.isError).toBe(true);
+      await expect(access(join(root, "private"))).rejects.toMatchObject({ code: "ENOENT" });
+      expect((await call({ ...save, relativePath: "boat.mp4" })).result).toMatchObject({
+        status: "saved",
+      });
+      expect((await call({ ...save, relativePath: "boat.mp4" })).isError).toBe(true);
+      expect(askSave).not.toHaveBeenCalled();
+    } finally {
+      applyProtectedFilesChoice(previous);
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("writes nothing when the turn is stopped once the clip is read or the card answered", async () => {
