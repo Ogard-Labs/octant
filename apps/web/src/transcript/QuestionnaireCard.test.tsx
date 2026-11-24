@@ -36,6 +36,38 @@ const questionnaire = {
 };
 
 describe("inline questionnaires", () => {
+  it("picks options by number within the question that has focus", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn(async () => true);
+    render(
+      <QuestionnaireCard
+        prompt="Provider form"
+        questionnaire={{ ...questionnaire, allowComment: false }}
+        onAnswer={submit}
+      />,
+    );
+    screen.getByRole("checkbox", { name: "Markdown" }).focus();
+    await user.keyboard("2");
+    screen.getByRole("radio", { name: "Save only" }).focus();
+    await user.keyboard("2");
+    expect(screen.getByRole("checkbox", { name: "Markdown" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Open the file" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(submit).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Send answers" }));
+    expect(submit).toHaveBeenCalledExactlyOnceWith(
+      JSON.stringify({
+        version: 1,
+        answers: [
+          { questionId: "formats", selectedOptionIds: ["md"] },
+          { questionId: "open", selectedOptionIds: ["open"] },
+        ],
+      }),
+    );
+  });
+
   it("omits the global comment input when the form cannot receive a comment", async () => {
     const submit = vi.fn(async () => true);
     render(

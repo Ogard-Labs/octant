@@ -1,0 +1,14 @@
+/* An option's number sits at its trailing edge, centred on the label and its
+   description, so the key that picks it reads beside it. Loaded with the
+   question cards rather than the shell, which never draws one. */
+.provider-question-card__option:has(> .provider-question-card__key) {
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--oct-space-3);
+  width: 100%;
+}
+
+.provider-question-card__key {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+}

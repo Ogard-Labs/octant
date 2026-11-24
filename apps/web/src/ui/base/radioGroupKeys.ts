@@ -47,3 +47,37 @@ function moveWithinRole(event: KeyboardEvent<HTMLElement>, role: "radio" | "tab"
   radio.focus();
   radio.click();
 }
+
+/**
+ * Number keys for a group of choices: 1–9 pick the matching option, as a click
+ * would, and move focus to it. Only a key pressed inside the group counts, and
+ * never one typed into a text field there, so digits stay text in an answer
+ * field and the composer. A key picks; it never sends.
+ */
+export function chooseByNumber(event: KeyboardEvent<HTMLElement>): void {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  if (!/^[1-9]$/.test(event.key)) return;
+  const target = event.target;
+  if (
+    target instanceof HTMLElement &&
+    target.matches('input:not([type="checkbox"]), textarea, [contenteditable="true"]')
+  ) {
+    return;
+  }
+  const choices = Array.from(
+    event.currentTarget.querySelectorAll<HTMLElement>(
+      '[role="radio"], [role="checkbox"], input[type="checkbox"]',
+    ),
+  ).filter((choice) => !choice.matches(':disabled, [aria-disabled="true"]'));
+  const choice = choices[Number(event.key) - 1];
+  if (choice === undefined) return;
+  event.preventDefault();
+  choice.focus();
+  choice.click();
+}
+
+/** Arrow-key movement and number keys together, for a single-choice group. */
+export function moveOrChooseInRadioGroup(event: KeyboardEvent<HTMLElement>): void {
+  chooseByNumber(event);
+  if (!event.defaultPrevented) moveWithinRadioGroup(event);
+}

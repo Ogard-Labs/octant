@@ -6,7 +6,9 @@ import { useState } from "react";
 import { Eye, EyeOff } from "../ui/icons";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+import { moveOrChooseInRadioGroup } from "../ui/base/radioGroupKeys";
+import { OptionKey } from "./OptionKey";
+import "./question-keys.css";
 
 export interface ProviderQuestionCardProps {
   readonly draftIdentity?: QuestionnaireDraftIdentity | undefined;
@@ -79,10 +81,10 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
       ) : null}
       <div
         className="provider-question-card__choices"
-        onKeyDown={moveWithinRadioGroup}
+        onKeyDown={moveOrChooseInRadioGroup}
         role="radiogroup"
       >
-        {props.options.map((option) => (
+        {props.options.map((option, index) => (
           <div
             className="provider-question-card__choice"
             {...(selected === option.label ? { "data-checked": "" } : {})}
@@ -102,6 +104,7 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
                   {option.description}
                 </span>
               )}
+              <OptionKey index={index} />
             </OctantButton>
           </div>
         ))}
@@ -115,6 +118,7 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
             variant="ghost"
           >
             <span className="provider-question-card__option-label">Type your own answer</span>
+            <OptionKey index={props.options.length} />
           </OctantButton>
           {custom && !secret ? (
             <OctantInput

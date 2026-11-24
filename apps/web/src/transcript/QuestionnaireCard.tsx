@@ -7,7 +7,9 @@ import { validateQuestionnaireAnswer, type QuestionnaireAnswerValidation } from 
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
-import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+import { chooseByNumber, moveOrChooseInRadioGroup } from "../ui/base/radioGroupKeys";
+import { OptionKey } from "./OptionKey";
+import "./question-keys.css";
 
 export interface QuestionnaireCardProps {
   readonly draftIdentity?: QuestionnaireDraftIdentity | undefined;
@@ -149,9 +151,11 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
               role={question.selection === "single" ? "radiogroup" : "group"}
               aria-label={question.prompt}
               aria-describedby={`${id}-${index}-help`}
-              onKeyDown={question.selection === "single" ? moveWithinRadioGroup : undefined}
+              onKeyDown={
+                question.selection === "single" ? moveOrChooseInRadioGroup : chooseByNumber
+              }
             >
-              {question.options.map((option) => {
+              {question.options.map((option, optionIndex) => {
                 const checked = !custom && selected.includes(option.id);
                 const label = (
                   <>
@@ -164,6 +168,7 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
                         {option.description}
                       </span>
                     )}
+                    <OptionKey index={optionIndex} />
                   </>
                 );
                 const choose = () => {
@@ -230,7 +235,10 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
                       update({ questionId: question.id, selectedOptionIds: [] });
                     }}
                   >
-                    Write another answer
+                    <span className="provider-question-card__option-label">
+                      Write another answer
+                    </span>
+                    <OptionKey index={question.options.length} />
                   </OctantButton>
                   {custom ? (
                     <label className="questionnaire__written">
