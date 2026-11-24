@@ -834,6 +834,19 @@ export class VideoJobService {
           clipId,
           answer.video.bytes,
         );
+        if (this.#closing.signal.aborted) {
+          // The journal may have closed while the file was being written.
+          // Recovery will poll the still-running job and record a fresh clip.
+          if (written.status === "stored") {
+            await this.#options.clips.remove(current.scopeId, clipId).catch((error: unknown) => {
+              console.error(
+                "Could not remove an unrecorded video clip after shutdown.",
+                error instanceof Error ? redactHostSecrets(error.message) : "Unknown failure.",
+              );
+            });
+          }
+          return;
+        }
         const settled = this.#settled(current, answer.usage);
         if (written.status === "refused" && written.reason === "purged") {
           // The thread was deleted while the provider finished: nothing is

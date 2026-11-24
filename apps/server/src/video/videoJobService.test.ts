@@ -182,10 +182,11 @@ function harness(script: Script, directory?: string) {
     settle: vi.fn(),
     abandon: vi.fn(),
   };
+  const clips = new VideoClipStore(root);
   const service = new VideoJobService({
     journal,
     projection: runtime.videoJobProjection,
-    clips: new VideoClipStore(root),
+    clips,
     readProviderInstance: (id) => (String(id) === String(profileId) ? instance.current : undefined),
     listProviderInstances: () => (instance.current === undefined ? [] : [instance.current]),
     credentialResolver: {
@@ -216,6 +217,7 @@ function harness(script: Script, directory?: string) {
     service,
     calls: fake.calls,
     spend,
+    clips,
     instance,
     root,
     connection,
@@ -580,6 +582,48 @@ describe("video jobs", () => {
     service.close();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(service.getById(queued.id)?.status).toBe("running");
+  });
+
+  it("leaves a job for recovery when its clip write finishes after shutdown", async () => {
+    const { service, clips, root, spend, calls, connection } = harness({});
+    const entered = Promise.withResolvers<string>();
+    const resume = Promise.withResolvers<void>();
+    const written = Promise.withResolvers<void>();
+    const write = clips.write.bind(clips);
+    vi.spyOn(clips, "write").mockImplementation(async (scope, clipId, bytes) => {
+      entered.resolve(String(clipId));
+      await resume.promise;
+      const result = await write(scope, clipId, bytes);
+      written.resolve();
+      return result;
+    });
+
+    const queued = await enqueue(service);
+    const clipId = await entered.promise;
+    service.close();
+    connection.close();
+    resume.resolve();
+    await written.promise;
+    const clipPath = join(root, "generated-video", String(scopeId), `${clipId}.mp4`);
+    await vi.waitFor(() => expect(existsSync(clipPath)).toBe(false));
+    expect(spend.settle).not.toHaveBeenCalled();
+    expect(calls.forget).toBe(0);
+
+    const restarted = harness({}, root);
+    try {
+      expect(restarted.service.getById(queued.id)).toMatchObject({
+        status: "running",
+        remoteId: "remote-1",
+      });
+      await restarted.service.recover();
+      await expect(restarted.service.whenTerminal(queued.id)).resolves.toMatchObject({
+        status: "completed",
+        settledCostUsdMicros: 347_520,
+      });
+    } finally {
+      restarted.service.close();
+      restarted.connection.close();
+    }
   });
 
   it("ends the wait at its estimate when the model cannot stop a running job", async () => {

@@ -349,6 +349,8 @@ the host keeps polling within the job time. It settles at the estimate if it
 still cannot confirm the outcome at the deadline.
 
 Shutdown stops handing out slots and leaves waiting jobs in the journal.
+If a clip write finishes after shutdown starts, the host discards that file
+and leaves the running job for recovery.
 At startup the host reconciles every video job the journal left unfinished:
 
 - A job that was **queued**, so nothing was sent, is marked failed as
