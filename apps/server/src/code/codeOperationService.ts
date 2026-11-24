@@ -1,4 +1,5 @@
 import type { EventActor, ProviderDriverKind } from "@octant/contracts";
+import type { CodeOperationEventAuthor } from "./codeOperationEventStore";
 import {
   attachedFilesMessage,
   partitionAttachedFiles,
@@ -380,7 +381,13 @@ export interface CodeOperationEventPort {
     readonly operationId: CodeOperationId;
     readonly expectedCursor: number;
     readonly event: CodeOperationEvent;
+    readonly journaledAs?: CodeOperationEventAuthor;
   }) => void;
+  /**
+   * Names `actor` (the host when undefined) on what this request journals for
+   * the operation until the returned release; absent, the port's own actor.
+   */
+  readonly actingFor?: (operationId: CodeOperationId, actor: EventActor | undefined) => () => void;
   readonly replay: (input: {
     readonly threadId: CodeThreadId;
     readonly operationId: CodeOperationId;
@@ -1100,6 +1107,22 @@ type ReviewAnchorAssessment = Pick<CodeReviewFindingAssessment, "explanation"> &
   readonly anchorState: "current" | "outdated" | "unavailable";
 };
 
+/** Who gave a "Remember for this Project" answer: a local window, or a person-paired device. */
+export type CodeProjectAnswerApprover =
+  | { readonly kind: "window"; readonly windowId: WindowId }
+  | { readonly kind: "paired-device"; readonly deviceId: string };
+
+/**
+ * A person's answer to an app-managed tool's ask in the thread.
+ * `remembered-for-project` answers only an ask that offered it.
+ */
+export type CodeToolAskAnswer =
+  | "approved"
+  | "denied"
+  | "cancelled"
+  | "expired"
+  | { readonly kind: "remembered-for-project"; readonly approver: CodeProjectAnswerApprover };
+
 export interface CodeOperationTurnPort {
   readonly start: (input: {
     readonly windowId: WindowId;
@@ -1183,6 +1206,16 @@ export interface CodeOperationTurnPort {
     readonly decision: "approved" | "denied";
     /** The window that answered, which a level change acts for. */
     readonly windowId?: WindowId;
+    /**
+     * With `approved`: the person chose "Remember for this Project", and who
+     * they are. Honored only on an ask that offered it.
+     */
+    readonly rememberedForProjectBy?: CodeProjectAnswerApprover;
+    /**
+     * Who the answer's receipt on the asking turn names: the request's own
+     * actor, which may differ from whoever started the turn.
+     */
+    readonly answeredAs?: CodeOperationEventAuthor;
   }) => Promise<CodeOperationTurnResult>;
   readonly forceStop?: (input: {
     readonly thread: CodeThread;
@@ -1190,6 +1223,8 @@ export interface CodeOperationTurnPort {
     readonly turnOperationId: CodeOperationId;
     /** `"person"` only on the person's own Stop command; cleanup callers omit it. */
     readonly stopRequestedBy?: "person";
+    /** Who the Stop's marker on the turn names, when `stopRequestedBy` is set. */
+    readonly stopRequestedAs?: CodeOperationEventAuthor;
   }) => Promise<CodeOperationTurnResult>;
   readonly cancel: (input: {
     readonly thread: CodeThread;
@@ -1198,6 +1233,8 @@ export interface CodeOperationTurnPort {
     readonly turnOperationId?: CodeOperationId;
     /** `"person"` only on the person's own Stop command; cleanup callers omit it. */
     readonly stopRequestedBy?: "person";
+    /** Who the Stop's marker on the turn names, when `stopRequestedBy` is set. */
+    readonly stopRequestedAs?: CodeOperationEventAuthor;
   }) => Promise<
     CodeOperationTurnResult & {
       /** The operation of the live turn this stopped, when there was one. */
@@ -1286,8 +1323,8 @@ export interface CodeOperationExecuteOptions {
   readonly initiator?: CodeOperationInitiator;
   /**
    * Who the route resolved the request to. It names the person's own records
-   * an operation writes (a review finding); the operation's own events keep
-   * the runtime's actor. Host-only: the wire command cannot carry it.
+   * an operation writes (a review finding) and the operation's own events;
+   * absent, they are the host's. Host-only: the wire command cannot carry it.
    */
   readonly actor?: EventActor;
   /**
@@ -1650,6 +1687,8 @@ interface StartingTurn {
   cancelled: boolean;
   /** `"person"` when the person's own Stop released the start; nothing else sets it. */
   stopRequestedBy: "person" | undefined;
+  /** Who that Stop's marker names: the stopping request's actor, not the start's. */
+  stopRequestedAs: CodeOperationEventAuthor | undefined;
   /**
    * Whether the start's own result is journaled, by the start or by the Stop
    * that released it. Exactly one of them writes it.
@@ -1767,6 +1806,19 @@ export class CodeOperationService {
     options: CodeOperationExecuteOptions = {},
   ): Promise<CodeOperationResult> {
     const command = decodeCodeOperationCommand(rawCommand);
+    const release = this.#options.events.actingFor?.(command.operationId, options.actor);
+    try {
+      return await this.#executeAs(windowId, command, options);
+    } finally {
+      release?.();
+    }
+  }
+
+  async #executeAs(
+    windowId: WindowId,
+    command: CodeOperationCommand,
+    options: CodeOperationExecuteOptions,
+  ): Promise<CodeOperationResult> {
     if (!REMOTE_STEP_OPERATIONS.has(command.kind))
       return this.#executeDecoded(windowId, command, options);
     // The result that answers a retry is journaled only once the step has
@@ -2117,6 +2169,7 @@ export class CodeOperationService {
                     ),
                     cancelled: false,
                     stopRequestedBy: undefined,
+                    stopRequestedAs: undefined,
                     journaled: false,
                   }
                 : undefined;
@@ -2470,6 +2523,7 @@ export class CodeOperationService {
         stopped,
         cancelled: false,
         stopRequestedBy: undefined,
+        stopRequestedAs: undefined,
         journaled: false,
       };
       startingTurn = held;
@@ -2538,6 +2592,9 @@ export class CodeOperationService {
           operationId: starting.operationId,
           expectedCursor: cursor,
           event: { kind: "conversation-turn-stop-requested" },
+          ...(starting.stopRequestedAs === undefined
+            ? {}
+            : { journaledAs: starting.stopRequestedAs }),
         });
         cursor += 1;
       }
@@ -4093,6 +4150,12 @@ export class CodeOperationService {
     personActor?: EventActor,
   ): Promise<CodeOperationResult> {
     const workingDirectory = root.workingDirectory ?? root.checkoutRoot;
+    // What this request journals on another operation (a Stop's marker or an
+    // approval's receipt on the turn that asked) names the request's own
+    // actor: `actingFor` binds only this command's operation, and the turn's
+    // would otherwise credit whoever started it.
+    const requestedAs: CodeOperationEventAuthor =
+      personActor === undefined ? "host" : { actor: personActor };
     // A server thread's Git runs on its server; it never reaches this host's.
     const git =
       checkout.kind === "remote-root" ? this.#options.serverGit?.(thread) : this.#options.git;
@@ -4939,6 +5002,17 @@ export class CodeOperationService {
             approvalId: command.approvalId,
             decision: command.decision,
             windowId,
+            // A standing Project answer is the person's alone: a device the
+            // hub introduced answers as an agent and allows only this once.
+            ...(command.rememberForProject === true && initiator === "user"
+              ? {
+                  rememberedForProjectBy:
+                    personActor?.kind === "remote-device"
+                      ? { kind: "paired-device" as const, deviceId: String(personActor.deviceId) }
+                      : { kind: "window" as const, windowId },
+                }
+              : {}),
+            answeredAs: requestedAs,
           }),
         );
       case "force-stop-provider-turn":
@@ -4957,6 +5031,7 @@ export class CodeOperationService {
                 checkoutRoot: root.checkoutRoot,
                 turnOperationId: command.turnOperationId,
                 stopRequestedBy: "person",
+                stopRequestedAs: requestedAs,
               }),
         );
       case "cancel-provider-turn": {
@@ -4973,6 +5048,7 @@ export class CodeOperationService {
           ) {
             starting.cancelled = true;
             starting.stopRequestedBy = "person";
+            starting.stopRequestedAs = requestedAs;
             this.#startingTurns.delete(starting);
             stoppedStarts.push(starting);
           }
@@ -4981,6 +5057,7 @@ export class CodeOperationService {
           thread,
           checkoutRoot: root.checkoutRoot,
           stopRequestedBy: "person",
+          stopRequestedAs: requestedAs,
           ...(command.turnOperationId === undefined
             ? {}
             : { turnOperationId: command.turnOperationId }),

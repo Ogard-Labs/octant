@@ -5,7 +5,11 @@ import {
   type ComputerUseSettings,
   type ComputerUseStatus,
 } from "@octant/contracts/computer-use-plugin";
-import type { RememberedComputerUseApp, ShellSettings } from "@octant/contracts/shell";
+import type {
+  RememberedComputerUseApp,
+  RememberedDesktopFileTransfer,
+  ShellSettings,
+} from "@octant/contracts/shell";
 import { thisComputerName, useHostPlatform } from "../platform";
 import { getInjectedHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -13,12 +17,14 @@ import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { SettingRow, SettingsSection, SettingsState } from "./primitives";
 
 const NO_REMEMBERED_APPS: ReadonlyArray<RememberedComputerUseApp> = [];
+const NO_REMEMBERED_DESKTOP_FILES: ReadonlyArray<RememberedDesktopFileTransfer> = [];
 const NO_PROJECT_NAMES: ReadonlyMap<string, string> = new Map();
 
 export function ComputerUseSettingsView(props: {
   readonly settings: ComputerUseSettings;
   readonly onSettingsChange: (patch: Partial<ShellSettings>) => Promise<boolean> | boolean | void;
   readonly rememberedApps?: ReadonlyArray<RememberedComputerUseApp>;
+  readonly rememberedDesktopFiles?: ReadonlyArray<RememberedDesktopFileTransfer>;
   readonly projectNames?: ReadonlyMap<string, string>;
   readonly bridge?: ComputerBridge;
 }) {
@@ -39,6 +45,20 @@ export function ComputerUseSettingsView(props: {
           (candidate) =>
             String(candidate.projectId) !== String(entry.projectId) ||
             candidate.appId !== entry.appId,
+        ),
+      });
+    } finally {
+      setForgettingKey(undefined);
+    }
+  };
+  const rememberedDesktopFiles = props.rememberedDesktopFiles ?? NO_REMEMBERED_DESKTOP_FILES;
+  const forgetDesktopFiles = async (entry: RememberedDesktopFileTransfer) => {
+    const key = `desktop-files\0${String(entry.projectId)}`;
+    setForgettingKey(key);
+    try {
+      await props.onSettingsChange({
+        rememberedDesktopFileTransfers: rememberedDesktopFiles.filter(
+          (candidate) => String(candidate.projectId) !== String(entry.projectId),
         ),
       });
     } finally {
@@ -175,6 +195,49 @@ export function ComputerUseSettingsView(props: {
                   <OctantButton
                     disabled={forgettingKey === key}
                     onClick={() => void forgetApp(entry)}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Forget
+                  </OctantButton>
+                </SettingRow>
+              );
+            })}
+          </div>
+        )}
+      </SettingsSection>
+      <SettingsSection
+        collapse={{
+          open: rememberedDesktopFiles.length > 0,
+          summary:
+            rememberedDesktopFiles.length === 0
+              ? "None remembered"
+              : rememberedDesktopFiles.length === 1
+                ? "1 Project remembered"
+                : `${rememberedDesktopFiles.length} Projects remembered`,
+        }}
+        description="Granted by “Remember for this Project” when an agent sends a file into a disposable desktop on this machine below Full access. Forget one and the next file asks again."
+        title="Remembered desktop files"
+      >
+        {rememberedDesktopFiles.length === 0 ? (
+          <SettingsState kind="empty">No remembered desktop files.</SettingsState>
+        ) : (
+          <div className="setgroup">
+            {rememberedDesktopFiles.map((entry) => {
+              const key = `desktop-files\0${String(entry.projectId)}`;
+              const projectName = projectNames.get(String(entry.projectId)) ?? "Project";
+              return (
+                <SettingRow
+                  description={`Agents in ${projectName} below Full access send files into their desktops on this machine without asking.`}
+                  key={key}
+                  label={projectName}
+                  scope="host"
+                  settingId="computer-use-remembered-desktop-files"
+                >
+                  <OctantButton
+                    disabled={forgettingKey === key}
+                    onClick={() => void forgetDesktopFiles(entry)}
                     size="sm"
                     type="button"
                     variant="secondary"

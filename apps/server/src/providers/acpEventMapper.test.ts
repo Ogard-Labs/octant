@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   mapAcpNotification,
   mapAcpPermissionRequest,
+  acpReportOfHostTool,
   type AcpEventContext,
 } from "./acpEventMapper";
 
@@ -1014,5 +1015,42 @@ describe("an agent that sends stray updates", () => {
       event: { kind: "approval-request" },
     });
     expect(mapped.kind === "approval" ? mapped.allowOptionId : "none").toBeUndefined();
+  });
+
+  describe("pairing a host tool request with the agent's own report of it", () => {
+    function started(ctx: AcpEventContext, toolCallId: string, title: string): string {
+      const mapped = mapAcpNotification(ctx, {
+        kind: "notification",
+        method: "session/update",
+        params: {
+          sessionId: "acp-session-1",
+          update: { sessionUpdate: "tool_call", toolCallId, title, status: "pending" },
+        },
+      });
+      const start = mapped[0];
+      if (start?.kind !== "event" || start.event.kind !== "tool-start") throw new Error("no start");
+      return start.event.toolCallId;
+    }
+
+    it("names the one open call whose title names the Octant tool, once", () => {
+      const ctx = context();
+      started(ctx, "provider-1", "Run tests");
+      const report = started(ctx, "provider-2", "read (octant-browser MCP Server)");
+
+      expect(acpReportOfHostTool(ctx, "read")).toBe(report);
+      // A second request for the same tool is not the same report again.
+      expect(acpReportOfHostTool(ctx, "read")).toBeUndefined();
+    });
+
+    it("names nothing when two open calls could be the request, or none names Octant", () => {
+      const ctx = context();
+      started(ctx, "provider-1", "mcp__octant-browser__read");
+      started(ctx, "provider-2", "Tool: octant-browser/read");
+      expect(acpReportOfHostTool(ctx, "read")).toBeUndefined();
+
+      const other = context();
+      started(other, "provider-1", "Read file");
+      expect(acpReportOfHostTool(other, "read")).toBeUndefined();
+    });
   });
 });

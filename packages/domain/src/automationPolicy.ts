@@ -6,7 +6,10 @@ import {
   decodeAutomationDefinition,
   decodeAutomationDefinitionRevision,
   decodeAutomationTrigger,
+  type AutomationAuthorPrincipal,
+  type AutomationClientPrincipal,
   type AutomationDefinition,
+  type AutomationFileSourceReview,
   type AutomationId,
   type AutomationLocalDate,
   type AutomationLocalTime,
@@ -1264,4 +1267,24 @@ export function decideRoutineFromAgent(input: {
   return input.requestedByPerson || input.posture === "full-access"
     ? "create-paused"
     : "ask-on-card";
+}
+
+/** Whether this principal is the one that reviewed the held batch. */
+export function automationFileSourceReviewedBy(
+  review: AutomationFileSourceReview,
+  principal: AutomationClientPrincipal | AutomationAuthorPrincipal,
+): boolean {
+  if ("reviewedDevice" in review)
+    return (
+      principal.kind === "remote-device" &&
+      String(principal.hostId) === String(review.reviewedDevice.hostId) &&
+      String(principal.deviceId) === String(review.reviewedDevice.deviceId) &&
+      principal.credentialGeneration === review.reviewedDevice.credentialGeneration &&
+      String(principal.sessionId) === String(review.reviewedDevice.sessionId)
+    );
+  return (
+    principal.kind === "local-window" &&
+    String(principal.windowId) === review.reviewedWindowId &&
+    principal.capabilityGeneration === review.reviewedCapabilityGeneration
+  );
 }

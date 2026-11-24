@@ -145,45 +145,6 @@ export function automationFileActivityWindowLimit(checkpoint: {
   return checkpoint.activityWindowLimit ?? DEFAULT_AUTOMATION_FILE_ACTIVITY_WINDOW;
 }
 
-export const AutomationFileSourceReview = Schema.Struct({
-  expectedDefinitionVersion: positiveCounter,
-  previousObservationRevision: positiveCounter,
-  previousSourceIdentity: AutomationSourceDigest,
-  previousBatchDigest: AutomationSourceDigest,
-  disposition: Schema.Literal("skip", "run-once"),
-  reviewedWindowId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  reviewedCapabilityGeneration: counter,
-  reviewedAt: UtcTimestamp,
-}).annotations(strict);
-export type AutomationFileSourceReview = typeof AutomationFileSourceReview.Type;
-
-export const AutomationFileArrivalReceipt = Schema.Struct({
-  checkpoint: AutomationFileSourceCheckpoint,
-  files: Schema.Array(AutomationSourceRelativePath).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_AUTOMATION_SOURCE_FILES),
-  ),
-  automaticStartOrdinal: Schema.Int.pipe(Schema.between(1, MAX_AUTOMATION_FILE_START_LIMIT)),
-  rearm: Schema.optional(AutomationFileSourceReview),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (receipt) =>
-        (receipt.rearm === undefined || receipt.rearm.disposition === "run-once") &&
-        receipt.automaticStartOrdinal === receipt.checkpoint.automaticStarts &&
-        receipt.checkpoint.baselineReady &&
-        (receipt.checkpoint.phase === "watching" ||
-          (receipt.checkpoint.phase === "needs-rearm" &&
-            receipt.checkpoint.reason === "automatic-start-limit")) &&
-        new Set(receipt.files).size === receipt.files.length &&
-        receipt.files.every((path) =>
-          receipt.checkpoint.baseline.some((file) => file.path === path),
-        ),
-    ),
-  );
-export type AutomationFileArrivalReceipt = typeof AutomationFileArrivalReceipt.Type;
-
 export const AutomationFileSourceSummary = Schema.Struct({
   phase: Schema.Union(AutomationFileSourcePhase, Schema.Literal("paused")),
   reason: Schema.optional(AutomationFileSourceReason),

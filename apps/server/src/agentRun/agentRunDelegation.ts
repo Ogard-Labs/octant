@@ -974,9 +974,9 @@ export function recordAgentRunResultIngestion(
 
 /**
  * Hands a finished child's reply to its parent's agent. A reply a provider
- * would replace with a lossy preview is not settled. One that fits marks the
- * parent first, as a delivered reply does, because the child may relay what
- * it fetched; a mark that cannot be recorded keeps the reply owed.
+ * would replace with a lossy preview is not settled. One that fits passes
+ * `recordResultIngestion` first, which marks the parent where the child may
+ * relay what it fetched; a mark that cannot be recorded keeps the reply owed.
  */
 export function collectAgentRunResult(
   persistence: Pick<AgentRunPersistenceService, "getById"> &

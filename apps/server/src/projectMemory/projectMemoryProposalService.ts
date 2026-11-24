@@ -12,6 +12,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import type { AgentMemoryCommand } from "../projectService";
+import { whileAwaitingToolApproval } from "../toolEffects/toolEffectLedger";
 
 /**
  * Host-wide cap on waiting memory proposals, as the tool-approval services cap
@@ -56,6 +57,8 @@ interface PendingProposal {
   readonly view: ProjectMemoryProposal;
   readonly windowId: WindowId;
   readonly settle: (outcome: ProjectMemoryProposalOutcome) => void;
+  /** Puts the asking call back on record before a confirm writes; throws when it cannot. */
+  readonly answered: () => void;
 }
 
 /**
@@ -94,21 +97,26 @@ export class ProjectMemoryProposalService {
       requestedAt: new Date(this.#options.now()).toISOString(),
     });
     const key = String(view.proposalId);
-    return new Promise((resolve) => {
-      const onAbort = () => settle({ status: "cancelled" });
-      let settled = false;
-      const settle = (outcome: ProjectMemoryProposalOutcome) => {
-        if (settled) return;
-        settled = true;
-        signal?.removeEventListener("abort", onAbort);
-        if (this.#pending.delete(key)) this.#options.onChanged?.();
-        resolve(outcome);
-      };
-      this.#pending.set(key, { view, windowId: input.windowId, settle });
-      this.#options.onChanged?.();
-      this.#options.onAsked?.({ threadId: view.threadId, askId: key });
-      signal?.addEventListener("abort", onAbort, { once: true });
-    });
+    // Asked before memory changes; a confirm writes before the tool hears
+    // it, so `decide` puts the call back on record first.
+    return whileAwaitingToolApproval(
+      (answered) =>
+        new Promise((resolve) => {
+          const onAbort = () => settle({ status: "cancelled" });
+          let settled = false;
+          const settle = (outcome: ProjectMemoryProposalOutcome) => {
+            if (settled) return;
+            settled = true;
+            signal?.removeEventListener("abort", onAbort);
+            if (this.#pending.delete(key)) this.#options.onChanged?.();
+            resolve(outcome);
+          };
+          this.#pending.set(key, { view, windowId: input.windowId, settle, answered });
+          this.#options.onChanged?.();
+          this.#options.onAsked?.({ threadId: view.threadId, askId: key });
+          signal?.addEventListener("abort", onAbort, { once: true });
+        }),
+    );
   }
 
   /** The proposals this window may answer, oldest first. */
@@ -139,6 +147,15 @@ export class ProjectMemoryProposalService {
     if (decision.decision === "decline") {
       pending.settle({ status: "declined" });
       return { kind: "project-memory-proposal-declined" };
+    }
+    try {
+      pending.answered();
+    } catch {
+      // Written now, the change would sit under a record that says the call
+      // was still waiting, and a restart would ask for it again.
+      const message = "Project memory could not be changed.";
+      pending.settle({ status: "not-applied", message });
+      return { kind: "project-memory-proposal-not-applied", message };
     }
     const proposal = pending.view;
     const origin: AgentAuthoredMemoryProvenance = {

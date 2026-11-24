@@ -727,6 +727,20 @@ export const RememberedComputerUseApp = Schema.Struct({
 }).annotations(strict);
 export type RememberedComputerUseApp = typeof RememberedComputerUseApp.Type;
 
+/**
+ * One "Remember for this Project" answer to an agent's file sent into a
+ * disposable desktop on this machine below Full access: later sent-file asks
+ * from threads in that Project send without asking until the person forgets
+ * it in Settings. Grows only through the approval decision path; a settings
+ * replacement may only forget entries.
+ */
+export const RememberedDesktopFileTransfer = Schema.Struct({
+  projectId: ProjectId,
+  grantedBy: EventActor,
+  grantedAt: UtcTimestamp,
+}).annotations(strict);
+export type RememberedDesktopFileTransfer = typeof RememberedDesktopFileTransfer.Type;
+
 /** One site remembered for one stored Browser profile; see `rememberedBrowserProfileSites`. */
 export const RememberedBrowserProfileSite = Schema.Struct({
   origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
@@ -1388,6 +1402,16 @@ export const ShellSettings = Schema.Struct({
    */
   rememberedComputerUseApps: Schema.optionalWith(
     Schema.Array(RememberedComputerUseApp).pipe(Schema.maxItems(1_024)),
+    { default: () => [] },
+  ),
+  /**
+   * Projects whose agents' files into a disposable desktop on this machine
+   * the person approved with "Remember for this Project" below Full access.
+   * Grows only through the approval decision path; a settings replacement
+   * may only forget entries.
+   */
+  rememberedDesktopFileTransfers: Schema.optionalWith(
+    Schema.Array(RememberedDesktopFileTransfer).pipe(Schema.maxItems(1_024)),
     { default: () => [] },
   ),
   /** Local opt-in; old grants never inherit a newly enabled native owner. */

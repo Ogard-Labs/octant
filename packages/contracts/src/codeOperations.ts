@@ -1177,6 +1177,13 @@ const AnswerProviderApproval = Schema.Struct({
   ...OperationScope,
   approvalId: CodeApprovalId,
   decision: Schema.Literal("approved", "denied"),
+  /**
+   * With `approved`, on an ask whose `approval-requested` offers
+   * `canRememberForProject`: the person chose "Remember for this Project".
+   * The host honors it only from a person, and only while the ask still
+   * offers it; otherwise the answer allows this one ask.
+   */
+  rememberForProject: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 const ForceStopProviderTurn = Schema.Struct({
   kind: Schema.Literal("force-stop-provider-turn"),
@@ -2021,6 +2028,12 @@ const ApprovalEvent = Schema.Struct({
       plan: Schema.optional(CodeEvidenceReference),
     }).annotations(strict),
   ),
+  /**
+   * The ask may be answered with "Remember for this Project" as well as for
+   * this once: an agent's file sent into a disposable desktop on this
+   * machine. Absent on every other approval.
+   */
+  canRememberForProject: Schema.optional(Schema.Literal(true)),
   /**
    * Legacy mark from approvals for physical-device and distribution effects,
    * which no longer exist. Nothing sets or reads it now. It stays in the schema

@@ -616,6 +616,7 @@ export function startOctantServer(
       providerAvailabilityMarks,
     } = yield* wireProviders({
       hubActScopeSlot,
+      toolEffectLedger,
       resolveThreadStrict,
       resolveHostStrict,
       hostResourceBudget,
