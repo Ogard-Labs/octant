@@ -1348,6 +1348,32 @@ describe("completing and snoozing from a thread row", () => {
     expect(screen.getByRole("button", { name: /Controller foundation/ })).toContainElement(woke);
   });
 
+  it("offers Settle on a row's hover gutter, and Un-settle once the row is settled", async () => {
+    const onCompleteThread = vi.fn();
+    const onReopenThread = vi.fn();
+    const { rerender } = render(
+      <ProjectThreadRows
+        actions={{ onCompleteThread, onReopenThread, onArchiveThread: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Settle thread" }));
+    expect(onCompleteThread).toHaveBeenCalledWith("thread-one");
+    expect(screen.queryByRole("button", { name: "Archive thread" })).toBeNull();
+
+    rerender(
+      <ProjectThreadRows
+        actions={{ onCompleteThread, onReopenThread, onArchiveThread: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, completedAt: new Date().toISOString() }]}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Settle thread" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Un-settle thread" }));
+    expect(onReopenThread).toHaveBeenCalledWith("thread-one");
+  });
+
   it("reaches Settle and each wake time from the overflow menu too", async () => {
     const onCompleteThread = vi.fn();
     const onSnoozeThread = vi.fn();
@@ -1361,7 +1387,7 @@ describe("completing and snoozing from a thread row", () => {
 
     const overflow = screen.getByRole("button", { name: "Thread actions" });
     await userEvent.click(overflow);
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Put thread away" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Settle thread" }));
     expect(onCompleteThread).toHaveBeenCalledWith("thread-one");
 
     await userEvent.click(overflow);

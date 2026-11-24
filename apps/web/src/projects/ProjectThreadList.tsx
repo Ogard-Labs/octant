@@ -30,6 +30,7 @@ import {
   Pin,
   PinOff,
   RotateCcw,
+  Undo2,
 } from "../ui/icons";
 import type { IconComponent } from "../ui/icons";
 import { resolveSnoozePresets } from "@octant/domain";
@@ -510,6 +511,10 @@ export function ThreadRowActionsGutter(props: {
   const threadId = props.thread.navigationId ?? props.thread.threadId;
   const pinned = props.thread.pinned === true;
   const pinLabel = pinned ? "Unpin thread" : "Pin thread";
+  // The gutter's second button settles or un-settles the thread, the action a
+  // finished row most often wants; Archive moves to the menus for such rows,
+  // since the slot holds two buttons and a third would cut every title short.
+  const settled = props.thread.completedAt !== undefined;
   const pullRequestDestinations = threadRowPullRequestDestinations(props.thread, props.actions);
   // The overflow menu is flat, so each wake time is its own row here; the
   // right-click menu folds the same times under one Snooze item.
@@ -565,7 +570,7 @@ export function ThreadRowActionsGutter(props: {
         : [
             {
               icon: <Check aria-hidden="true" size={14} />,
-              label: "Put thread away",
+              label: "Settle thread",
               value: "complete",
             } as const,
           ]),
@@ -607,7 +612,29 @@ export function ThreadRowActionsGutter(props: {
           {pinned ? <PinOff aria-hidden="true" size={14} /> : <Pin aria-hidden="true" size={14} />}
         </OctantIconButton>
       )}
-      {props.actions.onArchiveThread === undefined ? null : (
+      {settled && props.actions.onReopenThread !== undefined ? (
+        <OctantIconButton
+          className="sidebar-navigation__thread-action sidebar-navigation__thread-action--inline"
+          label="Un-settle thread"
+          onClick={() => props.actions.onReopenThread?.(threadId)}
+          title="Un-settle thread"
+          type="button"
+          variant="bare"
+        >
+          <Undo2 aria-hidden="true" size={14} />
+        </OctantIconButton>
+      ) : !settled && props.actions.onCompleteThread !== undefined ? (
+        <OctantIconButton
+          className="sidebar-navigation__thread-action sidebar-navigation__thread-action--inline"
+          label="Settle thread"
+          onClick={() => props.actions.onCompleteThread?.(threadId)}
+          title="Settle thread"
+          type="button"
+          variant="bare"
+        >
+          <Check aria-hidden="true" size={14} />
+        </OctantIconButton>
+      ) : props.actions.onArchiveThread === undefined ? null : (
         <OctantIconButton
           className="sidebar-navigation__thread-action sidebar-navigation__thread-action--inline"
           label="Archive thread"
@@ -650,7 +677,12 @@ export function ThreadRowActionsGutter(props: {
  */
 export function hasInlineActions(actions: ThreadRowActions | undefined): boolean {
   if (actions === undefined) return false;
-  return actions.onPinThread !== undefined || actions.onArchiveThread !== undefined;
+  return (
+    actions.onPinThread !== undefined ||
+    actions.onArchiveThread !== undefined ||
+    actions.onCompleteThread !== undefined ||
+    actions.onReopenThread !== undefined
+  );
 }
 
 function selectionIdFor(
