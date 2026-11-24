@@ -1,5 +1,11 @@
 import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
 import { NewDeviceAlerts } from "./NewDeviceAlerts";
+import { AccessActivityList } from "./AccessActivityList";
+import { ChangeNotices, type ChangeNoticeLocalActions } from "./ChangeNotices";
+import {
+  createAccessActivityClient,
+  type AccessActivityPort,
+} from "@octant/client-runtime/access-activity-client";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import {
   buildPairingCode,
@@ -17,7 +23,7 @@ import {
   type DeviceAccessLevel,
   type PairedDeviceLifetime,
 } from "@octant/contracts/remote-access";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
 import {
   SettingRow,
@@ -77,6 +83,16 @@ export interface RemoteAccessSettingsSectionProps {
   readonly onPairedDeviceLifetimeChange?: ((lifetime: PairedDeviceLifetime) => void) | undefined;
   /** Alerts for devices that paired with this host, which every connected device is shown. */
   readonly newDeviceAlerts?: NewDeviceAlertsClient | undefined;
+  readonly accessActivity?: AccessActivitySettings | undefined;
+}
+
+/** Settings' access activity and change notices, refreshed when the change feed moves. */
+export interface AccessActivitySettings {
+  readonly port: AccessActivityPort;
+  readonly activityRevision: number;
+  readonly noticesRevision: number;
+  /** A desktop window's own controls for a notice's key Undo and revoke. */
+  readonly localActions?: ChangeNoticeLocalActions;
 }
 
 const PAIRED_DEVICE_LIFETIME_LABELS: Readonly<Record<PairedDeviceLifetime, string>> = {
@@ -140,6 +156,46 @@ function pairingLink(origin: string, ticket: RemoteMintedPairingTicket): string 
   return `${origin}/#ticketId=${encodeURIComponent(ticket.ticketId)}&ticketProof=${encodeURIComponent(ticket.ticketProof)}`;
 }
 
+/**
+ * The access activity list and change notices, on their own so a window
+ * without the desktop bridge — a local browser Review opens — shows them too.
+ * Without a bridge secret the notice's key Undo and revoke stay refused, which
+ * the buttons say.
+ */
+export function AccessActivitySection({
+  accessActivity,
+}: {
+  readonly accessActivity: AccessActivitySettings | undefined;
+}) {
+  const accessActivityPort = accessActivity?.port;
+  const accessActivityClient = useMemo(
+    () =>
+      accessActivityPort === undefined ? undefined : createAccessActivityClient(accessActivityPort),
+    [accessActivityPort],
+  );
+  if (accessActivityClient === undefined || accessActivity === undefined) return null;
+  return (
+    <SettingsSection
+      description="Devices added, removed or given another level, newest first, and who did it. Changes a paired device or an agent made to a thread's level or a provider key are listed above it, with Undo."
+      title="Access activity"
+    >
+      <div data-setting-id="access-activity">
+        <ChangeNotices
+          changeRevision={accessActivity.noticesRevision}
+          client={accessActivityClient}
+          {...(accessActivity.localActions === undefined
+            ? {}
+            : { localActions: accessActivity.localActions })}
+        />
+        <AccessActivityList
+          changeRevision={accessActivity.activityRevision}
+          client={accessActivityClient}
+        />
+      </div>
+    </SettingsSection>
+  );
+}
+
 export function RemoteAccessSettingsSection({
   bridge,
   focusedSetting,
@@ -150,6 +206,7 @@ export function RemoteAccessSettingsSection({
   pairedDeviceLifetime,
   onPairedDeviceLifetimeChange,
   newDeviceAlerts,
+  accessActivity,
   projectNames,
 }: RemoteAccessSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
@@ -871,6 +928,8 @@ export function RemoteAccessSettingsSection({
           </div>
         </SettingsSection>
       )}
+
+      <AccessActivitySection accessActivity={accessActivity} />
 
       {/* Revoking is this page's destructive group, so it sits last. */}
       <SettingsPanel

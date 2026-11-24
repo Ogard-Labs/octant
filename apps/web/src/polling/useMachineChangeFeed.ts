@@ -1,5 +1,5 @@
 import type { MachineChangeClient } from "@octant/client-runtime/machine-change-client";
-import type { MachineChangeTopic } from "@octant/contracts/machine-changes";
+import { MachineChangeTopic } from "@octant/contracts/machine-changes";
 import { useEffect, useState } from "react";
 import { waitForReconnect } from "../lib/waitForReconnect";
 
@@ -17,6 +17,8 @@ export interface MachineChangeRevisions {
   readonly threadMessageQueue: number;
   readonly todos: number;
   readonly canvasChoiceAnswers: number;
+  readonly accessActivity: number;
+  readonly changeNotices: number;
 }
 
 const INITIAL_REVISIONS: MachineChangeRevisions = {
@@ -33,6 +35,8 @@ const INITIAL_REVISIONS: MachineChangeRevisions = {
   threadMessageQueue: 0,
   todos: 0,
   canvasChoiceAnswers: 0,
+  accessActivity: 0,
+  changeNotices: 0,
 };
 
 /**
@@ -92,25 +96,7 @@ async function consumeMachineChanges(
         received = true;
         cursor = frame.sequence;
         epoch = frame.epoch;
-        changed(
-          frame.kind === "snapshot-required"
-            ? [
-                "projects",
-                "chat-navigation",
-                "work-navigation",
-                "code-navigation",
-                "extensions",
-                "computer-use",
-                "image-jobs",
-                "browser-captures",
-                "tool-approvals",
-                "thread-follow-ups",
-                "thread-message-queue",
-                "todos",
-                "canvas-choice-answers",
-              ]
-            : frame.topics,
-        );
+        changed(frame.kind === "snapshot-required" ? MachineChangeTopic.literals : frame.topics);
       }
       retryMs = received ? 50 : Math.min(retryMs * 2, 2_000);
     } catch {
@@ -149,5 +135,7 @@ function advanceRevisions(
     threadMessageQueue: current.threadMessageQueue + Number(changed.has("thread-message-queue")),
     todos: current.todos + Number(changed.has("todos")),
     canvasChoiceAnswers: current.canvasChoiceAnswers + Number(changed.has("canvas-choice-answers")),
+    accessActivity: current.accessActivity + Number(changed.has("access-activity")),
+    changeNotices: current.changeNotices + Number(changed.has("change-notices")),
   };
 }

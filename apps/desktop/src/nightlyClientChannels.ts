@@ -150,6 +150,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   remoteDeviceAccessLevel: "octant-only",
   remoteAccessPauseRead: "octant-only",
   remoteAccessPauseSet: "octant-only",
+  undoAccessChangeNotice: "octant-only",
   hubAdministrationRequest: "octant-only",
   agentAccessRequest: "octant-only",
   providerDeviceSignIn: "octant-only",

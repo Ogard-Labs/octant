@@ -1,4 +1,8 @@
+import type { ChangeNoticeLocalActions } from "../host/ChangeNotices";
+import { AgentAccessResult, decodeAgentAccessCommand, decodeHostAnswer } from "@octant/contracts";
 import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
+import type { AccessActivitySettings } from "../host/RemoteAccessSettingsSection";
+import { AccessActivitySection } from "../host/RemoteAccessSettingsSection";
 import { SandboxRestrictionsSettings } from "../settings/SandboxRestrictionsSettings";
 import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
 import type { SandboxSettingsScope } from "../settings/SandboxRestrictionsSettings";
@@ -238,7 +242,9 @@ import {
   ownerUnlockOf,
   remoteAccessAdministrationOf,
   agentAccessAdministrationOf,
+  type AgentAccessAdministrationBridge,
   type OctantHostBridge,
+  type RemoteAccessAdministrationBridge,
 } from "./hostBridge";
 import { providerSettingsViewProps } from "../providers/providerSettingsViewProps";
 import { ApplicationIdentity } from "./ApplicationIdentity";
@@ -303,6 +309,8 @@ export interface SettingsViewProps {
   readonly protectedFilesClient?: ProtectedFilesClient;
   /** The host's new-device alerts, read and cleared from this window. */
   readonly newDeviceAlertsClient?: NewDeviceAlertsClient;
+  /** Access activity and change notices, with the change feed's revisions for each. */
+  readonly accessActivity?: AccessActivitySettings;
   readonly blockedToolsClient?: BlockedToolsClient;
   readonly sandboxRestrictionsClient?: SandboxRestrictionsClient;
   readonly sandboxInitialScope?:
@@ -1554,6 +1562,18 @@ function ActiveSectionContent({
             projectNames={props.actProjectNames ?? NO_PROJECT_NAMES}
             pairedDeviceLifetime={props.settings.pairedDeviceLifetime}
             newDeviceAlerts={props.newDeviceAlertsClient}
+            accessActivity={
+              props.accessActivity === undefined
+                ? undefined
+                : {
+                    ...props.accessActivity,
+                    ...changeNoticeLocalActionsOf(
+                      props.hostBridge,
+                      administration,
+                      agentAccessAdministration,
+                    ),
+                  }
+            }
           />
           {agentAccess}
         </div>
@@ -1567,6 +1587,7 @@ function ActiveSectionContent({
               commands.
             </p>
             <BrowserHubSection hubAdministration={hubAdministrationOf(props.hostBridge)} />
+            <AccessActivitySection accessActivity={props.accessActivity} />
           </section>
           {agentAccess}
         </div>
@@ -3848,4 +3869,43 @@ function privacyThreadsFromSettings(props: SettingsViewProps): ReadonlyArray<Pri
       mode: "code" as const,
     })),
   ];
+}
+
+/**
+ * A desktop window's own key, device and grant controls for a change notice:
+ * the host takes these from a window only with the desktop bridge's secret,
+ * which the desktop adds and a renderer never holds. Absent elsewhere, where
+ * a window's notice routes refuse them.
+ */
+function changeNoticeLocalActionsOf(
+  hostBridge: OctantHostBridge | undefined,
+  administration:
+    | Pick<RemoteAccessAdministrationBridge, "revokeRemoteDevice" | "undoAccessChangeNotice">
+    | undefined,
+  agentAccess: AgentAccessAdministrationBridge | undefined,
+): { readonly localActions?: ChangeNoticeLocalActions } {
+  if (hostBridge === undefined || administration === undefined || agentAccess === undefined) {
+    return {};
+  }
+  // An older build's bridge has no Undo; it stays absent so the action
+  // refuses rather than removing the key outright.
+  const undoAccessChangeNotice = administration.undoAccessChangeNotice;
+  return {
+    localActions: {
+      ...(undoAccessChangeNotice === undefined ? {} : { undoAccessChangeNotice }),
+      revokeDevice: (deviceId) => administration.revokeRemoteDevice(deviceId),
+      endAgentGrant: async (grantId) => {
+        const answer = await agentAccess.agentAccessRequest({
+          kind: "command",
+          command: decodeAgentAccessCommand({
+            kind: "revoke",
+            grantId,
+            stopRunningTurns: false,
+          }),
+        });
+        const result = decodeHostAnswer(AgentAccessResult)(answer.body);
+        if (result.kind === "refused") throw new Error(result.message);
+      },
+    },
+  };
 }
