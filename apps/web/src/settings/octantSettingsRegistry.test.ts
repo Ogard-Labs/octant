@@ -1,12 +1,34 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { octantSettingsCommandPages } from "./octantSettingsNavigation";
 import { octantSettingsRegistry } from "./octantSettingsRegistry";
 import { listAvailableSections, resolveDeepLink, searchSettings } from "./registry";
 
 const capabilities = { nativeBoundsAvailable: true, sidebarVibrancySupported: true };
 
 describe("octantSettingsRegistry", () => {
+  it.each([
+    ["Chat thread titles", "automatic-model-thread-title"],
+    ["ChatGPT plan title model", "automatic-model-thread-title"],
+    ["API endpoint title model", "automatic-model-thread-title"],
+    ["Thread title model", "automatic-model-thread-title-model"],
+  ])("finds the title control for %s", (query, settingId) => {
+    const results = searchSettings(
+      listAvailableSections(octantSettingsRegistry, capabilities),
+      capabilities,
+      query,
+    );
+    expect(results).toContainEqual(
+      expect.objectContaining({ kind: "setting", sectionId: "providers", settingId }),
+    );
+    if (settingId === "automatic-model-thread-title") {
+      expect(results).not.toContainEqual(
+        expect.objectContaining({ settingId: "automatic-model-thread-title-model" }),
+      );
+    }
+  });
+
   it("finds the switch that stops this computer taking delegated work by its label", () => {
     expect(
       searchSettings(
@@ -120,6 +142,9 @@ describe("octantSettingsRegistry", () => {
       "host",
       "usage",
     ]);
+    expect(octantSettingsCommandPages.map(({ id, label }) => ({ id, label }))).toEqual(
+      octantSettingsRegistry.sections.map(({ id, label }) => ({ id, label })),
+    );
   });
 
   it("registers the GitHub section as a host-scoped connection destination", () => {
@@ -315,6 +340,8 @@ describe("octantSettingsRegistry", () => {
     expect(usage?.settings.map((setting) => setting.id)).toEqual(["spend-ceiling-shown"]);
     const providers = octantSettingsRegistry.sections.find((s) => s.id === "providers");
     expect(providers?.settings.map((setting) => setting.id)).toEqual([
+      "automatic-model-thread-title",
+      "automatic-model-thread-title-model",
       "automatic-model-judge",
       "automatic-model-memory",
       "automatic-model-decision-review",

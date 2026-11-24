@@ -123,6 +123,26 @@ export interface EndpointPreset {
  */
 export const ENDPOINT_PRESETS: ReadonlyArray<EndpointPreset> = [
   {
+    id: "openai-api",
+    kind: "openai-compatible",
+    displayName: "OpenAI API",
+    detail: "OpenAI models billed through your API account.",
+    glyph: "openai-compatible",
+    baseUrl: "https://api.openai.com/v1",
+    protocol: "responses",
+    keyPage: { label: "the OpenAI API platform", url: "https://platform.openai.com/api-keys" },
+  },
+  {
+    id: "openrouter-api",
+    kind: "openai-compatible",
+    displayName: "OpenRouter API",
+    detail: "Models from multiple providers with an OpenRouter API key.",
+    glyph: "openai-compatible",
+    baseUrl: "https://openrouter.ai/api/v1",
+    protocol: "chat-completions",
+    keyPage: { label: "OpenRouter API keys", url: "https://openrouter.ai/settings/keys" },
+  },
+  {
     id: "opencode-go",
     kind: "openai-compatible",
     displayName: "OpenCode Go",

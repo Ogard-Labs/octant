@@ -3,7 +3,7 @@ import {
   MAX_THREAD_MESSAGE_QUEUE_ITEM_BYTES,
   type ThreadMessageQueueCommand,
   type ThreadMessageQueueScope,
-} from "@octant/contracts";
+} from "@octant/contracts/thread-message-queue";
 
 const PREFIX = "octant.composer.queue-receipt.v1:";
 export type QueueReceiptStorage = Pick<

@@ -7,6 +7,8 @@ import {
   type ProjectMemoryProposalClient,
 } from "../projects/ProjectMemoryProposalPrompt";
 import { ProviderCloudSessions } from "./ProviderCloudSessions";
+import { WorktreeLaunchProgress } from "./WorktreeLaunchProgress";
+import { WorktreeLaunchContext } from "./worktreeLaunchContext";
 import { CoordinatorWorkerCards, type CoordinatorWorkersSource } from "./CoordinatorWorkersPanel";
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
@@ -50,6 +52,7 @@ import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import {
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -382,6 +385,7 @@ export interface CodeThreadWorkspaceProps {
  * Overview/Git/Terminal remain secondary surfaces opened from the thread toolbar.
  */
 export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
+  const worktreeLaunch = useContext(WorktreeLaunchContext)?.launches.get(props.threadId);
   const continuation = useContinuationInputPolicy("code", String(props.threadId), props.serverUrl);
   const view =
     props.controller.activeView?.thread.id === props.threadId
@@ -1173,6 +1177,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // The first prompt can be in flight before this surface reads its journal
   // entry. Keep it visible without adding queued messages to the transcript.
   const awaitedPrompt = messages.length === 0 ? firstPromptInFlight : undefined;
+  const firstLoadedUserMessage =
+    worktreeLaunch === undefined
+      ? undefined
+      : messages.find((message) => message.role === "user" && message.sourceThreadId === undefined);
+  const firstUserMessage =
+    earlierConversation === undefined || earlierConversation === "none-left" || ownTurnsExhausted
+      ? firstLoadedUserMessage
+      : undefined;
+  const launchProgress =
+    worktreeLaunch?.target === undefined ? null : (
+      <WorktreeLaunchProgress
+        key={`worktree:${worktreeLaunch.threadId}`}
+        launch={worktreeLaunch}
+        firstMessageSent={firstLoadedUserMessage !== undefined}
+      />
+    );
   const pendingMessage =
     awaitedPrompt === undefined ? null : (
       <article aria-label="Your message" className="code-thread-workspace__message turn-user">
@@ -1896,6 +1916,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   </EmptyThreadStart>
                 </>
               ) : null}
+              {launchProgress}
             </div>
           </div>
         ) : (
@@ -1903,6 +1924,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             <TranscriptWindow
               trail={
                 <>
+                  {pendingMessage}
+                  {firstUserMessage === undefined ? launchProgress : null}
                   <CredentialRequests
                     key={String(props.threadId)}
                     threadId={String(props.threadId)}
@@ -2511,6 +2534,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         )}
                       </TurnActionMenu>
                     </article>
+                    {message === firstUserMessage ? launchProgress : null}
                     <SteeredChildResults
                       providerGroups={providerGroups}
                       steered={message.steeredResults}
@@ -2550,7 +2574,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               }}
               restoreKey={String(props.threadId)}
               role="region"
-              {...(pendingMessage === null ? {} : { trail: pendingMessage })}
             />
           </SelectionThreadScope>
         )}

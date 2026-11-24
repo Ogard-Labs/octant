@@ -67,6 +67,7 @@ import {
   type CodeCheckoutId,
   type CodeCommand,
   CodeCommandResult,
+  type CodeWorktreeCreationProgress,
   type CodeEvidenceContentId,
   CodeEvidenceReference,
   type CodeEvidenceBatchRequest,
@@ -200,7 +201,11 @@ export interface CodeClient {
   /** Message search over the Code threads the host lists for this window. */
   searchTranscript(query: string): Promise<CodeTranscriptSearch>;
   thread(threadId: CodeThreadId, signal?: AbortSignal): Promise<CodeThreadView>;
-  execute(command: CodeCommand, signal?: AbortSignal): Promise<CodeCommandResult>;
+  execute(
+    command: CodeCommand,
+    signal?: AbortSignal,
+    onWorktreeProgress?: (progress: CodeWorktreeCreationProgress) => void,
+  ): Promise<CodeCommandResult>;
   executeOperation(
     command: CodeOperationCommand,
     signal?: AbortSignal,
@@ -490,24 +495,50 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         decodeThreadView,
       );
     },
-    async execute(command, signal) {
+    async execute(command, signal, onWorktreeProgress) {
       let validated: CodeCommand;
       try {
         validated = decodeCodeCommand(command);
       } catch {
         throw invalidCommand();
       }
-      return request(
+      const progress =
+        validated.kind === "create-managed-code-thread" ? onWorktreeProgress : undefined;
+      const readWorktreeCreation =
+        progress === undefined ? undefined : (await import("./codeWorktreeCreationStream")).default;
+      const response = await requestRaw(
         fetch,
         new URL("/api/code/commands", options.baseUrl).toString(),
         {
           method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
+          headers: {
+            ...headers,
+            "content-type": "application/json",
+            ...(progress === undefined ? {} : { accept: "application/x-ndjson" }),
+          },
           body: JSON.stringify(validated),
           ...(signal === undefined ? {} : { signal }),
         },
-        decodeHostAnswer(CodeCommandResult),
       );
+      if (
+        readWorktreeCreation !== undefined &&
+        progress !== undefined &&
+        validated.kind === "create-managed-code-thread" &&
+        response.ok &&
+        response.headers.get("content-type")?.split(";", 1)[0] === "application/x-ndjson"
+      ) {
+        const frame = await readWorktreeCreation(
+          response,
+          validated.threadId,
+          progress,
+          MAX_CODE_NDJSON_LINE_BYTES,
+        ).catch(() => {
+          throw malformedResponse();
+        });
+        if (frame.kind === "failure") throw new CodeClientFailure(frame.failure);
+        return frame.result;
+      }
+      return readJsonAnswer(response, decodeHostAnswer(CodeCommandResult));
     },
     async executeOperation(command, signal) {
       let validated: CodeOperationCommand;
@@ -1596,7 +1627,10 @@ async function request<T>(
   init: RequestInit,
   decode: (value: unknown) => T,
 ): Promise<T> {
-  const response = await requestRaw(fetch, url, init);
+  return readJsonAnswer(await requestRaw(fetch, url, init), decode);
+}
+
+async function readJsonAnswer<T>(response: Response, decode: (value: unknown) => T): Promise<T> {
   let body: unknown;
   try {
     body = await response.json();

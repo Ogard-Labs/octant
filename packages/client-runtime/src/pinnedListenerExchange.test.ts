@@ -113,18 +113,21 @@ describe("a listener fetch over the phone's pinned exchange", () => {
   it("never asks the exchange to reach an origin with no pin, and never uses the platform fetch", async () => {
     const host = listener({ served: PIN });
     const platformFetch = vi.spyOn(globalThis, "fetch");
-    const fetch = createExchangeListenerFetch({
-      origin: ORIGIN,
-      trust: { current: { kind: "platform" } },
-      port: host.port,
-    });
+    try {
+      const fetch = createExchangeListenerFetch({
+        origin: ORIGIN,
+        trust: { current: { kind: "platform" } },
+        port: host.port,
+      });
 
-    await expect(refusalOf(fetch(`${ORIGIN}/api/remote/hello`))).resolves.toBe(
-      "platform-untrusted",
-    );
-    expect(host.port.open).not.toHaveBeenCalled();
-    expect(platformFetch).not.toHaveBeenCalled();
-    platformFetch.mockRestore();
+      await expect(refusalOf(fetch(`${ORIGIN}/api/remote/hello`))).resolves.toBe(
+        "platform-untrusted",
+      );
+      expect(host.port.open).not.toHaveBeenCalled();
+      expect(platformFetch).not.toHaveBeenCalled();
+    } finally {
+      platformFetch.mockRestore();
+    }
   });
 
   it("says a newer Octant is needed for a pin naming another hash, without connecting", async () => {
