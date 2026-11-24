@@ -46,6 +46,7 @@ import type { AutomationEventObservation } from "./automationEventSourceState";
 import { automationChatSubmissionId, automationCodeOperationId } from "./automationRunIdentity";
 import { automationDispatchPromptText } from "./automationFileContext";
 import { automationFollowUpTurnPrompt } from "@octant/contracts";
+import { eventActorForPrincipal } from "../principalEventActor";
 
 export interface AutomationSchedulerConfig {
   /**
@@ -687,13 +688,19 @@ export class AutomationSchedulerService {
           nextDueAt: null,
           version: definition.version + 1,
           updatedAt: review.reviewedAt,
-          updatedBy: {
-            kind: "local-window",
-            windowId: review.reviewedWindowId,
-            capabilityGeneration: review.reviewedCapabilityGeneration,
-          },
+          updatedBy:
+            "reviewedDevice" in review
+              ? review.reviewedDevice
+              : {
+                  kind: "local-window",
+                  windowId: review.reviewedWindowId,
+                  capabilityGeneration: review.reviewedCapabilityGeneration,
+                },
         });
         this.#store.appendOccurrenceLedger({
+          ...("reviewedDevice" in review
+            ? { actor: eventActorForPrincipal(review.reviewedDevice) }
+            : {}),
           automationId: definition.id,
           expectedVersion: definition.version,
           events: [

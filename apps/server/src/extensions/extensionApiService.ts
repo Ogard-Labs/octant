@@ -92,7 +92,7 @@ export class ExtensionApiService {
     | {
         owns(sourceRef: string): boolean;
         localSetupId?(sourceRef: string): "paper" | undefined;
-        prepareRemoval?(extensionId: string): Promise<() => void>;
+        prepareRemoval?(extensionId: string, actor?: EventActor): Promise<() => void>;
         remove(sourceRef: string, extensionId: string): Promise<void>;
       }
     | undefined;
@@ -122,7 +122,7 @@ export class ExtensionApiService {
     readonly userAddedMcpServers?: {
       owns(sourceRef: string): boolean;
       localSetupId?(sourceRef: string): "paper" | undefined;
-      prepareRemoval?(extensionId: string): Promise<() => void>;
+      prepareRemoval?(extensionId: string, actor?: EventActor): Promise<() => void>;
       remove(sourceRef: string, extensionId: string): Promise<void>;
     };
   }) {
@@ -384,7 +384,7 @@ export class ExtensionApiService {
           let release: (() => void) | undefined;
           try {
             release = owned
-              ? await this.#userAddedMcpServers?.prepareRemoval?.(command.extensionId)
+              ? await this.#userAddedMcpServers?.prepareRemoval?.(command.extensionId, actor)
               : undefined;
           } catch {
             return failure(

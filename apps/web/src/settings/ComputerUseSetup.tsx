@@ -115,9 +115,11 @@ export function ComputerUseSetup(
               <span>
                 {status === undefined
                   ? "Not checked"
-                  : status.permissions[permission]
-                    ? "Allowed"
-                    : "Not allowed"}
+                  : status.permissionsUnavailable
+                    ? "Couldn’t check"
+                    : status.permissions[permission]
+                      ? "Allowed"
+                      : "Not allowed"}
               </span>
               <OctantButton
                 size="sm"

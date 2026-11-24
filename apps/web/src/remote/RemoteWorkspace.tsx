@@ -38,6 +38,10 @@ import {
   type ReplyDetailThread,
 } from "../transcript/replyDetail";
 
+const RemoteDesktopPane = lazy(async () => ({
+  default: (await import("../desktop/DesktopPane")).DesktopPane,
+}));
+
 export interface RemoteWorkspaceProps {
   readonly initialThread?: { readonly mode: OctantMode; readonly threadId: string };
   readonly clients: RemoteProductClients;
@@ -481,6 +485,7 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
 export interface RemoteCodeSurfaceProps extends Omit<RemoteSurfaceProps, "clients"> {
   /** Canvas is absent where its routes do not reach the host (a desktop window's paired computer). */
   readonly clients: Pick<RemoteProductClients, "code" | "project"> & {
+    readonly desktop?: RemoteProductClients["desktop"];
     readonly canvas?: RemoteProductClients["canvas"];
     readonly serviceOffers?: RemoteProductClients["serviceOffers"];
     readonly imageResults?: RemoteProductClients["imageResults"];
@@ -594,6 +599,13 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
               thread={activeThread}
             />
           )}
+          {activeThread && props.connected && props.clients.desktop && (
+            <RemoteThreadDesktop
+              key={activeThread.id}
+              threadId={activeThread.id}
+              client={props.clients.desktop}
+            />
+          )}
           <CodeThreadWorkspace
             actsAsHostPerson={props.actsAsHostPerson}
             {...(props.clients.canvas === undefined ? {} : { canvasClient: props.clients.canvas })}
@@ -612,6 +624,25 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
         </>
       )}
     </RemoteThreadPane>
+  );
+}
+
+function RemoteThreadDesktop(props: {
+  readonly threadId: CodeThreadId;
+  readonly client: NonNullable<RemoteProductClients["desktop"]>;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <OctantButton aria-expanded={open} onClick={() => setOpen(!open)} variant="outline" size="sm">
+        Desktop
+      </OctantButton>
+      {open && (
+        <Suspense fallback={<p role="status">Opening desktop…</p>}>
+          <RemoteDesktopPane threadId={props.threadId} client={props.client} />
+        </Suspense>
+      )}
+    </>
   );
 }
 

@@ -53,6 +53,8 @@ export type CodeProviderRequest =
         readonly plan?: string;
         readonly planContentId?: CodeEvidenceContentId;
       };
+      /** The ask may also be answered with "Remember for this Project". */
+      readonly canRememberForProject?: true;
     }
   | {
       readonly kind: "input";
@@ -142,6 +144,7 @@ function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderReques
                 : { planContentId: event.levelChange.plan.contentId }),
             },
           }),
+      ...(event.canRememberForProject === true ? { canRememberForProject: true } : {}),
     };
   }
   // App questionnaires follow the session read so answers from another window
@@ -620,17 +623,8 @@ async function projectConversationTurns(
     let replayed = EMPTY_TURN_ACTIVITY;
     for (const step of steps) {
       if (step.kind === "tool") {
-        replayed = applyActivityEvent(replayed, {
-          kind: "tool-activity",
-          toolCallId: step.toolCallId,
-          toolName: step.toolName,
-          state: step.state,
-          ...(step.summary === undefined ? {} : { summary: step.summary }),
-          ...(step.published === undefined ? {} : { published: step.published }),
-          ...(step.outsideContent === undefined ? {} : { outsideContent: step.outsideContent }),
-          ...(step.routine === undefined ? {} : { routine: step.routine }),
-          ...(step.timing === undefined ? {} : { timing: step.timing }),
-        });
+        // A recorded tool step carries exactly the fields of the event that made it.
+        replayed = applyActivityEvent(replayed, { ...step, kind: "tool-activity" });
         continue;
       }
       if (step.kind === "review") {

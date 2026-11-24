@@ -18,6 +18,7 @@ import {
   type ProviderUsageLimit,
   type ThreadCallTiming,
   type ThreadPublishedPage,
+  type ThreadCanvasPreviewReceipt,
   type ThreadRoutineReceipt,
   type ToolOutsideContentMark,
   type TurnLoopNotice,
@@ -217,6 +218,8 @@ export interface CodeTurnEvent {
   readonly outsideContent?: ToolOutsideContentMark;
   /** The routine the finished call created. */
   readonly routine?: ThreadRoutineReceipt;
+  /** The Canvas version the finished call previewed. */
+  readonly canvasPreview?: ThreadCanvasPreviewReceipt;
   /**
    * The host-measured execute interval for an app-managed call that ended.
    * Bounds come from the recorded call itself — the interval immediately
@@ -1008,6 +1011,9 @@ export class CodeTurnRunner {
                       ...(answer.isError || execution.routine === undefined
                         ? {}
                         : { routine: execution.routine }),
+                      ...(answer.isError || execution.canvasPreview === undefined
+                        ? {}
+                        : { canvasPreview: execution.canvasPreview }),
                       ...(appToolCallTiming === undefined ? {} : { callTiming: appToolCallTiming }),
                       // A refused call carries a mark only when it reached
                       // for a protected secret, which its row then shows.

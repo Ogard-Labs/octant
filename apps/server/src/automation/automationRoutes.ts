@@ -610,14 +610,14 @@ async function handleCommand(
     command = { ...checked, definition: eventPreparation.definition };
   }
   if (command.kind === "rearm-file-automation") {
-    // The journaled review record names the window that reviewed the held
-    // input (its id and capability generation), and recovery rebuilds the
-    // routine's author from it; it has no form for a device yet.
-    if (context.principal.kind !== "local-window")
+    // A device the host's own person paired reviews as a window does; the
+    // journaled review names that device, and recovery rebuilds the routine's
+    // author from it (maintainer decision, 2026-11-12).
+    if (!principalActsAsHostPerson(context.principal))
       return jsonResponse(
         commandFailure(
           "unauthorized",
-          "Re-arm this file routine from an Octant window on this host.",
+          "Re-arm this file routine from an Octant window on this host or a device you paired there.",
         ),
         200,
         origin,
@@ -785,6 +785,18 @@ async function handleProposalDecision(
   if (proposals === undefined || claimed === undefined) {
     return jsonResponse(
       decodeRoutineProposalDecisionResult({ kind: "routine-proposal-gone" }),
+      200,
+      origin,
+    );
+  }
+  if ("status" in claimed) {
+    // The answer could not be journaled, so nothing acts on it; the proposal
+    // stays waiting and the card reports the failure instead of vanishing.
+    return jsonResponse(
+      decodeRoutineProposalDecisionResult({
+        kind: "routine-proposal-answer-unrecorded",
+        message: "The answer could not be saved; nothing was changed. Try again.",
+      }),
       200,
       origin,
     );

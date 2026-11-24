@@ -1,5 +1,6 @@
 import {
   decodeAgentRun,
+  decodeEventActor,
   decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceReference,
@@ -2152,6 +2153,20 @@ describe("CodeOperationService", () => {
         event: expect.objectContaining({ kind: "conversation-turn-started" }),
       }),
     );
+  });
+
+  it("starts a paired person's turn while leaving the local window's feedback pending", async () => {
+    const prepare = vi.fn(() => ({ attachments: [], take: () => ({ attachments: [] }) }));
+    const fixture = providerTurnFixture({
+      takeProductFeedbackForTurn: Object.assign(() => ({ attachments: [] }), { prepare }),
+    });
+    await fixture.service.execute(ids.window, startProviderTurn, {
+      initiator: "user",
+      actor: decodeEventActor({ kind: "remote-device", actorId: ids.window, deviceId: ids.window }),
+      admissionCurrent: () => true,
+    });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(fixture.turns.start).toHaveBeenCalledOnce();
   });
 
   it("fails a recorded host turn revoked while its prompt is loading without starting it", async () => {

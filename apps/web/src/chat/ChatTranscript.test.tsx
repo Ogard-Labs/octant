@@ -2210,3 +2210,17 @@ function waitingReceipt() {
     message: "No selected model is currently eligible. Check provider readiness and pool policy.",
   };
 }
+
+describe("what a turn made, in the Chat transcript", () => {
+  it("draws the turn's Canvas above the reply text, inside the last reply only", () => {
+    const beforeReply = vi.fn(() => <section aria-label="Canvas: Summary">Summary tiles</section>);
+    render(<ChatTranscript beforeReply={beforeReply} view={viewFixture()} />);
+
+    const canvas = screen.getByRole("region", { name: "Canvas: Summary" });
+    const reply = screen.getByText("Here is the summary.");
+    // The Canvas precedes the reply in reading order.
+    expect(canvas.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Two attempts, one Canvas: only the last reply receives it.
+    expect(screen.getAllByRole("region", { name: "Canvas: Summary" })).toHaveLength(1);
+  });
+});

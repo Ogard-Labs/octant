@@ -33,6 +33,7 @@ vi.mock("./computerUseSdkRuntime", async (actual) => ({
     };
   }),
 }));
+import { computerUsePermissions } from "./computerUseSdkRuntime";
 import * as updateModule from "./computerUseDriverUpdates";
 import * as controlModule from "./computerUseControlHost";
 import { createComputerUseDesktopService } from "./computerUseDesktopService";
@@ -52,6 +53,18 @@ describe("Computer use permission status", () => {
     fixture.driver = { accessibility: true, screen_recording: true };
   });
   afterEach(() => vi.unstubAllGlobals());
+  it("reports an unreadable host permission check without granting access", async () => {
+    const computer = service();
+    try {
+      vi.mocked(computerUsePermissions).mockRejectedValueOnce(new Error("SDK unavailable"));
+      expect(await computer.status()).toMatchObject({
+        permissionsUnavailable: true,
+        permissions: { accessibility: false, screenRecording: false },
+      });
+    } finally {
+      await computer.close();
+    }
+  });
   it("keeps permission grants separate from a working test and clears verification after revocation", async () => {
     const computer = service();
     await computer.configure({ enabled: true, automaticUpdates: false });

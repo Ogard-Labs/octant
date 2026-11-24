@@ -127,7 +127,12 @@ import type {
   ImageGenerationClient,
   ThreadImageResults,
 } from "@octant/client-runtime/image-generation-client";
-import type { ImageArtifactRecord, ImageGenerationProfileView, ImageJob } from "@octant/contracts";
+import type {
+  ImageArtifactRecord,
+  ImageGenerationProfileView,
+  ImageJob,
+  ThreadCanvasPreviewReceipt,
+} from "@octant/contracts";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
@@ -139,6 +144,7 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
+import { CanvasPreviewMiniature } from "../canvas/CanvasPreviewMiniature";
 import {
   ThreadArtifactsConfirm,
   ThreadArtifactsOffer,
@@ -146,7 +152,12 @@ import {
   threadMayChooseArtifacts,
 } from "../canvas/ThreadArtifactsChoice";
 import { publishedSnapshotRunRuntimeFor } from "../canvas/blocks/designRunningFrame";
-import { placeByTurn, placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
+import {
+  canvasesByTurnRow,
+  placeByTurn,
+  placeThreadCanvases,
+  threadTurnSpans,
+} from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import {
@@ -556,6 +567,13 @@ function WorkToolGroup(props: {
       {...(workedFor !== undefined && settledTurnFoldsActivity(activity) ? { workedFor } : {})}
       {...(toolCallRecords === undefined ? {} : { toolCallRecords })}
       subagents={subagents}
+      {...(canvasClient === undefined
+        ? {}
+        : {
+            canvasPreview: (preview: ThreadCanvasPreviewReceipt) => (
+              <CanvasPreviewMiniature client={canvasClient} preview={preview} />
+            ),
+          })}
     />
   );
 }
@@ -2587,6 +2605,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       transcriptRows,
       (row) => row.key,
       (row) => (row.kind === "message" && row.entry.role === "user" ? row.at : undefined),
+      (row) => row.kind === "message" && row.entry.role === "assistant",
     ),
     threadCanvases.cards,
   );
@@ -2623,7 +2642,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     choosable: artifactsChoosable && !completionLocked,
     documentDelivery: thread?.documentDelivery,
     rowKeys: transcriptRows.map((row) => row.key),
-    canvasesByRow: canvasPlacement.byRow,
+    canvasesByRow: canvasesByTurnRow(canvasPlacement),
   });
 
   // What the old "Task actions" menu offered, now a group of the add menu.
@@ -2925,6 +2944,18 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                               : { canvasClient: props.canvasClient })}
                           />
                         </>
+                      )}
+                      {/* The turn's Canvases sit between its steps and its last
+                      reply, so a summary reads first and the reply adds to it. */}
+                      {canvasClient === undefined ? null : (
+                        <ThreadCanvases
+                          cards={canvasPlacement.beforeReply.get(row.key)}
+                          client={canvasClient}
+                          {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+                          {...(props.canvasOpenLabel === undefined
+                            ? {}
+                            : { openLabel: props.canvasOpenLabel })}
+                        />
                       )}
                       {row.entry.text === "" ? null : (
                         <AssistantMessageBody body={row.entry.text} streaming={row.streaming} />

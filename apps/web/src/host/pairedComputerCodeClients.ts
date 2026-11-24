@@ -1,3 +1,7 @@
+import {
+  createDesktopPaneClient,
+  type DesktopPaneClient,
+} from "@octant/client-runtime/desktop-pane-client";
 import { createRemoteProductFetch, type RemoteSessionBridge } from "@octant/client-runtime";
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
 import {
@@ -8,6 +12,7 @@ import { createProjectClient, type ProjectClient } from "@octant/client-runtime/
 import { createProviderClient, type ProviderClient } from "@octant/client-runtime/provider-client";
 
 export interface PairedComputerCodeClients {
+  readonly desktop: DesktopPaneClient;
   readonly code: CodeClient;
   readonly project: ProjectClient;
   readonly provider: ProviderClient;
@@ -37,6 +42,7 @@ export function createPairedComputerCodeClients(
   };
   return {
     code: createCodeClient({ ...port, threadEvents: "poll" }),
+    desktop: createDesktopPaneClient(port),
     project: createProjectClient(port),
     provider: createProviderClient(port),
     folderBrowse: createFolderBrowseClient(port),

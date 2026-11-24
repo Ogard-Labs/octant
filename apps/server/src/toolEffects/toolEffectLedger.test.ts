@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Schema } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { Effect, Schema } from "effect";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   EventActor,
   TOOL_EFFECT_AGGREGATE_TYPE,
@@ -14,7 +14,14 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import { RoutineProposalService } from "../automation/routineProposalService";
+import { createBrowserAppManagedTools } from "../browser/browserAppManagedTools";
+import { BrowserToolApprovalService } from "../browser/browserToolApprovalService";
+import { NativeHarnessQuestionStore } from "../harness/nativeHarnessQuestions";
+import { ImageGenerationOfferService } from "../image/imageGenerationOfferService";
+import { ProjectMemoryProposalService } from "../projectMemory/projectMemoryProposalService";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { withRecordedApprovalAnswers } from "./recordedApprovalAnswers";
 import {
   executingToolCallId,
   registerToolEffectEvents,
@@ -60,15 +67,21 @@ function hostOn(connection: SqliteConnection, clock: () => string = () => now) {
     actor,
     clock,
   });
-  const journaled = () =>
-    journal
-      .replayAggregate({
+  const journaled = () => {
+    const frames: Array<{ readonly eventName: string; readonly payload: unknown }> = [];
+    for (;;) {
+      const page = journal.replayAggregate({
         aggregateType: TOOL_EFFECT_AGGREGATE_TYPE,
         aggregateId: turnId,
-        afterVersion: 0,
+        afterVersion: frames.length,
         limit: 1_000,
-      })
-      .map((envelope) => ({ eventName: envelope.eventName, payload: envelope.payload }));
+      });
+      frames.push(
+        ...page.map((envelope) => ({ eventName: envelope.eventName, payload: envelope.payload })),
+      );
+      if (page.length < 1_000) return frames;
+    }
+  };
   return { journal, ledger, journaled };
 }
 
@@ -365,6 +378,361 @@ describe("tool effect ledger", () => {
     expect(host.ledger.certainty(turnId)).toEqual({ kind: "settled" });
   });
 
+  it("records the answer before an ask whose answer acts before the tool hears it", async () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    let seenByAnswer: ReadonlyArray<string> = [];
+    const tools = before.ledger.forTurn({ threadId, turnId }).tools(
+      toolSet(["octant_memory"], async () => {
+        // The person's confirm applies the change before the tool hears it,
+        // as a memory proposal's does, and the host stops right after.
+        await whileAwaitingToolApproval((answered) => {
+          answered();
+          seenByAnswer = before.journaled().map((entry) => entry.eventName);
+          return new Promise(() => {});
+        });
+        return { result: {} };
+      }),
+    );
+    void tools.execute({ name: "octant_memory", inputJson: "{}", toolCallId: "call-1" });
+    await Promise.resolve();
+
+    expect(seenByAnswer).toEqual([
+      "tool-effect-intended@1",
+      "tool-effect-awaiting-approval@1",
+      "tool-effect-intended@1",
+    ]);
+    expect(hostOn(connection).ledger.certainty(turnId)).toEqual({
+      kind: "uncertain",
+      toolName: "octant_memory",
+    });
+  });
+
+  it("continues a turn whose runtime tool was waiting for the runtime's approval request", () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    const turn = before.ledger.forTurn({ threadId, turnId });
+    turn.observe(
+      runtimeEvent({ kind: "tool-start", sessionId: "s-1", toolCallId: "rt-1", toolName: "Bash" }),
+    );
+    turn.observe(
+      runtimeEvent({
+        kind: "approval-request",
+        sessionId: "s-1",
+        requestId: "req-1",
+        action: "shell",
+        description: "Run rm -rf build",
+        toolCallId: "rt-1",
+      }),
+    );
+
+    // Nothing ran: the restart continues the turn, and the runtime asks again.
+    expect(hostOn(connection).ledger.certainty(turnId)).toEqual({ kind: "settled" });
+
+    // The answer is on record before the runtime hears it.
+    expect(before.ledger.approvalAnswered({ sessionId: "s-1", requestId: "req-1" })).toEqual({
+      status: "recorded",
+    });
+    expect(hostOn(connection).ledger.certainty(turnId)).toEqual({
+      kind: "uncertain",
+      toolName: "Bash",
+    });
+    // A second answer to the same request has nothing left to record.
+    expect(before.ledger.approvalAnswered({ sessionId: "s-1", requestId: "req-1" })).toEqual({
+      status: "no-wait",
+    });
+    expect(before.journaled()).toHaveLength(3);
+  });
+
+  it("records a runtime approval's answer before the runtime hears it, and refuses the call when it cannot", async () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    const heard: Array<{ readonly approved: boolean; readonly frames: number }> = [];
+    const driver = withRecordedApprovalAnswers(
+      {
+        acquire: () =>
+          Effect.succeed({
+            answerApproval: (answer: { readonly approved: boolean }) =>
+              Effect.sync(() => {
+                heard.push({ approved: answer.approved, frames: before.journaled().length });
+              }),
+          }),
+      } as never,
+      before.ledger,
+    );
+    const turn = before.ledger.forTurn({ threadId, turnId });
+    turn.observe(
+      runtimeEvent({ kind: "tool-start", sessionId: "s-1", toolCallId: "rt-1", toolName: "Bash" }),
+    );
+    turn.observe(
+      runtimeEvent({
+        kind: "approval-request",
+        sessionId: "s-1",
+        requestId: "req-1",
+        action: "shell",
+        description: "Run a command",
+        toolCallId: "rt-1",
+      }),
+    );
+    const refusing = withRecordedApprovalAnswers(driver, {
+      approvalAnswered: () => ({ status: "refused" }),
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const answering = yield* driver.acquire({} as never);
+          yield* answering.answerApproval({
+            sessionId: "s-1",
+            requestId: "req-1",
+            approved: true,
+          } as never);
+          const unrecorded = yield* refusing.acquire({} as never);
+          yield* unrecorded.answerApproval({
+            sessionId: "s-1",
+            requestId: "req-2",
+            approved: true,
+          } as never);
+        }),
+      ),
+    );
+
+    expect(heard).toEqual([
+      // intended, awaiting, intended again: all before the runtime heard "allow".
+      { approved: true, frames: 3 },
+      { approved: false, frames: 3 },
+    ]);
+  });
+
+  it("still records the answer to a runtime's oldest waiting request after many more requests wait", () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    const turn = before.ledger.forTurn({ threadId, turnId });
+    for (let index = 0; index < 600; index += 1) {
+      turn.observe(
+        runtimeEvent({
+          kind: "tool-start",
+          sessionId: "s-1",
+          toolCallId: `rt-${index}`,
+          toolName: "Bash",
+        }),
+      );
+      turn.observe(
+        runtimeEvent({
+          kind: "approval-request",
+          sessionId: "s-1",
+          requestId: `req-${index}`,
+          action: "shell",
+          description: "Run a command",
+          toolCallId: `rt-${index}`,
+        }),
+      );
+    }
+
+    expect(before.ledger.approvalAnswered({ sessionId: "s-1", requestId: "req-0" })).toEqual({
+      status: "recorded",
+    });
+    // Approved and not finished when the host stopped: the restart holds it.
+    expect(hostOn(connection).ledger.certainty(turnId)).toEqual({
+      kind: "uncertain",
+      toolName: "Bash",
+    });
+  });
+
+  it("holds a call whose wait the full request index could not keep, even once it is approved", () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    const turn = before.ledger.forTurn({ threadId, turnId });
+    for (let index = 0; index < 512; index += 1) {
+      turn.observe(
+        runtimeEvent({
+          kind: "tool-start",
+          sessionId: "s-1",
+          toolCallId: `read-${index}`,
+          toolName: "Read",
+        }),
+      );
+      turn.observe(
+        runtimeEvent({
+          kind: "approval-request",
+          sessionId: "s-1",
+          requestId: `read-req-${index}`,
+          action: "read",
+          description: "Read a file",
+          toolCallId: `read-${index}`,
+        }),
+      );
+    }
+    turn.observe(
+      runtimeEvent({ kind: "tool-start", sessionId: "s-1", toolCallId: "rt-x", toolName: "Bash" }),
+    );
+    turn.observe(
+      runtimeEvent({
+        kind: "approval-request",
+        sessionId: "s-1",
+        requestId: "req-x",
+        action: "shell",
+        description: "Run rm -rf build",
+        toolCallId: "rt-x",
+      }),
+    );
+    const isBash = (entry: { readonly payload: unknown }) =>
+      (entry.payload as { readonly toolCallId?: string }).toolCallId === "rt-x";
+
+    // Its wait was never journaled, so the record says it may already run.
+    expect(
+      before
+        .journaled()
+        .filter(isBash)
+        .map((entry) => entry.eventName),
+    ).toEqual(["tool-effect-intended@1"]);
+    expect(before.ledger.approvalAnswered({ sessionId: "s-1", requestId: "req-x" })).toEqual({
+      status: "no-wait",
+    });
+    // The other waiting calls never ran; only the approved one holds.
+    for (let index = 0; index < 512; index += 1)
+      turn.observe(
+        runtimeEvent({
+          kind: "tool-success",
+          sessionId: "s-1",
+          toolCallId: `read-${index}`,
+        }),
+      );
+    expect(hostOn(connection).ledger.certainty(turnId)).toEqual({
+      kind: "uncertain",
+      toolName: "Bash",
+    });
+  });
+
+  it("frees a waiting request's place once its call settles or its turn ends", () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    const turn = before.ledger.forTurn({ threadId, turnId });
+    const ask = (index: number) => {
+      turn.observe(
+        runtimeEvent({
+          kind: "tool-start",
+          sessionId: "s-1",
+          toolCallId: `rt-${index}`,
+          toolName: "Bash",
+        }),
+      );
+      turn.observe(
+        runtimeEvent({
+          kind: "approval-request",
+          sessionId: "s-1",
+          requestId: `req-${index}`,
+          action: "shell",
+          description: "Run a command",
+          toolCallId: `rt-${index}`,
+        }),
+      );
+    };
+    for (let index = 0; index < 512; index += 1) {
+      ask(index);
+      turn.observe(
+        runtimeEvent({ kind: "tool-failure", sessionId: "s-1", toolCallId: `rt-${index}` }),
+      );
+    }
+    const other = before.ledger.forTurn({ threadId, turnId: otherTurnId });
+    for (let index = 0; index < 512; index += 1) {
+      other.observe(
+        runtimeEvent({
+          kind: "tool-start",
+          sessionId: "s-2",
+          toolCallId: `rt-${index}`,
+          toolName: "Bash",
+        }),
+      );
+      other.observe(
+        runtimeEvent({
+          kind: "approval-request",
+          sessionId: "s-2",
+          requestId: `req-${index}`,
+          action: "shell",
+          description: "Run a command",
+          toolCallId: `rt-${index}`,
+        }),
+      );
+    }
+    other.observe(runtimeEvent({ kind: "interrupted", sessionId: "s-2" }));
+    ask(1_000);
+
+    expect(before.ledger.approvalAnswered({ sessionId: "s-1", requestId: "req-1000" })).toEqual({
+      status: "recorded",
+    });
+  });
+
+  it("keeps holding a runtime's approval request that names no call it reported", () => {
+    const connection = openConnection();
+    const turn = hostOn(connection).ledger.forTurn({ threadId, turnId });
+    turn.observe(
+      runtimeEvent({ kind: "tool-start", sessionId: "s-1", toolCallId: "rt-1", toolName: "Bash" }),
+    );
+    turn.observe(
+      runtimeEvent({
+        kind: "approval-request",
+        sessionId: "s-1",
+        requestId: "req-1",
+        action: "shell",
+        description: "Run a command",
+      }),
+    );
+
+    expect(hostOn(connection).ledger.certainty(turnId)).toEqual({
+      kind: "uncertain",
+      toolName: "Bash",
+    });
+  });
+
+  it("never holds a turn for a runtime's second report of a host tool the host records", async () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    const turn = before.ledger.forTurn({ threadId, turnId });
+    const host = toolSet(["read"], () => new Promise(() => {}));
+    // An ACP agent titles its call freely, so the start alone names nothing.
+    turn.observe(
+      runtimeEvent({ kind: "tool-start", toolCallId: "tool-1", toolName: "read (octant MCP)" }),
+      host,
+    );
+    turn.observe(
+      runtimeEvent({
+        kind: "tool-request",
+        requestId: "acp-tool-1",
+        toolName: "read",
+        inputJson: "{}",
+        toolCallId: "tool-1",
+      }),
+      host,
+    );
+    void turn.tools(host).execute({ name: "read", inputJson: "{}", toolCallId: "acp-tool-1" });
+    await Promise.resolve();
+
+    expect(hostOn(connection).ledger.certainty(turnId)).toEqual({ kind: "settled" });
+  });
+
+  it("still holds a runtime tool a host request names when the host does not offer that tool", () => {
+    const connection = openConnection();
+    const turn = hostOn(connection).ledger.forTurn({ threadId, turnId });
+    const host = toolSet(["read"], async () => ({ result: {} }));
+    turn.observe(runtimeEvent({ kind: "tool-start", toolCallId: "tool-1", toolName: "Run" }), host);
+    turn.observe(
+      runtimeEvent({
+        kind: "tool-request",
+        requestId: "acp-tool-1",
+        toolName: "shell",
+        inputJson: "{}",
+        toolCallId: "tool-1",
+      }),
+      host,
+    );
+
+    expect(hostOn(connection).ledger.certainty(turnId)).toEqual({
+      kind: "uncertain",
+      toolName: "Run",
+    });
+  });
+
   it("waits for an approval outside any recorded call without writing a record", async () => {
     const host = hostOn(openConnection());
 
@@ -490,5 +858,272 @@ describe("tool effect ledger", () => {
       payload: { toolCallId: "call-1", outcome: "superseded" },
     });
     expect(hostOn(connection).ledger.certainty(turnId)).toEqual({ kind: "settled" });
+  });
+});
+
+describe("asks that wait for a person's answer", () => {
+  const windowId = "10000000-0000-4000-8000-000000000001" as never;
+  const projectId = "10000000-0000-4000-8000-000000000002" as never;
+  const authority = {
+    hostId: "20000000-0000-4000-8000-000000000001",
+    mode: "code",
+    providerInstanceId: "30000000-0000-4000-8000-000000000001",
+    extension: { kind: "core" },
+  } as never;
+  let ids = 0;
+  const uuid = () => `bbbbbbbb-bbbb-4bbb-8bbb-${(++ids).toString(16).padStart(12, "0")}`;
+
+  /**
+   * Runs `ask` as a recorded call's wait and stops the host while it waits:
+   * the turn continues after the restart (it asks again), and nothing ran.
+   */
+  async function cutOffWhileAsking(ask: () => Promise<unknown>) {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    void before.ledger
+      .forTurn({ threadId, turnId })
+      .tools(toolSet(["ask"], async () => ({ result: await ask() })))
+      .execute({ name: "ask", inputJson: "{}", toolCallId: "call-1" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return {
+      frames: before.journaled().map((entry) => entry.eventName),
+      afterRestart: hostOn(connection).ledger.certainty(turnId),
+    };
+  }
+
+  const waiting = {
+    frames: ["tool-effect-intended@1", "tool-effect-awaiting-approval@1"],
+    afterRestart: { kind: "settled" },
+  };
+
+  it("continues a turn cut off while a question waits for the person", async () => {
+    const questions = new NativeHarnessQuestionStore({
+      sessions: {
+        ensure: () => undefined,
+        askQuestion: () => undefined,
+        settleQuestion: () => undefined,
+        read: () => undefined,
+      } as never,
+      uuid,
+      clock: () => now,
+    });
+    expect(
+      await cutOffWhileAsking(() =>
+        questions.ask({
+          threadId,
+          mode: "code",
+          lead: {} as never,
+          prompt: "Which branch?",
+          options: [],
+        }),
+      ),
+    ).toEqual(waiting);
+  });
+
+  it("continues a turn cut off while an image offer waits for the person", async () => {
+    const offers = new ImageGenerationOfferService({ wait: () => new Promise(() => {}) });
+    expect(await cutOffWhileAsking(() => offers.offer({ windowId, offer: {} as never }))).toEqual(
+      waiting,
+    );
+  });
+
+  it("continues a turn cut off on a Browser site question, and holds one on a download question", async () => {
+    const approvals = new BrowserToolApprovalService({
+      uuid,
+      now: () => Date.parse(now),
+      authorityIsCurrent: () => true,
+    });
+    const site = { windowId, threadId, authority, origin: "https://example.com" };
+    expect(await cutOffWhileAsking(() => approvals.request(site))).toEqual(waiting);
+    // A download's question can follow the click that started it.
+    expect(
+      await cutOffWhileAsking(() =>
+        approvals.request({
+          ...site,
+          download: { name: "report.pdf", sizeBytes: 10, mediaType: "application/pdf" },
+        }),
+      ),
+    ).toEqual({
+      frames: ["tool-effect-intended@1"],
+      afterRestart: { kind: "uncertain", toolName: "ask" },
+    });
+  });
+
+  it("puts a memory proposal's call back on record before the confirm writes", async () => {
+    let framesAtWrite: ReadonlyArray<string> = [];
+    let host: ReturnType<typeof hostOn> | undefined;
+    const proposals = new ProjectMemoryProposalService({
+      uuid,
+      now: () => Date.parse(now),
+      apply: async () => {
+        framesAtWrite = host?.journaled().map((entry) => entry.eventName) ?? [];
+        return new Promise(() => {});
+      },
+    });
+    const propose = () =>
+      proposals.propose({
+        windowId,
+        proposal: {
+          projectId,
+          mode: "code",
+          threadId,
+          change: { kind: "create", memoryKind: "fact", content: "Waits for the person." },
+          expectedVersion: 0 as never,
+        },
+      });
+    expect(await cutOffWhileAsking(propose)).toEqual(waiting);
+
+    host = hostOn(openConnection());
+    void host.ledger
+      .forTurn({ threadId, turnId })
+      .tools(toolSet(["ask"], async () => ({ result: await propose() })))
+      .execute({ name: "ask", inputJson: "{}", toolCallId: "call-1" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const asked = proposals.list(windowId).at(-1);
+    if (asked === undefined) throw new Error("No proposal waits.");
+    void proposals.decide(windowId, { proposalId: asked.proposalId, decision: "confirm" } as never);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(framesAtWrite).toEqual([
+      "tool-effect-intended@1",
+      "tool-effect-awaiting-approval@1",
+      "tool-effect-intended@1",
+    ]);
+  });
+
+  it("puts a routine proposal's call back on record when its answer is claimed", async () => {
+    const proposals = new RoutineProposalService({ uuid, now: () => Date.parse(now) });
+    const propose = () =>
+      proposals.propose({
+        windowId,
+        proposal: {
+          threadId: threadId as never,
+          mode: "work",
+          projectId,
+          displayName: "Soon",
+          taskPrompt: "Check.",
+          trigger: { kind: "once", scheduledAt: "2026-11-13T09:00:00.000Z" as never },
+          missedRunPolicy: "skip",
+          firstRunAt: "2026-11-13T09:00:00.000Z" as never,
+        },
+      });
+    expect(await cutOffWhileAsking(propose)).toEqual(waiting);
+
+    const host = hostOn(openConnection());
+    void host.ledger
+      .forTurn({ threadId, turnId })
+      .tools(toolSet(["ask"], async () => ({ result: await propose() })))
+      .execute({ name: "ask", inputJson: "{}", toolCallId: "call-1" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const asked = proposals.list(windowId).at(-1);
+    if (asked === undefined) throw new Error("No proposal waits.");
+    // The route creates the routine only after it holds the claim.
+    expect(proposals.claim(windowId, asked.proposalId)).toBeDefined();
+
+    expect(host.journaled().map((entry) => entry.eventName)).toEqual([
+      "tool-effect-intended@1",
+      "tool-effect-awaiting-approval@1",
+      "tool-effect-intended@1",
+    ]);
+  });
+
+  it("keeps a steps batch's certainty uncertain while a later step's approval is still open", async () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    const browserAuthority = {
+      hostId: "30000000-0000-4000-8000-000000000001",
+      mode: "chat",
+      providerInstanceId: "40000000-0000-4000-8000-000000000001",
+      extension: { kind: "core" },
+    };
+    const context = (contextId: string) => ({
+      contextId,
+      threadId,
+      actionId: "60000000-0000-4000-8000-000000000001",
+      correlationId: "70000000-0000-4000-8000-000000000001",
+      authority: browserAuthority,
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 8,
+        sessionTimeoutMs: 600_000,
+      },
+      state: "active",
+      createdAt: "2026-09-09T10:00:00.000Z",
+    });
+    const first = {
+      status: "running",
+      threadId,
+      evidence: [],
+      context: context("50000000-0000-4000-8000-000000000001"),
+      observation: { url: "https://example.com/a", revision: 1 },
+    } as never;
+    const second = {
+      status: "running",
+      threadId,
+      evidence: [],
+      context: context("50000000-0000-4000-8000-000000000002"),
+      observation: { url: "https://example.com/b", revision: 2 },
+    } as never;
+    const act = vi.fn(async () => first);
+    const approvals = new BrowserToolApprovalService({
+      uuid,
+      now: () => Date.parse(now),
+      authorityIsCurrent: () => true,
+    });
+    const browserTools = createBrowserAppManagedTools({
+      windowId,
+      threadId: threadId as never,
+      mode: "chat",
+      modelId: "model-a",
+      resolveModelId: () => "model-a",
+      modelBindings: new Map([
+        [
+          "50000000-0000-4000-8000-000000000001",
+          { modelId: "model-a", authority: browserAuthority as never },
+        ],
+      ]),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => browserAuthority as never,
+      browser: {
+        inspectThread: vi.fn().mockReturnValueOnce(first).mockReturnValue(second),
+        create: vi.fn(async () => second),
+        act,
+        releaseThread: vi.fn(async () => second),
+      },
+      approvals,
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    const tools = before.ledger.forTurn({ threadId, turnId }).tools(browserTools);
+    const pending = tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({
+        operation: "steps",
+        steps: [
+          { operation: "click", selector: "#go" },
+          { operation: "navigate", url: "https://example.com" },
+        ],
+      }),
+      toolCallId: "call-1",
+    });
+    try {
+      await vi.waitFor(() =>
+        expect(approvals.list(windowId)).toEqual([
+          expect.objectContaining({ threadId, origin: "https://example.com" }),
+        ]),
+      );
+      expect(act).toHaveBeenCalledOnce();
+      // An approval after an earlier step's effect must not mark the whole
+      // call replay-safe: the restart answer stays uncertain.
+      expect(hostOn(connection).ledger.certainty(turnId)).toEqual({
+        kind: "uncertain",
+        toolName: "octant_browser",
+      });
+    } finally {
+      approvals.close();
+      await pending;
+    }
   });
 });

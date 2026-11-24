@@ -3,7 +3,6 @@ import type { CodeCheckoutId, CodeRelativePath, CodeThreadId } from "@octant/con
 import type { OctantMode } from "@octant/contracts/modes";
 import type { FirstRunOnboardingStatus } from "@octant/contracts/shell";
 import type { ProjectId } from "@octant/contracts/projects";
-import { CodeSearchDialog } from "../code/CodeSearchDialog";
 import { lazy, Suspense, useEffect, useRef } from "react";
 import type { FirstRunOnboardingProps } from "../onboarding/FirstRunOnboarding";
 
@@ -15,6 +14,11 @@ const FirstRunOnboarding = lazy(() =>
   import("../onboarding/FirstRunOnboarding").then((module) => ({
     default: module.FirstRunOnboarding,
   })),
+);
+// Quick-open mounts only while a Code thread is in view, so a window that
+// never shows one never loads it.
+const CodeSearchDialog = lazy(() =>
+  import("../code/CodeSearchDialog").then((module) => ({ default: module.CodeSearchDialog })),
 );
 import { CommandPalette } from "../palette/CommandPalette";
 import type { ProjectCreateGithubSource } from "../projects/ProjectCreateDialog";
@@ -169,19 +173,21 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
           in view. Mounting it per tab would make one chord open a dialog for
           every split pane at once. */}
       {props.zenActive || props.activeCodeThreadView === undefined ? null : (
-        <CodeSearchDialog
-          readOnly={
-            props.activeCodeThreadView.thread.executionPolicy === undefined ||
-            props.activeCodeThreadView.thread.executionPolicy === "plan"
-          }
-          checkoutId={props.activeCodeThreadView.checkout.id}
-          onOpenFile={props.onOpenCodeSearchFile}
-          {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-          {...(props.windowCapability === undefined
-            ? {}
-            : { windowCapability: props.windowCapability })}
-          threadId={props.activeCodeThreadView.thread.id}
-        />
+        <Suspense fallback={null}>
+          <CodeSearchDialog
+            readOnly={
+              props.activeCodeThreadView.thread.executionPolicy === undefined ||
+              props.activeCodeThreadView.thread.executionPolicy === "plan"
+            }
+            checkoutId={props.activeCodeThreadView.checkout.id}
+            onOpenFile={props.onOpenCodeSearchFile}
+            {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+            {...(props.windowCapability === undefined
+              ? {}
+              : { windowCapability: props.windowCapability })}
+            threadId={props.activeCodeThreadView.thread.id}
+          />
+        </Suspense>
       )}
       {/* First run renders nothing once it has been answered, but a mounted
           lazy element still fetches its chunk. Asking whether it is still

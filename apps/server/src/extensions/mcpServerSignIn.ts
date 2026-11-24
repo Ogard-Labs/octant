@@ -343,7 +343,12 @@ export class McpServerSignIn {
       return this.#signOut(extensionId, componentId, principalKind, actor);
     });
   }
-  async preparePackageRemoval(extensionId: string): Promise<() => void> {
+  /**
+   * Cancels the package's waiting sign-ins before it is removed. `actor` is
+   * whoever removed it, as the route resolved them: the cancellation is
+   * journaled as theirs, never as whoever began the attempt.
+   */
+  async preparePackageRemoval(extensionId: string, actor?: EventActor): Promise<() => void> {
     this.#removals.set(extensionId, (this.#removals.get(extensionId) ?? 0) + 1);
     let released = false;
     const release = () => {
@@ -369,7 +374,13 @@ export class McpServerSignIn {
             throw new Error("Finish signing out before removing this server.");
           for (const [key, pending] of Array.from(this.#attempts))
             if (key.startsWith(prefix) && pending.discovered.resource === resource) {
-              if (!(await this.#cancelPending(key, "local-window")))
+              if (
+                !(await this.#cancelPending(
+                  key,
+                  actor?.kind === "remote-device" ? "person-paired-device" : "local-window",
+                  actor,
+                ))
+              )
                 throw new Error(
                   "Sign-in cancellation is not confirmed. Restore the credential broker and retry removal.",
                 );
