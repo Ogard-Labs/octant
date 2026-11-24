@@ -111,3 +111,13 @@ export function placeThreadCanvases(
   }
   return { byRow, beforeReply, placed: placement.placed };
 }
+
+/**
+ * Every row that shows Canvases, whether above its reply text or after it,
+ * for what is placed beside a turn's Canvases (the one-time artifacts offer).
+ */
+export function canvasesByTurnRow(
+  placement: ThreadCanvasPlacement,
+): ReadonlyMap<string, ReadonlyArray<CanvasThreadReferenceCard>> {
+  return new Map([...placement.byRow, ...placement.beforeReply]);
+}

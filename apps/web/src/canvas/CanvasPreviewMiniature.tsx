@@ -1,9 +1,10 @@
 import "../styles/canvas-inline.css";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ThreadCanvasPreviewReceipt } from "@octant/contracts";
-import { type CanvasDefinition, decodeCanvasId } from "@octant/contracts/canvas";
-import { useEffect, useState } from "react";
+import { type CanvasDefinition, type CanvasId, decodeCanvasId } from "@octant/contracts/canvas";
+import { useEffect, useMemo, useState } from "react";
 import { CanvasView } from "./CanvasView";
+import type { DesignAssetRuntime } from "./blocks/designDocument";
 
 type LoadedVersion =
   | { readonly kind: "loading" }
@@ -22,20 +23,33 @@ export function CanvasPreviewMiniature(props: {
   readonly preview: ThreadCanvasPreviewReceipt;
 }) {
   const { client } = props;
-  const { canvasId, versionId } = props.preview;
+  const { versionId } = props.preview;
+  // A reference the step kept that is not a Canvas id reads as unavailable.
+  const canvasId = useMemo(() => decodedCanvasId(props.preview.canvasId), [props.preview.canvasId]);
   const [loaded, setLoaded] = useState<LoadedVersion>({ kind: "loading" });
+  // The images the agent's preview drew (a generated image, a design's
+  // declared assets), resolved by the host for this exact version under its
+  // own thread authority, as the Canvas workspace does. Without it they drew
+  // as placeholders the agent never saw.
+  const designAssetRuntime = useMemo<DesignAssetRuntime | undefined>(() => {
+    const designAssets = client.designAssets;
+    if (designAssets === undefined || canvasId === undefined) return undefined;
+    return {
+      resolve: async (blockId) => {
+        const outcome = await designAssets({ canvasId, versionId, blockId });
+        return outcome.kind === "ready" ? outcome.assets : undefined;
+      },
+    };
+  }, [canvasId, client, versionId]);
   useEffect(() => {
-    let id;
-    try {
-      id = decodeCanvasId(canvasId);
-    } catch {
+    if (canvasId === undefined) {
       setLoaded({ kind: "unavailable" });
       return;
     }
     let cancelled = false;
     setLoaded({ kind: "loading" });
     client
-      .get(id, versionId)
+      .get(canvasId, versionId)
       .then((outcome) => {
         if (cancelled) return;
         setLoaded(
@@ -65,7 +79,11 @@ export function CanvasPreviewMiniature(props: {
         <>
           <span aria-hidden="true" className="canvas-preview-shot__frame" inert>
             <span className="canvas-preview-shot__page">
-              <CanvasView input={loaded.definition} placement="thread" />
+              <CanvasView
+                input={loaded.definition}
+                placement="thread"
+                {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
+              />
             </span>
           </span>
           <figcaption className="canvas-preview-shot__caption">
@@ -79,4 +97,12 @@ export function CanvasPreviewMiniature(props: {
       )}
     </figure>
   );
+}
+
+function decodedCanvasId(value: string): CanvasId | undefined {
+  try {
+    return decodeCanvasId(value);
+  } catch {
+    return undefined;
+  }
 }

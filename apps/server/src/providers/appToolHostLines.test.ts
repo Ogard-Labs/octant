@@ -143,6 +143,7 @@ describe("appToolHostLines", () => {
     expect(canvas?.text).toContain("above your reply");
     expect(canvas?.text).not.toMatch(/below/);
     expect(CANVAS_DELIVERY_INSTRUCTIONS).toContain("inline Canvas summary drawn above your reply");
+    expect(CANVAS_DELIVERY_INSTRUCTIONS).toContain("reply with only what it does not already say");
   });
 
   it("keeps Project memory to this Project's facts and says nothing of the person's preferences", () => {

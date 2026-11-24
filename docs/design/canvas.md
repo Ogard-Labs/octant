@@ -32,7 +32,10 @@ comparison (a CI timing review, a benchmark, a cost breakdown) lead with an
 inline Canvas summary, a few metrics and one to three charts, drawn above the
 reply; the reply then says only what the summary does not (the reasons, what
 to do, the caveats) and does not describe it, and a longer report may still
-sit in the sidebar beside it. The same trigger is in the turn's delivery
+sit in the sidebar beside it. A revision's result says instead that the
+Canvas is redrawn in place, in the turn that created it, and that a reply in
+a later turn says what changed: the thread keeps a Canvas where it was first
+placed, so the summary is not above the reviser's reply. The same trigger is in the turn's delivery
 instructions, the `octant_canvas` routing line every runtime receives, and
 the inline result's `whereShown`, and tests hold the four to the same words,
 because a rule stated in one place and contradicted in another was what left
@@ -439,8 +442,8 @@ a reference to the version it drew (`canvasPreview`: the Canvas id and
 version id), journaled on the call's step like a routine receipt
 (`ThreadCanvasPreviewReceipt`); the picture the agent was shown is never
 journaled. Opening that row in Chat, Work, or Code draws the version as an
-inert miniature, read under the window's own Canvas authority, captioned with
-its version, so a person can see what the agent checked; a window that cannot
+inert miniature, read under the window's own Canvas authority with its images
+resolved by the host for that version, captioned with its version, so a person can see what the agent checked; a window that cannot
 read the Canvas sees a plain line instead. A running design runs in the preview as
 it does for a reader: the host builds its page with `renderCanvasDesignPage`,
 answers it at a path under the preview page's own origin with the page

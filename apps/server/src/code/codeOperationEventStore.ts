@@ -1889,6 +1889,11 @@ function foldTurnFrame(
     // bounded measurement the call recorded stands rather than being
     // cleared by a restatement that cannot measure it.
     const timing = frame.event.timing ?? (previous?.kind === "tool" ? previous.timing : undefined);
+    // The host's completion carries the preview receipt; a runtime that then
+    // restates the same call (Claude Code's tool result) carries none, and
+    // replacing the step dropped the miniature from a reopened thread.
+    const canvasPreview =
+      frame.event.canvasPreview ?? (previous?.kind === "tool" ? previous.canvasPreview : undefined);
     const step = {
       kind: "tool" as const,
       toolCallId: frame.event.toolCallId,
@@ -1900,9 +1905,7 @@ function foldTurnFrame(
         ? {}
         : { outsideContent: frame.event.outsideContent }),
       ...(frame.event.routine === undefined ? {} : { routine: frame.event.routine }),
-      ...(frame.event.canvasPreview === undefined
-        ? {}
-        : { canvasPreview: frame.event.canvasPreview }),
+      ...(canvasPreview === undefined ? {} : { canvasPreview }),
       ...(timing === undefined ? {} : { timing }),
     };
     if (existing === -1) appendStep(builder, step);

@@ -151,7 +151,12 @@ import {
   threadMayChooseArtifacts,
 } from "../canvas/ThreadArtifactsChoice";
 import { publishedSnapshotRunRuntimeFor } from "../canvas/blocks/designRunningFrame";
-import { placeByTurn, placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
+import {
+  canvasesByTurnRow,
+  placeByTurn,
+  placeThreadCanvases,
+  threadTurnSpans,
+} from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import {
@@ -2647,7 +2652,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     choosable: artifactsChoosable && !completionLocked,
     documentDelivery: thread?.documentDelivery,
     rowKeys: transcriptRows.map((row) => row.key),
-    canvasesByRow: canvasPlacement.byRow,
+    canvasesByRow: canvasesByTurnRow(canvasPlacement),
   });
 
   // What the old "Task actions" menu offered, now a group of the add menu.

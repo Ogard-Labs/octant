@@ -2247,6 +2247,44 @@ describe("an inline Canvas's result", () => {
   });
 });
 
+describe("an inline Canvas's revision", () => {
+  it("says the Canvas is redrawn where it first appeared and asks the reply to say what changed", async () => {
+    const { set } = tools({
+      canvas: {
+        create: vi.fn(),
+        revise: vi.fn(() => ({
+          kind: "accepted" as const,
+          receipt: { canvasId: "canvas-1", versionId: "version-2", sequence: 2 },
+        })),
+        get: vi.fn(() => ({
+          kind: "ready" as const,
+          version: {
+            sequence: 2,
+            definition: { title: "Where CI time goes", presentation: "inline", blocks: [diagram] },
+          },
+        })),
+      },
+    });
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "revise",
+        canvasId: "canvas-1",
+        expectedSequence: 1,
+        title: "Where CI time goes",
+        blocks: [diagram],
+      }),
+    });
+
+    expect(outcome.isError).not.toBe(true);
+    const result = outcome.result as { presentation?: string; whereShown?: string };
+    expect(result.presentation).toBe("inline");
+    expect(result.whereShown).toContain("redraws this Canvas in place");
+    expect(result.whereShown).toContain("say in your reply what changed");
+    expect(result.whereShown).not.toContain("do not describe it");
+  });
+});
+
 describe("a Chat thread's Canvas reads", () => {
   const canvasId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const get = () => ({

@@ -81,6 +81,15 @@ const INLINE_WHERE_SHOWN =
   "The thread draws this Canvas above your reply, so do not describe it: reply with only what it does not already say.";
 
 /**
+ * Said back with an inline revision. The thread keeps a Canvas in the turn
+ * that created it, so a revision from a later turn is redrawn above that
+ * earlier reply, not this one; telling the agent to leave its findings out of
+ * this reply would leave the follow-up saying nothing of what changed.
+ */
+const INLINE_REVISED_WHERE_SHOWN =
+  "The thread redraws this Canvas in place, above the reply of the turn that created it. If that was an earlier turn, say in your reply what changed.";
+
+/**
  * How many blocks one authoring call may carry.
  *
  * The canvas budget already bounds a document; this bounds one tool call, so a
@@ -1683,7 +1692,7 @@ function canvasToolSet(options: {
           ...(input.mermaid === undefined ? {} : { mermaid: input.mermaid }),
           ...(effective === undefined ? {} : { presentation: effective }),
           ...(note === undefined ? {} : { presentationNote: note }),
-          ...(effective === "inline" ? { whereShown: INLINE_WHERE_SHOWN } : {}),
+          ...(effective === "inline" ? { whereShown: INLINE_REVISED_WHERE_SHOWN } : {}),
           ...(strayed.length === 0 ? {} : { warning: outsideRequestWarning(strayed) }),
         },
       };

@@ -130,7 +130,12 @@ import {
   threadMayChooseArtifacts,
 } from "../canvas/ThreadArtifactsChoice";
 import { publishedSnapshotRunRuntimeFor } from "../canvas/blocks/designRunningFrame";
-import { placeByTurn, placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
+import {
+  canvasesByTurnRow,
+  placeByTurn,
+  placeThreadCanvases,
+  threadTurnSpans,
+} from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import type { HostId } from "@octant/contracts/host";
 import type { AutomationClient, CodeClient, ThreadMentionClient } from "@octant/client-runtime";
@@ -1174,7 +1179,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     choosable: artifactsChoosable,
     documentDelivery: thread.documentDelivery,
     rowKeys: messages.map((message) => message.id),
-    canvasesByRow: canvasPlacement.byRow,
+    canvasesByRow: canvasesByTurnRow(canvasPlacement),
   });
   const liveTasks = liveTaskProgress(
     messages.flatMap((message) => {
