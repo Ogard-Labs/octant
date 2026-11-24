@@ -631,7 +631,6 @@ import {
   HostFederationStackContext,
   useHostFederationLifecycle,
 } from "./host/useHostFederationLifecycle";
-import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
 import { createPairedComputerFetch } from "./host/pairedComputerFetch";
 import { usePairedComputerReads } from "./host/usePairedComputerReads";
 import {
@@ -740,6 +739,11 @@ const SettingsContainer = lazy(() =>
 const PairedComputerCodeSurface = lazy(() =>
   import("./host/PairedComputerCodeSurface").then(({ PairedComputerCodeSurface }) => ({
     default: PairedComputerCodeSurface,
+  })),
+);
+const FederatedHostsLifecycleStrip = lazy(() =>
+  import("./host/FederatedHostsLifecyclePanel").then(({ FederatedHostsLifecycleStrip }) => ({
+    default: FederatedHostsLifecycleStrip,
   })),
 );
 const RepositoryBootstrapHost = lazy(() => import("./projects/RepositoryBootstrapHost"));
@@ -9125,7 +9129,9 @@ function LaunchedShell(
         : { workProviderTerminal: zenWorkProviderTerminal })}
     >
       {hostFederationLifecycle === undefined ? null : (
-        <FederatedHostsLifecycleStrip lifecycle={hostFederationLifecycle} />
+        <Suspense fallback={null}>
+          <FederatedHostsLifecycleStrip lifecycle={hostFederationLifecycle} />
+        </Suspense>
       )}
       <AddRepositoryToComputerContext.Provider value={openBootstrap}>
         <ShellFrame
