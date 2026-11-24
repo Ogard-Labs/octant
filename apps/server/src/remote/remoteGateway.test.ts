@@ -2,6 +2,7 @@ import {
   createHash,
   createPublicKey,
   generateKeyPairSync,
+  randomUUID,
   sign,
   verify,
   type KeyObject,
@@ -47,9 +48,16 @@ vi.mock("./remoteRequestRegistry", async (importOriginal) => {
     },
   };
 });
+import { decodeVideoClipTicketResponse, decodeVideoJob } from "@octant/contracts";
 import { decodeStableHostId, type PairedDeviceLifetime } from "@octant/contracts/remote-access";
 import { buildHostHelloSignaturePayload, buildRemoteRequestProofPayload } from "@octant/domain";
-import { isPairedDeviceSessionCurrent } from "../remoteRequestProofService";
+import {
+  isAuthenticatedPairedDeviceSessionCurrent,
+  isPairedDeviceSessionCurrent,
+} from "../remoteRequestProofService";
+import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
+import { createVideoRouteHandler } from "../video/videoRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { Journal } from "../persistence/journal";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -273,6 +281,106 @@ function insertActiveSession(
       nowMs + 600_000,
       createHash("sha256").update(sessionIdDigest).digest("hex"),
     );
+}
+
+function seedPairedRequests(connection: ReturnType<typeof openSqlite>) {
+  const deviceKeys = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const publicPem = deviceKeys.publicKey.export({ format: "pem", type: "spki" }).toString().trim();
+  const keyFacts = canonicalDeviceKeyFacts(publicPem);
+  if (keyFacts === undefined) throw new Error("Expected valid P-256 key facts");
+  const deviceId = "22222222-2222-4222-8222-222222222222";
+  const sessionId = "33333333-3333-4333-8333-333333333333";
+  const sessionDigest = createHash("sha256").update(sessionId, "utf8").digest("hex");
+  const csrfToken = "csrf-token-value";
+  const csrfDigest = createHash("sha256").update(csrfToken, "utf8").digest("hex");
+
+  connection
+    .prepare(
+      `INSERT INTO remote_device_projection (
+         device_id, host_id, device_key_fingerprint, device_public_key,
+         device_label, origin, protocol_floor, credential_generation,
+         created_at, expires_at, last_seen_at, state, revoked_at, revoked_reason
+       ) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, 'active', NULL, NULL)`,
+    )
+    .run(
+      deviceId,
+      hostId,
+      keyFacts.fingerprint,
+      publicPem,
+      "Paired Phone",
+      ORIGIN,
+      nowIso,
+      new Date(nowMs + 7 * 24 * 60 * 60_000).toISOString(),
+      nowIso,
+    );
+  connection
+    .prepare(
+      `INSERT INTO remote_security_audit_projection (
+         event_kind, host_id, device_id, protocol_version, credential_generation,
+         source_class, result_category, reason_code, correlation_id, occurred_at
+       ) VALUES ('device-approved', ?, ?, 1, 1, 'lan-private', 'ok', 'user-approved', ?, ?)`,
+    )
+    .run(hostId, deviceId, "44444444-4444-4444-8444-444444444444", nowIso);
+  connection
+    .prepare(
+      `INSERT INTO remote_session_store (
+         session_id_digest, host_id, device_id, credential_generation, origin,
+         protocol_version, capability_digest, issued_at, last_seen_at,
+         idle_expires_at, absolute_expires_at, csrf_digest, state
+       ) VALUES (?, ?, ?, 1, ?, 1, ?, ?, ?, ?, ?, ?, 'active')`,
+    )
+    .run(
+      sessionDigest,
+      hostId,
+      deviceId,
+      ORIGIN,
+      "c".repeat(64),
+      nowMs,
+      nowMs,
+      nowMs + 15 * 60_000,
+      nowMs + 60 * 60_000,
+      csrfDigest,
+    );
+
+  const signedPost = (path: string, payloadBody: object, timestampMs: number) => {
+    const body = JSON.stringify(payloadBody);
+    const bodyDigest = createHash("sha256").update(body, "utf8").digest("hex");
+    const timestamp = new Date(timestampMs).toISOString();
+    const proof = {
+      method: "POST",
+      canonicalPathQuery: path,
+      timestamp,
+      nonce: randomUUID(),
+      bodyDigest,
+      csrfDigest,
+    };
+    const payload = buildRemoteRequestProofPayload({
+      sessionId,
+      proof,
+    });
+    const signature = sign("sha256", Buffer.from(payload, "utf8"), {
+      key: deviceKeys.privateKey,
+      dsaEncoding: "ieee-p1363",
+    }).toString("base64url");
+    const encodedProof = Buffer.from(JSON.stringify({ ...proof, signature }), "utf8").toString(
+      "base64url",
+    );
+    return new Request(`${ORIGIN}${path}`, {
+      method: "POST",
+      headers: {
+        host: "192.168.1.20:9443",
+        origin: ORIGIN,
+        "sec-fetch-site": "same-origin",
+        "content-type": "application/json",
+        cookie: `__Secure-octant-remote-session=${sessionId}`,
+        "x-octant-csrf": csrfToken,
+        "x-octant-command-id": randomUUID(),
+        "x-octant-device-proof": encodedProof,
+      },
+      body,
+    });
+  };
+  return { deviceId, sessionId, signedPost };
 }
 
 function countActiveSessions(connection: ReturnType<typeof openSqlite>): number {
@@ -1652,6 +1760,85 @@ describe("RemoteGateway — approval for a window that never finished", () => {
     await gateway.stop();
   });
 
+  it("serves a paired clip ticket until its issuing session signs out", async () => {
+    const capturing = createCapturingServe();
+    const { gateway, connection } = setup({
+      serve: capturing.serve,
+      productDispatch: createAuthenticatedProductDispatch({
+        dispatch: (request) => videoRoutes(request),
+      }),
+    });
+    const bytes = Uint8Array.of(1, 2, 3);
+    const job = decodeVideoJob({
+      id: "e4000000-0000-4000-8000-000000000003",
+      status: "completed",
+      threadKind: "chat-thread",
+      scopeId: "e4000000-0000-4000-8000-000000000002",
+      profileInstanceId: "e4000000-0000-4000-8000-000000000001",
+      driverKind: "gemini-video",
+      modelId: "gemini-omni-1.2-flash",
+      promptHash: "a".repeat(64),
+      options: { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: true },
+      imageCount: 0,
+      estimatedCostUsdMicros: 695_040,
+      clip: {
+        clipId: "e4000000-0000-4000-8000-000000000004",
+        hash: "b".repeat(64),
+        size: bytes.byteLength,
+        durationSeconds: 10,
+        resolution: "720p",
+        aspectRatio: "16:9",
+      },
+      providerCopy: "removed",
+      version: 2,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+    const readClipRange = vi.fn(async () => ({ bytes, start: 0, end: 2, size: bytes.length }));
+    const videoRoutes = createVideoRouteHandler({
+      jobs: {
+        getById: (id) => (String(id) === String(job.id) ? job : undefined),
+        listByScope: () => [job],
+        stop: vi.fn(),
+        readClipRange,
+        streamClip: async () => undefined,
+      },
+      authorizeScope: async (_window, kind, scope) =>
+        kind === job.threadKind && String(scope) === String(job.scopeId),
+      isPairedDeviceSessionCurrent: (issuer, sessionNow) =>
+        isAuthenticatedPairedDeviceSessionCurrent(connection, issuer, (sessionNow ?? Date.now)()),
+      windowAuthorityStore: new WindowAuthorityStore(),
+      now: () => nowMs,
+    });
+
+    try {
+      const { signedPost } = seedPairedRequests(connection);
+      await gateway.start();
+      const fetch = capturing.getFetch();
+      if (fetch === undefined) throw new Error("Expected captured gateway fetch");
+
+      const issued = await fetch(signedPost("/api/video/clip", { jobId: job.id }, nowMs), lanFacts);
+      expect(issued.status).toBe(200);
+      const { url } = decodeVideoClipTicketResponse(await issued.json());
+      const readRange = () =>
+        videoRoutes(
+          new Request(`http://127.0.0.1:3100${url}`, { headers: { range: "bytes=0-2" } }),
+        );
+      const playing = await readRange();
+      expect(playing?.status).toBe(206);
+      expect(playing?.headers.get("content-range")).toBe("bytes 0-2/3");
+      expect(new Uint8Array((await playing?.arrayBuffer()) ?? new ArrayBuffer(0))).toEqual(bytes);
+
+      const signedOut = await fetch(signedPost("/api/remote/auth/sign-out", {}, nowMs), lanFacts);
+      expect(signedOut.status).toBe(200);
+      expect((await readRange())?.status).toBe(404);
+      expect(readClipRange).toHaveBeenCalledOnce();
+    } finally {
+      await gateway.stop();
+      connection.close();
+    }
+  });
+
   it("shares its monotonic clock with product dispatch so Browser session checks match gateway expiry across forward wall-clock jumps", async () => {
     let wallMs = nowMs;
     let steadyMs = 5_000;
@@ -1671,110 +1858,10 @@ describe("RemoteGateway — approval for a window that never finished", () => {
       const fetch = capturing.getFetch();
       if (fetch === undefined) throw new Error("Expected captured gateway fetch");
 
-      const deviceKeys = generateKeyPairSync("ec", { namedCurve: "P-256" });
-      const publicPem = deviceKeys.publicKey
-        .export({ format: "pem", type: "spki" })
-        .toString()
-        .trim();
-      const keyFacts = canonicalDeviceKeyFacts(publicPem);
-      if (keyFacts === undefined) throw new Error("Expected valid P-256 key facts");
-      const deviceId = "22222222-2222-4222-8222-222222222222";
-      const sessionId = "33333333-3333-4333-8333-333333333333";
-      const sessionDigest = createHash("sha256").update(sessionId, "utf8").digest("hex");
-      const csrfToken = "csrf-token-value";
-      const csrfDigest = createHash("sha256").update(csrfToken, "utf8").digest("hex");
-
-      connection
-        .prepare(
-          `INSERT INTO remote_device_projection (
-             device_id, host_id, device_key_fingerprint, device_public_key,
-             device_label, origin, protocol_floor, credential_generation,
-             created_at, expires_at, last_seen_at, state, revoked_at, revoked_reason
-           ) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, 'active', NULL, NULL)`,
-        )
-        .run(
-          deviceId,
-          hostId,
-          keyFacts.fingerprint,
-          publicPem,
-          "Paired Phone",
-          ORIGIN,
-          nowIso,
-          new Date(wallMs + 7 * 24 * 60 * 60_000).toISOString(),
-          nowIso,
-        );
-      connection
-        .prepare(
-          `INSERT INTO remote_security_audit_projection (
-             event_kind, host_id, device_id, protocol_version, credential_generation,
-             source_class, result_category, reason_code, correlation_id, occurred_at
-           ) VALUES ('device-approved', ?, ?, 1, 1, 'lan-private', 'ok', 'user-approved', ?, ?)`,
-        )
-        .run(hostId, deviceId, "44444444-4444-4444-8444-444444444444", nowIso);
-      connection
-        .prepare(
-          `INSERT INTO remote_session_store (
-             session_id_digest, host_id, device_id, credential_generation, origin,
-             protocol_version, capability_digest, issued_at, last_seen_at,
-             idle_expires_at, absolute_expires_at, csrf_digest, state
-           ) VALUES (?, ?, ?, 1, ?, 1, ?, ?, ?, ?, ?, ?, 'active')`,
-        )
-        .run(
-          sessionDigest,
-          hostId,
-          deviceId,
-          ORIGIN,
-          "c".repeat(64),
-          wallMs,
-          wallMs,
-          wallMs + 15 * 60_000,
-          wallMs + 60 * 60_000,
-          csrfDigest,
-        );
-
-      const signedProductRequest = (nonce: string, commandId: string, timestampMs: number) => {
-        const body = JSON.stringify({ threadId: "55555555-5555-4555-8555-555555555555" });
-        const bodyDigest = createHash("sha256").update(body, "utf8").digest("hex");
-        const timestamp = new Date(timestampMs).toISOString();
-        const proof = {
-          method: "POST",
-          canonicalPathQuery: "/api/browser/contexts/current",
-          timestamp,
-          nonce,
-          bodyDigest,
-          csrfDigest,
-        };
-        const payload = buildRemoteRequestProofPayload({
-          sessionId,
-          proof,
-        });
-        const signature = sign("sha256", Buffer.from(payload, "utf8"), {
-          key: deviceKeys.privateKey,
-          dsaEncoding: "ieee-p1363",
-        }).toString("base64url");
-        const encodedProof = Buffer.from(JSON.stringify({ ...proof, signature }), "utf8").toString(
-          "base64url",
-        );
-        return new Request(`${ORIGIN}/api/browser/contexts/current`, {
-          method: "POST",
-          headers: {
-            host: "192.168.1.20:9443",
-            origin: ORIGIN,
-            "sec-fetch-site": "same-origin",
-            "content-type": "application/json",
-            cookie: `__Secure-octant-remote-session=${sessionId}`,
-            "x-octant-csrf": csrfToken,
-            "x-octant-command-id": commandId,
-            "x-octant-device-proof": encodedProof,
-          },
-          body,
-        });
-      };
-
-      const first = await fetch(
-        signedProductRequest("nonce-1", "66666666-6666-4666-8666-666666666666", wallMs),
-        lanFacts,
-      );
+      const { deviceId, sessionId, signedPost } = seedPairedRequests(connection);
+      const path = "/api/browser/contexts/current";
+      const body = { threadId: "55555555-5555-4555-8555-555555555555" };
+      const first = await fetch(signedPost(path, body, wallMs), lanFacts);
       expect(first.status).toBe(200);
       if (capturedSessionNow === undefined) {
         throw new Error("Expected product dispatch to receive gateway sessionNow");
@@ -1815,10 +1902,7 @@ describe("RemoteGateway — approval for a window that never finished", () => {
       // Even while wall time is still jumped, the gateway's bounded clock has
       // not ratcheted, so product dispatch and Browser checks agree the session
       // is still active.
-      const secondDuringJump = await fetch(
-        signedProductRequest("nonce-2", "77777777-7777-4777-8777-777777777777", boundedNow),
-        lanFacts,
-      );
+      const secondDuringJump = await fetch(signedPost(path, body, boundedNow), lanFacts);
       expect(secondDuringJump.status).toBe(200);
 
       // Correcting wall time back to true elapsed time recovers gateway posture
