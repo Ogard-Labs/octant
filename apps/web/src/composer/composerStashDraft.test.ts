@@ -90,6 +90,27 @@ describe("restoring a saved composer draft", () => {
     );
   });
 
+  it("keeps both drafts when combining their selected context would exceed the turn limits", () => {
+    const location = { ...chat, mode: "code" as const, binding: "checkout" };
+    const draft = {
+      ...emptyComposerStashDraft(),
+      text: "Review these files",
+      context: Array.from({ length: 5 }, (_, index) => ({
+        kind: "file" as const,
+        value: `file-${index}.md`,
+      })),
+    };
+    expect(
+      planComposerStashRestore(location, { ...target, location, context: ["file"] }, draft, {
+        ...draft,
+        context: draft.context.map((part) => ({ ...part, value: `saved-${part.value}` })),
+      }),
+    ).toEqual({
+      kind: "refused",
+      reason: "Remove a file mention before restoring this draft. This composer can hold 8.",
+    });
+  });
+
   it("keeps a draft within the host that owns its source scope", () => {
     expect(
       planComposerStashRestore(
@@ -99,5 +120,48 @@ describe("restoring a saved composer draft", () => {
         { ...emptyComposerStashDraft(), text: "private draft" },
       ).kind,
     ).toBe("refused");
+  });
+
+  it("keeps a selected file path bound to its original checkout", () => {
+    const location = { ...chat, mode: "code" as const, binding: "source-checkout" };
+    const planned = planComposerStashRestore(
+      location,
+      { ...target, location: { ...location, binding: "different-checkout" }, context: ["file"] },
+      emptyComposerStashDraft(),
+      {
+        ...emptyComposerStashDraft(),
+        text: "Review src/entry.ts",
+        context: [{ kind: "file", value: "src/entry.ts" }],
+      },
+    );
+    expect(planned).toEqual({
+      kind: "refused",
+      reason: "A file mention needs its original composer.",
+    });
+  });
+
+  it("keeps a linked to-do with the new task's original mode and Project", () => {
+    const location = { ...chat, threadId: null, composerId: "new-task" };
+    const draft = {
+      ...emptyComposerStashDraft(),
+      context: [
+        {
+          kind: "todo" as const,
+          value: { todoId: "todo-1", title: "Check the release notes", listHostId: "list-host" },
+        },
+      ],
+    };
+    const inProject = { ...target, location, context: ["todo"] as const };
+    expect(planComposerStashRestore(location, inProject, emptyComposerStashDraft(), draft)).toEqual(
+      { kind: "ready", draft },
+    );
+    expect(
+      planComposerStashRestore(
+        location,
+        { ...inProject, location: { ...location, projectId: "another-project" } },
+        emptyComposerStashDraft(),
+        draft,
+      ),
+    ).toEqual({ kind: "refused", reason: "A to-do link needs its original composer." });
   });
 });

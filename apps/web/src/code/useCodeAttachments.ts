@@ -10,8 +10,11 @@ import {
 import type { CodeClient } from "@octant/client-runtime";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { attachmentMediaType, isImageAttachment } from "../composer/attachmentMediaType";
+import { prepareComposerStashFiles } from "../composer/prepareComposerStashFiles";
+import type { PreparedComposerStash } from "../composer/useComposerStash";
 
 export interface StagedCodeAttachment {
+  readonly file: File;
   /** Exactly what the host answered with, so the turn sends what it accepted. */
   readonly reference: CodeAttachmentReference;
   /**
@@ -38,6 +41,7 @@ export interface CodeAttachments {
   readonly busy: boolean;
   /** Answers the reason nothing was attached, or undefined when an image was. */
   readonly attach: (files: ReadonlyArray<File>) => Promise<string | undefined>;
+  readonly prepareDraftFiles: (files: ReadonlyArray<File>) => Promise<PreparedComposerStash>;
   /** Refuse an attachment the composer itself knows this turn cannot carry. */
   readonly refuse: (message: string) => void;
   readonly remove: (attachmentId: CodeAttachmentId) => void;
@@ -137,6 +141,28 @@ export function useCodeAttachments(input: {
     };
   }, []);
 
+  const stageFile = useCallback(
+    async (file: File, owner: CodeThreadId): Promise<StagedCodeAttachment> => {
+      const mediaType = attachmentMediaType(file);
+      const image = IMAGES.has(mediaType);
+      const attachmentId = decodeCodeAttachmentId(globalThis.crypto.randomUUID());
+      const displayName =
+        file.name.trim() === "" ? (image ? "Pasted image" : "Pasted file") : file.name;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const reference = await client.putAttachment({
+        threadId: owner,
+        attachmentId,
+        displayName,
+        mediaType,
+        bytes,
+      });
+      const previewUrl = image ? URL.createObjectURL(file) : "";
+      if (image) previews.current.add(previewUrl);
+      return { file, reference, previewUrl };
+    },
+    [client],
+  );
+
   const attach = useCallback(
     async (files: ReadonlyArray<File>): Promise<string | undefined> => {
       if (threadId === undefined || files.length === 0) return "Attachments are unavailable.";
@@ -146,8 +172,6 @@ export function useCodeAttachments(input: {
       inFlight.current += 1;
       try {
         for (const file of files) {
-          const mediaType = attachmentMediaType(file);
-          const image = IMAGES.has(mediaType);
           if (file.size === 0) {
             refusal = `${file.name || "The file"} is empty.`;
             setMessage(refusal);
@@ -163,20 +187,8 @@ export function useCodeAttachments(input: {
             setMessage(refusal);
             break;
           }
-          const attachmentId = decodeCodeAttachmentId(globalThis.crypto.randomUUID());
-          const displayName =
-            file.name.trim() === "" ? (image ? "Pasted image" : "Pasted file") : file.name;
-          const bytes = new Uint8Array(await file.arrayBuffer());
-          const reference = await client.putAttachment({
-            threadId,
-            attachmentId,
-            displayName,
-            mediaType,
-            bytes,
-          });
-          const previewUrl = image ? URL.createObjectURL(file) : "";
-          if (image) previews.current.add(previewUrl);
-          apply((list) => [...list, { reference, previewUrl }]);
+          const entry = await stageFile(file, threadId);
+          apply((list) => [...list, entry]);
           attached = true;
           setMessage(undefined);
         }
@@ -189,7 +201,7 @@ export function useCodeAttachments(input: {
       }
       return attached ? undefined : refusal;
     },
-    [apply, client, threadId],
+    [apply, stageFile, threadId],
   );
 
   const remove = useCallback(
@@ -339,6 +351,28 @@ export function useCodeAttachments(input: {
     message,
     busy,
     attach,
+    prepareDraftFiles: async (files) => {
+      if (threadId === undefined) {
+        return files.length === 0
+          ? { kind: "ready", apply: () => {} }
+          : { kind: "refused", reason: "Attachments are unavailable in this thread." };
+      }
+      if (inFlight.current > 0 || queueClaims.current.size > 0) {
+        return { kind: "refused", reason: "Wait for the current attachment action to finish." };
+      }
+      return prepareComposerStashFiles({
+        current: current.current,
+        files,
+        stage: (file) => stageFile(file, threadId),
+        discard: (entry) => {
+          forget(entry.previewUrl);
+          void client
+            .discardAttachment(threadId, entry.reference.attachmentId)
+            .catch(() => undefined);
+        },
+        apply: (entries) => apply(() => entries),
+      });
+    },
     refuse: setMessage,
     remove,
     detachForSend,

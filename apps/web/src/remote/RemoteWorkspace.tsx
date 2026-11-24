@@ -28,6 +28,7 @@ import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import type { RemoteProductClients } from "./remoteProductClients";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { ComposerStashHostContext } from "../composer/ComposerStashControls";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ReplyDetailClient } from "@octant/client-runtime/reply-detail-client";
 import type { ReplyDetailLevel, ReplyDetailReading } from "@octant/contracts/shell";
@@ -46,6 +47,7 @@ export interface RemoteWorkspaceProps {
   readonly initialThread?: { readonly mode: OctantMode; readonly threadId: string };
   readonly clients: RemoteProductClients;
   readonly mode: OctantMode;
+  readonly stashHostId?: string;
   /** False while the session is stale: reads stay visible, sends are refused. */
   readonly connected: boolean;
   /**
@@ -75,7 +77,9 @@ export function RemoteWorkspace(props: RemoteWorkspaceProps) {
     <ConversationInputClientContext.Provider value={props.clients.conversationInputs}>
       <ReplyDetailSourceContext.Provider value={replyDetail}>
         <ReplyDetailContext.Provider value={replyDetail.reading.defaultLevel}>
-          <RemoteModeSurface {...props} />
+          <ComposerStashHostContext.Provider value={props.stashHostId}>
+            <RemoteModeSurface {...props} />
+          </ComposerStashHostContext.Provider>
         </ReplyDetailContext.Provider>
       </ReplyDetailSourceContext.Provider>
     </ConversationInputClientContext.Provider>

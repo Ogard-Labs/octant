@@ -16,6 +16,7 @@ import {
   purgeQueueReceipts,
 } from "../messageQueue/threadMessageQueueReceipts";
 import { registerComposerThreadDraftReset } from "./composerThreadDraftReset";
+import { purgeComposerStashThread } from "./composerStashStore";
 import type { ComposerInputElement } from "./ComposerInput";
 
 /**
@@ -467,6 +468,12 @@ export function createComposerThreadDraftStore(
       });
     },
     purgeThread: (threadId) => {
+      if (isBrowserLocalStorage(storage)) {
+        void purgeComposerStashThread(threadId).catch(() => {
+          persistError = COMPOSER_DRAFT_REMOVE_FAILED_NOTE;
+          notify();
+        });
+      }
       const refused = purgeReceipts((scope) => scope.threadId !== threadId);
       if (refused !== undefined) return refused;
       const suffix = `:${threadId}`;

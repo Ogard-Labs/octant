@@ -8,6 +8,10 @@ import {
 } from "../composer/useNewTaskPrompt";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
+import { ComposerStashControls } from "../composer/ComposerStashControls";
+import { ComposerMenuActionProvider } from "../composer/ComposerMenuActions";
+import { useNewTaskComposerStash } from "../composer/useNewTaskComposerStash";
+import { MAX_WORK_ATTACHMENT_BYTES, MAX_WORK_TURN_ATTACHMENTS } from "@octant/contracts";
 import type {
   ProviderInstanceId,
   ProviderModelId,
@@ -17,7 +21,14 @@ import type {
 import type { WorkProjectStatus, WorkStatusDatedItem } from "@octant/contracts/work-project-status";
 import type { CreateHostViewScope, PickerGroup, ModelPickerSelection } from "@octant/domain";
 import { CalendarClock, FolderOpen, ShieldCheck } from "../ui/icons";
-import { useContext, useState, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
+import {
+  useContext,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { clipboardHasImage } from "../chat/composerImagePaste";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
 import { WorkImageAttachmentChips } from "./composer/WorkImageAttachmentChips";
@@ -135,6 +146,24 @@ export function WorkOverview(props: WorkOverviewProps) {
   const [starterArtifactPath, setStarterArtifactPath] = useState("notes.md");
   const [starterArtifactContent, setStarterArtifactContent] = useState("");
   const [starterArtifactSubmitting, setStarterArtifactSubmitting] = useState(false);
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  const composerForm = useRef<HTMLFormElement>(null);
+  const stash = useNewTaskComposerStash({
+    mode: "work",
+    host: props.fixedHostId ?? props.selectedHostId,
+    projectId: props.projectId,
+    prompt: draft,
+    textarea,
+    setPrompt: setDraft,
+    busy: submitting || !createAvailable,
+    files: {
+      current: images.staged.map((attachment) => attachment.file),
+      change: images.replaceDraftFiles,
+      attachmentLimit: MAX_WORK_TURN_ATTACHMENTS,
+      attachmentByteLimit: MAX_WORK_ATTACHMENT_BYTES,
+      readsImages: imageSupport !== false,
+    },
+  });
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -271,12 +300,13 @@ export function WorkOverview(props: WorkOverviewProps) {
         {!createAvailable ? (
           <p role="status">Thread creation is unavailable for this Project.</p>
         ) : null}
-        <form noValidate onSubmit={(event) => void submit(event)}>
+        <form noValidate ref={composerForm} onSubmit={(event) => void submit(event)}>
           <label className="sr-only" htmlFor="work-overview-quick-start">
             Start a new task
           </label>
           <WorkImageAttachmentChips images={images} />
           <OctantTextarea
+            ref={textarea}
             disabled={!createAvailable || submitting}
             id="work-overview-quick-start"
             onChange={(event) => setDraft(event.target.value)}
@@ -293,19 +323,22 @@ export function WorkOverview(props: WorkOverviewProps) {
             rows={3}
             value={draft}
           />
-          <ComposerAttachButton
-            busy={!createAvailable || submitting}
-            onRefused={images.refuse}
-            onFileSelected={(file) =>
-              attachAllowingFiles(
-                [file],
-                imageSupport,
-                images.attach,
-                images.refuse,
-                "This model cannot read images. Pick one that can.",
-              )
-            }
-          />
+          <ComposerMenuActionProvider offered>
+            <ComposerStashControls binding={stash} surface={composerForm} />
+            <ComposerAttachButton
+              busy={!createAvailable || submitting}
+              onRefused={images.refuse}
+              onFileSelected={(file) =>
+                attachAllowingFiles(
+                  [file],
+                  imageSupport,
+                  images.attach,
+                  images.refuse,
+                  "This model cannot read images. Pick one that can.",
+                )
+              }
+            />
+          </ComposerMenuActionProvider>
           <OctantButton
             className="project-button"
             disabled={!createAvailable || submitting || draft.trim() === ""}

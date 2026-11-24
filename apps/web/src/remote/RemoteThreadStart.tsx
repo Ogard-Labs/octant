@@ -17,9 +17,12 @@ import {
   threadAccessOf,
   type PickerGroup,
 } from "@octant/domain";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { planCodeThreadCreate } from "../code/codeThreadCreate";
 import type { useCodeController } from "../code/useCodeController";
+import { ComposerStashControls } from "../composer/ComposerStashControls";
+import type { ComposerStashSubmission } from "../composer/useComposerStash";
+import { useNewTaskComposerStash } from "../composer/useNewTaskComposerStash";
 import { FolderPicker } from "../projects/FolderPicker";
 import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
 import { useProjectController } from "../projects/useProjectController";
@@ -198,6 +201,18 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>();
   const [pickingFolder, setPickingFolder] = useState(false);
+  const form = useRef<HTMLFormElement>(null);
+  const firstMessage = useRef<HTMLInputElement>(null);
+  const submission = useRef<ComposerStashSubmission>(undefined);
+  const stash = useNewTaskComposerStash({
+    mode: "code",
+    host: undefined,
+    projectId: chosen?.id,
+    prompt,
+    setPrompt,
+    textarea: firstMessage,
+    busy,
+  });
   const { folderBrowse } = props;
   if (projects.length === 0 && folderBrowse === undefined) return null;
 
@@ -253,6 +268,7 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
     const text = prompt.trim();
     const settings = controller.bootstrap?.settings;
     if (chosen?.type !== "code" || text.length === 0) return undefined;
+    const retireStashRecovery = submission.current?.();
     if (settings === undefined) return "Code is still loading on this host.";
     const prepared = await controller.execute({
       kind: "prepare-code-project-checkout",
@@ -388,6 +404,7 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
     }
     // The thread is durable whether or not its first turn starts, so it is
     // opened first and a failed send is retried from there.
+    retireStashRecovery?.();
     props.onCreated(created.thread);
     setPrompt("");
     const started = await controller.startThreadTurn({
@@ -414,6 +431,7 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
     <form
       className="flex flex-col gap-1"
       noValidate
+      ref={form}
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
@@ -421,11 +439,14 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
     >
       <ProjectChoice chosen={chosen} disabled={busy} onChoose={choose} projects={projects} />
       {newProject}
+      <ComposerStashControls binding={{ ...stash, submission }} surface={form} />
       <OctantInput
         aria-label="First message"
+        data-composer-draft-input=""
         disabled={busy}
         onChange={(event) => setPrompt(event.target.value)}
         placeholder="Describe the task"
+        ref={firstMessage}
         value={prompt}
       />
       <OctantButton

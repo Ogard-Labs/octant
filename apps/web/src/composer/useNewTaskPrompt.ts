@@ -8,6 +8,7 @@ import type { CodeNewThreadWorkspace } from "@octant/contracts/projects";
 import type { PermissionMode, PermissionPersistence } from "@octant/contracts/providers";
 import { createContext, useCallback, useContext, useState, useSyncExternalStore } from "react";
 import type { ComposerExtensionSelection } from "./composerExtensionSelection";
+import { discardComposerNewTaskRecovery } from "./composerStashStore";
 
 export type NewTaskCreateFromSelection =
   | {
@@ -186,6 +187,7 @@ function discardNewTaskDraftScope(drafts: NewTaskDrafts, scope: string): void {
   drafts.writeCodeCheckout(scope, undefined);
   drafts.writeMentionChips(scope, []);
   drafts.writeExtensionReceipts(scope, []);
+  void discardComposerNewTaskRecovery(scope).catch(() => undefined);
 }
 
 /**

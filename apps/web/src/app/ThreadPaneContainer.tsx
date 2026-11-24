@@ -251,7 +251,7 @@ export interface ThreadPaneContainerProps {
   /** The workers' level and bounds the person chose in that draft. */
   readonly pendingDraftCoordinatorChoices: import("../shell/DraftThreadWorkspace").CoordinatorDraftChoices;
   readonly pendingDraftPrompt?: string;
-  readonly draftTodoSource?: { readonly title: string; readonly onRemove: () => void };
+  readonly draftTodoSource?: NonNullable<WorkspaceViewProps["draftTodoSource"]>;
   readonly pendingIssue?: RepositoryIssueRow;
   readonly presentedLayout: NonNullable<ShellController["presentedLayout"]>;
   readonly projectClient: ProjectController["client"];

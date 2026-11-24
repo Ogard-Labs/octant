@@ -22,6 +22,7 @@ export type OctantKeybindingActionId =
   | "new-todo"
   | "next-waiting-thread"
   | "reply-detail-cycle"
+  | "composer-stash"
   | "zen-next-space"
   | "zen-previous-space"
   | "review-next"
@@ -52,7 +53,7 @@ export interface OctantKeybindingAction {
    * or Alt, and may name Escape: held with a modifier it is not the Escape a
    * shell or editor reads, which is why it can be the way out.
    */
-  readonly scope?: "terminal";
+  readonly scope?: "terminal" | "composer";
 }
 
 /**
@@ -101,6 +102,13 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     // (Safari: Add to Reading List), which a page may take; the window
     // listener prevents the default only when the chord runs this action.
     defaultChord: "Mod+Shift+D",
+  },
+  {
+    id: "composer-stash",
+    label: "Stash or restore a draft in the composer",
+    area: "Shell",
+    scope: "composer",
+    defaultChord: "Mod+S",
   },
   {
     id: "zen-next-space",

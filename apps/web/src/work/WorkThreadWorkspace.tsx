@@ -177,6 +177,12 @@ import {
   type ThreadImageVerdict,
 } from "../composer/threadImageOffers";
 import { WorkImageAttachmentChips } from "./composer/WorkImageAttachmentChips";
+import {
+  composerStashContextValues,
+  recoveredComposerThreadDraft,
+} from "../composer/composerStashDraft";
+import type { ComposerStashBinding, ComposerStashSubmission } from "../composer/useComposerStash";
+import { MAX_WORK_ATTACHMENT_BYTES, MAX_WORK_TURN_ATTACHMENTS } from "@octant/contracts";
 import { useWorkFileMentions } from "./useWorkFileMentions";
 import {
   THREAD_ACTIVITY_RECOVERY_MS,
@@ -1074,6 +1080,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     initialThread.current = undefined;
   }
   const textareaRef = useRef<ComposerInputElement>(null);
+  const stashSubmission = useRef<ComposerStashSubmission>(undefined);
   const currentThreadKeyRef = useRef(String(props.threadId));
   currentThreadKeyRef.current = String(props.threadId);
   const mentionListId = useId();
@@ -1586,6 +1593,59 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
   const fileMentionOpen = fileMentions.open && !mention.open;
+  const stash: ComposerStashBinding = {
+    submission: stashSubmission,
+    target: {
+      location: {
+        host: props.hostId ?? "local",
+        mode: "work",
+        projectId: thread?.projectId ?? projectId ?? null,
+        composerId: props.threadId,
+        threadId: props.threadId,
+        binding: thread?.bindingRevisionId ?? null,
+      },
+      attachmentLimit: MAX_WORK_TURN_ATTACHMENTS,
+      attachmentByteLimit: MAX_WORK_ATTACHMENT_BYTES,
+      readsImages: imageSupport !== false,
+      context: ["file", "thread", "extension", "side-chat", "continuation"],
+    },
+    draft: {
+      text: prompt,
+      caret: textareaRef.current?.selectionStart ?? composerDraft.caretIndex,
+      files: images.staged.map((attachment) => attachment.file),
+      context: [
+        ...fileMentions.selectedPaths.map((value) => ({ kind: "file" as const, value })),
+        ...threadMentions.chips.map((value) => ({ kind: "thread" as const, value })),
+        ...extensionDraft.stagedReceipts.map((value) => ({ kind: "extension" as const, value })),
+        ...composerDraft.sideChatReturns.map((value) => ({ kind: "side-chat" as const, value })),
+        ...(composerDraft.sideChatReturnsInvalid
+          ? [{ kind: "side-chat" as const, value: null }]
+          : []),
+        ...(continuation.policy === "text-only"
+          ? [{ kind: "continuation" as const, value: continuation.policy }]
+          : []),
+      ],
+    },
+    unavailable:
+      creating ||
+      thread === undefined ||
+      completionLocked ||
+      messageQueue.busy ||
+      messageQueue.uncertain
+        ? "Wait for this composer to be ready before moving the draft."
+        : undefined,
+    prepare: (next) => ({
+      kind: "ready",
+      apply: () => {
+        images.replaceDraftFiles(next.files);
+        fileMentions.restore(composerStashContextValues(next, "file"));
+        threadMentions.restore(composerStashContextValues(next, "thread"));
+        extensionDraft.restore(composerStashContextValues(next, "extension"));
+        continuation.change(composerStashContextValues(next, "continuation")[0] ?? "preserve");
+        composerDraft.restoreFor(props.threadId, recoveredComposerThreadDraft(next));
+      },
+    }),
+  };
   const providerMentions = useThreadProviderMentions(props.providerGroups, {
     kind: "thread",
     mode: "work",
@@ -2194,6 +2254,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       const sideChatReturns = composerDraft.sideChatReturns;
       const promptText = composerDraft.text;
       if (promptText.length === 0) return false;
+      const retireStashRecovery = stashSubmission.current?.();
       const sendingThreadId = String(thread.id);
       const draftRevision = composerDraft.revisionFor(String(props.threadId));
       const attachmentIds: WorkAttachmentId[] = [];
@@ -2243,6 +2304,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               extensionSelections,
             },
             () => {
+              retireStashRecovery?.();
               continuation.reset();
               if (currentThreadKeyRef.current !== sendingThreadId) return;
               images.consume(staged);
@@ -2291,6 +2353,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           setErrorMessage("The Work turn could not be started.");
           return false;
         }
+        retireStashRecovery?.();
         {
           continuation.reset();
           images.consume(staged);
@@ -2360,6 +2423,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       return;
     }
     if (props.mutationClient === undefined) return;
+    const retireStashRecovery = stashSubmission.current?.();
     setCreating(true);
     setErrorMessage(undefined);
     setToolCatalogHandoffRequired(false);
@@ -2378,6 +2442,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         setErrorMessage("The artifact could not be created.");
         return;
       }
+      retireStashRecovery?.();
       composerDraft.clear();
       setStatus(`Created ${reply.outcome.artifact.displayName} in the bound folder.`);
       textareaRef.current?.focus();
@@ -3301,6 +3366,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         )}
         <ThreadComposer
           readOnly={readOnly}
+          stash={readOnly ? undefined : stash}
           queue={
             <>
               <ThreadWakeups

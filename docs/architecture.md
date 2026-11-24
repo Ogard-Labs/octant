@@ -7157,6 +7157,18 @@ ls-remote` against the thread's remote and the GitHub reads they already
   them. Sending or clearing removes the draft; deleting or purging the thread
   removes it too.
 
+  **Saved drafts** in the desktop and web composer are private to the client
+  profile. A saved entry carries the source host, Project, composer and binding
+  and the full editable draft, including attachment bytes and typed context.
+  IndexedDB commits the stash and its cleared source, or the restored
+  destination and removal from the stash, as one move. A restored draft keeps
+  its recovery data there while it is editable. The live composer changes only
+  after the write commits, and a competing restore can consume the entry only
+  once. A failed move preserves a recoverable copy. Ordinary attachment
+  staging assigns destination-owned references. Ordinary turn admission
+  rechecks authority, context references and model capabilities. Thread
+  deletion and purge remove that thread's saved and recovered drafts.
+
 - **Accepted message queue.** Chat, Work, and Code share a host-owned ordered
   queue for messages the user submits while a turn runs. A successful enqueue
   acknowledges durable storage; the renderer then relinquishes the submitted

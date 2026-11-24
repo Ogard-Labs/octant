@@ -1603,11 +1603,13 @@ export function useChatController(options: ChatControllerOptions) {
     readonly draftSideChatReturnsInvalid?: boolean;
     readonly draftRevision?: number;
     readonly readDraftRevision?: (threadId: string) => number;
+    readonly restoreComposerDraft?: typeof composerDraft.restoreFor;
   } = {
     draftSideChatReturns: composerDraft.sideChatReturns,
     draftSideChatReturnsInvalid: composerDraft.sideChatReturnsInvalid,
     draftRevision: composerDraft.revisionFor(String(options.activeThreadId ?? "")),
     readDraftRevision: composerDraft.revisionFor,
+    restoreComposerDraft: composerDraft.restoreFor,
   };
   return useRetainedRecord({
     activeView: visibleActiveView,

@@ -448,7 +448,9 @@ export interface WorkspaceViewProps {
   readonly draftPendingPrompt?: string;
   readonly onDraftPendingPromptConsumed?: () => void;
   /** The to-do the draft was started from; see DraftThreadWorkspace. */
-  readonly draftTodoSource?: { readonly title: string; readonly onRemove: () => void };
+  readonly draftTodoSource?: import("../composer/useNewTaskComposerStash").ComposerStashTodoSource & {
+    readonly draft: string;
+  };
   readonly onDockResearch?: (request: {
     readonly threadId: string;
     readonly mode: "work" | "code";
@@ -2220,7 +2222,9 @@ function renderNonCodeTab(
           {...(props.draftPendingPrompt === undefined
             ? {}
             : { pendingPrompt: props.draftPendingPrompt })}
-          {...(props.draftTodoSource === undefined ? {} : { todoSource: props.draftTodoSource })}
+          {...(props.draftTodoSource?.draft === `${String(paneId)}:${String(tab.id)}`
+            ? { todoSource: props.draftTodoSource }
+            : {})}
           {...(props.onDraftPendingPromptConsumed === undefined
             ? {}
             : { onPendingPromptConsumed: props.onDraftPendingPromptConsumed })}
@@ -2389,6 +2393,7 @@ function renderNonCodeTab(
         {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
         key={tab.threadId}
         onClearCanvasSelections={canvasContext.clearCanvasSelections}
+        onAttachCanvasContext={canvasContext.onAttachCanvasContext}
         onRemoveCanvasSelection={canvasContext.onRemoveCanvasSelection}
         pendingCanvasSelections={canvasContext.pendingCanvasSelections}
         projects={props.projects}
@@ -3469,6 +3474,7 @@ function ChatThreadWorkspace(props: {
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly onOpenSettings?: () => void;
   readonly onClearCanvasSelections: () => void;
+  readonly onAttachCanvasContext: (selection: CanvasContextSelection) => void;
   readonly onRemoveCanvasSelection: (selectionId: CanvasContextSelectionId) => void;
   readonly pendingCanvasSelections: ReadonlyArray<CanvasContextSelection>;
   readonly projectServerUrl?: string;
@@ -3577,6 +3583,7 @@ function ChatThreadWorkspace(props: {
               ? {}
               : { onOpenSettings: props.onOpenSettings })}
             onClearCanvasSelections={props.onClearCanvasSelections}
+            onAttachCanvasContext={props.onAttachCanvasContext}
             onRemoveCanvasSelection={props.onRemoveCanvasSelection}
             pendingCanvasSelections={props.pendingCanvasSelections}
             {...(props.extensionClient === undefined

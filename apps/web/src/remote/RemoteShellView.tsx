@@ -228,6 +228,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           extensionClient={extensionClient}
           mode={activeMode}
           readOnly={standing.accessLevel === "read-only"}
+          stashHostId={hosts[0]?.hostId ?? "paired-browser"}
         />
       </ContinuityScreenContext.Provider>
 

@@ -31,6 +31,10 @@ import { useProjectController } from "../projects/useProjectController";
 import { useCodeController } from "../code/useCodeController";
 import { planCodeThreadCreate } from "../code/codeThreadCreate";
 import type { CodeComposerSubmitInput } from "../code/composer/CodeComposerAdapter";
+import type { ComposerStashTodo } from "../composer/composerStashDraft";
+import { ComposerStashHostContext } from "../composer/ComposerStashControls";
+import { discardComposerNewTaskRecovery } from "../composer/composerStashStore";
+import { NewTaskDraftScopeContext } from "../composer/useNewTaskPrompt";
 import {
   DraftThreadWorkspace,
   type DraftThreadWorkspaceProps,
@@ -51,6 +55,8 @@ export function RemoteTodoDraft(props: {
   readonly connected: boolean;
   readonly project?: ProjectSummary;
   readonly todo?: Todo;
+  readonly todoListHostId?: string;
+  readonly canRestoreTodo?: (source: ComposerStashTodo) => boolean;
   readonly thread?: TodoThreadLink;
   readonly onCreated: (link: TodoThreadLink) => Promise<void>;
   readonly onClose: () => void;
@@ -102,6 +108,7 @@ export function RemoteTodoDraft(props: {
   const [error, setError] = useState<string>();
   const [turnError, setTurnError] = useState<string>();
   const [unsentPrompt, setUnsentPrompt] = useState("");
+  const draftScope = `remote-todo:${props.hostId}:${String(props.todo?.id ?? "")}`;
   const project =
     projects.allProjects.find((candidate) => String(candidate.id) === String(props.project?.id)) ??
     props.project;
@@ -132,6 +139,7 @@ export function RemoteTodoDraft(props: {
     try {
       if (source !== undefined) await props.onCreated(value);
     } finally {
+      void discardComposerNewTaskRecovery(draftScope).catch(() => undefined);
       setThread(value);
     }
   };
@@ -390,6 +398,7 @@ export function RemoteTodoDraft(props: {
           actsAsHostPerson={standing.actsAsHostPerson}
           extensionClient={extensionClient}
           initialThread={thread}
+          stashHostId={props.hostId}
         />
       </>
     );
@@ -403,45 +412,65 @@ export function RemoteTodoDraft(props: {
           This computer cannot be reached. Your draft is kept here until it reconnects.
         </OctantAlert>
       )}
-      <DraftThreadWorkspace
-        mode={mode}
-        {...(project === undefined ? {} : { projectId: project.id, projectName: project.name })}
-        {...(project === undefined || project.type === "chat"
-          ? {}
-          : { projectRoot: project.binding.canonicalRoot })}
-        projects={project === undefined ? [] : [project]}
-        providerGroups={groups}
-        {...(model === undefined
-          ? {}
-          : {
-              selectedProviderInstanceId: model.providerInstanceId,
-              selectedModelId: model.modelId,
-            })}
-        onSelectProvider={select}
-        onCreateThread={create}
-        onCreateCodeThread={createCode}
-        codeExecute={code.execute}
-        {...(code.bootstrap === undefined || project?.type !== "code"
-          ? {}
-          : {
-              defaultPermissionMode: defaultPermissionModeFor({
-                project,
-                settings: code.bootstrap.settings,
-              }),
-              defaultPermissionPersistence: code.bootstrap.settings.defaultPermissionPersistence,
-            })}
-        onCancel={props.onClose}
-        creating={busy || !props.connected}
-        {...(error === undefined ? {} : { errorMessage: error })}
-        pendingPrompt={
-          props.todo === undefined
-            ? ""
-            : `${props.todo.title}${props.todo.notes === "" ? "" : `\n\n${props.todo.notes}`}`
-        }
-        {...(source === undefined
-          ? {}
-          : { todoSource: { title: source.title, onRemove: () => setSource(undefined) } })}
-      />
+      <ComposerStashHostContext.Provider value={props.hostId}>
+        <NewTaskDraftScopeContext.Provider value={draftScope}>
+          <DraftThreadWorkspace
+            mode={mode}
+            {...(project === undefined ? {} : { projectId: project.id, projectName: project.name })}
+            {...(project === undefined || project.type === "chat"
+              ? {}
+              : { projectRoot: project.binding.canonicalRoot })}
+            projects={project === undefined ? [] : [project]}
+            providerGroups={groups}
+            {...(model === undefined
+              ? {}
+              : {
+                  selectedProviderInstanceId: model.providerInstanceId,
+                  selectedModelId: model.modelId,
+                })}
+            onSelectProvider={select}
+            onCreateThread={create}
+            onCreateCodeThread={createCode}
+            codeExecute={code.execute}
+            {...(code.bootstrap === undefined || project?.type !== "code"
+              ? {}
+              : {
+                  defaultPermissionMode: defaultPermissionModeFor({
+                    project,
+                    settings: code.bootstrap.settings,
+                  }),
+                  defaultPermissionPersistence:
+                    code.bootstrap.settings.defaultPermissionPersistence,
+                })}
+            onCancel={props.onClose}
+            creating={busy || !props.connected}
+            {...(error === undefined ? {} : { errorMessage: error })}
+            pendingPrompt={
+              props.todo === undefined
+                ? ""
+                : `${props.todo.title}${props.todo.notes === "" ? "" : `\n\n${props.todo.notes}`}`
+            }
+            {...(props.todo === undefined
+              ? {}
+              : {
+                  todoSource: {
+                    current:
+                      source === undefined
+                        ? undefined
+                        : {
+                            todoId: String(source.id),
+                            title: source.title,
+                            listHostId: props.todoListHostId ?? props.hostId,
+                          },
+                    canRestore: (saved) =>
+                      saved.todoId === String(props.todo?.id) &&
+                      props.canRestoreTodo?.(saved) === true,
+                    change: (saved) => setSource(saved === undefined ? undefined : props.todo),
+                  },
+                })}
+          />
+        </NewTaskDraftScopeContext.Provider>
+      </ComposerStashHostContext.Provider>
     </>
   );
 }

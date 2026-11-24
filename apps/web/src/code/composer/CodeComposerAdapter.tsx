@@ -1,5 +1,11 @@
 import { useDroppedFolderMentions } from "../../composer/useDroppedFolderMentions";
 import { attachAllowingFiles } from "../../composer/attachmentMediaType";
+import { MAX_WORK_ATTACHMENT_BYTES, MAX_WORK_TURN_ATTACHMENTS } from "@octant/contracts";
+import {
+  useNewTaskComposerStash,
+  type ComposerStashSource,
+  type ComposerStashTodoSource,
+} from "../../composer/useNewTaskComposerStash";
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
 import type { AutoReview } from "../autoReview";
 import { WorktreeLaunchContext } from "../worktreeLaunchContext";
@@ -120,6 +126,8 @@ import { observeComposerPlacement } from "../codeWorkspaceApprovals";
 import { ComposerInput, type ComposerInputElement } from "../../composer/ComposerInput";
 
 export interface CodeComposerAdapterProps {
+  readonly stashSource?: ComposerStashSource;
+  readonly stashTodo?: ComposerStashTodoSource;
   readonly projectId?: ProjectId;
   /** False when the server says the selected Code Project is unavailable. */
   readonly projectAvailable?: boolean;
@@ -629,6 +637,26 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     !submitting &&
     !atMenu.resolving &&
     serverRefusal === undefined;
+  const stash = useNewTaskComposerStash({
+    mode: "code",
+    host: props.fixedHostId ?? props.selectedHostId,
+    projectId: props.projectId,
+    prompt: draftPrompt,
+    textarea: textareaRef,
+    setPrompt,
+    busy: props.creating === true || submitting || atMenu.resolving,
+    files: {
+      current: images.staged.map((attachment) => attachment.file),
+      change: images.replaceDraftFiles,
+      attachmentLimit: MAX_WORK_TURN_ATTACHMENTS,
+      attachmentByteLimit: MAX_WORK_ATTACHMENT_BYTES,
+      readsImages: imageSupport !== false,
+    },
+    threads: { current: threadMentions.chips, change: threadMentions.restore },
+    extensions: { current: extensionDraft.stagedReceipts, change: extensionDraft.restore },
+    source: props.stashSource,
+    todo: props.stashTodo,
+  });
 
   // Server-authoritative ref catalog for the branch selector, fetched lazily
   // the first time the selector opens.
@@ -989,6 +1017,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         </div>
         <div className="composer-stack">
           <ThreadComposer
+            stash={props.fixedPrompt === undefined ? stash : undefined}
             notices={[
               ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
               ...(images.message === undefined

@@ -149,13 +149,29 @@ export function createComposerStashStore(factory: IDBFactory) {
         saved.delete(id);
         return restored;
       }),
-    revise: (previous: ComposerDraftRecovery, draft: ComposerStashDraft) =>
+    revise: (previous: ComposerDraftRecovery, draft: ComposerStashDraft, beforeText: string) =>
       inDraftStorage(factory, "readwrite", async (_, recovered) => {
         const key = composerStashLocationKey(previous.location);
         if ((await readRecovery(recovered, key))?.revision !== previous.revision) return undefined;
-        const revised = recovery(previous.location, previous.draft.text, draft);
+        const revised = recovery(previous.location, beforeText, draft);
         recovered.put(revised, key);
         return revised;
+      }),
+    retire: (previous: ComposerDraftRecovery) =>
+      inDraftStorage(factory, "readwrite", async (_, recovered) => {
+        const key = composerStashLocationKey(previous.location);
+        if ((await readRecovery(recovered, key))?.revision !== previous.revision) return false;
+        recovered.delete(key);
+        return true;
+      }),
+    discardNewTaskRecovery: (composerId: string) =>
+      inDraftStorage(factory, "readwrite", async (_, recovered) => {
+        const records = (await result(recovered.getAll())) as ComposerDraftRecovery[];
+        for (const { location } of records) {
+          if (location.threadId === null && location.composerId === composerId) {
+            recovered.delete(composerStashLocationKey(location));
+          }
+        }
       }),
     discard: (id: string, host: string) =>
       inDraftStorage(factory, "readwrite", async (saved) => {
@@ -175,3 +191,15 @@ export function createComposerStashStore(factory: IDBFactory) {
 }
 
 export type ComposerStashStore = ReturnType<typeof createComposerStashStore>;
+
+export async function purgeComposerStashThread(threadId: string): Promise<void> {
+  if (globalThis.indexedDB !== undefined) {
+    await createComposerStashStore(globalThis.indexedDB).purgeThread(threadId);
+  }
+}
+
+export async function discardComposerNewTaskRecovery(composerId: string): Promise<void> {
+  if (globalThis.indexedDB !== undefined) {
+    await createComposerStashStore(globalThis.indexedDB).discardNewTaskRecovery(composerId);
+  }
+}

@@ -25,6 +25,8 @@ import {
 } from "react";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { useNewTaskComposerStash } from "../composer/useNewTaskComposerStash";
+import type { HostId } from "@octant/contracts/host";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -69,6 +71,7 @@ export interface ChatProjectOverviewModel {
 }
 
 export interface ChatProjectOverviewProps {
+  readonly hostId?: HostId;
   readonly client?: ChatClient;
   readonly controller?: ChatController;
   readonly model?: ChatProjectOverviewModel;
@@ -137,6 +140,15 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
   const [submitting, setSubmitting] = useState(false);
   const [restoreFocus, setRestoreFocus] = useState(false);
   const createAvailable = props.onCreateThread !== undefined;
+  const stash = useNewTaskComposerStash({
+    mode: "chat",
+    host: props.hostId,
+    projectId: props.projectId,
+    prompt: draft,
+    textarea: input,
+    setPrompt: setDraft,
+    busy: submitting || !createAvailable,
+  });
   const visibleSections = SECTIONS.filter(([key]) => isVisibleOverviewSection(model[key]));
   const homeOnly = visibleSections.length === 0;
   const threadsEmptyMessage = model.threads.status === "empty" ? model.threads.message : undefined;
@@ -186,6 +198,7 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
             Start a new Chat thread
           </label>
           <ThreadComposer
+            stash={stash}
             notices={
               createAvailable
                 ? []

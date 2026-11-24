@@ -1,12 +1,23 @@
-import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
-import type { CodeReviewFindingReference } from "@octant/contracts/code-operations";
+import { MAX_FILE_MENTIONS_PER_TURN, MAX_THREAD_MENTIONS_PER_TURN } from "@octant/contracts";
+import {
+  MAX_CHAT_TURN_CANVAS_SELECTIONS,
+  type CanvasContextSelection,
+} from "@octant/contracts/canvasContext";
+import { MAX_CHAT_TURN_PREVIEW_SELECTIONS } from "@octant/contracts/chat";
+import {
+  MAX_CODE_REVIEW_CORRECTION_FINDINGS,
+  type CodeReviewFindingReference,
+} from "@octant/contracts/code-operations";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
-import type { SideChatDraftReturnReference } from "@octant/contracts/side-chat-return";
+import {
+  MAX_SIDE_CHAT_DRAFT_RETURNS,
+  type SideChatDraftReturnReference,
+} from "@octant/contracts/side-chat-return";
 import type { ThreadMentionChip } from "../chat/ThreadMentionPicker";
 import type { TranscriptQuoteChip } from "../chat/quoteSelection";
 import { isImageAttachment } from "./attachmentMediaType";
 import type { ComposerExtensionSelection } from "./composerExtensionSelection";
-import type { ComposerDraftMode } from "./composerThreadDraftStore";
+import type { ComposerDraftMode, ComposerThreadDraft } from "./composerThreadDraftStore";
 import type { NewTaskCreateFromSelection } from "./useNewTaskPrompt";
 
 export interface ComposerStashLocation {
@@ -15,6 +26,13 @@ export interface ComposerStashLocation {
   readonly projectId: string | null;
   readonly composerId: string;
   readonly threadId: string | null;
+  readonly binding?: string | null;
+}
+
+export interface ComposerStashTodo {
+  readonly todoId: string;
+  readonly title: string;
+  readonly listHostId: string;
 }
 
 interface ComposerStashContextValue {
@@ -27,6 +45,7 @@ interface ComposerStashContextValue {
   readonly "side-chat": SideChatDraftReturnReference | null;
   readonly review: CodeReviewFindingReference | null;
   readonly "create-from": NewTaskCreateFromSelection;
+  readonly todo: ComposerStashTodo;
   readonly continuation: "text-only";
 }
 
@@ -66,7 +85,21 @@ const CONTEXT_LABELS: Record<ComposerStashContext["kind"], string> = {
   "side-chat": "A returned Side Chat reply",
   review: "A review finding",
   "create-from": "A source selection",
+  todo: "A to-do link",
   continuation: "A continuation choice",
+};
+
+const CONTEXT_LIMITS: Partial<Record<ComposerStashContext["kind"], number>> = {
+  thread: MAX_THREAD_MENTIONS_PER_TURN,
+  file: MAX_FILE_MENTIONS_PER_TURN,
+  extension: 32,
+  preview: MAX_CHAT_TURN_PREVIEW_SELECTIONS,
+  canvas: MAX_CHAT_TURN_CANVAS_SELECTIONS,
+  "side-chat": MAX_SIDE_CHAT_DRAFT_RETURNS,
+  review: MAX_CODE_REVIEW_CORRECTION_FINDINGS,
+  "create-from": 1,
+  todo: 1,
+  continuation: 1,
 };
 
 export function composerStashLocationKey(location: ComposerStashLocation): string {
@@ -76,6 +109,7 @@ export function composerStashLocationKey(location: ComposerStashLocation): strin
     location.projectId,
     location.composerId,
     location.threadId,
+    location.binding ?? null,
   ]);
 }
 
@@ -96,6 +130,20 @@ export function composerStashContextValues<Kind extends keyof ComposerStashConte
   );
 }
 
+export function recoveredComposerThreadDraft(draft: ComposerStashDraft): ComposerThreadDraft {
+  const returns = composerStashContextValues(draft, "side-chat");
+  const findings = composerStashContextValues(draft, "review");
+  return {
+    text: draft.text,
+    caretIndex: draft.caret,
+    stagedDropped: false,
+    sideChatReturns: returns.filter((value) => value !== null),
+    ...(returns.includes(null) ? { sideChatReturnsInvalid: true } : {}),
+    reviewFindingReferences: findings.filter((value) => value !== null),
+    ...(findings.includes(null) ? { reviewFindingReferencesInvalid: true } : {}),
+  };
+}
+
 export function planComposerStashRestore(
   origin: ComposerStashLocation,
   target: ComposerStashTarget,
@@ -108,21 +156,35 @@ export function planComposerStashRestore(
   }
 
   const sameComposer = composerStashLocationKey(origin) === composerStashLocationKey(destination);
+  const sameNewTaskScope =
+    origin.threadId === null &&
+    destination.threadId === null &&
+    origin.mode === destination.mode &&
+    origin.projectId === destination.projectId;
+  const context = [...current.context, ...saved.context];
+  const checked = new Set<ComposerStashContext["kind"]>();
   for (const part of saved.context) {
+    if (checked.has(part.kind)) continue;
+    checked.add(part.kind);
     const label = CONTEXT_LABELS[part.kind];
     const canMoveThreadMention =
       part.kind === "thread" && origin.projectId === destination.projectId;
-    if (!sameComposer && !canMoveThreadMention) {
+    const canMoveNewTaskSelection =
+      sameNewTaskScope &&
+      (part.kind === "extension" || part.kind === "create-from" || part.kind === "todo");
+    if (!sameComposer && !canMoveThreadMention && !canMoveNewTaskSelection) {
       return { kind: "refused", reason: `${label} needs its original composer.` };
     }
     if (!target.context.includes(part.kind)) {
       return { kind: "refused", reason: `${label} is unavailable in this composer.` };
     }
-    if (
-      (part.kind === "create-from" || part.kind === "continuation") &&
-      current.context.some((value) => value.kind === part.kind)
-    ) {
-      return { kind: "refused", reason: `${label} is already present in this composer.` };
+    const limit = CONTEXT_LIMITS[part.kind];
+    if (limit !== undefined && context.filter((value) => value.kind === part.kind).length > limit) {
+      const name = label.toLowerCase();
+      return {
+        kind: "refused",
+        reason: `Remove ${name} before restoring this draft. This composer can hold ${limit}.`,
+      };
     }
   }
 
@@ -159,7 +221,7 @@ export function planComposerStashRestore(
       caret:
         saved.text === "" ? current.caret : current.text.length + separator.length + saved.caret,
       files: [...current.files, ...saved.files],
-      context: [...current.context, ...saved.context],
+      context,
     },
   };
 }
