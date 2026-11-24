@@ -14,7 +14,7 @@ import {
   TICKET_ID,
 } from "../../../../packages/client-runtime/src/remoteConnectionFixtures";
 
-export { ORIGIN };
+export { HOST_ID, ORIGIN };
 
 async function pemFromPublicKey(publicKey: CryptoKey): Promise<string> {
   const spki = await crypto.subtle.exportKey("spki", publicKey);

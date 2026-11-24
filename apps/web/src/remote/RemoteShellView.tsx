@@ -39,6 +39,7 @@ import {
 import { NewDeviceAlerts } from "../host/NewDeviceAlerts";
 import { RemoteHostSettings } from "./RemoteHostSettings";
 import { RemoteWorkspace } from "./RemoteWorkspace";
+import { usePairedComposerStashScope } from "./usePairedComposerStashScope";
 import { useRemoteSession } from "./useRemoteSession";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 
@@ -100,6 +101,11 @@ export function RemoteShellView(props: RemoteShellViewProps) {
     (standingRead.sessionId === sessionId || state.kind === "stale")
       ? standingRead.standing
       : RESTRICTED_REMOTE_SESSION;
+  const stashScope = usePairedComposerStashScope(
+    props.bridge,
+    hosts[0]?.hostId ?? "paired-browser",
+    connected && standing.actsAsHostPerson,
+  );
   const extensionClient = useMemo(
     () => createRemoteExtensionClient(props.bridge, standing),
     [props.bridge, standing],
@@ -239,7 +245,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           extensionClient={extensionClient}
           mode={activeMode}
           readOnly={standing.accessLevel === "read-only"}
-          stashHostId={hosts[0]?.hostId ?? "paired-browser"}
+          stashScope={stashScope}
         />
       </ContinuityScreenContext.Provider>
 

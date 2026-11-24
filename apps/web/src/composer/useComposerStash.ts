@@ -77,7 +77,10 @@ type ComposerStashNotice = {
   readonly tone: "success" | "warning";
 };
 
-export function useComposerStash(binding: ComposerStashBinding) {
+export function useComposerStash(
+  binding: ComposerStashBinding,
+  reconcilePurges?: () => Promise<void>,
+) {
   const [store] = useState(canReadDraftStorage);
   const [notice, setNotice] = useState<ComposerStashNotice>();
   const [entries, setEntries] = useState<ReadonlyArray<SavedComposerDraft>>();
@@ -340,6 +343,8 @@ export function useComposerStash(binding: ComposerStashBinding) {
       return;
     }
     try {
+      await reconcilePurges?.();
+      if (!mounted.current || moving.current) return;
       const input = latest.current;
       const saved = await store.list(input.target.location.host);
       if (!mounted.current) return;

@@ -646,8 +646,10 @@ move and keeps the full stash available.
 Stash clears the composer after the save commits. Restore consumes the saved
 entry when the whole destination draft is recoverable. If you reopen the
 composer in a new window, look in **Saved drafts** for a restored first
-message you left in the closed window. Both actions are separate from send and
-the host's message queue. The list offers removal of an individual saved draft.
+message you left in the closed window. The list orders entries by when the
+draft was last saved or revised, including entries recovered from a closed
+window. Both actions are separate from send and the host's message queue. The
+list offers removal of an individual saved draft.
 
 ## Image preview
 

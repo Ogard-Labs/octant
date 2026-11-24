@@ -2,7 +2,7 @@ import { render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { decodeHostId, LOCAL_HOST_ID, type HostIdentity } from "@octant/contracts/host";
 import type { RemoteCodeSurfaceProps } from "../remote/RemoteWorkspace";
-import { readyPairedBridge } from "./pairedComputerTestBridge.test-support";
+import { HOST_ID, readyPairedBridge } from "./pairedComputerTestBridge.test-support";
 
 const surfaces: RemoteCodeSurfaceProps[] = [];
 vi.mock("../remote/RemoteWorkspace", () => ({
@@ -14,7 +14,7 @@ vi.mock("../remote/RemoteWorkspace", () => ({
 
 const { PairedComputerCodeSurface } = await import("./PairedComputerCodeSurface");
 
-const LAPTOP = decodeHostId("22222222-2222-4222-8222-222222222222");
+const LAPTOP = decodeHostId(HOST_ID);
 const hosts: ReadonlyArray<HostIdentity> = [
   { hostId: LOCAL_HOST_ID, displayName: "This Mac", health: "healthy", capabilities: ["code"] },
   { hostId: LAPTOP, displayName: "Laptop", health: "healthy", capabilities: ["code"] },
@@ -61,5 +61,20 @@ describe("a paired computer's Code start screen", () => {
     expect(client?.toolGrantsAvailable).toBe(true);
     await client?.listToolApprovals().catch(() => undefined);
     expect(sent.some((url) => url.pathname === "/api/extensions/tool-approvals")).toBe(true);
+  });
+
+  it("reads confirmed purges from a computer that paired this device at Full", async () => {
+    vi.stubGlobal("indexedDB", {});
+    try {
+      const sent: URL[] = [];
+      await surfaceFor(true, sent);
+      await waitFor(() =>
+        expect(sent.some((url) => url.pathname === "/api/host-control/thread-retention")).toBe(
+          true,
+        ),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

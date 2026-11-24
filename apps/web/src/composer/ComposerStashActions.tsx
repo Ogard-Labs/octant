@@ -16,6 +16,7 @@ import { useComposerStash } from "./useComposerStash";
 import {
   ComposerStashScopeContext,
   type ComposerStashControlsProps,
+  type ComposerStashScope,
 } from "./ComposerStashControls";
 import "./composerStash.css";
 
@@ -31,14 +32,17 @@ export function ComposerStashActions(props: ComposerStashControlsProps) {
     <BoundComposerStashActions
       binding={{ ...props.binding, target: { ...target, location } }}
       key={composerStashRecoveryKey(location)}
+      reconcilePurges={scope?.reconcilePurges}
       surface={props.surface}
     />
   );
 }
 
-function BoundComposerStashActions(props: ComposerStashControlsProps) {
+function BoundComposerStashActions(
+  props: ComposerStashControlsProps & Pick<ComposerStashScope, "reconcilePurges">,
+) {
   const { binding, surface } = props;
-  const stash = useComposerStash(binding);
+  const stash = useComposerStash(binding, props.reconcilePurges);
   const hasContent = hasComposerStashContent(binding.draft);
   const { keybindings } = useKeybindings();
   const chord = keybindings.bindings.get("composer-stash");

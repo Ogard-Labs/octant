@@ -1,7 +1,7 @@
 import { decodeCodeThread } from "@octant/contracts";
 import { ChatClientFailure, type ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -135,8 +135,12 @@ describe("thread rest from the sidebar", () => {
       { name: /Older chat/ },
     );
     await userEvent.pointer({ target: row, keys: "[MouseRight]" });
-    await userEvent.hover(await screen.findByRole("menuitem", { name: "Snooze" }));
-    await userEvent.click(await screen.findByRole("menuitem", { name: /^Tomorrow/ }));
+    const snooze = await screen.findByRole("menuitem", { name: "Snooze" });
+    act(() => snooze.focus());
+    await userEvent.keyboard("{ArrowRight}");
+    const tomorrow = await screen.findByRole("menuitem", { name: /^Tomorrow/ });
+    act(() => tomorrow.focus());
+    await userEvent.keyboard("{Enter}");
 
     await waitFor(() =>
       expect(chatApi.execute).toHaveBeenCalledWith(

@@ -43,6 +43,7 @@ import {
   createRemoteProductClients,
 } from "../remote/remoteProductClients";
 import { RemoteWorkspace } from "../remote/RemoteWorkspace";
+import { usePairedComposerStashScope } from "../remote/usePairedComposerStashScope";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -116,6 +117,12 @@ export function RemoteTodoDraft(props: {
   ]);
   const drafts = useContext(NewTaskDraftsContext);
   const windowId = props.ownerWindowId ?? drafts?.windowId;
+  const stashScope = usePairedComposerStashScope(
+    props.bridge,
+    props.hostId,
+    props.connected && standing.actsAsHostPerson,
+    windowId,
+  );
   const seed =
     props.todo === undefined
       ? ""
@@ -415,7 +422,7 @@ export function RemoteTodoDraft(props: {
           actsAsHostPerson={standing.actsAsHostPerson}
           extensionClient={extensionClient}
           initialThread={thread}
-          stashHostId={props.hostId}
+          stashScope={stashScope}
         />
       </>
     );
@@ -429,7 +436,7 @@ export function RemoteTodoDraft(props: {
           This computer cannot be reached. Your draft is kept here until it reconnects.
         </OctantAlert>
       )}
-      <ComposerStashScopeContext.Provider value={{ host: props.hostId, windowId }}>
+      <ComposerStashScopeContext.Provider value={stashScope}>
         <NewTaskDraftScopeContext.Provider value={draftScope}>
           <DraftThreadWorkspace
             mode={mode}

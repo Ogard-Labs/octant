@@ -1,6 +1,9 @@
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
-import type { ThreadPurgeTombstone } from "@octant/contracts/thread-retention";
+import type {
+  ThreadPurgeTombstone,
+  ThreadRetentionState,
+} from "@octant/contracts/thread-retention";
 import {
   composerStashRecoveryKey,
   emptyComposerStashDraft,
@@ -19,6 +22,8 @@ export interface SavedComposerDraft {
 export interface ComposerDraftRecovery {
   readonly location: ComposerStashLocation;
   readonly revision: string;
+  /** Older recovery records had no date and sort below dated drafts. */
+  readonly updatedAt?: number;
   /** The text the older draft store may still show if the window closed during the move. */
   readonly beforeText: string;
   readonly draft: ComposerStashDraft;
@@ -101,7 +106,13 @@ function recovery(
   beforeText: string,
   draft: ComposerStashDraft,
 ): ComposerDraftRecovery {
-  return { location, revision: globalThis.crypto.randomUUID(), beforeText, draft };
+  return {
+    location,
+    revision: globalThis.crypto.randomUUID(),
+    updatedAt: Date.now(),
+    beforeText,
+    draft,
+  };
 }
 
 async function readRecovery(
@@ -140,7 +151,7 @@ async function recoverClosedWindows(factory: IDBFactory, host: string): Promise<
         saved.add({
           id: globalThis.crypto.randomUUID(),
           source: location,
-          savedAt: Date.now(),
+          savedAt: record.updatedAt ?? 0,
           draft,
         } satisfies SavedComposerDraft);
         recovered.delete(key);
@@ -275,6 +286,22 @@ export async function removePurgedComposerDrafts(
   }
 }
 
+export async function reconcileComposerStashPurges(
+  host: string,
+  readRetention: () => Promise<ThreadRetentionState | undefined>,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (globalThis.indexedDB === undefined || signal?.aborted) return;
+  try {
+    const retention = await readRetention();
+    if (retention !== undefined && !signal?.aborted) {
+      await removePurgedComposerDrafts(host, retention.tombstones);
+    }
+  } catch {
+    // A failed read cannot establish that an existing draft may be removed.
+  }
+}
+
 export function connectComposerStashWindow(
   windowId: string,
   client: Pick<HostControlClient, "readThreadRetention">,
@@ -284,12 +311,7 @@ export function connectComposerStashWindow(
   void holdWindow(windowId, signal).catch(() => undefined);
   const reconcilePurges = () => {
     // Navigation bootstraps can hide archived threads and Projects.
-    void client
-      .readThreadRetention()
-      .then(({ tombstones }) => {
-        if (!signal.aborted) return removePurgedComposerDrafts(LOCAL_HOST_ID, tombstones);
-      })
-      .catch(() => undefined);
+    void reconcileComposerStashPurges(LOCAL_HOST_ID, client.readThreadRetention, signal);
   };
   window.addEventListener("focus", reconcilePurges, { signal });
   reconcilePurges();

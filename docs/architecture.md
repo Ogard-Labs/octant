@@ -450,8 +450,8 @@ Settings loads the full registry of controls and search terms when it opens.
 The renderer's first load has a byte budget, recorded in
 `scripts/initial-renderer-budget.json` and enforced by `bun run renderer:check`
 in CI. The budget counts the static graph Vite loads for `index.html`: the main
-entry is at most 1,575,467 B (1,539 KiB), the initial CSS at most 648,943 B
-(634 KiB), and the initial JavaScript and CSS at most 1,143,348 B after gzip
+entry is at most 1,576,476 B (1,540 KiB), the initial CSS at most 648,943 B
+(634 KiB), and the initial JavaScript and CSS at most 1,142,921 B after gzip
 level 6. A change that grows any measure past its budget fails. A change that
 shrinks one lowers the recorded budget. Raising a budget is a maintainer
 decision; the editable composer prompt that holds inline `@model` chips raised
@@ -7171,9 +7171,11 @@ ls-remote` against the thread's remote and the GitHub reads they already
   staging assigns destination-owned references. Ordinary turn admission
   rechecks authority, context references and model capabilities. A host's
   retention tombstones remove that thread's saved and recovered drafts,
-  including threads purged while the client was closed. Archiving a thread
-  or Project keeps its saved drafts. Recovery waits for host acceptance
-  before clearing a submitted draft.
+  including threads purged while the client was closed. The client reads
+  the owning host's tombstones through its existing retention permissions,
+  which a device paired at Full has. Archiving a thread or Project keeps
+  its saved drafts. Recovery waits for host acceptance before clearing a
+  submitted draft.
 
 - **Accepted message queue.** Chat, Work, and Code share a host-owned ordered
   queue for messages the user submits while a turn runs. A successful enqueue

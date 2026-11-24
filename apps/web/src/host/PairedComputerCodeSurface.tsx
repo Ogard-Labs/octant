@@ -20,6 +20,7 @@ import { PairedComputerThreadServers } from "./PairedComputerThreadServers";
 import type { RemoteServerGrantSource } from "@octant/contracts";
 import type { RemoteOpenMode, RemoteOpenOutcome } from "../home/runningServices";
 import { ComposerStashScopeContext } from "../composer/ComposerStashControls";
+import { usePairedComposerStashScope } from "../remote/usePairedComposerStashScope";
 
 export interface PairedComputerCodeSurfaceProps {
   /** The paired computer's session, already ready. */
@@ -88,6 +89,11 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
       current = false;
     };
   }, [bridge, ready]);
+  const stashScope = usePairedComposerStashScope(
+    bridge,
+    props.selectedHostId,
+    connected && standing.actsAsHostPerson,
+  );
 
   // A thread's MCP tool approvals, listed and answered on that computer, so one
   // Needs you opens here can be answered here.
@@ -126,7 +132,7 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
           {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
         />
       </div>
-      <ComposerStashScopeContext.Provider value={{ host: props.selectedHostId }}>
+      <ComposerStashScopeContext.Provider value={stashScope}>
         <RemoteCodeSurface
           clients={clients}
           actsAsHostPerson={standing.actsAsHostPerson}
