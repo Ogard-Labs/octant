@@ -21,7 +21,11 @@ import { isProtectedSecretPath } from "../process/secretGuard";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { TaintAppManagedToolResultsInput } from "../providers/appManagedToolTaint";
 import { adaptMediaToolSet } from "../providers/mediaToolAdapter";
-import type { SpeechAdapter } from "./speechAdapter";
+import {
+  transcriptionRequestIdentity,
+  type SpeechAdapter,
+  type SpeechTranscriptionPreferences,
+} from "./speechAdapter";
 import { sniffSpeechAudioMediaType } from "./speechAudio";
 import type { SpeechGates } from "./speechGates";
 
@@ -75,7 +79,12 @@ export class ThreadTranscription {
         readonly offers: Pick<ServiceOfferService<ServiceOffer, ServiceOfferAnswer>, "wait">;
         readonly gates: SpeechGates;
         readonly endpoint: () => SpeechEndpointResolution;
-        readonly adapter: (ready: Ready) => Pick<SpeechAdapter, "transcribe">;
+        /** Voice settings' language and dictionary, read once per call. */
+        readonly preferences?: () => SpeechTranscriptionPreferences;
+        readonly adapter: (
+          ready: Ready,
+          preferences: SpeechTranscriptionPreferences,
+        ) => Pick<SpeechAdapter, "transcribe">;
       },
   ): AppManagedToolSet | undefined {
     const profileAllows = () =>
@@ -127,7 +136,20 @@ export class ThreadTranscription {
               reason: "The folder, access or Voice destination changed.",
             };
           }
-          const key = JSON.stringify([thread, audio.digest, target, language]);
+          // Keyed on what the provider would actually be sent, so a Voice
+          // change it never sees still reuses the paid transcript, and one it
+          // does see asks again.
+          const preferences = input.preferences?.() ?? {};
+          const key = JSON.stringify([
+            thread,
+            audio.digest,
+            target,
+            transcriptionRequestIdentity(
+              ready.instance.configuration.baseUrl,
+              language,
+              preferences,
+            ),
+          ]);
           const cached = this.#pages.get(key);
           if (cached !== undefined) return { status: "transcribed", text: cached.text };
           if (!allowFreshRequest) return { status: "cache-miss" };
@@ -186,7 +208,7 @@ export class ThreadTranscription {
               };
             }
             if (remember) this.#consent.set(thread, { target, windowId: input.windowId });
-            const result = await input.adapter(ready).transcribe({
+            const result = await input.adapter(ready, preferences).transcribe({
               audio: read.bytes,
               mediaType: audio.mediaType,
               modelId: ready.modelId,

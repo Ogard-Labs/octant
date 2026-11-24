@@ -2972,8 +2972,59 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("separator", { name: /provider handoff/i })).toHaveTextContent(
-      "Provider handoff",
+    const separator = screen.getByRole("separator", { name: /context handoff/i });
+    expect(separator).toHaveTextContent("Context handoff");
+    expect(separator).toHaveTextContent("Model One");
+    expect(separator).toHaveTextContent("Model Two");
+  });
+
+  it("places a context handoff divider between the previous reply and the prompt sent to the new provider", () => {
+    const firstOperationId = "90000000-0000-4000-8000-000000000011";
+    const secondOperationId = "90000000-0000-4000-8000-000000000012";
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: `${firstOperationId}:user`,
+              role: "user",
+              text: "Start on provider one.",
+              operationId: firstOperationId as never,
+            },
+            {
+              id: `${firstOperationId}:assistant`,
+              role: "assistant",
+              text: "First pass done.",
+              operationId: firstOperationId as never,
+              providerInstanceId: providerId,
+              modelId,
+              status: "completed",
+            },
+            {
+              id: `${secondOperationId}:user`,
+              role: "user",
+              text: "Take over on provider two.",
+              operationId: secondOperationId as never,
+            },
+            {
+              id: `${secondOperationId}:assistant`,
+              role: "assistant",
+              text: "Second pass done.",
+              operationId: secondOperationId as never,
+              providerInstanceId: alternateProviderId,
+              modelId: alternateModelId,
+              status: "completed",
+            },
+          ],
+        })}
+        providerGroups={[providerGroup(), alternateProviderGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    const transcript = screen.getByRole("region", { name: "Code thread" });
+    expect(transcript.textContent).toMatch(
+      /First pass done\.[\s\S]*Context handoff[\s\S]*Model One[\s\S]*Model Two[\s\S]*Take over on provider two\.[\s\S]*Second pass done\./,
     );
   });
 
@@ -3442,10 +3493,11 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("separator", { name: /model switch/i })).toHaveTextContent(
-      `Switched to ${String(alternateModelId)}`,
-    );
-    expect(screen.queryByText(/provider handoff/i)).not.toBeInTheDocument();
+    const separator = screen.getByRole("separator", { name: /model switch/i });
+    expect(separator).toHaveTextContent("Model switch");
+    expect(separator).toHaveTextContent("Model One");
+    expect(separator).toHaveTextContent(String(alternateModelId));
+    expect(screen.queryByText(/context handoff/i)).not.toBeInTheDocument();
   });
 
   it("does not invent a provider handoff for an app-authored assistant message", () => {
@@ -3474,7 +3526,9 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.queryByRole("separator", { name: /provider handoff/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("separator", { name: /context handoff|model switch/i }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/undefined/)).not.toBeInTheDocument();
   });
 
@@ -3647,7 +3701,7 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("Check the failing suite first.")).toBeVisible();
   });
 
-  it("keeps the live task list under the conversation while the turn works through it", () => {
+  it("shows the task list inside the turn that is working through it", () => {
     const operationId = "70000000-0000-4000-8000-000000000053";
     render(
       <CodeThreadWorkspace
@@ -3688,11 +3742,14 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("region", { name: "Agent tasks" })).toBeVisible();
+    const tasks = screen.getByRole("region", { name: "Agent tasks" });
+    expect(tasks).toBeVisible();
+    expect(tasks.closest(".code-thread-workspace__row")).not.toBeNull();
     expect(screen.getByText("1 of 2 tasks completed")).toBeVisible();
+    expect(screen.getByRole("list", { name: "Task list" })).toBeVisible();
   });
 
-  it("shows no task list for a settled turn whose tasks all finished", () => {
+  it("keeps a settled turn's finished task list in that turn, folded to its header", () => {
     const operationId = "70000000-0000-4000-8000-000000000054";
     render(
       <CodeThreadWorkspace
@@ -3722,7 +3779,12 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.queryByRole("region", { name: "Agent tasks" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Agent tasks" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /1 of 1 tasks completed/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByRole("list", { name: "Task list" })).not.toBeInTheDocument();
   });
 
   it("renders no activity disclosure for a turn that reported none", () => {

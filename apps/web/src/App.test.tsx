@@ -1651,6 +1651,107 @@ describe("App", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("offers Tasks from More tools for a Chat thread showing a task list, without opening the dock", async () => {
+    const user = userEvent.setup();
+    const now = "2026-07-20T08:00:00.000Z";
+    const turnId = "00000000-0000-4000-8000-000000000971";
+    const prompt = {
+      contentId: "00000000-0000-4000-8000-000000000972",
+      role: "user" as const,
+      body: "Plan the fix",
+      digest: "a".repeat(64),
+      byteLength: 12,
+    };
+    const baseChat = chats();
+    const threadRecord = (await baseChat.bootstrap()).threads[0];
+    if (threadRecord === undefined) throw new Error("Missing chat thread fixture.");
+    const snapshot = decodeChatThreadView({
+      thread: threadRecord,
+      turns: [
+        {
+          id: turnId,
+          threadId: oldChatThreadId,
+          sequence: 1,
+          userMessageRef: {
+            contentId: prompt.contentId,
+            digest: prompt.digest,
+            byteLength: prompt.byteLength,
+          },
+          attachmentIds: [],
+          attempts: [
+            {
+              id: "00000000-0000-4000-8000-000000000973",
+              turnId,
+              threadId: oldChatThreadId,
+              providerInstanceId: threadRecord.providerInstanceId,
+              providerSessionId: "00000000-0000-4000-8000-000000000974",
+              modelId: "model-a",
+              contextManifestId: "00000000-0000-4000-8000-000000000975",
+              outcome: "completed",
+              responseRefs: [],
+              citationIds: [],
+              tasks: [
+                { taskId: "t1", state: "completed", summary: "Read the failing test" },
+                { taskId: "t2", state: "pending", summary: "Fix the parser" },
+              ],
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+          createdAt: now,
+        },
+      ],
+      lastSequence: 1,
+      contents: [prompt],
+      attachments: [],
+      citations: [],
+      workItems: [],
+      workListVersion: 0,
+      followUpVersion: 0,
+    });
+    const baseShell = chatShellBootstrap();
+    const chatLayout = baseShell.workspace.layouts.chat;
+    if (chatLayout.kind !== "pane") throw new Error("Expected the default Chat pane.");
+    render(
+      <App
+        chatClient={{ ...baseChat, thread: vi.fn(async () => snapshot) }}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client({
+          ...baseShell,
+          workspace: applyWorkspaceOperation(
+            baseShell.workspace,
+            decodeWorkspaceOperation({
+              kind: "open-surface",
+              mode: "chat",
+              paneId: String(chatLayout.paneId),
+              surface: {
+                kind: "chat-thread",
+                id: "00000000-0000-4000-8000-000000000976",
+                threadId: oldChatThreadId,
+                mode: "chat",
+                title: "Older chat",
+              },
+            }),
+          ),
+        })}
+      />,
+    );
+
+    // The Chat workspace loads on demand, so its first read takes a moment.
+    expect(
+      await screen.findByText("1 of 2 tasks completed", {}, { timeout: 10_000 }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("complementary", { name: "Right Utility Dock" }),
+    ).not.toBeInTheDocument();
+    const menu = await openAddToolMenu(user, document.body);
+    expect(within(menu).getByRole("menuitemcheckbox", { name: /Tasks/ })).toBeVisible();
+  });
+
   it("renders independent authoritative Chat sessions in every visible split pane", async () => {
     const chatApi = chats();
 
@@ -5394,7 +5495,7 @@ describe("App", () => {
       );
       expect(screen.queryByText("feature/handed-by-start-a-fix")).toBeNull();
       // The clean draft is Code Home's page again, list and all.
-      expect(screen.getByRole("region", { name: "CI failures" })).toBeVisible();
+      expect(await screen.findByRole("region", { name: "CI failures" })).toBeVisible();
     },
   );
 

@@ -76,7 +76,11 @@ opens with Model endpoints, every endpoint Octant calls over an API itself
 by model roles ([Model endpoints: Model roles](model-endpoints.md#model-roles)), helper agents, and Navigator's models; with no endpoint yet it offers three ways
 in instead (Sign in with ChatGPT, Sign in with OpenRouter, Add endpoint), each
 sign-in one click with its terms as a consent line under the button. Voice &
-images holds speech, transcription, the image profiles, custom image
+images holds transcription (one Transcribe with menu: Off, each endpoint's
+transcription model, Other model…), the dictation Language and Your
+dictionary, speech, the Microphone dictation records from on this computer, a Test
+microphone row that plays a
+short clip back on this computer, the image profiles, custom image
 sources, and, once two image profiles are ready, **At Full access** with one
 select, **Image profile at Full access** (First ready profile, then each ready
 profile by name), the profile a thread at Full access uses instead of asking. The Provider catalog lists every bundled driver of both kinds and
@@ -127,6 +131,26 @@ this computer's Projects by name, the same checklist a member's Act item
 shows, with **Save the Projects**; it is the hub's own Act list, read at each
 request, and none ticked leaves a member's window nothing to start here
 ([Hub and spokes: the hub coordinates](hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)).
+
+**Access activity** sits on Settings › Remote access above Paired devices
+(maintainer decision, 2026-11-22). Its rows are page rows, newest first: a
+device added at its level, changed from one level to another, or removed
+(removed, signed out with every other device, removed itself, pairing
+expired), with a meta line naming who did it (you on this computer, a device
+by its label, an agent by its name, or this computer) and how long ago. With
+nothing recorded the section is the one line "No devices added, removed or
+re-levelled yet". It refreshes as each change is journaled. Above the list,
+each change notice, a paired device or an agent raising a thread's level or
+adding or replacing a provider key, is a row naming who changed what, with
+**Undo**, **Revoke** the device (or **End** the agent's access) and
+**Dismiss**; a replaced key's row has no Undo and says the earlier key is not
+kept, and a refused action shows the host's reason. On a window, a key's
+Undo runs through the notice route this computer's desktop sends with its
+secret, and the revoke through this computer's own device and grant
+controls. A window's notice stack
+shows the newest notice with **Review**, which opens this section, and a
+browser paired at Full shows the notices beside its new-device alerts. The
+rule is in [Architecture: Security and authority](../architecture.md#security-and-authority).
 
 Selecting a page replaces its controls as well as its heading. Plugin pages
 resolve the currently selected entry point; a missing entry point shows an

@@ -520,11 +520,26 @@ async function readyBridge(
   actsAsHostPerson?: boolean,
   withToolPrompt = false,
   withBoundProjects = false,
+  accessLevel?: "read-only" | "approve-and-steer" | (() => "read-only" | "full"),
 ) {
-  const server = createFakeRemoteServer({
-    handleProductRequest: answerProduct(seen, withCanvas, withToolPrompt, withBoundProjects),
-    ...(actsAsHostPerson === undefined ? {} : { actsAsHostPerson }),
-  });
+  const handleProductRequest = answerProduct(seen, withCanvas, withToolPrompt, withBoundProjects);
+  const server = createFakeRemoteServer(
+    typeof accessLevel === "function"
+      ? {
+          handleProductRequest,
+          get accessLevel() {
+            return accessLevel();
+          },
+          get actsAsHostPerson() {
+            return accessLevel() === "full";
+          },
+        }
+      : {
+          handleProductRequest,
+          ...(actsAsHostPerson === undefined ? {} : { actsAsHostPerson }),
+          ...(accessLevel === undefined ? {} : { accessLevel }),
+        },
+  );
   const pairingStore = createInMemoryDeviceKeyStore();
   const keyPair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [
     "sign",
@@ -587,7 +602,14 @@ describe("RemoteShellView", () => {
   it("opens a Chat thread from the paired host and sends a real turn over the remote session", async () => {
     const user = userEvent.setup();
     const seen: ProductRequest[] = [];
-    const { bridge, server } = await readyBridge(seen);
+    const { bridge, server } = await readyBridge(
+      seen,
+      false,
+      false,
+      false,
+      false,
+      "approve-and-steer",
+    );
     render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
 
     expect(await screen.findByText("This Mac")).toBeInTheDocument();
@@ -615,6 +637,56 @@ describe("RemoteShellView", () => {
       expect(request.headers.get("x-octant-window-capability")).toBeNull();
     }
     expect(screen.queryByRole("button", { name: /verify .* mutation/i })).not.toBeInTheDocument();
+  });
+
+  it("lets a read-only browser watch Chat without offering sends, approval, or thread creation", async () => {
+    const user = userEvent.setup();
+    const { bridge } = await readyBridge([], false, false, true, true, "read-only");
+    try {
+      render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+      const list = await screen.findByRole("navigation", { name: "Chat thread list" });
+      await user.click(await within(list).findByRole("button", { name: chatThread.title }));
+
+      expect(await screen.findByRole("region", { name: "Conversation" })).toBeInTheDocument();
+      expect(screen.queryByRole("textbox", { name: /message/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "New thread" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Deny" })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Code" }));
+      const code = await screen.findByRole("navigation", { name: "Code thread list" });
+      expect(within(code).queryByRole("button", { name: "Start thread" })).not.toBeInTheDocument();
+    } finally {
+      bridge.disconnect();
+    }
+  });
+
+  it("updates an open browser when the host changes its device access level", async () => {
+    const user = userEvent.setup();
+    let level: "read-only" | "full" = "read-only";
+    const { bridge, server } = await readyBridge([], false, false, true, true, () => level);
+    const sessionId = server.issuedSessionId();
+    try {
+      render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+      const list = await screen.findByRole("navigation", { name: "Chat thread list" });
+      await user.click(await within(list).findByRole("button", { name: chatThread.title }));
+      await screen.findByRole("region", { name: "Conversation" });
+      expect(screen.queryByRole("textbox", { name: /message/i })).not.toBeInTheDocument();
+
+      level = "full";
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(await screen.findByRole("textbox", { name: /message/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "New thread" })).toBeInTheDocument();
+
+      level = "read-only";
+      document.dispatchEvent(new Event("visibilitychange"));
+      await waitFor(() => {
+        expect(screen.queryByRole("textbox", { name: /message/i })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "New thread" })).not.toBeInTheDocument();
+      });
+      expect(server.issuedSessionId()).toBe(sessionId);
+    } finally {
+      bridge.disconnect();
+    }
   });
 
   it("opens a paired Chat Canvas and copies its public link without owner controls or window authority", async () => {

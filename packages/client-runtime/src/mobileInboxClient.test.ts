@@ -303,6 +303,25 @@ describe("mobileInboxClient", () => {
     });
   });
 
+  it("says when the host refused because remote access is paused", async () => {
+    const fetch = vi.fn(async () =>
+      Response.json(
+        { status: "rejected", category: "unavailable", reasonCode: "remote-access-paused" },
+        { status: 403 },
+      ),
+    );
+
+    await expect(
+      listMobileInbox({
+        hostId,
+        authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+      }),
+    ).rejects.toMatchObject({
+      category: "rejected",
+      message: expect.stringMatching(/Remote access is paused on this computer/),
+    });
+  });
+
   it("loads a chat thread view and sends a follow-up", async () => {
     const view = decodeChatThreadView({
       thread: chatThread,

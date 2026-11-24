@@ -78,6 +78,7 @@ import type {
   ProviderApiKeySummary,
   ProviderCredentialStatus,
   RemoteCredentialOperationReceipt,
+  RemoteDeviceAccessLevel,
   RemoteDeviceInventoryEntry,
   RemoteDeviceSourceClass,
   RemoteDeviceState,
@@ -577,7 +578,17 @@ export interface OctantHostBridge {
     sourceClass: RemotePairingTicketSourceClass,
   ) => Promise<RemoteMintedPairingTicket>;
   readonly listRemotePairingRequests?: () => Promise<ReadonlyArray<RemotePendingPairingRequest>>;
-  readonly approveRemotePairingRequest?: (ticketId: string) => Promise<RemotePairingApprovalResult>;
+  readonly approveRemotePairingRequest?: (
+    ticketId: string,
+    accessLevel?: RemoteDeviceAccessLevel,
+  ) => Promise<RemotePairingApprovalResult>;
+  readonly setRemoteDeviceAccessLevel?: (
+    deviceId: string,
+    accessLevel: RemoteDeviceAccessLevel,
+  ) => Promise<void>;
+  readonly getRemoteAccessPaused?: () => Promise<boolean>;
+  readonly setRemoteAccessPaused?: (paused: boolean) => Promise<boolean>;
+  readonly undoAccessChangeNotice?: (noticeId: string) => Promise<void>;
   readonly denyRemotePairingRequest?: (
     ticketId: string,
     reasonCode: string,
@@ -1633,11 +1644,37 @@ export function createHostBridge(
           },
           listRemotePairingRequests: async () =>
             decodeRemotePendingList(await invokeRemote(IPC_CHANNELS.remotePairingRequests)),
-          approveRemotePairingRequest: async (ticketId: string) => {
+          approveRemotePairingRequest: async (
+            ticketId: string,
+            accessLevel?: RemoteDeviceAccessLevel,
+          ) => {
             validateRemoteUuid(ticketId);
+            if (accessLevel !== undefined && !isDeviceAccessLevel(accessLevel)) {
+              throw new TypeError("Invalid device access level.");
+            }
             return decodeRemotePairingApproval(
-              await invokeRemote(IPC_CHANNELS.remotePairingApprove, ticketId),
+              accessLevel === undefined
+                ? await invokeRemote(IPC_CHANNELS.remotePairingApprove, ticketId)
+                : await invokeRemote(IPC_CHANNELS.remotePairingApprove, ticketId, accessLevel),
             );
+          },
+          setRemoteDeviceAccessLevel: async (
+            deviceId: string,
+            accessLevel: RemoteDeviceAccessLevel,
+          ) => {
+            validateRemoteUuid(deviceId);
+            if (!isDeviceAccessLevel(accessLevel)) {
+              throw new TypeError("Invalid device access level.");
+            }
+            await invokeRemote(IPC_CHANNELS.remoteDeviceAccessLevel, deviceId, accessLevel);
+          },
+          getRemoteAccessPaused: async () =>
+            (await invokeRemote(IPC_CHANNELS.remoteAccessPauseRead)) === true,
+          setRemoteAccessPaused: async (paused: boolean) =>
+            (await invokeRemote(IPC_CHANNELS.remoteAccessPauseSet, paused === true)) === true,
+          undoAccessChangeNotice: async (noticeId: string) => {
+            validateRemoteUuid(noticeId);
+            await invokeRemote(IPC_CHANNELS.undoAccessChangeNotice, noticeId);
           },
           denyRemotePairingRequest: async (ticketId: string, reasonCode: string) => {
             validateRemoteUuid(ticketId);
@@ -1767,6 +1804,10 @@ export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
   "mintRemotePairingTicket",
   "listRemotePairingRequests",
   "approveRemotePairingRequest",
+  "setRemoteDeviceAccessLevel",
+  "getRemoteAccessPaused",
+  "setRemoteAccessPaused",
+  "undoAccessChangeNotice",
   "denyRemotePairingRequest",
   "getRemoteDeviceInventory",
   "renameRemoteDevice",
@@ -2012,8 +2053,12 @@ function decodeRemoteDevice(value: unknown): RemoteDeviceInventoryEntry {
     "protocolFloor",
     "state",
   ];
-  const allowed = new Set([...required, "revokedAt", "revokedReason"]);
-  if (keys.some((key) => !allowed.has(key)) || required.some((key) => !(key in value))) {
+  const allowed = new Set([...required, "revokedAt", "revokedReason", "accessLevel"]);
+  if (
+    keys.some((key) => !allowed.has(key)) ||
+    required.some((key) => !(key in value)) ||
+    (value.accessLevel !== undefined && !isDeviceAccessLevel(value.accessLevel))
+  ) {
     throw new TypeError("Invalid local device inventory entry.");
   }
   if (
@@ -2052,7 +2097,14 @@ function decodeRemoteDevice(value: unknown): RemoteDeviceInventoryEntry {
     state: value.state as RemoteDeviceState,
     ...(value.revokedAt === undefined ? {} : { revokedAt: value.revokedAt }),
     ...(value.revokedReason === undefined ? {} : { revokedReason: value.revokedReason }),
+    ...(isDeviceAccessLevel(value.accessLevel) ? { accessLevel: value.accessLevel } : {}),
   });
+}
+
+// Spelled out here because the preload imports no runtime code from the
+// contracts package; the server sends only these three.
+function isDeviceAccessLevel(value: unknown): value is RemoteDeviceAccessLevel {
+  return value === "full" || value === "approve-and-steer" || value === "read-only";
 }
 
 function decodeRemotePending(value: unknown): RemotePendingPairingRequest {

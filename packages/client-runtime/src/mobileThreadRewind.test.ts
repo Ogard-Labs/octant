@@ -23,7 +23,7 @@ const digest = `sha256:${"a".repeat(64)}`;
 function ref(n: number) {
   return { contentId: uuid(n), digest, byteLength: 1 };
 }
-function content(n: number, role: "user" | "assistant", body: string) {
+function content(n: number, role: "user" | "assistant" | "snippet", body: string) {
   return { contentId: uuid(n), role, body, digest, byteLength: body.length };
 }
 function turn(n: number, user: number, reply: number | undefined, extra: object = {}) {
@@ -104,6 +104,86 @@ describe("mobile fork and rewind", () => {
     // The last reply has no later turn to rewind to.
     expect(replyTwo?.targets?.rewindFromId).toBeUndefined();
     expect(replyTwo?.targets?.forkThroughId).toBe(uuid(2));
+  });
+
+  it("orders Chat messages by active turn and attempt even when host content ids sort backwards", () => {
+    const viewWithUuidSortedContents = {
+      thread: chatView.thread,
+      turns: [
+        {
+          id: uuid(1),
+          sequence: 1,
+          userMessageRef: ref(90),
+          attempts: [
+            { id: uuid(501), outcome: "interrupted", responseRefs: [] },
+            { id: uuid(502), outcome: "failed", responseRefs: [] },
+            { id: uuid(503), outcome: "completed", responseRefs: [ref(10)] },
+          ],
+        },
+        turn(2, 50, 20),
+      ],
+      // Mirrors SQLite readChatContentBodies ordering by content_id ASC.
+      contents: [
+        content(10, "assistant", "later retry reply"),
+        content(20, "assistant", "second reply"),
+        content(50, "user", "second prompt"),
+        content(90, "user", "first prompt"),
+      ],
+    };
+
+    const messages = mobileChatMessages(viewWithUuidSortedContents as never);
+    expect(messages.map((message) => message.content.body)).toEqual([
+      "first prompt",
+      "later retry reply",
+      "second prompt",
+      "second reply",
+    ]);
+  });
+
+  it("keeps Sees images descriptions and citation snippets out of visible Chat messages", () => {
+    const viewWithAuxiliaryContents = {
+      thread: chatView.thread,
+      turns: [
+        {
+          id: uuid(1),
+          sequence: 1,
+          userMessageRef: ref(11),
+          attempts: [
+            {
+              id: uuid(501),
+              outcome: "completed",
+              describedImages: [
+                {
+                  attachmentId: uuid(701),
+                  name: "login.png",
+                  describedBy: { provider: "Local Vision", model: "Vision" },
+                  description: ref(15),
+                },
+              ],
+              responseRefs: [ref(12)],
+            },
+          ],
+        },
+        turn(2, 21, 22),
+      ],
+      citations: [{ citationId: uuid(801), snippetRef: ref(16) }],
+      contents: [
+        content(11, "user", "What is on this screen?"),
+        content(12, "assistant", "It is a sign-in form."),
+        content(15, "user", "Generated description of login.png"),
+        content(16, "snippet", "Citation snippet text"),
+        content(21, "user", "Unrelated follow-up"),
+        content(22, "assistant", "Follow-up reply"),
+      ],
+    };
+
+    const messages = mobileChatMessages(viewWithAuxiliaryContents as never);
+    expect(messages.map((message) => message.content.body)).toEqual([
+      "What is on this screen?",
+      "It is a sign-in form.",
+      "Unrelated follow-up",
+      "Follow-up reply",
+    ]);
   });
 
   it("returns the removed message above a draft already in the composer", () => {

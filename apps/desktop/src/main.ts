@@ -769,8 +769,20 @@ export function installRemoteDeviceIpcHandlers(options: {
   options.handle(IPC_CHANNELS.remotePairingRequests, (event) =>
     run(event, (service) => service.listPairingRequests()),
   );
-  options.handle(IPC_CHANNELS.remotePairingApprove, (event, ticketId) =>
-    run(event, (service) => service.approvePairingRequest(ticketId as string)),
+  options.handle(IPC_CHANNELS.remotePairingApprove, (event, ticketId, accessLevel) =>
+    run(event, (service) => service.approvePairingRequest(ticketId as string, accessLevel)),
+  );
+  options.handle(IPC_CHANNELS.remoteDeviceAccessLevel, (event, deviceId, accessLevel) =>
+    run(event, (service) => service.setDeviceAccessLevel(deviceId as string, accessLevel)),
+  );
+  options.handle(IPC_CHANNELS.remoteAccessPauseRead, (event) =>
+    run(event, (service) => service.readRemoteAccessPaused()),
+  );
+  options.handle(IPC_CHANNELS.remoteAccessPauseSet, (event, paused) =>
+    run(event, (service) => service.setRemoteAccessPaused(paused)),
+  );
+  options.handle(IPC_CHANNELS.undoAccessChangeNotice, (event, noticeId) =>
+    run(event, (service) => service.undoAccessChangeNotice(noticeId)),
   );
   options.handle(IPC_CHANNELS.remotePairingDeny, (event, ticketId, reasonCode) =>
     run(event, (service) => service.denyPairingRequest(ticketId as string, reasonCode as string)),
@@ -2129,7 +2141,27 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     });
     const nextBrowserRuntimeBroker = await startBrowserRuntimeBroker(surfaceHost, profileStore);
     launch.acquired({ browserBroker: nextBrowserRuntimeBroker });
+    const deviceHelperPath = resolveDesktopNativeHelperPath(
+      {
+        packaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        moduleUrl: import.meta.url,
+      },
+      DEVICE_HELPER_FILENAME,
+    );
     const nextComputerService = createComputerUseDesktopService({
+      displayHelperPath: deviceHelperPath,
+      onDisplayLock: (close) => {
+        powerMonitor.on("lock-screen", close);
+        powerMonitor.on("suspend", close);
+        powerMonitor.on("user-did-resign-active", close);
+        return () => {
+          powerMonitor.off("lock-screen", close);
+          powerMonitor.off("suspend", close);
+          powerMonitor.off("user-did-resign-active", close);
+        };
+      },
+      displayUnlocked: () => ["active", "idle"].includes(powerMonitor.getSystemIdleState(60)),
       bundledPath: resolveDesktopNativeHelperPath(
         {
           packaged: app.isPackaged,
@@ -2159,14 +2191,6 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       }),
     });
     launch.acquired({ managedTools: nextManagedToolService });
-    const deviceHelperPath = resolveDesktopNativeHelperPath(
-      {
-        packaged: app.isPackaged,
-        resourcesPath: process.resourcesPath,
-        moduleUrl: import.meta.url,
-      },
-      DEVICE_HELPER_FILENAME,
-    );
     // Simulators exist on macOS only. The broker still starts when the native
     // helper binary is missing, so a managed serve-sim stream can drive the
     // pane. Without either, input is reported unavailable.

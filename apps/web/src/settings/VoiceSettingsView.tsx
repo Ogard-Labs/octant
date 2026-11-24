@@ -9,15 +9,26 @@ import {
   type SpeechEndpointRef,
   type SpeechSynthesisEndpointRef,
   type SpeechSynthesisVoice,
+  type SpeechTranscriptionLanguage,
+  type VoiceDictionaryTerm,
   type VoiceSettings,
 } from "@octant/contracts";
 import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { ShellSettings } from "@octant/contracts/shell";
-import { listSpeechEligibleInstances, resolveSpeechEndpoint } from "@octant/domain";
+import {
+  addVoiceDictionaryTerms,
+  listSpeechEligibleInstances,
+  resolveSpeechEndpoint,
+  type SpeechEndpointResolution,
+} from "@octant/domain";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { X } from "../ui/icons";
+import { MicrophonePicker } from "../voice/MicrophonePicker";
+import { MicrophoneTest } from "../voice/MicrophoneTest";
+import { transcriptionChoices, type TranscriptionChoice } from "./harness/voiceModels";
 import { SettingRow, SettingsSection } from "./primitives";
 import { settingId } from "./registry";
 
@@ -30,15 +41,16 @@ export interface VoiceSettingsViewProps {
 }
 
 /**
- * Voice settings section: which OpenAI-compatible provider turns speech into
- * text, and which turns text into speech. Both persist through the journaled
- * shell settings, and the section shows what the host would actually do with
+ * Voice settings section: where speech is turned into text, which provider
+ * turns text into speech, and a microphone test. Both endpoints persist through
+ * the journaled shell settings, and the section shows what the host would actually do with
  * each choice — the same resolution the speech routes run — so it cannot
  * promise a voice the runtime will refuse.
  */
 export function VoiceSettingsView(props: VoiceSettingsViewProps) {
   const instances = props.providerSnapshot?.instances ?? [];
   const eligible = listSpeechEligibleInstances(instances);
+  const choices = transcriptionChoices(instances, props.providerSnapshot?.observedStates ?? []);
 
   const apply = (next: VoiceSettings) => props.onSettingsChange({ voice: next });
   const hasConfiguredEndpoint =
@@ -56,8 +68,8 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
               </OctantButton>
             )
           }
-          detail="Voice needs an enabled OpenAI-compatible endpoint, added under Octant Harness › Model endpoints."
-          title="No eligible provider yet"
+          detail="Voice runs on an OpenAI-compatible endpoint. An OpenAI API or Mistral key can transcribe; add one under Octant Harness › Model endpoints."
+          title="No endpoint for voice yet"
           tone="page"
         />
       ) : (
@@ -65,15 +77,15 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
           <SettingsSection title="Speech to text">
             <div className="setgroup">
               <SettingRow
-                description="Choose the provider and model that turn recordings into text."
+                description="Where your speech is turned into text."
                 focused={props.focusedSetting === settingId("transcription")}
-                label="Transcription"
+                label="Transcribe with"
                 scope="app"
                 settingId="transcription"
               >
-                <SpeechEndpointForm
+                <TranscriptionMenu
+                  choices={choices}
                   current={props.settings.transcription}
-                  direction="transcription"
                   eligible={eligible}
                   instances={instances}
                   onClear={() => {
@@ -81,6 +93,36 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
                     apply(rest);
                   }}
                   onSave={(ref) => apply({ ...props.settings, transcription: ref })}
+                />
+              </SettingRow>
+              <SettingRow
+                description="The language you speak. Automatic lets the model work it out."
+                focused={props.focusedSetting === settingId("dictation-language")}
+                label="Language"
+                scope="app"
+                settingId="dictation-language"
+              >
+                <LanguageMenu
+                  current={props.settings.language}
+                  onChange={(language) => {
+                    const { language: _previous, ...rest } = props.settings;
+                    apply(language === undefined ? rest : { ...rest, language });
+                  }}
+                />
+              </SettingRow>
+              <SettingRow
+                description="Names and terms to spell your way. Every transcription on this computer uses them."
+                focused={props.focusedSetting === settingId("dictation-dictionary")}
+                label="Your dictionary"
+                scope="app"
+                settingId="dictation-dictionary"
+              >
+                <DictionaryEditor
+                  dictionary={props.settings.dictionary ?? []}
+                  onChange={(dictionary) => {
+                    const { dictionary: _previous, ...rest } = props.settings;
+                    apply(dictionary.length === 0 ? rest : { ...rest, dictionary });
+                  }}
                 />
               </SettingRow>
             </div>
@@ -110,8 +152,263 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
           </SettingsSection>
         </>
       )}
+      <SettingsSection title="Microphone">
+        <div className="setgroup">
+          <SettingRow
+            description="Dictation records from this microphone on this computer."
+            focused={props.focusedSetting === settingId("microphone")}
+            label="Microphone"
+            scope="app"
+            settingId="microphone"
+          >
+            <MicrophonePicker />
+          </SettingRow>
+          <SettingRow
+            description="Record ten seconds and play it back. The audio stays on this computer unless you transcribe it."
+            focused={props.focusedSetting === settingId("microphone-test")}
+            label="Test microphone"
+            scope="app"
+            settingId="microphone-test"
+          >
+            <MicrophoneTest />
+          </SettingRow>
+        </div>
+      </SettingsSection>
     </section>
   );
+}
+
+const OFF = "off";
+const OTHER = "other";
+const SAVED = "saved";
+
+interface TranscriptionMenuProps {
+  readonly choices: ReadonlyArray<TranscriptionChoice>;
+  readonly current: SpeechEndpointRef | undefined;
+  readonly eligible: ReadonlyArray<ProviderRegistrySnapshot["instances"][number]>;
+  readonly instances: ReadonlyArray<ProviderRegistrySnapshot["instances"][number]>;
+  readonly onSave: (ref: SpeechEndpointRef) => void;
+  readonly onClear: () => void;
+}
+
+/**
+ * Transcription is one choice: Off, or a model an endpoint already serves.
+ * Picking one saves it, so turning dictation on takes no typing. A model no
+ * endpoint lists stays reachable under Other model…, and a saved one keeps
+ * its own entry so the menu never claims something else is in use.
+ */
+function TranscriptionMenu(props: TranscriptionMenuProps) {
+  const [otherOpen, setOtherOpen] = useState(false);
+  const current = props.current;
+  const currentIndex =
+    current === undefined
+      ? -1
+      : props.choices.findIndex(
+          (choice) =>
+            String(choice.instanceId) === String(current.providerInstanceId) &&
+            String(choice.modelId) === String(current.modelId),
+        );
+  const options: Array<{ readonly id: string; readonly label: string }> = [
+    { id: OFF, label: "Off" },
+    ...props.choices.map((choice, index) => ({
+      id: `choice-${index}`,
+      label: `${String(choice.modelId)} on ${choice.instanceName}`,
+    })),
+  ];
+  if (current !== undefined && currentIndex === -1) {
+    const name =
+      props.instances.find((instance) => String(instance.id) === String(current.providerInstanceId))
+        ?.displayName ?? "Removed provider";
+    options.push({ id: SAVED, label: `${String(current.modelId)} on ${name}` });
+  }
+  options.push({ id: OTHER, label: "Other model…" });
+  const selected = otherOpen
+    ? OTHER
+    : current === undefined
+      ? OFF
+      : currentIndex === -1
+        ? SAVED
+        : `choice-${currentIndex}`;
+  const resolution = resolveSpeechEndpoint(current, props.instances);
+
+  return (
+    <div className="voice-settings__choice">
+      <OctantSelectField
+        aria-label="Transcribe with"
+        className="settings-view__select window-no-drag"
+        onValueChange={(value) => {
+          if (value === OTHER) {
+            setOtherOpen(true);
+            return;
+          }
+          setOtherOpen(false);
+          if (value === OFF) {
+            if (current !== undefined) props.onClear();
+            return;
+          }
+          const choice = props.choices[Number(value.replace("choice-", ""))];
+          if (choice === undefined) return;
+          props.onSave({ providerInstanceId: choice.instanceId, modelId: choice.modelId });
+        }}
+        options={options}
+        value={selected}
+      />
+      {otherOpen ? (
+        <SpeechEndpointForm
+          current={current}
+          direction="transcription"
+          eligible={props.eligible}
+          instances={props.instances}
+          onClear={() => {
+            setOtherOpen(false);
+            props.onClear();
+          }}
+          onSave={(ref) => {
+            setOtherOpen(false);
+            props.onSave(ref);
+          }}
+        />
+      ) : (
+        <p className="provider-settings__field-guidance" role="status">
+          {describeResolution("transcription", resolution)}
+          {props.choices.length === 0 && current === undefined
+            ? " No endpoint lists a transcription model yet; choose Other model… to enter one."
+            : ""}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Languages offered by name. Transcription models accept many more; a tag set
+ * some other way (an imported settings file) keeps its own entry.
+ */
+const DICTATION_LANGUAGES: ReadonlyArray<{ readonly tag: string; readonly name: string }> = [
+  { tag: "ar", name: "Arabic" },
+  { tag: "zh", name: "Chinese" },
+  { tag: "da", name: "Danish" },
+  { tag: "nl", name: "Dutch" },
+  { tag: "en", name: "English" },
+  { tag: "fi", name: "Finnish" },
+  { tag: "fr", name: "French" },
+  { tag: "de", name: "German" },
+  { tag: "hi", name: "Hindi" },
+  { tag: "it", name: "Italian" },
+  { tag: "ja", name: "Japanese" },
+  { tag: "ko", name: "Korean" },
+  { tag: "no", name: "Norwegian" },
+  { tag: "pl", name: "Polish" },
+  { tag: "pt", name: "Portuguese" },
+  { tag: "ru", name: "Russian" },
+  { tag: "es", name: "Spanish" },
+  { tag: "sv", name: "Swedish" },
+  { tag: "tr", name: "Turkish" },
+  { tag: "uk", name: "Ukrainian" },
+];
+const AUTOMATIC = "automatic";
+
+function LanguageMenu(props: {
+  readonly current: SpeechTranscriptionLanguage | undefined;
+  readonly onChange: (language: SpeechTranscriptionLanguage | undefined) => void;
+}) {
+  const known = DICTATION_LANGUAGES.some((language) => language.tag === props.current);
+  const options = [
+    { id: AUTOMATIC, label: "Automatic" },
+    ...DICTATION_LANGUAGES.map((language) => ({ id: language.tag, label: language.name })),
+    ...(props.current !== undefined && !known ? [{ id: props.current, label: props.current }] : []),
+  ];
+  return (
+    <OctantSelectField
+      aria-label="Dictation language"
+      className="settings-view__select window-no-drag"
+      onValueChange={(value) => props.onChange(value === AUTOMATIC ? undefined : value)}
+      options={options}
+      value={props.current ?? AUTOMATIC}
+    />
+  );
+}
+
+function DictionaryEditor(props: {
+  readonly dictionary: ReadonlyArray<VoiceDictionaryTerm>;
+  readonly onChange: (dictionary: ReadonlyArray<VoiceDictionaryTerm>) => void;
+}) {
+  const [problem, setProblem] = useState<string | undefined>(undefined);
+  return (
+    <div className="voice-settings__choice">
+      <form
+        aria-label="Add to your dictionary"
+        className="voice-settings__test-controls"
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          const field = event.currentTarget.elements.namedItem("terms");
+          if (!(field instanceof HTMLInputElement)) return;
+          const result = addVoiceDictionaryTerms(props.dictionary, field.value);
+          if (result.status === "refused") {
+            setProblem(result.reason);
+            return;
+          }
+          setProblem(undefined);
+          field.value = "";
+          props.onChange(result.dictionary);
+        }}
+      >
+        <OctantInput
+          aria-label="Words to add"
+          className="settings-view__text-input window-no-drag"
+          name="terms"
+          placeholder="Add words, separated by commas"
+          spellCheck={false}
+        />
+        <OctantButton size="sm" type="submit" variant="secondary">
+          Add
+        </OctantButton>
+      </form>
+      {problem === undefined ? null : (
+        /* ui-boundary-exception: inline-field-error */
+        <p className="provider-settings__field-guidance" role="alert">
+          {problem}
+        </p>
+      )}
+      {props.dictionary.length === 0 ? null : (
+        <ul aria-label="Your dictionary" className="voice-settings__terms">
+          {props.dictionary.map((term) => (
+            <li key={term}>
+              <span>{term}</span>
+              <OctantButton
+                aria-label={`Remove ${term}`}
+                onClick={() => props.onChange(props.dictionary.filter((other) => other !== term))}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <X aria-hidden="true" size={12} />
+              </OctantButton>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function describeResolution(
+  direction: "transcription" | "synthesis",
+  resolution: SpeechEndpointResolution,
+): string {
+  const label = direction === "transcription" ? "Transcription" : "Speech";
+  if (resolution.status === "ready") {
+    return `${label} runs on ${resolution.instance.displayName} with ${String(resolution.modelId)}${
+      resolution.voice === undefined ? "" : ` as ${resolution.voice}`
+    }.`;
+  }
+  if (resolution.status === "unconfigured") {
+    return direction === "transcription"
+      ? "Transcription is off, so microphone controls stay hidden."
+      : "No speech provider is configured, so read-aloud uses this computer's voices.";
+  }
+  return `${label} is unavailable: ${resolution.reason}`;
 }
 
 type SpeechEndpointFormProps =
@@ -252,15 +549,7 @@ function SpeechEndpointForm(props: SpeechEndpointFormProps) {
         </p>
       )}
       <p className="provider-settings__field-guidance" role="status">
-        {resolution.status === "ready"
-          ? `${label} runs on ${resolution.instance.displayName} with ${String(resolution.modelId)}${
-              resolution.voice === undefined ? "" : ` as ${resolution.voice}`
-            }.`
-          : resolution.status === "unconfigured"
-            ? props.direction === "transcription"
-              ? "Transcription is not configured, so microphone controls stay hidden."
-              : "No speech provider is configured, so read-aloud uses this computer's voices."
-            : `${label} is unavailable: ${resolution.reason}`}
+        {describeResolution(props.direction, resolution)}
       </p>
       <div className="settings-view__actions">
         <OctantButton disabled={!canSave} size="sm" type="submit" variant="secondary">

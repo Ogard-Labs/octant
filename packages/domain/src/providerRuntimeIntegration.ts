@@ -9,7 +9,7 @@ import type {
 } from "@octant/contracts/providers";
 import { isAcpAgentKind } from "@octant/contracts/acp-agent-profiles";
 import {
-  isImageProfileDriverKind,
+  isMediaProfileDriverKind,
   isNativeHarnessDriverKind,
   providerKeepsConversation,
 } from "./providerPolicy";
@@ -56,6 +56,7 @@ export function providerToolTransport(
     case "gemini-native-image":
     case "bfl-image":
     case "ideogram-image":
+    case "gemini-video":
       return undefined;
   }
 }
@@ -105,7 +106,7 @@ export function describeProviderRuntimeIntegration(
   driverKind: ProviderDriverKind,
   observed: Pick<ProviderObservedState, "readiness" | "capabilities">,
 ): ProviderRuntimeIntegration | undefined {
-  if (isImageProfileDriverKind(driverKind)) return undefined;
+  if (isMediaProfileDriverKind(driverKind)) return undefined;
   const { capabilities } = observed;
   const transport = providerToolTransport(driverKind);
   const tools: ProviderRuntimeIntegration["tools"] =

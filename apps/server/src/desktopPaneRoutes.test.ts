@@ -64,6 +64,7 @@ function post(
   if (options.personPaired === true) {
     bindPrincipalRouteContext(request, {
       principal: personPairedPrincipal,
+      abortSignal: request.signal,
       scopeId: personPairedPrincipal.deviceId as never,
     });
   }
@@ -81,6 +82,7 @@ const leaseSettingsOf = (
 function routes(
   recipeKey?: Parameters<typeof createDesktopPaneRouteHandler>[0]["recipeKey"],
   previews?: Parameters<typeof createDesktopPaneRouteHandler>[0]["previews"],
+  hostDisplay?: Parameters<typeof createDesktopPaneRouteHandler>[0]["hostDisplay"],
 ) {
   const store = new WindowAuthorityStore();
   store.register({ windowId: windowId as never, capability, now: 1 });
@@ -176,6 +178,7 @@ function routes(
   };
   const handler = createDesktopPaneRouteHandler({
     windowAuthorityStore: store,
+    ...(hostDisplay === undefined ? {} : { hostDisplay, mayUseHostDisplay: () => true }),
     ...(previews === undefined ? {} : { previews }),
     service,
     localActorId,
@@ -186,6 +189,22 @@ function routes(
 }
 
 describe("Desktop pane routes", () => {
+  it("checks the paired person and current Code thread before opening the host screen", async () => {
+    const hostDisplay = vi.fn(
+      async () => ({ status: "viewing", viewId: decodeDesktopViewId(viewId) }) as const,
+    );
+    const { handler, service } = routes(undefined, undefined, hostDisplay);
+    const open = { kind: "host-display", action: "open", threadId };
+    const restricted = await handler(post("/api/code/desktops", open, { remote: true }));
+    expect(await restricted?.json()).toMatchObject({ status: "refused" });
+    expect(hostDisplay).not.toHaveBeenCalled();
+    const allowed = await handler(post("/api/code/desktops", open, { personPaired: true }));
+    expect(await allowed?.json()).toMatchObject({ status: "viewing" });
+    service.overview.mockResolvedValue({ status: "refused", reason: "not-permitted" });
+    const revoked = await handler(post("/api/code/desktops", open, { personPaired: true }));
+    expect(await revoked?.json()).toMatchObject({ status: "refused" });
+    expect(hostDisplay).toHaveBeenCalledTimes(1);
+  });
   it("answers a local window as the person at this machine and a paired device as that device's person", async () => {
     const { handler, service } = routes();
     const local = await handler(post("/api/code/desktops", { kind: "overview", threadId }));

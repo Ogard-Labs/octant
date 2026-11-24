@@ -983,10 +983,10 @@ function ledgerWhere(input: {
     }
   }
   if (input.includeImageJobs === true && input.imageJobThread !== undefined) {
-    conditions.push(`(subject_type = 'image-job' AND subject_id IN (
+    conditions.push(`(subject_type IN ('image-job', 'video-job') AND subject_id IN (
       SELECT aggregate_id FROM event_journal
-      WHERE aggregate_type = 'image-job'
-        AND event_name = 'image.job-queued@1'
+      WHERE ((aggregate_type = 'image-job' AND event_name = 'image.job-queued@1')
+        OR (aggregate_type = 'video-job' AND event_name = 'video.job-queued@1'))
         AND json_extract(payload_json, '$.job.threadKind') = ?
         AND json_extract(payload_json, '$.job.scopeId') = ?
     ))`);

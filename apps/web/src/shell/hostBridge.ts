@@ -63,6 +63,7 @@ import type {
   ProviderApiKeySummary,
   ProviderCredentialStatus,
   RemoteCredentialOperationReceipt,
+  RemoteDeviceAccessLevel,
   RemoteDeviceInventoryEntry,
   RemoteMintedPairingTicket,
   RemotePendingPairingRequest,
@@ -115,6 +116,7 @@ export type {
   ProviderApiKeySummary,
   ProviderCredentialStatus,
   RemoteCredentialOperationReceipt,
+  RemoteDeviceAccessLevel,
   RemoteDeviceInventoryEntry,
   RemoteMintedPairingTicket,
   RemotePendingPairingRequest,
@@ -144,7 +146,17 @@ export interface RemoteAccessAdministrationBridge {
   readonly listRemotePairingRequests: () => Promise<ReadonlyArray<RemotePendingPairingRequest>>;
   readonly approveRemotePairingRequest: (
     ticketId: string,
+    accessLevel?: RemoteDeviceAccessLevel,
   ) => Promise<{ readonly decision: "approved"; readonly device: RemoteDeviceInventoryEntry }>;
+  /** A paired device's level and the pause; absent on a host build without them. */
+  readonly setRemoteDeviceAccessLevel?: (
+    deviceId: string,
+    accessLevel: RemoteDeviceAccessLevel,
+  ) => Promise<void>;
+  readonly getRemoteAccessPaused?: () => Promise<boolean>;
+  readonly setRemoteAccessPaused?: (paused: boolean) => Promise<boolean>;
+  /** The host's own journaled Undo of a change notice; absent on a host build without it. */
+  readonly undoAccessChangeNotice?: (noticeId: string) => Promise<void>;
   readonly denyRemotePairingRequest: (
     ticketId: string,
     reasonCode: string,
@@ -263,6 +275,18 @@ export function remoteAccessAdministrationOf(
     renameRemoteDevice: bridge.renameRemoteDevice,
     revokeRemoteDevice: bridge.revokeRemoteDevice,
     revokeAllRemoteDevices: bridge.revokeAllRemoteDevices,
+    ...(bridge.setRemoteDeviceAccessLevel === undefined
+      ? {}
+      : { setRemoteDeviceAccessLevel: bridge.setRemoteDeviceAccessLevel }),
+    ...(bridge.getRemoteAccessPaused === undefined || bridge.setRemoteAccessPaused === undefined
+      ? {}
+      : {
+          getRemoteAccessPaused: bridge.getRemoteAccessPaused,
+          setRemoteAccessPaused: bridge.setRemoteAccessPaused,
+        }),
+    ...(bridge.undoAccessChangeNotice === undefined
+      ? {}
+      : { undoAccessChangeNotice: bridge.undoAccessChangeNotice }),
   };
 }
 

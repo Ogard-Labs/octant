@@ -35,6 +35,7 @@ import { mobileSpacing, mobileTypography } from "../theme/tokens";
 export interface NativeHarnessSessionPanelProps {
   readonly transport: MobileRemoteTransport;
   readonly threadId: string;
+  readonly watchingOnly?: boolean;
   readonly refreshIntervalMs?: number;
   /** Confirms Allow on this phone; the device's own biometrics when absent. */
   readonly authenticator?: BiometricAuthenticator;
@@ -93,7 +94,7 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
   // Every host action goes through here: one at a time, a failure becomes a
   // note instead of a silent no-op, and the view is re-read either way.
   const run = async (action: () => Promise<string | undefined>) => {
-    if (busyRef.current || resource.error !== undefined) return;
+    if (props.watchingOnly === true || busyRef.current || resource.error !== undefined) return;
     busyRef.current = true;
     setBusy(true);
     try {
@@ -173,10 +174,11 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
         questionId: String(pendingQuestion.id),
         answer: text.trim(),
       });
-      setAnswer("");
-      return result?.kind === "question-answered"
-        ? undefined
-        : (result?.message ?? "The answer was refused.");
+      if (result?.kind === "question-answered") {
+        setAnswer((current) => (current === answer ? "" : current));
+        return undefined;
+      }
+      return result?.message ?? "The answer was refused.";
     });
   };
   // The same words the desktop composer and the terminal footer use, read-only.
@@ -199,29 +201,33 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
             <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
               {nativeHarnessStatusLabel(sessionView.session.status)}
             </Text>
-            <Pressable
-              accessibilityRole="button"
-              disabled={busy}
-              hitSlop={12}
-              onPress={() => {
-                const paused = nativeHarnessSessionHeld(sessionView.session.status);
-                void run(async () => {
-                  const result = await commandMobileNativeHarnessSession({
-                    transport: props.transport,
-                    threadId: props.threadId,
-                    kind: paused ? "resume-native-harness-session" : "pause-native-harness-session",
-                    sessionId: String(sessionView.session.id),
-                    expectedVersion: sessionView.session.version,
+            {props.watchingOnly === true ? null : (
+              <Pressable
+                accessibilityRole="button"
+                disabled={busy}
+                hitSlop={12}
+                onPress={() => {
+                  const paused = nativeHarnessSessionHeld(sessionView.session.status);
+                  void run(async () => {
+                    const result = await commandMobileNativeHarnessSession({
+                      transport: props.transport,
+                      threadId: props.threadId,
+                      kind: paused
+                        ? "resume-native-harness-session"
+                        : "pause-native-harness-session",
+                      sessionId: String(sessionView.session.id),
+                      expectedVersion: sessionView.session.version,
+                    });
+                    return result.ok ? undefined : (result.message ?? "The host refused that.");
                   });
-                  return result.ok ? undefined : (result.message ?? "The host refused that.");
-                });
-              }}
-              testID="mobile-native-harness-pause"
-            >
-              <Text style={[mobileTypography.caption, { color: colors.textPrimary }]}>
-                {nativeHarnessSessionHeld(sessionView.session.status) ? "Resume" : "Pause"}
-              </Text>
-            </Pressable>
+                }}
+                testID="mobile-native-harness-pause"
+              >
+                <Text style={[mobileTypography.caption, { color: colors.textPrimary }]}>
+                  {nativeHarnessSessionHeld(sessionView.session.status) ? "Resume" : "Pause"}
+                </Text>
+              </Pressable>
+            )}
           </View>
           <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
             {String(sessionView.session.lead.modelId)} · {sessionView.session.turnsRun} turns ·{" "}
@@ -292,17 +298,27 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
               <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
                 {listedHosts.length === 0
                   ? "This command can reach no host: this thread and its Project allow none."
-                  : "This command can reach only the hosts you select, and only while it runs."}
+                  : props.watchingOnly === true
+                    ? "Hosts offered for this command."
+                    : "This command can reach only the hosts you select, and only while it runs."}
               </Text>
               {listedHosts.length === 0 ? null : (
                 <View style={styles.chips} testID="mobile-native-harness-command-hosts">
                   {listedHosts.map((entry) => {
                     const key = hostKey(entry);
-                    return (
+                    const label = entry.port === 443 ? entry.host : key;
+                    return props.watchingOnly === true ? (
+                      <Text
+                        key={key}
+                        style={[mobileTypography.caption, { color: colors.textSecondary }]}
+                      >
+                        {label}
+                      </Text>
+                    ) : (
                       <GlassChip
                         active={ticked.has(key)}
                         key={key}
-                        label={entry.port === 443 ? entry.host : key}
+                        label={label}
                         onPress={() => toggleHost(key)}
                       />
                     );
@@ -314,16 +330,18 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
           {/* A child request is never remembered, and neither is a call after
               the thread took in outside content. Offering the session choice
               there would describe a decision the host ignores. */}
-          <ApprovalDecisionButtons
-            busy={busy || resource.error !== undefined}
-            onAllow={() => decide("approve")}
-            onAllowSession={
-              pendingApproval.source === undefined && pendingApproval.singleUse !== true
-                ? () => decide("approve-always")
-                : undefined
-            }
-            onDeny={() => decide("deny")}
-          />
+          {props.watchingOnly === true ? null : (
+            <ApprovalDecisionButtons
+              busy={busy || resource.error !== undefined}
+              onAllow={() => decide("approve")}
+              onAllowSession={
+                pendingApproval.source === undefined && pendingApproval.singleUse !== true
+                  ? () => decide("approve-always")
+                  : undefined
+              }
+              onDeny={() => decide("deny")}
+            />
+          )}
         </View>
       )}
       {questions.length < 2 ? null : (
@@ -359,37 +377,48 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
           )}
           {pendingQuestion.options.length === 0 ? null : (
             <View style={styles.chips}>
-              {pendingQuestion.options.map((option) => (
-                <GlassChip
-                  active={false}
-                  key={option}
-                  label={option}
-                  onPress={() => sendAnswer(option)}
-                />
-              ))}
+              {pendingQuestion.options.map((option) =>
+                props.watchingOnly === true ? (
+                  <Text
+                    key={option}
+                    style={[mobileTypography.caption, { color: colors.textSecondary }]}
+                  >
+                    {option}
+                  </Text>
+                ) : (
+                  <GlassChip
+                    active={false}
+                    key={option}
+                    label={option}
+                    onPress={() => sendAnswer(option)}
+                  />
+                ),
+              )}
             </View>
           )}
-          <View style={styles.row}>
-            <TextInput
-              accessibilityLabel="Answer"
-              onChangeText={setAnswer}
-              onSubmitEditing={() => sendAnswer(answer)}
-              placeholder="Type an answer"
-              placeholderTextColor={colors.textSecondary}
-              style={[styles.input, { color: colors.textPrimary, borderColor: colors.border }]}
-              value={answer}
-            />
-            <Pressable
-              accessibilityRole="button"
-              disabled={busy}
-              hitSlop={8}
-              onPress={() => sendAnswer(answer)}
-              style={[styles.button, { backgroundColor: colors.send }]}
-              testID="mobile-native-harness-answer"
-            >
-              <Text style={[mobileTypography.section, { color: colors.sendLabel }]}>Send</Text>
-            </Pressable>
-          </View>
+          {props.watchingOnly === true ? null : (
+            <View style={styles.row}>
+              <TextInput
+                accessibilityLabel="Answer"
+                onChangeText={setAnswer}
+                onSubmitEditing={() => sendAnswer(answer)}
+                placeholder="Type an answer"
+                placeholderTextColor={colors.textSecondary}
+                style={[styles.input, { color: colors.textPrimary, borderColor: colors.border }]}
+                value={answer}
+              />
+              <Pressable
+                accessibilityRole="button"
+                disabled={busy}
+                hitSlop={8}
+                onPress={() => sendAnswer(answer)}
+                style={[styles.button, { backgroundColor: colors.send }]}
+                testID="mobile-native-harness-answer"
+              >
+                <Text style={[mobileTypography.section, { color: colors.sendLabel }]}>Send</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       )}
       {sessionView === undefined ? null : (
@@ -420,7 +449,8 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
                   : lastIntervention.reason}
             </Text>
           )}
-          {sessionView.followUps === undefined ||
+          {props.watchingOnly === true ||
+          sessionView.followUps === undefined ||
           sessionView.followUps.suggestions.length === 0 ? null : (
             <View style={styles.chips}>
               {sessionView.followUps.suggestions.map((suggestion) => (
@@ -446,7 +476,7 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
               ))}
             </View>
           )}
-          {preview === undefined ? null : (
+          {props.watchingOnly === true || preview === undefined ? null : (
             <View style={styles.preview} testID="mobile-native-harness-preview">
               <Text style={[mobileTypography.section, { color: colors.textPrimary }]}>
                 {preview.suggestion.title}

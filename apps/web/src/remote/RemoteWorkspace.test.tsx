@@ -317,6 +317,26 @@ describe("RemoteWorkspace", () => {
     expect(read).toHaveBeenCalledTimes(2);
   });
 
+  it("opens the selected Code thread’s desktop only when the paired person asks", async () => {
+    const { clients, coordinator } = coordinatorFixture();
+    const request = vi.fn(async () => ({ status: "refused", reason: "not-permitted" }) as const);
+    render(
+      <RemoteWorkspace
+        actsAsHostPerson
+        clients={{ ...clients, desktop: { request, frame: vi.fn() } }}
+        connected
+        mode="code"
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Backlog coordinator" }));
+    const desktop = await screen.findByRole("button", { name: "Desktop" });
+    expect(request).not.toHaveBeenCalled();
+    fireEvent.click(desktop);
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith({ kind: "overview", threadId: coordinator.id }),
+    );
+  });
+
   it("approves a worker while its coordinator is selected and leaves the coordinator idle and sendable", async () => {
     const { clients, code, executeOperation, getWorkerId } = coordinatorFixture();
     render(<RemoteWorkspace actsAsHostPerson clients={clients} connected mode="code" />);
@@ -335,6 +355,23 @@ describe("RemoteWorkspace", () => {
     );
     // The coordinator stays idle: nothing offers to stop it, and its composer sends.
     await waitFor(() => expect(screen.queryByRole("button", { name: /^Stop/ })).toBeNull());
+  });
+
+  it("shows a watching device the Code conversation and pending workers without decision controls", async () => {
+    const { clients } = coordinatorFixture();
+    render(<RemoteWorkspace clients={clients} connected mode="code" readOnly />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Backlog coordinator" }));
+    await screen.findByText("No messages yet");
+    const workspace = await screen.findByRole("region", { name: "Code thread" });
+    expect(within(workspace).queryByRole("textbox")).not.toBeInTheDocument();
+    const proposal = await screen.findByRole("article", {
+      name: "Proposed worker: Fix the flaky test",
+    });
+    expect(
+      within(proposal).queryByRole("button", { name: "Approve and start" }),
+    ).not.toBeInTheDocument();
+    expect(within(proposal).queryByRole("button", { name: "Decline" })).not.toBeInTheDocument();
   });
 
   it("provides ThreadNativeSetupProvider to a paired browser so @ loads and labels Project Codex skills", async () => {

@@ -144,6 +144,7 @@ export function LargeTitle(props: LargeTitleProps) {
 export function ToolbarButton(props: {
   readonly icon: MobileIconName;
   readonly accessibilityLabel: string;
+  readonly disabled?: boolean;
   readonly onPress: () => void;
   readonly testID?: string;
 }) {
@@ -152,9 +153,14 @@ export function ToolbarButton(props: {
     <Pressable
       accessibilityLabel={props.accessibilityLabel}
       accessibilityRole="button"
+      accessibilityState={{ disabled: props.disabled === true }}
+      disabled={props.disabled === true}
       hitSlop={10}
       onPress={props.onPress}
-      style={({ pressed }) => [styles.toolbarButton, pressed ? { opacity: 0.45 } : null]}
+      style={({ pressed }) => [
+        styles.toolbarButton,
+        pressed || props.disabled === true ? { opacity: 0.45 } : null,
+      ]}
       testID={props.testID}
     >
       <Ionicons color={colors.accent} name={props.icon} size={23} />

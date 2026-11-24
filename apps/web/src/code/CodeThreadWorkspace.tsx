@@ -165,9 +165,15 @@ import { CodeTurnReviewPreviewCard } from "./CodeTurnReviewPreviewCard";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import { runningStepTitle, settledTurnFoldsActivity } from "../transcript/turnActivity";
-import { liveTaskProgress } from "./transcriptActivity";
+import { latestTurnTasks, splitTurnTasks } from "./transcriptActivity";
+import { usePublishThreadTaskList } from "../transcript/threadTaskLists";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
-import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
+import { providerModelLabel } from "../providers/providerModelLabel";
+import {
+  TranscriptHandoff,
+  resolveTranscriptHandoff,
+  type TranscriptHandoffEntry,
+} from "../transcript/TranscriptHandoff";
 import {
   pendingProviderSwitchNotice,
   conversationHandoffDisclosure,
@@ -177,6 +183,7 @@ import {
 import { TurnActions } from "../transcript/TurnActions";
 import {
   TurnHeader,
+  TurnLiveLine,
   TurnTime,
   turnWorkedFor,
   type TurnHeaderOutcome,
@@ -256,6 +263,7 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
 };
 
 export interface CodeThreadWorkspaceProps {
+  readonly readOnly?: boolean;
   readonly onOpenReview?: (request?: CodeReviewFileRequest) => void;
   readonly controller: CodeController;
   /**
@@ -393,6 +401,7 @@ export interface CodeThreadWorkspaceProps {
  * Overview/Git/Terminal remain secondary surfaces opened from the thread toolbar.
  */
 export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
+  const readOnly = props.readOnly === true;
   const worktreeLaunch = useContext(WorktreeLaunchContext)?.launches.get(props.threadId);
   const continuation = useContinuationInputPolicy("code", String(props.threadId), props.serverUrl);
   const view =
@@ -917,6 +926,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       return { status: "accepted" };
     },
   );
+  const conversation = props.controller.conversation;
+  const turnActivity = props.controller.turnActivity;
+  const latestTasks = useMemo(
+    () =>
+      latestTurnTasks(
+        conversation.flatMap((message) =>
+          message.role !== "assistant" || message.operationId === undefined
+            ? []
+            : [
+                {
+                  activity: turnActivity.get(String(message.operationId)),
+                  running: message.status === "incomplete",
+                },
+              ],
+        ),
+      ),
+    [conversation, turnActivity],
+  );
+  usePublishThreadTaskList(String(props.threadId), latestTasks);
   if (props.controller.status === "disconnected") {
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
@@ -1065,6 +1093,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   };
   const messages = props.controller.conversation;
   const subagentWindows = codeSubagentWindows(messages);
+  const handoffPlacements = codeHandoffPlacements(messages, providerGroups);
   // Only a coordinator's worker carries a host move's reason.
   const continuedOnFallback =
     view?.thread.coordinatorThreadId === undefined || view.thread.coordinatorChoice === undefined
@@ -1202,14 +1231,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     rowKeys: messages.map((message) => message.id),
     canvasesByRow: canvasesByTurnRow(canvasPlacement),
   });
-  const liveTasks = liveTaskProgress(
-    messages.flatMap((message) => {
-      if (message.role !== "assistant" || message.operationId === undefined) return [];
-      const activity = props.controller.turnActivity.get(String(message.operationId));
-      if (activity === undefined) return [];
-      return [{ activity, running: message.status === "incomplete" }];
-    }),
-  );
   // The first prompt can be in flight before this surface reads its journal
   // entry. Keep it visible without adding queued messages to the transcript.
   const awaitedPrompt = messages.length === 0 ? firstPromptInFlight : undefined;
@@ -1835,13 +1856,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               <UsageLimitNotice
                 limit={props.controller.turnUsageLimit}
                 provider={providerModelLabel(providerGroups, thread)}
-                resumable={providerTurnOperationId !== undefined}
+                resumable={!readOnly && providerTurnOperationId !== undefined}
                 {...(thread.usageResume === undefined ? {} : { usageResume: thread.usageResume })}
-                {...(scheduleUsageResume === undefined
+                {...(readOnly || scheduleUsageResume === undefined
                   ? {}
                   : { onScheduleResume: scheduleUsageResume })}
-                onCancelResume={cancelUsageResume}
-                {...(snoozeAtUsageReset === undefined
+                {...(readOnly ? {} : { onCancelResume: cancelUsageResume })}
+                {...(readOnly || snoozeAtUsageReset === undefined
                   ? {}
                   : { onSnoozeAtReset: snoozeAtUsageReset })}
               />
@@ -1868,7 +1889,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           </OctantAlert>
         )}
 
-        {props.controller.turnErrorCategory === "tools-changed" ? (
+        {!readOnly && props.controller.turnErrorCategory === "tools-changed" ? (
           <ToolCatalogContinuation
             disabled={!canSend || queueFollowUp}
             onContinue={() => void submitFollowUp(true)}
@@ -1890,11 +1911,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               // either here could only be refused.
               resumable={false}
               {...(thread.usageResume === undefined ? {} : { usageResume: thread.usageResume })}
-              {...(scheduleUsageResume === undefined
+              {...(readOnly || scheduleUsageResume === undefined
                 ? {}
                 : { onScheduleResume: scheduleUsageResume })}
-              onCancelResume={cancelUsageResume}
-              {...(snoozeAtUsageReset === undefined ? {} : { onSnoozeAtReset: snoozeAtUsageReset })}
+              {...(readOnly ? {} : { onCancelResume: cancelUsageResume })}
+              {...(readOnly || snoozeAtUsageReset === undefined
+                ? {}
+                : { onSnoozeAtReset: snoozeAtUsageReset })}
             />
           </div>
         ) : null}
@@ -1922,6 +1945,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   state="loading"
                   title="Loading conversation"
                 />
+              ) : readOnly ? (
+                <OctantEmpty state="neutral" title="No messages yet" />
               ) : showEmptyConversation ? (
                 <>
                   {/* A thread on an empty checkout has nothing to talk about yet.
@@ -2057,14 +2082,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       ? message
                       : nextOwnUserMessage(messages, index);
                 const forkPoint = message.role === "assistant" ? message : previousAssistant;
-                const handoff =
-                  message.role === "assistant" && previousAssistant !== undefined
-                    ? providerIdentityChange(previousAssistant, message)
-                    : undefined;
-                const activity =
+                const handoffEntry = handoffPlacements.get(message.id);
+                const recorded =
                   message.role === "assistant" && message.operationId !== undefined
                     ? props.controller.turnActivity.get(String(message.operationId))
                     : undefined;
+                const split = recorded === undefined ? undefined : splitTurnTasks(recorded);
+                const activity = split?.activity;
+                const turnTasks = split?.tasks ?? [];
                 const markedCheckpoint =
                   message.operationId === undefined
                     ? undefined
@@ -2117,23 +2142,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   settledTurnFoldsActivity(activity);
                 return (
                   <div className="code-thread-workspace__row">
-                    {handoff === "provider" ? (
-                      <OctantSeparatorWithLabel aria-label="Provider handoff">
-                        Provider handoff ·{" "}
-                        {providerModelLabel(providerGroups, {
-                          providerInstanceId: message.providerInstanceId,
-                          modelId: message.modelId,
-                        })}
-                      </OctantSeparatorWithLabel>
-                    ) : handoff === "model" ? (
-                      <OctantSeparatorWithLabel aria-label="Model switch">
-                        Switched to{" "}
-                        {modelDisplayName(providerGroups, {
-                          providerInstanceId: message.providerInstanceId,
-                          modelId: message.modelId,
-                        })}
-                      </OctantSeparatorWithLabel>
-                    ) : null}
+                    {handoffEntry === undefined ? null : (
+                      <TranscriptHandoff entry={handoffEntry} providerGroups={providerGroups} />
+                    )}
                     {message.role === "assistant" &&
                     message.operationId !== undefined &&
                     message.handoff !== undefined &&
@@ -2153,13 +2164,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     showsStrictNotice(message.strictKept, previousAssistant?.strictKept) ? (
                       <p className="code-thread-workspace__handoff" role="note">
                         {strictKeptSentence(message.strictKept)}
-                      </p>
-                    ) : null}
-                    {message.role === "assistant" && message.handoff !== undefined ? (
-                      <p className="code-thread-workspace__handoff" role="note">
-                        {conversationHandoffDisclosure(message.handoff, (selection) =>
-                          providerModelLabel(providerGroups, selection),
-                        )}
                       </p>
                     ) : null}
                     {message.role === "assistant"
@@ -2199,49 +2203,53 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       className={`code-thread-workspace__message ${delivered ? "turn-child-result" : message.role === "user" ? "turn-user" : "turn-agent"}`}
                     >
                       <TurnActionMenu
-                        actions={codeTurnActions({
-                          // A person's message forks through the reply before it.
-                          canFork:
-                            !serverCheckout &&
-                            props.onOpenCodeThread !== undefined &&
-                            forkPoint?.operationId !== undefined &&
-                            forkPoint.status === "completed",
-                          canRewind:
-                            rewindFrom !== undefined &&
-                            !busy &&
-                            props.operationClient !== undefined &&
-                            props.nextUuid !== undefined,
-                          // A fork's own finished replies; inherited ones are the source's.
-                          canMergeBack:
-                            !serverCheckout &&
-                            view?.thread.forkedFrom !== undefined &&
-                            message.sourceThreadId === undefined &&
-                            message.role === "assistant" &&
-                            message.operationId !== undefined &&
-                            message.status === "completed",
-                          merging,
-                          canCopyMarkdown:
-                            message.role === "assistant" &&
-                            message.status === "completed" &&
-                            message.text.trim().length > 0,
-                          canCheckpoint:
-                            !serverCheckout &&
-                            message.sourceThreadId === undefined &&
-                            message.role === "assistant" &&
-                            message.operationId !== undefined &&
-                            message.status === "completed" &&
-                            checkpoints.available,
-                          canRestoreFiles:
-                            !serverCheckout &&
-                            message.sourceThreadId === undefined &&
-                            message.role === "user" &&
-                            message.checkpoint !== undefined &&
-                            mayRestore,
-                          checkpointBusy: checkpoints.busy,
-                          forking,
-                          marked: markedCheckpoint !== undefined,
-                          restoring,
-                        })}
+                        actions={
+                          readOnly
+                            ? []
+                            : codeTurnActions({
+                                // A person's message forks through the reply before it.
+                                canFork:
+                                  !serverCheckout &&
+                                  props.onOpenCodeThread !== undefined &&
+                                  forkPoint?.operationId !== undefined &&
+                                  forkPoint.status === "completed",
+                                canRewind:
+                                  rewindFrom !== undefined &&
+                                  !busy &&
+                                  props.operationClient !== undefined &&
+                                  props.nextUuid !== undefined,
+                                // A fork's own finished replies; inherited ones are the source's.
+                                canMergeBack:
+                                  !serverCheckout &&
+                                  view?.thread.forkedFrom !== undefined &&
+                                  message.sourceThreadId === undefined &&
+                                  message.role === "assistant" &&
+                                  message.operationId !== undefined &&
+                                  message.status === "completed",
+                                merging,
+                                canCopyMarkdown:
+                                  message.role === "assistant" &&
+                                  message.status === "completed" &&
+                                  message.text.trim().length > 0,
+                                canCheckpoint:
+                                  !serverCheckout &&
+                                  message.sourceThreadId === undefined &&
+                                  message.role === "assistant" &&
+                                  message.operationId !== undefined &&
+                                  message.status === "completed" &&
+                                  checkpoints.available,
+                                canRestoreFiles:
+                                  !serverCheckout &&
+                                  message.sourceThreadId === undefined &&
+                                  message.role === "user" &&
+                                  message.checkpoint !== undefined &&
+                                  mayRestore,
+                                checkpointBusy: checkpoints.busy,
+                                forking,
+                                marked: markedCheckpoint !== undefined,
+                                restoring,
+                              })
+                        }
                         onAction={(value) => {
                           if (value === "fork" && forkPoint !== undefined) void forkFrom(forkPoint);
                           else if (value === "rewind" && rewindFrom !== undefined)
@@ -2327,10 +2335,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                 message.status === "incomplete" &&
                                 props.controller.turnStatus === "running"
                               }
-                              onStop={() => {
-                                forceStop.requestStop();
-                                void props.controller.cancelTurn();
-                              }}
+                              {...(readOnly
+                                ? {}
+                                : {
+                                    onStop: () => {
+                                      forceStop.requestStop();
+                                      void props.controller.cancelTurn();
+                                    },
+                                  })}
                             />
                             {activity?.retrying === undefined ? null : (
                               <HarnessRetryStatus
@@ -2398,6 +2410,23 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             ) : (
                               <p>{busy ? "Thinking…" : ""}</p>
                             )}
+                            {turnTasks.length === 0 ? null : (
+                              <ThreadTasksPanel
+                                tasks={{
+                                  running: message.status === "incomplete",
+                                  tasks: turnTasks,
+                                }}
+                              />
+                            )}
+                            {/* Only an incomplete turn is live; a waiting one keeps its
+                            status in the header. */}
+                            <TurnLiveLine
+                              outcome={turnHeaderOutcome(message.status)}
+                              {...(message.startedAt === undefined
+                                ? {}
+                                : { startedAt: message.startedAt })}
+                              step={runningStepTitle(activity)}
+                            />
                           </>
                         )}
                         {/* After the reply, like Work's: the files are what the turn
@@ -2471,7 +2500,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                 })}
                           />
                         ) : null}
-                        {(markedCheckpoint !== undefined ||
+                        {!readOnly &&
+                        (markedCheckpoint !== undefined ||
                           checkpointDraft?.messageId === message.id) &&
                         message.role === "assistant" &&
                         message.operationId !== undefined &&
@@ -2525,6 +2555,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         {message.role === "user" &&
                         message.checkpoint !== undefined &&
                         mayRestore &&
+                        !readOnly &&
                         confirmingRestore === message.id ? (
                           <RestoreFilesConfirm
                             onKeep={() => setConfirmingRestore(undefined)}
@@ -2541,6 +2572,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             forkDisabled={forking}
                             latest={message === lastReply}
                             onFork={
+                              !readOnly &&
                               message.operationId !== undefined &&
                               message.status === "completed" &&
                               props.onOpenCodeThread !== undefined
@@ -2616,7 +2648,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           ) : null}
         </OctantDialogPresence>
         <OctantDialogPresence>
-          {rewind !== undefined ? (
+          {!readOnly && rewind !== undefined ? (
             <RewindDialog
               busy={rewind?.busy === true}
               files={rewind?.files ?? { kind: "loading" }}
@@ -2644,8 +2676,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           </div>
         )}
 
-        {liveTasks === undefined ? null : <ThreadTasksPanel tasks={liveTasks} />}
-
         <InlineThreadPlan {...(changedFiles === undefined ? {} : { changedFiles })} />
         {!displayReady ||
         imageClient === undefined ||
@@ -2669,7 +2699,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             threadId={decodeBrowserThreadId(String(thread.id))}
           />
         )}
-        {props.controller.providerRequests.length === 0 ? null : (
+        {readOnly || props.controller.providerRequests.length === 0 ? null : (
           <div
             aria-label="Pending provider requests"
             className="code-thread-workspace__provider-requests thread-column"
@@ -2731,7 +2761,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         )}
         <ExtensionToolApprovalPrompt
           className="thread-column"
-          client={props.extensionClient}
+          client={readOnly ? undefined : props.extensionClient}
           threadId={String(props.threadId)}
           turnActive={busy}
         />
@@ -2758,6 +2788,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           turnActive={busy}
         />
         <ThreadComposer
+          readOnly={readOnly}
           queue={
             <>
               <ThreadWakeups
@@ -3552,22 +3583,58 @@ function waitingTurnLabel(requests: CodeController["providerRequests"]): string 
   return "Waiting";
 }
 
-function providerIdentityChange(
-  previous: CodeController["conversation"][number],
-  current: CodeController["conversation"][number],
-): "provider" | "model" | undefined {
-  if (
-    previous.providerInstanceId === undefined ||
-    previous.modelId === undefined ||
-    current.providerInstanceId === undefined ||
-    current.modelId === undefined
-  ) {
-    return undefined;
+function codeHandoffPlacements(
+  messages: ReadonlyArray<CodeConversationMessage>,
+  providerGroups: ReadonlyArray<PickerGroup>,
+): ReadonlyMap<string, TranscriptHandoffEntry> {
+  const placements = new Map<string, TranscriptHandoffEntry>();
+  let previousAssistant: CodeConversationMessage | undefined;
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message === undefined || message.role !== "assistant") continue;
+    const previous =
+      previousAssistant !== undefined &&
+      previousAssistant.providerInstanceId !== undefined &&
+      previousAssistant.modelId !== undefined
+        ? {
+            providerInstanceId: previousAssistant.providerInstanceId,
+            modelId: previousAssistant.modelId,
+          }
+        : undefined;
+    const current =
+      message.providerInstanceId !== undefined && message.modelId !== undefined
+        ? {
+            providerInstanceId: message.providerInstanceId,
+            modelId: message.modelId,
+          }
+        : undefined;
+    const disclosure =
+      message.handoff === undefined
+        ? undefined
+        : conversationHandoffDisclosure(message.handoff, (selection) =>
+            providerModelLabel(providerGroups, selection),
+          );
+    const entry = resolveTranscriptHandoff({
+      previous,
+      current,
+      handoff: message.handoff,
+      disclosure,
+    });
+    if (entry !== undefined) {
+      // Place the boundary ahead of this turn's prompt so it reads between the
+      // previous reply and the message sent to the new provider or model.
+      const prior = messages[index - 1];
+      const belongsToTurn =
+        prior?.role === "user" &&
+        ((prior.operationId !== undefined &&
+          message.operationId !== undefined &&
+          String(prior.operationId) === String(message.operationId)) ||
+          (prior.operationId === undefined && message.operationId === undefined));
+      placements.set(belongsToTurn && prior !== undefined ? prior.id : message.id, entry);
+    }
+    if (current !== undefined) previousAssistant = message;
   }
-  // Same provider with a new model is a model switch; calling it a provider
-  // handoff read as if the provider had changed.
-  if (previous.providerInstanceId !== current.providerInstanceId) return "provider";
-  return previous.modelId !== current.modelId ? "model" : undefined;
+  return placements;
 }
 
 /**

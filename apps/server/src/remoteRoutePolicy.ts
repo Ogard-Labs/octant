@@ -28,6 +28,7 @@ import { PENDING_REQUESTS_PATH } from "./pendingRequestRoutes";
 import { NEW_DEVICE_ALERTS_PATH } from "./hub/newDeviceAlertRoutes";
 import { PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS } from "./providers/providerCredentialRoutes";
 import { PAIRED_DEVICE_ADMINISTRATION_ROUTES } from "./remote/localDeviceAdministrationRoutes";
+import { PAIRED_DEVICE_ACCESS_ACTIVITY_ROUTES } from "./remote/accessActivityRoutes";
 import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";
 
 const DEFAULT_BODY_BYTES = 1_048_576;
@@ -1260,6 +1261,14 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     methods: [method],
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
   })),
+  // Access activity and change notices; the route answers only a device
+  // paired at Full and no restricted device reaches it through the catalogue.
+  ...PAIRED_DEVICE_ACCESS_ACTIVITY_ROUTES.map(({ path, method }) => ({
+    kind: "exact" as const,
+    path,
+    methods: [method],
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  })),
   {
     kind: "exact" as const,
     path: "/api/person-memory",
@@ -1851,11 +1860,13 @@ export interface RemoteRouteFacts {
   readonly sourceKey: string;
   /** The peer's private-network address, for a new-device alert only. */
   readonly privateAddress?: string;
+  /** The remote-access state when the gateway first admitted an agent request. */
+  readonly agentAccessPauseSignal?: AbortSignal;
 }
 
 export const REMOTE_SECURITY_POLICY = {
   hsts: "max-age=31536000; includeSubDomains",
-  csp: "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'",
+  csp: "default-src 'self'; img-src 'self' data: blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'",
   nosniff: "nosniff",
   referrer: "no-referrer",
 } as const;

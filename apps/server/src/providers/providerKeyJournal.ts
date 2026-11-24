@@ -42,8 +42,18 @@ export interface UnsettledProviderKeyChange {
 }
 
 export interface ProviderKeyChangeRecorder {
-  /** Records the outcome. Best effort: a missing outcome is settled at the next host start. */
-  readonly complete: (outcome: Completed["outcome"]) => void;
+  /**
+   * Records the outcome. Best effort: a missing outcome is settled at the
+   * next host start. `keyIds` is the pool's key ids after a `stored` change,
+   * and `fingerprint` its non-secret identity — key ids, the active key, and
+   * each key's opaque secret-revision marker — so a change notice's Undo can
+   * hold the pool to them.
+   */
+  readonly complete: (
+    outcome: Completed["outcome"],
+    keyIds?: ReadonlyArray<string>,
+    fingerprint?: string,
+  ) => void;
   readonly fail: (reason: Failed["reason"]) => void;
 }
 
@@ -56,6 +66,9 @@ export interface ProviderKeyJournal {
     readonly windowId: WindowId;
     /** The paired device the key came from. Absent, the change is the local person's. */
     readonly actor?: EventActor;
+    /** On a `set` that stores a new secret: added (with the key's id) or replaced. */
+    readonly keyChange?: "added" | "replaced";
+    readonly keyId?: string;
   }) => ProviderKeyChangeRecorder;
   readonly unsettled: () => ReadonlyArray<UnsettledProviderKeyChange>;
   /** Records the outcome of a request found without one. */
@@ -129,15 +142,23 @@ export function providerKeyJournal(options: {
           action: input.action,
           instanceVersion: decodeAggregateVersion(input.instanceVersion),
           windowId: input.windowId,
+          ...(input.keyChange === undefined ? {} : { keyChange: input.keyChange }),
+          ...(input.keyId === undefined ? {} : { keyId: input.keyId }),
         },
         input.actor,
       );
       const common = { requestId, instanceId: input.instanceId, action: input.action };
       return {
-        complete: (outcome) =>
+        complete: (outcome, keyIds, fingerprint) =>
           bestEffort(
             input.instanceId,
-            { name: "provider-key.change-completed", ...common, outcome },
+            {
+              name: "provider-key.change-completed",
+              ...common,
+              outcome,
+              ...(keyIds === undefined ? {} : { keyIds: [...keyIds] }),
+              ...(fingerprint === undefined ? {} : { fingerprint }),
+            },
             input.actor,
           ),
         fail: (reason) =>

@@ -38,6 +38,7 @@ export interface RightUtilityDockProps {
   readonly debug?: ReactNode;
   readonly vitals?: ReactNode;
   readonly artifacts?: ReactNode;
+  readonly tasks?: ReactNode;
   readonly isNarrow: boolean;
   /** What the panes of a split keep between them, which the tool columns leave alone. */
   readonly primaryMinimum?: number | undefined;
@@ -184,6 +185,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.debug === undefined ? {} : { debug: props.debug })}
       {...(props.vitals === undefined ? {} : { vitals: props.vitals })}
       {...(props.artifacts === undefined ? {} : { artifacts: props.artifacts })}
+      {...(props.tasks === undefined ? {} : { tasks: props.tasks })}
       onCloseTab={props.onCloseTab}
       onOpenTab={props.onOpenTab}
       {...(props.pageIcon === undefined ? {} : { pageIcon: props.pageIcon })}

@@ -9,6 +9,7 @@ import {
   estimateVideoCost,
   settleVideoCostUsdMicros,
   videoAspectRatioChoices,
+  videoDurationValues,
 } from "./videoGenerationPolicy";
 
 const noInputs = { firstFrame: false, lastFrame: false, referenceCount: 0 };
@@ -106,6 +107,25 @@ describe("video generation policy", () => {
       status: "refused",
       reason: "Flat Model makes 21:9 clips only from a first frame.",
     });
+  });
+
+  it("limits choices and defaults only when a clip uses both frames", () => {
+    const model = {
+      ...omni,
+      defaultDuration: 15,
+      inputs: { ...omni.inputs, maxDurationSecondsWithBothFrames: 10 },
+    };
+    const first = { ...noInputs, firstFrame: true };
+    const both = { ...first, lastFrame: true };
+    const options = { durationSeconds: 11, resolution: "720p", aspectRatio: "16:9", audio: true };
+    expect(videoDurationValues(model, first)).toContain(15);
+    expect(videoDurationValues(model, both)).toContain(10);
+    expect(videoDurationValues(model, both)).not.toContain(11);
+    expect(defaultVideoClipOptions(model, both.firstFrame, both.lastFrame)?.durationSeconds).toBe(
+      10,
+    );
+    expect(checkVideoClipOptions(model, options, first).status).toBe("allowed");
+    expect(checkVideoClipOptions(model, options, both).status).toBe("refused");
   });
 
   it("refuses options outside what the model declares", () => {

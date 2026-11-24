@@ -1147,9 +1147,35 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       settings: [
         {
           id: settingId("transcription"),
-          label: "Transcription",
+          label: "Transcribe with",
           scope: "app",
-          keywords: "voice transcription speech to text microphone dictation whisper stt model",
+          keywords:
+            "voice transcription transcribe speech to text microphone dictation whisper stt model off",
+        },
+        {
+          id: settingId("dictation-language"),
+          label: "Language",
+          scope: "app",
+          keywords: "voice dictation transcription language spoken automatic detect",
+        },
+        {
+          id: settingId("dictation-dictionary"),
+          label: "Your dictionary",
+          scope: "app",
+          keywords:
+            "voice dictation transcription dictionary vocabulary names terms spelling words",
+        },
+        {
+          id: settingId("microphone"),
+          label: "Microphone",
+          scope: "app",
+          keywords: "voice microphone input device dictation headset usb choose",
+        },
+        {
+          id: settingId("microphone-test"),
+          label: "Test microphone",
+          scope: "app",
+          keywords: "voice microphone test record playback dictation input",
         },
         {
           id: settingId("synthesis"),
@@ -2044,11 +2070,25 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "pairing code pair phone device single use",
         },
         {
+          id: settingId("access-activity"),
+          label: "Access activity",
+          scope: "host",
+          keywords:
+            "access activity log history devices added removed revoked expired signed out level changed who undo notice raised full access provider key agent",
+        },
+        {
           id: settingId("remote-paired-device-lifetime"),
           label: "Keep devices paired for",
           scope: "host",
           keywords:
             "pairing length lifetime expiry expire paired device registration days year never revoke",
+        },
+        {
+          id: settingId("remote-access-pause"),
+          label: "Pause remote access",
+          scope: "host",
+          keywords:
+            "pause resume remote access paired devices agents refuse block stop lock out panic access level full approve steer read only",
         },
         {
           id: settingId("hub-role"),

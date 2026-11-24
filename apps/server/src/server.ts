@@ -32,7 +32,10 @@ import {
 } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
 import { resolveSpeechEndpoint } from "@octant/domain";
-import { makeOpenAiCompatibleSpeechAdapter } from "./speech/speechAdapter";
+import {
+  makeOpenAiCompatibleSpeechAdapter,
+  transcriptionPreferencesOf,
+} from "./speech/speechAdapter";
 import type { NarrationForTurn } from "./speech/narrationTool";
 import type { TranscriptionForTurn } from "./speech/transcriptionTool";
 import { CredentialRequests } from "./credentials/credentialRequests";
@@ -478,6 +481,8 @@ export function startOctantServer(
       stopDesktopLeases,
       webAssets,
     } = wireComputerUse({
+      isPairedDeviceScope,
+      isRestrictedDeviceScope,
       resolveThreadStrict,
       // Deferred: Work's running turns are wired later in this scope.
       runningWorkTurnAccess: (threadId) => runningWorkTurnAccess(threadId),
@@ -674,9 +679,12 @@ export function startOctantServer(
             persistence.readShellSettings()?.settings.voice.transcription,
             persistence.readProviderInstances(),
           ),
-        adapter: ({ instance }) =>
+        preferences: () =>
+          transcriptionPreferencesOf(persistence.readShellSettings()?.settings.voice ?? {}),
+        adapter: ({ instance }, preferences) =>
           makeOpenAiCompatibleSpeechAdapter({
             instance,
+            transcriptionPreferences: preferences,
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
           }),
       });
@@ -2111,6 +2119,7 @@ export function startOctantServer(
       threadMoveAdministrationRoutes,
       hubAdministrationRoutes,
       newDeviceAlertRoutes,
+      accessActivityRoutes,
       localDeviceAdministrationRoutes,
       memberInstallRoutes,
       agentAccessAdministrationRoutes,
@@ -2325,6 +2334,7 @@ export function startOctantServer(
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await hubAdministrationRoutes(request)) ??
                 (await newDeviceAlertRoutes(request)) ??
+                (await accessActivityRoutes(request)) ??
                 (await threadMoveAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
                 (await secretStoresRoutes(request)) ??

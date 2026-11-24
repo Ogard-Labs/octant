@@ -131,6 +131,9 @@ export const ENDPOINT_PRESETS: ReadonlyArray<EndpointPreset> = [
     baseUrl: "https://api.openai.com/v1",
     protocol: "responses",
     keyPage: { label: "the OpenAI API platform", url: "https://platform.openai.com/api-keys" },
+    // The audio routes serve these on every API account; an account whose
+    // model list loads still offers what it lists instead.
+    voice: { transcription: "gpt-4o-mini-transcribe", speech: "gpt-4o-mini-tts" },
   },
   {
     id: "openrouter-api",

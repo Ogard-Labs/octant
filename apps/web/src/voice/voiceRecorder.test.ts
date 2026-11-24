@@ -91,3 +91,47 @@ describe("useVoiceRecorder", () => {
     expect(result.current.state.kind).toBe("idle");
   });
 });
+
+describe("useVoiceRecorder with a chosen microphone", () => {
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("records from the chosen microphone", async () => {
+    const { getUserMedia } = installMicrophone();
+    localStorage.setItem("octant.voice-microphone.v1", "usb-headset");
+    const { result } = renderHook(() => useVoiceRecorder());
+
+    await act(async () => {
+      await result.current.start();
+    });
+
+    expect(getUserMedia).toHaveBeenCalledOnce();
+    expect(getUserMedia.mock.calls[0]).toEqual([
+      expect.objectContaining({
+        audio: expect.objectContaining({ deviceId: { exact: "usb-headset" } }),
+      }),
+    ]);
+    expect(result.current.state.kind).toBe("recording");
+  });
+
+  it("falls back to the system default when the chosen microphone is gone", async () => {
+    const { getUserMedia } = installMicrophone();
+    getUserMedia.mockImplementationOnce(async () => {
+      const error = new Error("gone");
+      error.name = "OverconstrainedError";
+      throw error;
+    });
+    localStorage.setItem("octant.voice-microphone.v1", "unplugged");
+    const { result } = renderHook(() => useVoiceRecorder());
+
+    await act(async () => {
+      await result.current.start();
+    });
+
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    const second = getUserMedia.mock.calls[1] as unknown as [MediaStreamConstraints];
+    expect(second[0].audio).not.toHaveProperty("deviceId");
+    expect(result.current.state.kind).toBe("recording");
+  });
+});

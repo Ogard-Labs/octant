@@ -1,4 +1,10 @@
 import {
+  decodeHostDisplayAnswer,
+  type HostDisplayAnswer,
+  type HostDisplayScope,
+  type HostDisplayRequest,
+} from "@octant/contracts";
+import {
   decodeComputerControlResult,
   decodeComputerUseStatus,
   type ComputerControlCommand,
@@ -9,6 +15,11 @@ import {
 } from "@octant/contracts/computer-use-plugin";
 
 export interface DesktopComputerUsePort {
+  readonly hostDisplay?: (
+    scope: HostDisplayScope,
+    command: HostDisplayRequest,
+    signal?: AbortSignal,
+  ) => Promise<HostDisplayAnswer>;
   readonly status: () => Promise<ComputerUseStatus>;
   readonly configure: (settings: ComputerUseSettings) => Promise<void>;
   readonly reserve: (owner: ComputerUseOwner) => Promise<boolean>;
@@ -80,6 +91,14 @@ export function createDesktopComputerUsePort(
     return JSON.parse(Buffer.concat(chunks, length).toString("utf8"));
   }
   return {
+    ...(environment.OCTANT_PACKAGED_RUNTIME === "1"
+      ? {
+          hostDisplay: async (scope, command, signal) =>
+            decodeHostDisplayAnswer(
+              await request({ operation: "host-display", scope, command }, signal),
+            ),
+        }
+      : {}),
     status: async () => decodeComputerUseStatus(await request({ operation: "status" })),
     configure: async (settings) => {
       await request({ operation: "configure", settings });

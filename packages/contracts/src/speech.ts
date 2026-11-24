@@ -82,6 +82,19 @@ export const SpeechSynthesisEndpointRef = Schema.Struct({
 }).annotations(strict);
 export type SpeechSynthesisEndpointRef = typeof SpeechSynthesisEndpointRef.Type;
 
+/** BCP-47-shaped hint the caller may pass to transcription. */
+export const SpeechTranscriptionLanguage = Schema.String.pipe(
+  Schema.pattern(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/),
+);
+export type SpeechTranscriptionLanguage = typeof SpeechTranscriptionLanguage.Type;
+
+/** How many dictionary terms Voice keeps; the provider sees as many as fit its prompt. */
+export const MAX_VOICE_DICTIONARY_TERMS = 100;
+
+/** One name or term transcription should spell the person's way. */
+export const VoiceDictionaryTerm = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
+export type VoiceDictionaryTerm = typeof VoiceDictionaryTerm.Type;
+
 /**
  * Voice settings section.
  *
@@ -92,18 +105,22 @@ export type SpeechSynthesisEndpointRef = typeof SpeechSynthesisEndpointRef.Type;
  * `synthesis` is the endpoint that turns text into speech. Absent means no
  * host call is made; a renderer may still read text aloud with the operating
  * system's own voices, which is a renderer-local choice the host never sees.
+ *
+ * `language` and `dictionary` shape every transcription the host makes —
+ * dictation, a paired phone's clips, and the agent's transcription tool — so
+ * they live here rather than in any one client.
  */
 export const VoiceSettings = Schema.Struct({
   transcription: Schema.optional(SpeechEndpointRef),
   synthesis: Schema.optional(SpeechSynthesisEndpointRef),
+  /** The language dictation assumes when a request names none; absent lets the model detect it. */
+  language: Schema.optional(SpeechTranscriptionLanguage),
+  /** Names and terms transcription should spell this way, in the order they were added. */
+  dictionary: Schema.optional(
+    Schema.Array(VoiceDictionaryTerm).pipe(Schema.maxItems(MAX_VOICE_DICTIONARY_TERMS)),
+  ),
 }).annotations(strict);
 export type VoiceSettings = typeof VoiceSettings.Type;
-
-/** BCP-47-shaped hint the caller may pass to transcription. */
-export const SpeechTranscriptionLanguage = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/),
-);
-export type SpeechTranscriptionLanguage = typeof SpeechTranscriptionLanguage.Type;
 
 /**
  * What transcription returns. Empty text is a legitimate answer for a silent

@@ -1,3 +1,4 @@
+import { CHANGE_NOTICE_DISMISSED, ChangeNoticeDismissed } from "@octant/contracts/access-activity";
 import {
   BROWSER_DOWNLOAD_PERMISSION_EVENT,
   BrowserDownloadPermissionChanged,
@@ -114,7 +115,10 @@ import {
   WorkProjectActionsChanged,
   WorkProjectPermissionModeChanged,
   GUARDRAIL_LEVEL_LOWERED,
+  GUARDRAIL_ACCESS_RAISED,
+  GUARDRAIL_LEVEL_CHANGED,
   GuardrailLevelLowered,
+  GuardrailLevelChange,
   PROVIDER_TOOLING_APPLIED,
   ProviderToolingAppliedRecordSchema,
   PROVIDER_ACP_AGENT_INSTALL_SCRIPTS_RAN,
@@ -337,6 +341,14 @@ import {
   ShieldForgeChangeObservedPayload,
 } from "@octant/contracts";
 import {
+  VIDEO_JOB_PROVIDER_COPY_CHANGED,
+  VIDEO_JOB_QUEUED,
+  VIDEO_JOB_STATUS_CHANGED,
+  VideoJobProviderCopyChanged,
+  VideoJobQueued,
+  VideoJobStatusChanged,
+} from "@octant/contracts/video-generation";
+import {
   MemberInstallRequestedPayload,
   MemberInstallStepRecordedPayload,
   MemberRemovalRequestedPayload,
@@ -416,6 +428,8 @@ import { ProviderKeyJournalRecord } from "@octant/contracts/provider-key-journal
 import { SecretStoreJournalRecord } from "@octant/contracts/secret-stores";
 import {
   REMOTE_ACCESS_EVENT_NAMES,
+  DeviceAccessLevelChangedV1,
+  RemoteAccessPauseChangedV1,
   DeviceKeyRotatedV1,
   DeviceRegisteredV1,
   DeviceRevokedV1,
@@ -558,6 +572,7 @@ import {
   GithubCloneProjection,
 } from "./githubCloneProjection";
 import { ImageJobProjection } from "../image/imageJobProjection";
+import { VideoJobProjection } from "../video/videoJobProjection";
 import { registerBenchmarkEvents } from "../benchmarks/benchmarkEventStore";
 import { registerPullRequestReviewEvents } from "../pullRequestReviewers/pullRequestReviewService";
 import { BenchmarkProjection } from "../benchmarks/benchmarkProjection";
@@ -582,6 +597,7 @@ export interface Phase1RuntimeRegistries {
   readonly automationProjection: AutomationProjection;
   readonly githubCloneProjection: GithubCloneProjection;
   readonly imageJobProjection: ImageJobProjection;
+  readonly videoJobProjection: VideoJobProjection;
   readonly benchmarkProjection: BenchmarkProjection;
   readonly desktopLeaseProjection: DesktopLeaseProjection;
   readonly replicaMembershipProjection: ReplicaMembershipProjection;
@@ -633,6 +649,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     )
     .register(CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED, 1, CodeProjectPullRequestMergeRecorded)
     .register(GUARDRAIL_LEVEL_LOWERED, 1, GuardrailLevelLowered)
+    .register(GUARDRAIL_ACCESS_RAISED, 1, GuardrailLevelChange)
+    .register(GUARDRAIL_LEVEL_CHANGED, 1, GuardrailLevelChange)
+    .register(CHANGE_NOTICE_DISMISSED, 1, ChangeNoticeDismissed)
     .register(PROVIDER_TOOLING_APPLIED, 1, ProviderToolingAppliedRecordSchema)
     .register(CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED, 1, CodeProjectPullRequestActionRecorded)
     .register(
@@ -942,6 +961,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       DeviceRegistrationDeadlineChangedV1,
     )
     .register(REMOTE_ACCESS_EVENT_NAMES.hostKeyRotated, 1, HostKeyRotatedV1)
+    .register(REMOTE_ACCESS_EVENT_NAMES.deviceAccessLevelChanged, 1, DeviceAccessLevelChangedV1)
+    .register(REMOTE_ACCESS_EVENT_NAMES.remoteAccessPauseChanged, 1, RemoteAccessPauseChangedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.sessionInvalidated, 1, RemoteSessionInvalidatedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.commandReceiptRecorded, 1, RemoteCommandReceiptRecordedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.securityAuditRecorded, 1, SecurityAuditRecordedV1)
@@ -1003,6 +1024,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(GITHUB_CLONE_TRANSITIONED, 1, GithubCloneTransitioned)
     .register(IMAGE_JOB_QUEUED, 1, ImageJobQueued)
     .register(IMAGE_JOB_STATUS_CHANGED, 1, ImageJobStatusChanged)
+    .register(VIDEO_JOB_QUEUED, 1, VideoJobQueued)
+    .register(VIDEO_JOB_STATUS_CHANGED, 1, VideoJobStatusChanged)
+    .register(VIDEO_JOB_PROVIDER_COPY_CHANGED, 1, VideoJobProviderCopyChanged)
     .register(BROWSER_CAPTURE_KEPT, 1, BrowserCaptureKept)
     .register(BROWSER_DOWNLOAD_EVENT_NAMES.saved, 1, BrowserDownloadSaved)
     .register(BROWSER_DOWNLOAD_EVENT_NAMES.selectedSaved, 1, BrowserDownloadSelectedSaved)
@@ -1080,6 +1104,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   const automationProjection = new AutomationProjection();
   const githubCloneProjection = new GithubCloneProjection();
   const imageJobProjection = new ImageJobProjection();
+  const videoJobProjection = new VideoJobProjection();
   const benchmarkProjection = new BenchmarkProjection();
   const desktopLeaseProjection = new DesktopLeaseProjection();
   const replicaMembershipProjection = new ReplicaMembershipProjection();
@@ -1093,6 +1118,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     automationProjection,
     githubCloneProjection,
     imageJobProjection,
+    videoJobProjection,
     benchmarkProjection,
     desktopLeaseProjection,
     replicaMembershipProjection,
@@ -1115,6 +1141,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(automationProjection)
       .register(githubCloneProjection)
       .register(imageJobProjection)
+      .register(videoJobProjection)
       .register(benchmarkProjection)
       .register(desktopLeaseProjection)
       .register(new ZenProjection())

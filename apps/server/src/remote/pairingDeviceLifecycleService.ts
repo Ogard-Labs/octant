@@ -7,6 +7,10 @@ import {
 } from "node:crypto";
 import {
   REMOTE_ACCESS_EVENT_NAMES,
+  DEFAULT_DEVICE_ACCESS_LEVEL,
+  decodeDeviceAccessLevelChangedV1,
+  decodeRemoteAccessPauseChangedV1,
+  type DeviceAccessLevel,
   decodeDeviceRegistrationV1,
   decodePairingDecisionV1,
   decodePairingRequestV1,
@@ -36,7 +40,12 @@ import {
 } from "@octant/domain/remote-protocol-policy";
 import type { Journal } from "../persistence/journal";
 import type { SqliteConnection } from "../persistence/sqlitePort";
-import { readDeviceRegistrations } from "../persistence/remoteAccessProjection";
+import {
+  readDeviceAccessLevel,
+  readDeviceApprovedByPerson,
+  readDeviceRegistrations,
+  readRemoteAccessPaused,
+} from "../persistence/remoteAccessProjection";
 import { canonicalDeviceKeyFacts, deviceKeyFingerprintMatches } from "./deviceKeyFacts";
 import {
   derivePairingComparisonCode,
@@ -142,6 +151,8 @@ export interface ApprovePairingTicketInput {
   readonly ticketId: string;
   /** The paired device that decided. Absent, the host's own record is written. */
   readonly actor?: EventActor;
+  /** What the person lets the device do; Full unless they picked another. */
+  readonly accessLevel?: DeviceAccessLevel;
 }
 
 export interface DenyPairingTicketInput {
@@ -527,6 +538,7 @@ export class PairingDeviceLifecycleService {
               reasonCode: "user-approved",
               correlationId,
               occurredAt: new Date(now).toISOString(),
+              accessLevel: input.accessLevel ?? DEFAULT_DEVICE_ACCESS_LEVEL,
             },
           },
         },
@@ -793,6 +805,77 @@ export class PairingDeviceLifecycleService {
       }
       this.#awaitingKeyStep.delete(deviceId);
     }
+  }
+
+  /**
+   * Changes how much a device the host's person paired may do, journaled under
+   * whoever changed it with the level before and after. A device the hub's
+   * roster introduced has no level of its own (it stays held to the catalogue),
+   * so it is refused, as is a device that is no longer active.
+   */
+  setAccessLevel(input: {
+    readonly deviceId: string;
+    readonly accessLevel: DeviceAccessLevel;
+    readonly actor?: EventActor;
+  }): { readonly previousLevel: DeviceAccessLevel; readonly accessLevel: DeviceAccessLevel } {
+    const device = this.#readDevice(input.deviceId);
+    if (device === undefined || device.state !== "active") {
+      throw new PairingDeviceLifecycleError("invalid", "Device is unavailable.");
+    }
+    if (!readDeviceApprovedByPerson(this.#connection, device.deviceId)) {
+      throw new PairingDeviceLifecycleError("invalid", "This device has no access level to set.");
+    }
+    const previousLevel = readDeviceAccessLevel(this.#connection, device.deviceId);
+    if (previousLevel === input.accessLevel) return { previousLevel, accessLevel: previousLevel };
+    const now = new Date(this.#now()).toISOString();
+    this.#journal.append({
+      aggregate: { aggregateType: "remote-device", aggregateId: device.deviceId },
+      expectedVersion: this.#aggregateVersion("remote-device", device.deviceId),
+      events: [
+        {
+          eventId: this.#uuid(),
+          eventName: REMOTE_ACCESS_EVENT_NAMES.deviceAccessLevelChanged,
+          eventVersion: 1,
+          correlationId: this.#correlationId(),
+          actor: input.actor ?? { kind: "system", actorId: this.#actorId() },
+          occurredAt: now,
+          payload: decodeDeviceAccessLevelChangedV1({
+            hostId: this.#hostId,
+            deviceId: device.deviceId,
+            previousLevel,
+            accessLevel: input.accessLevel,
+            changedAt: now,
+          }),
+        },
+      ],
+    });
+    return { previousLevel, accessLevel: input.accessLevel };
+  }
+
+  /** Pauses or resumes remote access, journaled under whoever did it; a repeat writes nothing. */
+  setRemoteAccessPaused(input: { readonly paused: boolean; readonly actor?: EventActor }): boolean {
+    if (readRemoteAccessPaused(this.#connection) === input.paused) return input.paused;
+    const now = new Date(this.#now()).toISOString();
+    this.#journal.append({
+      aggregate: { aggregateType: "remote-host", aggregateId: this.#hostId },
+      expectedVersion: this.#aggregateVersion("remote-host", this.#hostId),
+      events: [
+        {
+          eventId: this.#uuid(),
+          eventName: REMOTE_ACCESS_EVENT_NAMES.remoteAccessPauseChanged,
+          eventVersion: 1,
+          correlationId: this.#correlationId(),
+          actor: input.actor ?? { kind: "system", actorId: this.#actorId() },
+          occurredAt: now,
+          payload: decodeRemoteAccessPauseChangedV1({
+            hostId: this.#hostId,
+            paused: input.paused,
+            changedAt: now,
+          }),
+        },
+      ],
+    });
+    return input.paused;
   }
 
   clearEphemeralState(): void {

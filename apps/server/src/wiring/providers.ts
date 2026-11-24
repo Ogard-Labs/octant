@@ -200,6 +200,8 @@ import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
 import { GeneratedImageStore } from "../image/generatedImageStore";
 import { ImageJobService } from "../image/imageJobService";
+import { VideoClipStore } from "../video/videoClipStore";
+import { VideoJobService } from "../video/videoJobService";
 import { createLocalUsageHistoryRouteHandler } from "../localUsageHistoryRoutes";
 import {
   createLocalUsageHistorySourceForDriver,
@@ -278,7 +280,7 @@ import {
   claudePlanUsageStateDirectory,
   defaultShellSettings,
   effectiveClaudeAccountConfigDirectory,
-  isImageProfileDriverKind,
+  isMediaProfileDriverKind,
   isNativeHarnessDriverKind,
   isKeyProviderDriverKind,
   providerKeepsConversation,
@@ -413,7 +415,7 @@ export function makeConfiguredProviderDriver(
   if (!instance.enabled) {
     throw new Error("Provider instance is disabled.");
   }
-  if (isImageProfileDriverKind(instance.driverKind)) {
+  if (isMediaProfileDriverKind(instance.driverKind)) {
     throw new ProviderDriverConfigurationError();
   }
   const admitted = options.admittedDriverKinds ?? admittedBundledProviderDriverKinds();
@@ -2589,7 +2591,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       listInstances: () =>
         persistence
           .readProviderInstances()
-          .filter((instance) => !isImageProfileDriverKind(instance.driverKind)),
+          .filter((instance) => !isMediaProfileDriverKind(instance.driverKind)),
       now: () => new Date().toISOString() as UtcTimestamp,
       unavailableReason: (instance) =>
         instance.driverKind === "claude" &&
@@ -2710,6 +2712,39 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
     });
     yield* Effect.promise(() => imageJobService.reconcileInterruptedJobs());
+    // Video generation runs on the same provider credentials and spend
+    // ceilings; restart recovery resumes sent jobs and retries owed removals.
+    const videoJobService = new VideoJobService({
+      journal: persistence.journal,
+      projection: persistence.videoJobProjection,
+      clips: new VideoClipStore(persistence.dataDirectory),
+      readProviderInstance: (id) => persistence.readProviderInstance(id),
+      listProviderInstances: () => persistence.readProviderInstances(),
+      credentialResolver:
+        credentialResolver ??
+        ({
+          has: async () => false,
+          resolve: async () => "",
+        } as const),
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      spendCeiling: spendCeilingService,
+      resolveThreadProjectId: ({ threadType, threadId }) => {
+        if (threadType === "chat-thread") {
+          const projectId = persistence.readChatThread(decodeChatThreadId(threadId))?.projectId;
+          return projectId === undefined ? undefined : String(projectId);
+        }
+        if (threadType === "code-thread") {
+          const projectId = persistence.readCodeThread(decodeCodeThreadId(threadId))?.projectId;
+          return projectId === undefined ? undefined : String(projectId);
+        }
+        const projectId = workThreadProjection.read(decodeWorkThreadId(threadId))?.projectId;
+        return projectId === undefined ? undefined : String(projectId);
+      },
+    });
+    yield* Effect.promise(() => videoJobService.recover());
+    yield* Effect.addFinalizer(() => Effect.sync(() => videoJobService.close()));
     return {
       providerAvailabilityMarks,
       bindCodeToolHost,
@@ -2739,6 +2774,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       providerToolingRoutes,
       generatedImageStore,
       imageJobService,
+      videoJobService,
       localPluginImportReceipts,
       localUsageHistoryRoutes,
       managedCodeThreadCreation,

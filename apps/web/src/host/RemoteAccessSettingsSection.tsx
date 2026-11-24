@@ -1,5 +1,11 @@
 import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
 import { NewDeviceAlerts } from "./NewDeviceAlerts";
+import { AccessActivityList } from "./AccessActivityList";
+import { ChangeNotices, type ChangeNoticeLocalActions } from "./ChangeNotices";
+import {
+  createAccessActivityClient,
+  type AccessActivityPort,
+} from "@octant/client-runtime/access-activity-client";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import {
   buildPairingCode,
@@ -9,10 +15,15 @@ import {
   remoteListenerOrigin,
 } from "@octant/domain";
 import {
+  DEFAULT_DEVICE_ACCESS_LEVEL,
+  DEVICE_ACCESS_LEVEL_LABELS,
+  DEVICE_ACCESS_LEVELS,
+  isDeviceAccessLevel,
   PAIRED_DEVICE_LIFETIMES,
+  type DeviceAccessLevel,
   type PairedDeviceLifetime,
 } from "@octant/contracts/remote-access";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
 import {
   SettingRow,
@@ -39,6 +50,7 @@ import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { HubSettingsSection } from "./HubSettingsSection";
@@ -71,6 +83,16 @@ export interface RemoteAccessSettingsSectionProps {
   readonly onPairedDeviceLifetimeChange?: ((lifetime: PairedDeviceLifetime) => void) | undefined;
   /** Alerts for devices that paired with this host, which every connected device is shown. */
   readonly newDeviceAlerts?: NewDeviceAlertsClient | undefined;
+  readonly accessActivity?: AccessActivitySettings | undefined;
+}
+
+/** Settings' access activity and change notices, refreshed when the change feed moves. */
+export interface AccessActivitySettings {
+  readonly port: AccessActivityPort;
+  readonly activityRevision: number;
+  readonly noticesRevision: number;
+  /** A desktop window's own controls for a notice's key Undo and revoke. */
+  readonly localActions?: ChangeNoticeLocalActions;
 }
 
 const PAIRED_DEVICE_LIFETIME_LABELS: Readonly<Record<PairedDeviceLifetime, string>> = {
@@ -84,6 +106,11 @@ const PAIRED_DEVICE_LIFETIME_LABELS: Readonly<Record<PairedDeviceLifetime, strin
 function isPairedDeviceLifetime(value: string): value is PairedDeviceLifetime {
   return (PAIRED_DEVICE_LIFETIMES as ReadonlyArray<string>).includes(value);
 }
+
+const ACCESS_LEVEL_OPTIONS = DEVICE_ACCESS_LEVELS.map((id) => ({
+  id,
+  label: DEVICE_ACCESS_LEVEL_LABELS[id],
+}));
 
 type ListenerState =
   | { readonly kind: "loading" }
@@ -129,6 +156,46 @@ function pairingLink(origin: string, ticket: RemoteMintedPairingTicket): string 
   return `${origin}/#ticketId=${encodeURIComponent(ticket.ticketId)}&ticketProof=${encodeURIComponent(ticket.ticketProof)}`;
 }
 
+/**
+ * The access activity list and change notices, on their own so a window
+ * without the desktop bridge — a local browser Review opens — shows them too.
+ * Without a bridge secret the notice's key Undo and revoke stay refused, which
+ * the buttons say.
+ */
+export function AccessActivitySection({
+  accessActivity,
+}: {
+  readonly accessActivity: AccessActivitySettings | undefined;
+}) {
+  const accessActivityPort = accessActivity?.port;
+  const accessActivityClient = useMemo(
+    () =>
+      accessActivityPort === undefined ? undefined : createAccessActivityClient(accessActivityPort),
+    [accessActivityPort],
+  );
+  if (accessActivityClient === undefined || accessActivity === undefined) return null;
+  return (
+    <SettingsSection
+      description="Devices added, removed or given another level, newest first, and who did it. Changes a paired device or an agent made to a thread's level or a provider key are listed above it, with Undo."
+      title="Access activity"
+    >
+      <div data-setting-id="access-activity">
+        <ChangeNotices
+          changeRevision={accessActivity.noticesRevision}
+          client={accessActivityClient}
+          {...(accessActivity.localActions === undefined
+            ? {}
+            : { localActions: accessActivity.localActions })}
+        />
+        <AccessActivityList
+          changeRevision={accessActivity.activityRevision}
+          client={accessActivityClient}
+        />
+      </div>
+    </SettingsSection>
+  );
+}
+
 export function RemoteAccessSettingsSection({
   bridge,
   focusedSetting,
@@ -139,6 +206,7 @@ export function RemoteAccessSettingsSection({
   pairedDeviceLifetime,
   onPairedDeviceLifetimeChange,
   newDeviceAlerts,
+  accessActivity,
   projectNames,
 }: RemoteAccessSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
@@ -161,6 +229,11 @@ export function RemoteAccessSettingsSection({
   const [pairingMessage, setPairingMessage] = useState<string>();
   const [renameDraft, setRenameDraft] = useState<{ deviceId: string; label: string }>();
   const [confirmRevokeAll, setConfirmRevokeAll] = useState(false);
+  // The level picked for each waiting request, Full until the person picks another.
+  const [approvalLevels, setApprovalLevels] = useState<ReadonlyMap<string, DeviceAccessLevel>>(
+    new Map(),
+  );
+  const [paused, setPaused] = useState<boolean>();
   const listenerOpener = useRef<HTMLButtonElement>(null);
   const revokeAllOpener = useRef<HTMLButtonElement>(null);
   const hostnameId = useId();
@@ -189,6 +262,9 @@ export function RemoteAccessSettingsSection({
       ]);
       setPending(requests);
       setDevices(inventory);
+      if (bridge.getRemoteAccessPaused !== undefined) {
+        setPaused(await bridge.getRemoteAccessPaused());
+      }
     } catch (error) {
       setInventoryMessage(failureMessage(error, "Paired devices could not be read."));
     }
@@ -200,6 +276,13 @@ export function RemoteAccessSettingsSection({
   }, [refreshListener, refreshInventory]);
 
   const status = listener.kind === "ready" ? listener.status : undefined;
+  // Devices and the pause are read through the listener's gateway, which does
+  // not exist while the listener is off; once it is up they are read again,
+  // so enabling the listener shows them without reopening the page.
+  const listenerReady = status?.state === "ready";
+  useEffect(() => {
+    if (listenerReady) void refreshInventory();
+  }, [listenerReady, refreshInventory]);
   // With the listener off the host has no remote gateway to answer a device
   // inventory, so its refusal is the prerequisite this page already states
   // rather than a failure to report.
@@ -327,7 +410,10 @@ export function RemoteAccessSettingsSection({
     setPairingMessage(undefined);
     try {
       if (decision === "approve") {
-        await bridge.approveRemotePairingRequest(request.ticketId);
+        await bridge.approveRemotePairingRequest(
+          request.ticketId,
+          approvalLevels.get(request.ticketId) ?? DEFAULT_DEVICE_ACCESS_LEVEL,
+        );
         setPairingMessage(`Approved ${request.deviceLabel}.`);
       } else {
         await bridge.denyRemotePairingRequest(request.ticketId, "user-denied");
@@ -347,6 +433,27 @@ export function RemoteAccessSettingsSection({
       setInventoryMessage(failureMessage(error, "The device was not revoked."));
     }
     await refreshInventory();
+  };
+
+  const changeLevel = async (device: RemoteDeviceInventoryEntry, level: DeviceAccessLevel) => {
+    if (bridge.setRemoteDeviceAccessLevel === undefined) return;
+    setInventoryMessage(undefined);
+    try {
+      await bridge.setRemoteDeviceAccessLevel(device.deviceId, level);
+    } catch (error) {
+      setInventoryMessage(failureMessage(error, "The device's access was not changed."));
+    }
+    await refreshInventory();
+  };
+
+  const changePause = async (next: boolean) => {
+    if (bridge.setRemoteAccessPaused === undefined) return;
+    setInventoryMessage(undefined);
+    try {
+      setPaused(await bridge.setRemoteAccessPaused(next));
+    } catch (error) {
+      setInventoryMessage(failureMessage(error, "Remote access was not changed."));
+    }
   };
 
   const revokeAll = async () => {
@@ -759,6 +866,15 @@ export function RemoteAccessSettingsSection({
                   Approve only if the comparison code matches the one shown on the device.
                 </p>
                 <div className="host-settings__controls">
+                  <OctantSelectField
+                    aria-label={`Access for ${request.deviceLabel}`}
+                    onValueChange={(value) => {
+                      if (!isDeviceAccessLevel(value)) return;
+                      setApprovalLevels(new Map(approvalLevels).set(request.ticketId, value));
+                    }}
+                    options={ACCESS_LEVEL_OPTIONS}
+                    value={approvalLevels.get(request.ticketId) ?? DEFAULT_DEVICE_ACCESS_LEVEL}
+                  />
                   <OctantButton
                     onClick={() => void decide(request, "approve")}
                     size="sm"
@@ -813,6 +929,8 @@ export function RemoteAccessSettingsSection({
         </SettingsSection>
       )}
 
+      <AccessActivitySection accessActivity={accessActivity} />
+
       {/* Revoking is this page's destructive group, so it sits last. */}
       <SettingsPanel
         title="Paired devices"
@@ -829,6 +947,21 @@ export function RemoteAccessSettingsSection({
                 await refreshInventory();
               }}
             />
+          )}
+          {paused === undefined ? null : (
+            <SettingRow
+              description="Refuses every paired device until you turn it off here. Devices stay paired and keep their keys; this computer's own hub links are not affected."
+              focused={focusedSetting === "remote-access-pause"}
+              label="Pause remote access"
+              scope="host"
+              settingId="remote-access-pause"
+            >
+              <OctantSwitch
+                checked={paused}
+                label="Pause remote access"
+                onCheckedChange={(checked) => void changePause(checked)}
+              />
+            </SettingRow>
           )}
           {activeDevices.length === 0 ? (
             <SettingsState kind="empty">No devices are paired with this host.</SettingsState>
@@ -870,6 +1003,18 @@ export function RemoteAccessSettingsSection({
                       <span className="oct-meta">
                         {device.origin} · last seen {new Date(device.lastSeenAt).toLocaleString()}
                       </span>
+                      {/* A device the hub introduced has no level of its own. */}
+                      {device.accessLevel === undefined ? null : (
+                        <OctantSelectField
+                          aria-label={`Access for ${device.deviceLabel}`}
+                          disabled={bridge.setRemoteDeviceAccessLevel === undefined}
+                          onValueChange={(value) => {
+                            if (isDeviceAccessLevel(value)) void changeLevel(device, value);
+                          }}
+                          options={ACCESS_LEVEL_OPTIONS}
+                          value={device.accessLevel}
+                        />
+                      )}
                       <OctantButton
                         onClick={() =>
                           setRenameDraft({ deviceId: device.deviceId, label: device.deviceLabel })

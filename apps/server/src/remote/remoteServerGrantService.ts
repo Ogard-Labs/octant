@@ -34,7 +34,9 @@ import {
   type RemoteServerGrantSource,
   type WindowId,
 } from "@octant/contracts";
+import type { DeviceAccessLevel } from "@octant/contracts/remote-access";
 import {
+  admittedDeviceAuthorityKind,
   decideRemoteServerGrant,
   relayRequestHeaders,
   relayWebSocketRequestHeaders,
@@ -112,6 +114,8 @@ export interface RemoteServerRelayPrincipal {
   readonly origin: string;
   /** Who let this device onto the host, read from the host's own record. */
   readonly admittedBy?: "host-person" | "hub-roster";
+  /** The narrower level the person chose for it, read from the same record. */
+  readonly accessLevel?: DeviceAccessLevel;
 }
 
 export interface RemoteServerRelayRequestInput {
@@ -700,12 +704,10 @@ export class RemoteServerGrantService {
     const previews = this.#options.serverProjectPreviews;
     if (previews === undefined) return closedGrant();
     if (!input.stillAuthorized()) return { kind: "session-ended" };
-    if (input.principal.admittedBy !== "host-person") return closedGrant();
-    const opened = previews.openRelayStream(input.grantId, {
-      deviceId: input.principal.deviceId,
-      credentialGeneration: input.principal.credentialGeneration,
-      admittedBy: input.principal.admittedBy,
-    });
+    if (admittedDeviceAuthorityKind(input.principal) !== "person-paired-device") {
+      return closedGrant();
+    }
+    const opened = previews.openRelayStream(input.grantId, input.principal);
     if (opened.kind === "refused") {
       return opened.reason === "server-unreachable"
         ? { kind: "refused", reason: "server-unreachable" }
@@ -781,7 +783,9 @@ export class RemoteServerGrantService {
     const previews = this.#options.serverProjectPreviews;
     if (previews === undefined) return closedGrant();
     if (!input.stillAuthorized()) return { kind: "session-ended" };
-    if (input.principal.admittedBy !== "host-person") return closedGrant();
+    if (admittedDeviceAuthorityKind(input.principal) !== "person-paired-device") {
+      return closedGrant();
+    }
     let perGrant = 0;
     for (const active of this.#previewRelays) {
       if (active.isSocket && active.grantId === input.grantId) perGrant += 1;
@@ -790,11 +794,7 @@ export class RemoteServerGrantService {
     if (perGrant >= this.#socketLimits.perGrant || onDevice >= this.#socketLimits.perDevice) {
       return { kind: "busy" };
     }
-    const opened = previews.openRelayStream(input.grantId, {
-      deviceId: input.principal.deviceId,
-      credentialGeneration: input.principal.credentialGeneration,
-      admittedBy: input.principal.admittedBy,
-    });
+    const opened = previews.openRelayStream(input.grantId, input.principal);
     if (opened.kind === "refused") {
       if (opened.reason === "busy") return { kind: "busy" };
       return opened.reason === "server-unreachable"

@@ -450,8 +450,8 @@ Settings loads the full registry of controls and search terms when it opens.
 The renderer's first load has a byte budget, recorded in
 `scripts/initial-renderer-budget.json` and enforced by `bun run renderer:check`
 in CI. The budget counts the static graph Vite loads for `index.html`: the main
-entry is at most 1,618,546 B (1,581 KiB), the initial CSS at most 665,705 B
-(650 KiB), and the initial JavaScript and CSS at most 1,213,872 B after gzip
+entry is at most 1,610,036 B (1,572 KiB), the initial CSS at most 665,705 B
+(650 KiB), and the initial JavaScript and CSS at most 1,214,339 B after gzip
 level 6. A change that grows any measure past its budget fails. A change that
 shrinks one lowers the recorded budget. Raising a budget is a maintainer
 decision; the editable composer prompt that holds inline `@model` chips raised
@@ -7219,9 +7219,11 @@ ls-remote` against the thread's remote and the GitHub reads they already
   decision, 2026-11-13); a hub-introduced or restricted device is refused
   those. A device's queue change is journaled with the device as its actor. The message
   waits under the device's own scope, so its turn keeps every limit a turn
-  the device sends directly has. Each command and each dispatch asks again
-  that the device is still paired, is allowed the mode's send action, and
-  that the thread's Project is one the mode serves (for Code, an active one).
+  the device sends directly has. Each mutation and each dispatch asks again
+  that the device is still paired, its current access level allows the mode's
+  send action, and the thread's Project is one the mode serves (for Code, an
+  active one). Changing the device to Read only holds its queued messages
+  and still lets it read the queue for that thread.
   A Code dispatch has no request to be admitted by, so it is admitted as that
   device for the dispatch alone and holds nothing afterwards. The paired
   clients do not yet offer the queue in their composer.
@@ -8194,11 +8196,20 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and credential. Mistral's speech route is the one dialect the adapter
   speaks besides OpenAI's: on `api.mistral.ai` the voice goes as `voice_id`
   and the reply is JSON with base64 `audio_data`, as Mistral's OpenAPI
-  description lays out; transcription there is OpenAI-shaped and needs no
-  dialect. An endpoint page, and Add endpoint's last step, offer the
-  endpoint's voice models to Voice settings when it lists any (a preset's
-  known models, or ids that read as transcription or speech models): one
-  click makes a transcription model the one Voice uses, and speech is named
+  description lays out; transcription there is OpenAI-shaped except for Voice
+  settings' dictionary, which an OpenAI-shaped route reads as one `prompt` of
+  at most about 800 characters and Mistral as one `context_bias` field per
+  term. Every transcription the host makes (dictation, a paired phone's clips,
+  the agent's tool) carries the dictionary, and Voice settings' language when
+  the request names none. Voice settings choose transcription from one menu: Off, then each
+  enabled OpenAI-compatible endpoint with the transcription model it lists or
+  its preset knows, saved on choice, with Other model… for a typed id; a
+  Test microphone row plays a ten-second clip back in the window and sends it
+  to the transcription route only on request. An endpoint page, and Add
+  endpoint's last step, offer the endpoint's voice models to Voice settings
+  when it lists any (a preset's known models, or ids that read as
+  transcription or speech models): one click makes a transcription model the
+  one Voice uses, and speech is named
   with what it still needs, a voice from the provider, since Octant cannot
   choose one. The host serves `/api/speech/status`, `/api/speech/transcriptions`,
   and `/api/speech/synthesis` behind window authority, sniffs and bounds the
@@ -8241,8 +8252,13 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   leaving one for local read-aloud.
   Every desktop composer (Chat, Work, Code, the welcome and draft composers) and
   Navigator show a microphone beside the attach control only while
-  transcription is `ready`; the clip is recorded by the browser's own encoder,
-  the transcript is appended to the draft, and the person still sends. Navigator
+  transcription is `ready`; the clip is recorded by the browser's own encoder
+  from the microphone Voice settings name on this computer (kept in the app's
+  browser storage, falling back to the system default when it is not
+  connected); the
+  microphone button or the remappable Dictate chord on the focused composer
+  (tap to toggle, hold to talk) starts it, the transcript is appended to the
+  draft, and the person still sends. Navigator
   can read replies aloud through the configured synthesis endpoint, or with the
   operating system's voices when none is set. A paired device reaches the
   status and transcription routes only: the listener forwards those two routes
@@ -14569,6 +14585,8 @@ completed or skipped onboarding, the local desktop instead opens Computer use
 Settings once on launch, without changing that onboarding outcome. Settings exposes plugin enablement, separate
 Accessibility and Screen Recording shortcuts, the driver version and update
 controls. Both surfaces refresh permissions on focus and visibility changes.
+If Octant cannot load its native permission checker, Settings reports that it
+couldn’t check either permission and computer control remains unavailable.
 Enabled, permissions granted and verified working are separate facts. Only an
 explicit successful test reports Verified working. Driver restart/replacement,
 disablement, permission loss or an unreadable driver permission answer clears
@@ -18500,8 +18518,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   classifier. A remote principal can never exceed host, mode, provider, Project,
   or thread authority, cannot mint local receipts, and every remote mutation is
   journaled with its principal. An authenticated paired device the host's own
-  person paired is the person and holds what a local window holds on every
-  route the private listener forwards (maintainer decision, 2026-11-12): the
+  person paired is the person: full by default, narrower if the person chooses
+  (maintainer decisions, 2026-11-12 and 2026-11-22). At Full it holds what a
+  local window holds on every route the private listener forwards: the
   split of actions into ones a device may approve and ones that need the host
   no longer holds it. Each rule that held a paired device to less now names
   the new rule beside what is built today; the delivery notes, test evidence,
@@ -18532,6 +18551,114 @@ approval-gated` command that undoes it. The terminal shows no one-time
     refusal, an unreachable host) as restricted and hides what the host would
     refuse. The answer shapes only what a client shows; the host decides every
     request from its own record.
+  - **A device's access level.** The person picks one of three levels when
+    approving a pairing (at a window or from a Full device) and can change it
+    later in Settings › Remote access › Paired devices: **Full** (the default),
+    **Approve and steer**, or **Read only**. The level reuses the remote action
+    catalogue rather than adding a permission system of its own: Approve and
+    steer is the catalogue a hub-introduced device is held to, without the
+    hub's Act item, since a device the person paired directly is not the hub's
+    (`principalIsHubIntroduced` reads the admission, not the level; its port
+    forwards reach a thread's running server only), and Read only is the
+    catalogue's reads alone, which clients show as watching only
+    (`project.overview.read`,
+    `code.language.read`, `browser.observe`, `simulator.observe`,
+    `terminal.read`, `preview.open-authorized`, `settings.read-non-secret`,
+    `provider.list-models`, `usage.spend-ceiling.read`). The level is the
+    host's record, never the client's: the `device-approved` audit record
+    carries it (absent on older records, which read as Full) and
+    `remote.device-access-level-changed@1` records each change with its actor
+    and the level before and after. The gateway marks a level below Full on
+    the principal beside its admission on every request, from a cache it
+    updates when the level changes, and ends that device's open requests so
+    its next one meets the new level. `principalAuthorityKind` judges such a
+    device `remote-device`, so every check of the host's person refuses it and
+    the product dispatch holds it to the catalogue, and at Read only to the
+    reads, before any route runs; a narrowed device can never raise itself.
+    Read only keeps eligible pending Work, harness and MCP tool requests
+    visible on the phone. The cards omit decisions and editable answers.
+    On the phone's start screens, the selected computer's standing disables
+    new Chat, Work and Code threads with a watching-only explanation. Existing
+    threads remain openable, and new threads wait for standing to be confirmed
+    whenever the phone switches its selected computer.
+    The phone refreshes standing while its start or thread screen is in the
+    foreground and when it returns, so host-side changes reach open screens.
+    Routes that change something but rode a read action before (revising or
+    refreshing a Canvas, a connector's sign-in and operations) carry their own
+    write actions, and the local-servers commands route and the server proxy
+    are outside Read only. A device's own sign-out, key rotation and
+    self-revoke keep working at every level. Hub-introduced devices and agent
+    grants have no level and keep their own limits. The own-device answer
+    (`/api/remote/auth/device`) reports a device's own `accessLevel` beside
+    `actsAsHostPerson`, for a device the host's person paired only, so a client
+    can say why a control is missing; like `actsAsHostPerson` it grants
+    nothing.
+  - **Pause remote access and signing out other devices.** Pausing is a host
+    setting journaled as `remote.access-pause-changed@1` with its actor. While
+    it is on, the private listener refuses every paired device's session
+    request and authenticated request (product, self-service and server proxy)
+    with `403` and reason `remote-access-paused`, ends their open requests and
+    proxy sessions, and keeps every device record, key and session row; a
+    client keeps its pairing and says remote access is paused. A window turns it
+    on or off; a Full device may turn it on, which takes its own access too,
+    and never off. The pause is kept through a restart, so a host with no window
+    reads and changes it from its own shell with `octant auth status`,
+    `octant auth pause` and `octant auth resume`, over the same authenticated
+    local channel `octant listener` and `octant pair` use; the listener must be
+    on for the host to answer. A pause and a level change are read again once a
+    request's body has arrived and the request is registered, so neither
+    misses an upload still in flight, and the request that made the change is
+    the only one of the asking device's left to finish its reply. Pausing means nothing remote reaches the host except the
+    person's own computers, so an outside agent's key claim and MCP calls
+    (`/api/agent-access/claim`, `/api/agent-access/mcp`) get the same refusal.
+    Pausing ends their in-flight calls and milestone streams, and keeps their
+    grants for when access resumes. Only the hub's
+    member-to-member routes between this person's own computers, which each
+    member signs with its identity key, keep working. **Sign out all
+    other devices** (`/api/remote/devices/sign-out-others`) revokes every other
+    paired device's key and sessions and keeps the asking device; a window has
+    no device of its own and uses Revoke all.
+  - **Access activity and change notices** (maintainer decision, 2026-11-22).
+    Both are read from the journal on each request, so no projection holds
+    them and a rebuild neither loses nor invents one. `GET
+/api/access-activity` answers the newest 200 devices added (the
+    `device-approved` record, with its level), removed (a revoke, a sign-out
+    of other devices, a self-revoke, an expiry) and re-levelled
+    (`remote.device-access-level-changed@1`, old and new), each with its time,
+    the device's label and who did it: the person at a window (a host record
+    for a change only a person makes), a device by label, an agent grant by
+    name, or the host itself for an expiry. A change notice is derived when a
+    paired device or an agent grant's session (a `remote-device` actor; an
+    agent grant acts under its scope id) raised a thread's level strictly up
+    the level order (`guardrail.access-raised@1` at thread scope, beside the
+    lowering `guardrail.level-lowered@1`, and every other direction under
+    `guardrail.level-changed@1`; a move between Auto and Accept edits is not
+    one) or added or replaced a provider key (a `provider-key`
+    request that records `keyChange`, `added` with the key's random pool id
+    or `replaced`, completed as `stored`; never the key). A window's own
+    change raises none. `GET /api/change-notices` shows the undismissed ones
+    to a window and to a device paired at Full, other than the device that
+    made the change; every other principal is refused on both reads. Dismiss,
+    Undo and Revoke (`POST /api/change-notices/{dismiss,undo,revoke}`) act
+    only on a notice the caller sees and journal
+    `access-notice.dismissed@1` with the outcome and who acted, so it stays
+    gone across a restart and on every client. Undo runs the change's own
+    command as whoever pressed it: the thread's level command back to the
+    level before, refused unless the thread is still at the raised level; or
+    the key pool's journaled remove of exactly the added key, refused once the
+    provider's keys changed again. A replaced key has no Undo, since the
+    earlier key is not kept. Revoke uses the device revoke or the agent
+    grant's revoke. A key's Undo and Revoke stand in for routes that take a
+    window only with the desktop bridge secret, so from a window the notice
+    routes need it too and refuse a window capability alone. A desktop window
+    runs a key's Undo through the notice route the desktop sends with the
+    secret, and the revoke through its own device and grant controls, after a
+    fresh read shows the notice still current (the read names the added key's
+    pool id only while Undo can still remove exactly it). A device paired at
+    Full uses the notice routes on its own session. The change feed's
+    `access-activity` and `change-notices` topics refresh both without a
+    reload. Notices stay in the app: none is sent to a phone's push path or
+    by email.
   - **What a person-paired device does.** As a local window does, with no
     owner unlock: sets a thread, a Project, or the default to Full access and
     starts a Work or Code thread there; changes a Project's access, actions,
@@ -18848,6 +18975,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   administration route without PEMs, or `octant listener enable` without
   `--cert` and `--key`), a certificate the host makes itself. A pasted
   certificate always wins, and the self-made key then stays unused on disk.
+  A bare `octant listener enable` reuses the host's saved listener settings —
+  address, port, and the certificate and key already stored, pasted or
+  self-made — and refuses, naming `--hostname` and `--port`, when no
+  listener settings have been saved; explicit flags still replace the
+  saved values for this run and the next.
   - **Key and certificate.** The self-made key is its own ECDSA P-256 key, not
     the host identity key, which signs the remote hello and whose rotation
     revokes every device. The certificate is a self-signed X.509 v3 leaf for

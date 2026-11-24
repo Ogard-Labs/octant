@@ -11,11 +11,24 @@ export interface MobileModelOption {
   readonly modelId: string;
   readonly label: string;
   readonly detail: string;
+  readonly driverKind?: string;
   /**
    * What the model takes as a native attachment: its declared input
    * modalities when its provider takes native attachments, and none otherwise.
    */
   readonly attachmentModalities: ReadonlyArray<ProviderInputModality>;
+}
+
+/**
+ * Every configured provider account the host knows, enabled or not, so
+ * historical transcript handoffs keep human account and model names after an
+ * account is disabled or goes unready.
+ */
+export interface MobileProviderDirectoryEntry {
+  readonly providerInstanceId: string;
+  readonly displayName: string;
+  readonly driverKind: string;
+  readonly models: ReadonlyArray<{ readonly modelId: string; readonly displayName: string }>;
 }
 
 const OPTION_SEPARATOR = "::";
@@ -59,12 +72,46 @@ export function normalizeMobileModelOptions(
         modelId: String(model.id),
         label: model.displayName,
         detail: instance.displayName,
+        driverKind: instance.driverKind,
         attachmentModalities:
           observation.capabilities.nativeAttachments === "supported" ? model.inputModalities : [],
       });
     }
   }
   return options;
+}
+
+/**
+ * Full provider directory for display attribution (handoff dividers and
+ * disclosures), including disabled and unready instances that pickers omit.
+ * Falls back to persisted catalog snapshots when a runtime probe clears an
+ * account's observed model list.
+ */
+export function normalizeMobileProviderDirectory(
+  snapshot: ProviderRegistrySnapshot,
+): ReadonlyArray<MobileProviderDirectoryEntry> {
+  return snapshot.instances.map((instance) => {
+    const observation = snapshot.observedStates.find(
+      (candidate) => candidate.instanceId === instance.id,
+    );
+    const catalog = snapshot.catalogs?.find((candidate) => candidate.instanceId === instance.id);
+    const modelsById = new Map<string, string>();
+    for (const model of observation?.models ?? []) {
+      modelsById.set(String(model.id), model.displayName);
+    }
+    for (const model of catalog?.models ?? []) {
+      const modelId = String(model.id);
+      if (!modelsById.has(modelId)) {
+        modelsById.set(modelId, model.displayName);
+      }
+    }
+    return {
+      providerInstanceId: String(instance.id),
+      displayName: instance.displayName,
+      driverKind: instance.driverKind,
+      models: Array.from(modelsById, ([modelId, displayName]) => ({ modelId, displayName })),
+    };
+  });
 }
 
 export async function fetchMobileProviderCatalog(

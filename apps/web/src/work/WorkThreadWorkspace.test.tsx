@@ -24,6 +24,11 @@ import { describe, expect, it, vi } from "vitest";
 import { WorkThreadWorkspace } from "./WorkThreadWorkspace";
 import { CompactingThread } from "../context/compactionTestSupport";
 import {
+  ComposerContextMeterGate,
+  ComposerContextMeterProvider,
+} from "../context/composerContextMeterScope";
+import { compactionStateFixture, contextFixture } from "../context/contextFixtures";
+import {
   COMPOSER_STAGED_DROPPED_NOTE,
   createComposerThreadDraftStore,
 } from "../composer/composerThreadDraftStore";
@@ -208,6 +213,29 @@ describe("Work host queue", () => {
 });
 
 describe("WorkThreadWorkspace", () => {
+  it("keeps the Work transcript available to a watching device without a composer", async () => {
+    const thread = workThread();
+    render(
+      <WorkThreadWorkspace
+        initialThread={thread}
+        projects={[]}
+        readOnly
+        threadClient={{
+          searchTranscript: vi.fn(),
+          bootstrap: vi.fn(),
+          navigation: vi.fn(),
+          execute: vi.fn(),
+          queryBoard: vi.fn(),
+        }}
+        threadId={thread.id}
+        title={thread.title}
+      />,
+    );
+
+    expect(await screen.findByRole("log", { name: "Work transcript" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
   it("shows the thread's guardrail level in its info panel", async () => {
     const thread = workThread();
     render(
@@ -829,12 +857,177 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
 
+    const separator = await screen.findByRole("separator", { name: /context handoff/i });
+    expect(separator).toHaveTextContent("Context handoff");
+    expect(separator).toHaveTextContent("Model Two");
+    expect(separator).toHaveTextContent("Model One");
     const note = await screen.findByRole("note");
     expect(note).toHaveTextContent(
       "Handed over 4 recent messages from Remote Provider — Model Two",
     );
     expect(note).toHaveTextContent("Left out: 1 attachment.");
     expect(note).toHaveTextContent("did not transfer");
+    const transcript = screen.getByRole("region", { name: "Task workspace" });
+    expect(transcript.textContent).toMatch(
+      /Context handoff[\s\S]*Model Two[\s\S]*Model One[\s\S]*Summarize the brief/,
+    );
+  });
+
+  it("keeps a previous turn's Canvas before the next turn's handoff and omits unloaded compactions before an opening handoff", async () => {
+    const firstTurn = workTurn({
+      acceptedAt: "2026-08-01T20:00:00.000Z",
+      updatedAt: "2026-08-01T20:01:00.000Z",
+      handoff: {
+        reason: "provider-switch",
+        previousProviderInstanceId: alternateProviderId,
+        previousModelId: alternateModelId,
+        messages: 2,
+        omissions: {
+          earlierMessages: 0,
+          unfinishedReplies: 0,
+          missingBodies: 0,
+          oversizedBodies: 0,
+          emptyBodies: 0,
+          attachments: 0,
+          truncatedMessages: 0,
+          truncatedCharacters: 0,
+          sourceTruncatedMessages: 0,
+        },
+        externalContentIngested: false,
+        nativeSessionTransferred: false,
+        hiddenReasoningTransferred: false,
+      },
+    });
+    const secondTurn = workTurn({
+      requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      turnId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      prompt: "Continue on the remote provider",
+      transcript: [
+        { role: "user", text: "Continue on the remote provider" },
+        { role: "assistant", text: "Remote reply." },
+      ],
+      acceptedAt: "2026-08-01T20:05:00.000Z",
+      updatedAt: "2026-08-01T20:06:00.000Z",
+      authority: {
+        providerInstanceId: alternateProviderId,
+        modelId: alternateModelId,
+      },
+    });
+    const card = {
+      schemaVersion: 1,
+      kind: "canvas-reference-card",
+      cardId: "20000000-0000-4000-8000-000000000011",
+      canvasId: "20000000-0000-4000-8000-000000000012",
+      versionId: "20000000-0000-4000-8000-000000000013",
+      title: "Turn one canvas",
+      scope: { hostId: "local", mode: "work", workspace: { kind: "work-root", projectId: null } },
+      originThreadId: threadId,
+      status: "ready",
+      authority: {
+        filesystem: false,
+        shell: false,
+        git: false,
+        network: false,
+        tools: true,
+        subagents: false,
+        executionPolicy: "plan",
+        permissionPersistence: "current-session",
+      },
+      actorId: "99999999-9999-4999-8999-999999999999",
+      providerInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      modelId: "octant-test-model",
+      canvasCreatedAt: "2026-08-01T20:00:30.000Z",
+      createdAt: "2026-08-01T20:00:30.000Z",
+      actionCount: 0,
+    } as unknown as CanvasThreadReferenceCard;
+    const oldCompaction = {
+      compactionId: "30000000-0000-4000-8000-000000000001",
+      subject: { aggregateType: "work-thread", aggregateId: String(threadId) },
+      executor: {
+        kind: "runtime" as const,
+        driverKind: "codex" as const,
+        providerInstanceId: contextFixture().modelLimits.providerInstanceId,
+      },
+      trigger: "requested" as const,
+      tokensBefore: {
+        kind: "known" as const,
+        tokens: 52_000,
+        accuracy: "provider-reported" as const,
+      },
+      tokensAfter: {
+        kind: "known" as const,
+        tokens: 10_800,
+        accuracy: "provider-reported" as const,
+      },
+      tokensFreed: {
+        kind: "measured" as const,
+        tokens: 41_200,
+        accuracy: "provider-reported" as const,
+      },
+      summary: { visibility: "runtime-only" as const },
+      usage: { kind: "unreported" as const },
+      completedAt: "2026-08-01T19:00:00.000Z",
+    };
+    const compactionState = compactionStateFixture(
+      { aggregateType: "work-thread", aggregateId: String(threadId) } as never,
+      {
+        completedCompactions: [oldCompaction as never],
+      },
+    );
+    const readCompaction = vi.fn(async () => compactionState);
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({
+        threadId,
+        turns: [firstTurn, secondTurn],
+        liveCursor: 0,
+      })),
+    };
+
+    render(
+      <ComposerContextMeterProvider
+        compaction={{
+          client: { readCompaction } as never,
+          controller: {
+            state: compactionState,
+            starting: false,
+            stateUnknown: false,
+            compact: vi.fn(async () => undefined),
+          },
+          names: { provider: () => undefined, model: () => undefined },
+        }}
+        status="not-planned"
+        subjectKey={`work-thread:${String(threadId)}`}
+      >
+        <ComposerContextMeterGate enabled>
+          <WorkThreadWorkspace
+            canvasClient={
+              {
+                threadReferenceCards: vi.fn(async () => ({ cards: [card] })),
+                get: vi.fn(async () => ({ kind: "unavailable" })),
+              } as never
+            }
+            onOpenCanvas={vi.fn()}
+            providerGroups={[providerGroup(), alternateProviderGroup()]}
+            threadClient={threadClient}
+            threadId={threadId}
+            title="Draft brief"
+            turnClient={turnClient as never}
+          />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    await screen.findByText("Turn one canvas");
+    await waitFor(() => expect(readCompaction).toHaveBeenCalled());
+    expect(document.querySelector("[data-compaction-divider]")).toBeNull();
+    const transcript = screen.getByRole("region", { name: "Task workspace" });
+    expect(transcript.textContent).toMatch(
+      /Summarize the brief[\s\S]*Turn one canvas[\s\S]*Here is the confined summary\.[\s\S]*Context handoff[\s\S]*Model One[\s\S]*Model Two[\s\S]*Continue on the remote provider/,
+    );
   });
 
   it("says once what Strict kept for a launch, and again only when what it kept changes", async () => {

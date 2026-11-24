@@ -79,6 +79,13 @@ function setup(overrides: Partial<LocalDeviceAdministrationPort> = {}) {
       result: "applied" as const,
       occurredAt: timestamp,
     })),
+    deviceAccessLevel: vi.fn(() => "full" as const),
+    setDeviceAccessLevel: vi.fn((input) => ({
+      previousLevel: "full" as const,
+      accessLevel: input.accessLevel,
+    })),
+    remoteAccessPaused: vi.fn(() => false),
+    setRemoteAccessPaused: vi.fn((input) => input.paused),
     ...overrides,
   };
   return {
@@ -232,6 +239,7 @@ describe("device administration from a paired device", () => {
     path: string,
     body?: unknown,
     admittedBy?: "host-person" | "hub-roster",
+    accessLevel?: "approve-and-steer" | "read-only",
   ): Request {
     const remote = new Request(`http://127.0.0.1${path}`, {
       method: body === undefined ? "GET" : "POST",
@@ -251,6 +259,7 @@ describe("device administration from a paired device", () => {
         capabilityDigest: "b".repeat(64),
         sessionId: "73000000-0000-4000-8000-000000000081" as never,
         ...(admittedBy === undefined ? {} : { admittedBy }),
+        ...(accessLevel === undefined ? {} : { accessLevel }),
       }),
       scopeId: approver as never,
     });
@@ -360,5 +369,126 @@ describe("device administration from a paired device", () => {
     expect(control.listDevices).not.toHaveBeenCalled();
     expect(control.revokeDevice).not.toHaveBeenCalled();
     expect(control.approvePairing).not.toHaveBeenCalled();
+  });
+
+  it("lets a Full device set another device's level and pause remote access, never resume it", async () => {
+    const { handle, control } = setup();
+    const person = "host-person" as const;
+    expect(
+      (
+        await handle(
+          fromDevice(
+            "/api/remote/devices/access-level",
+            { deviceId, accessLevel: "read-only" },
+            person,
+          ),
+        )
+      )?.status,
+    ).toBe(201);
+    expect(control.setDeviceAccessLevel).toHaveBeenCalledWith({
+      deviceId,
+      accessLevel: "read-only",
+      actor,
+    });
+
+    const resumed = await handle(fromDevice("/api/remote/access-pause", { paused: false }, person));
+    expect(resumed?.status).toBe(401);
+    expect(control.setRemoteAccessPaused).not.toHaveBeenCalled();
+    expect(
+      (await handle(fromDevice("/api/remote/access-pause", { paused: true }, person)))?.status,
+    ).toBe(201);
+    expect(control.setRemoteAccessPaused).toHaveBeenCalledWith({ paused: true, actor });
+  });
+
+  it("refuses a device paired below Full every administration route, its own level included", async () => {
+    const { handle, control } = setup();
+    for (const level of ["approve-and-steer", "read-only"] as const) {
+      for (const remote of [
+        fromDevice("/api/remote/devices", undefined, "host-person", level),
+        fromDevice(
+          "/api/remote/devices/access-level",
+          { deviceId: approver, accessLevel: "full" },
+          "host-person",
+          level,
+        ),
+        fromDevice("/api/remote/access-pause", { paused: true }, "host-person", level),
+        fromDevice("/api/remote/devices/sign-out-others", {}, "host-person", level),
+      ]) {
+        expect((await handle(remote))?.status).toBe(401);
+      }
+    }
+    expect(control.setDeviceAccessLevel).not.toHaveBeenCalled();
+    expect(control.setRemoteAccessPaused).not.toHaveBeenCalled();
+    expect(control.revokeAll).not.toHaveBeenCalled();
+  });
+
+  it("signs out every other device and keeps the asking one", async () => {
+    const { handle, control } = setup();
+    expect(
+      (await handle(fromDevice("/api/remote/devices/sign-out-others", {}, "host-person")))?.status,
+    ).toBe(201);
+    expect(control.revokeAll).toHaveBeenCalledWith({ actor, exceptDeviceId: approver });
+  });
+});
+
+describe("access levels and the pause from a window on the host", () => {
+  const localPerson = { kind: "local-user", actorId: expect.any(String) };
+
+  it("approves a pairing at the level the person picked and shows each device's level", async () => {
+    const { handle, control } = setup({
+      deviceAccessLevel: vi.fn(() => "approve-and-steer" as const),
+    });
+    const ticketId = "44444444-4444-4444-8444-444444444444";
+    const approved = await handle(
+      request("/api/desktop/remote/pairing-requests/approve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ticketId, accessLevel: "read-only" }),
+      }),
+    );
+    expect(approved?.status).toBe(201);
+    expect(control.approvePairing).toHaveBeenCalledWith({ ticketId, accessLevel: "read-only" });
+    const invalid = await handle(
+      request("/api/desktop/remote/pairing-requests/approve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ticketId, accessLevel: "owner" }),
+      }),
+    );
+    expect(invalid?.status).toBe(400);
+
+    const inventory = await handle(request("/api/desktop/remote/devices"));
+    expect(await inventory?.json()).toMatchObject({
+      devices: [{ deviceId, accessLevel: "approve-and-steer" }],
+    });
+  });
+
+  it("sets a level, pauses and resumes, each journaled as the local person", async () => {
+    const { handle, control } = setup();
+    const post = (path: string, body: unknown) =>
+      handle(
+        request(path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+    expect(
+      (await post("/api/desktop/remote/devices/access-level", { deviceId, accessLevel: "full" }))
+        ?.status,
+    ).toBe(201);
+    expect(control.setDeviceAccessLevel).toHaveBeenCalledWith({
+      deviceId,
+      accessLevel: "full",
+      actor: localPerson,
+    });
+    expect((await post("/api/desktop/remote/access-pause", { paused: true }))?.status).toBe(201);
+    expect((await post("/api/desktop/remote/access-pause", { paused: false }))?.status).toBe(201);
+    expect(control.setRemoteAccessPaused).toHaveBeenLastCalledWith({
+      paused: false,
+      actor: localPerson,
+    });
+    const read = await handle(request("/api/desktop/remote/access-pause"));
+    expect(await read?.json()).toEqual({ paused: false });
   });
 });

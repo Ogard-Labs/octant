@@ -67,6 +67,10 @@ function runtime(): RemoteDeviceControlRuntime & Record<string, ReturnType<typeo
       result: "applied" as const,
       occurredAt: pending.claimedAt,
     })),
+    setDeviceAccessLevel: vi.fn(async () => undefined),
+    readRemoteAccessPaused: vi.fn(async () => false),
+    setRemoteAccessPaused: vi.fn(async (input) => input.paused),
+    undoAccessChangeNotice: vi.fn(async () => undefined),
   };
 }
 
@@ -146,6 +150,48 @@ describe("remote device control service", () => {
       expiresAt: 1_785_000_000_000,
       sourceClass: "tailscale",
     });
+  });
+
+  it("sends a notice Undo on the fixed route with only its id, and refuses a bad id before fetch", async () => {
+    const seen: Array<{
+      readonly url: string;
+      readonly method: string | undefined;
+      readonly headers: Headers;
+      readonly body: unknown;
+      readonly redirect: RequestRedirect | undefined;
+    }> = [];
+    const noticeId = "00000000-0000-4000-8000-000000000c03";
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({
+        url: String(input),
+        method: init?.method,
+        headers: new Headers(init?.headers),
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : init?.body,
+        redirect: init?.redirect,
+      });
+      return Response.json({ status: "done" });
+    });
+    const port = createRemoteDeviceControlHttpRuntime({
+      serverUrl: "http://127.0.0.1:13773",
+      desktopBridgeSecret: "bridge-secret",
+      windowCapability: "C".repeat(43),
+      fetch,
+    });
+    const service = createRemoteDeviceControlService({ runtime: port });
+    await expect(service.undoAccessChangeNotice(noticeId)).resolves.toBeUndefined();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.url).toBe("http://127.0.0.1:13773/api/change-notices/undo");
+    expect(seen[0]?.method).toBe("POST");
+    expect(seen[0]?.headers.get("x-octant-desktop-secret")).toBe("bridge-secret");
+    expect(seen[0]?.headers.get("x-octant-window-capability")).toBe("C".repeat(43));
+    expect(seen[0]?.body).toEqual({ noticeId });
+    expect(seen[0]?.redirect).toBe("error");
+
+    // A malformed notice id is refused at the seam, before any fetch.
+    await expect(service.undoAccessChangeNotice("not-a-notice")).rejects.toMatchObject({
+      code: "invalid",
+    });
+    expect(seen).toHaveLength(1);
   });
 
   it("rejects malformed identities and preserves typed unavailable failures", async () => {

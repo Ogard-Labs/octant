@@ -12,6 +12,7 @@ import {
   GitPullRequest,
   Globe2,
   ListChecks,
+  ListTodo,
   MessageCircle,
   Monitor,
   Smartphone,
@@ -43,6 +44,7 @@ const ICONS: Readonly<Record<RightUtilityDockSurfaceId, IconComponent>> = {
   tests: FlaskConical,
   vitals: Activity,
   artifacts: Layers,
+  tasks: ListTodo,
 };
 
 export function dockToolIcon(surface: RightUtilityDockSurfaceId): IconComponent {

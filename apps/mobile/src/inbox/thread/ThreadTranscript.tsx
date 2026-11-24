@@ -8,6 +8,8 @@ import {
   mobileWorkTurnTargets,
   threadRoutineReceipts,
   type MobileCodeConversation,
+  type MobileModelOption,
+  type MobileProviderDirectoryEntry,
   type MobileTurnTargets,
 } from "@octant/client-runtime";
 import type { ChatAttachment, ReplyDetailLevel, WorkTurnState } from "@octant/contracts";
@@ -17,6 +19,13 @@ import { useTheme } from "../../../design-system";
 import { AttemptStatus } from "../../ui/AttemptStatus";
 import { MessageBubble } from "../../ui/MessageBubble";
 import { RoutineReceiptCard } from "../../ui/RoutineReceiptCard";
+import { TranscriptHandoffDivider } from "../../ui/TranscriptHandoffDivider";
+import {
+  mobileChatTranscriptAnnotations,
+  resolveMobileTranscriptHandoff,
+  type MobileChatTranscriptAnnotations,
+  type MobileTranscriptHandoffEntry,
+} from "../../ui/transcriptHandoffPresentation";
 import type { MessageActionItem } from "../../ui/MessageActions";
 import { ThreadWorkShelf } from "../../ui/ThreadWorkShelf";
 import { placeAttachments } from "./attachmentPlacement";
@@ -35,6 +44,10 @@ export interface ThreadTranscriptProps {
   ) => ReadonlyArray<MessageActionItem>;
   /** The thread's Reply detail level, the host's per-thread choice or its default. */
   readonly replyDetail: ReplyDetailLevel;
+  /** Host-advertised models, for resolving provider and model names on handoff dividers. */
+  readonly modelOptions?: ReadonlyArray<MobileModelOption>;
+  /** Full provider directory (including disabled/unready accounts) for historical handoff labels. */
+  readonly providerDirectory?: ReadonlyArray<MobileProviderDirectoryEntry>;
   /**
    * A turn to bring into view, from a message search hit: the transcript
    * reports where that turn sits so the screen can scroll to it. The id is the
@@ -128,9 +141,57 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
     [colors],
   );
   const { chat, workTurns, codeConversation } = props;
+  const modelOptions = props.modelOptions ?? [];
+  const providerDirectory = props.providerDirectory ?? [];
   const codeTurns = codeConversation?.turns;
   const view = chat.view;
   const messages = useMemo(() => (view === undefined ? [] : mobileChatMessages(view)), [view]);
+  const chatAnnotations = useMemo<MobileChatTranscriptAnnotations>(() => {
+    if (view === undefined) {
+      return { beforeContentId: new Map(), afterContentId: new Map(), trailing: [] };
+    }
+    const shownIds = new Set(messages.map((entry) => String(entry.content.contentId)));
+    return mobileChatTranscriptAnnotations(view, modelOptions, providerDirectory, shownIds);
+  }, [messages, modelOptions, providerDirectory, view]);
+  const workHandoffs = useMemo(() => {
+    const map = new Map<string, MobileTranscriptHandoffEntry>();
+    if (workTurns === undefined) return map;
+    for (let index = 0; index < workTurns.length; index += 1) {
+      const turn = workTurns[index];
+      if (turn === undefined) continue;
+      const previous = index > 0 ? workTurns[index - 1] : undefined;
+      const entry = resolveMobileTranscriptHandoff({
+        previous: previous?.authority,
+        current: turn.authority,
+        handoff: turn.handoff,
+        modelOptions,
+        providerDirectory,
+      });
+      if (entry !== undefined) map.set(String(turn.turnId), entry);
+    }
+    return map;
+  }, [modelOptions, providerDirectory, workTurns]);
+  const codeHandoffs = useMemo(() => {
+    const map = new Map<string, MobileTranscriptHandoffEntry>();
+    if (codeTurns === undefined) return map;
+    let previous: { readonly providerInstanceId: string; readonly modelId: string } | undefined;
+    for (const turn of codeTurns) {
+      const current =
+        turn.providerInstanceId !== undefined && turn.modelId !== undefined
+          ? { providerInstanceId: turn.providerInstanceId, modelId: turn.modelId }
+          : undefined;
+      const entry = resolveMobileTranscriptHandoff({
+        previous,
+        current,
+        handoff: turn.handoff,
+        modelOptions,
+        providerDirectory,
+      });
+      if (entry !== undefined) map.set(turn.operationId, entry);
+      if (current !== undefined) previous = current;
+    }
+    return map;
+  }, [codeTurns, modelOptions, providerDirectory]);
   const attachmentsByMessage = useMemo(
     () =>
       view === undefined
@@ -203,55 +264,64 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
           {workTurns.length === 0 ? (
             <Text style={styles.metaText}>{MOBILE_COPY.transcriptEmpty}</Text>
           ) : (
-            workTurns.map((turn, index) => (
-              <View
-                key={String(turn.turnId)}
-                style={styles.transcript}
-                {...focusTurnLayout(String(turn.turnId))}
-              >
-                <MessageBubble
-                  replyDetail={props.replyDetail}
-                  body={turn.prompt}
-                  role="user"
-                  showActions={false}
-                  testID={`mobile-work-prompt-${String(turn.turnId)}`}
-                  turnActions={props.turnActionsFor(
-                    mobileWorkTurnTargets(workTurns, index, "user"),
+            workTurns.map((turn, index) => {
+              const handoff = workHandoffs.get(String(turn.turnId));
+              return (
+                <View
+                  key={String(turn.turnId)}
+                  style={styles.transcript}
+                  {...focusTurnLayout(String(turn.turnId))}
+                >
+                  {handoff === undefined ? null : (
+                    <TranscriptHandoffDivider
+                      entry={handoff}
+                      testID={`mobile-work-handoff-${String(turn.turnId)}`}
+                    />
                   )}
-                />
-                {turn.response !== undefined && turn.response.length > 0 ? (
                   <MessageBubble
                     replyDetail={props.replyDetail}
-                    body={turn.response}
-                    role="assistant"
-                    testID={`mobile-work-reply-${String(turn.turnId)}`}
+                    body={turn.prompt}
+                    role="user"
+                    showActions={false}
+                    testID={`mobile-work-prompt-${String(turn.turnId)}`}
                     turnActions={props.turnActionsFor(
-                      turn.status === "completed"
-                        ? mobileWorkTurnTargets(workTurns, index, "assistant")
-                        : undefined,
+                      mobileWorkTurnTargets(workTurns, index, "user"),
                     )}
                   />
-                ) : turn.failure !== undefined ? (
-                  <Text style={styles.warningText}>{turn.failure.message}</Text>
-                ) : turn.status === "accepted" ||
-                  turn.status === "running" ||
-                  turn.status === "waiting" ? (
-                  <Text style={styles.metaText}>{MOBILE_COPY.turnRunning}</Text>
-                ) : null}
-                <SteeredMessages
-                  replyDetail={props.replyDetail}
-                  steered={turn.steeredMessages}
-                  testID={`mobile-work-steered-${String(turn.turnId)}`}
-                />
-                {threadRoutineReceipts(turn.toolSteps).map((routine) => (
-                  <RoutineReceiptCard
-                    key={routine.routineId}
-                    routine={routine}
-                    testID={`mobile-work-routine-${routine.routineId}`}
+                  {turn.response !== undefined && turn.response.length > 0 ? (
+                    <MessageBubble
+                      replyDetail={props.replyDetail}
+                      body={turn.response}
+                      role="assistant"
+                      testID={`mobile-work-reply-${String(turn.turnId)}`}
+                      turnActions={props.turnActionsFor(
+                        turn.status === "completed"
+                          ? mobileWorkTurnTargets(workTurns, index, "assistant")
+                          : undefined,
+                      )}
+                    />
+                  ) : turn.failure !== undefined ? (
+                    <Text style={styles.warningText}>{turn.failure.message}</Text>
+                  ) : turn.status === "accepted" ||
+                    turn.status === "running" ||
+                    turn.status === "waiting" ? (
+                    <Text style={styles.metaText}>{MOBILE_COPY.turnRunning}</Text>
+                  ) : null}
+                  <SteeredMessages
+                    replyDetail={props.replyDetail}
+                    steered={turn.steeredMessages}
+                    testID={`mobile-work-steered-${String(turn.turnId)}`}
                   />
-                ))}
-              </View>
-            ))
+                  {threadRoutineReceipts(turn.toolSteps).map((routine) => (
+                    <RoutineReceiptCard
+                      key={routine.routineId}
+                      routine={routine}
+                      testID={`mobile-work-routine-${routine.routineId}`}
+                    />
+                  ))}
+                </View>
+              );
+            })
           )}
         </View>
       ) : null}
@@ -263,63 +333,72 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
           {codeTurns.length === 0 ? (
             <Text style={styles.metaText}>{MOBILE_COPY.transcriptEmpty}</Text>
           ) : (
-            codeTurns.map((turn, turnIndex) => (
-              <View
-                key={turn.operationId}
-                style={styles.transcript}
-                {...focusTurnLayout(String(turn.operationId))}
-              >
-                {turn.prompt.length === 0 ? null : (
-                  <MessageBubble
+            codeTurns.map((turn, turnIndex) => {
+              const handoff = codeHandoffs.get(turn.operationId);
+              return (
+                <View
+                  key={turn.operationId}
+                  style={styles.transcript}
+                  {...focusTurnLayout(String(turn.operationId))}
+                >
+                  {handoff === undefined ? null : (
+                    <TranscriptHandoffDivider
+                      entry={handoff}
+                      testID={`mobile-code-handoff-${turn.operationId}`}
+                    />
+                  )}
+                  {turn.prompt.length === 0 ? null : (
+                    <MessageBubble
+                      replyDetail={props.replyDetail}
+                      body={turn.prompt}
+                      role="user"
+                      showActions={false}
+                      testID={`mobile-code-prompt-${turn.operationId}`}
+                      turnActions={props.turnActionsFor(
+                        mobileCodeTurnTargets(codeTurns, turnIndex, "user"),
+                      )}
+                    />
+                  )}
+                  {turn.assistant.map((part, index) => (
+                    <MessageBubble
+                      replyDetail={props.replyDetail}
+                      body={part}
+                      key={`${turn.operationId}-${index}`}
+                      role="assistant"
+                      testID={`mobile-code-reply-${turn.operationId}-${index}`}
+                      {...(index === turn.assistant.length - 1
+                        ? {
+                            turnActions: props.turnActionsFor(
+                              mobileCodeTurnTargets(codeTurns, turnIndex, "assistant"),
+                            ),
+                          }
+                        : {})}
+                    />
+                  ))}
+                  <SteeredMessages
                     replyDetail={props.replyDetail}
-                    body={turn.prompt}
-                    role="user"
-                    showActions={false}
-                    testID={`mobile-code-prompt-${turn.operationId}`}
-                    turnActions={props.turnActionsFor(
-                      mobileCodeTurnTargets(codeTurns, turnIndex, "user"),
-                    )}
+                    steered={turn.steeredMessages}
+                    testID={`mobile-code-steered-${turn.operationId}`}
                   />
-                )}
-                {turn.assistant.map((part, index) => (
-                  <MessageBubble
-                    replyDetail={props.replyDetail}
-                    body={part}
-                    key={`${turn.operationId}-${index}`}
-                    role="assistant"
-                    testID={`mobile-code-reply-${turn.operationId}-${index}`}
-                    {...(index === turn.assistant.length - 1
-                      ? {
-                          turnActions: props.turnActionsFor(
-                            mobileCodeTurnTargets(codeTurns, turnIndex, "assistant"),
-                          ),
-                        }
-                      : {})}
-                  />
-                ))}
-                <SteeredMessages
-                  replyDetail={props.replyDetail}
-                  steered={turn.steeredMessages}
-                  testID={`mobile-code-steered-${turn.operationId}`}
-                />
-                {turn.status === "waiting" ? (
-                  <Text style={styles.metaText}>
-                    {turn.usageLimit === undefined
-                      ? MOBILE_COPY.turnRunning
-                      : MOBILE_COPY.turnWaitingOnUsageLimit}
-                  </Text>
-                ) : turn.status === "failed" || turn.status === "interrupted" ? (
-                  <Text style={styles.warningText}>{chatAttemptStatusLabel(turn.status)}</Text>
-                ) : null}
-                {turn.routines.map((routine) => (
-                  <RoutineReceiptCard
-                    key={routine.routineId}
-                    routine={routine}
-                    testID={`mobile-code-routine-${routine.routineId}`}
-                  />
-                ))}
-              </View>
-            ))
+                  {turn.status === "waiting" ? (
+                    <Text style={styles.metaText}>
+                      {turn.usageLimit === undefined
+                        ? MOBILE_COPY.turnRunning
+                        : MOBILE_COPY.turnWaitingOnUsageLimit}
+                    </Text>
+                  ) : turn.status === "failed" || turn.status === "interrupted" ? (
+                    <Text style={styles.warningText}>{chatAttemptStatusLabel(turn.status)}</Text>
+                  ) : null}
+                  {turn.routines.map((routine) => (
+                    <RoutineReceiptCard
+                      key={routine.routineId}
+                      routine={routine}
+                      testID={`mobile-code-routine-${routine.routineId}`}
+                    />
+                  ))}
+                </View>
+              );
+            })
           )}
         </View>
       ) : null}
@@ -400,6 +479,10 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                 chat.activeAttempt === undefined &&
                 props.allowProductMutations;
               const sentWith = attachmentsByMessage.get(String(content.contentId)) ?? [];
+              const annotationsBefore =
+                chatAnnotations.beforeContentId.get(String(content.contentId)) ?? [];
+              const annotationsAfter =
+                chatAnnotations.afterContentId.get(String(content.contentId)) ?? [];
               return (
                 <View
                   key={content.contentId}
@@ -414,6 +497,23 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                     : {})}
                   style={styles.messageWithAttachments}
                 >
+                  {annotationsBefore.map((annotation, itemIndex) =>
+                    annotation.kind === "handoff" ? (
+                      <TranscriptHandoffDivider
+                        entry={annotation.entry}
+                        key={`before-${String(content.contentId)}-${String(itemIndex)}`}
+                        testID={`mobile-chat-handoff-${String(content.contentId)}`}
+                      />
+                    ) : (
+                      <Text
+                        key={`described-before-${String(content.contentId)}-${String(itemIndex)}`}
+                        style={styles.metaText}
+                        testID={`mobile-chat-described-images-${String(content.contentId)}-${String(itemIndex)}`}
+                      >
+                        {annotation.text}
+                      </Text>
+                    ),
+                  )}
                   <MessageBubble
                     replyDetail={props.replyDetail}
                     body={content.body}
@@ -436,9 +536,43 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                       : {})}
                   />
                   {sentWith.length > 0 ? attachmentChips(sentWith, true) : null}
+                  {annotationsAfter.map((annotation, itemIndex) =>
+                    annotation.kind === "handoff" ? (
+                      <TranscriptHandoffDivider
+                        entry={annotation.entry}
+                        key={`after-${String(content.contentId)}-${String(itemIndex)}`}
+                        testID={`mobile-chat-handoff-after-${String(content.contentId)}-${String(itemIndex)}`}
+                      />
+                    ) : (
+                      <Text
+                        key={`described-after-${String(content.contentId)}-${String(itemIndex)}`}
+                        style={styles.metaText}
+                        testID={`mobile-chat-described-images-after-${String(content.contentId)}-${String(itemIndex)}`}
+                      >
+                        {annotation.text}
+                      </Text>
+                    ),
+                  )}
                 </View>
               );
             })
+          )}
+          {chatAnnotations.trailing.map((annotation, itemIndex) =>
+            annotation.kind === "handoff" ? (
+              <TranscriptHandoffDivider
+                entry={annotation.entry}
+                key={`trailing-${String(itemIndex)}`}
+                testID={`mobile-chat-handoff-trailing-${String(itemIndex)}`}
+              />
+            ) : (
+              <Text
+                key={`described-trailing-${String(itemIndex)}`}
+                style={styles.metaText}
+                testID={`mobile-chat-described-images-trailing-${String(itemIndex)}`}
+              >
+                {annotation.text}
+              </Text>
+            ),
           )}
         </View>
       ) : null}
