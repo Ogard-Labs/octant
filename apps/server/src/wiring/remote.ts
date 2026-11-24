@@ -316,6 +316,7 @@ export type RemoteDependencies = {
     | "credentialResolver"
     | "extensionApiService"
     | "generatedImageStore"
+    | "videoJobService"
     | "imageJobService"
     | "providerDataDirectory"
     | "providerService"
@@ -448,6 +449,7 @@ export function wireRemote(deps: RemoteDependencies) {
     extensionApiService,
     evictGeneratedImageScope,
     generatedImageStore,
+    videoJobService,
     debugConfigurationApprovals,
     debugService,
     hostMemoryGuard,
@@ -2945,6 +2947,15 @@ export function wireRemote(deps: RemoteDependencies) {
             // raced with purgeScope cannot leave purged bytes cached.
             evictGeneratedImageScope?.(scopeId);
           }
+        },
+        purgeGeneratedVideos: async (id) => {
+          let scopeId: ImageGenerationScopeId;
+          try {
+            scopeId = decodeImageGenerationScopeId(id);
+          } catch {
+            return;
+          }
+          await videoJobService.purgeScope(scopeId).catch(() => undefined);
         },
         purgeBrowserCaptures: async (id) => {
           let threadId;

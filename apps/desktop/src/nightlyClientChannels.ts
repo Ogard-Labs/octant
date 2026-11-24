@@ -114,6 +114,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   selectSkillFolder: "local",
   selectRuntimeBinary: "local",
   saveSupportBundle: "local",
+  downloadThreadVideoArchive: "local",
   saveBrowserProofScreenshots: "local",
   windowCaptureList: "local",
   windowCapturePermission: "local",

@@ -72,6 +72,26 @@ describe("exporting a thread", () => {
     ).resolves.toBe("This thread could not be exported.");
   });
 
+  it("keeps the JSON export available when an older host has no archive route", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch");
+    fetch.mockImplementation(async (input) => {
+      if (new URL(String(input)).pathname !== "/api/threads/export")
+        throw new TypeError("Failed to fetch");
+      return Response.json(exported());
+    });
+    try {
+      const legacy = resolveThreadExportClient({
+        serverUrl: "http://127.0.0.1:3100",
+        windowCapability: "fixture",
+      });
+      if (legacy?.offerArchive === undefined) throw new Error("Expected an export client.");
+      await expect(legacy.offerArchive({ mode: "chat", threadId })).resolves.toEqual(exported());
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
   it("resolves no export client for a window with no server capability", () => {
     expect(resolveThreadExportClient({ serverUrl: "http://127.0.0.1:1" })).toBeUndefined();
     expect(resolveThreadExportClient({})).toBeUndefined();

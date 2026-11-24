@@ -1,13 +1,18 @@
 import { render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { decodeHostId, LOCAL_HOST_ID, type HostIdentity } from "@octant/contracts/host";
+import { decodeImageGenerationScopeId, decodeVideoJobId } from "@octant/contracts";
+import { useContext, type ContextType } from "react";
 import type { RemoteCodeSurfaceProps } from "../remote/RemoteWorkspace";
-import { readyPairedBridge } from "./pairedComputerTestBridge.test-support";
+import { VideoClientContext } from "../video/ThreadVideoClips";
+import { ORIGIN, readyPairedBridge } from "./pairedComputerTestBridge.test-support";
 
 const surfaces: RemoteCodeSurfaceProps[] = [];
+const videoClients: Array<ContextType<typeof VideoClientContext>> = [];
 vi.mock("../remote/RemoteWorkspace", () => ({
   RemoteCodeSurface: (props: RemoteCodeSurfaceProps) => {
     surfaces.push(props);
+    videoClients.push(useContext(VideoClientContext));
     return <p>Paired computer's Code</p>;
   },
 }));
@@ -22,15 +27,20 @@ const hosts: ReadonlyArray<HostIdentity> = [
 
 async function surfaceFor(actsAsHostPerson: boolean, sent: URL[] = []) {
   surfaces.length = 0;
+  videoClients.length = 0;
   const bridge = await readyPairedBridge(sent, { actsAsHostPerson });
+  const thisComputer = { list: vi.fn(), clipUrl: vi.fn() };
   render(
-    <PairedComputerCodeSurface
-      bridge={bridge}
-      hosts={hosts}
-      selectedHostId={LAPTOP}
-      onSelectHost={() => undefined}
-    />,
+    <VideoClientContext.Provider value={thisComputer}>
+      <PairedComputerCodeSurface
+        bridge={bridge}
+        hosts={hosts}
+        selectedHostId={LAPTOP}
+        onSelectHost={() => undefined}
+      />
+    </VideoClientContext.Provider>,
   );
+  return thisComputer;
 }
 
 describe("a paired computer's Code start screen", () => {
@@ -51,6 +61,41 @@ describe("a paired computer's Code start screen", () => {
     // Give the standing read time to answer; it must stay restricted.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(surfaces.every((props) => props.actsAsHostPerson === false)).toBe(true);
+    expect(videoClients.every((client) => client === undefined)).toBe(true);
+  });
+
+  it("lists and opens video clips through the paired computer's session", async () => {
+    const scopeId = decodeImageGenerationScopeId("d4000000-0000-4000-8000-000000000002");
+    const jobId = decodeVideoJobId("d4000000-0000-4000-8000-000000000003");
+    const sent: URL[] = [];
+    const thisComputer = await surfaceFor(true, sent);
+    await waitFor(() => expect(surfaces.at(-1)?.actsAsHostPerson).toBe(true));
+    const paired = videoClients.at(-1);
+
+    await expect(paired?.list({ threadKind: "code-thread", scopeId })).resolves.toEqual({
+      jobs: [],
+    });
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:paired-clip");
+    try {
+      await expect(paired?.clipUrl(jobId)).resolves.toMatchObject({ url: "blob:paired-clip" });
+      expect(createObjectURL).toHaveBeenCalledOnce();
+      const clip = createObjectURL.mock.calls[0]?.[0];
+      if (clip === undefined || !("arrayBuffer" in clip))
+        throw new Error("The player did not receive a clip blob.");
+      expect(new Uint8Array(await clip.arrayBuffer())).toEqual(Uint8Array.of(1, 2, 3));
+    } finally {
+      createObjectURL.mockRestore();
+    }
+    const videoRequests = sent.filter((url) => url.pathname.startsWith("/api/video/"));
+    expect(videoRequests.map((url) => [url.origin, url.pathname])).toEqual([
+      [ORIGIN, "/api/video/jobs"],
+      [ORIGIN, "/api/video/clip"],
+      [ORIGIN, "/api/video/clip"],
+      [ORIGIN, "/api/video/clip"],
+    ]);
+    expect(videoRequests[0]?.searchParams.get("scopeId")).toBe(String(scopeId));
+    expect(thisComputer.list).not.toHaveBeenCalled();
+    expect(thisComputer.clipUrl).not.toHaveBeenCalled();
   });
 
   it("lists a thread's MCP tool approvals on that computer, so one Needs you opens can be answered there", async () => {
