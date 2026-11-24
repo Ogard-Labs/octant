@@ -4,6 +4,11 @@ import {
   acpAgentCreateCommandKind,
   CLAUDE_ACCOUNT_ACCENTS,
 } from "@octant/contracts/providers";
+import type {
+  ChangeAcpAgentConfigurationCommand,
+  CreateAcpAgentProviderCommand,
+  ProviderRegistryCommand,
+} from "@octant/contracts/provider-commands";
 import {
   assignedProviderAccountDirectory,
   CLAUDE_ACCOUNT_PROFILE,
@@ -36,9 +41,6 @@ import type {
   AcpAgentProviderInstance,
   AddedAcpAgentConfiguration,
   AddedAcpAgentProviderInstance,
-  ChangeAcpAgentConfigurationCommand,
-  CreateAcpAgentProviderCommand,
-  ProviderRegistryCommand,
   AnthropicCompatibleProviderConfiguration,
   AnthropicCompatibleProviderInstance,
   AzureFoundryProviderConfiguration,

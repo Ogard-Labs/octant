@@ -1,10 +1,9 @@
 import {
-  decodeProviderRegistryCommand,
   ProviderFailure,
   type ProviderInstanceId,
   ProviderProbeResult,
   type ProviderRegistryCommand,
-  ProviderRegistryCommandResult,
+  type ProviderRegistryCommandResult,
   ProviderRegistrySnapshot,
   ThreadNativeSetupResult,
   ThreadProjectCodeResult,
@@ -66,6 +65,9 @@ export function createProviderClient(options: ProviderClientOptions): ProviderCl
       );
     },
     async execute(command) {
+      // Command decoders are only needed when a person changes a provider in Settings.
+      const { decodeProviderRegistryCommand, ProviderRegistryCommandResult } =
+        await import("@octant/contracts/provider-commands");
       let validated: ProviderRegistryCommand;
       try {
         validated = decodeProviderRegistryCommand(command);
