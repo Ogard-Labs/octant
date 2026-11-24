@@ -162,6 +162,39 @@ describe("KeybindingSettings", () => {
     expect(hook.result.current.document).toBe("");
   });
 
+  it("refuses to record an editor chord, says why, and changes nothing", async () => {
+    const user = userEvent.setup();
+    const { hook } = renderSettings(memoryStore());
+
+    const search = screen.getByRole("button", {
+      name: "Change the chord for Find a file by name",
+    });
+    await user.click(search);
+    fireEvent.keyDown(search, { key: "z", ctrlKey: true });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Mod+Z is Undo in text fields.");
+    expect(hook.result.current.document).toBe("");
+  });
+
+  it("reports an editor chord typed into the JSON and keeps the default", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderSettings(memoryStore());
+
+    await user.click(screen.getByText("Edit keybindings JSON"));
+    fireEvent.change(screen.getByLabelText("Keybindings JSON"), {
+      target: { value: '{"code-file-search":"Mod+C"}' },
+    });
+    await user.click(screen.getByRole("button", { name: "Save JSON" }));
+    rerender();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "code-file-search: Mod+C is Copy in text fields. Using the default instead.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Change the chord for Find a file by name" }),
+    ).toHaveTextContent("Ctrl+P");
+  });
+
   it("names the action that will not run when two share a chord", () => {
     renderSettings(memoryStore('{"code-file-search":"Mod+K"}'));
 

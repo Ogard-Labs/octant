@@ -212,8 +212,8 @@ export interface BrowserSurfaceShellWindowPort {
  * chords: the command palette (⌘K), sidebar (⌘\), dock (⌘⇧J), and focusing the
  * composer (Ctrl+Escape). ⌘ is Ctrl off macOS. Settings (⌘,) is an
  * application-menu accelerator, which already fires while a page has focus.
- * Zen's ⌘⇧Z is Redo, and the renderer leaves it to a focused text field; the
- * page's fields keep it the same way.
+ * Zen's ⌘⇧E stays with the page, as the renderer leaves it to a focused text
+ * field.
  */
 export function appShortcutOf(
   input: unknown,
