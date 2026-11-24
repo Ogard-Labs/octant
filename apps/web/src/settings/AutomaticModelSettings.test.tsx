@@ -3,8 +3,11 @@ import {
   type PersonMemoryResult,
   type PersonMemoryView,
 } from "@octant/contracts/person-memory";
+import type { ThreadTitleSettings } from "@octant/contracts/shell";
+import { decodeProviderInstanceId, decodeProviderModelId } from "@octant/contracts/providers";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { AutomaticModelSettings } from "./AutomaticModelSettings";
@@ -12,20 +15,36 @@ import { AutomaticModelSettings } from "./AutomaticModelSettings";
 const LOCAL = "00000000-0000-4000-8000-0000000000a1";
 const KEYED = "00000000-0000-4000-8000-0000000000a2";
 const OFF = "00000000-0000-4000-8000-0000000000a3";
+const PLAN = "00000000-0000-4000-8000-0000000000a4";
 
 const snapshot = {
   instances: [
     { id: LOCAL, displayName: "Local", enabled: true },
-    { id: KEYED, displayName: "Team key", enabled: true },
+    {
+      id: KEYED,
+      displayName: "Team key",
+      enabled: true,
+      driverKind: "openai-compatible",
+      configuration: { authentication: "bearer" },
+    },
     { id: OFF, displayName: "Old account", enabled: false },
+    {
+      id: PLAN,
+      displayName: "ChatGPT plan",
+      enabled: true,
+      driverKind: "openai-compatible",
+      configuration: { authentication: "bearer", oauthDescriptorId: "chatgpt-plan" },
+    },
   ],
   observedStates: [
     { instanceId: LOCAL, readiness: "ready" },
     { instanceId: KEYED, readiness: "ready", accountAuthentication: "api-key" },
+    { instanceId: PLAN, readiness: "ready", accountAuthentication: "subscription" },
   ],
   catalogs: [
     { instanceId: LOCAL, models: [{ id: "local-small", displayName: "Local small" }] },
     { instanceId: KEYED, models: [{ id: "key-mini", displayName: "Key mini" }] },
+    { instanceId: PLAN, models: [{ id: "plan-mini", displayName: "Plan mini" }] },
   ],
 } as never;
 
@@ -57,6 +76,88 @@ function fakeMemory(initial: PersonMemoryView) {
 }
 
 describe("Automatic model calls", () => {
+  it("switches between API and subscription titles without losing either model choice", async () => {
+    function Settings() {
+      const [settings, setSettings] = useState<ThreadTitleSettings>();
+      return (
+        <AutomaticModelSettings
+          codeSettings={undefined}
+          onCodeUpdate={vi.fn()}
+          onThreadTitlesChange={setSettings}
+          personMemoryClient={undefined}
+          providerSnapshot={snapshot}
+          threadTitles={settings}
+        />
+      );
+    }
+    render(<Settings />);
+    const user = userEvent.setup();
+    const source = screen.getByRole("combobox", { name: "Thread title source" });
+    expect(source).toHaveTextContent("Use first message");
+    await chooseSelectFieldOption(user, source, "API endpoint");
+    const api = screen.getByRole("combobox", { name: "API endpoint model" });
+    await user.click(api);
+    expect(screen.queryByRole("option", { name: "ChatGPT plan · Plan mini" })).toBeNull();
+    await user.click(await screen.findByRole("option", { name: "Team key (API key) · Key mini" }));
+    expect(screen.getByText(/first message to Team key/)).toBeVisible();
+    await chooseSelectFieldOption(user, source, "Subscription");
+    const subscription = screen.getByRole("combobox", { name: "Subscription model" });
+    await user.click(subscription);
+    expect(screen.queryByRole("option", { name: "Team key (API key) · Key mini" })).toBeNull();
+    await user.click(await screen.findByRole("option", { name: "ChatGPT plan · Plan mini" }));
+    expect(screen.getByText(/first message to ChatGPT plan/)).toBeVisible();
+    await chooseSelectFieldOption(user, source, "API endpoint");
+    expect(screen.getByRole("combobox", { name: "API endpoint model" })).toHaveTextContent(
+      "Key mini",
+    );
+    await chooseSelectFieldOption(user, source, "Use first message");
+    expect(screen.queryByRole("combobox", { name: "API endpoint model" })).toBeNull();
+    await chooseSelectFieldOption(user, source, "Subscription");
+    expect(screen.getByRole("combobox", { name: "Subscription model" })).toHaveTextContent(
+      "Plan mini",
+    );
+  });
+
+  it("opens endpoint setup when the remembered title endpoint was removed", async () => {
+    const open = vi.fn();
+    render(
+      <AutomaticModelSettings
+        codeSettings={undefined}
+        onCodeUpdate={vi.fn()}
+        personMemoryClient={undefined}
+        onThreadTitlesChange={vi.fn()}
+        onOpenModelEndpoints={open}
+        providerSnapshot={{ instances: [], catalogs: [], observedStates: [] } as never}
+        threadTitles={{
+          source: "subscription",
+          subscriptionModel: {
+            providerInstanceId: decodeProviderInstanceId(PLAN),
+            modelId: decodeProviderModelId("plan-mini"),
+          },
+        }}
+      />,
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "Open Model endpoints" }));
+    expect(open).toHaveBeenCalledOnce();
+    expect(screen.getByText(/the account you chose was removed/i)).toBeVisible();
+  });
+
+  it("shows a failed title-model save and keeps the saved choice", async () => {
+    render(
+      <AutomaticModelSettings
+        codeSettings={undefined}
+        onCodeUpdate={vi.fn()}
+        onThreadTitlesChange={vi.fn(async () => false)}
+        personMemoryClient={undefined}
+        providerSnapshot={snapshot}
+      />,
+    );
+    const field = screen.getByRole("combobox", { name: "Thread title source" });
+    await chooseSelectFieldOption(userEvent.setup(), field, "API endpoint");
+    expect(await screen.findByText("Thread title settings could not be saved.")).toBeVisible();
+    expect(field).toHaveTextContent("Use first message");
+  });
+
   it("offers the thread's provider, then each enabled account, an API-key one marked, and none that is off", async () => {
     const { client } = fakeMemory(memoryView());
     render(

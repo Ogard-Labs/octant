@@ -1,3 +1,4 @@
+import { octantSettingsNavigation } from "./octantSettingsNavigation";
 import { createSettingsRegistry, settingId, type SettingsRegistry } from "./registry";
 
 /**
@@ -18,9 +19,7 @@ import { createSettingsRegistry, settingId, type SettingsRegistry } from "./regi
 export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
   sections: [
     {
-      id: "general",
-      label: "General",
-      scope: "app",
+      ...octantSettingsNavigation.general,
       keywords:
         "general enabled modes startup default chat work updates version release threads completed put away archive snooze compact compaction context window profile name email avatar gravatar initials colour color picture identity notifications notify alerts push phone waiting approval failure completion automation routines",
       settings: [
@@ -266,9 +265,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "appearance",
-      label: "Appearance",
-      scope: "app",
+      ...octantSettingsNavigation.appearance,
       keywords:
         "appearance theme glass translucency material background typography font reading transcript accessibility",
       settings: [
@@ -523,9 +520,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "sidebar",
-      label: "Sidebar",
-      scope: "app",
+      ...octantSettingsNavigation.sidebar,
       keywords:
         "sidebar width destinations more row mode switcher provider icons thread rows background layout",
       settings: [
@@ -646,9 +641,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "keybindings",
-      label: "Keybindings",
-      scope: "app",
+      ...octantSettingsNavigation.keybindings,
       keywords: "keybindings keyboard shortcuts chord palette zen search rebind json",
       settings: [
         {
@@ -660,9 +653,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "chat",
-      label: "Chat",
-      scope: "app",
+      ...octantSettingsNavigation.chat,
       keywords:
         "chat defaults provider model fallback backup web research backend routing octant searxng base url personality instructions new threads",
       settings: [
@@ -712,9 +703,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "work",
-      label: "Work",
-      scope: "host",
+      ...octantSettingsNavigation.work,
       keywords:
         "work defaults provider model access ask first auto-accept edits approvals files project folder new threads",
       settings: [
@@ -747,9 +736,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "code",
-      label: "Code",
-      scope: "app",
+      ...octantSettingsNavigation.code,
       keywords:
         "code defaults access approvals plan read-only full access permission persistence current session external editor executable arguments new threads open in applications vscode cursor zed finder terminal ghostty xcode detected installed diff layout unified side by side review language services type errors go to definition",
       settings: [
@@ -885,12 +872,23 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "providers",
-      label: "Providers & Models",
-      scope: "app",
+      ...octantSettingsNavigation.providers,
       keywords:
         "providers models agent runtimes provider type opencode codex kimi code acp cli login claude agent sdk subscription gemini qwen cline mistral vibe grok glm fx goose copilot antigravity agy google devin kilo pi binary path permissions permission persistence runtime capabilities connection detected installed scan opencode update managed cli version provider catalog drivers bundled installed trusted available enabled authenticated signed in ready set up setup guided add runtime endpoint find look on this host install modes chat work code agent loop harness capabilities",
       settings: [
+        {
+          id: settingId("automatic-model-thread-title"),
+          label: "Thread titles",
+          scope: "host",
+          keywords:
+            "automatic model calls thread title text generator name chat work code api key endpoint subscription chatgpt plan",
+        },
+        {
+          id: settingId("automatic-model-thread-title-model"),
+          label: "Thread title model",
+          scope: "host",
+          keywords: "automatic naming generator",
+        },
         {
           id: settingId("automatic-model-judge"),
           label: "Octant Shield's Judge",
@@ -1059,9 +1057,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "harness",
-      label: "Octant Harness",
-      scope: "app",
+      ...octantSettingsNavigation.harness,
       keywords:
         "octant harness native agent loop model endpoints endpoint api openai-compatible anthropic-compatible ollama azure ai foundry deployment base url api key bearer protocol manual model ids sign in with chatgpt plan openrouter subscription model roles main model backup model slots default plan slow task smol vision advisor routing fallback cooldown delegate children follow-ups chips agents subagents helper agents child creation posture off on automatic bounded hierarchy navigator assistant default model provider vision reviewer image screenshot dock help",
       settings: [
@@ -1139,9 +1135,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "voice",
-      label: "Voice & images",
-      scope: "app",
+      ...octantSettingsNavigation.voice,
       keywords:
         "voice speech microphone dictation transcription speech to text text to speech read aloud whisper tts stt image generation image provider profiles openai image gpt-image gemini image black forest labs flux ideogram custom image sources provider api key recraft openai-compatible bring your own endpoint",
       settings: [
@@ -1214,9 +1208,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "skills",
-      label: "Skills & Extensions",
-      scope: "host",
+      ...octantSettingsNavigation.skills,
       keywords:
         "skills extensions marketplace installed plugin package trust enable component desired effective provenance compatibility quarantine draining broken unavailable interrupted waiting offline failure mcp skill",
       settings: [
@@ -1260,9 +1252,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "web-search",
-      label: "Web search",
-      scope: "host",
+      ...octantSettingsNavigation["web-search"],
       keywords:
         "web search backends data policy zdr eu searxng staan mojeek linkup brave exa api key fallback provider search",
       settings: [
@@ -1287,9 +1277,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "computer-use",
-      label: "Computer use",
-      scope: "host",
+      ...octantSettingsNavigation["computer-use"],
       keywords:
         "computer use computer automation cua driver permissions accessibility screen recording plugin updates upgrade",
       settings: [
@@ -1381,9 +1369,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "device-tools",
-      label: "Device tools",
-      scope: "host",
+      ...octantSettingsNavigation["device-tools"],
       keywords:
         "device tools simulator emulator serve-sim serve-avd ios android stream updates upgrade bundled",
       settings: [
@@ -1402,9 +1388,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "github",
-      label: "GitHub",
-      scope: "host",
+      ...octantSettingsNavigation.github,
       keywords:
         "github account gh cli authentication connection setup sign in refresh scopes read:project logout revoke authorization repositories issues pull requests projects capability credential storage device code insecure external token rate limited diagnostics",
       settings: [
@@ -1423,9 +1407,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "linear",
-      label: "Linear",
-      scope: "host",
+      ...octantSettingsNavigation.linear,
       keywords:
         "linear workspace authentication connection setup oauth connect disconnect reconnect issues personal api key",
       settings: [
@@ -1444,9 +1426,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "permissions",
-      label: "Permissions",
-      scope: "host",
+      ...octantSettingsNavigation.permissions,
       keywords:
         "permissions protected files secrets ssh keys credentials remembered websites sites origins browser always allow forget public links share sharing remembered tool approvals extension tools revoke trust allowed access network safe networks servers ssh trusted hosts domains address ranges local network this mac private network overlay egress proxy refused recently refused trust allow outbound connections",
       settings: [
@@ -1734,9 +1714,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "memory",
-      label: "Memory",
-      scope: "host",
+      ...octantSettingsNavigation.memory,
       keywords:
         "memory remember person preferences past threads other projects forget learn privacy no trace distill",
       settings: [
@@ -1785,9 +1763,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "secret-stores",
-      label: "Secret stores",
-      scope: "host",
+      ...octantSettingsNavigation["secret-stores"],
       keywords:
         "secret stores 1password op command line vault item reference link unlink api key credential password manager keychain pointer fetch on use",
       settings: [
@@ -1852,9 +1828,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "data",
-      label: "Data & storage",
-      scope: "host",
+      ...octantSettingsNavigation.data,
       keywords:
         "data privacy backup snapshot restore recovery stored data map location journal projections artifacts credentials keychain caches what leaves this machine retention purge export erase delete history",
       settings: [
@@ -1933,9 +1907,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "todos",
-      label: "To-dos",
-      scope: "host",
+      ...octantSettingsNavigation.todos,
       keywords: "to-dos todo list keep host hub paired computer where sync",
       settings: [
         {
@@ -1947,9 +1919,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "sync",
-      label: "Sync",
-      scope: "host",
+      ...octantSettingsNavigation.sync,
       keywords:
         "sync artifacts replica store synced folder dropbox icloud onedrive s3 bucket endpoint region prefix access key secret keychain test connection probe other computers",
       settings: [
@@ -2017,9 +1987,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "remote-access",
-      label: "Remote access",
-      scope: "host",
+      ...octantSettingsNavigation["remote-access"],
       keywords:
         "remote access private listener lan tailscale https certificate pairing pair link ticket code approve deny device devices paired inventory browser phone revoke rename origin port exposure",
       settings: [
@@ -2204,9 +2172,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "host",
-      label: "Host",
-      scope: "host",
+      ...octantSettingsNavigation.host,
       keywords:
         "host service lifecycle stop restart enable disable startup policy identity owner mode versions readiness store replay clients uptime capabilities headless automation notifications push waiting approval failure completion apns fcm federated hosts maintenance reset layout window bounds diagnostics export support",
       settings: [
@@ -2265,9 +2231,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "usage",
-      label: "Usage",
-      scope: "host",
+      ...octantSettingsNavigation.usage,
       keywords:
         "usage operational dashboard provider model host mode project thread request shape attribution filters totals daily weekly cumulative top consumers measurement quality exact estimated reconciled stale unavailable export reset retention purge spend ceiling token budget",
       settings: [

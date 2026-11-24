@@ -1,18 +1,21 @@
 import {
-  decodeSideChatDraftReturnReferences,
   decodeCodeReviewFindingReferences,
   MAX_CODE_REVIEW_CORRECTION_FINDINGS,
   type CodeReviewCorrectionPrepared,
   type CodeReviewFindingReference,
+} from "@octant/contracts/code-operations";
+import {
+  decodeSideChatDraftReturnReferences,
   MAX_SIDE_CHAT_DRAFT_RETURNS,
   type SideChatDraftPrepared,
   type SideChatDraftReturnReference,
-} from "@octant/contracts";
+} from "@octant/contracts/side-chat-return";
 import {
   asQueueReceiptStorage,
   markQueueDraftChanged,
   purgeQueueReceipts,
 } from "../messageQueue/threadMessageQueueReceipts";
+import { registerComposerThreadDraftReset } from "./composerThreadDraftReset";
 import type { ComposerInputElement } from "./ComposerInput";
 
 /**
@@ -518,6 +521,11 @@ export function createComposerThreadDraftStore(
 }
 
 export const composerThreadDrafts = createComposerThreadDraftStore();
+if (import.meta.env.MODE === "test") {
+  registerComposerThreadDraftReset(() => {
+    composerThreadDrafts.clearAll();
+  });
+}
 
 export function purgeComposerThreadDrafts(
   threadIds: ReadonlyArray<string>,

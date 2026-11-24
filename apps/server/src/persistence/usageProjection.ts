@@ -11,6 +11,8 @@ import {
   PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE,
   SHIELD_REVIEW_REQUEST_SHAPE,
   SHIELD_REVIEW_USAGE_AGGREGATE_TYPE,
+  THREAD_TITLE_REQUEST_SHAPE,
+  THREAD_TITLE_USAGE_AGGREGATE_TYPE,
   PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE,
   decodeCodeOperationEventFrame,
   decodeContextUsageReconciled,
@@ -69,6 +71,7 @@ export class UsageProjection implements Projection {
       event.aggregateType !== PERSON_MEMORY_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== DECISION_REVIEW_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE &&
+      event.aggregateType !== THREAD_TITLE_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE
     )
       return;
@@ -105,7 +108,8 @@ export class UsageProjection implements Projection {
               ? shieldReviewedThreadType(connection, event.aggregateId)
               : event.aggregateType === PERSON_MEMORY_USAGE_AGGREGATE_TYPE ||
                   event.aggregateType === DECISION_REVIEW_USAGE_AGGREGATE_TYPE ||
-                  event.aggregateType === IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE
+                  event.aggregateType === IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE ||
+                  event.aggregateType === THREAD_TITLE_USAGE_AGGREGATE_TYPE
                 ? distilledThreadType(connection, event.aggregateId)
                 : event.aggregateType,
       aggregateId: event.aggregateId,
@@ -227,6 +231,7 @@ export class UsageProjection implements Projection {
           reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE ||
           reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE ||
           reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE ||
+          reconciliation.requestShape === THREAD_TITLE_REQUEST_SHAPE ||
           reconciliation.requestShape === PULL_REQUEST_REVIEW_REQUEST_SHAPE
           ? 0
           : 1,

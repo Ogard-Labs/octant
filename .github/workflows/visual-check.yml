@@ -11,7 +11,8 @@ name: Visual check
 # decides instead, and a skipped job counts as passed.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    # A draft runs nothing; marking it ready for review starts the run.
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
   merge_group:
   push:
     branches: [main]
@@ -29,6 +30,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   scope:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     permissions:
@@ -62,7 +64,7 @@ jobs:
   visual:
     name: Visual check
     needs: scope
-    if: needs.scope.outputs.draw == 'true'
+    if: github.event.pull_request.draft != true && needs.scope.outputs.draw == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     env:
@@ -72,6 +74,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
       - run: bun install --frozen-lockfile --ignore-scripts
       - name: Read the pinned browser version
         id: playwright

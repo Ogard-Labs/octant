@@ -146,20 +146,22 @@ describe("opening an app pairing code", () => {
 
   it("stops when the client has no pinned transport rather than using its own fetch", async () => {
     const platformFetch = vi.spyOn(globalThis, "fetch");
+    try {
+      const opened = await openAppPairingCode({
+        code: code(),
+        transport: () => ({ status: "unavailable" }),
+        webBuildVersion: "0.1.0",
+      });
 
-    const opened = await openAppPairingCode({
-      code: code(),
-      transport: () => ({ status: "unavailable" }),
-      webBuildVersion: "0.1.0",
-    });
-
-    expect(opened).toEqual({
-      status: "refused",
-      reason: "no-pinned-transport",
-      message: NO_PINNED_TRANSPORT_COPY,
-    });
-    expect(platformFetch).not.toHaveBeenCalled();
-    platformFetch.mockRestore();
+      expect(opened).toEqual({
+        status: "refused",
+        reason: "no-pinned-transport",
+        message: NO_PINNED_TRANSPORT_COPY,
+      });
+      expect(platformFetch).not.toHaveBeenCalled();
+    } finally {
+      platformFetch.mockRestore();
+    }
   });
 
   it("says the computer's key changed when the listener serves another key", async () => {

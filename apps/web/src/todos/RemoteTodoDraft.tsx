@@ -23,6 +23,7 @@ import type { ProjectSummary } from "@octant/contracts/projects";
 import type { Todo, TodoThreadLink } from "@octant/contracts/todos";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import { buildModelPickerGroups, defaultPermissionModeFor } from "@octant/domain";
+import { pairedTodoThreadTitle } from "@octant/domain/automatic-model-policy";
 import { useEffect, useMemo, useState } from "react";
 import { useProviderController } from "../providers/useProviderController";
 import { firstSelectableProviderSelection } from "../providers/firstSelectableProviderSelection";
@@ -157,7 +158,7 @@ export function RemoteTodoDraft(props: {
         modelId: model.modelId,
         threadId: crypto.randomUUID(),
         timestamp: new Date().toISOString(),
-        title: input.prompt.slice(0, 60),
+        title: pairedTodoThreadTitle(input.prompt),
       });
       if (plan.kind === "rejected") return refuseCreate(plan.message);
       const created = await code.execute(plan.command);
@@ -246,7 +247,7 @@ export function RemoteTodoDraft(props: {
       if (mode === "chat") {
         const created = await clients.chat.execute({
           kind: "create-chat-thread",
-          title: prompt.slice(0, 60),
+          title: pairedTodoThreadTitle(prompt),
           ...(selectedProject === undefined ? {} : { projectId: selectedProject.id }),
         });
         if (created.kind !== "thread-created")
@@ -313,7 +314,7 @@ export function RemoteTodoDraft(props: {
           threadId: decodeWorkThreadId(crypto.randomUUID()),
           projectId: selectedProject.id,
           bindingRevisionId: selectedProject.bindingRevisionId,
-          title: prompt.slice(0, 60),
+          title: pairedTodoThreadTitle(prompt),
           providerInstanceId: model.providerInstanceId,
           modelId: model.modelId,
           hostId: LOCAL_HOST_ID,
