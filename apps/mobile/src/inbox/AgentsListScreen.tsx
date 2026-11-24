@@ -57,8 +57,7 @@ function sentenceCase(value: string): string {
 
 export function AgentsListScreen(props: AgentsListScreenProps) {
   const { colors } = useTheme();
-  const { transports, hosts, inboxHostFilter, setInboxHostFilter, refreshHosts } =
-    useMobileSession();
+  const { transports, hosts, inboxHostFilter, setInboxHostFilter } = useMobileSession();
   const [rows, setRows] = useState<ReadonlyArray<MobileInboxRow>>([]);
   const [failures, setFailures] = useState<ReadonlyArray<MobileInboxHostFailure>>([]);
   const [error, setError] = useState<string | undefined>();
@@ -106,6 +105,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
     placementLabel,
     placementAccessReason,
     placementDisabledReason,
+    refreshPlacement,
     staleGate,
     models,
     modelOptionId,
@@ -528,7 +528,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
         onPressModel={() => setModelOpen(true)}
         onSelectMode={() => undefined}
         onSubmit={() => void createChatThread()}
-        onRefreshHost={() => void refreshHosts()}
+        onRefreshHost={refreshPlacement}
         placementLabel={placementLabel}
         placementDisabledReason={placementDisabledReason}
         prompt={prompt}

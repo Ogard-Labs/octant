@@ -103,7 +103,6 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     hosts,
     hostsLoaded,
     health,
-    refreshHosts,
   } = useMobileSession();
   const emptyState =
     props.homeMode === "inbox" ? inboxEmptyState({ hosts, hostsLoaded }) : undefined;
@@ -153,6 +152,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     placementLabel,
     placementAccessReason,
     placementDisabledReason,
+    refreshPlacement,
     staleGate,
     models,
     modelOptionId,
@@ -1032,7 +1032,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
               sourceLabel: MOBILE_COPY.todoSource,
               onRemoveSource: () => setTodoSource(undefined),
             })}
-        onRefreshHost={() => void refreshHosts()}
+        onRefreshHost={refreshPlacement}
         placementLabel={placementLabel}
         placementDisabledReason={placementDisabledReason}
         projectLabel={composerProjectLabel}

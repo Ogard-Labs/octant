@@ -25,8 +25,15 @@ import { useRemoteSessionStanding } from "./useRemoteSessionStanding";
  * not, because it names the host it will use.
  */
 export function usePlacement(options: { readonly fallbackToFirstHost: boolean }) {
-  const { environment, transports, hosts, placementHostId, transportForHost, health } =
-    useMobileSession();
+  const {
+    environment,
+    transports,
+    hosts,
+    placementHostId,
+    transportForHost,
+    health,
+    refreshHosts,
+  } = useMobileSession();
   const { fallbackToFirstHost } = options;
 
   const placementTransport: MobileRemoteTransport | undefined = useMemo(() => {
@@ -49,9 +56,15 @@ export function usePlacement(options: { readonly fallbackToFirstHost: boolean })
     return hosts.find((host) => host.hostId === placementTransport.hostId)?.label;
   }, [hosts, placementTransport]);
   const staleGate = useMemo(() => presentStaleHostSecurity(placementHealth), [placementHealth]);
+  const [accessRefresh, setAccessRefresh] = useState(0);
+  const refreshPlacement = useCallback(() => {
+    setAccessRefresh((previous) => previous + 1);
+    void refreshHosts();
+  }, [refreshHosts]);
   const standing = useRemoteSessionStanding(
     placementTransport,
     environment.kind === "mock" && environment.offlineDemo,
+    accessRefresh,
   );
   const placementAccessReason =
     placementTransport === undefined || !staleGate.allowProductMutations
@@ -114,6 +127,7 @@ export function usePlacement(options: { readonly fallbackToFirstHost: boolean })
     placementHealth,
     placementAccessReason,
     placementDisabledReason,
+    refreshPlacement,
     staleGate,
     models,
     modelOptionId,

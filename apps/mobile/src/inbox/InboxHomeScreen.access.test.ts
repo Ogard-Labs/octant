@@ -59,7 +59,9 @@ const permitted: MobileRemoteTransport = {
 };
 const watching: MobileRemoteTransport = {
   hostId: hostB,
-  authenticatedFetch: vi.fn(async () => Response.json({ ...standing, accessLevel: "read-only" })),
+  authenticatedFetch: vi.fn(async () =>
+    Response.json({ ...standing, actsAsHostPerson: false, accessLevel: "read-only" }),
+  ),
 };
 const hosts = [
   { hostId: hostA, label: "Studio" },
@@ -122,7 +124,9 @@ it("keeps existing threads openable while the placement host refuses new threads
     expect(element("mobile-composer-input")?.hasAttribute("readonly")).toBe(true);
     expect(container.textContent).toContain("confirm this phone’s access");
     await act(async () => {
-      reading.resolve(Response.json({ ...standing, accessLevel: "read-only" }));
+      reading.resolve(
+        Response.json({ ...standing, actsAsHostPerson: false, accessLevel: "read-only" }),
+      );
     });
     expect(container.textContent).toContain("Watching only");
     expect(element("mobile-composer-input")?.hasAttribute("readonly")).toBe(true);
@@ -151,6 +155,24 @@ it("keeps existing threads openable while the placement host refuses new threads
     expect(createChat).not.toHaveBeenCalled();
     expect(createWork).not.toHaveBeenCalled();
     expect(createCode).not.toHaveBeenCalled();
+
+    session.placementHostId = hostA;
+    await render(home("inbox"));
+    await act(async () => element("mobile-home-compose")?.click());
+    session.placementHostId = hostB;
+    await render(home("inbox"));
+    const sheet = document.querySelector('[data-testid="mobile-home-composer-sheet"]');
+    expect(sheet?.textContent).toContain("Watching only");
+    const refresh = sheet?.querySelector<HTMLElement>(
+      '[data-testid="mobile-home-composer-refresh-host"]',
+    );
+    expect(refresh).not.toBeNull();
+    vi.mocked(watching.authenticatedFetch).mockResolvedValueOnce(
+      Response.json({ ...standing, actsAsHostPerson: false, accessLevel: "approve-and-steer" }),
+    );
+    await act(async () => refresh?.click());
+    const input = sheet?.querySelector('[data-testid="mobile-home-composer-input"]');
+    expect(input?.hasAttribute("readonly")).toBe(false);
   } finally {
     act(() => root.unmount());
     session.placementHostId = hostA;

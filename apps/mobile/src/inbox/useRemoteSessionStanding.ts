@@ -20,9 +20,11 @@ const DEMO_STANDING: RemoteSessionStanding = { actsAsHostPerson: true };
 export function useRemoteSessionStanding(
   transport: SessionStandingTransport | undefined,
   offlineDemo: boolean,
+  refresh = 0,
 ): RemoteSessionStanding {
   const [read, setRead] = useState<{
     readonly transport: SessionStandingTransport;
+    readonly refresh: number;
     readonly standing: RemoteSessionStanding;
   }>();
   useEffect(() => {
@@ -31,7 +33,7 @@ export function useRemoteSessionStanding(
     let current = true;
     const reread = () => {
       void readRemoteSessionStanding(transport).then((answer) => {
-        if (current) setRead({ transport, standing: answer });
+        if (current) setRead({ transport, refresh, standing: answer });
       });
     };
     reread();
@@ -45,11 +47,11 @@ export function useRemoteSessionStanding(
       current = false;
       subscription.remove();
     };
-  }, [transport, offlineDemo]);
+  }, [transport, offlineDemo, refresh]);
   // The offline demo has no host to ask. For live sessions, access from the
   // previous computer cannot apply while the new one is still answering.
   if (offlineDemo) return DEMO_STANDING;
-  return read !== undefined && read.transport === transport
+  return read !== undefined && read.transport === transport && read.refresh === refresh
     ? read.standing
     : RESTRICTED_REMOTE_SESSION;
 }
