@@ -49,7 +49,8 @@ export function threadPullRequestNextStep(summary: Summary): ThreadPullRequestNe
   }
   if (summary.checks === "failing" && url !== undefined)
     return { kind: "fix", url: `${url}/checks` };
-  if (summary.readyToMerge) return { kind: "merge" };
+  // One already in the merge queue or set to merge itself needs no Merge.
+  if (summary.readyToMerge && summary.merging === undefined) return { kind: "merge" };
   return undefined;
 }
 

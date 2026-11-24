@@ -3726,8 +3726,8 @@ An open or draft pull request ends with the one next step it waits on, by
 what blocks it first: **Resolve ↗** while it has conflicts, which opens its
 conflicts on GitHub; **Fix ↗** while its checks fail, which opens its checks on
 GitHub; and **Merge** once it is ready to merge, which opens the pull request,
-whose Merge asks for the method before it acts. Resolve and Fix are in the
-danger ink; a merged or closed pull request offers none (maintainer decision,
+whose Merge asks for the method before it acts. A merged or closed pull
+request offers none (maintainer decision,
 2026-11-24).
 The Project's own open pull requests stay under Delivery (maintainer request,
 2026-11-16).

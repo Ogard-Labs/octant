@@ -459,7 +459,24 @@ export class CodeProjectPullRequestService {
     threads: ReadonlyArray<CodeProjectLinkedThreadFact>,
   ): BoardSnapshot {
     const cachedRows = this.#authorizedRows(projects);
-    const rows = this.#boundRows(this.#mergeRows(cachedRows, this.#knownRows(projects, threads)));
+    // Cached rows carry the linked threads of their last refresh; a person's
+    // unlink since then holds at once, not only after the next refresh.
+    const factById = new Map(threads.map((thread) => [thread.threadId, thread] as const));
+    const rows = this.#boundRows(
+      this.#mergeRows(cachedRows, this.#knownRows(projects, threads)),
+    ).map((row) => {
+      const linkedThreads = row.linkedThreads.filter((linked) => {
+        const fact = factById.get(String(linked.threadId));
+        return (
+          fact === undefined ||
+          !threadUnlinkedPullRequest(fact, {
+            repository: { owner: row.repositoryOwner, name: row.repositoryName },
+            number: row.number,
+          })
+        );
+      });
+      return linkedThreads.length === row.linkedThreads.length ? row : { ...row, linkedThreads };
+    });
     const freshness = this.#queryFreshness();
     const boardFreshness =
       rows.some((row) => row.state === "unknown") && freshness.status !== "stale"
@@ -754,8 +771,24 @@ export class CodeProjectPullRequestService {
       },
       threads,
     );
+    const factById = new Map(threads.map((thread) => [thread.threadId, thread] as const));
     const linkedThreadIds = uniqueStrings([
-      ...(link?.threadIds.map((id) => String(id)) ?? []),
+      // A recorded link's threads, less any a person unlinked from it.
+      ...(link?.threadIds
+        .map((id) => String(id))
+        .filter((id) => {
+          const fact = factById.get(id);
+          return (
+            fact === undefined ||
+            !threadUnlinkedPullRequest(fact, {
+              repository: {
+                owner: canonicalTarget.repositoryOwner,
+                name: canonicalTarget.repositoryName,
+              },
+              number: target.number,
+            })
+          );
+        }) ?? []),
       ...linked.map((thread) => String(thread.threadId)),
     ]);
     return {
@@ -1806,10 +1839,15 @@ export class CodeProjectPullRequestService {
         ) {
           continue;
         }
+        // A person's unlink wins over a recorded link too.
         const linkedThreads = link.threadIds
           .flatMap((id) => {
             const fact = threadById.get(String(id));
-            return fact === undefined
+            return fact === undefined ||
+              threadUnlinkedPullRequest(fact, {
+                repository: { owner: link.repositoryOwner, name: link.repositoryName },
+                number: link.number,
+              })
               ? []
               : [{ threadId: decodeCodeThreadId(fact.threadId), title: fact.title }];
           })
@@ -2442,7 +2480,17 @@ export class CodeProjectPullRequestService {
     if (link !== undefined) {
       for (const id of link.threadIds) {
         const fact = threadById.get(String(id));
-        if (fact !== undefined) add(fact.threadId, fact.title);
+        // A person's unlink wins over a recorded link, as over every other
+        // linking evidence, until the thread touches the pull request again.
+        if (
+          fact !== undefined &&
+          !threadUnlinkedPullRequest(fact, {
+            repository: { owner: target.owner, name: target.name },
+            number: target.number,
+          })
+        ) {
+          add(fact.threadId, fact.title);
+        }
       }
     }
     const normalizedThreads = threads.map((thread) =>

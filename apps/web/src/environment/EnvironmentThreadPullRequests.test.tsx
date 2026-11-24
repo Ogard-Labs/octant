@@ -214,6 +214,25 @@ describe("EnvironmentThreadPullRequests", () => {
     ).toBeNull();
   });
 
+  it("offers no Merge for a pull request already in the merge queue", () => {
+    render(
+      <EnvironmentThreadPullRequests
+        onOpen={vi.fn()}
+        onOpenExternal={vi.fn()}
+        summaries={summaries([
+          summary(5, {
+            checks: "passing",
+            review: "approved",
+            mergeability: "mergeable",
+            readyToMerge: true,
+            merging: "queued",
+          }),
+        ])}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Merge pull request #5" })).toBeNull();
+  });
+
   it("keeps the row and its menu as sibling controls, never a button inside a button", () => {
     const { container } = render(
       <EnvironmentThreadPullRequests
