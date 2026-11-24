@@ -548,6 +548,7 @@ export const THREAD_TITLE_USAGE_AGGREGATE_TYPE = "thread-title-usage";
  * thread so the thread's and its Project's spend ceilings count it.
  */
 export const PULL_REQUEST_REVIEW_REQUEST_SHAPE = "pull-request-review";
+export const VIDEO_GENERATION_REQUEST_SHAPE = "video-generation";
 export const PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE = "pull-request-review-usage";
 
 export const UsageReconciliation = Schema.Struct({
@@ -597,7 +598,9 @@ export const UsageReconciliation = Schema.Struct({
         reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE ||
         reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE ||
         reconciliation.requestShape === THREAD_TITLE_REQUEST_SHAPE ||
-        reconciliation.requestShape === PULL_REQUEST_REVIEW_REQUEST_SHAPE
+        reconciliation.requestShape === PULL_REQUEST_REVIEW_REQUEST_SHAPE ||
+        // A video job has no context plan and counts no images.
+        reconciliation.requestShape === VIDEO_GENERATION_REQUEST_SHAPE
       ) {
         return reconciliation.planId === undefined && reconciliation.imageUnits === undefined;
       }

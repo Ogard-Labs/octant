@@ -99,6 +99,7 @@ describe("a new ACP agent profile in Settings", () => {
         onCreateBflImage={callback}
         onCreateClaude={callback}
         onCreateGeminiImage={callback}
+        onCreateGeminiVideo={callback}
         onCreateIdeogramImage={callback}
         onCreateOllama={callback}
         onCreateOpenAiCompatible={callback}

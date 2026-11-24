@@ -1,4 +1,5 @@
 import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
+import type { AccessActivitySettings } from "../host/RemoteAccessSettingsSection";
 import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
 import type { SandboxSettingsScope } from "../settings/SandboxRestrictionsSettings";
 import type { ServerProjectRelayedPreviewOpener } from "../settings/ServerProjectPreviewTunnel";
@@ -98,6 +99,7 @@ export interface ShellSettingsSurfaceProps {
   >;
   readonly protectedFilesClient?: ProtectedFilesClient;
   readonly newDeviceAlertsClient?: NewDeviceAlertsClient;
+  readonly accessActivity?: AccessActivitySettings;
   readonly blockedToolsClient?: BlockedToolsClient;
   readonly sandboxRestrictionsClient?: SandboxRestrictionsClient;
   readonly sandboxScopes?: ReadonlyArray<SandboxSettingsScope>;
@@ -213,6 +215,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.newDeviceAlertsClient === undefined
               ? {}
               : { newDeviceAlertsClient: props.newDeviceAlertsClient })}
+            {...(props.accessActivity === undefined
+              ? {}
+              : { accessActivity: props.accessActivity })}
             {...(props.protectedFilesClient === undefined
               ? {}
               : { protectedFilesClient: props.protectedFilesClient })}

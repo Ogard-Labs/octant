@@ -8,6 +8,10 @@ const UsageWorkspace = lazy(() =>
 const RemotePairingView = lazy(() =>
   import("../remote/RemotePairingView").then((module) => ({ default: module.RemotePairingView })),
 );
+// Host notices load after the window first renders.
+const LazyHostNoticeToasts = lazy(() =>
+  import("../host/HostNoticeToasts").then((module) => ({ default: module.HostNoticeToasts })),
+);
 const ZenSurface = lazy(() =>
   import("../zen/ZenSurface").then((module) => ({ default: module.ZenSurface })),
 );
@@ -53,6 +57,7 @@ const ProjectCreateDialog = lazy(() =>
 export {
   CoordinatorBoundsDialog,
   ProjectCreateDialog,
+  LazyHostNoticeToasts,
   RemotePairingView,
   RemoteTodoDraft,
   UsageWorkspace,

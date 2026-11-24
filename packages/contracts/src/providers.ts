@@ -84,6 +84,8 @@ export const ProviderDriverKind = Schema.Literal(
   "gemini-native-image",
   "bfl-image",
   "ideogram-image",
+  // Video drivers; `VIDEO_DRIVER_KINDS` in videoGeneration.ts lists the same kinds.
+  "gemini-video",
   // The one family for every driver package that does not ship with Octant.
   // Which driver an instance runs is package data in its configuration, never
   // a new value here, so the exhaustive checks over this set stay closed.
@@ -1024,6 +1026,17 @@ export const IdeogramImageProviderConfiguration = Schema.Struct({
   .pipe(Schema.filter(imageAllowlistContainsDefault))
   .annotations(strict);
 export type IdeogramImageProviderConfiguration = typeof IdeogramImageProviderConfiguration.Type;
+
+/** Suggested Gemini video model IDs for Settings; the allowlist stays manual-entry. */
+export const GEMINI_VIDEO_MODEL_PRESETS = ["gemini-omni-1.2-flash"] as const;
+export const GeminiVideoProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("gemini-video-http"),
+  modelAllowlist: UniqueManualModelIds,
+  defaultModel: ProviderModelId,
+})
+  .pipe(Schema.filter(imageAllowlistContainsDefault))
+  .annotations(strict);
+export type GeminiVideoProviderConfiguration = typeof GeminiVideoProviderConfiguration.Type;
 /**
  * How a Claude account signs in: its own claude.ai login, an Anthropic API
  * key, or a gateway (an address the runtime calls as `ANTHROPIC_BASE_URL`
@@ -1319,6 +1332,13 @@ export const IdeogramImageProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type IdeogramImageProviderInstance = typeof IdeogramImageProviderInstance.Type;
 
+export const GeminiVideoProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("gemini-video"),
+  configuration: GeminiVideoProviderConfiguration,
+}).annotations(strict);
+export type GeminiVideoProviderInstance = typeof GeminiVideoProviderInstance.Type;
+
 /**
  * The host's hold on an outside instance's driver at one digest. The process
  * owner sets it when the driver crashes past its limit (a third crash within
@@ -1359,6 +1379,7 @@ export const ProviderInstance = Schema.Union(
   GeminiImageProviderInstance,
   BflImageProviderInstance,
   IdeogramImageProviderInstance,
+  GeminiVideoProviderInstance,
   OutsideHarnessEndpointProviderInstance,
 );
 export type ProviderInstance = typeof ProviderInstance.Type;
@@ -1449,6 +1470,7 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     GeminiImageProviderInstance,
     BflImageProviderInstance,
     IdeogramImageProviderInstance,
+    GeminiVideoProviderInstance,
     ClaudeProviderInstance,
     AcpAgentProviderInstance,
     AddedAcpAgentProviderInstance,
@@ -2548,6 +2570,12 @@ export const ProviderRegistryCommand = Schema.Union(
     configuration: IdeogramImageProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("create-gemini-video-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: GeminiVideoProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("create-codex-provider"),
     ...CreateProviderCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
@@ -2649,6 +2677,11 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("change-ideogram-image-configuration"),
     ...ProviderInstanceCommandFields,
     configuration: IdeogramImageProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-gemini-video-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: GeminiVideoProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-claude-configuration"),

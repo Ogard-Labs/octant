@@ -5,7 +5,7 @@ import type {
   ProviderDriverKind,
 } from "@octant/contracts";
 import { ACP_AGENT_KINDS } from "@octant/contracts/acp-agent-profiles";
-import { isImageProfileDriverKind } from "./providerPolicy";
+import { isMediaProfileDriverKind } from "./providerPolicy";
 
 export type DiscoveryPolicyDecision =
   | { readonly kind: "allowed" }
@@ -68,7 +68,7 @@ export function isUnclassifiedDriverKind(driverKind: ProviderDriverKind): boolea
   return (
     !canAutoDetectDriverKind(driverKind) &&
     !requiresManualEndpoint(driverKind) &&
-    !isImageProfileDriverKind(driverKind)
+    !isMediaProfileDriverKind(driverKind)
   );
 }
 

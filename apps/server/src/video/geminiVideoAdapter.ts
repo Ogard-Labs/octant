@@ -47,7 +47,12 @@ export const GEMINI_OMNI_FLASH: VideoModelCapabilities = decodeVideoModelCapabil
   aspectRatios: [{ ratio: "16:9" }, { ratio: "9:16" }],
   defaultAspectRatio: "16:9",
   audio: "always",
-  inputs: { firstFrame: true, lastFrame: true, maxReferenceImages: 6 },
+  inputs: {
+    firstFrame: true,
+    lastFrame: true,
+    maxDurationSecondsWithBothFrames: MAX_INTERPOLATION_SECONDS,
+    maxReferenceImages: 6,
+  },
   price: {
     kind: "per-token",
     outputTokensPerSecond: [
@@ -181,19 +186,6 @@ async function start(
 ): Promise<VideoAdapterStart> {
   const refusal = refuseOutsideDeclaration(declaredFor(profile), request);
   if (refusal !== undefined) return { status: "failed", providerFailure: refusal };
-  if (
-    request.firstFrame !== undefined &&
-    request.lastFrame !== undefined &&
-    request.options.durationSeconds > MAX_INTERPOLATION_SECONDS
-  ) {
-    return {
-      status: "failed",
-      providerFailure: videoFailure(
-        "invalid-configuration",
-        `Gemini Omni Flash makes clips from a first and a last frame only up to ${MAX_INTERPOLATION_SECONDS} seconds.`,
-      ),
-    };
-  }
   const images = [
     ...(request.firstFrame === undefined ? [] : [request.firstFrame]),
     ...(request.lastFrame === undefined ? [] : [request.lastFrame]),
@@ -309,6 +301,8 @@ async function readInteraction(
           return {
             status: "failed",
             providerFailure: videoFailure("protocol", "Google returned a clip that is not an MP4."),
+            billed: true,
+            ...(usage === undefined ? {} : { usage }),
           };
         }
         return {
@@ -391,11 +385,20 @@ async function downloadFile(
   }
 }
 
-async function cancel(ports: VideoGenerationPorts, remoteId: string): Promise<VideoAdapterPoll> {
+async function cancel(
+  ports: VideoGenerationPorts,
+  remoteId: string,
+  signal?: AbortSignal,
+): Promise<VideoAdapterPoll> {
   const url = interactionUrl(remoteId, "/cancel");
   if (url === undefined) return invalidId();
   try {
-    const response = await ports.request({ url, method: "POST", auth: AUTH });
+    const response = await ports.request({
+      url,
+      method: "POST",
+      auth: AUTH,
+      ...(signal === undefined ? {} : { signal }),
+    });
     if (!response.ok && response.status !== 409) {
       return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
     }
@@ -404,7 +407,7 @@ async function cancel(ports: VideoGenerationPorts, remoteId: string): Promise<Vi
   }
   // Google notes the state can lag the cancel briefly; the job service keeps
   // polling a `running` answer until it settles.
-  return await readInteraction(ports, remoteId);
+  return await readInteraction(ports, remoteId, signal);
 }
 
 async function forget(ports: VideoGenerationPorts, remoteId: string): Promise<VideoAdapterForget> {
@@ -437,7 +440,7 @@ export const geminiVideoDriver: VideoGenerationDriver = {
     models: async () => declaredFor(profile),
     start: (request) => start(ports, profile, request),
     poll: (remoteId, signal) => readInteraction(ports, remoteId, signal),
-    cancel: (remoteId) => cancel(ports, remoteId),
+    cancel: (remoteId, signal) => cancel(ports, remoteId, signal),
     forget: (remoteId) => forget(ports, remoteId),
   }),
 };

@@ -65,6 +65,7 @@ export class UsageProjection implements Projection {
     if (
       event.aggregateType !== "context-ledger" &&
       event.aggregateType !== "image-job" &&
+      event.aggregateType !== "video-job" &&
       event.aggregateType !== PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== AGENT_RUN_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== SHIELD_REVIEW_USAGE_AGGREGATE_TYPE &&
@@ -503,11 +504,11 @@ function projectBearingSubjectTerms(
     // token ceilings leave it false so image providers that report no tokens
     // do not trip token ceilings as unavailable.
     ...(includeImageJobs ? PROJECT_THREADS : []).map(
-      ({ subjectType, threads }) => `(subject_type = 'image-job'
+      ({ subjectType, threads }) => `(subject_type IN ('image-job', 'video-job')
     AND subject_id IN (
       SELECT aggregate_id FROM event_journal
-      WHERE aggregate_type = 'image-job'
-        AND event_name = 'image.job-queued@1'
+      WHERE ((aggregate_type = 'image-job' AND event_name = 'image.job-queued@1')
+        OR (aggregate_type = 'video-job' AND event_name = 'video.job-queued@1'))
         AND json_extract(payload_json, '$.job.threadKind') = '${subjectType}'
         AND json_extract(payload_json, '$.job.scopeId') IN (${threads(match)})
     ))`,
@@ -702,10 +703,10 @@ export function usageModeCondition(
     sql: `(subject_type = ?${
       imageJobs
         ? `
-    OR (subject_type = 'image-job' AND subject_id IN (
+    OR (subject_type IN ('image-job', 'video-job') AND subject_id IN (
       SELECT aggregate_id FROM event_journal
-      WHERE aggregate_type = 'image-job'
-        AND event_name = 'image.job-queued@1'
+      WHERE ((aggregate_type = 'image-job' AND event_name = 'image.job-queued@1')
+        OR (aggregate_type = 'video-job' AND event_name = 'video.job-queued@1'))
         AND json_extract(payload_json, '$.job.threadKind') = ?
     ))`
         : ""
@@ -930,7 +931,7 @@ function decodeProjection<T>(decode: () => T): T {
 }
 
 /**
- * The thread kind and thread an image job was made in, from its queued event,
+ * The thread kind and thread an image or video job was made in, from its queued event,
  * or `undefined` for a library job or one whose event a purge erased.
  */
 export function readImageJobThread(
@@ -942,9 +943,9 @@ export function readImageJobThread(
       `SELECT json_extract(payload_json, '$.job.threadKind') AS thread_kind,
          json_extract(payload_json, '$.job.scopeId') AS scope_id
        FROM event_journal
-       WHERE aggregate_type = 'image-job'
-         AND aggregate_id = ?
-         AND event_name = 'image.job-queued@1'`,
+       WHERE ((aggregate_type = 'image-job' AND event_name = 'image.job-queued@1')
+           OR (aggregate_type = 'video-job' AND event_name = 'video.job-queued@1'))
+         AND aggregate_id = ?`,
     )
     .get(jobId) as
     | { readonly thread_kind: string | null; readonly scope_id: string | null }

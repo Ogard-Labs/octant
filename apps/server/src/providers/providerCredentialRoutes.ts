@@ -35,6 +35,7 @@ import type { EventActor, ProviderInstance, ProviderInstanceId, WindowId } from 
 import {
   addApiKey,
   ApiKeyPoolError,
+  apiKeyPoolFingerprint,
   credentialStoreFailureCauseOf,
   listApiKeys,
   moveApiKey,
@@ -187,14 +188,7 @@ export function createProviderCredentialRouteHandler(
   options: ProviderCredentialRouteOptions,
 ): (request: Request) => Promise<Response | undefined> {
   const now = options.now ?? Date.now;
-  // One change at a time: a `set` reads the instance, stores, and reads it
-  // again, and no other key change from these routes can run in between.
-  let queue: Promise<unknown> = Promise.resolve();
-  const serialized = <T>(task: () => Promise<T>): Promise<T> => {
-    const run = queue.then(task);
-    queue = run.catch(() => undefined);
-    return run;
-  };
+  const serialized = serializerFor(options);
 
   return async (request) => {
     const url = new URL(request.url);
@@ -294,6 +288,7 @@ export function createProviderCredentialRouteHandler(
       }
       const begin = (
         action: "set" | "remove" | "remove-with-provider",
+        keyChange?: KeyChange,
       ): ProviderKeyChangeRecorder | undefined => {
         try {
           return options.journal.request({
@@ -302,6 +297,7 @@ export function createProviderCredentialRouteHandler(
             instanceVersion: target.kind === "existing" ? target.instance.version : 0,
             windowId,
             ...(actor === undefined ? {} : { actor }),
+            ...keyChange,
           });
         } catch {
           return undefined;
@@ -361,7 +357,8 @@ export function createProviderCredentialRouteHandler(
           return answer((await credentials.store.has(id)) ? "stored" : "missing", target);
         }
         if (decoded.kind !== "set" || target.kind !== "existing") return refuse("invalid");
-        if (await credentials.store.has(id)) {
+        const hadKey = await credentials.store.has(id);
+        if (hadKey) {
           if (!decoded.replace) return refuse("already-stored");
           // Replacing a pool with one key would drop keys the person cannot see
           // from here, so the command asks for an explicit remove first.
@@ -369,7 +366,11 @@ export function createProviderCredentialRouteHandler(
             return refuse("several-keys");
           }
         }
-        const recorder = begin("set");
+        // A plain stored value is a pool of one key with the `default` id.
+        const recorder = begin(
+          "set",
+          hadKey ? { keyChange: "replaced" } : { keyChange: "added", keyId: "default" },
+        );
         if (recorder === undefined) return refuse("journal-unavailable");
         // A store error (a lost or malformed answer) does not say whether the
         // write committed, so the request stays unsettled and the next start
@@ -576,7 +577,17 @@ type KeyRequest =
       readonly keyId: string;
       readonly credential: string;
     }
-  | { readonly kind: "remove" | "set-active"; readonly instance: string; readonly keyId: string }
+  | { readonly kind: "set-active"; readonly instance: string; readonly keyId: string }
+  | {
+      readonly kind: "remove";
+      readonly instance: string;
+      readonly keyId: string;
+      /** The notice-recorded pool state a notice Undo holds the pool to. */
+      readonly expected?: {
+        readonly keyIds: ReadonlyArray<string>;
+        readonly fingerprint: string | undefined;
+      };
+    }
   | {
       readonly kind: "move";
       readonly instance: string;
@@ -660,6 +671,93 @@ function decodeKeyRequest(route: Route, value: unknown): KeyRequest | "too-large
  * touched, a linked pointer is never replaced, and a key that arrived while the
  * provider was reconfigured is cleared again.
  */
+/** What a `set` did to the secrets a provider holds, for its change notice. */
+type KeyChange =
+  | { readonly keyChange: "added"; readonly keyId: string }
+  | { readonly keyChange: "replaced" };
+
+const queues = new WeakMap<ProviderCredentialRouteOptions, Promise<unknown>>();
+
+/**
+ * One key change at a time per credential store: a `set` reads the instance,
+ * stores, and reads it again, and no other key change (a route's or a change
+ * notice's Undo) can run in between.
+ */
+function serializerFor(options: ProviderCredentialRouteOptions) {
+  return <T>(task: () => Promise<T>): Promise<T> => {
+    const run = (queues.get(options) ?? Promise.resolve()).then(task);
+    queues.set(
+      options,
+      run.catch(() => undefined),
+    );
+    return run;
+  };
+}
+
+/**
+ * Removes one key a change notice names, through the same journaled pool
+ * change the key routes make, as the person who pressed Undo. The pool's own
+ * check refuses a key that is no longer stored.
+ */
+export async function removeProviderApiKey(
+  options: ProviderCredentialRouteOptions,
+  input: {
+    readonly instanceId: string;
+    readonly keyId: string;
+    readonly windowId: WindowId;
+    readonly actor: EventActor;
+    /**
+     * The pool state the change notice recorded when it was journaled: the
+     * key ids and the pool's non-secret identity fingerprint after the
+     * change the notice describes — key ids, the active key, and each key's
+     * opaque secret-revision marker, nothing derived from a secret.
+     * Revalidated inside the serialized operation — a change that
+     * landed since, journaled or a desktop edit the journal never saw,
+     * changes the pool first and refuses the Undo.
+     */
+    readonly expected?: {
+      readonly keyIds: ReadonlyArray<string>;
+      readonly fingerprint?: string;
+    };
+  },
+): Promise<{ readonly status: "done" } | { readonly status: "refused"; readonly message: string }> {
+  const credentials = options.credentials;
+  if (credentials === undefined) {
+    return { status: "refused", message: REFUSAL_MESSAGE["credential-store-unavailable"] };
+  }
+  const response = await serializerFor(options)(() =>
+    changeApiKeys(
+      {
+        kind: "remove",
+        instance: input.instanceId,
+        keyId: input.keyId,
+        ...(input.expected === undefined
+          ? {}
+          : {
+              expected: {
+                keyIds: input.expected.keyIds,
+                fingerprint: input.expected.fingerprint,
+              },
+            }),
+      },
+      input.windowId,
+      input.actor,
+      credentials,
+      options,
+    ),
+  );
+  if (response.ok) return { status: "done" };
+  const body: unknown = await response.json().catch(() => undefined);
+  const message =
+    typeof body === "object" &&
+    body !== null &&
+    "message" in body &&
+    typeof body.message === "string"
+      ? body.message
+      : "The key could not be removed.";
+  return { status: "refused", message };
+}
+
 async function changeApiKeys(
   request: KeyRequest,
   windowId: WindowId,
@@ -683,6 +781,29 @@ async function changeApiKeys(
     const stored = (await credentials.store.has(id)) ? await credentials.readStored(id) : undefined;
     if (request.kind === "list") {
       return Response.json({ keys: stored === undefined ? [] : listApiKeys(stored) });
+    }
+    const expected = request.kind === "remove" ? request.expected : undefined;
+    if (expected !== undefined) {
+      const ids = stored === undefined ? [] : listApiKeys(stored).map((key) => key.id);
+      const fingerprint = stored === undefined ? undefined : apiKeyPoolFingerprint(stored);
+      if (
+        ids.length !== expected.keyIds.length ||
+        ids.some((id, index) => id !== expected.keyIds[index]) ||
+        (expected.fingerprint !== undefined && fingerprint !== expected.fingerprint)
+      ) {
+        // Revalidated inside the serialized operation: a change that landed
+        // after the notice was read — journaled or a desktop edit the journal
+        // never saw — has already changed the pool, so the removal refuses.
+        return Response.json(
+          {
+            category: "api-key-pool",
+            reason: "unknown-key",
+            message:
+              "This provider's keys changed again since, so Undo could remove the wrong key. Check its keys in Settings.",
+          },
+          { status: 409 },
+        );
+      }
     }
     let next: string | undefined;
     let added: ReturnType<typeof addApiKey>["key"] | undefined;
@@ -711,6 +832,11 @@ async function changeApiKeys(
         instanceVersion: target.instance.version,
         windowId,
         ...(actor === undefined ? {} : { actor }),
+        ...(added !== undefined
+          ? { keyChange: "added" as const, keyId: added.id }
+          : request.kind === "replace"
+            ? { keyChange: "replaced" as const }
+            : {}),
       });
     } catch {
       return refuse("journal-unavailable");
@@ -730,7 +856,11 @@ async function changeApiKeys(
         recorder.complete("cleared-after-change");
         return refuse(current === undefined ? "not-found" : "changed");
       }
-      recorder.complete("stored");
+      recorder.complete(
+        "stored",
+        listApiKeys(next).map((key) => key.id),
+        apiKeyPoolFingerprint(next),
+      );
     }
     void options.reprobe(windowId, target.instance).catch(() => undefined);
     return Response.json(added === undefined ? { outcome: "changed" } : { key: added });

@@ -137,6 +137,7 @@ export const DESKTOP_IPC_CHANNELS = {
   remoteDeviceAccessLevel: "octant:remote-device:access-level",
   remoteAccessPauseRead: "octant:remote-device:access-pause-read",
   remoteAccessPauseSet: "octant:remote-device:access-pause-set",
+  undoAccessChangeNotice: "octant:remote-device:undo-access-change-notice",
   hubAdministrationRequest: "octant:hub-administration:request",
   agentAccessRequest: "octant:agent-access:request",
   providerDeviceSignIn: "octant:provider-device-sign-in:request",

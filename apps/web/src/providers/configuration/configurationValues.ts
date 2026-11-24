@@ -13,6 +13,7 @@ import {
   type GeminiImageAspectRatio,
   type GeminiImageProviderConfiguration,
   type GeminiImageResolution,
+  type GeminiVideoProviderConfiguration,
   type IdeogramImageProviderConfiguration,
   type OpenAiCompatibleProtocol,
   type OpenAiCompatibleProviderConfiguration,
@@ -215,6 +216,21 @@ export function geminiImageConfigurationFrom(data: FormData): GeminiImageProvide
     defaultModel: defaultModel as GeminiImageProviderConfiguration["defaultModel"],
     ...(aspectRatio === undefined ? {} : { aspectRatio }),
     ...(resolution === undefined ? {} : { resolution }),
+  };
+}
+
+/**
+ * A Gemini video profile holds only its models: aspect ratio, resolution, and
+ * length are chosen per clip when one is generated, not stored on the profile.
+ */
+export function geminiVideoConfigurationFrom(data: FormData): GeminiVideoProviderConfiguration {
+  const modelAllowlist = parseManualModelIds(String(data.get("modelAllowlist") ?? ""));
+  const enteredDefault = String(data.get("defaultModel") ?? "").trim();
+  const defaultModel = enteredDefault.length > 0 ? enteredDefault : (modelAllowlist[0] ?? "");
+  return {
+    kind: "gemini-video-http",
+    modelAllowlist,
+    defaultModel: defaultModel as GeminiVideoProviderConfiguration["defaultModel"],
   };
 }
 

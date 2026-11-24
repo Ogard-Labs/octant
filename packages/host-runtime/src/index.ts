@@ -226,6 +226,7 @@ export {
 export {
   addApiKey,
   ApiKeyPoolError,
+  apiKeyPoolFingerprint,
   apiKeysInUseOrder,
   keyCooldownMs,
   moveApiKey,

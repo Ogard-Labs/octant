@@ -129,6 +129,25 @@ describe("Gemini video driver", () => {
     });
   });
 
+  it("retains usage when Google completes an interaction with invalid inline video", async () => {
+    const adapter = geminiVideoDriver.create({
+      profile,
+      ports: ports(() =>
+        Response.json(
+          completedInteraction({
+            steps: [{ type: "model_output", content: [{ type: "video", data: "aGVsbG8=" }] }],
+          }),
+        ),
+      ).ports,
+    });
+    expect(await adapter.poll("v1_abc", new AbortController().signal)).toMatchObject({
+      status: "failed",
+      providerFailure: { category: "protocol" },
+      billed: true,
+      usage: { outputTokens: 46_376, inputTokens: 12 },
+    });
+  });
+
   it("refuses a first-and-last-frame clip over ten seconds before calling Google", async () => {
     const recorder = ports(script());
     const adapter = geminiVideoDriver.create({ profile, ports: recorder.ports });

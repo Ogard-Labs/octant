@@ -2973,6 +2973,41 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("gemini-secret");
   });
 
+  it("creates a Gemini video profile with a write-only key and the suggested default model, with no aspect ratio or resolution", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: geminiImageProvider() });
+    renderProviderSettings(
+      <ProviderCreateForm
+        {...props}
+        allowedProviderTypes={["gemini-native-image", "gemini-video"]}
+        triggerLabel="Add media provider"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add media provider" }));
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Gemini Video");
+    const create = screen.getByRole("form", { name: "Add Gemini video profile" });
+    expect(within(create).queryByLabelText("API base URL")).not.toBeInTheDocument();
+    expect(within(create).queryByLabelText("Aspect ratio")).not.toBeInTheDocument();
+    expect(within(create).queryByLabelText("Resolution")).not.toBeInTheDocument();
+    expect(within(create).getByLabelText("Default model")).toHaveValue("gemini-omni-1.2-flash");
+    await user.type(within(create).getByLabelText("Provider name"), "Omni");
+    await user.type(within(create).getByLabelText("API key"), "video-secret");
+    await user.click(screen.getByRole("button", { name: "Add Gemini video profile" }));
+
+    expect(props.onCreateGeminiVideo).toHaveBeenCalledOnce();
+    const [name, configuration, credential] = vi.mocked(props.onCreateGeminiVideo).mock.calls[0]!;
+    expect(name).toBe("Omni");
+    expect(configuration).toEqual({
+      kind: "gemini-video-http",
+      modelAllowlist: ["gemini-omni-1.2-flash"],
+      defaultModel: "gemini-omni-1.2-flash",
+    });
+    expect(credential.value).toBe("video-secret");
+    credential.clear();
+    expect(document.body.textContent).not.toContain("video-secret");
+  });
+
   it("creates a BFL image profile with a write-only key, its provider's own endpoint when the base URL is blank, and no quality or size fields", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: geminiImageProvider() });
@@ -5756,6 +5791,7 @@ function ControllerBackedProviderSettings(props: {
       onChangeAmazonBedrockConfiguration={controller.changeAmazonBedrockConfiguration}
       onChangeOpenAiImageConfiguration={controller.changeOpenAiImageConfiguration}
       onChangeGeminiImageConfiguration={controller.changeGeminiImageConfiguration}
+      onChangeGeminiVideoConfiguration={controller.changeGeminiVideoConfiguration}
       onChangeBflImageConfiguration={controller.changeBflImageConfiguration}
       onChangeIdeogramImageConfiguration={controller.changeIdeogramImageConfiguration}
       onClearProviderCredential={controller.clearProviderCredential}
@@ -5771,6 +5807,7 @@ function ControllerBackedProviderSettings(props: {
       onCreateAmazonBedrock={controller.createAmazonBedrock}
       onCreateOpenAiImage={controller.createOpenAiImage}
       onCreateGeminiImage={controller.createGeminiImage}
+      onCreateGeminiVideo={controller.createGeminiVideo}
       onCreateBflImage={controller.createBflImage}
       onCreateIdeogramImage={controller.createIdeogramImage}
       onPermissionPersistenceChange={controller.updatePermissionPersistence}
@@ -5903,6 +5940,10 @@ function fixture(
       credential.clear();
       return true;
     }),
+    onCreateGeminiVideo: vi.fn(async (_name, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
     onCreateBflImage: vi.fn(async (_name, _configuration, credential) => {
       credential.clear();
       return true;
@@ -5950,6 +5991,10 @@ function fixture(
       return true;
     }),
     onChangeGeminiImageConfiguration: vi.fn(async (_id, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
+    onChangeGeminiVideoConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();
       return true;
     }),

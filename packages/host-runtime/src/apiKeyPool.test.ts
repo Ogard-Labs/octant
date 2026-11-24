@@ -4,6 +4,7 @@ import {
   QUOTA_COOLDOWN_MS,
   RATE_LIMIT_COOLDOWN_MS,
   addApiKey,
+  apiKeyPoolFingerprint,
   apiKeysInUseOrder,
   keyCooldownMs,
   listApiKeys,
@@ -96,6 +97,28 @@ describe("API key pool", () => {
     expect(refusalOf(() => addApiKey(stored, { secret: "sk-17" }))).toBe("too-many-keys");
   });
 
+  it("still edits a pool stored close to the size bound when its keys carry no revision", () => {
+    const uuid = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    const keys = Array.from({ length: 16 }, (_, index) => ({
+      id: uuid(index + 1),
+      label: `K${index + 1}`,
+      secret: "s".repeat(600),
+    }));
+    const pack = () =>
+      JSON.stringify({ kind: "api-key-pool", version: 1, active: keys[0]?.id, keys });
+    const last = keys[15];
+    if (last === undefined) throw new Error("the pool holds no key");
+    let stored = pack();
+    while (stored.length <= 11 * 1024 - 9) {
+      last.secret += "s";
+      stored = pack();
+    }
+    expect(stored.length).toBeLessThanOrEqual(11 * 1024);
+    expect(stored).not.toContain("rotation");
+    expect(() => setActiveApiKey(stored, keys[15]?.id ?? "")).not.toThrow();
+    expect(() => removeApiKey(stored, keys[15]?.id ?? "")).not.toThrow();
+  });
+
   it("renames a key and keeps its secret", () => {
     const { stored, ids } = poolWithTwoKeys();
     const renamed = renameApiKey(stored, ids[1] ?? "", "Client");
@@ -108,6 +131,18 @@ describe("API key pool", () => {
     const replaced = replaceApiKeySecret(stored, ids[0] ?? "", "sk-rotated-2222");
     expect(readApiKeyPool(replaced).map((key) => key.secret)).toEqual(["sk-rotated-2222", SECOND]);
     expect(listApiKeys(replaced).map((key) => key.label)).toEqual(["Work", "Personal"]);
+  });
+
+  it("marks each secret replacement with a revision one above the stored one", () => {
+    const added = addApiKey(undefined, { secret: FIRST, label: "Work" });
+    const first = replaceApiKeySecret(added.stored, added.key.id, "sk-rotated-1111");
+    expect(readApiKeyPool(first).map((key) => key.rotation)).toEqual([2]);
+    const second = replaceApiKeySecret(
+      first,
+      readApiKeyPool(first)[0]?.id ?? "",
+      "sk-rotated-2222",
+    );
+    expect(readApiKeyPool(second).map((key) => key.rotation)).toEqual([3]);
   });
 
   it("removes one key and keeps the others in order", () => {
@@ -240,6 +275,35 @@ describe("active key and order", () => {
     expect(refusalOf(() => setActiveApiKey(stored, "00000000-0000-4000-8000-000000000000"))).toBe(
       "unknown-key",
     );
+  });
+});
+
+describe("the pool identity a change notice holds a key Undo to", () => {
+  it("changes when a key's secret is replaced under the same id", () => {
+    const { stored } = addApiKey(undefined, { secret: FIRST, label: "Work" });
+    const parsed = JSON.parse(stored) as {
+      active: string;
+      keys: Array<{ id: string; label: string; secret: string; rotation?: number }>;
+    };
+    const key = parsed.keys[0];
+    if (key === undefined) throw new Error("the pool holds no key");
+    expect(key.rotation).toBeUndefined();
+    const before = apiKeyPoolFingerprint(stored);
+    const sameIdNextRevision = JSON.stringify({
+      ...parsed,
+      keys: [{ ...key, secret: SECOND, rotation: 2 }],
+    });
+    expect(apiKeyPoolFingerprint(sameIdNextRevision)).not.toBe(before);
+  });
+
+  it("carries only key ids, the active key and revisions, never the secret", () => {
+    const { stored } = addApiKey(undefined, { secret: FIRST, label: "Work" });
+    const fingerprint = apiKeyPoolFingerprint(stored);
+    expect(fingerprint).not.toContain(FIRST);
+    expect(fingerprint).not.toMatch(/[0-9a-f]{64}/);
+    expect(fingerprint).toBe(apiKeyPoolFingerprint(stored));
+    const replaced = replaceApiKeySecret(stored, listApiKeys(stored)[0]?.id ?? "", SECOND);
+    expect(apiKeyPoolFingerprint(replaced)).not.toBe(fingerprint);
   });
 });
 

@@ -12,6 +12,9 @@ import {
   THREAD_RETENTION_EVENT_NAMES,
   THREAD_SIDE_TASKS_AGGREGATE_TYPE,
 } from "@octant/contracts";
+import { CHANGE_NOTICE_AGGREGATE_TYPE } from "@octant/contracts/access-activity";
+import { PROVIDER_KEY_AGGREGATE_TYPE } from "@octant/contracts/provider-key-journal";
+import { REMOTE_ACCESS_EVENT_NAMES } from "@octant/contracts/remote-access";
 import {
   decodeMachineChangeFrame,
   type MachineChangeFrame,
@@ -242,6 +245,30 @@ export class MachineChangeFeed {
   }
 }
 
+function accessActivityChanged(event: {
+  readonly eventName?: string;
+  readonly payload?: unknown;
+}): boolean {
+  const names = REMOTE_ACCESS_EVENT_NAMES;
+  if (
+    event.eventName === names.deviceRevoked ||
+    event.eventName === names.deviceCredentialExpired ||
+    event.eventName === names.deviceAccessLevelChanged
+  )
+    return true;
+  if (event.eventName !== names.securityAuditRecorded) return false;
+  const payload = event.payload;
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    "record" in payload &&
+    typeof payload.record === "object" &&
+    payload.record !== null &&
+    "eventKind" in payload.record &&
+    payload.record.eventKind === "device-approved"
+  );
+}
+
 function topicsForEvent(event: {
   readonly aggregateType: string;
   readonly eventName?: string;
@@ -302,6 +329,16 @@ function topicsForEvent(event: {
   // The agent's image tool queues and finishes jobs outside any request the
   // renderer made, so the thread learns of them here rather than on a timer.
   if (aggregateType === IMAGE_JOB_AGGREGATE_TYPE) return ["image-jobs"];
+  // A device added, removed, or re-levelled refreshes Settings' access
+  // activity; a raised level, a provider key change, or a dismissal refreshes
+  // the change notices, so neither waits for a reload.
+  if (accessActivityChanged(event)) return ["access-activity"];
+  if (
+    aggregateType === "guardrail-change" ||
+    aggregateType === PROVIDER_KEY_AGGREGATE_TYPE ||
+    aggregateType === CHANGE_NOTICE_AGGREGATE_TYPE
+  )
+    return ["change-notices"];
   return [];
 }
 
