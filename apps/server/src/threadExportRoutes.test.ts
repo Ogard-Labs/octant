@@ -1,5 +1,5 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { Archive } from "bun";
 import { decodeVideoJob, decodeWindowId } from "@octant/contracts";
 import {
   decodeThreadExportBundle,
@@ -311,17 +311,21 @@ describe("thread exports with video files", () => {
     const result = await handler(makeRequest(offer.url, { method: "GET" }));
     expect(result?.status).toBe(200);
     expect(result?.headers.get("content-length")).toBe(String(offer.size));
-    const contents = await result?.blob();
+    const contents = await result?.arrayBuffer();
     if (contents === undefined) throw new Error("Expected an archive body.");
-    expect(contents.size).toBe(offer.size);
-    const files = await new Archive(contents).files();
-    expect([...files.keys()]).toEqual(["manifest.json", `video/${clipId}.mp4`]);
+    expect(contents.byteLength).toBe(offer.size);
+    // Read through the system tar so this round-trip checks a standard archive
+    // and works in the Node-run unit suite as well as in Bun.
+    const input = Buffer.from(contents);
+    const clipPath = `video/${clipId}.mp4`;
+    const paths = execFileSync("tar", ["-tf", "-"], { input, encoding: "utf8" });
+    expect(paths.trim().split(/\r?\n/)).toEqual(["manifest.json", clipPath]);
     const manifest = decodeThreadVideoArchiveManifest(
-      JSON.parse((await files.get("manifest.json")?.text()) ?? ""),
+      JSON.parse(execFileSync("tar", ["-xOf", "-", "manifest.json"], { input, encoding: "utf8" })),
     );
     expect(manifest.thread).toEqual(exportBundle());
     expect(manifest.clips).toEqual([{ jobId: job.id, clipId, size: bytes.length, hash }]);
-    expect(await files.get(`video/${clipId}.mp4`)?.bytes()).toEqual(bytes);
+    expect(Uint8Array.from(execFileSync("tar", ["-xOf", "-", clipPath], { input }))).toEqual(bytes);
     expect((await handler(makeRequest(offer.url, { method: "GET" })))?.status).toBe(404);
   });
 
