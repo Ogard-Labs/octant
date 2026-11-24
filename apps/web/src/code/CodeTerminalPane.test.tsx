@@ -1430,7 +1430,7 @@ describe("CodeTerminalPane Browser switch", () => {
     ],
     [
       "thread-not-active",
-      "This thread is archived or put away, so its terminal cannot use the Browser.",
+      "This thread is archived or settled, so its terminal cannot use the Browser.",
     ],
   ] as const)(
     "says why the host refused with %s, and does not pretend the terminal has the Browser",
