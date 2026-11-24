@@ -1,4 +1,6 @@
 import { Schema } from "effect";
+import { GithubRepositoryName, GithubRepositoryOwner } from "./githubCatalogue";
+import { LinearIssueIdentifier, LinearIssueUrl } from "./linearIssues";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -102,6 +104,68 @@ export const ThreadCanvasPreviewReceipt = Schema.Struct({
   versionId: boundedNonEmptyText(255),
 }).annotations(strict);
 export type ThreadCanvasPreviewReceipt = typeof ThreadCanvasPreviewReceipt.Type;
+
+/**
+ * What a tool call did to a pull request or an issue. Only writes are
+ * recorded: a call that merely read one (a view, a list, a search) touched
+ * nothing, and recording reads would link a thread to every pull request its
+ * agent glanced at.
+ */
+export const ThreadForgeAction = Schema.Literal(
+  "created",
+  "merged",
+  "reviewed",
+  "commented",
+  "edited",
+  "closed",
+  "reopened",
+);
+export type ThreadForgeAction = typeof ThreadForgeAction.Type;
+
+/** At most this many references cross on one finished tool call. */
+export const MAX_THREAD_FORGE_REFERENCES_PER_CALL = 10;
+
+/**
+ * A GitHub pull request or issue a finished tool call wrote to, read by the
+ * adapter from the call's command and result. Owner, repository and number
+ * are exact identity; the title and state are what the result said at the
+ * time and only describe it.
+ */
+export const ThreadGithubForgeReference = Schema.Struct({
+  forge: Schema.Literal("github"),
+  kind: Schema.Literal("pull-request", "issue"),
+  action: ThreadForgeAction,
+  owner: GithubRepositoryOwner,
+  repository: GithubRepositoryName,
+  number: Schema.Int.pipe(Schema.between(1, 999_999_999)),
+  title: Schema.optional(boundedNonEmptyText(256)),
+  state: Schema.optional(boundedNonEmptyText(64)),
+}).annotations(strict);
+export type ThreadGithubForgeReference = typeof ThreadGithubForgeReference.Type;
+
+/** A Linear issue a finished tool call wrote to, by its issue key. */
+export const ThreadLinearForgeReference = Schema.Struct({
+  forge: Schema.Literal("linear"),
+  kind: Schema.Literal("issue"),
+  action: ThreadForgeAction,
+  identifier: LinearIssueIdentifier,
+  /** The issue's page, when the call's result gave it; Linear addresses need the workspace. */
+  url: Schema.optional(LinearIssueUrl),
+  title: Schema.optional(boundedNonEmptyText(256)),
+  state: Schema.optional(boundedNonEmptyText(64)),
+}).annotations(strict);
+export type ThreadLinearForgeReference = typeof ThreadLinearForgeReference.Type;
+
+export const ThreadForgeReference = Schema.Union(
+  ThreadGithubForgeReference,
+  ThreadLinearForgeReference,
+);
+export type ThreadForgeReference = typeof ThreadForgeReference.Type;
+
+export const ThreadForgeReferences = Schema.Array(ThreadForgeReference).pipe(
+  Schema.minItems(1),
+  Schema.maxItems(MAX_THREAD_FORGE_REFERENCES_PER_CALL),
+);
 
 /**
  * How a Work or Code thread delivers a document it makes: as a Canvas, or

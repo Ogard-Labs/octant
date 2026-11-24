@@ -431,11 +431,17 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
     yield* Effect.addFinalizer(() => Effect.promise(() => azureRuntime.close()));
     const linearRedirectUri =
       options.linearOAuthRedirectUri ?? "http://127.0.0.1:52693/oauth/linear/callback";
+    const linearConnectionStore = createFileConnectionStore(
+      join(persistence.dataDirectory, "integrations", "linear-connection.json"),
+    );
+    // Whether Linear is switched on and a connection is stored, read from
+    // memory: a navigation read asks it for every row and must never reach
+    // Linear to answer.
+    const linearConnected = () =>
+      linearIntegrationIsEffective() && linearConnectionStore.read() !== undefined;
     const integrationService = createLinearIntegrationService({
       vault: integrationVault,
-      connectionStore: createFileConnectionStore(
-        join(persistence.dataDirectory, "integrations", "linear-connection.json"),
-      ),
+      connectionStore: linearConnectionStore,
       config: {
         redirectUri: linearRedirectUri,
         ...(options.linearOAuthClientId === undefined
@@ -552,6 +558,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
           ? azureOperations.list()
           : []),
       ],
+      linearConnected,
       linearIssueContextService,
       linearReadToolService,
       linearRoutineEventSources: linearRoutineEventSources(

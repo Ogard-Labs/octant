@@ -671,6 +671,47 @@ describe("CodeService reads", () => {
     expect(read.runtime[0]).not.toHaveProperty("threadPullRequests");
   });
 
+  it("lists the issues a thread touched that the window may read, open first, and Linear ones only while connected", async () => {
+    const issues = [
+      {
+        forge: "github" as const,
+        owner: "octant",
+        repository: "octant",
+        number: 3,
+        state: "closed",
+        observedAt: "2026-11-24T09:00:00.000Z",
+      },
+      {
+        forge: "github" as const,
+        owner: "someone-else",
+        repository: "private",
+        number: 4,
+        observedAt: "2026-11-24T09:00:00.000Z",
+      },
+      {
+        forge: "linear" as const,
+        identifier: "ENG-991",
+        state: "In Progress",
+        observedAt: "2026-11-24T08:00:00.000Z",
+      },
+    ];
+    const navigationWith = async (linearConnected: boolean) =>
+      (
+        await serviceFixture({
+          touchedIssues: { issuesFor: () => issues, linearConnected: () => linearConnected },
+        }).service.navigation(ids.window)
+      ).runtime[0];
+
+    expect((await navigationWith(true))?.touchedIssues).toEqual({
+      items: [issues[2], issues[0]],
+      hiddenCount: 0,
+    });
+    expect((await navigationWith(false))?.touchedIssues).toEqual({
+      items: [issues[0]],
+      hiddenCount: 0,
+    });
+  });
+
   it("keeps navigation rows without pull-request facts when the snapshot source fails or GitHub is revoked", async () => {
     const failing = serviceFixture({
       pullRequests: {
@@ -6581,6 +6622,7 @@ function serviceFixture(
     readonly probeProvider?: CodeServiceOptions["probeProvider"];
     readonly content?: CodeContentStoreOptions;
     readonly pullRequests?: CodeServiceOptions["pullRequests"];
+    readonly touchedIssues?: CodeServiceOptions["touchedIssues"];
     readonly readLatestFinishedReceipt?: CodeServiceOptions["readLatestFinishedReceipt"];
     readonly putAwayWhenDone?: CodeServiceOptions["putAwayWhenDone"];
     readonly gitHistory?: CodeServiceOptions["gitHistory"];
@@ -6719,6 +6761,7 @@ function serviceFixture(
       ? {}
       : { serverGitHistory: options.serverGitHistory }),
     ...(options.pullRequests === undefined ? {} : { pullRequests: options.pullRequests }),
+    ...(options.touchedIssues === undefined ? {} : { touchedIssues: options.touchedIssues }),
     ...(options.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
     ...(options.awaitsHarnessApproval === undefined
       ? {}

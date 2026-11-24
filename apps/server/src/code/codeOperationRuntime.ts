@@ -8093,6 +8093,9 @@ function normalizedOperationEvent(
       ...(event.providerKind === "tool-success" && event.published !== undefined
         ? { published: event.published }
         : {}),
+      ...(event.providerKind === "tool-success" && event.forgeReferences !== undefined
+        ? { forgeReferences: event.forgeReferences }
+        : {}),
     };
   }
   if (event.category === "usage")
