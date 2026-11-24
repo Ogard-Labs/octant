@@ -6,28 +6,39 @@ import type { TurnActivity, TurnActivityRow } from "../transcript/turnActivity";
 export type TaskActivityRow = Extract<TurnActivityRow, { kind: "task" }>;
 
 /**
- * The latest turn that journaled provider task progress, with whether it is
- * still in flight. Providers restate their whole plan as a turn proceeds, so
- * the newest list is the agent's ongoing work; merging older turns would mix
- * finished history into the current checklist.
- *
- * Returns undefined when nothing deserves a persistent panel: a settled turn
- * whose tasks all completed or failed is already told by the transcript, and a
- * turn that journaled no tasks has no list to show.
+ * A Code turn's activity split in two: the provider's task list, which the
+ * turn shows as its own group, and the rest, which folds behind the turn's
+ * summary line. Kept apart so a task row is never drawn or counted as a step.
  */
-export function liveTaskProgress(
-  turns: ReadonlyArray<{ readonly activity: TurnActivity; readonly running: boolean }>,
+export function splitTurnTasks(activity: TurnActivity): {
+  readonly tasks: ReadonlyArray<TaskActivityRow>;
+  readonly activity: TurnActivity;
+} {
+  const tasks = activity.rows.filter((row): row is TaskActivityRow => row.kind === "task");
+  if (tasks.length === 0) return { tasks, activity };
+  return {
+    tasks,
+    activity: { ...activity, rows: activity.rows.filter((row) => row.kind !== "task") },
+  };
+}
+
+/**
+ * The newest Code turn's task list, for the Tasks dock panel: providers restate
+ * their whole plan as a turn proceeds, so the latest list is the agent's
+ * current work, and merging older turns would mix finished history into it.
+ */
+export function latestTurnTasks(
+  turns: ReadonlyArray<{ readonly activity: TurnActivity | undefined; readonly running: boolean }>,
 ): ThreadTaskProgress | undefined {
-  const turn = turns.findLast((candidate) =>
-    candidate.activity.rows.some((row) => row.kind === "task"),
-  );
-  if (turn === undefined) return undefined;
-  const tasks = turn.activity.rows.filter((row): row is TaskActivityRow => row.kind === "task");
-  const stillOpen = tasks.some(
-    (task) => task.state === "pending" || task.state === "running" || task.state === "waiting",
-  );
-  if (!turn.running && !stillOpen) return undefined;
-  return { tasks, running: turn.running };
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn?.activity === undefined) continue;
+    const { tasks } = splitTurnTasks(turn.activity);
+    if (tasks.length > 0) return { tasks, running: turn.running };
+    // The newest list was cleared: there is no current list, older ones are history.
+    if (turn.activity.tasksCleared === true) return undefined;
+  }
+  return undefined;
 }
 
 function upsert(
@@ -158,8 +169,9 @@ export function applyActivityEvent(
     };
   }
   if (event.kind === "task-progress") {
+    const { tasksCleared: _cleared, ...rest } = activity;
     return {
-      ...activity,
+      ...rest,
       rows: upsert(activity.rows, {
         kind: "task",
         id: event.taskId,
@@ -171,7 +183,13 @@ export function applyActivityEvent(
   }
   if (event.kind === "task-list") {
     const rows = restateTaskRows(activity.rows, event.taskIds);
-    return rows === activity.rows ? activity : { ...activity, rows };
+    // An empty restatement is the provider clearing its list (OpenCode sends
+    // one), which is not the same as a turn that never wrote one: the Tasks
+    // panel must stop there rather than fall back to an older turn's list.
+    const cleared = event.taskIds.length === 0 ? { tasksCleared: true as const } : {};
+    return rows === activity.rows && event.taskIds.length > 0
+      ? activity
+      : { ...activity, rows, ...cleared };
   }
   if (event.kind === "file-change") {
     const path = String(event.path);

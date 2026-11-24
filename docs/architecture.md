@@ -8197,10 +8197,15 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   speaks besides OpenAI's: on `api.mistral.ai` the voice goes as `voice_id`
   and the reply is JSON with base64 `audio_data`, as Mistral's OpenAPI
   description lays out; transcription there is OpenAI-shaped and needs no
-  dialect. An endpoint page, and Add endpoint's last step, offer the
-  endpoint's voice models to Voice settings when it lists any (a preset's
-  known models, or ids that read as transcription or speech models): one
-  click makes a transcription model the one Voice uses, and speech is named
+  dialect. Voice settings choose transcription from one menu: Off, then each
+  enabled OpenAI-compatible endpoint with the transcription model it lists or
+  its preset knows, saved on choice, with Other model… for a typed id; a
+  Test microphone row plays a ten-second clip back in the window and sends it
+  to the transcription route only on request. An endpoint page, and Add
+  endpoint's last step, offer the endpoint's voice models to Voice settings
+  when it lists any (a preset's known models, or ids that read as
+  transcription or speech models): one click makes a transcription model the
+  one Voice uses, and speech is named
   with what it still needs, a voice from the provider, since Octant cannot
   choose one. The host serves `/api/speech/status`, `/api/speech/transcriptions`,
   and `/api/speech/synthesis` behind window authority, sniffs and bounds the

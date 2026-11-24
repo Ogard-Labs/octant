@@ -3647,7 +3647,7 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("Check the failing suite first.")).toBeVisible();
   });
 
-  it("keeps the live task list under the conversation while the turn works through it", () => {
+  it("shows the task list inside the turn that is working through it", () => {
     const operationId = "70000000-0000-4000-8000-000000000053";
     render(
       <CodeThreadWorkspace
@@ -3688,11 +3688,14 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("region", { name: "Agent tasks" })).toBeVisible();
+    const tasks = screen.getByRole("region", { name: "Agent tasks" });
+    expect(tasks).toBeVisible();
+    expect(tasks.closest(".code-thread-workspace__row")).not.toBeNull();
     expect(screen.getByText("1 of 2 tasks completed")).toBeVisible();
+    expect(screen.getByRole("list", { name: "Task list" })).toBeVisible();
   });
 
-  it("shows no task list for a settled turn whose tasks all finished", () => {
+  it("keeps a settled turn's finished task list in that turn, folded to its header", () => {
     const operationId = "70000000-0000-4000-8000-000000000054";
     render(
       <CodeThreadWorkspace
@@ -3722,7 +3725,12 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.queryByRole("region", { name: "Agent tasks" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Agent tasks" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /1 of 1 tasks completed/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByRole("list", { name: "Task list" })).not.toBeInTheDocument();
   });
 
   it("renders no activity disclosure for a turn that reported none", () => {

@@ -1,0 +1,6 @@
+/* The Tasks dock tool is a panel a person opened to read the whole list, and
+   the dock scrolls as one, so the transcript's height bound would only hide
+   the tail of the list behind a second scroll. */
+.tasks-dock .thread-tasks__list {
+  max-height: none;
+}

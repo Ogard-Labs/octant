@@ -838,6 +838,34 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   gap: var(--oct-space-1);
 }
 
+/* Transcribe with is a select with what the host would do under it; Other
+   model… opens the typed form in the same column. The microphone test stacks
+   its controls, the playback and what was heard the same way. */
+.voice-settings__choice,
+.voice-settings__test {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oct-space-2);
+  width: 100%;
+}
+
+.voice-settings__test-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.voice-settings__test-timer {
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.voice-settings__test > audio {
+  width: 100%;
+  max-width: 420px;
+}
+
 /* Custom image sources adds a second block above the form the other compound
    rows don't have: the list of what's already configured. Both blocks share
    the row's control column, so the column itself needs the gap that a
