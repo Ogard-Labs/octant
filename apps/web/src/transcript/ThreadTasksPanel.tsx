@@ -152,7 +152,13 @@ export function ThreadTasksPanel(props: ThreadTasksPanelProps) {
               <span className="thread-tasks__mark">{taskIcon(task.state)}</span>
               <span className="thread-tasks__summary">{taskWording(task, running)}</span>
               {/* The mark is drawn for the eye only, so the state is said in words. */}
-              <span className="sr-only">, {TASK_STATE_WORDS[task.state]}</span>
+              <span className="sr-only">
+                ,{" "}
+                {task.state === "running" && !running
+                  ? // A stopped turn's task in hand did not finish; the header says Incomplete.
+                    "not finished"
+                  : TASK_STATE_WORDS[task.state]}
+              </span>
             </li>
           ))}
         </ol>

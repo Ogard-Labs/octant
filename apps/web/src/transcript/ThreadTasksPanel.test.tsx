@@ -52,6 +52,21 @@ describe("ThreadTasksPanel", () => {
     expect(items[1]).toHaveTextContent(/Run tests, not started$/);
   });
 
+  it("does not read a stopped turn's task in hand as still in progress", () => {
+    render(
+      <ThreadTasksPanel
+        alwaysOpen
+        tasks={{
+          running: false,
+          tasks: [{ id: "t1", state: "running", summary: "Run tests" }],
+        }}
+      />,
+    );
+    expect(screen.getByRole("list", { name: "Task list" }).children[0]).toHaveTextContent(
+      /Run tests, not finished$/,
+    );
+  });
+
   it("names the task in its running wording only while the turn is running", () => {
     const tasks = [
       {
