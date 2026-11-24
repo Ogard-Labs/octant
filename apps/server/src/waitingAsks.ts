@@ -260,6 +260,10 @@ function serviceOfferText(offer: ServiceOffer): string {
       return offer.variantCount === 1
         ? "Generate an image?"
         : `Generate ${String(offer.variantCount)} images?`;
+    case "video-generate":
+      return `Make a ${String(offer.options.durationSeconds)}-second video clip?`;
+    case "video-save":
+      return "Save a video clip?";
   }
 }
 

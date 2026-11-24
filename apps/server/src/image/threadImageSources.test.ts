@@ -7,7 +7,8 @@ import {
   MAX_GENERATED_IMAGE_BYTES,
 } from "@octant/contracts";
 import { expect, it, vi } from "vitest";
-import { workspaceImageSources } from "./threadImageSourcePorts";
+import { applyProtectedFilesChoice, currentProtectedFilesChoice } from "../process/secretGuard";
+import { attachedImageSources, workspaceImageSources } from "./threadImageSourcePorts";
 import {
   describeImageSources,
   parseImageSourceRequests,
@@ -53,6 +54,30 @@ it("confines a reference to the turn's folder and refuses a file that changes sc
     await expect(changed?.read()).resolves.toBeUndefined();
   } finally {
     await rm(base, { recursive: true, force: true });
+  }
+});
+
+it("refuses a protected reference before approval and again before reading it", async () => {
+  const folder = await realpath(await mkdtemp(join(tmpdir(), "octant-references-")));
+  const previous = currentProtectedFilesChoice();
+  try {
+    const photo = join(folder, "photo.png");
+    await writeFile(photo, png);
+    await symlink("photo.png", join(folder, "alias.png"));
+    const files = workspaceImageSources({
+      threadId,
+      browserCaptures: { list: () => [], read: async () => undefined },
+      root: async () => folder,
+    });
+    const source = await files.file?.("alias.png");
+    await expect(source?.read()).resolves.toEqual(png);
+    applyProtectedFilesChoice({ ...previous, added: [...previous.added, photo] });
+    await expect(files.file?.("photo.png")).resolves.toBeUndefined();
+    await expect(files.file?.("alias.png")).resolves.toBeUndefined();
+    await expect(source?.read()).resolves.toBeUndefined();
+  } finally {
+    applyProtectedFilesChoice(previous);
+    await rm(folder, { recursive: true, force: true });
   }
 });
 
@@ -116,4 +141,24 @@ it("checks the expanded count and recorded size before reading, then sniffs rath
   await expect(readImageSources(described)).resolves.toEqual({
     error: "A reference is not a PNG, JPEG, WebP or GIF image.",
   });
+});
+
+it("resolves a named upload by its file name, not by a suffix of a longer one", async () => {
+  const read = vi.fn(async () => png);
+  const upload = (displayName: string) => ({
+    displayName,
+    mediaType: "image/png",
+    byteLength: 3,
+  });
+  const attachments = attachedImageSources([upload("logo.png"), upload("new logo.png")], () =>
+    read(),
+  );
+  const described = await describeImageSources(
+    [{ kind: "attachment", name: "logo.png" }],
+    { latestAttachments: () => attachments },
+    () => undefined,
+  );
+  if ("error" in described) throw new Error(described.error);
+  expect(described).toHaveLength(1);
+  expect(described[0]?.source.label).toBe("your attached photo logo.png");
 });

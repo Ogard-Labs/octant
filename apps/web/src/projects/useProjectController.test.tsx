@@ -1,6 +1,9 @@
 import {
   decodeMemoryEntryId,
+  decodeProject,
   decodeProjectId,
+  decodeProviderInstanceId,
+  decodeProviderModelId,
   type MemoryCommandResult,
   type ProjectBootstrap,
   type ProjectCommand,
@@ -110,12 +113,45 @@ function client(initial = bootstrap()) {
 }
 
 describe("useProjectController", () => {
+  it.each(["image", "video"] as const)(
+    "clears only the Project's kept %s choice",
+    async (media) => {
+      const choice = {
+        profileInstanceId: decodeProviderInstanceId("00000000-0000-4000-8000-000000000813"),
+        modelId: decodeProviderModelId("kept-model"),
+      };
+      const initial = bootstrap();
+      const kept = decodeProject(
+        project(chatId, "chat", {
+          imageGenerationChoice: choice,
+          videoGenerationChoice: choice,
+        }),
+      );
+      if (kept.type !== "chat") throw new Error("Expected a Chat Project.");
+      const server = client({ ...initial, active: [kept] });
+      vi.mocked(server.api.executeProject).mockResolvedValueOnce({
+        kind: "project-image-generation-choice-changed",
+        project: kept,
+      });
+      const { result } = renderHook(() =>
+        useProjectController({ activeMode: "chat", activeProjectId: chatId, client: server.api }),
+      );
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+      await act(async () => result.current.askAgainForGeneration(chatId, media));
+      expect(server.api.executeProject).toHaveBeenCalledExactlyOnceWith({
+        kind: "change-project-image-generation-choice",
+        projectId: chatId,
+        expectedVersion: kept.version,
+        ...(media === "video" ? { media } : {}),
+      });
+    },
+  );
+
   it("exposes the authoritative Project client to composed Project views", async () => {
     const server = client();
     const { result } = renderHook(() =>
       useProjectController({ activeMode: "chat", activeProjectId: chatId, client: server.api }),
     );
-
     await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(result.current.client).toBe(server.api);
   });

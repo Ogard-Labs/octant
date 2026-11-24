@@ -18,6 +18,7 @@ import {
   ImageGenerationScopeId,
   MAX_PENDING_IMAGE_GENERATION_OFFERS,
 } from "./imageGeneration";
+import { VideoGenerateOffer, VideoOfferDecision, VideoSaveOffer } from "./videoGeneration";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -69,11 +70,14 @@ export const ServiceOffer = Schema.Union(
   ImageGenerationSaveOffer,
   TranscriptionOffer,
   NarrationOffer,
+  VideoGenerateOffer,
+  VideoSaveOffer,
 ).annotations(personDecides);
 export type ServiceOffer = typeof ServiceOffer.Type;
 
 export const ServiceOfferDecision = Schema.Union(
   ImageGenerationOfferDecision,
+  VideoOfferDecision,
   Schema.Struct({
     offerId: ServiceOfferId,
     decision: Schema.Literal("transcribe"),

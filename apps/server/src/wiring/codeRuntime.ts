@@ -70,9 +70,10 @@ import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
 import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
-import { saveGeneratedImageUnder } from "../image/generatedImageSave";
+import { saveGeneratedImageUnder, writeConfinedNewFileUnder } from "../image/generatedImageSave";
 import { hostIconSetsUnder } from "../image/iconSetRenderer";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import { createThreadVideoAgentTools } from "../video/videoAgentTools";
 import type { NarrationForTurn } from "../speech/narrationTool";
 import type { TranscriptionForTurn } from "../speech/transcriptionTool";
 import { attachedImageSources, workspaceImageSources } from "../image/threadImageSourcePorts";
@@ -380,6 +381,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeApprovalStore"
     | "codeSessionAuthority"
     | "imageGenerationOffers"
+    | "videoOffers"
     | "liveTurns"
     | "machineChangeFeed"
     | "onThreadArchived"
@@ -424,6 +426,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "gitObservationPort"
     | "goalService"
     | "keptImageChoices"
+    | "keptVideoChoices"
     | "projectService"
   > &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
@@ -458,6 +461,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "extensionApiService"
     | "extensionPackageStore"
     | "imageJobService"
+    | "videoJobService"
     | "nativeHarnessTranscripts"
     | "probeProviderForThreads"
     | "providerAvailabilityMarks"
@@ -568,7 +572,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     machineChangeFeed,
     hostShield,
     imageGenerationOffers,
+    videoOffers,
     imageJobService,
+    videoJobService,
     runtimeForgeChanges,
     nativeHarnessComposition,
     nativeHarnessHooks,
@@ -591,6 +597,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     projectPullRequestCadence,
     projectPullRequestService,
     keptImageChoices,
+    keptVideoChoices,
     projectService,
     providerDataDirectory,
     providerRuntimeRegistry,
@@ -808,6 +815,24 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             root: currentRoot,
             allowed: speechTurnAllowed,
           });
+      const codeImageSources = {
+        latestAttachments: () =>
+          codeAttachments === undefined
+            ? []
+            : attachedImageSources(
+                codeBoardEventStore.latestPersonTurnAttachments(thread.id),
+                (attachment) => codeAttachments.read(thread.id, attachment),
+              ),
+        ...workspaceImageSources({
+          threadId: decodeBrowserThreadId(String(thread.id)),
+          browserCaptures,
+          root: currentRoot,
+        }),
+      };
+      const savePostureForMedia = (): "refuse" | "ask" | "allow" => {
+        const current = level();
+        return current === "plan" ? "refuse" : current === "approval-gated" ? "ask" : "allow";
+      };
       const images = createThreadImageAgentTools({
         windowId,
         unattended: isRoutineHostScope(windowId),
@@ -817,20 +842,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         kept: keptImageChoices,
         fullAccess: () => level() === "full-access",
         jobs: imageJobService,
-        imageSources: {
-          latestAttachments: () =>
-            codeAttachments === undefined
-              ? []
-              : attachedImageSources(
-                  codeBoardEventStore.latestPersonTurnAttachments(thread.id),
-                  (attachment) => codeAttachments.read(thread.id, attachment),
-                ),
-          ...workspaceImageSources({
-            threadId: decodeBrowserThreadId(String(thread.id)),
-            browserCaptures,
-            root: currentRoot,
-          }),
-        },
+        imageSources: codeImageSources,
         listInstances: () => persistence.readProviderInstances(),
         readImageGenerationCustomSources: () =>
           (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration
@@ -851,14 +863,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           ? {}
           : {
               save: {
-                posture: () => {
-                  const current = level();
-                  return current === "plan"
-                    ? "refuse"
-                    : current === "approval-gated"
-                      ? "ask"
-                      : "allow";
-                },
+                posture: savePostureForMedia,
                 write: (relativePath: string, bytes: Uint8Array) =>
                   saveGeneratedImageUnder({ root: checkoutRoot, relativePath, bytes }),
               },
@@ -871,9 +876,35 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             ? "Plan mode cannot generate images. Leave Plan mode to generate one."
             : undefined,
       });
-      return transcription === undefined && narration === undefined
-        ? images
-        : combineAppManagedToolSets(images, narration, transcription);
+      // Video follows the image rules: the same kept choice per Project, the
+      // same Full access rule and the same save at the turn's level.
+      const videos = createThreadVideoAgentTools({
+        windowId,
+        unattended: isRoutineHostScope(windowId),
+        threadKind: "code-thread",
+        scopeId: decodeImageGenerationScopeId(String(thread.id)),
+        offers: videoOffers,
+        kept: keptVideoChoices,
+        fullAccess: () => level() === "full-access",
+        jobs: videoJobService,
+        recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        imageSources: codeImageSources,
+        imageJobs: imageJobService,
+        ...(checkoutRoot === undefined
+          ? {}
+          : {
+              save: {
+                posture: savePostureForMedia,
+                write: (relativePath: string, bytes: Uint8Array) =>
+                  writeConfinedNewFileUnder({ root: checkoutRoot, relativePath, bytes }),
+              },
+            }),
+        refusal: () =>
+          (readThread()?.executionPolicy ?? thread.executionPolicy) === "plan"
+            ? "Plan mode cannot make video clips. Leave Plan mode to make one."
+            : undefined,
+      });
+      return combineAppManagedToolSets(images, videos, narration, transcription);
     });
     // Sees images: a thread whose model cannot read images may ask for one
     // to be described, from its own attachments or its own folder.
