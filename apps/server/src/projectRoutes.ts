@@ -633,7 +633,7 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
         return response(
           {
             category: "unauthorized",
-            message: "The image model agents use without asking is set on the host.",
+            message: `The ${command.media ?? "image"} model agents use without asking is set on the host.`,
           },
           403,
           origin,

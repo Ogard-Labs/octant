@@ -452,8 +452,10 @@ function formatScope(target: ProjectLinearTarget): {
 } {
   return {
     teamKey: target.teamKey,
-    teamName: target.teamName,
-    ...(target.projectName === undefined ? {} : { projectName: target.projectName }),
+    teamName: redactLinearIssueContextText(target.teamName),
+    ...(target.projectName === undefined
+      ? {}
+      : { projectName: redactLinearIssueContextText(target.projectName) }),
   };
 }
 

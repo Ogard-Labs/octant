@@ -21,12 +21,15 @@ generation, as provider plugins, and it supports more than one provider. He
 approved the three first-party drivers below the same day: the Gemini API's
 Gemini Omni Flash, Runway, and fal.
 
-It is built as one stack of three layers:
+It is built as one stack of layers:
 
 1. this design, the seam with its conformance harness, and the Gemini driver;
-2. the host: the job service, storage, recovery and spend, the agent tool and
-   its card, the viewer and the save;
-3. the Runway and fal drivers.
+2. the host's job service, storage, recovery and spend, and the Gemini video
+   profile in Settings;
+3. the agent tool and its card on every client, with the consent kept by media
+   kind;
+4. the clip routes, the viewer, Settings and the guide;
+5. the Runway and fal drivers.
 
 ## Why
 
@@ -220,7 +223,8 @@ under [Image generation and voice](decisions.md#image-generation-and-voice).
 The card shows:
 
 - the prompt;
-- any reference images, named, as for images;
+- any input images, named with the provider receiving them, and marked when
+  they came from a signed-in page;
 - the profile, provider and model;
 - the duration, resolution, aspect ratio and audio choice. The person can
   change each within what that model declares.
@@ -240,7 +244,9 @@ holds that choice or exactly one video profile is ready, and with several
 ready, on the profile Settings names for Full access, else the first ready one.
 As for images:
 
-- Full access asks again after the person chooses Ask again.
+- In Project settings, the **Video generation** row names the kept model
+  and offers **Ask again**. It restores the video confirmation at Full access
+  and keeps the Project's image choice.
 - A kept choice the host can no longer run (its profile turned off, its driver
   plugin disabled or its model removed) is dropped and the person is asked. It
   is never swapped for another model.
@@ -377,8 +383,8 @@ At startup the host reconciles every video job the journal left unfinished:
   them.
 - Reference images follow the image rule. They are named on the card and need
   that card's confirmation, and a model that cannot take them is not offered.
-- A clip's result marks the thread as having read outside content, because the
-  provider's output enters the thread, as image results do.
+- Delivering a completed clip marks a Chat, Work or Code thread as having
+  read outside content. Pending and declined replies contain only host status.
 - Nothing goes to an Octant-operated service. No telemetry is added.
 
 ## Seam
@@ -630,7 +636,10 @@ tool plugin over a new optional `videoGeneration` capability on the public
 media tool port (`@octant/plugin-api/media-tools`). It has `generate` and
 `save` operations, and the same host-owned boundaries as
 `octant_create_image`: confinement, bytes, credentials, spend, consent and the
-access level stay in the host.
+access level stay in the host. Workspace references must pass protected-file
+checks both when offered and when read. A Work or Code turn can save a
+completed clip by its clip ID or by the job ID returned while generation
+was still running. The save refuses protected paths and existing files.
 
 It is offered in Chat, Work and Code only while an enabled profile has a
 video model. It is never offered in Plan or a Side Chat, and in an unattended

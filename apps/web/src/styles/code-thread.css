@@ -54,22 +54,6 @@
   flex: 1 1 200px;
 }
 
-/* Provider questions are actionable composer state. Keep them with the
-   composer at the foot of the thread so the answer never gets separated from
-   the message field by a long transcript. The shared request row supplies
-   its controls and neutral surface; this wrapper owns the stack and measure. */
-.code-thread-workspace__provider-requests {
-  display: grid;
-  flex: 0 0 auto;
-  gap: 8px;
-  margin-top: 0;
-  margin-bottom: 8px;
-}
-
-.code-thread-workspace__provider-requests .approval-row {
-  width: 100%;
-}
-
 /* The scroll frame, its padding, and the fade at its edges are the system's
    `.transcript-scroll`. (Code alone faded the top: cut off sharp right under
    the waiting row, half a line of the answer read as printed over that row.) */

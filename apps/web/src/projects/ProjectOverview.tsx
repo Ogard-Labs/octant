@@ -133,7 +133,10 @@ export interface ProjectOverviewProps {
   /** Absent when the host cannot accept the change; the switch is then not shown. */
   readonly onAgentMemoryWritesChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   /** Drops the image model the Project's agents use without asking; absent hides the row. */
-  readonly onImageGenerationAskAgain?: (projectId: ProjectId) => Promise<boolean>;
+  readonly onGenerationAskAgain?: (
+    projectId: ProjectId,
+    media: "image" | "video",
+  ) => Promise<boolean>;
   /** Absent when the host cannot accept the change; the brand kit is then not shown. */
   readonly onBrandKitChange?: (
     projectId: ProjectId,
@@ -780,14 +783,23 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 onChange={(enabled) => props.onAgentMemoryWritesChange?.(props.project.id, enabled)}
               />
             )}
-            {props.onImageGenerationAskAgain === undefined ||
-            props.project.imageGenerationChoice === undefined ? null : (
-              <KeptImageGenerationChoice
-                disabled={archived || connectionStale}
-                modelId={String(props.project.imageGenerationChoice.modelId)}
-                onAskAgain={() => props.onImageGenerationAskAgain?.(props.project.id)}
-              />
-            )}
+            {props.onGenerationAskAgain === undefined
+              ? null
+              : (["image", "video"] as const).map((media) => {
+                  const choice =
+                    media === "image"
+                      ? props.project.imageGenerationChoice
+                      : props.project.videoGenerationChoice;
+                  return choice === undefined ? null : (
+                    <KeptGenerationChoice
+                      key={media}
+                      disabled={archived || connectionStale}
+                      media={media}
+                      modelId={String(choice.modelId)}
+                      onAskAgain={() => props.onGenerationAskAgain?.(props.project.id, media)}
+                    />
+                  );
+                })}
             {props.project.type === "work" && props.onWorkDeveloperToolsChange !== undefined ? (
               <WorkDeveloperToolsSetting
                 disabled={archived || connectionStale}
@@ -1030,25 +1042,30 @@ function AgentMemoryWritesSetting(props: {
 }
 
 /**
- * The image model a person told a thread of this Project to keep using
- * ("Don't ask again" on the image card). It is shown only while one is kept,
+ * The model a person told a thread of this Project to keep using
+ * ("Don't ask again" on the generation card). It is shown only while one is kept,
  * because the card is where a model is chosen; here the person takes the
  * standing permission back.
  */
-function KeptImageGenerationChoice(props: {
+function KeptGenerationChoice(props: {
   readonly disabled: boolean;
+  readonly media: "image" | "video";
   readonly modelId: string;
   readonly onAskAgain: () => Promise<boolean> | undefined;
 }) {
   const [pending, setPending] = useState(false);
+  const label = props.media === "image" ? "Image generation" : "Video generation";
+  const output = props.media === "image" ? "images" : "video clips";
+  const unit = props.media === "image" ? "image" : "clip";
   return (
-    <section className="project-overview-inspector">
+    <section aria-label={label} className="project-overview-inspector">
       <div className="project-overview-inspector__row">
         <div>
-          <h3>Image generation</h3>
+          <h3>{label}</h3>
           <p>
-            Agents in this Project generate images with {props.modelId} without asking, in routines
-            too. Each image is billed to your image provider. Plan never generates.
+            Agents in this Project generate {output} with {props.modelId} without asking, in
+            routines too. Each {unit} is billed to your {props.media} provider. Plan never
+            generates.
           </p>
         </div>
         <OctantButton

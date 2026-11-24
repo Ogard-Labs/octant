@@ -6,7 +6,8 @@ import { useState } from "react";
 import { Eye, EyeOff } from "../ui/icons";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+import { chooseByNumber, moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+import { OptionKey } from "./OptionKey";
 
 export interface ProviderQuestionCardProps {
   readonly draftIdentity?: QuestionnaireDraftIdentity | undefined;
@@ -71,6 +72,9 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
   return (
     <section
       aria-label="Provider question"
+      // Numbers pick from anywhere in the card, Submit included; arrows stay
+      // on the choice group.
+      onKeyDown={chooseByNumber}
       className={`provider-question-card${props.className === undefined ? "" : ` ${props.className}`}`}
     >
       <p className="provider-question-card__prompt">{props.prompt}</p>
@@ -82,7 +86,7 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
         onKeyDown={moveWithinRadioGroup}
         role="radiogroup"
       >
-        {props.options.map((option) => (
+        {props.options.map((option, index) => (
           <div
             className="provider-question-card__choice"
             {...(selected === option.label ? { "data-checked": "" } : {})}
@@ -92,11 +96,15 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
               aria-checked={selected === option.label}
               className="provider-question-card__option"
               onClick={() => setSelected(option.label)}
+              size={null}
               role="radio"
               type="button"
               variant="ghost"
             >
-              <span className="provider-question-card__option-label">{option.label}</span>
+              <span className="provider-question-card__option-label">
+                {option.label}
+                <OptionKey index={index} />
+              </span>
               {option.description === undefined ? null : (
                 <span className="provider-question-card__option-description">
                   {option.description}
@@ -110,11 +118,15 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
             aria-checked={custom}
             className="provider-question-card__option"
             onClick={() => setSelected(CUSTOM)}
+            size={null}
             role="radio"
             type="button"
             variant="ghost"
           >
-            <span className="provider-question-card__option-label">Type your own answer</span>
+            <span className="provider-question-card__option-label">
+              Type your own answer
+              <OptionKey index={props.options.length} />
+            </span>
           </OctantButton>
           {custom && !secret ? (
             <OctantInput

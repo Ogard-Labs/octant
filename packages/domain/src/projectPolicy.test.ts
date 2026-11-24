@@ -370,6 +370,31 @@ describe("Project creation and lifecycle", () => {
     }
   });
 
+  it("keeps a Project's video choice beside its image choice, by the same rule", () => {
+    const image = {
+      profileInstanceId: "a3000000-0000-4000-8000-000000000001",
+      modelId: "gpt-image-2",
+    } as never;
+    const video = {
+      profileInstanceId: "a3000000-0000-4000-8000-000000000002",
+      modelId: "gemini-omni-1.2-flash",
+    } as never;
+    const project = changeProjectImageGenerationChoice(
+      makeProject(ids.work, "0/1", { type: "work" }),
+      image,
+      updatedAt,
+    );
+    const both = changeProjectImageGenerationChoice(project, video, updatedAt, "video");
+    expect(both).toMatchObject({ imageGenerationChoice: image, videoGenerationChoice: video });
+    expect(() => changeProjectImageGenerationChoice(both, video, updatedAt, "video")).toThrow(
+      ProjectPolicyRejected,
+    );
+    const askAgain = changeProjectImageGenerationChoice(both, undefined, updatedAt, "video");
+    expect(askAgain.videoGenerationAskAgain).toBe(true);
+    expect(askAgain.imageGenerationChoice).toEqual(image);
+    expect("imageGenerationAskAgain" in askAgain).toBe(false);
+  });
+
   it("lets a Project of any mode allow agents to write its memory without asking, which starts off", () => {
     for (const type of ["chat", "work", "code"] as const) {
       const project = makeProject(ids[type], "0/1", { type });

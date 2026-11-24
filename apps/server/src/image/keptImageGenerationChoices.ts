@@ -31,17 +31,29 @@ export interface KeptImageGenerationChoices {
 }
 
 export function createKeptImageGenerationChoices(options: {
+  /** Which media's choice this keeps; image when absent. Video uses the same rule and code path. */
+  readonly media?: "image" | "video";
   /** Where a thread outside a Project keeps its choice. */
   readonly threadChoices: Pick<ImageGenerationOfferService, "remember" | "remembered" | "forget">;
   /** The Project a thread stands in, read when asked; undefined outside one. */
   readonly projectOf: (scope: ThreadScope) => ProjectId | undefined;
   readonly readProject: (
     projectId: ProjectId,
-  ) => Pick<Project, "version" | "imageGenerationChoice" | "imageGenerationAskAgain"> | undefined;
+  ) =>
+    | Pick<
+        Project,
+        | "version"
+        | "imageGenerationChoice"
+        | "imageGenerationAskAgain"
+        | "videoGenerationChoice"
+        | "videoGenerationAskAgain"
+      >
+    | undefined;
   /** Journals the Project's choice through the Project command path. */
   readonly changeProject: (
     command: {
       readonly kind: "change-project-image-generation-choice";
+      readonly media?: "image" | "video";
       readonly projectId: ProjectId;
       readonly expectedVersion: AggregateVersion;
       readonly imageGenerationChoice?: ProjectImageGenerationChoice;
@@ -58,6 +70,13 @@ export function createKeptImageGenerationChoices(options: {
       : String(left.profileInstanceId) === String(right.profileInstanceId) &&
         String(left.modelId) === String(right.modelId);
 
+  const media = options.media ?? "image";
+  const keptOf = (project: {
+    readonly imageGenerationChoice?: ProjectImageGenerationChoice | undefined;
+    readonly videoGenerationChoice?: ProjectImageGenerationChoice | undefined;
+  }): ProjectImageGenerationChoice | undefined =>
+    media === "video" ? project.videoGenerationChoice : project.imageGenerationChoice;
+
   // The Project command refuses a change that changes nothing, so an answer
   // that repeats the kept choice, or a drop of nothing, journals no event.
   const change = async (
@@ -66,10 +85,11 @@ export function createKeptImageGenerationChoices(options: {
     actor?: EventActor,
   ): Promise<void> => {
     const project = options.readProject(projectId);
-    if (project === undefined || sameChoice(project.imageGenerationChoice, choice)) return;
+    if (project === undefined || sameChoice(keptOf(project), choice)) return;
     await options.changeProject(
       {
         kind: "change-project-image-generation-choice",
+        ...(media === "video" ? { media } : {}),
         projectId,
         expectedVersion: project.version,
         ...(choice === undefined ? {} : { imageGenerationChoice: choice }),
@@ -88,12 +108,18 @@ export function createKeptImageGenerationChoices(options: {
       const projectId = options.projectOf(scope);
       return projectId === undefined
         ? options.threadChoices.remembered(scope)
-        : options.readProject(projectId)?.imageGenerationChoice;
+        : (() => {
+            const project = options.readProject(projectId);
+            return project === undefined ? undefined : keptOf(project);
+          })();
     },
     asksAgain(scope) {
       const projectId = options.projectOf(scope);
       return (
-        projectId !== undefined && options.readProject(projectId)?.imageGenerationAskAgain === true
+        projectId !== undefined &&
+        (media === "video"
+          ? options.readProject(projectId)?.videoGenerationAskAgain
+          : options.readProject(projectId)?.imageGenerationAskAgain) === true
       );
     },
     async forget(scope) {

@@ -1,5 +1,5 @@
 import type { AutomationClient } from "@octant/client-runtime";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
@@ -229,6 +229,9 @@ describe("WorkspaceRailLayers", () => {
 
   it("opens the complete Automation Center from the sidebar once the release gate flips", async () => {
     automationGate.enabled = true;
+    // Resolve both Code chunks before timing queries against their rendered
+    // content. The pane label appears before the nested workspace finishes loading.
+    await Promise.all([import("../code/CodeWorkspaceTab"), import("../code/CodeWorkspace")]);
     const user = userEvent.setup();
     const definition = automationDefinitionFixture(automationCodeDraftFixture());
     const run = automationRunFixture(definition, {
@@ -262,14 +265,7 @@ describe("WorkspaceRailLayers", () => {
       />,
     );
 
-    // The thread names itself through the pane that holds it; the thread's own
-    // body carries no title. CodeWorkspaceTab is also lazy, and its Suspense
-    // fallback is an OctantEmpty state heading titled with the tab name, so a heading
-    // probe would pass on the fallback before the chunk settled.
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    await act(async () => {
-      await vi.dynamicImportSettled();
-    });
     expect(await screen.findByRole("region", { name: "Code thread" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "More destinations" }));
     await user.click(await screen.findByRole("menuitem", { name: "Automations" }));

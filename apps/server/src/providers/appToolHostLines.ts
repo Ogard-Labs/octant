@@ -2,6 +2,7 @@ import { BROWSER_TOOL_HOST_LINE } from "@octant/plugin-host/browser-use";
 import { COMPUTER_TOOL_HOST_LINE } from "@octant/plugin-host/computer-use";
 import {
   CREATE_IMAGE_TOOL_HOST_LINE,
+  CREATE_VIDEO_TOOL_HOST_LINE,
   LOOK_TOOL_HOST_LINE,
   NARRATE_TOOL_HOST_LINE,
   TRANSCRIBE_TOOL_HOST_LINE,
@@ -44,6 +45,7 @@ const GUIDE_LINES: Readonly<Record<string, string>> = {
     "Ask the language server about a saved file with octant_code: its errors, where a name is defined, and where it is used.",
   octant_computer: COMPUTER_TOOL_HOST_LINE,
   octant_create_image: CREATE_IMAGE_TOOL_HOST_LINE,
+  octant_create_video: CREATE_VIDEO_TOOL_HOST_LINE,
   octant_credential:
     "When a registered operation or a saved command needs a credential the person holds, use octant_credential; you never see the value, and it is not a command runner.",
   octant_debug:
