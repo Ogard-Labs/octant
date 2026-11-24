@@ -1822,19 +1822,22 @@ export class CodeProjectPullRequestService {
       }
       for (const thread of threads) {
         if (thread.projectId !== String(project.projectId)) continue;
-        if (
-          !this.#areSameRepository(project.projectId, thread.repository, {
-            owner: project.repositoryOwner,
-            name: project.repositoryName,
-          })
-        ) {
-          continue;
-        }
         for (const identity of thread.pullRequestNumbers ?? []) {
+          // A number from Octant's own operations is in the thread's own
+          // repository; one a tool call wrote to names its repository.
+          const repository = identity.repository ?? thread.repository;
+          if (
+            !this.#areSameRepository(project.projectId, repository, {
+              owner: project.repositoryOwner,
+              name: project.repositoryName,
+            })
+          ) {
+            continue;
+          }
           const link = this.#resolveLink({
             projectId: project.projectId,
-            repositoryOwner: thread.repository.owner,
-            repositoryName: thread.repository.name,
+            repositoryOwner: repository.owner,
+            repositoryName: repository.name,
             number: identity.number,
           });
           rows.push({

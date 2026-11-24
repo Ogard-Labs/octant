@@ -56,7 +56,10 @@ import {
   CodeService,
 } from "../code/codeService";
 import type { CompletedThreadArchiveInput } from "../completedThreadArchiveSweep";
-import { pullRequestIdentitiesFromHistory } from "../code/codeThreadMetadataService";
+import {
+  pullRequestIdentitiesFromHistory,
+  type CodeThreadKnownPullRequest,
+} from "../code/codeThreadMetadataService";
 import {
   type CodeProjectPullRequestDetailPort,
   type CodeProjectPullRequestListPort,
@@ -1169,10 +1172,7 @@ export function wireCode(deps: CodeDependencies) {
         readonly title: string;
         readonly repository: { readonly owner: string; readonly name: string };
         readonly deliveryBranch: string;
-        readonly pullRequestNumbers: ReadonlyArray<{
-          readonly number: number;
-          readonly observedAt: string;
-        }>;
+        readonly pullRequestNumbers: ReadonlyArray<CodeThreadKnownPullRequest>;
       }> = [];
       for (const thread of persistence.readCodeThreads()) {
         const repository = thread.deliveryTarget.proposedBaseRepository;

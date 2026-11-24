@@ -277,6 +277,8 @@ type HistoryFrame = typeof CodeOperationEventFrame.Type;
  * - the last pull-request review, the last pull-request state, and per pull
  *   request number the last frame that identifies it;
  * - every `tool-activity` frame carrying a page the call published;
+ * - every `tool-activity` frame carrying the pull requests and issues the
+ *   call wrote to, which link the thread;
  * - the last `git-observed` result;
  * - the last `repository-test-state` result, which the Tests surface reads;
  * - provider-turn evidence: once a completed provider turn is proven, only the
@@ -320,6 +322,12 @@ export function summarizeThreadHistory(
     // Every page a tool call published stays: the Artifacts library lists a
     // thread's Claude pages from its summary, each publish a version.
     if (event.kind === "tool-activity" && event.published !== undefined) {
+      keep.add(index);
+      return;
+    }
+    // Every pull request and issue a call wrote to stays: they link the
+    // thread, and a compacted history must link it the same way.
+    if (event.kind === "tool-activity" && event.forgeReferences !== undefined) {
       keep.add(index);
       return;
     }

@@ -938,6 +938,48 @@ describe("CodeProjectPullRequestService", () => {
     });
   });
 
+  it("links a thread to the pull request a tool call wrote to, and never to one outside the Project", async () => {
+    const { service } = serviceFixture({
+      knownPullRequests: [
+        {
+          number: 7,
+          observedAt: "2026-08-21T08:00:00Z",
+          repository: { owner: "OCTANT", name: "Octant" },
+        },
+        {
+          number: 9,
+          observedAt: "2026-08-21T09:00:00Z",
+          repository: { owner: "someone-else", name: "private" },
+        },
+      ],
+      detail: async (request) =>
+        request.number === 7
+          ? {
+              ...observedDetail,
+              pullRequest: {
+                ...observedDetail.pullRequest,
+                number: 7,
+                url: "https://github.com/octant/octant/pull/7",
+                title: "Merged by a tool call",
+                state: "merged",
+                mergeability: "unknown",
+                headBranch: "feature/elsewhere",
+                updatedAt: "2026-08-22T06:30:00Z",
+              },
+            }
+          : { status: "unavailable" },
+    });
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const board = await service.boardSnapshot(windowId);
+
+    expect(board.rows.map((row) => row.number).sort((a, b) => a - b)).toEqual([7, 12]);
+    expect(board.rows.find((row) => row.number === 7)?.linkedThreads).toEqual([
+      { threadId, title: "Manual refresh" },
+    ]);
+    expect(JSON.stringify(board.rows)).not.toContain("someone-else");
+  });
+
   it("keeps another window's linked pull-request pairs when a window with disjoint thread visibility refreshes", async () => {
     // Window A's renderer can only see the Octant Project's threads; window B
     // only works in Docs. The snapshot they share must carry both Projects'
