@@ -343,7 +343,7 @@ function seedPairedRequests(connection: ReturnType<typeof openSqlite>) {
   const signedRequest = (
     path: string,
     timestampMs: number,
-    input: { method: "POST"; body: object } | { method: "GET"; range: string },
+    input: { method: "POST"; body: object } | { method: "GET"; range?: string },
   ) => {
     const body = input.method === "POST" ? JSON.stringify(input.body) : "";
     const bodyDigest = createHash("sha256").update(body, "utf8").digest("hex");
@@ -380,7 +380,9 @@ function seedPairedRequests(connection: ReturnType<typeof openSqlite>) {
               "x-octant-csrf": csrfToken,
               "x-octant-command-id": randomUUID(),
             }
-          : { range: input.range }),
+          : input.range === undefined
+            ? {}
+            : { range: input.range }),
         "x-octant-device-proof": encodedProof,
       },
       ...(input.method === "POST" ? { body } : {}),
@@ -1846,6 +1848,144 @@ describe("RemoteGateway — approval for a window that never finished", () => {
       );
       expect(afterSignOut?.status).toBe(404);
       expect(readClipRange).toHaveBeenCalledOnce();
+    } finally {
+      await gateway.stop();
+      connection.close();
+    }
+  });
+
+  it("lets directly paired Read only and Approve and steer devices watch clip ranges while refusing inaccessible threads and Stop", async () => {
+    const bytes = new Uint8Array([9, 8, 7]);
+    const accessibleScope = "e4000000-0000-4000-8000-000000000002";
+    const forbiddenScope = "e4000000-0000-4000-8000-000000000099";
+    const job = decodeVideoJob({
+      id: "e4000000-0000-4000-8000-000000000003",
+      status: "completed",
+      threadKind: "chat-thread",
+      scopeId: accessibleScope,
+      profileInstanceId: "e4000000-0000-4000-8000-000000000001",
+      driverKind: "gemini-video",
+      modelId: "gemini-omni-1.2-flash",
+      promptHash: "a".repeat(64),
+      options: { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: true },
+      imageCount: 0,
+      estimatedCostUsdMicros: 695_040,
+      clip: {
+        clipId: "e4000000-0000-4000-8000-000000000004",
+        hash: "b".repeat(64),
+        size: bytes.byteLength,
+        durationSeconds: 10,
+        resolution: "720p",
+        aspectRatio: "16:9",
+      },
+      providerCopy: "removed",
+      version: 2,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+    const forbiddenJob = decodeVideoJob({
+      ...job,
+      id: "e4000000-0000-4000-8000-000000000098",
+      scopeId: forbiddenScope,
+    });
+    const stop = vi.fn();
+    const readClipRange = vi.fn(async () => ({ bytes, start: 0, end: 2, size: bytes.length }));
+    const capturing = createCapturingServe();
+    const { gateway, connection } = setup({
+      serve: capturing.serve,
+      productDispatch: createAuthenticatedProductDispatch({
+        dispatch: async (request) => await videoRoutes(request),
+      }),
+    });
+    const videoRoutes = createVideoRouteHandler({
+      jobs: {
+        getById: (id) =>
+          String(id) === String(job.id)
+            ? job
+            : String(id) === String(forbiddenJob.id)
+              ? forbiddenJob
+              : undefined,
+        listByScope: (scope) => (String(scope) === accessibleScope ? [job] : [forbiddenJob]),
+        stop,
+        readClipRange,
+        streamClip: async () => undefined,
+      },
+      authorizeScope: async (_window, kind, scope) =>
+        kind === job.threadKind && String(scope) === accessibleScope,
+      isPairedDeviceSessionCurrent: (issuer, sessionNow) =>
+        isAuthenticatedPairedDeviceSessionCurrent(connection, issuer, (sessionNow ?? Date.now)()),
+      windowAuthorityStore: new WindowAuthorityStore(),
+      now: () => nowMs,
+    });
+
+    try {
+      const { deviceId, signedRequest } = seedPairedRequests(connection);
+      await gateway.start();
+      const fetch = capturing.getFetch();
+      const admin = gateway.localDeviceAdministration();
+      if (fetch === undefined || admin === undefined) {
+        throw new Error("Expected captured gateway fetch and device administration");
+      }
+
+      const localActor: EventActor = decodeEventActor({
+        kind: "local-user",
+        actorId: "77777777-7777-4777-8777-777777777777",
+      });
+      for (const accessLevel of ["read-only", "approve-and-steer"] as const) {
+        admin.setDeviceAccessLevel({ deviceId, accessLevel, actor: localActor });
+
+        const listed = await fetch(
+          signedRequest(
+            `/api/video/jobs?scopeId=${accessibleScope}&threadKind=chat-thread`,
+            nowMs,
+            {
+              method: "GET",
+            },
+          ),
+          lanFacts,
+        );
+        expect(listed.status).toBe(200);
+        expect(((await listed.json()) as { jobs: unknown[] }).jobs).toHaveLength(1);
+
+        const issued = await fetch(
+          signedRequest("/api/video/clip", nowMs, { method: "POST", body: { jobId: job.id } }),
+          lanFacts,
+        );
+        expect(issued.status).toBe(200);
+        const { url } = decodeVideoClipTicketResponse(await issued.json());
+        const playing = await fetch(
+          signedRequest(url, nowMs, { method: "GET", range: "bytes=0-2" }),
+          lanFacts,
+        );
+        expect(playing.status).toBe(206);
+        expect(playing.headers.get("content-range")).toBe("bytes 0-2/3");
+        expect(new Uint8Array(await playing.arrayBuffer())).toEqual(bytes);
+
+        const forbiddenList = await fetch(
+          signedRequest(`/api/video/jobs?scopeId=${forbiddenScope}&threadKind=chat-thread`, nowMs, {
+            method: "GET",
+          }),
+          lanFacts,
+        );
+        expect(forbiddenList.status).toBe(404);
+
+        const forbiddenTicket = await fetch(
+          signedRequest("/api/video/clip", nowMs, {
+            method: "POST",
+            body: { jobId: forbiddenJob.id },
+          }),
+          lanFacts,
+        );
+        expect(forbiddenTicket.status).toBe(404);
+
+        const stopped = await fetch(
+          signedRequest(`/api/video/jobs/${job.id}/stop`, nowMs, { method: "POST", body: {} }),
+          lanFacts,
+        );
+        expect(stopped.status).toBe(404);
+        expect(stop).not.toHaveBeenCalled();
+      }
+      expect(readClipRange).toHaveBeenCalledTimes(2);
     } finally {
       await gateway.stop();
       connection.close();

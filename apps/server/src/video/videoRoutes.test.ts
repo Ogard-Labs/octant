@@ -2,7 +2,7 @@ import { decodeVideoJob, decodeWindowId, type VideoJob } from "@octant/contracts
 import { decodeStableHostId, DeviceId, RemoteSessionId } from "@octant/contracts/remote-access";
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { createRemoteDevicePrincipal } from "../clientPrincipal";
+import { AGENT_ACCESS_ORIGIN, createRemoteDevicePrincipal } from "../clientPrincipal";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createVideoRouteHandler, parseRange, type VideoRouteDependencies } from "./videoRoutes";
@@ -207,6 +207,63 @@ describe("video routes", () => {
     const response = await handler(request(`/api/video/jobs/${jobId}/stop`, { method: "POST" }));
     expect(response?.status).toBe(200);
     expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it("refuses hub-introduced devices and agent grants while allowing directly paired narrower levels to read clips", async () => {
+    const { handler, stop } = setup(() => true);
+    const makePrincipal = (overrides: Partial<Parameters<typeof createRemoteDevicePrincipal>[0]>) =>
+      createRemoteDevicePrincipal({
+        hostId: decodeStableHostId("70000000-0000-4000-8000-000000000011"),
+        deviceId: Schema.decodeUnknownSync(DeviceId)("70000000-0000-4000-8000-000000000012"),
+        sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
+          "70000000-0000-4000-8000-000000000013",
+        ),
+        origin: "https://host.example.test",
+        capabilityDigest: "c".repeat(64),
+        credentialGeneration: 2,
+        protocolVersion: 1,
+        ...overrides,
+      });
+    const sendAs = async (
+      principal: ReturnType<typeof createRemoteDevicePrincipal>,
+      path: string,
+      init: { method?: string; body?: string } = {},
+    ) => {
+      const req = new Request(`http://127.0.0.1:3100${path}`, {
+        method: init.method ?? "GET",
+        headers: init.body === undefined ? {} : { "content-type": "application/json" },
+        ...(init.body === undefined ? {} : { body: init.body }),
+      });
+      bindPrincipalRouteContext(req, {
+        principal,
+        scopeId: decodeWindowId(String(principal.deviceId)),
+      });
+      return handler(req);
+    };
+
+    const readOnly = makePrincipal({ admittedBy: "host-person", accessLevel: "read-only" });
+    expect(
+      (await sendAs(readOnly, `/api/video/jobs?threadKind=work-thread&scopeId=${scopeId}`))?.status,
+    ).toBe(200);
+    expect(
+      (await sendAs(readOnly, `/api/video/jobs/${jobId}/stop`, { method: "POST" }))?.status,
+    ).toBe(404);
+    expect(stop).not.toHaveBeenCalled();
+
+    const hubMember = makePrincipal({ admittedBy: "hub-roster" });
+    expect(
+      (await sendAs(hubMember, `/api/video/jobs?threadKind=work-thread&scopeId=${scopeId}`))
+        ?.status,
+    ).toBe(404);
+
+    const agentGrant = makePrincipal({
+      admittedBy: "host-person",
+      origin: AGENT_ACCESS_ORIGIN,
+    });
+    expect(
+      (await sendAs(agentGrant, `/api/video/jobs?threadKind=work-thread&scopeId=${scopeId}`))
+        ?.status,
+    ).toBe(404);
   });
 
   it("reads open, closed and suffix ranges and refuses ones past the clip", () => {

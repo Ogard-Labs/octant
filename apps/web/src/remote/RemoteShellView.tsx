@@ -234,6 +234,10 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       >
         <RemoteWorkspace
           actsAsHostPerson={standing.actsAsHostPerson}
+          canWatchVideoClips={
+            standing !== RESTRICTED_REMOTE_SESSION &&
+            (standing.actsAsHostPerson || standing.accessLevel !== undefined)
+          }
           clients={clients}
           connected={connected}
           extensionClient={extensionClient}

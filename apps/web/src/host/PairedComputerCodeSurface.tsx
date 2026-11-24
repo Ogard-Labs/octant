@@ -127,7 +127,12 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
         />
       </div>
       <VideoClientContext.Provider
-        value={standing.actsAsHostPerson ? clients.videoResults : undefined}
+        value={
+          standing !== RESTRICTED_REMOTE_SESSION &&
+          (standing.actsAsHostPerson || standing.accessLevel !== undefined)
+            ? clients.videoResults
+            : undefined
+        }
       >
         <RemoteCodeSurface
           clients={clients}
