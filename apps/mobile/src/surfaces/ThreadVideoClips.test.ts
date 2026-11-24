@@ -6,19 +6,29 @@ import type { MobileRemoteTransport } from "@octant/client-runtime";
 import { ThemeProvider } from "../../design-system/theme";
 import { ThreadVideoClips } from "./ThreadVideoClips";
 
-const { cache, remove, pickDirectory, copy } = vi.hoisted(() => ({
+const { cache, remove, pickDirectory, copy, mobile, native } = vi.hoisted(() => ({
   cache: vi.fn(),
   remove: vi.fn(),
   pickDirectory: vi.fn(),
   copy: vi.fn(),
+  mobile: { platform: "android" },
+  native: { pick: vi.fn(), copy: vi.fn(), discard: vi.fn() },
 }));
 vi.mock("expo-file-system", () => ({ Directory: { pickDirectoryAsync: pickDirectory } }));
 vi.mock("./videoClipCache", () => ({ cacheVideoClip: cache }));
 vi.mock("react-native", async () => ({
   ...(await vi.importActual<Record<string, unknown>>("react-native-web")),
+  Platform: {
+    get OS() {
+      return mobile.platform;
+    },
+  },
   AppState: { currentState: "active", addEventListener: () => ({ remove: () => undefined }) },
 }));
-vi.mock("expo", () => ({ useEvent: () => ({ status: "readyToPlay" }) }));
+vi.mock("expo", () => ({
+  useEvent: () => ({ status: "readyToPlay" }),
+  requireOptionalNativeModule: () => native,
+}));
 vi.mock("expo-video", () => ({
   useVideoPlayer: () => ({ status: "readyToPlay" }),
   VideoView: () => createElement("div", { "data-testid": "video-playing" }),
@@ -30,11 +40,20 @@ vi.mock("../../design-system", async () => ({
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
-it("keeps a saved copy while the player reconnects and refuses to export after access is lost", async () => {
+it.each(["android", "ios"])(
+  "keeps playback and refuses to save after access is lost on %s",
+  verifySave,
+);
+
+async function verifySave(platform: string) {
   vi.useFakeTimers();
-  cache.mockResolvedValue({ uri: "file:///cache/clip.mp4", exists: true, delete: remove, copy });
-  const directory = { uri: "file:///chosen-folder" };
-  pickDirectory.mockResolvedValueOnce(directory);
+  vi.clearAllMocks();
+  mobile.platform = platform;
+  const fileUri = "file:///cache/clip.mp4";
+  cache.mockResolvedValue({ uri: fileUri, exists: true, delete: remove, copy });
+  const directory = platform === "ios" ? "folder-token" : { uri: "file:///chosen-folder" };
+  const pick = platform === "ios" ? native.pick : pickDirectory;
+  pick.mockResolvedValueOnce(directory);
   const threadId = "e4000000-0000-4000-8000-000000000002";
   const options = { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: true };
   const jobs = [
@@ -98,8 +117,14 @@ it("keeps a saved copy while the player reconnects and refuses to export after a
     expect(player).not.toBeNull();
     const save = () => node.querySelector<HTMLElement>('[aria-label="Save video"]');
     await act(async () => save()?.click());
-    expect(pickDirectory).toHaveBeenCalledOnce();
-    expect(copy).toHaveBeenCalledWith(directory, { overwrite: false });
+    expect(pick).toHaveBeenCalledOnce();
+    const saveCopy = platform === "ios" ? native.copy : copy;
+    if (platform === "ios") {
+      expect(saveCopy).toHaveBeenCalledWith(directory, fileUri);
+      expect(native.discard).toHaveBeenCalledWith(directory);
+    } else {
+      expect(saveCopy).toHaveBeenCalledWith(directory, { overwrite: false });
+    }
     expect(node.textContent).toContain("Video saved.");
     expect(remove).not.toHaveBeenCalled();
     await render(undefined);
@@ -115,16 +140,17 @@ it("keeps a saved copy while the player reconnects and refuses to export after a
     await poll(200);
     expect(cache).toHaveBeenCalledOnce();
     let finishPicking: (value: typeof directory) => void = () => undefined;
-    pickDirectory.mockReturnValueOnce(
+    pick.mockReturnValueOnce(
       new Promise((resolve) => {
         finishPicking = resolve;
       }),
     );
     await act(async () => save()?.click());
-    expect(pickDirectory).toHaveBeenCalledTimes(2);
+    expect(pick).toHaveBeenCalledTimes(2);
     await poll(404);
     await act(async () => finishPicking(directory));
-    expect(copy).toHaveBeenCalledOnce();
+    expect(saveCopy).toHaveBeenCalledOnce();
+    if (platform === "ios") expect(native.discard).toHaveBeenCalledTimes(2);
     expect(playing()).toBeNull();
     expect(remove).toHaveBeenCalledOnce();
     await poll(503);
@@ -136,4 +162,4 @@ it("keeps a saved copy while the player reconnects and refuses to export after a
     act(() => root.unmount());
     vi.useRealTimers();
   }
-});
+}

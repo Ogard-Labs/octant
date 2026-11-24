@@ -367,6 +367,9 @@ which the person sets, like any turn.
   A temporary list failure or reconnection leaves the already-downloaded clip playing.
   **Save video** copies the file into a folder the person chooses on the phone.
   A saved copy remains in that folder when the temporary player file is removed.
+  On iOS, Octant opens access to the chosen folder for each copy and releases it
+  when the copy finishes. If thread access is lost while the picker is open,
+  selecting a folder does not copy the clip.
 - A clip can be placed in a Canvas design as a `generated-video` asset in a
   later change. This design does not add the asset kind.
 

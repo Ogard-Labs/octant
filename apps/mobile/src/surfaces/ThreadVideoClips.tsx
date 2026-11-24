@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useEvent } from "expo";
-import { Directory, type File } from "expo-file-system";
+import type { File } from "expo-file-system";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { RemoteConnectionError, type MobileRemoteTransport } from "@octant/client-runtime";
 import {
@@ -18,6 +18,7 @@ import { useTheme } from "../../design-system";
 import { usePolledResource } from "../runtime/usePolledResource";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { cacheVideoClip } from "./videoClipCache";
+import { saveVideoClip } from "./videoClipSave";
 
 export function ThreadVideoClips(props: {
   readonly hostId: string;
@@ -181,11 +182,8 @@ function ClipPlayer({ file, signal }: { readonly file: File; readonly signal: Ab
     saving.current = true;
     setSaveStatus("saving");
     try {
-      const destination = await Directory.pickDirectoryAsync();
-      // The picker may still be open when the thread loses access to this file.
-      if (signal.aborted) return;
-      await file.copy(destination, { overwrite: false });
-      if (!signal.aborted) setSaveStatus("saved");
+      const saved = await saveVideoClip(file, signal);
+      if (!signal.aborted) setSaveStatus(saved ? "saved" : undefined);
     } catch (error) {
       const code =
         typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
