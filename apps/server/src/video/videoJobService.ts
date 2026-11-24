@@ -83,6 +83,8 @@ const MAX_POLL_MS = 30_000;
 const VIDEO_TIMEOUT_CLEANUP_MS = 15_000;
 /** How often a partial or failed catalog read is retried per profile. */
 const VIDEO_DISCOVERY_RETRY_MS = 60_000;
+/** How long the host waits for prices and capabilities before a clip can be offered. */
+const VIDEO_QUOTE_DISCOVERY_TIMEOUT_MS = 30_000;
 
 /** A failed status check can leave the already accepted job's outcome unknown. */
 function pollFailureLeavesJobUnconfirmed(failure: ProviderFailure): boolean {
@@ -137,6 +139,7 @@ export interface EnqueueVideoJobInput extends VideoJobInputs {
   readonly modelId: ProviderModelId;
   readonly prompt: string;
   readonly options: VideoClipOptions;
+  readonly signal?: AbortSignal;
 }
 
 /** What the card needs before Generate: the model's declaration, the check, and the price. */
@@ -415,9 +418,13 @@ export class VideoJobService {
     readonly firstFrame: boolean;
     readonly lastFrame: boolean;
     readonly referenceCount: number;
+    readonly signal?: AbortSignal;
   }): Promise<VideoQuote> {
     if (this.#closing.signal.aborted) {
       return { status: "refused", reason: "The host is shutting down." };
+    }
+    if (input.signal?.aborted) {
+      return { status: "refused", reason: "Video generation was stopped." };
     }
     const instance = this.#options.readProviderInstance(input.profileInstanceId);
     if (instance === undefined || !instance.enabled) {
@@ -431,11 +438,19 @@ export class VideoJobService {
     if (adapter === undefined) {
       return { status: "refused", reason: "That video provider's plugin is turned off." };
     }
-    const models = await this.#modelsOf(adapter);
+    const discoverySignal = AbortSignal.any([
+      this.#closing.signal,
+      AbortSignal.timeout(VIDEO_QUOTE_DISCOVERY_TIMEOUT_MS),
+      ...(input.signal === undefined ? [] : [input.signal]),
+    ]);
+    const models = await this.#modelsOf(adapter, discoverySignal);
     if (this.#closing.signal.aborted) {
       return { status: "refused", reason: "The host is shutting down." };
     }
-    if (models === undefined) {
+    if (input.signal?.aborted) {
+      return { status: "refused", reason: "Video generation was stopped." };
+    }
+    if (models === undefined || discoverySignal.aborted) {
       return { status: "refused", reason: "That video provider cannot be reached." };
     }
     const model = models.find((candidate) => String(candidate.modelId) === String(input.modelId));
@@ -488,9 +503,13 @@ export class VideoJobService {
       firstFrame: input.firstFrame !== undefined,
       lastFrame: input.lastFrame !== undefined,
       referenceCount: input.references.length,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
     if (this.#closing.signal.aborted) {
       throw new VideoJobServiceError("busy", "The host is shutting down.");
+    }
+    if (input.signal?.aborted) {
+      throw new VideoJobServiceError("ineligible", "Video generation was stopped.");
     }
     if (quote.status === "refused") throw new VideoJobServiceError("ineligible", quote.reason);
     if (this.#options.projection.countQueued() >= MAX_QUEUED_VIDEO_JOBS) {

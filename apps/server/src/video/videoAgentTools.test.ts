@@ -215,10 +215,13 @@ function harness(options: {
 describe("octant_create_video on the host", () => {
   it("asks on a card with the model's defaults and makes the clip with the person's choices", async () => {
     const chosen = { durationSeconds: 5, resolution: "1080p", aspectRatio: "16:9", audio: true };
-    const { call, askGenerate, enqueue } = harness({
+    const { signal } = new AbortController();
+    const { call, quote, askGenerate, enqueue } = harness({
       answer: { status: "video-generate", options: chosen, rememberForThread: false },
     });
-    await call({ prompt: "A paper boat on a pond" });
+    await call({ prompt: "A paper boat on a pond" }, signal);
+    expect(quote).toHaveBeenNthCalledWith(1, expect.objectContaining({ signal }));
+    expect(quote).toHaveBeenNthCalledWith(2, expect.objectContaining({ signal }));
     expect(askGenerate).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "video-generate",
@@ -230,7 +233,12 @@ describe("octant_create_video on the host", () => {
       expect.any(AbortSignal),
     );
     expect(enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({ profileInstanceId: profileId, options: chosen, references: [] }),
+      expect.objectContaining({
+        profileInstanceId: profileId,
+        options: chosen,
+        references: [],
+        signal,
+      }),
     );
   });
 

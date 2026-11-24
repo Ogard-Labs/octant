@@ -608,6 +608,58 @@ describe("video jobs", () => {
     expect(calls.start).toBe(0);
   });
 
+  it.each(["Stop", "shutdown", "the discovery deadline"])(
+    "interrupts discovery before reserving a clip on %s",
+    async (interruption) => {
+      const lookup = Promise.withResolvers<AbortSignal | undefined>();
+      const release = Promise.withResolvers<void>();
+      const caller = new AbortController();
+      const deadline = new AbortController();
+      const { service, calls, spend } = harness({
+        beforeModels: (_call, signal) => {
+          lookup.resolve(signal);
+          signal?.addEventListener("abort", () => release.reject(signal.reason), { once: true });
+          return release.promise;
+        },
+      });
+      const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(deadline.signal);
+      const input = {
+        threadKind: "work-thread" as const,
+        scopeId,
+        profileInstanceId: profileId,
+        modelId,
+        prompt: "A paper boat on a pond",
+        options,
+        references: [],
+        signal: caller.signal,
+      };
+      const pending = service.enqueue(input);
+      const observed = pending.catch((error: unknown) => error);
+      try {
+        const signal = await lookup.promise;
+        expect(signal).toBeDefined();
+        expect(timeout).toHaveBeenCalledWith(30_000);
+        if (interruption === "Stop") caller.abort();
+        if (interruption === "shutdown") service.close();
+        if (interruption === "the discovery deadline") deadline.abort();
+        expect(signal?.aborted).toBe(true);
+        await expect(pending).rejects.toThrow(
+          interruption === "Stop"
+            ? "Video generation was stopped."
+            : interruption === "shutdown"
+              ? "The host is shutting down."
+              : "That video provider cannot be reached.",
+        );
+        expect(spend.admit).not.toHaveBeenCalled();
+        expect(calls.start).toBe(0);
+      } finally {
+        timeout.mockRestore();
+        release.reject(new Error("The discovery fixture finished."));
+        await observed;
+      }
+    },
+  );
+
   it("releases both slots when start responses stall past the job deadline", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const reading = Promise.withResolvers<void>();

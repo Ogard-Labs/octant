@@ -305,6 +305,9 @@ to stay healthy:
 A video job counts against the thread's and the Project's spend ceilings,
 which the person sets, like any turn.
 
+- **Quote.** Before a clip can be offered or reserved, the host waits up to 30
+  seconds for a provider's model and price discovery. Stopping the turn or
+  shutting down the host interrupts the lookup before the clip is queued.
 - **Reserve.** Before Generate is honoured, the host reserves the card's
   estimate against every ceiling that applies. The estimate is the model's
   declared output price for the chosen duration, resolution and audio, plus its
