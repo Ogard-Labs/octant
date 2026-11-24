@@ -38,6 +38,18 @@ describe("Computer use Settings", () => {
     });
   });
 
+  it("distinguishes an unreadable permission check from a macOS denial", async () => {
+    render(
+      <ComputerUseSettingsView
+        settings={{ enabled: true, automaticUpdates: true }}
+        onSettingsChange={() => {}}
+        bridge={{ getComputerUseStatus: async () => ({ ...status, permissionsUnavailable: true }) }}
+      />,
+    );
+    expect(await screen.findAllByText("Couldn’t check")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Test Computer use" })).toBeDisabled();
+  });
+
   it("keeps the page available with an honest explanation outside the desktop app", async () => {
     render(
       <ComputerUseSettingsView

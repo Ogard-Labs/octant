@@ -1,0 +1,20 @@
+diff --git a/dist/native/node-runtime.js b/dist/native/node-runtime.js
+--- a/dist/native/node-runtime.js
++++ b/dist/native/node-runtime.js
+@@ -1,6 +1,15 @@
+ import { createRequire } from "node:module";
+ import { dirname, join } from "node:path";
+-import { resolveLibPath } from "@ubjs/node/typescript/dist/resolve-lib.js";
++import { resolveLibPath as resolvePackageLibrary } from "@ubjs/node/typescript/dist/resolve-lib.js";
++// Electron emulates archive paths for JavaScript, but dlopen needs the
++// physical native payload next to the sealed archive.
++function resolveLibPath(options) {
++    const path = resolvePackageLibrary(options);
++    const archive = process.resourcesPath && join(process.resourcesPath, "app.asar") + "/";
++    return archive && path.startsWith(archive)
++        ? join(process.resourcesPath, "app.asar.unpacked", path.slice(archive.length))
++        : path;
++}
+ const FfiType = {
+     UInt8: { tag: "UInt8" },
+     Int8: { tag: "Int8" },
