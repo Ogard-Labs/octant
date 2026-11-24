@@ -11,6 +11,7 @@ import type {
 } from "@octant/contracts";
 import { decideGithubCatalogueRead } from "@octant/domain";
 import type { OctantMode } from "@octant/contracts/modes";
+import { projectPullRequestKey } from "../code/projectPullRequestKey";
 
 /** Rows the card lists before it says "+N more". */
 export const PULL_REQUEST_CARD_ROW_LIMIT = 6;
@@ -141,7 +142,7 @@ function askedToReview(row: CodeProjectPullRequestRow, viewerLogin: string): boo
 
 function cardRow(row: CodeProjectPullRequestRow, group: PullRequestCardGroup): PullRequestCardRow {
   return {
-    key: `${String(row.projectId)}:${row.repositoryOwner}/${row.repositoryName}#${String(row.number)}`,
+    key: projectPullRequestKey(row),
     group,
     projectId: row.projectId,
     repositoryOwner: row.repositoryOwner,

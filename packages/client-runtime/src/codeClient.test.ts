@@ -5,12 +5,13 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { decodeCodeProviderFileReviewRequest } from "@octant/contracts/code-provider-file-review";
 import { decodeProjectId } from "@octant/contracts/projects";
-import { decodeCodeCommand } from "@octant/contracts/code";
+import { decodeCodeCommand, decodeCodeThreadId } from "@octant/contracts/code";
 import {
   CodeClientFailure,
   CodeClientSnapshotRequiredError,
   createCodeClient,
   MAX_CODE_NDJSON_LINE_BYTES,
+  PullRequestControlsUnavailableError,
 } from "./codeClient";
 
 const baseUrl = "http://127.0.0.1:4310";
@@ -649,6 +650,48 @@ describe("code client", () => {
       client.setProjectPullRequestAutoFix?.({ kind: "enable", target } as never),
     ).rejects.toMatchObject({ category: "invalid" });
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports unavailable pull request controls when their modules fail to load", async () => {
+    const fetch = vi.fn();
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+    const unavailable = () => {
+      throw new Error("Missing module");
+    };
+    vi.doMock("@octant/contracts/code-project-pull-requests", unavailable);
+    vi.doMock("@octant/contracts/code-project-pull-request-switches", unavailable);
+    try {
+      await expect(client.queryProjectPullRequests({ version: 1 })).rejects.toBeInstanceOf(
+        PullRequestControlsUnavailableError,
+      );
+      await expect(
+        client.queryProjectPullRequestSwitches?.({
+          projectId: decodeProjectId(ids.project),
+          repositoryOwner: "octant",
+          repositoryName: "octant",
+          number: 12,
+        }),
+      ).rejects.toBeInstanceOf(PullRequestControlsUnavailableError);
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock("@octant/contracts/code-project-pull-requests");
+      vi.doUnmock("@octant/contracts/code-project-pull-request-switches");
+    }
+  });
+
+  it("sends composer activity only for a valid thread", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.noteComposerActivity?.("bad" as never)).rejects.toMatchObject({
+      category: "invalid",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    await client.noteComposerActivity?.(decodeCodeThreadId(ids.thread));
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/composer-activity`,
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ threadId: ids.thread }) }),
+    );
   });
 
   it("reads a Code thread follow-up view over the authenticated endpoint", async () => {

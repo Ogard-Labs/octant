@@ -51,7 +51,10 @@ import {
 } from "../code/codeOperationRuntime";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { CodePlannerService } from "../code/codePlannerService";
-import { CodeProjectPullRequestSwitchService } from "../code/codeProjectPullRequestSwitchService";
+import {
+  CodeProjectPullRequestSwitchService,
+  pullRequestAutoFixRoutes,
+} from "../code/codeProjectPullRequestSwitchService";
 import { PullRequestReviewerRegistry } from "../pullRequestReviewers/pullRequestReviewerRegistry";
 import { createPullRequestReviewHostRuntime } from "../pullRequestReviewers/pullRequestReviewHostRuntime";
 import { createPullRequestReviewRouteHandler } from "../pullRequestReviewers/pullRequestReviewRoutes";
@@ -368,6 +371,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<HarnessWiring, "shieldServerStore"> &
   Pick<
     AuthorityWiring,
+    | "isPairedDeviceSessionCurrent"
     | "browserCaptures"
     | "browserModelBindings"
     | "agentRunPersistence"
@@ -2778,6 +2782,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     );
     // Merge when ready and Auto-fix reuse `pullRequestSwitchForge` created above.
     const pullRequestSwitchService = new CodeProjectPullRequestSwitchService({
+      localWindows: () => deps.windowAuthorityStore.listWindowIds(),
       limits: () => {
         const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
         return {
@@ -2855,6 +2860,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               result.state === "completed")
           );
         },
+        readFollowUp: (threadId) => codeFollowUpService.read(threadId).followUp,
         notifyPerson: async (threadId, reason) => {
           const view = codeFollowUpService.read(threadId);
           await codeFollowUpService.observeTrigger({
@@ -2906,8 +2912,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         codePlannerService.execute(windowId, command, actor),
       executePlannerProposal: (windowId, command, signal, actor) =>
         codePlannerService.resolveProposal(windowId, command, signal, actor),
-      queryProjectPullRequests: (windowId, query) =>
-        projectPullRequestService.query(windowId, query),
+      queryProjectPullRequests: async (windowId, query) =>
+        pullRequestSwitchService.withBabysitProgress(
+          await projectPullRequestService.query(windowId, query),
+        ),
       refreshProjectPullRequests: async (windowId, command, signal) => {
         const view = await projectPullRequestService.refresh(
           windowId,
@@ -2920,7 +2928,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         if (view.freshness.status === "fresh") {
           projectPullRequestCadence.noteExplicitRefreshSucceeded();
         }
-        return view;
+        return pullRequestSwitchService.withBabysitProgress(view);
       },
       queryProjectPullRequestDetail: (windowId, query) =>
         projectPullRequestService.queryDetail(windowId, query),
@@ -2947,12 +2955,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         projectPullRequestActionService.act(windowId, command, signal, caller, actor),
       readProjectPullRequestActionContext: (windowId, query, signal, caller) =>
         projectPullRequestActionService.readContext(windowId, query, signal, caller),
-      queryProjectPullRequestSwitches: (windowId, target) =>
-        pullRequestSwitchService.query(windowId, target),
+      ...pullRequestAutoFixRoutes(pullRequestSwitchService, deps.isPairedDeviceSessionCurrent),
       setProjectPullRequestMergeWhenReady: (windowId, command, signal, caller, actor) =>
         pullRequestSwitchService.setMergeWhenReady(windowId, command, caller, signal, actor),
-      setProjectPullRequestAutoFix: (windowId, command, initiator, actor) =>
-        pullRequestSwitchService.setAutoFix(windowId, command, initiator, actor),
       noteComposerActivity: (_windowId, activity) =>
         pullRequestSwitchService.noteComposerActivity(activity.threadId),
       // A person's Stop that interrupts a Code turn is told to hosts composed

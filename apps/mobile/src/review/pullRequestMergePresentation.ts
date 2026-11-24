@@ -66,6 +66,7 @@ export function mergeWhenReadyOutcomeCopy(
         : "Merge when ready did not change: the host cannot run the GitHub command.";
   }
   const reason: Record<typeof outcome.reason, string> = {
+    "already-active": "a switch is already active for this pull request",
     "not-authorized": "it was not confirmed, or this Project is not connected to that repository",
     "not-open": "the pull request is no longer open",
     stale: "the pull request changed since you reviewed it",

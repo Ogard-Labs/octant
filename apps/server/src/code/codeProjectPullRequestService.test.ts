@@ -1337,6 +1337,8 @@ describe("CodeProjectPullRequestService", () => {
       detail: async () => ({ status: "unavailable" }),
     });
 
+    const linked = await fixture.service.query(windowId, { version: 1, threadId });
+    expect(linked.rows.map((row) => row.number)).toEqual([11]);
     await fixture.service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
     const board = await fixture.service.boardSnapshot(windowId);
 

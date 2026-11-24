@@ -285,6 +285,7 @@ export function startOctantServer(
       isPairedDeviceScope,
       isRestrictedDeviceScope,
       isPersonPairedDeviceCurrent,
+      isPairedDeviceSessionCurrent,
       liveTurns,
       machineChangeFeed,
       onAgentRunExecutionAccepted,
@@ -938,7 +939,6 @@ export function startOctantServer(
       liveProjectBrowsers,
       pairedBrowserControlService,
       resolvePairedDeviceName,
-      isPairedDeviceSessionCurrent,
       productFeedbackRoutes,
       nativeBrowserPresentationRoutes,
       productFeedbackService,
@@ -1006,6 +1006,7 @@ export function startOctantServer(
       onCodeTurnCancelled,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      isPairedDeviceSessionCurrent,
       narrationForTurn,
       transcriptionForTurn,
       imageDescriber,
