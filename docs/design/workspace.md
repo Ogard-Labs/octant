@@ -2564,7 +2564,19 @@ kinds, labelling the leftover; it adds no authority of its own.
 
 An agent can ask for related decisions through the app-owned `ask-user` tool
 in Chat, Work, and Code. A questionnaire belongs in its originating thread,
-with one compact card containing up to four questions. It creates no Canvas.
+with one compact card containing up to four questions.
+
+A pending question or approval, the `ask-user` card or a provider's own, is
+docked directly above the composer in Chat, Work and Code, outside the
+transcript, so a long reply never carries it out of view and the answer sits
+where the person types (maintainer decision, 2026-11-24). The reply that asked
+keeps its waiting status in the transcript, and an answered question's summary
+stays there. The composer is not the answer field: the card keeps its own
+written-answer field and Submit, and the composer keeps queueing messages.
+Each option shows its number, and pressing 1–9 while focus is in the card
+picks that option as a click would; in a questionnaire the keys act within
+the question that has focus. A key never sends, and digits typed into a text
+field stay text. It creates no Canvas.
 More than four decisions belong in a Canvas [choice block](canvas.md#choice-block),
 which has no question limit; the tool's description tells agents so.
 Each question offers one choice or several choices, optional descriptions,
