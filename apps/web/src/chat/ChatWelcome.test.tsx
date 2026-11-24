@@ -3,7 +3,7 @@ import {
   decodeProviderInstanceId,
   decodeProviderModelId,
 } from "@octant/contracts";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { OctantCommandProvider } from "../palette/CommandRegistry";
@@ -246,7 +246,9 @@ describe("ChatWelcome", () => {
     await user.upload(screen.getByLabelText("Choose attachment file"), file);
     const attachments = screen.getByRole("list", { name: "Attachments" });
     expect(attachments).toHaveTextContent("notes.md");
-    expect(attachments.querySelector("svg.octant-icon-file-text")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(attachments.querySelector("svg.octant-icon-file-text")).toBeInTheDocument(),
+    );
 
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Summarize{Enter}");
 

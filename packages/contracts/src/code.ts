@@ -40,6 +40,7 @@ import {
   ThreadBoardPullRequestSummaries,
   ThreadNavigationPullRequestSummaries,
 } from "./threadBoardPullRequests";
+import { ThreadTouchedIssues } from "./threadTouchedIssues";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -1692,6 +1693,8 @@ export const CodeNavigationRuntime = Schema.Struct({
    * Current clients read this one and fall back to `pullRequestSummaries`.
    */
   threadPullRequests: Schema.optional(ThreadNavigationPullRequestSummaries),
+  /** The issues the thread's tool calls wrote to, newest first; absent when none. */
+  touchedIssues: Schema.optional(ThreadTouchedIssues),
   /** The latest turn's start and latest step while it runs; absent otherwise. */
   ...ThreadLiveTurnFields,
 }).annotations(strict);

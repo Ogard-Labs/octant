@@ -12,6 +12,7 @@ export * from "./codeDebug";
 export * from "./codeLanguage";
 export * from "./threadBoard";
 export * from "./threadBoardPullRequests";
+export * from "./threadTouchedIssues";
 export * from "./codeTestDefinitions";
 export * from "./context";
 export * from "./contextHandoff";

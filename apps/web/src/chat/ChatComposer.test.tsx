@@ -78,14 +78,18 @@ describe("ChatComposer", () => {
     const list = screen.getByRole("list", { name: "Attached files" });
     const chips = within(list).getAllByRole("listitem");
     files.forEach((file, index) => {
-      const chip = chips[index];
-      expect(chip).toHaveTextContent(file.displayName);
-      expect(chip?.querySelector(`svg.octant-icon-${file.icon}`)).toHaveAttribute(
-        "aria-hidden",
-        "true",
-      );
+      expect(chips[index]).toHaveTextContent(file.displayName);
     });
-    await user.click(screen.getByRole("button", { name: "Remove notes.md attachment" }));
+    const removeNotes = screen.getByRole("button", { name: "Remove notes.md attachment" });
+    await waitFor(() => {
+      files.forEach((file, index) => {
+        expect(chips[index]?.querySelector(`svg.octant-icon-${file.icon}`)).toHaveAttribute(
+          "aria-hidden",
+          "true",
+        );
+      });
+    });
+    await user.click(removeNotes);
     expect(onRemoveAttachment).toHaveBeenCalledWith(files[0]?.id);
   });
 

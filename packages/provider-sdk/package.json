@@ -12,6 +12,7 @@
     "./child-observations": "./src/childObservations.ts",
     "./driver": "./src/driver.ts",
     "./driver-plugins": "./src/driverPlugins.ts",
+    "./forge-references": "./src/forgeReferences.ts",
     "./harness-endpoint": "./src/harnessEndpoint.ts",
     "./harness-endpoint-conformance": "./src/harnessEndpointConformance.ts",
     "./outside-driver": "./src/outsideDriver.ts",

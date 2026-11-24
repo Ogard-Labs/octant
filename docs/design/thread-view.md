@@ -629,9 +629,10 @@ In desktop and web composers, staged file chips show a 12px file-type glyph
 beside the filename in Chat, Work, and Code. Use the document, code,
 spreadsheet, archive, or image glyph for known filename extensions and the
 plain file glyph otherwise. Composers recognize the Code file explorer's
-code, document, and image extensions. An available image thumbnail takes
-the glyph's place. Long filenames truncate within the chip so its remove
-control stays reachable.
+code, document, and image extensions. The generic glyph fills the same space
+while the file-type glyph loads. An available image thumbnail takes the glyph's
+place. Long filenames truncate within the chip so its remove control stays
+reachable.
 
 ## Image preview
 

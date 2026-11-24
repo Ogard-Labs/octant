@@ -4,9 +4,14 @@ import type {
   CodeThreadLinkedPullRequest,
   CodeThreadOperationalMetadataView,
 } from "@octant/contracts";
+import { decodeCodeDeliveryTarget } from "@octant/contracts/code";
 import { describe, expect, it, vi } from "vitest";
 import type { MergedThreadPutAwayOutcome } from "./codeService";
-import { MergedThreadPutAway, type MergedPullRequest } from "./mergedThreadPutAway";
+import {
+  MergedThreadPutAway,
+  threadDeliversPullRequest,
+  type MergedPullRequest,
+} from "./mergedThreadPutAway";
 
 const merged: CodeThreadLinkedPullRequest = {
   kind: "linked",
@@ -75,7 +80,7 @@ function fixture(options: {
     threads: () => options.threads,
     projectExists: () => true,
     metadata: { project },
-    cachedMerges: (threadId) => options.cachedMerges?.[String(threadId)] ?? [],
+    cachedMerges: (thread) => options.cachedMerges?.[String(thread.id)] ?? [],
     decisionPending: (thread) => options.decisionPending?.includes(String(thread.id)) === true,
     samePullRequest: (_projectId, left, right) =>
       left.number === right.number && left.baseRepository === right.baseRepository,
@@ -86,6 +91,78 @@ function fixture(options: {
 }
 
 describe("merged thread put-away", () => {
+  it("counts a merge as the thread's delivery only in its own repository, on its branch or recorded by Octant", () => {
+    const thread = codeThread("delivering", {
+      deliveryTarget: decodeCodeDeliveryTarget({
+        outcomeKind: "opened-pr",
+        branchIntent: "feature/thing",
+        remoteName: "origin",
+        proposedBaseRepository: "acme/app",
+        proposedBaseBranch: "main",
+        confirmedAt: "2026-11-19T12:00:00.000Z",
+      }),
+    });
+    const delivers = (
+      pullRequest: Partial<Parameters<typeof threadDeliversPullRequest>[0]["pullRequest"]>,
+    ) =>
+      threadDeliversPullRequest({
+        thread,
+        own: [{ number: 12, repository: { owner: "acme", name: "app" } }],
+        pullRequest: {
+          repositoryOwner: "acme",
+          repositoryName: "app",
+          number: 99,
+          headBranch: "feature/other",
+          ...pullRequest,
+        },
+        // `acme/app` was renamed `acme/app-next`.
+        sameRepository: (_projectId, left, right) =>
+          left.owner === right.owner &&
+          left.name.replace("-next", "") === right.name.replace("-next", ""),
+      });
+
+    expect(delivers({ headBranch: "feature/thing" })).toBe(true);
+    expect(delivers({ number: 12 })).toBe(true);
+    expect(delivers({ number: 12, repositoryName: "app-next" })).toBe(true);
+    // Linked by a tool call that only touched it: no operation of Octant's own.
+    expect(delivers({ number: 30 })).toBe(false);
+    // Another of the Project's repositories, by the same number or branch.
+    expect(delivers({ number: 12, repositoryName: "docs" })).toBe(false);
+    expect(delivers({ headBranch: "feature/thing", repositoryName: "docs" })).toBe(false);
+  });
+
+  it("finds a server thread's delivery repository in the pull request Octant opened for it", () => {
+    // A composer reads no remote of a server, so the target is a placeholder.
+    const thread = codeThread("on-a-server", {
+      deliveryTarget: decodeCodeDeliveryTarget({
+        outcomeKind: "opened-pr",
+        branchIntent: "feature/thing",
+        remoteName: "origin",
+        proposedBaseRepository: "local/App",
+        proposedBaseBranch: "main",
+        confirmedAt: "2026-11-19T12:00:00.000Z",
+      }),
+    });
+    const delivers = (
+      own: Parameters<typeof threadDeliversPullRequest>[0]["own"],
+      pullRequest: { readonly number: number; readonly headBranch: string },
+      repositoryName = "app",
+    ) =>
+      threadDeliversPullRequest({
+        thread,
+        own,
+        pullRequest: { repositoryOwner: "acme", repositoryName, ...pullRequest },
+        sameRepository: (_projectId, left, right) =>
+          left.owner === right.owner && left.name === right.name,
+      });
+    const opened = [{ number: 12, repository: { owner: "acme", name: "app" } }];
+
+    expect(delivers(opened, { number: 12, headBranch: "feature/thing" })).toBe(true);
+    expect(delivers(opened, { number: 40, headBranch: "feature/thing" })).toBe(true);
+    expect(delivers(opened, { number: 12, headBranch: "feature/thing" }, "docs")).toBe(false);
+    expect(delivers([], { number: 12, headBranch: "feature/thing" })).toBe(false);
+  });
+
   it("puts away a thread whose pull request merged, and leaves an open one, an unmerged one and a coordinator", async () => {
     const { pass, putAway } = fixture({
       threads: [

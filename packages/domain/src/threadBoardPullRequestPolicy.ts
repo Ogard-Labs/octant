@@ -6,10 +6,13 @@ import type {
   ThreadBoardPullRequestState,
   ThreadBoardPullRequestSummaries,
   ThreadBoardPullRequestSummary,
+  ThreadTouchedIssue,
+  ThreadTouchedIssues,
 } from "@octant/contracts";
 import {
   MAX_THREAD_BOARD_PULL_REQUEST_DISPLAY,
   MAX_THREAD_NAVIGATION_PULL_REQUEST_DISPLAY,
+  MAX_THREAD_TOUCHED_ISSUES,
 } from "@octant/contracts";
 
 export interface ThreadBoardPullRequestJoinRow {
@@ -173,4 +176,54 @@ export function composeThreadNavigationPullRequestSummaries(
       lifecycleRank(left) - lifecycleRank(right) || byMostRecentlyUpdated(left, right),
     MAX_THREAD_NAVIGATION_PULL_REQUEST_DISPLAY,
   );
+}
+
+/** States, as GitHub or a Linear workflow names them, that mean an issue is finished. */
+const FINISHED_ISSUE_STATES: ReadonlySet<string> = new Set([
+  "closed",
+  "done",
+  "completed",
+  "canceled",
+  "cancelled",
+  "duplicate",
+]);
+
+/** Whether the state an issue was last seen in means it is finished. */
+export function threadTouchedIssueIsFinished(issue: ThreadTouchedIssue): boolean {
+  return issue.state !== undefined && FINISHED_ISSUE_STATES.has(issue.state.toLowerCase());
+}
+
+/**
+ * The issues a Code thread's tool calls wrote to, as its navigation entry
+ * carries them: a GitHub issue only in a repository the window may read and
+ * while GitHub is not revoked, a Linear issue only while Linear is connected.
+ * Open issues come first, then finished ones, each newest first.
+ */
+export function composeThreadTouchedIssues(input: {
+  readonly issues: ReadonlyArray<ThreadTouchedIssue>;
+  readonly readableRepositories: ReadonlyArray<{ readonly owner: string; readonly name: string }>;
+  readonly githubRevoked: boolean;
+  readonly linearConnected: boolean;
+}): ThreadTouchedIssues | undefined {
+  const readable = new Set(
+    input.readableRepositories.map(
+      (repository) => `${repository.owner.toLowerCase()}/${repository.name.toLowerCase()}`,
+    ),
+  );
+  const visible = input.issues.filter((issue) =>
+    issue.forge === "github"
+      ? !input.githubRevoked &&
+        readable.has(`${issue.owner.toLowerCase()}/${issue.repository.toLowerCase()}`)
+      : input.linearConnected,
+  );
+  if (visible.length === 0) return undefined;
+  const ordered = [...visible].sort(
+    (left, right) =>
+      Number(threadTouchedIssueIsFinished(left)) - Number(threadTouchedIssueIsFinished(right)) ||
+      right.observedAt.localeCompare(left.observedAt),
+  );
+  return {
+    items: ordered.slice(0, MAX_THREAD_TOUCHED_ISSUES),
+    hiddenCount: Math.max(0, ordered.length - MAX_THREAD_TOUCHED_ISSUES),
+  };
 }
