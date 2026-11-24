@@ -52,7 +52,7 @@ describe("ThreadTasksPanel", () => {
     expect(items[1]).toHaveTextContent(/Run tests, not started$/);
   });
 
-  it("does not read a stopped turn's task in hand as still in progress", () => {
+  it("does not read or draw a stopped turn's task in hand as still in progress", () => {
     render(
       <ThreadTasksPanel
         alwaysOpen
@@ -62,9 +62,10 @@ describe("ThreadTasksPanel", () => {
         }}
       />,
     );
-    expect(screen.getByRole("list", { name: "Task list" }).children[0]).toHaveTextContent(
-      /Run tests, not finished$/,
-    );
+    const row = screen.getByRole("list", { name: "Task list" }).children[0];
+    expect(row).toHaveTextContent(/Run tests, not finished$/);
+    // No spinner: the row is not drawn as running once its turn stopped.
+    expect(row).not.toHaveAttribute("data-task-state", "running");
   });
 
   it("names the task in its running wording only while the turn is running", () => {

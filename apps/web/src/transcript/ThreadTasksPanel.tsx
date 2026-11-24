@@ -56,6 +56,15 @@ const TASK_STATE_WORDS: Readonly<Record<ThreadTaskRow["state"], string>> = {
 };
 
 /**
+ * How a task is drawn: a task still marked running when its turn stopped did
+ * not finish, so it takes the not-started mark instead of a spinner that would
+ * say work is still going on.
+ */
+function drawnState(task: ThreadTaskRow, turnRunning: boolean): ThreadTaskRow["state"] {
+  return task.state === "running" && !turnRunning ? "pending" : task.state;
+}
+
+/**
  * How a task is named: its running wording while the turn is writing and the
  * task is in hand, its plain wording otherwise, so a stopped turn never
  * claims work is still going on.
@@ -145,11 +154,11 @@ export function ThreadTasksPanel(props: ThreadTasksPanelProps) {
       {open ? (
         <ol aria-label="Task list" className="thread-tasks__list" id={listId}>
           {tasks.map((task, index) => (
-            <li data-task-state={task.state} key={task.id}>
+            <li data-task-state={drawnState(task, running)} key={task.id}>
               <span aria-hidden="true" className="thread-tasks__index">
                 {index + 1}.
               </span>
-              <span className="thread-tasks__mark">{taskIcon(task.state)}</span>
+              <span className="thread-tasks__mark">{taskIcon(drawnState(task, running))}</span>
               <span className="thread-tasks__summary">{taskWording(task, running)}</span>
               {/* The mark is drawn for the eye only, so the state is said in words. */}
               <span className="sr-only">

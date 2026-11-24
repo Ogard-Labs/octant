@@ -2045,7 +2045,8 @@ done, not to review. While a Chat thread's host connection is lost it dims and
 withholds Stop without repeating the connection notice; expansion previews up to three active or
 unresolved children. Rows open the corresponding detail in Agents, and View all
 keeps completed history reachable. Chat admits Agents, and Tasks while the
-thread shows a task list ([Mode-specific utility chrome](#mode-specific-utility-chrome)),
+thread shows a task list or its tab is retained
+([Mode-specific utility chrome](#mode-specific-utility-chrome)),
 as its only dock tools; opening either does not expose Work or Code tools or
 the bottom panel. Every
 subagent of the thread is one row in the same list, whether Octant started it
