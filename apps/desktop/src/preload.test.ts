@@ -27,6 +27,16 @@ const projectWindowCapability = "C".repeat(43);
 const projectId = "00000000-0000-4000-8000-000000000203";
 
 describe("desktop preload bridge", () => {
+  it("passes only the archive ticket to the native download channel", async () => {
+    const invoke = vi.fn(async () => true);
+    const bridge = createHostBridge(
+      { invoke, on: vi.fn(), removeListener: vi.fn() },
+      projectWindowCapability,
+    );
+    const ticket = "a".repeat(43);
+    await expect(bridge.downloadThreadVideoArchive(ticket)).resolves.toBe(true);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith(IPC_CHANNELS.downloadThreadVideoArchive, ticket);
+  });
   it("leaves Octant-only administration out of a Nightly client bridge so its screens hide", async () => {
     const reached: string[] = [];
     const ipc: IpcRendererPort = {
@@ -792,6 +802,7 @@ describe("desktop preload bridge", () => {
       "detachBrowserSurface",
       "disablePrivateListener",
       "downloadAppUpdate",
+      "downloadThreadVideoArchive",
       "enablePrivateListener",
       "forgetPairedComputer",
       "forgetRemoteServerPages",

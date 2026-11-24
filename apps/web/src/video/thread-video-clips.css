@@ -1,0 +1,45 @@
+/*
+ * A thread's clips sit at the foot of the thread with its other asked-for
+ * results, one card per clip, the player as wide as the thread allows.
+ */
+.thread-video-clips {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin-bottom: var(--oct-space-2);
+}
+
+.thread-video-clips__card {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2) var(--oct-space-3) var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+}
+
+.thread-video-clips__head,
+.thread-video-clips__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+
+.thread-video-clips__kind,
+.thread-video-clips__note,
+.thread-video-clips__actions {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.thread-video-clips__download {
+  font-size: var(--oct-text-xs);
+}
+
+.thread-video-clips__player {
+  width: 100%;
+  max-height: 60vh;
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface-warm);
+}

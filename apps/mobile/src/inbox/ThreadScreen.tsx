@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -25,6 +26,7 @@ import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
 import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard";
 import { ServiceOfferCard } from "../surfaces/ServiceOfferCard";
+import { ThreadVideoClips } from "../surfaces/ThreadVideoClips";
 import { WorkRequestCards } from "../surfaces/WorkRequestCards";
 import {
   conversationComposerAccess,
@@ -728,6 +730,18 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 turnActionsFor={turnActions.actionsFor}
                 workTurns={work.turns}
               />
+              {!offlineDemo &&
+              Platform.OS !== "web" &&
+              selectedHost !== undefined &&
+              hostHealth !== "unauthorized" ? (
+                <ThreadVideoClips
+                  key={`${selected.hostId}:${selectedHost.credentialGeneration}:${selected.mode}:${selected.threadId}`}
+                  hostId={selected.hostId}
+                  threadId={selected.threadId}
+                  threadKind={`${selected.mode}-thread`}
+                  transport={hostHealth === "ready" ? transport : undefined}
+                />
+              ) : null}
             </>
           )}
         </ScrollView>

@@ -954,6 +954,19 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
 
 const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   { kind: "exact" as const, path: "/api/image/jobs", methods: ["GET"] as const, allowQuery: true },
+  { kind: "exact" as const, path: "/api/video/jobs", methods: ["GET"] as const, allowQuery: true },
+  {
+    // Clip tickets and ranged clip bytes for a paired player; Stop stays a
+    // local-only route the policy never forwards.
+    kind: "exact" as const,
+    path: "/api/video/clip",
+    methods: ["GET", "POST"] as const,
+    allowQuery: true,
+    allowedRequestHeaders: [...REMOTE_REQUEST_HEADERS, "range"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 4_096,
+    maxResponseBytes: 10 * 1_024 * 1_024,
+  },
   {
     kind: "exact" as const,
     path: "/api/image/thread-artifact",
@@ -1866,7 +1879,7 @@ export interface RemoteRouteFacts {
 
 export const REMOTE_SECURITY_POLICY = {
   hsts: "max-age=31536000; includeSubDomains",
-  csp: "default-src 'self'; img-src 'self' data: blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'",
+  csp: "default-src 'self'; img-src 'self' data: blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; media-src 'self' blob:",
   nosniff: "nosniff",
   referrer: "no-referrer",
 } as const;

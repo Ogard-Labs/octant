@@ -7,7 +7,7 @@ const SOURCE_ROOT = import.meta.dirname;
 
 /** What a module calls when it judges a device the host's own person paired as that person. */
 const JUDGES_A_DEVICE_AS_THE_PERSON =
-  /\b(principalActsAsHostPerson|principalAuthorityKind|boundPrincipalIsRestricted)\b/;
+  /\b(principalActsAsHostPerson|principalIsDirectlyPaired|principalAuthorityKind|boundPrincipalIsRestricted)\b/;
 
 /**
  * Modules that judge such a device without resolving its actor themselves,
@@ -43,6 +43,7 @@ const NAMES_THE_ACTOR_ELSEWHERE: Readonly<Record<string, string>> = {
   "providers/providerUsageLimitsRoutes.ts":
     "reads the limits and asks the providers again; journals nothing",
   "terminalSessionRoutes.ts": "lists and reads history; changes nothing",
+  "video/videoRoutes.ts": "authenticates and scopes each request; journals nothing",
   "remote/remoteHttpAuthentication.ts":
     "answers a device's read of its own standing; that route journals nothing",
   "terminalSessions/terminalSessionAuthority.ts": "an authority predicate; changes nothing",

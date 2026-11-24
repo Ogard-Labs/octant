@@ -176,6 +176,7 @@ import { KeybindingSettings } from "../keybindings/KeybindingSettings";
 import { NavigatorAssistantSettingsView } from "../settings/NavigatorAssistantSettingsView";
 import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettingsView";
+import { VideoGenerationSettingsView } from "../settings/VideoGenerationSettingsView";
 import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
 import { WebSearchSettingsView } from "../settings/WebSearchSettingsView";
@@ -1180,7 +1181,7 @@ function ActiveSectionContent({
         </div>
       );
     case "voice":
-      // Voice and image generation both pick a model endpoint to send media
+      // Voice, image and video generation all pick a provider to send media
       // through, so they share one page under AI.
       return (
         <div className="settings-section-stack" id="settings-voice">
@@ -1203,6 +1204,16 @@ function ActiveSectionContent({
               ? {}
               : { providerController: props.providerController })}
             settings={props.settings.imageGeneration}
+          />
+          <VideoGenerationSettingsView
+            onSettingsChange={props.onSettingsChange}
+            {...(props.providerController?.snapshot === undefined
+              ? {}
+              : { providerSnapshot: props.providerController.snapshot })}
+            {...(props.providerController === undefined
+              ? {}
+              : { providerController: props.providerController })}
+            settings={props.settings.videoGeneration}
           />
         </div>
       );

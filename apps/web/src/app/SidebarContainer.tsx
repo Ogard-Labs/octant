@@ -48,6 +48,8 @@ import { useRailPinSetter } from "../shell/useRailPinSetter";
 import type { countSidebarTiles } from "../shell/sidebarTileCounts";
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import { exportThreadBundle, type resolveThreadExportClient } from "../thread/threadExport";
+import { ThreadVideoArchiveConfirmation } from "../thread/ThreadVideoArchiveConfirmation";
+import type { ThreadVideoArchiveDownload } from "@octant/contracts/thread-export";
 import {
   handOffThread,
   threadHandOffMessage,
@@ -214,6 +216,7 @@ export interface SidebarContainerProps {
  * actions, which keep their identity across renders.
  */
 export const SidebarContainer = memo(function SidebarContainer(props: SidebarContainerProps) {
+  const [archive, setArchive] = useState<ThreadVideoArchiveDownload>();
   const firstPartyPluginsEffective = useFirstPartyPluginsEffective();
   const {
     actions,
@@ -354,9 +357,13 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       if (client === undefined) return undefined;
       return (threadId, title) => {
         actions.setThreadExportNotice(`Exporting ${title}…`);
-        void exportThreadBundle(client, { mode, threadId, title }).then(
-          actions.setThreadExportNotice,
-        );
+        void exportThreadBundle(client, { mode, threadId, title }).then((result) => {
+          if (typeof result === "string") actions.setThreadExportNotice(result);
+          else {
+            actions.setThreadExportNotice(undefined);
+            setArchive(result);
+          }
+        });
       };
     };
     const handOffThreadFromRow = (
@@ -633,6 +640,14 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
 
   return (
     <>
+      <ThreadVideoArchiveConfirmation
+        archive={archive}
+        onClose={() => setArchive(undefined)}
+        onDownload={() => {
+          setArchive(undefined);
+          actions.setThreadExportNotice("Started the thread archive download.");
+        }}
+      />
       <ShellSidebar
         {...(hostBridge?.applicationIdentity === undefined
           ? {}

@@ -271,6 +271,7 @@ export function defaultShellSettings(): ShellSettings {
     navigatorAssistant: {},
     voice: {},
     imageGeneration: { customSources: [] },
+    videoGeneration: {},
     userProfile: { accent: DEFAULT_AVATAR_ACCENT, avatar: DEFAULT_USER_AVATAR },
     standaloneSkillActivations: {},
     skillFolders: { providers: [], folders: [] },
