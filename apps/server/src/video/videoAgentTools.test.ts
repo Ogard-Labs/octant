@@ -257,8 +257,17 @@ describe("octant_create_video on the host", () => {
       answer: { status: "video-generate", options: chosen, rememberForThread: false },
     });
     await call({ prompt: "A paper boat on a pond" }, signal);
-    expect(quote).toHaveBeenNthCalledWith(1, expect.objectContaining({ signal }));
-    expect(quote).toHaveBeenNthCalledWith(2, expect.objectContaining({ signal }));
+    expect(quote).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        options: finished.options,
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(quote).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ options: chosen, signal: expect.any(AbortSignal) }),
+    );
     expect(askGenerate).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "video-generate",
@@ -274,7 +283,7 @@ describe("octant_create_video on the host", () => {
         profileInstanceId: profileId,
         options: chosen,
         references: [],
-        signal,
+        signal: expect.any(AbortSignal),
       }),
     );
   });
