@@ -1,0 +1,20 @@
+/* The pending requests' stack and measure; the shared request row and the
+   question card supply their own controls and neutral surface. A tall
+   questionnaire (four questions of up to eight options) scrolls inside the
+   stack rather than pushing its Send answers and the composer out of a short
+   or split pane, so at least two fifths of the pane stays for the transcript. */
+.thread-pending-requests {
+  display: grid;
+  flex: 0 1 auto;
+  gap: 8px;
+  max-height: 60%;
+  min-height: 0;
+  margin-top: 0;
+  margin-bottom: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.thread-pending-requests .approval-row {
+  width: 100%;
+}
