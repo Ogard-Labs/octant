@@ -19,11 +19,13 @@ function settler(
   const outcomes = [...(overrides.outcomes ?? [{ status: "settled" as const }])];
   const settle = vi.fn(async () => outcomes.shift() ?? { status: "settled" as const });
   const ports: FinishedReportSettlePorts = {
-    completedTurn: (event) => {
+    turnUpdate: (event) => {
       const payload = event.payload as { threadId: string; turnId: string; status: string };
-      return payload.status === "completed"
-        ? { threadId: payload.threadId, turnId: payload.turnId }
-        : undefined;
+      return {
+        threadId: payload.threadId,
+        turnId: payload.turnId,
+        completed: payload.status === "completed",
+      };
     },
     latestReportTurnId: () => "turn-2",
     enabled: () => true,
@@ -76,6 +78,23 @@ describe("settling a thread whose agent filed a finished report", () => {
     second.settler.onCommittedEvents([turnEvent("thread-b", "turn-2", "completed")]);
     await flush();
     expect(second.settle).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops trying once a newer turn starts, so a later turn without a report is not hidden", async () => {
+    const busy = { status: "skipped", reason: "busy" } as const;
+    let release: () => void = () => undefined;
+    const { settle, settler: subject } = settler({
+      outcomes: [busy, { status: "settled" }],
+      wait: () => new Promise<void>((resolve) => (release = resolve)),
+    });
+    subject.onCommittedEvents([turnEvent("thread-a", "turn-2", "completed")]);
+    await flush();
+    expect(settle).toHaveBeenCalledTimes(1);
+    // The person sends another message while the first attempt waits.
+    subject.onCommittedEvents([turnEvent("thread-a", "turn-3", "running")]);
+    release();
+    await flush();
+    expect(settle).toHaveBeenCalledTimes(1);
   });
 
   it("gives up after a few tries when the thread stays busy", async () => {

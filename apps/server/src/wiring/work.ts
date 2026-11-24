@@ -2296,12 +2296,14 @@ export function wireWork(deps: WorkDependencies) {
     );
     // A turn that filed a finished report settles its thread once it completes.
     const finishedReportSettle = new FinishedReportSettle({
-      completedTurn: (event) => {
+      turnUpdate: (event) => {
         if (event.eventName !== "work.turn-updated@1") return undefined;
         const updated = decodeWorkTurnUpdated(event.payload);
-        return updated.status === "completed"
-          ? { threadId: String(updated.threadId), turnId: String(updated.turnId) }
-          : undefined;
+        return {
+          threadId: String(updated.threadId),
+          turnId: String(updated.turnId),
+          completed: updated.status === "completed",
+        };
       },
       latestReportTurnId: (threadId) => finishedReceipts.latest(threadId)?.receipt.turnId,
       enabled: () =>
@@ -2315,6 +2317,17 @@ export function wireWork(deps: WorkDependencies) {
         if (workTurnDecision(thread, workTurnProjection.listForThread(id)) !== undefined) {
           return { status: "skipped", reason: "decision-pending" };
         }
+        // A child's result the lead has not read yet keeps the thread in view,
+        // as it keeps the board card's count; the service sees only live children.
+        const unreadChildResult = persistence.agentRunProjection
+          .parentSummary(decodeAgentRunParentThreadId(String(id)))
+          .some(
+            (run) =>
+              (run.lifecycleStatus === "completed" || run.lifecycleStatus === "failed") &&
+              run.resultAcknowledgement.required &&
+              !run.resultAcknowledgement.acknowledged,
+          );
+        if (unreadChildResult) return { status: "skipped", reason: "child-work" };
         return workThreadService.settleFinishedThread(id);
       },
       onError: (message, error) => console.error(`[work-settle] ${message}`, error),

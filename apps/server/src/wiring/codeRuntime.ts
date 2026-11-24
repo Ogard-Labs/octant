@@ -2598,11 +2598,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       hostCodeService === undefined
         ? undefined
         : new FinishedReportSettle({
-            completedTurn: (event) => {
+            turnUpdate: (event) => {
               if (event.eventName !== "code.operation-event-recorded@1") return undefined;
               const frame = decodeCodeOperationEventFrame(event.payload);
-              return frame.event.kind === "operation-state" && frame.event.state === "completed"
-                ? { threadId: String(frame.threadId), turnId: String(frame.operationId) }
+              return frame.event.kind === "operation-state"
+                ? {
+                    threadId: String(frame.threadId),
+                    turnId: String(frame.operationId),
+                    completed: frame.event.state === "completed",
+                  }
                 : undefined;
             },
             latestReportTurnId: (threadId) => finishedReceipts.latest(threadId)?.receipt.turnId,

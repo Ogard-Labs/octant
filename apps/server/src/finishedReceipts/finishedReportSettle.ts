@@ -1,10 +1,11 @@
 import type { EventEnvelope } from "@octant/contracts";
 
-/** A turn the journal just recorded as completed, in one mode's own words. */
-export interface CompletedTurn {
+/** A turn's state change the journal just recorded, in one mode's own words. */
+export interface TurnUpdate {
   readonly threadId: string;
   /** The Work turn id or Code operation id, as a finished report names it. */
   readonly turnId: string;
+  readonly completed: boolean;
 }
 
 export type FinishedReportSettleOutcome =
@@ -22,8 +23,8 @@ export type FinishedReportSettleOutcome =
     };
 
 export interface FinishedReportSettlePorts {
-  /** The completed turn a committed event records, or nothing for any other event. */
-  readonly completedTurn: (event: EventEnvelope) => CompletedTurn | undefined;
+  /** The turn state change a committed event records, or nothing for any other event. */
+  readonly turnUpdate: (event: EventEnvelope) => TurnUpdate | undefined;
   /** The turn the thread's latest finished report was filed in, if it names one. */
   readonly latestReportTurnId: (threadId: string) => string | undefined;
   /**
@@ -58,6 +59,13 @@ const BUSY_WAIT_MS = 2_000;
  */
 export class FinishedReportSettle {
   readonly #ports: FinishedReportSettlePorts;
+  /**
+   * The turn each thread last recorded a state change for. A retry stops once
+   * a newer turn appears: a person may start one during the wait, and if it
+   * ended without a report of its own, settling on the earlier report would
+   * hide that turn.
+   */
+  readonly #latestTurn = new Map<string, string>();
 
   constructor(ports: FinishedReportSettlePorts) {
     this.#ports = ports;
@@ -65,25 +73,26 @@ export class FinishedReportSettle {
 
   /** Feed committed journal appends; a completed turn that filed its report settles its thread. */
   onCommittedEvents(events: ReadonlyArray<EventEnvelope>): void {
-    if (!this.#ports.enabled()) return;
     for (const event of events) {
-      let completed: CompletedTurn | undefined;
+      let update: TurnUpdate | undefined;
       try {
-        completed = this.#ports.completedTurn(event);
+        update = this.#ports.turnUpdate(event);
       } catch (error) {
-        this.#ports.onError?.("A completed turn event did not decode.", error);
+        this.#ports.onError?.("A turn event did not decode.", error);
         continue;
       }
-      if (completed === undefined) continue;
-      if (this.#ports.latestReportTurnId(completed.threadId) !== completed.turnId) continue;
-      void this.#settle(completed.threadId).catch((error: unknown) =>
+      if (update === undefined) continue;
+      this.#latestTurn.set(update.threadId, update.turnId);
+      if (!update.completed || !this.#ports.enabled()) continue;
+      if (this.#ports.latestReportTurnId(update.threadId) !== update.turnId) continue;
+      void this.#settle(update.threadId, update.turnId).catch((error: unknown) =>
         this.#ports.onError?.("A finished thread could not be settled.", error),
       );
     }
   }
 
   /** Settles the thread, trying again while only the turn's own wind-down keeps it busy. */
-  async #settle(threadId: string): Promise<FinishedReportSettleOutcome> {
+  async #settle(threadId: string, turnId: string): Promise<FinishedReportSettleOutcome> {
     const wait =
       this.#ports.wait ??
       ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
@@ -91,6 +100,7 @@ export class FinishedReportSettle {
     for (let tries = 1; tries < BUSY_TRIES && outcome.status === "skipped"; tries += 1) {
       if (outcome.reason !== "busy") break;
       await wait(BUSY_WAIT_MS);
+      if (this.#latestTurn.get(threadId) !== turnId) return { status: "skipped", reason: "busy" };
       outcome = await this.#ports.settle(threadId);
     }
     return outcome;
