@@ -100,7 +100,9 @@ describe("the text editing chords", () => {
     const resolved = resolveKeybindings();
 
     expect(resolved.bindings.size).toBe(OCTANT_KEYBINDING_ACTIONS.length);
-    expect(resolved.conflicts).toEqual([]);
+    expect(
+      OCTANT_KEYBINDING_ACTIONS.filter((action) => isShadowedKeybinding(resolved, action.id)),
+    ).toEqual([]);
   });
 
   it("keeps a chord saved on another action before Zen's default moved onto it", () => {
