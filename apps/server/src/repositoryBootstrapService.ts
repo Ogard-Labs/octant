@@ -1462,7 +1462,16 @@ export class RepositoryBootstrapService {
     const configured = await new Promise<string | undefined>((resolve) => {
       nodeExecFile(
         "git",
-        ["config", "--global", "--includes", "--path", "--get", "core.excludesFile"],
+        [
+          "-C",
+          canonicalRoot,
+          "config",
+          "--global",
+          "--includes",
+          "--path",
+          "--get",
+          "core.excludesFile",
+        ],
         {
           encoding: "utf8",
           env,

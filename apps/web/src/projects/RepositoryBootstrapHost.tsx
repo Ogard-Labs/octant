@@ -1,9 +1,10 @@
 import type { HostFederationTransports } from "@octant/client-runtime/host-federation-transports";
 import type { RepositoryBootstrapClientOptions } from "@octant/client-runtime/repository-bootstrap-client";
-import type { HostId } from "@octant/contracts/host";
+import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import type { ProjectId, ProjectSummary } from "@octant/contracts/projects";
 import { useEffect, useMemo, useState } from "react";
 import { useBootstrapDestinations } from "../host/useBootstrapDestinations";
+import { localHostDisplayName } from "@octant/client-runtime";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import {
   AddRepositoryToComputerDialog,
@@ -18,9 +19,9 @@ export interface RepositoryBootstrapRequest {
 export interface RepositoryBootstrapHostProps {
   readonly transports: HostFederationTransports;
   readonly allProjects: ReadonlyArray<ProjectSummary>;
+  readonly hosts: ReadonlyArray<{ readonly hostId: HostId; readonly displayName: string }>;
   readonly request: RepositoryBootstrapRequest | undefined;
   readonly sourceBootstrapPort: RepositoryBootstrapClientOptions;
-  readonly sourceHostName: string;
   readonly onHasDestinationChange: (hasDestination: boolean) => void;
   readonly onClose: () => void;
   readonly onCompleted: (result: AddRepositoryToComputerCompleted) => void;
@@ -33,6 +34,10 @@ export function RepositoryBootstrapHost(props: RepositoryBootstrapHostProps) {
   useEffect(() => {
     props.onHasDestinationChange(destinations.length > 0);
   }, [destinations.length, props.onHasDestinationChange]);
+
+  const sourceHostName =
+    props.hosts.find((host) => String(host.hostId) === String(LOCAL_HOST_ID))?.displayName ??
+    localHostDisplayName();
 
   const localActiveCodeProjects = useMemo(
     () =>
@@ -69,7 +74,7 @@ export function RepositoryBootstrapHost(props: RepositoryBootstrapHostProps) {
           open
           {...(targetProject === undefined ? {} : { project: targetProject })}
           sourceBootstrapPort={props.sourceBootstrapPort}
-          sourceHostName={props.sourceHostName}
+          sourceHostName={sourceHostName}
         />
       )}
     </OctantDialogPresence>

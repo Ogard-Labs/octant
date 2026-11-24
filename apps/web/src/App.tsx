@@ -2723,9 +2723,15 @@ function LaunchedShell(
   const [bootstrapDialog, setBootstrapDialog] = useState<RepositoryBootstrapRequest | undefined>(
     undefined,
   );
-  const openAddRepositoryToComputer = useCallback((projectId: ProjectId) => {
-    setBootstrapDialog({ projectId });
-  }, []);
+  const addToAnotherComputerProp = useMemo(
+    () =>
+      hasBootstrapDestination
+        ? {
+            onAddToAnotherComputer: (projectId: ProjectId) => setBootstrapDialog({ projectId }),
+          }
+        : {},
+    [hasBootstrapDestination],
+  );
   const pairedThreadToOpenHere =
     pairedThreadToOpen !== undefined && pairedThreadToOpen.hostId === String(createHostId)
       ? pairedThreadToOpen
@@ -9238,9 +9244,7 @@ function LaunchedShell(
                     pairedComputerThreads,
                     onOpenPairedComputerThread: openPairedComputerThreadLatest,
                   })}
-              {...(hasBootstrapDestination
-                ? { onAddToAnotherComputer: openAddRepositoryToComputer }
-                : {})}
+              {...addToAnotherComputerProp}
               federatedHostStates={federatedHostStates}
               githubIssuesReadAvailable={githubIssuesReadAvailable}
               {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -9412,9 +9416,7 @@ function LaunchedShell(
                     {...(renderPairedComputerCodeStart === undefined
                       ? {}
                       : { renderPairedComputerCodeStart })}
-                    {...(hasBootstrapDestination
-                      ? { onAddToAnotherComputer: openAddRepositoryToComputer }
-                      : {})}
+                    {...addToAnotherComputerProp}
                     dockOpen={dockOpen}
                     {...(dockSurface === undefined
                       ? {}
@@ -9804,6 +9806,7 @@ function LaunchedShell(
         <Suspense fallback={null}>
           <RepositoryBootstrapHost
             allProjects={projectController.allProjects}
+            hosts={hosts}
             onClose={() => setBootstrapDialog(undefined)}
             onCompleted={(result) => {
               handleSelectCreateHost(result.destinationHostId);
@@ -9818,10 +9821,6 @@ function LaunchedShell(
             onHasDestinationChange={setHasBootstrapDestination}
             request={bootstrapDialog}
             sourceBootstrapPort={launchedClients.repositoryBootstrapPort}
-            sourceHostName={
-              hosts.find((host) => String(host.hostId) === String(LOCAL_HOST_ID))?.displayName ??
-              localHostDisplayName()
-            }
             transports={hostFederationTransports}
           />
         </Suspense>
