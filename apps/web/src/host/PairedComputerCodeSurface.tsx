@@ -19,7 +19,7 @@ import { createPairedComputerCodeClients } from "./pairedComputerCodeClients";
 import { PairedComputerThreadServers } from "./PairedComputerThreadServers";
 import type { RemoteServerGrantSource } from "@octant/contracts";
 import type { RemoteOpenMode, RemoteOpenOutcome } from "../home/runningServices";
-import { ComposerStashHostContext } from "../composer/ComposerStashControls";
+import { ComposerStashScopeContext } from "../composer/ComposerStashControls";
 
 export interface PairedComputerCodeSurfaceProps {
   /** The paired computer's session, already ready. */
@@ -126,7 +126,7 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
           {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
         />
       </div>
-      <ComposerStashHostContext.Provider value={props.selectedHostId}>
+      <ComposerStashScopeContext.Provider value={{ host: props.selectedHostId }}>
         <RemoteCodeSurface
           clients={clients}
           actsAsHostPerson={standing.actsAsHostPerson}
@@ -161,7 +161,7 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
           onNavigate={() => undefined}
           onOpenCanvas={() => undefined}
         />
-      </ComposerStashHostContext.Provider>
+      </ComposerStashScopeContext.Provider>
     </div>
   );
 }

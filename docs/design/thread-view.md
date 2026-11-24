@@ -644,9 +644,10 @@ Project, and the to-do must still be open. A refusal identifies what could not
 move and keeps the full stash available.
 
 Stash clears the composer after the save commits. Restore consumes the saved
-entry when the whole destination draft is recoverable. Both actions are
-separate from send and the host's message queue. The list offers removal of
-an individual saved draft.
+entry when the whole destination draft is recoverable. If you reopen the
+composer in a new window, look in **Saved drafts** for a restored first
+message you left in the closed window. Both actions are separate from send and
+the host's message queue. The list offers removal of an individual saved draft.
 
 ## Image preview
 

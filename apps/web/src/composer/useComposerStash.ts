@@ -8,7 +8,7 @@ import {
   type ComposerStashLocation,
   type ComposerStashTarget,
 } from "./composerStashDraft";
-import { planComposerStashRestore } from "./composerStashRestore";
+import { planComposerStashRecovery, planComposerStashRestore } from "./composerStashRestore";
 import {
   createComposerStashStore,
   type ComposerDraftRecovery,
@@ -136,30 +136,12 @@ export function useComposerStash(binding: ComposerStashBinding) {
         recoveryApplied.current = true;
         return;
       }
-      const plan = planComposerStashRestore(
-        record.location,
-        current.target,
-        emptyComposerStashDraft(),
-        record.draft,
-      );
+      const plan = planComposerStashRecovery(record, current.target, current.draft);
       if (plan.kind === "refused") {
         report(plan.reason);
         return;
       }
-      const savedContext = new Set(record.draft.context.map((part) => JSON.stringify(part)));
-      if (current.draft.context.some((part) => !savedContext.has(JSON.stringify(part)))) {
-        report(
-          "Your current selections were kept. Reopen the composer to recover the saved draft.",
-        );
-        return;
-      }
-      const text =
-        initial.draft.text === record.beforeText ||
-        initial.draft.text === "" ||
-        initial.draft.text === record.draft.text
-          ? record.draft.text
-          : initial.draft.text;
-      const draft = { ...record.draft, text };
+      const { draft } = plan;
       if (sameDraft(draft, initial.draft)) {
         recoveryApplied.current = true;
         return;

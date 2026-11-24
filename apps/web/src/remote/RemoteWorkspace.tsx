@@ -28,7 +28,7 @@ import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import type { RemoteProductClients } from "./remoteProductClients";
 import { OctantAlert } from "../ui/base/OctantAlert";
-import { ComposerStashHostContext } from "../composer/ComposerStashControls";
+import { ComposerStashScopeContext } from "../composer/ComposerStashControls";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ReplyDetailClient } from "@octant/client-runtime/reply-detail-client";
 import type { ReplyDetailLevel, ReplyDetailReading } from "@octant/contracts/shell";
@@ -77,9 +77,9 @@ export function RemoteWorkspace(props: RemoteWorkspaceProps) {
     <ConversationInputClientContext.Provider value={props.clients.conversationInputs}>
       <ReplyDetailSourceContext.Provider value={replyDetail}>
         <ReplyDetailContext.Provider value={replyDetail.reading.defaultLevel}>
-          <ComposerStashHostContext.Provider value={props.stashHostId}>
+          <ComposerStashScopeContext.Provider value={{ host: props.stashHostId }}>
             <RemoteModeSurface {...props} />
-          </ComposerStashHostContext.Provider>
+          </ComposerStashScopeContext.Provider>
         </ReplyDetailContext.Provider>
       </ReplyDetailSourceContext.Provider>
     </ConversationInputClientContext.Provider>

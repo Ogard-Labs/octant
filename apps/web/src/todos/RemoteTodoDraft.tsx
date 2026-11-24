@@ -32,7 +32,7 @@ import { useCodeController } from "../code/useCodeController";
 import { planCodeThreadCreate } from "../code/codeThreadCreate";
 import type { CodeComposerSubmitInput } from "../code/composer/CodeComposerAdapter";
 import type { ComposerStashTodo } from "../composer/composerStashDraft";
-import { ComposerStashHostContext } from "../composer/ComposerStashControls";
+import { ComposerStashScopeContext } from "../composer/ComposerStashControls";
 import { NewTaskDraftsContext, NewTaskDraftScopeContext } from "../composer/useNewTaskPrompt";
 import {
   DraftThreadWorkspace,
@@ -114,7 +114,8 @@ export function RemoteTodoDraft(props: {
     props.hostId,
     props.todo?.id,
   ]);
-  const windowId = useContext(NewTaskDraftsContext)?.windowId;
+  const drafts = useContext(NewTaskDraftsContext);
+  const windowId = props.ownerWindowId ?? drafts?.windowId;
   const seed =
     props.todo === undefined
       ? ""
@@ -428,7 +429,7 @@ export function RemoteTodoDraft(props: {
           This computer cannot be reached. Your draft is kept here until it reconnects.
         </OctantAlert>
       )}
-      <ComposerStashHostContext.Provider value={props.hostId}>
+      <ComposerStashScopeContext.Provider value={{ host: props.hostId, windowId }}>
         <NewTaskDraftScopeContext.Provider value={draftScope}>
           <DraftThreadWorkspace
             mode={mode}
@@ -483,7 +484,7 @@ export function RemoteTodoDraft(props: {
                 })}
           />
         </NewTaskDraftScopeContext.Provider>
-      </ComposerStashHostContext.Provider>
+      </ComposerStashScopeContext.Provider>
     </>
   );
 }

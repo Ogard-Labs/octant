@@ -406,6 +406,7 @@ import {
 /** A to-do whose Start opened the current new-thread draft. */
 interface TodoStartInProgress extends ComposerStashTodo {
   readonly mode: OctantMode;
+  readonly seed?: string;
   /** The Project the draft is for; absent for a Chat start in no Project. */
   readonly projectId?: string;
   /** The draft it opened, as `pane:surface`, once that draft is in front. */
@@ -1919,6 +1920,20 @@ function LaunchedShell(
       props.workTurnClient,
     ],
   );
+  useEffect(() => {
+    if (globalThis.indexedDB === undefined) return;
+    const lifetime = new AbortController();
+    void import("./composer/composerStashStore")
+      .then(({ connectComposerStashWindow }) =>
+        connectComposerStashWindow(
+          props.launch.windowId,
+          launchedClients.hostControlClient,
+          lifetime.signal,
+        ),
+      )
+      .catch(() => undefined);
+    return () => lifetime.abort();
+  }, [props.launch.windowId, launchedClients.hostControlClient]);
   const {
     agentProfileClient,
     agentRunClient,
@@ -2034,7 +2049,6 @@ function LaunchedShell(
   const chatController = useChatController({
     client: chatClient,
     navigationRefreshMs: 0,
-    composerStashHost: LOCAL_HOST_ID,
     changeRevision: machineChanges.chatNavigation,
     readCursorStore: chatReadCursorStore,
     serverUrl: props.launch.serverUrl,
@@ -2197,7 +2211,6 @@ function LaunchedShell(
   );
   const workNavigation = useWorkThreadNavigation(workThreadClient, {
     navigationRefreshMs: 0,
-    composerStashHost: LOCAL_HOST_ID,
     changeRevision: machineChanges.workNavigation,
   });
   const githubClient = useMemo(() => {
@@ -2809,7 +2822,6 @@ function LaunchedShell(
   const codeController = useCodeController({
     client: codeClient,
     navigationRefreshMs: 0,
-    composerStashHost: LOCAL_HOST_ID,
     changeRevision: machineChanges.codeNavigation,
     readCursorStore: codeReadCursorStore,
   });
@@ -7665,12 +7677,14 @@ function LaunchedShell(
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
     resetNewTaskDraft(mode);
-    setPendingDraftPrompt(todo.notes === "" ? todo.title : `${todo.title}\n\n${todo.notes}`);
+    const seed = todo.notes === "" ? todo.title : `${todo.title}\n\n${todo.notes}`;
+    setPendingDraftPrompt(seed);
     setTodoStart({
       todoId: String(todo.id),
       title: todo.title,
       listHostId,
       mode,
+      seed,
       ...(project === undefined ? {} : { projectId: String(project.id) }),
     });
     // A Chat start files the thread in no Project, so the draft must not keep
@@ -9452,6 +9466,7 @@ function LaunchedShell(
                       : {
                           draftTodoSource: {
                             draft: frontDraft,
+                            seed: todoStart?.draft === frontDraft ? todoStart.seed : undefined,
                             current:
                               todoStart?.draft === frontDraft
                                 ? {

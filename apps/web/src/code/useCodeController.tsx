@@ -402,7 +402,6 @@ export interface CodeControllerOptions {
   readonly navigation?: { readonly bootstrap: CodeBootstrap | undefined };
   readonly client?: CodeClient;
   readonly draftStore?: ComposerThreadDraftStore;
-  readonly composerStashHost?: string;
   readonly readCursorStore?: CodeReadCursorStore;
   /**
    * How often the sidebar re-reads the thread list. Only the thread in view
@@ -461,13 +460,10 @@ export function useCodeController(options: CodeControllerOptions) {
   const knownDraftThreads = useRef<ReadonlySet<string> | undefined>(undefined);
 
   const reconcileDrafts = useCallback(
-    (threadIds: ReadonlyArray<string>, completeBootstrap = false) => {
+    (threadIds: ReadonlyArray<string>) => {
       if (!ownsNavigation) return;
       if (knownDraftThreads.current === undefined) {
-        composerDraftRef.current.dropUnknown(
-          threadIds,
-          completeBootstrap ? options.composerStashHost : undefined,
-        );
+        composerDraftRef.current.dropUnknown(threadIds);
       } else {
         for (const threadId of knownDraftThreads.current) {
           if (!threadIds.includes(threadId)) composerDraftRef.current.purge(threadId);
@@ -475,7 +471,7 @@ export function useCodeController(options: CodeControllerOptions) {
       }
       knownDraftThreads.current = new Set(threadIds);
     },
-    [options.composerStashHost, ownsNavigation],
+    [ownsNavigation],
   );
   const [conversation, setConversation] = useState<ReadonlyArray<CodeConversationMessage>>([]);
   // The transcript as last set, and whose it is, for the window reads that
@@ -888,10 +884,7 @@ export function useCodeController(options: CodeControllerOptions) {
           appliedNavigationRead.current = ++navigationReadSequence.current;
           setBootstrap(next);
           setActiveView((current) => refreshActiveThreadView(current, next));
-          reconcileDrafts(
-            next.threads.map((thread) => String(thread.id)),
-            true,
-          );
+          reconcileDrafts(next.threads.map((thread) => String(thread.id)));
           clearFailure();
           setStatus("ready");
           return true;

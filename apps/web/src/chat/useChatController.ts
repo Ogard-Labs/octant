@@ -143,7 +143,6 @@ export interface ChatControllerOptions {
   readonly reconnectDelayMs?: number;
   readonly readCursorStore?: ChatReadCursorStore;
   readonly draftStore?: ComposerThreadDraftStore;
-  readonly composerStashHost?: string;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
 }
@@ -303,19 +302,16 @@ export function useChatController(options: ChatControllerOptions) {
   composerDraftRef.current = composerDraft;
   const knownDraftThreads = useRef<ReadonlySet<string> | undefined>(undefined);
 
-  const reconcileDrafts = useCallback(
-    (threadIds: ReadonlyArray<string>) => {
-      if (knownDraftThreads.current === undefined) {
-        composerDraftRef.current.dropUnknown(threadIds, options.composerStashHost);
-      } else {
-        for (const threadId of knownDraftThreads.current) {
-          if (!threadIds.includes(threadId)) composerDraftRef.current.purge(threadId);
-        }
+  const reconcileDrafts = useCallback((threadIds: ReadonlyArray<string>) => {
+    if (knownDraftThreads.current === undefined) {
+      composerDraftRef.current.dropUnknown(threadIds);
+    } else {
+      for (const threadId of knownDraftThreads.current) {
+        if (!threadIds.includes(threadId)) composerDraftRef.current.purge(threadId);
       }
-      knownDraftThreads.current = new Set(threadIds);
-    },
-    [options.composerStashHost],
-  );
+    }
+    knownDraftThreads.current = new Set(threadIds);
+  }, []);
 
   const updatePendingDraft = useCallback((value: string, caretIndex?: number) => {
     if (caretIndex === undefined) composerDraftRef.current.setDraft(value);

@@ -13,13 +13,20 @@ import { useRegisterComposerMenuAction } from "./ComposerMenuActions";
 import { useComposerNoticeSink } from "./ComposerNotice";
 import { useComposerStash } from "./useComposerStash";
 
-import { ComposerStashHostContext, type ComposerStashControlsProps } from "./ComposerStashControls";
+import {
+  ComposerStashScopeContext,
+  type ComposerStashControlsProps,
+} from "./ComposerStashControls";
 import "./composerStash.css";
 
 export function ComposerStashActions(props: ComposerStashControlsProps) {
-  const host = useContext(ComposerStashHostContext);
+  const scope = useContext(ComposerStashScopeContext);
   const target = props.binding.target;
-  const location = host === undefined ? target.location : { ...target.location, host };
+  const location = {
+    ...target.location,
+    host: scope?.host ?? target.location.host,
+    windowId: scope?.windowId ?? target.location.windowId,
+  };
   return (
     <BoundComposerStashActions
       binding={{ ...props.binding, target: { ...target, location } }}

@@ -5,7 +5,7 @@ import {
   type ComposerStashLocation,
   type ComposerStashTarget,
 } from "./composerStashDraft";
-import { planComposerStashRestore } from "./composerStashRestore";
+import { planComposerStashRecovery, planComposerStashRestore } from "./composerStashRestore";
 
 const chat: ComposerStashLocation = {
   host: "host",
@@ -90,6 +90,41 @@ describe("restoring a saved composer draft", () => {
       kind: "ready",
       draft: { ...saved, text: "New edits\n\n" + saved.text, caret: 11 },
     });
+  });
+
+  it("recovers a renamed to-do's draft, keeps its attachments, and preserves newer edits", () => {
+    const location = { ...chat, threadId: null, composerId: "remote-todo" };
+    const oldTitle = "Review release notes";
+    const newTitle = "Review November release notes";
+    const todo = { todoId: "todo-1", title: oldTitle, listHostId: "list-host" };
+    const file = new File(["the exact attachment"], "notes.md", { type: "text/markdown" });
+    const saved = {
+      ...emptyComposerStashDraft(),
+      text: "Review the rewritten release notes",
+      caret: 9,
+      files: [file],
+      context: [{ kind: "todo" as const, value: todo }],
+    };
+    const record = { location, revision: "revision", beforeText: oldTitle, draft: saved };
+    const targetForTodo = { ...target, location, context: ["todo"] as const, todoSeed: newTitle };
+    const context = [{ kind: "todo" as const, value: { ...todo, title: newTitle } }];
+    const current = { ...emptyComposerStashDraft(), text: newTitle, context };
+    const edits = { ...current, text: "Newer edits", caret: 4 };
+
+    expect(planComposerStashRecovery(record, targetForTodo, current)).toEqual({
+      kind: "ready",
+      draft: { ...saved, context },
+    });
+    expect(planComposerStashRecovery(record, targetForTodo, edits)).toEqual({
+      kind: "ready",
+      draft: { ...saved, context, text: edits.text, caret: edits.caret },
+    });
+    expect(
+      planComposerStashRecovery(record, targetForTodo, {
+        ...current,
+        context: [{ kind: "todo", value: { ...todo, listHostId: "other-list" } }],
+      }).kind,
+    ).toBe("refused");
   });
 
   it("restores an attachment-only draft into a compatible mode and keeps the original bytes", async () => {

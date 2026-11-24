@@ -1,6 +1,10 @@
+import type { HostControlClient } from "@octant/client-runtime/host-control-client";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import type { ThreadPurgeTombstone } from "@octant/contracts/thread-retention";
 import {
   composerStashRecoveryKey,
   emptyComposerStashDraft,
+  hasComposerStashContent,
   type ComposerStashDraft,
   type ComposerStashLocation,
 } from "./composerStashDraft";
@@ -23,6 +27,20 @@ export interface ComposerDraftRecovery {
 const DATABASE = "octant.composer.stash";
 const SAVED = "saved";
 const RECOVERED = "recovered";
+type PurgedThread = Pick<ThreadPurgeTombstone, "mode"> & { readonly threadId: string };
+
+function windowLock(windowId: string): string {
+  return `octant.composer.window.${windowId}`;
+}
+
+async function holdWindow(windowId: string, signal: AbortSignal): Promise<void> {
+  await navigator.locks?.request(windowLock(windowId), { mode: "shared", signal }, () => {
+    if (signal.aborted) return;
+    return new Promise<void>((resolve) =>
+      signal.addEventListener("abort", () => resolve(), { once: true }),
+    );
+  });
+}
 
 function result<Value>(request: IDBRequest<Value>): Promise<Value> {
   return new Promise((resolve, reject) => {
@@ -44,9 +62,7 @@ async function open(factory: IDBFactory): Promise<IDBDatabase> {
   request.onupgradeneeded = () => {
     const saved = request.result.createObjectStore(SAVED, { keyPath: "id" });
     saved.createIndex("host", "source.host");
-    saved.createIndex("thread", "source.threadId");
-    const recovered = request.result.createObjectStore(RECOVERED);
-    recovered.createIndex("thread", "location.threadId");
+    request.result.createObjectStore(RECOVERED);
   };
   return result(request);
 }
@@ -95,6 +111,44 @@ async function readRecovery(
   return (await result(store.get(key))) as ComposerDraftRecovery | undefined;
 }
 
+async function recoverClosedWindows(factory: IDBFactory, host: string): Promise<void> {
+  const locks = globalThis.navigator?.locks;
+  if (locks === undefined) return;
+  const records = await inDraftStorage(
+    factory,
+    "readonly",
+    (_, recovered) => result(recovered.getAll()) as Promise<ComposerDraftRecovery[]>,
+  );
+  for (const record of records) {
+    const { location, draft, revision } = record;
+    const { windowId } = location;
+    if (
+      location.host !== host ||
+      location.threadId !== null ||
+      windowId === undefined ||
+      !hasComposerStashContent(draft)
+    ) {
+      continue;
+    }
+    // A live renderer holds a shared lock for its window. The browser releases
+    // it on close or crash, and two windows cannot publish the same recovery.
+    await locks.request(windowLock(windowId), { ifAvailable: true }, (lock) => {
+      if (lock === null) return;
+      return inDraftStorage(factory, "readwrite", async (saved, recovered) => {
+        const key = composerStashRecoveryKey(location);
+        if ((await readRecovery(recovered, key))?.revision !== revision) return;
+        saved.add({
+          id: globalThis.crypto.randomUUID(),
+          source: location,
+          savedAt: Date.now(),
+          draft,
+        } satisfies SavedComposerDraft);
+        recovered.delete(key);
+      });
+    });
+  }
+}
+
 interface ComposerDraftMove {
   readonly location: ComposerStashLocation;
   readonly expectedRevision: string | undefined;
@@ -105,11 +159,13 @@ interface ComposerDraftMove {
 /** IndexedDB keeps the exact file bytes and serializes a move across renderer windows. */
 export function createComposerStashStore(factory: IDBFactory) {
   return {
-    list: (host: string) =>
-      inDraftStorage(factory, "readonly", async (saved) => {
+    list: async (host: string) => {
+      await recoverClosedWindows(factory, host);
+      return inDraftStorage(factory, "readonly", async (saved) => {
         const entries = (await result(saved.index("host").getAll(host))) as SavedComposerDraft[];
         return entries.sort((left, right) => right.savedAt - left.savedAt);
-      }),
+      });
+    },
     readRecovery: (location: ComposerStashLocation) =>
       inDraftStorage(factory, "readonly", (_, recovered) =>
         readRecovery(recovered, composerStashRecoveryKey(location)),
@@ -187,36 +243,22 @@ export function createComposerStashStore(factory: IDBFactory) {
         const entry = (await result(saved.get(id))) as SavedComposerDraft | undefined;
         if (entry?.source.host === host) saved.delete(id);
       }),
-    purgeThread: (threadId: string) =>
+    removePurgedThreads: (host: string, threads: ReadonlyArray<PurgedThread>) =>
       inDraftStorage(factory, "readwrite", async (saved, recovered) => {
-        const [savedKeys, recoveredKeys] = await Promise.all([
-          result(saved.index("thread").getAllKeys(threadId)),
-          result(recovered.index("thread").getAllKeys(threadId)),
-        ]);
-        for (const key of savedKeys) saved.delete(key);
-        for (const key of recoveredKeys) recovered.delete(key);
-      }),
-    dropUnknownThreads: (
-      host: string,
-      mode: ComposerStashLocation["mode"],
-      threadIds: ReadonlyArray<string>,
-    ) =>
-      inDraftStorage(factory, "readwrite", async (saved, recovered) => {
-        const known = new Set(threadIds);
-        const missing = (location: ComposerStashLocation) =>
+        const purged = new Set(threads.map(({ mode, threadId }) => `${mode}:${threadId}`));
+        const wasPurged = (location: ComposerStashLocation) =>
           location.host === host &&
-          location.mode === mode &&
           location.threadId !== null &&
-          !known.has(location.threadId);
+          purged.has(`${location.mode}:${location.threadId}`);
         const [entries, records] = await Promise.all([
           result(saved.index("host").getAll(host)) as Promise<SavedComposerDraft[]>,
           result(recovered.getAll()) as Promise<ComposerDraftRecovery[]>,
         ]);
         for (const entry of entries) {
-          if (missing(entry.source)) saved.delete(entry.id);
+          if (wasPurged(entry.source)) saved.delete(entry.id);
         }
         for (const { location } of records) {
-          if (missing(location)) recovered.delete(composerStashRecoveryKey(location));
+          if (wasPurged(location)) recovered.delete(composerStashRecoveryKey(location));
         }
       }),
   };
@@ -224,20 +266,33 @@ export function createComposerStashStore(factory: IDBFactory) {
 
 export type ComposerStashStore = ReturnType<typeof createComposerStashStore>;
 
-export async function purgeComposerStashThread(threadId: string): Promise<void> {
-  if (globalThis.indexedDB !== undefined) {
-    await createComposerStashStore(globalThis.indexedDB).purgeThread(threadId);
+export async function removePurgedComposerDrafts(
+  host: string,
+  threads: ReadonlyArray<PurgedThread>,
+): Promise<void> {
+  if (threads.length > 0 && globalThis.indexedDB !== undefined) {
+    await createComposerStashStore(globalThis.indexedDB).removePurgedThreads(host, threads);
   }
 }
 
-export async function dropUnknownComposerStashThreads(
-  host: string,
-  mode: ComposerStashLocation["mode"],
-  threadIds: ReadonlyArray<string>,
-): Promise<void> {
-  if (globalThis.indexedDB !== undefined) {
-    await createComposerStashStore(globalThis.indexedDB).dropUnknownThreads(host, mode, threadIds);
-  }
+export function connectComposerStashWindow(
+  windowId: string,
+  client: Pick<HostControlClient, "readThreadRetention">,
+  signal: AbortSignal,
+): void {
+  if (globalThis.indexedDB === undefined || signal.aborted) return;
+  void holdWindow(windowId, signal).catch(() => undefined);
+  const reconcilePurges = () => {
+    // Navigation bootstraps can hide archived threads and Projects.
+    void client
+      .readThreadRetention()
+      .then(({ tombstones }) => {
+        if (!signal.aborted) return removePurgedComposerDrafts(LOCAL_HOST_ID, tombstones);
+      })
+      .catch(() => undefined);
+  };
+  window.addEventListener("focus", reconcilePurges, { signal });
+  reconcilePurges();
 }
 
 export async function discardComposerNewTaskRecovery(

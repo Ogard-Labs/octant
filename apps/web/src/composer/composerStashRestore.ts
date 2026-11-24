@@ -7,12 +7,15 @@ import { isImageAttachment } from "./attachmentMediaType";
 import {
   composerStashContextValues,
   composerStashLocationKey,
+  emptyComposerStashDraft,
   type ComposerStashContext,
   type ComposerStashDraft,
   type ComposerStashLocation,
   type ComposerStashRestorePlan,
   type ComposerStashTarget,
+  type ComposerStashTodo,
 } from "./composerStashDraft";
+import type { ComposerDraftRecovery } from "./composerStashStore";
 
 const CONTEXT_LABELS: Record<ComposerStashContext["kind"], string> = {
   thread: "A thread mention",
@@ -41,6 +44,20 @@ const CONTEXT_LIMITS: Partial<Record<ComposerStashContext["kind"], number>> = {
   continuation: 1,
 };
 
+function matchingTodo(
+  current: ComposerStashDraft,
+  saved: ComposerStashDraft,
+): ComposerStashTodo | undefined {
+  const currentTodo = composerStashContextValues(current, "todo")[0];
+  const savedTodo = composerStashContextValues(saved, "todo")[0];
+  return currentTodo !== undefined &&
+    savedTodo !== undefined &&
+    currentTodo.todoId === savedTodo.todoId &&
+    currentTodo.listHostId === savedTodo.listHostId
+    ? currentTodo
+    : undefined;
+}
+
 export function planComposerStashRestore(
   origin: ComposerStashLocation,
   target: ComposerStashTarget,
@@ -58,13 +75,7 @@ export function planComposerStashRestore(
     destination.threadId === null &&
     origin.mode === destination.mode &&
     origin.projectId === destination.projectId;
-  const currentTodo = composerStashContextValues(current, "todo")[0];
-  const savedTodo = composerStashContextValues(saved, "todo")[0];
-  const sameTodo =
-    currentTodo !== undefined &&
-    savedTodo !== undefined &&
-    currentTodo.todoId === savedTodo.todoId &&
-    currentTodo.listHostId === savedTodo.listHostId;
+  const sameTodo = matchingTodo(current, saved) !== undefined;
   const context = [
     ...current.context,
     ...saved.context.filter((part) => part.kind !== "todo" || !sameTodo),
@@ -138,6 +149,50 @@ export function planComposerStashRestore(
           : starter.length + separator.length + saved.caret,
       files: [...current.files, ...saved.files],
       context,
+    },
+  };
+}
+
+export function planComposerStashRecovery(
+  record: ComposerDraftRecovery,
+  target: ComposerStashTarget,
+  current: ComposerStashDraft,
+): ComposerStashRestorePlan {
+  const plan = planComposerStashRestore(
+    record.location,
+    target,
+    emptyComposerStashDraft(),
+    record.draft,
+  );
+  if (plan.kind === "refused") return plan;
+  // A renamed to-do keeps its identity while its title and seeded prompt change.
+  const todo = matchingTodo(current, record.draft);
+  const savedContext = new Set(record.draft.context.map((part) => JSON.stringify(part)));
+  if (
+    current.context.some(
+      (part) =>
+        !(part.kind === "todo" && todo !== undefined) && !savedContext.has(JSON.stringify(part)),
+    )
+  ) {
+    return {
+      kind: "refused",
+      reason: "Your current selections were kept. Reopen the composer to recover the saved draft.",
+    };
+  }
+  const useSavedPrompt =
+    current.text === record.beforeText ||
+    current.text === "" ||
+    current.text === record.draft.text ||
+    (todo !== undefined && current.text === target.todoSeed);
+  return {
+    kind: "ready",
+    draft: {
+      ...record.draft,
+      text: useSavedPrompt ? record.draft.text : current.text,
+      caret: useSavedPrompt ? record.draft.caret : current.caret,
+      context: record.draft.context.map((part) =>
+        part.kind === "todo" && todo !== undefined ? { kind: "todo", value: todo } : part,
+      ),
     },
   };
 }

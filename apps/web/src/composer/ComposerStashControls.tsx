@@ -1,7 +1,9 @@
 import { createContext, lazy, Suspense, type RefObject } from "react";
 import type { ComposerStashBinding } from "./useComposerStash";
 
-export const ComposerStashHostContext = createContext<string | undefined>(undefined);
+export const ComposerStashScopeContext = createContext<
+  { readonly host: string | undefined; readonly windowId?: string | undefined } | undefined
+>(undefined);
 
 export interface ComposerStashControlsProps {
   readonly binding: ComposerStashBinding;
