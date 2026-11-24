@@ -205,6 +205,7 @@ async function runScript(
             sandboxPolicy === undefined ? options.sshAgentSocket?.() : undefined,
           ),
           ...options.environment,
+          ...input.environment,
         },
         timeoutMs: input.timeoutMs,
         ...(input.outputRetention === undefined ? {} : { outputRetention: input.outputRetention }),

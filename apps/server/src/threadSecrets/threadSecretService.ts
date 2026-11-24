@@ -110,7 +110,8 @@ interface ActiveSecret {
   readonly delivery: ThreadSecretDelivery;
   /** Set for a 1Password secret: every use but its file reads the item again. */
   readonly reference: Reference | undefined;
-  readonly value: string;
+  /** None when the person chose to have the item read at each use and kept nowhere. */
+  readonly value: string | undefined;
   readonly path: string | undefined;
   readonly endsAt: number | undefined;
   /** Stops redacting the value that was granted; none for a value that is no secret. */
@@ -154,7 +155,23 @@ interface AnsweredField {
   readonly value: string;
   readonly source: ThreadSecretSource;
   readonly reference: Reference | undefined;
+  readonly eachUse: boolean;
 }
+
+/** A secret about to be used, and the value it has now. */
+interface Use {
+  readonly secret: ActiveSecret;
+  readonly value: string;
+}
+
+export type ThreadSecretLoan =
+  | {
+      readonly status: "lent";
+      readonly environment: Readonly<Record<string, string>>;
+      /** Says the command has ended and its output has been read. */
+      readonly done: () => void;
+    }
+  | { readonly status: "refused"; readonly failure: ThreadSecretFailure };
 
 /** A request held for a person costs memory and a place in Needs you. */
 const MAX_PENDING_REQUESTS = 256;
@@ -222,6 +239,8 @@ export class ThreadSecretService {
   /** Retry key to its one answer, per thread. */
   readonly #answers = new Map<string, Map<string, RetriedAnswer>>();
   readonly #leases = new Set<Lease>();
+  /** One-command secrets a command is being prepared with. */
+  readonly #claimed = new Set<string>();
   /**
    * What stops redacting each ended value, oldest first. A token usually works
    * after its secret ends, and the agent may still have it in its context, so
@@ -407,12 +426,8 @@ export class ThreadSecretService {
     if (before !== undefined) return { status: "refused", failure: before };
     // Spent before the value is read: two redeemers never both get it.
     this.#handles.delete(input.handle);
-    let { value } = secret;
-    if (secret.reference !== undefined) {
-      const read = await this.#read(secret.reference, input.signal);
-      if (typeof read !== "string") return { status: "refused", failure: read.failure };
-      value = read;
-    }
+    const value = await this.#currentValue(secret, input.signal);
+    if (typeof value !== "string") return { status: "refused", failure: value.failure };
     // Everything that admitted the use may have ended while the item was read.
     this.sweep();
     const current = this.#active.get(secret.id);
@@ -421,41 +436,80 @@ export class ThreadSecretService {
       return { status: "refused", failure: "unavailable" };
     const after = this.#refusesUse(caller, current, input.signal);
     if (after !== undefined) return { status: "refused", failure: after };
-    const rotated = value === current.value ? undefined : value;
-    let lease: Lease | undefined;
-    let releaseRotated: (() => void) | undefined;
+    const done = this.#use(caller, [{ secret: current, value }], "handle");
+    return done === undefined
+      ? { status: "refused", failure: "unavailable" }
+      : { status: "redeemed", label: secret.label, value, done };
+  }
+
+  /** Why the thread's commands may not be given these secrets now, before anyone is asked. */
+  refusesLoan(
+    caller: ThreadSecretCaller,
+    names: ReadonlyArray<string>,
+    signal: AbortSignal,
+  ): ThreadSecretFailure | undefined {
+    this.sweep();
+    for (const name of names) {
+      const found = this.#lendable(caller, name, signal);
+      if (typeof found === "string") return found;
+    }
+    return undefined;
+  }
+
+  /**
+   * Gives one command its secrets, as variables. Only a secret the person
+   * granted to commands is lent: one granted as a handle stays a handle.
+   */
+  async lend(input: {
+    readonly caller: ThreadSecretCaller;
+    readonly names: ReadonlyArray<string>;
+    readonly signal: AbortSignal;
+  }): Promise<ThreadSecretLoan> {
+    const { caller } = input;
+    this.sweep();
+    const claimed: string[] = [];
     try {
-      lease = {
-        threadId: secret.threadId,
-        turnId: caller.turnId,
-        release: this.#options.hold(value),
-      };
-      if (rotated !== undefined) releaseRotated = this.#options.hold(rotated);
-      this.#options.journal.record(secret.threadId, [
-        { name: "thread-secret.used", ...journaled(current), use: "handle" },
-      ]);
-    } catch {
-      this.#attempt(() => lease?.release());
-      this.#attempt(() => releaseRotated?.());
-      return { status: "refused", failure: "unavailable" };
+      const wanted: ActiveSecret[] = [];
+      for (const name of input.names) {
+        const found = this.#lendable(caller, name, input.signal);
+        if (typeof found === "string") return { status: "refused", failure: found };
+        // One command's secret goes to one command, however many are prepared at once.
+        if (found.lifetime === "this-command") {
+          this.#claimed.add(found.id);
+          claimed.push(found.id);
+        }
+        wanted.push(found);
+      }
+      const values: string[] = [];
+      for (const secret of wanted) {
+        const value = await this.#currentValue(secret, input.signal);
+        if (typeof value !== "string") return { status: "refused", failure: value.failure };
+        values.push(value);
+      }
+      this.sweep();
+      const uses: Use[] = [];
+      for (const [index, secret] of wanted.entries()) {
+        const current = this.#active.get(secret.id);
+        const value = values[index];
+        if (current === undefined || value === undefined)
+          return { status: "refused", failure: "revoked" };
+        const after = this.#refusesUse(caller, current, input.signal);
+        if (after !== undefined) return { status: "refused", failure: after };
+        uses.push({ secret: current, value });
+      }
+      const done = this.#use(caller, uses, "command");
+      return done === undefined
+        ? { status: "refused", failure: "unavailable" }
+        : {
+            status: "lent",
+            environment: Object.fromEntries(
+              uses.map(({ secret, value }) => [secret.environmentName, value]),
+            ),
+            done,
+          };
+    } finally {
+      for (const id of claimed) this.#claimed.delete(id);
     }
-    const taken = lease;
-    this.#leases.add(taken);
-    let held = current;
-    if (rotated !== undefined) {
-      held = { ...current, value: rotated, releaseRotated };
-      // The value before this one is the store's old one; only the granted
-      // value, which the agent may have been told of, stays held beside it.
-      this.#attempt(() => current.releaseRotated?.());
-      this.#active.set(secret.id, held);
-    }
-    if (held.lifetime === "this-command") this.#end([held], "command-ended");
-    return {
-      status: "redeemed",
-      label: secret.label,
-      value,
-      done: () => this.#endLease(taken),
-    };
   }
 
   /** Ends what the turn alone was given, and the cards it left open. */
@@ -719,14 +773,15 @@ export class ThreadSecretService {
         // Blank is no answer; anything else is kept exactly as typed.
         return entry.value.trim() === ""
           ? { failure: "missing" }
-          : { value: entry.value, source: "pasted", reference: undefined };
+          : { value: entry.value, source: "pasted", reference: undefined, eachUse: false };
       case "onepassword": {
         // The store belongs to the person at this computer.
         if (from.paired) return { failure: "not-linked" };
-        if (entry.freshEachUse) return { failure: "unavailable" };
         const reference = { store: entry.store, reference: entry.reference };
         const read = await this.#read(reference, signal);
-        return typeof read === "string" ? { value: read, source: "onepassword", reference } : read;
+        return typeof read === "string"
+          ? { value: read, source: "onepassword", reference, eachUse: entry.freshEachUse }
+          : read;
       }
       case "remembered":
         return { failure: "unavailable" };
@@ -767,7 +822,8 @@ export class ThreadSecretService {
       lifetime,
       strict: authority.strict,
       commandsConfined: authority.commandsConfined,
-      freshEachUse: false,
+      // A file is a copy. One field read at each use keeps the request from having any.
+      freshEachUse: [...answered.values()].some((field) => field.eachUse),
     });
     const files =
       wanted === "file-and-environment" && this.#swept ? this.#options.files : undefined;
@@ -792,7 +848,8 @@ export class ThreadSecretService {
         // person typed and saw; it never spares an account's own password, or
         // a stored value nobody looked at.
         const plain = !shown.secret && value.source === "pasted" && input.kind === "token";
-        const release = plain ? undefined : this.#options.hold(value.value);
+        // Nothing of an item read at each use is kept, so nothing is there to print.
+        const release = plain || value.eachUse ? undefined : this.#options.hold(value.value);
         const secret: ActiveSecret = {
           id: this.#options.uuid(),
           threadId: caller.threadId,
@@ -808,7 +865,7 @@ export class ThreadSecretService {
           lifetime,
           delivery,
           reference: value.reference,
-          value: value.value,
+          value: value.eachUse ? undefined : value.value,
           path: undefined,
           endsAt: endOf(lifetime, this.#options.now()),
           release,
@@ -910,7 +967,7 @@ export class ThreadSecretService {
               env: byField((secret) => secret.environmentName),
             };
       case "environment":
-      case "op-run":
+      case "each-use":
         return {
           ...saved,
           delivery,
@@ -1006,6 +1063,82 @@ export class ThreadSecretService {
       secret.lifetime,
     );
     return decision.status === "refused" ? decision.failure : undefined;
+  }
+
+  /** An active secret this thread's commands may be given, or why not. */
+  #lendable(
+    caller: ThreadSecretCaller,
+    name: string,
+    signal: AbortSignal,
+  ): ActiveSecret | ThreadSecretFailure {
+    const secret = this.#named(caller.threadId, name);
+    if (secret === undefined) return "expired";
+    if (secret.delivery === "handle" || this.#claimed.has(secret.id)) return "unavailable";
+    return this.#refusesUse(caller, secret, signal) ?? secret;
+  }
+
+  /** What a secret's value is now: its item's, read again, or the one that was typed. */
+  #currentValue(
+    secret: ActiveSecret,
+    signal: AbortSignal,
+  ): Promise<string | { readonly failure: ThreadSecretFailure }> {
+    return secret.reference === undefined
+      ? Promise.resolve(secret.value ?? { failure: "unavailable" })
+      : this.#read(secret.reference, signal);
+  }
+
+  /**
+   * Records a use and starts redacting what it hands over; undefined, with
+   * nothing handed over, when either cannot be done. Returns what ends it.
+   */
+  #use(
+    caller: ThreadSecretCaller,
+    uses: ReadonlyArray<Use>,
+    use: "handle" | "command",
+  ): (() => void) | undefined {
+    const leases: Lease[] = [];
+    const renewed = new Map<string, () => void>();
+    try {
+      for (const { secret, value } of uses) {
+        leases.push({
+          threadId: secret.threadId,
+          turnId: caller.turnId,
+          release: this.#options.hold(value),
+        });
+        if (value !== secret.value) renewed.set(secret.id, this.#options.hold(value));
+      }
+      this.#options.journal.record(
+        caller.threadId,
+        uses.map(({ secret }) => ({ name: "thread-secret.used", ...journaled(secret), use })),
+      );
+    } catch {
+      for (const lease of leases) this.#attempt(lease.release);
+      for (const release of renewed.values()) this.#attempt(release);
+      return undefined;
+    }
+    const spent: ActiveSecret[] = [];
+    for (const { secret, value } of uses) {
+      const releaseRotated = renewed.get(secret.id);
+      let held = secret;
+      if (releaseRotated !== undefined) {
+        // An item read at each use is redacted and otherwise kept nowhere.
+        held = {
+          ...secret,
+          value: secret.value === undefined ? undefined : value,
+          releaseRotated,
+        };
+        // The value before this one is the store's old one; only the granted
+        // value, which the agent may have been told of, stays held beside it.
+        this.#attempt(() => secret.releaseRotated?.());
+        this.#active.set(secret.id, held);
+      }
+      if (held.lifetime === "this-command") spent.push(held);
+    }
+    for (const lease of leases) this.#leases.add(lease);
+    this.#end(spent, "command-ended");
+    return () => {
+      for (const lease of leases) this.#endLease(lease);
+    };
   }
 
   /** The first answer again, while it still says something true. */

@@ -793,6 +793,203 @@ describe("a one-use handle", () => {
   });
 });
 
+describe("a secret lent to one command", () => {
+  const lend = (
+    context: ReturnType<typeof host>,
+    names: ReadonlyArray<string> = ["DEPLOY_TOKEN"],
+    over: {
+      readonly turnId?: string;
+      readonly threadId?: string;
+      readonly signal?: AbortSignal;
+    } = {},
+  ) =>
+    context.service.lend({
+      caller: {
+        ...context.caller,
+        turnId: over.turnId ?? "turn",
+        threadId: over.threadId ?? THREAD,
+      },
+      names,
+      signal: over.signal ?? new AbortController().signal,
+    });
+  const item = {
+    name: "DEPLOY_TOKEN",
+    source: "onepassword",
+    store: "onepassword",
+    reference: "op://Private/Deploy/credential",
+    freshEachUse: true,
+  } as const;
+
+  it.each([
+    ["Strict", { mode: "code", strict: true, commandsConfined: true }, "this-turn"],
+    ["a file beside it", { mode: "work", strict: false, commandsConfined: false }, "24-hours"],
+  ] as const)(
+    "is a variable with %s, and its use is recorded",
+    async (_name, authority, lifetime) => {
+      const context = host();
+      context.state.authority = authority;
+      await grant(context, request(), { lifetime });
+      const loan = await lend(context);
+      expect(loan).toMatchObject({
+        status: "lent",
+        environment: { OCTANT_SECRET_DEPLOY_TOKEN: VALUE },
+      });
+      expect(records().at(-1)).toMatchObject({ name: "thread-secret.used", use: "command" });
+      expect(JSON.stringify(records())).not.toContain(VALUE);
+      expect(await lend(context)).toMatchObject({ status: "lent" });
+    },
+  );
+
+  it("gives several fields at once, each under its own variable", async () => {
+    const context = host();
+    await grant(
+      context,
+      request({
+        name: "SERVICE",
+        fields: [
+          { name: "EMAIL", label: "Email", secret: false },
+          { name: "TOKEN", label: "Token" },
+        ],
+      }),
+      {
+        fields: [
+          { name: "EMAIL", source: "pasted", value: "person@example.com" },
+          { name: "TOKEN", source: "pasted", value: VALUE },
+        ],
+      },
+    );
+    expect(await lend(context, ["SERVICE_EMAIL", "SERVICE_TOKEN"])).toMatchObject({
+      environment: {
+        OCTANT_SECRET_SERVICE_EMAIL: "person@example.com",
+        OCTANT_SECRET_SERVICE_TOKEN: VALUE,
+      },
+    });
+    expect(await lend(context, ["SERVICE"])).toEqual({ status: "refused", failure: "expired" });
+  });
+
+  it("is never one the person granted as a handle", async () => {
+    const context = host();
+    await grant(context, request({ delivery: "handle" }));
+    expect(await lend(context)).toEqual({ status: "refused", failure: "unavailable" });
+    expect(context.service.refusesLoan(context.caller, ["DEPLOY_TOKEN"], context.stop.signal)).toBe(
+      "unavailable",
+    );
+  });
+
+  it("is refused to another thread or turn, under a rule it breaks, or once it ended", async () => {
+    const context = host();
+    await grant(context, request(), { lifetime: "24-hours" });
+    expect(await lend(context, undefined, { threadId: OTHER_THREAD })).toMatchObject({
+      failure: "expired",
+    });
+    context.state.authority = { mode: "code", strict: true, commandsConfined: true };
+    expect(await lend(context)).toMatchObject({ failure: "refused-by-strict" });
+    context.state.authority = undefined;
+    expect(await lend(context)).toMatchObject({ failure: "unavailable" });
+    context.state.authority = { mode: "code", strict: false, commandsConfined: false };
+    await grant(context, request({ name: "TURN" }), { lifetime: "this-turn" });
+    expect(await lend(context, ["TURN"], { turnId: "next" })).toMatchObject({ failure: "expired" });
+    const stopped = new AbortController();
+    stopped.abort();
+    expect(await lend(context, undefined, { signal: stopped.signal })).toMatchObject({
+      failure: "unavailable",
+    });
+    context.service.withdrawThread(THREAD);
+    expect(await lend(context)).toMatchObject({ failure: "expired" });
+    expect(records().some((record) => record.name === "thread-secret.used")).toBe(false);
+  });
+
+  it("goes to one command when that is all the person allowed", async () => {
+    const context = host();
+    await grant(context, request(), { lifetime: "this-command" });
+    const loans = await Promise.all([lend(context), lend(context)]);
+    expect(loans.map((loan) => loan.status).sort()).toEqual(["lent", "refused"]);
+    expect(context.service.active()).toEqual([]);
+    expect(redactHostSecrets(`printed ${VALUE}`)).toBe("printed [redacted secret]");
+  });
+
+  it("is not spent by a command that was refused", async () => {
+    let status: CredentialRequestResolution = { status: "read", value: VALUE };
+    const context = host({ read: async () => status });
+    await grant(context, request(), { lifetime: "this-command", fields: [item] });
+    status = { status: "locked" };
+    expect(await lend(context)).toEqual({ status: "refused", failure: "locked" });
+    status = { status: "read", value: VALUE };
+    expect(await lend(context)).toMatchObject({ status: "lent" });
+    expect(await lend(context)).toMatchObject({ status: "refused" });
+  });
+
+  it("gives every secret asked for or none", async () => {
+    const context = host();
+    await grant(context, request());
+    expect(await lend(context, ["DEPLOY_TOKEN", "MISSING"])).toEqual({
+      status: "refused",
+      failure: "expired",
+    });
+    expect(records().some((record) => record.name === "thread-secret.used")).toBe(false);
+  });
+
+  it("is not given when its use cannot be recorded", async () => {
+    let fails = false;
+    const context = host({ journalFails: () => fails });
+    await grant(context, request(), { lifetime: "this-command" });
+    fails = true;
+    expect(await lend(context)).toEqual({ status: "refused", failure: "unavailable" });
+    fails = false;
+    expect(await lend(context)).toMatchObject({ status: "lent" });
+  });
+
+  it("is read at each use, kept nowhere and written nowhere, when the person chose that", async () => {
+    let value = "first-Value-1";
+    let reads = 0;
+    const holds = new Set<string>();
+    const context = host({
+      read: async () => {
+        reads += 1;
+        return { status: "read", value };
+      },
+      hold: (held) => {
+        holds.add(held);
+        return () => holds.delete(held);
+      },
+    });
+    expect(await grant(context, request(), { fields: [item] })).toEqual({
+      status: "saved",
+      delivery: "each-use",
+      name: "DEPLOY_TOKEN",
+      env: "OCTANT_SECRET_DEPLOY_TOKEN",
+    });
+    expect(existsSync(join(root, THREAD))).toBe(false);
+    expect([...holds]).toEqual([]);
+    const first = await lend(context);
+    expect(first).toMatchObject({ environment: { OCTANT_SECRET_DEPLOY_TOKEN: "first-Value-1" } });
+    value = "second-Value-2";
+    const second = await lend(context);
+    expect(second).toMatchObject({ environment: { OCTANT_SECRET_DEPLOY_TOKEN: "second-Value-2" } });
+    expect(reads).toBe(3);
+    if (first.status === "lent") first.done();
+    if (second.status === "lent") second.done();
+    expect([...holds]).not.toContain("first-Value-1");
+  });
+
+  it("is read at each redemption of a handle too, when the person chose that", async () => {
+    let value = VALUE;
+    const context = host({ read: async () => ({ status: "read", value }) });
+    context.service.registerConsumer(CONSUMER);
+    const result = await grant(context, request({ delivery: "handle" }), { fields: [item] });
+    if (result.status !== "saved" || !("handle" in result)) throw new Error("No handle.");
+    value = "rotated-Value-9";
+    expect(
+      await context.service.redeem({
+        consumerId: CONSUMER.id,
+        caller: context.caller,
+        handle: result.handle,
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ status: "redeemed", value: "rotated-Value-9" });
+  });
+});
+
 describe("what an agent cannot arrange", () => {
   it("keeps a value redacted although the agent marked its field not secret", async () => {
     const context = host({ read: async () => ({ status: "read", value: VALUE }) });

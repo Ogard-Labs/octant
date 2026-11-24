@@ -110,7 +110,7 @@ describe("how a saved secret reaches its use", () => {
 
   it("writes no file when every use reads the item again", () => {
     for (const strict of [true, false])
-      expect(resolveThreadSecretDelivery({ ...file, freshEachUse: true, strict })).toBe("op-run");
+      expect(resolveThreadSecretDelivery({ ...file, freshEachUse: true, strict })).toBe("each-use");
   });
 
   it("keeps a handle a handle, away from the agent's shell", () => {

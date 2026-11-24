@@ -70,7 +70,7 @@ export const ThreadSecretDelivery = Schema.Literal(
   "handle",
   "file-and-environment",
   "environment",
-  "op-run",
+  "each-use",
 );
 export type ThreadSecretDelivery = typeof ThreadSecretDelivery.Type;
 export const ThreadSecretFailure = Schema.Literal(
@@ -176,6 +176,50 @@ export const ThreadSecretRequestInput = Schema.Struct({
   );
 export type ThreadSecretRequestInput = typeof ThreadSecretRequestInput.Type;
 
+export const MAX_THREAD_SECRET_COMMAND_BYTES = 16_384;
+
+/** The `run-with-secret` operation's input: one command, and the secrets it is given. */
+export const ThreadSecretRunInput = Schema.Struct({
+  operation: Schema.Literal("run-with-secret"),
+  command: Schema.String.pipe(
+    Schema.minLength(1),
+    Schema.maxLength(MAX_THREAD_SECRET_COMMAND_BYTES),
+    Schema.filter((value) => value.trim() !== "" && !value.includes("\u0000"), {
+      message: () => "A command is text.",
+    }),
+  ),
+  /** The names saved results gave, without the variable's prefix. */
+  secrets: Schema.Array(DeliveredName).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(MAX_THREAD_SECRET_FIELDS),
+    Schema.filter((names) => new Set(names).size === names.length, {
+      message: () => "Each secret is named once.",
+    }),
+  ),
+  timeoutMs: Schema.optional(Schema.Int.pipe(Schema.between(1_000, 600_000))),
+}).annotations(strict);
+export type ThreadSecretRunInput = typeof ThreadSecretRunInput.Type;
+
+/** What the agent reads of a command it ran with a secret. Its output is redacted. */
+export const ThreadSecretRunResult = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("ran", "timed-out", "cancelled"),
+    exitCode: Schema.optional(Schema.Int),
+    output: Schema.String,
+    truncated: Schema.Boolean,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    /** A secret's own failure, or why the command was not run. */
+    failure: Schema.Union(
+      ThreadSecretFailure,
+      Schema.Literal("plan", "not-approved", "no-shell", "server-project"),
+    ),
+    note: Note,
+  }).annotations(strict),
+);
+export type ThreadSecretRunResult = typeof ThreadSecretRunResult.Type;
+
 const saved = { status: Schema.Literal("saved"), name: ThreadSecretName } as const;
 const FieldHandles = Schema.Record({ key: ThreadSecretFieldName, value: Schema.UUID });
 const FieldPaths = Schema.Record({ key: ThreadSecretFieldName, value: Schema.NonEmptyString });
@@ -208,7 +252,7 @@ export const ThreadSecretRequestResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     ...saved,
-    delivery: Schema.Literal("environment", "op-run"),
+    delivery: Schema.Literal("environment", "each-use"),
     env: Schema.Union(EnvironmentName, FieldVariables),
   }).annotations(strict),
   Schema.Struct({
@@ -383,7 +427,7 @@ export const ThreadSecretJournalRecord = Schema.Union(
   Schema.Struct({
     name: Schema.Literal("thread-secret.used"),
     ...journaled,
-    use: Schema.Literal("command", "handle", "op-run"),
+    use: Schema.Literal("command", "handle"),
   }).annotations(strict),
   Schema.Struct({ name: Schema.Literal("thread-secret.expired"), ...journaled }).annotations(
     strict,
@@ -404,6 +448,7 @@ export const ThreadSecretJournalRecord = Schema.Union(
 );
 export type ThreadSecretJournalRecord = typeof ThreadSecretJournalRecord.Type;
 
+export const decodeThreadSecretRunInput = Schema.decodeUnknownEither(ThreadSecretRunInput);
 export const decodeThreadSecretRequestInput = Schema.decodeUnknownEither(ThreadSecretRequestInput);
 export const decodeThreadSecretCommand = Schema.decodeUnknownEither(ThreadSecretCommand);
 export const decodeThreadSecretJournalRecord = Schema.decodeUnknownSync(ThreadSecretJournalRecord);

@@ -108,7 +108,7 @@ export function resolveThreadSecretDelivery(input: {
   readonly freshEachUse: boolean;
 }): ThreadSecretDelivery {
   if (input.requested === "handle") return "handle";
-  if (input.freshEachUse) return "op-run";
+  if (input.freshEachUse) return "each-use";
   return input.strict || input.commandsConfined || input.lifetime === "this-command"
     ? "environment"
     : "file-and-environment";

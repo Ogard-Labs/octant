@@ -12,6 +12,7 @@ import {
   ThreadSecretRequestCard,
   ThreadSecretRequestInput,
   ThreadSecretRequestResult,
+  ThreadSecretRunInput,
 } from "./threadSecrets";
 
 const ID = "00000000-0000-4000-8000-000000000001";
@@ -127,6 +128,32 @@ describe("what an agent may ask for", () => {
   });
 });
 
+describe("a command run with a secret", () => {
+  const decode = Schema.decodeUnknownSync(ThreadSecretRunInput);
+  const run = { operation: "run-with-secret", command: "deploy", secrets: ["DEPLOY_TOKEN"] };
+
+  it("names the secrets it is given and never carries one", () => {
+    expect(decode(run)).toEqual(run);
+    expect(decode({ ...run, secrets: ["SERVICE_TOKEN", "A"] }).secrets).toHaveLength(2);
+    expect(() => decode({ ...run, environment: { TOKEN: "private" } })).toThrow();
+    expect(() => decode({ ...run, value: "private" })).toThrow();
+  });
+
+  it("refuses no command, no secret, a repeated one, and a name that is not one", () => {
+    for (const over of [
+      { command: "  " },
+      { command: "a\u0000b" },
+      { command: "x".repeat(16_385) },
+      { secrets: [] },
+      { secrets: ["A", "A"] },
+      { secrets: ["PATH; rm"] },
+      { secrets: ["A", "B", "C", "D", "E", "F", "G", "H", "I"] },
+      { timeoutMs: 0 },
+    ])
+      expect(() => decode({ ...run, ...over })).toThrow();
+  });
+});
+
 describe("what the agent gets back", () => {
   const decode = Schema.decodeUnknownSync(ThreadSecretRequestResult);
 
@@ -160,7 +187,7 @@ describe("what the agent gets back", () => {
     },
     {
       status: "saved",
-      delivery: "op-run",
+      delivery: "each-use",
       name: "DEPLOY_TOKEN",
       env: "OCTANT_SECRET_DEPLOY_TOKEN",
     },
@@ -184,7 +211,7 @@ describe("what the agent gets back", () => {
   });
 
   it("refuses a file path when the value reaches commands only as a variable", () => {
-    for (const delivery of ["environment", "op-run"])
+    for (const delivery of ["environment", "each-use"])
       expect(() =>
         decode({ status: "saved", delivery, name: "A", env: "OCTANT_SECRET_A", file: "/a" }),
       ).toThrow();
