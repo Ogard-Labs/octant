@@ -286,7 +286,7 @@ export function MediaProviderSettings(props: {
         onChangeCodexConfiguration={controller.changeCodexConfiguration}
         onChangeAcpAgentConfiguration={controller.changeAcpAgentConfiguration}
         onChangeGeminiImageConfiguration={controller.changeGeminiImageConfiguration}
-        onChangeGeminiVideoConfiguration={controller.changeGeminiVideoConfiguration}
+        onChangeVideoConfiguration={controller.changeVideoConfiguration}
         onChangeIdeogramImageConfiguration={controller.changeIdeogramImageConfiguration}
         onChangeOhMyPiConfiguration={controller.changeOhMyPiConfiguration}
         onChangeOllamaConfiguration={controller.changeOllamaConfiguration}
@@ -338,7 +338,7 @@ function ImageProviderCreateForm(props: { readonly controller: ProviderControlle
       onCreateAcpAgent={controller.createAcpAgent}
       onCreateClaude={controller.createClaude}
       onCreateGeminiImage={controller.createGeminiImage}
-      onCreateGeminiVideo={controller.createGeminiVideo}
+      onCreateVideo={controller.createVideo}
       onCreateIdeogramImage={controller.createIdeogramImage}
       onCreateOllama={controller.createOllama}
       onCreateOpenAiCompatible={controller.createOpenAiCompatible}

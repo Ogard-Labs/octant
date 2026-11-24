@@ -16,7 +16,7 @@ const OptionLabel = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32));
  * `@octant/provider-sdk/video-generation`, admitted by the same activation
  * ladder as image drivers (maintainer decision, 2026-11-22).
  */
-export const VIDEO_DRIVER_KINDS = ["gemini-video"] as const;
+export const VIDEO_DRIVER_KINDS = ["gemini-video", "runway-video", "fal-video"] as const;
 export const VideoDriverKind = Schema.Literal(...VIDEO_DRIVER_KINDS);
 export type VideoDriverKind = typeof VideoDriverKind.Type;
 
@@ -223,6 +223,13 @@ export const VideoJob = Schema.Struct({
   safetyRefusal: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
   failure: Schema.optional(ProviderFailure),
   providerCopy: VideoProviderCopy,
+  /**
+   * What the model declared about its stored copy when the remote id was
+   * recorded, kept on the job so cleanup reads the journal, never the
+   * catalog. Jobs journaled before it was kept have none and stay on the
+   * retry loop, the safe default.
+   */
+  providerRemoval: Schema.optional(VideoJobControl.fields.removal),
   settledCostUsdMicros: Schema.optional(NonNegativeInt),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
@@ -245,6 +252,7 @@ export const VideoJobStatusChanged = Schema.Struct({
   safetyRefusal: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
   failure: Schema.optional(ProviderFailure),
   providerCopy: Schema.optional(VideoProviderCopy),
+  providerRemoval: Schema.optional(VideoJobControl.fields.removal),
   settledCostUsdMicros: Schema.optional(NonNegativeInt),
 }).annotations(strict);
 export type VideoJobStatusChanged = typeof VideoJobStatusChanged.Type;

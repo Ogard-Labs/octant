@@ -2995,8 +2995,8 @@ describe("ProviderSettingsView", () => {
     await user.type(within(create).getByLabelText("API key"), "video-secret");
     await user.click(screen.getByRole("button", { name: "Add Gemini video profile" }));
 
-    expect(props.onCreateGeminiVideo).toHaveBeenCalledOnce();
-    const [name, configuration, credential] = vi.mocked(props.onCreateGeminiVideo).mock.calls[0]!;
+    expect(props.onCreateVideo).toHaveBeenCalledOnce();
+    const [name, configuration, credential] = vi.mocked(props.onCreateVideo).mock.calls[0]!;
     expect(name).toBe("Omni");
     expect(configuration).toEqual({
       kind: "gemini-video-http",
@@ -5791,7 +5791,7 @@ function ControllerBackedProviderSettings(props: {
       onChangeAmazonBedrockConfiguration={controller.changeAmazonBedrockConfiguration}
       onChangeOpenAiImageConfiguration={controller.changeOpenAiImageConfiguration}
       onChangeGeminiImageConfiguration={controller.changeGeminiImageConfiguration}
-      onChangeGeminiVideoConfiguration={controller.changeGeminiVideoConfiguration}
+      onChangeVideoConfiguration={controller.changeVideoConfiguration}
       onChangeBflImageConfiguration={controller.changeBflImageConfiguration}
       onChangeIdeogramImageConfiguration={controller.changeIdeogramImageConfiguration}
       onClearProviderCredential={controller.clearProviderCredential}
@@ -5807,7 +5807,7 @@ function ControllerBackedProviderSettings(props: {
       onCreateAmazonBedrock={controller.createAmazonBedrock}
       onCreateOpenAiImage={controller.createOpenAiImage}
       onCreateGeminiImage={controller.createGeminiImage}
-      onCreateGeminiVideo={controller.createGeminiVideo}
+      onCreateVideo={controller.createVideo}
       onCreateBflImage={controller.createBflImage}
       onCreateIdeogramImage={controller.createIdeogramImage}
       onPermissionPersistenceChange={controller.updatePermissionPersistence}
@@ -5940,7 +5940,7 @@ function fixture(
       credential.clear();
       return true;
     }),
-    onCreateGeminiVideo: vi.fn(async (_name, _configuration, credential) => {
+    onCreateVideo: vi.fn(async (_name, _configuration, credential) => {
       credential.clear();
       return true;
     }),
@@ -5994,7 +5994,7 @@ function fixture(
       credential.clear();
       return true;
     }),
-    onChangeGeminiVideoConfiguration: vi.fn(async (_id, _configuration, credential) => {
+    onChangeVideoConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();
       return true;
     }),

@@ -642,7 +642,8 @@ frame 32px inside the window for every image, the image fitted inside it, its
 filename and size beneath, with "n of m" when the message has several. Arrow
 keys step between the images of that message or composer; Escape or a press
 outside closes it and returns focus to the thumbnail. Stepping never resizes
-the frame.
+the frame. The lightbox loads when a thumbnail is available. If it fails to
+load, opening the thumbnail shows a message with how to try again.
 
 ## Model picker
 

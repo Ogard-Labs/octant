@@ -223,6 +223,8 @@ export function driverLabel(driverKind: ProviderInstance["driverKind"]): string 
   if (driverKind === "openai-image") return "OpenAI Image";
   if (driverKind === "gemini-native-image") return "Gemini Image";
   if (driverKind === "gemini-video") return "Gemini Video";
+  if (driverKind === "runway-video") return "Runway Video";
+  if (driverKind === "fal-video") return "fal Video";
   if (driverKind === "bfl-image") return "Black Forest Labs Image";
   if (driverKind === "ideogram-image") return "Ideogram Image";
   // An outside driver package never borrows a bundled provider's name.
