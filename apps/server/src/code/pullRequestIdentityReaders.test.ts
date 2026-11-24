@@ -11,6 +11,7 @@ import {
   CODE_PULL_REQUEST_LINK_AGGREGATE,
   CODE_PULL_REQUEST_LINK_FORGE_IDS_BACKFILLED,
   decodeAggregateVersion,
+  decodeCodeProjectPullRequestDetailRefreshCommand,
   decodeCodeProjectPullRequestSwitchTarget,
   decodeCodeThread,
   decodeCodeThreadFollowUp,
@@ -846,10 +847,31 @@ describe("pull request readers use the single forge identity owner", () => {
     });
     const refresh = () =>
       pullRequestService.refresh(windowId, { kind: "refresh-all" }, signal).then(() => undefined);
-    const linked = async () =>
-      (await pullRequestService.boardSnapshot(windowId)).rows
+    // Every reader answers for itself: the board filters unlinks on its own, so
+    // reading it alone would hide one that the detail or the switches missed.
+    const linked = async () => {
+      const target = {
+        projectId,
+        repositoryOwner: "acme",
+        repositoryName: forge.repo.name,
+        number: 42,
+      };
+      const board = (await pullRequestService.boardSnapshot(windowId)).rows
         .flatMap((row) => row.linkedThreads)
         .map((thread) => String(thread.threadId));
+      const detail = await pullRequestService.refreshDetail(
+        windowId,
+        decodeCodeProjectPullRequestDetailRefreshCommand(target),
+        signal,
+      );
+      const authorized = await pullRequestService.authorizePullRequest(
+        windowId,
+        decodeCodeProjectPullRequestSwitchTarget(target),
+      );
+      expect(detail.linkedThreads.map((thread) => String(thread.threadId))).toEqual(board);
+      expect(authorized).toMatchObject({ status: "authorized", linkedThreadIds: board });
+      return board;
+    };
     const unlink = (repository: string) =>
       unlinkedPullRequests.push({ owner: "acme", repository, number: 42, unlinkedAt: clock() });
     const rename = (repository: string) => {
