@@ -12,12 +12,13 @@ import {
   VIDEO_JOB_TIMEOUT_MS,
   type VideoModelCapabilities,
 } from "@octant/contracts/video-generation";
-import type {
-  VideoAdapterPoll,
-  VideoAdapterRequest,
-  VideoAdapterStart,
-  VideoGenerationDriver,
-  VideoGenerationPorts,
+import {
+  isProviderFailure,
+  type VideoAdapterPoll,
+  type VideoAdapterRequest,
+  type VideoAdapterStart,
+  type VideoGenerationDriver,
+  type VideoGenerationPorts,
 } from "@octant/provider-sdk/video-generation";
 import { CONFORMANCE_MP4_BYTES } from "@octant/provider-sdk/video-generation-conformance";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -28,6 +29,7 @@ import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import type { SpendCeilingTurnRequest } from "../spendCeilingService";
 import { VideoClipStore } from "./videoClipStore";
+import { VIDEO_HTTP_LIMITS } from "./videoHttp";
 import { VideoJobService } from "./videoJobService";
 
 const now = "2026-11-22T12:00:00.000Z";
@@ -352,6 +354,50 @@ describe("video jobs", () => {
     expect(done?.settledCostUsdMicros).toBeUndefined();
     expect(fetched).toEqual([]);
     expect(spend.settle).not.toHaveBeenCalled();
+  });
+
+  it("releases the reservation when a start times out before fetching with its key", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const reading = Promise.withResolvers<void>();
+    const credential = Promise.withResolvers<string>();
+    const { service, fetched, spend } = harness({
+      credential: () => {
+        reading.resolve();
+        return credential.promise;
+      },
+      start: async (ports, request) => {
+        try {
+          await ports.request({
+            url: "https://video.example.test/start",
+            method: "POST",
+            auth: { header: "authorization", scheme: "Bearer" },
+            signal: request.signal,
+          });
+          return { status: "started", remoteId: "remote-1" };
+        } catch (error) {
+          if (!isProviderFailure(error)) throw error;
+          return { status: "failed", providerFailure: error };
+        }
+      },
+    });
+    try {
+      const job = await enqueue(service);
+      await reading.promise;
+      await vi.advanceTimersByTimeAsync(VIDEO_HTTP_LIMITS.connectionTimeoutMs);
+      const done = await service.whenTerminal(job.id);
+      expect(done).toMatchObject({ status: "failed", failure: { category: "unavailable" } });
+      expect(done?.settledCostUsdMicros).toBeUndefined();
+      expect(spend.abandon).toHaveBeenCalledOnce();
+      expect(spend.settle).not.toHaveBeenCalled();
+
+      credential.resolve("key");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(fetched).toEqual([]);
+    } finally {
+      credential.resolve("key");
+      service.close();
+      vi.useRealTimers();
+    }
   });
 
   it("bills nothing when shutdown lands while the start is still reading its key", async () => {

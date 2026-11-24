@@ -651,18 +651,12 @@ export class VideoJobService {
         });
         return;
       }
-      if (startTimedOut && this.#knownUnsent(running)) {
-        this.#finish(sending, "failed", {
-          failure: videoFailure("unavailable", "The clip timed out before it was sent."),
-        });
-        return;
-      }
-      // An unavailable answer may mean the request reached the provider
-      // after all: the job ends interrupted and settles at the estimate,
-      // since the provider may still make and bill the clip. Nothing is
-      // forgotten — there is no remote id to forget. A definite rejection,
-      // rate-limited or otherwise, bills nothing.
-      if (startTimedOut || startMayHaveReachedProvider(started.providerFailure)) {
+      // The provider may bill an unconfirmed start. A timeout while obtaining
+      // the key can also report "unavailable", before any request was sent.
+      if (
+        (startTimedOut || startMayHaveReachedProvider(started.providerFailure)) &&
+        !this.#knownUnsent(running)
+      ) {
         this.#finish(sending, "failed", {
           failure: videoFailure(
             "interrupted",
@@ -673,7 +667,11 @@ export class VideoJobService {
         });
         return;
       }
-      this.#finish(sending, "failed", { failure: started.providerFailure });
+      this.#finish(sending, "failed", {
+        failure: startTimedOut
+          ? videoFailure("unavailable", "The clip timed out before it was sent.")
+          : started.providerFailure,
+      });
       return;
     }
     const model = (await this.#modelsOf(adapter))?.find(
