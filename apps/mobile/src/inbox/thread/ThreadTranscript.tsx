@@ -22,9 +22,7 @@ import { MessageBubble } from "../../ui/MessageBubble";
 import { RoutineReceiptCard } from "../../ui/RoutineReceiptCard";
 import { TranscriptHandoffDivider } from "../../ui/TranscriptHandoffDivider";
 import {
-  mobileChatHandoffPlacements,
   resolveMobileTranscriptHandoff,
-  type MobileChatHandoffPlacements,
   type MobileTranscriptHandoffEntry,
 } from "../../ui/transcriptHandoffPresentation";
 import type { MessageActionItem } from "../../ui/MessageActions";
@@ -147,54 +145,89 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
   const codeTurns = codeConversation?.turns;
   const view = chat.view;
   const messages = useMemo(() => (view === undefined ? [] : mobileChatMessages(view)), [view]);
-  const chatHandoffs = useMemo<MobileChatHandoffPlacements>(
-    () =>
-      view === undefined
-        ? {
-            beforeContentId: new Map(),
-            afterContentId: new Map(),
-            trailing: [],
-          }
-        : mobileChatHandoffPlacements(view, modelOptions, providerDirectory),
-    [modelOptions, providerDirectory, view],
-  );
-  // Attribution notes for images described by Sees images stay attached to the
-  // owning attempt rather than appearing as detached message bubbles.
-  const chatDescribedImages = useMemo(() => {
-    const beforeContentId = new Map<string, string[]>();
-    const afterContentId = new Map<string, string[]>();
-    const trailing: string[] = [];
+  // Interleave handoff dividers and Sees images attribution in strict attempt
+  // order so an earlier replyless attempt's image note never crosses a later
+  // retry's handoff boundary.
+  const chatAnnotations = useMemo(() => {
+    type Annotation =
+      | { readonly kind: "handoff"; readonly entry: MobileTranscriptHandoffEntry }
+      | { readonly kind: "described-images"; readonly text: string };
+    const beforeContentId = new Map<string, Annotation[]>();
+    const afterContentId = new Map<string, Annotation[]>();
+    const trailing: Annotation[] = [];
     if (view === undefined) return { beforeContentId, afterContentId, trailing };
     const shownIds = new Set(messages.map((entry) => String(entry.content.contentId)));
-    const appendNote = (map: Map<string, string[]>, key: string, note: string) => {
+    const append = (map: Map<string, Annotation[]>, key: string, item: Annotation) => {
       const existing = map.get(key);
       if (existing === undefined) {
-        map.set(key, [note]);
+        map.set(key, [item]);
       } else {
-        existing.push(note);
+        existing.push(item);
       }
     };
+    const placeForAttempt = (
+      firstVisibleReply: string | undefined,
+      lastVisibleAnchor: string | undefined,
+      item: Annotation,
+    ) => {
+      if (firstVisibleReply !== undefined) {
+        append(beforeContentId, firstVisibleReply, item);
+      } else if (lastVisibleAnchor !== undefined) {
+        append(afterContentId, lastVisibleAnchor, item);
+      } else {
+        trailing.push(item);
+      }
+    };
+    const describedImagesText = (
+      describedImages: NonNullable<
+        NonNullable<typeof view>["turns"][number]["attempts"][number]["describedImages"]
+      >,
+    ) =>
+      describedImages
+        .map(
+          (image) =>
+            `${image.name} described by ${image.describedBy.model} (${image.describedBy.provider})`,
+        )
+        .join(" · ");
+
+    let previousTurnAttempt:
+      | NonNullable<typeof view>["turns"][number]["attempts"][number]
+      | undefined;
     for (const turn of activeChatTurns(view.turns)) {
       const userId = String(turn.userMessageRef.contentId);
       let lastVisibleAnchor: string | undefined = shownIds.has(userId) ? userId : undefined;
-      for (const attempt of turn.attempts) {
+      for (let index = 0; index < turn.attempts.length; index += 1) {
+        const attempt = turn.attempts[index];
+        if (attempt === undefined) continue;
         const firstVisibleReply = attempt.responseRefs
           .map((ref) => String(ref.contentId))
           .find((id) => shownIds.has(id));
-        if (attempt.describedImages !== undefined && attempt.describedImages.length > 0) {
-          const note = attempt.describedImages
-            .map(
-              (image) =>
-                `${image.name} described by ${image.describedBy.model} (${image.describedBy.provider})`,
-            )
-            .join(" · ");
-          if (firstVisibleReply !== undefined) {
-            appendNote(beforeContentId, firstVisibleReply, note);
-          } else if (lastVisibleAnchor !== undefined) {
-            appendNote(afterContentId, lastVisibleAnchor, note);
+        const handoffEntry = resolveMobileTranscriptHandoff({
+          previous: index === 0 ? previousTurnAttempt : turn.attempts[index - 1],
+          current: attempt,
+          handoff: attempt.handoff,
+          modelOptions,
+          providerDirectory,
+        });
+        if (handoffEntry !== undefined) {
+          if (index === 0) {
+            if (shownIds.has(userId)) {
+              append(beforeContentId, userId, { kind: "handoff", entry: handoffEntry });
+            } else {
+              trailing.push({ kind: "handoff", entry: handoffEntry });
+            }
           } else {
-            trailing.push(note);
+            placeForAttempt(firstVisibleReply, lastVisibleAnchor, {
+              kind: "handoff",
+              entry: handoffEntry,
+            });
           }
+        }
+        if (attempt.describedImages !== undefined && attempt.describedImages.length > 0) {
+          placeForAttempt(firstVisibleReply, lastVisibleAnchor, {
+            kind: "described-images",
+            text: describedImagesText(attempt.describedImages),
+          });
         }
         for (const ref of attempt.responseRefs) {
           const id = String(ref.contentId);
@@ -205,9 +238,11 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
           if (shownIds.has(researchId)) lastVisibleAnchor = researchId;
         }
       }
+      const latest = turn.attempts.at(-1);
+      if (latest !== undefined) previousTurnAttempt = latest;
     }
     return { beforeContentId, afterContentId, trailing };
-  }, [messages, view]);
+  }, [messages, modelOptions, providerDirectory, view]);
   const workHandoffs = useMemo(() => {
     const map = new Map<string, MobileTranscriptHandoffEntry>();
     if (workTurns === undefined) return map;
@@ -534,14 +569,10 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                 chat.activeAttempt === undefined &&
                 props.allowProductMutations;
               const sentWith = attachmentsByMessage.get(String(content.contentId)) ?? [];
-              const handoffsBefore =
-                chatHandoffs.beforeContentId.get(String(content.contentId)) ?? [];
-              const handoffsAfter =
-                chatHandoffs.afterContentId.get(String(content.contentId)) ?? [];
-              const describedBefore =
-                chatDescribedImages.beforeContentId.get(String(content.contentId)) ?? [];
-              const describedAfter =
-                chatDescribedImages.afterContentId.get(String(content.contentId)) ?? [];
+              const annotationsBefore =
+                chatAnnotations.beforeContentId.get(String(content.contentId)) ?? [];
+              const annotationsAfter =
+                chatAnnotations.afterContentId.get(String(content.contentId)) ?? [];
               return (
                 <View
                   key={content.contentId}
@@ -556,22 +587,23 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                     : {})}
                   style={styles.messageWithAttachments}
                 >
-                  {handoffsBefore.map((handoff, handoffIndex) => (
-                    <TranscriptHandoffDivider
-                      entry={handoff}
-                      key={`before-${String(content.contentId)}-${String(handoffIndex)}`}
-                      testID={`mobile-chat-handoff-${String(content.contentId)}`}
-                    />
-                  ))}
-                  {describedBefore.map((note, noteIndex) => (
-                    <Text
-                      key={`described-before-${String(content.contentId)}-${String(noteIndex)}`}
-                      style={styles.metaText}
-                      testID={`mobile-chat-described-images-${String(content.contentId)}-${String(noteIndex)}`}
-                    >
-                      {note}
-                    </Text>
-                  ))}
+                  {annotationsBefore.map((annotation, itemIndex) =>
+                    annotation.kind === "handoff" ? (
+                      <TranscriptHandoffDivider
+                        entry={annotation.entry}
+                        key={`before-${String(content.contentId)}-${String(itemIndex)}`}
+                        testID={`mobile-chat-handoff-${String(content.contentId)}`}
+                      />
+                    ) : (
+                      <Text
+                        key={`described-before-${String(content.contentId)}-${String(itemIndex)}`}
+                        style={styles.metaText}
+                        testID={`mobile-chat-described-images-${String(content.contentId)}-${String(itemIndex)}`}
+                      >
+                        {annotation.text}
+                      </Text>
+                    ),
+                  )}
                   <MessageBubble
                     replyDetail={props.replyDetail}
                     body={content.body}
@@ -594,42 +626,44 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                       : {})}
                   />
                   {sentWith.length > 0 ? attachmentChips(sentWith, true) : null}
-                  {handoffsAfter.map((handoff, handoffIndex) => (
-                    <TranscriptHandoffDivider
-                      entry={handoff}
-                      key={`after-${String(content.contentId)}-${String(handoffIndex)}`}
-                      testID={`mobile-chat-handoff-after-${String(content.contentId)}-${String(handoffIndex)}`}
-                    />
-                  ))}
-                  {describedAfter.map((note, noteIndex) => (
-                    <Text
-                      key={`described-after-${String(content.contentId)}-${String(noteIndex)}`}
-                      style={styles.metaText}
-                      testID={`mobile-chat-described-images-after-${String(content.contentId)}-${String(noteIndex)}`}
-                    >
-                      {note}
-                    </Text>
-                  ))}
+                  {annotationsAfter.map((annotation, itemIndex) =>
+                    annotation.kind === "handoff" ? (
+                      <TranscriptHandoffDivider
+                        entry={annotation.entry}
+                        key={`after-${String(content.contentId)}-${String(itemIndex)}`}
+                        testID={`mobile-chat-handoff-after-${String(content.contentId)}-${String(itemIndex)}`}
+                      />
+                    ) : (
+                      <Text
+                        key={`described-after-${String(content.contentId)}-${String(itemIndex)}`}
+                        style={styles.metaText}
+                        testID={`mobile-chat-described-images-after-${String(content.contentId)}-${String(itemIndex)}`}
+                      >
+                        {annotation.text}
+                      </Text>
+                    ),
+                  )}
                 </View>
               );
             })
           )}
-          {chatHandoffs.trailing.map((handoff, handoffIndex) => (
-            <TranscriptHandoffDivider
-              entry={handoff}
-              key={`trailing-${String(handoffIndex)}`}
-              testID={`mobile-chat-handoff-trailing-${String(handoffIndex)}`}
-            />
-          ))}
-          {chatDescribedImages.trailing.map((note, noteIndex) => (
-            <Text
-              key={`described-trailing-${String(noteIndex)}`}
-              style={styles.metaText}
-              testID={`mobile-chat-described-images-trailing-${String(noteIndex)}`}
-            >
-              {note}
-            </Text>
-          ))}
+          {chatAnnotations.trailing.map((annotation, itemIndex) =>
+            annotation.kind === "handoff" ? (
+              <TranscriptHandoffDivider
+                entry={annotation.entry}
+                key={`trailing-${String(itemIndex)}`}
+                testID={`mobile-chat-handoff-trailing-${String(itemIndex)}`}
+              />
+            ) : (
+              <Text
+                key={`described-trailing-${String(itemIndex)}`}
+                style={styles.metaText}
+                testID={`mobile-chat-described-images-trailing-${String(itemIndex)}`}
+              >
+                {annotation.text}
+              </Text>
+            ),
+          )}
         </View>
       ) : null}
     </>

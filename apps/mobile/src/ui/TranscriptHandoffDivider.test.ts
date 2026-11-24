@@ -792,4 +792,125 @@ describe("TranscriptHandoffDivider on the phone", () => {
     expect(host.textContent).toContain("login.png described by Vision (Local Vision)");
     expect(host.textContent).not.toContain("INTERNAL SEES IMAGES TEXT");
   });
+
+  it("keeps an earlier replyless attempt's image attribution above a later retry's handoff divider", () => {
+    const now = "2026-11-24T12:00:00.000Z";
+    const threadId = "00000000-0000-4000-8000-000000000991";
+    const turnId = "00000000-0000-4000-8000-000000000992";
+    const userId = "00000000-0000-4000-8000-000000000993";
+    const descriptionId = "00000000-0000-4000-8000-000000000994";
+    const attachmentId = "00000000-0000-4000-8000-000000000995";
+    const ref = (contentId: string) => ({ contentId, digest: "e".repeat(64), byteLength: 10 });
+    const view = decodeChatThreadView({
+      thread: {
+        id: threadId,
+        title: "Replyless image retry",
+        lifecycle: "active",
+        providerInstanceId: claudeId,
+        modelId: "claude-sonnet-4",
+        researchEnabled: false,
+        researchRouting: "automatic",
+        personalityInstructions: "Be calm.",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+      lastSequence: 1,
+      turns: [
+        {
+          id: turnId,
+          threadId,
+          sequence: 1,
+          userMessageRef: ref(userId),
+          attachmentIds: [attachmentId],
+          attempts: [
+            {
+              id: "10000000-0000-4000-8000-000000000996",
+              turnId,
+              threadId,
+              providerInstanceId: codexId,
+              providerSessionId: "20000000-0000-4000-8000-000000000996",
+              modelId: "gpt-5.3",
+              contextManifestId: "30000000-0000-4000-8000-000000000996",
+              describedImages: [
+                {
+                  attachmentId,
+                  name: "screen.png",
+                  describedBy: { provider: "Local Vision", model: "Vision" },
+                  description: ref(descriptionId),
+                },
+              ],
+              outcome: "failed",
+              responseRefs: [],
+              citationIds: [],
+              createdAt: now,
+              updatedAt: now,
+            },
+            {
+              id: "10000000-0000-4000-8000-000000000997",
+              turnId,
+              threadId,
+              providerInstanceId: claudeId,
+              providerSessionId: "20000000-0000-4000-8000-000000000997",
+              modelId: "claude-sonnet-4",
+              contextManifestId: "30000000-0000-4000-8000-000000000997",
+              outcome: "interrupted",
+              responseRefs: [],
+              citationIds: [],
+              handoff: {
+                reason: "provider-switch",
+                previousProviderInstanceId: codexId,
+                previousModelId: "gpt-5.3",
+                messages: 1,
+                omissions: emptyOmissions,
+                externalContentIngested: false,
+                nativeSessionTransferred: false,
+                hiddenReasoningTransferred: false,
+              },
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+          createdAt: now,
+        },
+      ],
+      contents: [
+        {
+          contentId: userId,
+          role: "user",
+          body: "Inspect screen.png",
+          byteLength: 18,
+          digest: "e".repeat(64),
+        },
+        {
+          contentId: descriptionId,
+          role: "user",
+          body: "INTERNAL DESCRIPTION",
+          byteLength: 20,
+          digest: "e".repeat(64),
+        },
+      ],
+      attachments: [],
+      citations: [],
+      workItems: [],
+      workListVersion: 0,
+      followUpVersion: 0,
+    });
+
+    const host = renderChatTranscript(view);
+    const renderedIds = Array.from(host.querySelectorAll("[data-testid]"))
+      .map((element) => element.getAttribute("data-testid") ?? "")
+      .filter(
+        (id) =>
+          /^mobile-message-[0-9a-f-]{36}$/.test(id) ||
+          /^mobile-chat-handoff-(?:after-)?[0-9a-f-]{36}(?:-\d+)?$/.test(id) ||
+          id.startsWith("mobile-chat-described-images-"),
+      );
+
+    expect(renderedIds).toEqual([
+      `mobile-message-${userId}`,
+      `mobile-chat-described-images-after-${userId}-0`,
+      `mobile-chat-handoff-after-${userId}-1`,
+    ]);
+  });
 });

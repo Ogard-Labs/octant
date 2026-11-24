@@ -23,7 +23,7 @@ const digest = `sha256:${"a".repeat(64)}`;
 function ref(n: number) {
   return { contentId: uuid(n), digest, byteLength: 1 };
 }
-function content(n: number, role: "user" | "assistant", body: string) {
+function content(n: number, role: "user" | "assistant" | "snippet", body: string) {
   return { contentId: uuid(n), role, body, digest, byteLength: body.length };
 }
 function turn(n: number, user: number, reply: number | undefined, extra: object = {}) {
@@ -171,7 +171,7 @@ describe("mobile fork and rewind", () => {
         content(11, "user", "What is on this screen?"),
         content(12, "assistant", "It is a sign-in form."),
         content(15, "user", "Generated description of login.png"),
-        content(16, "assistant", "Citation snippet text"),
+        content(16, "snippet", "Citation snippet text"),
         content(21, "user", "Unrelated follow-up"),
         content(22, "assistant", "Follow-up reply"),
       ],
