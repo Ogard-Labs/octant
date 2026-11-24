@@ -241,10 +241,12 @@ describe("ChatWelcome", () => {
     const user = userEvent.setup();
     const onCreateChat = vi.fn();
     render(<ChatWelcome onCreateChat={onCreateChat} />);
-    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+    const file = new File(["# Notes"], "notes.md", { type: "text/markdown" });
 
     await user.upload(screen.getByLabelText("Choose attachment file"), file);
-    expect(screen.getByRole("list", { name: "Attachments" })).toHaveTextContent("notes.txt");
+    const attachments = screen.getByRole("list", { name: "Attachments" });
+    expect(attachments).toHaveTextContent("notes.md");
+    expect(attachments.querySelector("svg.octant-icon-file-text")).toBeInTheDocument();
 
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Summarize{Enter}");
 

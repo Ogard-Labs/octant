@@ -5,6 +5,7 @@ import {
   useComposerAtMenu,
 } from "../composer/useComposerAtMenu";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
+import { ComposerAttachmentIcon } from "../composer/ComposerAttachmentIcon";
 import {
   useId,
   useCallback,
@@ -546,8 +547,12 @@ export function ChatComposer(props: ChatComposerProps) {
       {(props.pendingAttachments ?? []).length > 0 ? (
         <ul aria-label="Attached files" className="composer-chips chat-composer__selections">
           {(props.pendingAttachments ?? []).map((attachmentSelection) => (
-            <li key={String(attachmentSelection.id)} className="chip chat-composer__selection">
-              <span>{attachmentSelection.displayName}</span>
+            <li
+              key={String(attachmentSelection.id)}
+              className="chip chat-composer__selection composer-file-chip"
+            >
+              <ComposerAttachmentIcon name={attachmentSelection.displayName} />
+              <span className="composer-file-chip__name">{attachmentSelection.displayName}</span>
               {props.onRemoveAttachment === undefined ? null : (
                 <OctantButton
                   aria-label={`Remove ${attachmentSelection.displayName} attachment`}
