@@ -226,6 +226,7 @@ import TriangleAlertGlyph from "lucide-react/icons/triangle-alert";
 import TruckGlyph from "lucide-react/icons/truck";
 import TypeGlyph from "lucide-react/icons/type";
 import Undo2Glyph from "lucide-react/icons/undo-2";
+import UnlinkGlyph from "lucide-react/icons/unlink";
 import UnplugGlyph from "lucide-react/icons/unplug";
 import UploadGlyph from "lucide-react/icons/upload";
 import UserGlyph from "lucide-react/icons/user";
@@ -513,6 +514,7 @@ export const TriangleAlert = /* @__PURE__ */ makeIcon("triangle-alert", Triangle
 export const Truck = /* @__PURE__ */ makeIcon("truck", TruckGlyph);
 export const Type = /* @__PURE__ */ makeIcon("type", TypeGlyph);
 export const Undo2 = /* @__PURE__ */ makeIcon("undo2", Undo2Glyph);
+export const Unlink = /* @__PURE__ */ makeIcon("unlink", UnlinkGlyph);
 export const Unplug = /* @__PURE__ */ makeIcon("unplug", UnplugGlyph);
 export const Upload = /* @__PURE__ */ makeIcon("upload", UploadGlyph);
 export const User = /* @__PURE__ */ makeIcon("user", UserGlyph);

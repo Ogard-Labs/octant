@@ -5,7 +5,10 @@ import { removeHostWorktree } from "../code/hostWorktreeRemoval";
 import { createDiskCleanupRouteHandler } from "../diskCleanupRoutes";
 import { createArchivedWorktreeRouteHandler } from "../archivedWorktreeRoutes";
 import { createArchivedWorktrees } from "../code/archivedWorktrees";
-import { decodeThreadWorkingDirectory } from "@octant/contracts";
+import {
+  decodeThreadWorkingDirectory,
+  type CodeThreadUnlinkedPullRequest,
+} from "@octant/contracts";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { GitHistoryPort } from "../code/gitHistoryPort";
@@ -1195,6 +1198,7 @@ export function wireCode(deps: CodeDependencies) {
         readonly repository: { readonly owner: string; readonly name: string };
         readonly deliveryBranch: string;
         readonly pullRequestNumbers: ReadonlyArray<CodeThreadKnownPullRequest>;
+        readonly unlinkedPullRequests?: ReadonlyArray<CodeThreadUnlinkedPullRequest>;
       }> = [];
       for (const thread of persistence.readCodeThreads()) {
         const repository = thread.deliveryTarget.proposedBaseRepository;
@@ -1212,6 +1216,9 @@ export function wireCode(deps: CodeDependencies) {
           pullRequestNumbers: pullRequestIdentitiesFromHistory(
             codeBoardEventStore.summaryForThread(thread.id),
           ),
+          ...(thread.unlinkedPullRequests === undefined
+            ? {}
+            : { unlinkedPullRequests: thread.unlinkedPullRequests }),
         });
       }
       return facts;

@@ -22,6 +22,40 @@ export interface CodeProjectLinkedThreadFact {
     readonly observedAt: string;
     readonly repository?: CodeProjectPullRequestRepositoryIdentity;
   }>;
+  /** Pull requests a person unlinked from the thread, each with when. */
+  readonly unlinkedPullRequests?: ReadonlyArray<{
+    readonly owner: string;
+    readonly repository: string;
+    readonly number: number;
+    readonly unlinkedAt: string;
+  }>;
+}
+
+/**
+ * Whether a person's unlink still holds for this pull request: it does until
+ * the thread touches the pull request again after it (a later record of it,
+ * in the repository it was recorded for).
+ */
+export function threadUnlinkedPullRequest(
+  thread: CodeProjectLinkedThreadFact,
+  pullRequest: {
+    readonly repository: CodeProjectPullRequestRepositoryIdentity;
+    readonly number: number;
+  },
+): boolean {
+  const unlink = thread.unlinkedPullRequests?.find(
+    (entry) =>
+      entry.number === pullRequest.number &&
+      sameRepository({ owner: entry.owner, name: entry.repository }, pullRequest.repository),
+  );
+  if (unlink === undefined) return false;
+  const touchedAfter = thread.pullRequestNumbers?.some(
+    (entry) =>
+      entry.number === pullRequest.number &&
+      sameRepository(entry.repository ?? thread.repository, pullRequest.repository) &&
+      entry.observedAt > unlink.unlinkedAt,
+  );
+  return touchedAfter !== true;
 }
 
 export interface CodeProjectPullRequestMatchTarget {
@@ -40,8 +74,9 @@ export interface CodeProjectLinkedThreadEvidence {
 /**
  * Exact linked-thread evidence only: the delivery branch in the thread's own
  * repository, or a recorded pull-request number in the repository it was
- * recorded for (the thread's own, or the one a tool call named). Title text
- * and loose branch fragments never match.
+ * recorded for (the thread's own, or the one a tool call named). A person's
+ * unlink wins over both until the thread touches the pull request again.
+ * Title text and loose branch fragments never match.
  */
 export function matchLinkedThreadsToPullRequest(input: {
   readonly pullRequest: CodeProjectPullRequestMatchTarget;
@@ -64,6 +99,7 @@ export function matchLinkedThreadsToPullRequest(input: {
             : sameRepository(entry.repository, input.pullRequest.repository)),
       ) === true;
     if (!byBranch && !byIdentity) continue;
+    if (threadUnlinkedPullRequest(thread, input.pullRequest)) continue;
     matches.push({ threadId: thread.threadId, title: thread.title });
   }
   return matches;

@@ -5,6 +5,7 @@ import {
   type ThreadFinishedReceipt,
   type ThreadTouchedIssue,
   type ThreadTouchedIssues,
+  MAX_CODE_THREAD_UNLINKED_PULL_REQUESTS,
 } from "@octant/contracts";
 import { composeThreadTouchedIssues } from "@octant/domain/thread-board-pull-request-policy";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
@@ -1002,6 +1003,30 @@ function withoutRest<T extends Pick<CodeThread, "completedAt" | "snooze">>(
 }
 
 /** The thread without a person's Done mark, as if it had never been marked. */
+/**
+ * The thread's unlinked pull requests with this one added, or its time
+ * renewed: one entry per pull request, the newest kept within the bound.
+ */
+function withUnlinkedPullRequest(
+  current: CodeThread["unlinkedPullRequests"],
+  command: { readonly owner: string; readonly repository: string; readonly number: number },
+  unlinkedAt: CodeThread["updatedAt"],
+): NonNullable<CodeThread["unlinkedPullRequests"]> {
+  const same = (entry: NonNullable<CodeThread["unlinkedPullRequests"]>[number]) =>
+    entry.number === command.number &&
+    entry.owner.toLowerCase() === command.owner.toLowerCase() &&
+    entry.repository.toLowerCase() === command.repository.toLowerCase();
+  return [
+    ...(current ?? []).filter((entry) => !same(entry)),
+    {
+      owner: command.owner,
+      repository: command.repository,
+      number: command.number,
+      unlinkedAt,
+    },
+  ].slice(-MAX_CODE_THREAD_UNLINKED_PULL_REQUESTS);
+}
+
 function withoutDoneMark<T extends Pick<CodeThread, "markedDoneAt" | "completionReceiptId">>(
   thread: T,
 ): Omit<T, "markedDoneAt" | "completionReceiptId"> {
@@ -2505,6 +2530,15 @@ export class CodeService {
         throw this.#failure("unauthorized", "Only a person can mark a Code thread Done.");
       }
       if (
+        command.kind === "unlink-code-thread-pull-request" &&
+        (isRoutineHostScope(authenticatedWindowId) || actor?.kind === "system")
+      ) {
+        throw this.#failure(
+          "unauthorized",
+          "Only a person can unlink a pull request from a thread.",
+        );
+      }
+      if (
         command.kind === "set-code-thread-coordinator-done-when" &&
         (isRoutineHostScope(authenticatedWindowId) || actor?.kind === "system")
       ) {
@@ -3193,40 +3227,51 @@ export class CodeService {
                                     version: command.expectedVersion + 1,
                                     updatedAt,
                                   }
-                                : command.kind === "mark-code-thread-done"
-                                  ? (() => {
-                                      const completionReceiptId = selectCompletionReceiptId(
-                                        this.#readLatestFinishedReceipt?.(String(current.id)),
-                                      );
-                                      // Marking Done also puts the thread away when Settings
-                                      // says so, unless a turn is still running or waits on
-                                      // the person: then the mark stands and the row stays.
-                                      const putAway =
-                                        this.#putAwayWhenDone() && this.#mayPutAwayDone(current);
-                                      return {
-                                        ...(putAway
-                                          ? {
-                                              ...withoutPinned(withoutRest(current)),
-                                              completedAt: updatedAt,
-                                            }
-                                          : current),
-                                        markedDoneAt: updatedAt,
-                                        ...(completionReceiptId === undefined
-                                          ? {}
-                                          : { completionReceiptId }),
-                                        version: command.expectedVersion + 1,
-                                        updatedAt,
-                                      };
-                                    })()
-                                  : {
+                                : command.kind === "unlink-code-thread-pull-request"
+                                  ? {
                                       ...current,
-                                      ...(command.workingFolderId === undefined
-                                        ? {}
-                                        : { workingFolderId: command.workingFolderId }),
-                                      workingDirectory: command.workingDirectory,
+                                      unlinkedPullRequests: withUnlinkedPullRequest(
+                                        current.unlinkedPullRequests,
+                                        command,
+                                        updatedAt,
+                                      ),
                                       version: command.expectedVersion + 1,
                                       updatedAt,
-                                    },
+                                    }
+                                  : command.kind === "mark-code-thread-done"
+                                    ? (() => {
+                                        const completionReceiptId = selectCompletionReceiptId(
+                                          this.#readLatestFinishedReceipt?.(String(current.id)),
+                                        );
+                                        // Marking Done also puts the thread away when Settings
+                                        // says so, unless a turn is still running or waits on
+                                        // the person: then the mark stands and the row stays.
+                                        const putAway =
+                                          this.#putAwayWhenDone() && this.#mayPutAwayDone(current);
+                                        return {
+                                          ...(putAway
+                                            ? {
+                                                ...withoutPinned(withoutRest(current)),
+                                                completedAt: updatedAt,
+                                              }
+                                            : current),
+                                          markedDoneAt: updatedAt,
+                                          ...(completionReceiptId === undefined
+                                            ? {}
+                                            : { completionReceiptId }),
+                                          version: command.expectedVersion + 1,
+                                          updatedAt,
+                                        };
+                                      })()
+                                    : {
+                                        ...current,
+                                        ...(command.workingFolderId === undefined
+                                          ? {}
+                                          : { workingFolderId: command.workingFolderId }),
+                                        workingDirectory: command.workingDirectory,
+                                        version: command.expectedVersion + 1,
+                                        updatedAt,
+                                      },
       );
       const next =
         command.kind === "change-code-thread-access"

@@ -455,6 +455,24 @@ export interface WorkspaceViewProps {
    */
   /** Pins a Code thread's terminal to the focus zone. */
   readonly onPinTerminal?: CodeWorkspaceProps["onPinTerminal"];
+  /**
+   * Opens one pull request a Code thread worked on as a tab in that thread's
+   * pane. Absent, the Environment opens it in the Review dock as before.
+   */
+  readonly onOpenThreadPullRequestTab?: (
+    threadId: CodeThreadId,
+    pullRequest: ThreadBoardPullRequestIdentity,
+    title: string,
+  ) => void;
+  /**
+   * Draws such a tab: the Pull requests page's reading view for the pull
+   * request, with Unlink from this thread in its More actions.
+   */
+  readonly renderThreadPullRequest?: (input: {
+    readonly threadId: CodeThreadId;
+    readonly pullRequest: ThreadBoardPullRequestIdentity;
+    readonly onUnlink: () => void;
+  }) => React.ReactNode;
   readonly onPinCanvasInFocusZone?: (request: {
     readonly canvasId: CanvasId;
     readonly title: string;
@@ -1654,6 +1672,18 @@ function renderCodeTab(
   paneId: PaneId,
   codeController: CodeController,
 ): React.ReactNode {
+  if (
+    tab.kind === "code-pr" &&
+    tab.pullRequest !== undefined &&
+    props.renderThreadPullRequest !== undefined
+  ) {
+    const pullRequest = tab.pullRequest;
+    return props.renderThreadPullRequest({
+      threadId: tab.threadId,
+      pullRequest,
+      onUnlink: () => void codeController.unlinkPullRequest(tab.threadId, pullRequest),
+    });
+  }
   const project = resolveCodeTabProject(tab, props);
   const browserAutomationClient = props.browserAutomationClient;
   const onOpenSurface = props.onOpenSurface;
@@ -3438,7 +3468,12 @@ function threadPullRequestProps(
   const entry = codeController.navigation?.find((item) => String(item.threadId) === threadId);
   const summaries = entry?.pullRequestSummaries;
   const issues = entry?.touchedIssues;
-  const open = props.onSelectPullRequest;
+  const openTab = props.onOpenThreadPullRequestTab;
+  const open =
+    openTab === undefined
+      ? props.onSelectPullRequest
+      : (identity: ThreadBoardPullRequestIdentity) =>
+          openTab(decodeCodeThreadId(threadId), identity, `#${String(identity.number)}`);
   const hostBridge = props.hostBridge;
   return {
     ...(summaries === undefined ? {} : { threadPullRequests: summaries }),

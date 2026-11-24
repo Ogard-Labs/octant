@@ -2802,7 +2802,8 @@ without the spinner. See
 [Workspace](workspace.md).
 
 Main-pane content opens in a closable tab beside its conversation. Files, previews,
-and canvases retain navigation references, and selecting one uses the ordinary
+canvases and a Code thread's pull requests (one tab per pull request, opened from
+the Environment's list) retain navigation references, and selecting one uses the ordinary
 host-authorized open command. Image creation is a pane-owned view that retains
 its draft while the user switches back to the conversation. The strip occupies
 the existing pane title row rather than adding a second header.
@@ -3706,7 +3707,15 @@ pull request known only from a thread, and a failed queue read send nothing for
 it, and an absent fact draws nothing (never a zero, never "0/0"). A merged or
 closed pull request keeps its line counts and has no checks or merging state.
 Pressing a row
-opens that pull request in the app; a "…" menu beside it (More for pull request
+opens that pull request as a tab of the thread's pane, named by its number
+(#917), drawn with the Pull requests page's reading view (Summary, Changes and
+Timeline, the status column, Merge with its method and confirmation); its More
+actions menu starts with **Unlink from this thread**, which journals the
+person's unlink on the thread: the thread stops listing the pull request and
+stops being one of its linked threads (for babysitting and line notes too)
+until the thread touches it again, whatever the branch or an earlier
+operation said. Only a person may unlink; a routine is refused (maintainer
+decision, 2026-11-24). A "…" menu beside the row (More for pull request
 #N), shown on hover and keyboard focus and always on touch, offers Open on
 GitHub and Copy link. The list is the host's cached reading: opening the strip
 reaches no forge, and the link is built from the repository and number, never

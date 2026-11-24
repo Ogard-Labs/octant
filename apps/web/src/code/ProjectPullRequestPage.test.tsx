@@ -230,6 +230,17 @@ describe("the pull-request reading pane", () => {
     expect(act).toHaveBeenCalledWith({ kind: "close", ...query });
   });
 
+  it("offers Unlink from this thread first in More actions when the pull request is open in a thread", async () => {
+    const user = userEvent.setup();
+    const onUnlinkFromThread = vi.fn();
+    renderPage({ onUnlinkFromThread });
+    await user.click(await screen.findByRole("button", { name: "More actions" }));
+    const items = await screen.findAllByRole("menuitem");
+    expect(items[0]).toHaveAccessibleName("Unlink from this thread");
+    await user.click(items[0] as HTMLElement);
+    expect(onUnlinkFromThread).toHaveBeenCalledTimes(1);
+  });
+
   it("a pull request's diff opens a line note from a line-number button", async () => {
     const user = userEvent.setup();
     const view = detailView("Adds manual refresh.", {

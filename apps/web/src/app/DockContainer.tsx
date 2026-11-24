@@ -28,6 +28,7 @@ import type { CodeController } from "../code/useCodeController";
 import { composerContextOccupancy } from "../context/composerContextMeterReading";
 import type { ComposerContextMeterProvider } from "../context/composerContextMeterScope";
 import { ProjectReviewModule as DockProjectPullRequestReviewTool } from "../dockModules/ProjectReviewModule";
+import { projectPullRequestReviewActions } from "./projectPullRequestReviewWiring";
 import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import { modelDisplayName } from "../providers/providerModelLabel";
 import type { ProviderController } from "../providers/useProviderController";
@@ -488,28 +489,11 @@ const DockContainerBody = memo(function DockContainerBody(props: DockContainerPr
     );
   }
 
-  // Optional client methods are bound here so the review keeps them as props
-  // only where the host offers the switches.
-  const projectPullRequestSwitchActions = {
-    ...(codeClient.queryProjectPullRequestSwitches === undefined
-      ? {}
-      : { loadSwitches: codeClient.queryProjectPullRequestSwitches.bind(codeClient) }),
-    ...(codeClient.readProjectPullRequestActionContext === undefined ||
-    codeClient.actOnProjectPullRequest === undefined
-      ? {}
-      : {
-          loadActionContext: codeClient.readProjectPullRequestActionContext.bind(codeClient),
-          act: codeClient.actOnProjectPullRequest.bind(codeClient),
-        }),
-    ...(codeClient.setProjectPullRequestMergeWhenReady === undefined
-      ? {}
-      : { setMergeWhenReady: codeClient.setProjectPullRequestMergeWhenReady.bind(codeClient) }),
-    ...(codeClient.setProjectPullRequestAutoFix === undefined
-      ? {}
-      : { setAutoFix: codeClient.setProjectPullRequestAutoFix.bind(codeClient) }),
+  const projectPullRequestSwitchActions = projectPullRequestReviewActions({
+    codeClient,
     onSendLineNotes: actions.sendPullRequestLineNotes,
     pullRequestReviewClient,
-  };
+  });
 
   function bottomToolContent(surface: RightUtilityDockSurfaceId) {
     if (surface === "review" && projectPullRequestReviewOpen && selectedProjectPullRequest) {

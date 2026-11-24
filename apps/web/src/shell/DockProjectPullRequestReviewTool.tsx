@@ -65,6 +65,8 @@ export interface DockProjectPullRequestReviewToolProps {
     source: CodePullRequestLineNotesSource,
   ) => Promise<CodeLineNotesSendResult>;
   readonly pullRequestReviewClient?: PullRequestReviewClient;
+  /** Offered in the page's More actions when the pull request is open in a thread. */
+  readonly onUnlinkFromThread?: () => void;
 }
 
 /**
@@ -310,6 +312,9 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
             })}
         {...(props.layout === undefined ? {} : { layout: props.layout })}
         {...(props.updatedAt === undefined ? {} : { updatedAt: props.updatedAt })}
+        {...(props.onUnlinkFromThread === undefined
+          ? {}
+          : { onUnlinkFromThread: props.onUnlinkFromThread })}
         freshness={view.freshness}
         linkedThreads={view.linkedThreads}
         {...(props.onOpenLinkedThread === undefined

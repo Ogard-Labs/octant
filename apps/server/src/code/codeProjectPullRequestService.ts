@@ -48,6 +48,7 @@ import {
   boundActivePullRequestRefresh,
   CODE_PROJECT_PULL_REQUEST_MAX_PULL_REQUESTS,
   matchLinkedThreadsToPullRequest,
+  threadUnlinkedPullRequest,
   type CodeProjectLinkedThreadFact,
 } from "@octant/domain/code-project-pull-request-policy";
 import type { PullRequestLinkRecord } from "@octant/domain/pull-request-identity-policy";
@@ -1848,6 +1849,7 @@ export class CodeProjectPullRequestService {
           ) {
             continue;
           }
+          if (threadUnlinkedPullRequest(thread, { repository, number: identity.number })) continue;
           const link = this.#resolveLink({
             projectId: project.projectId,
             repositoryOwner: repository.owner,

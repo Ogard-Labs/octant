@@ -1,5 +1,10 @@
 import { VideoClientContext } from "../video/ThreadVideoClips";
 import type { PreparationTarget } from "../projects/WorktreePreparationDialog";
+import { ProjectReviewModule } from "../dockModules/ProjectReviewModule";
+import {
+  mergeProjectPullRequestFor,
+  projectPullRequestReviewActions,
+} from "./projectPullRequestReviewWiring";
 import type { HostId } from "@octant/contracts/host";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -136,6 +141,9 @@ export interface ThreadPaneContainerProps {
     | "refuseUnlessCreatableDestination"
     | "resetNewTaskDraft"
     | "selectProjectPullRequestIdentity"
+    | "openLinkedProjectPullRequestThread"
+    | "openProjectPullRequestChat"
+    | "sendPullRequestLineNotes"
     | "setCodeNewThreadWorkspace"
     | "setCodePullRequestsOpen"
     | "setDraftError"
@@ -422,6 +430,9 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     resetNewTaskDraft,
     revealBrowserActivity,
     selectProjectPullRequestIdentity,
+    openLinkedProjectPullRequestThread,
+    openProjectPullRequestChat,
+    sendPullRequestLineNotes,
     setCodeNewThreadWorkspace,
     setCodePullRequestsOpen,
     setDraftError,
@@ -874,6 +885,28 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                       openReviewForThread(String(threadId), request)
                     }
                     onSelectPullRequest={selectProjectPullRequestIdentity}
+                    onOpenThreadPullRequestTab={(threadId, pullRequest, title) =>
+                      void openCodeSurface({ kind: "code-pr", threadId, title, pullRequest })
+                    }
+                    renderThreadPullRequest={({ pullRequest, onUnlink }) => (
+                      <ProjectReviewModule
+                        layout="page"
+                        load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+                        onMerge={mergeProjectPullRequestFor(codeClient, pullRequest)}
+                        {...projectPullRequestReviewActions({
+                          codeClient,
+                          onSendLineNotes: sendPullRequestLineNotes,
+                          pullRequestReviewClient,
+                        })}
+                        onOpenChat={openProjectPullRequestChat}
+                        onOpenLinkedThread={(thread) =>
+                          openLinkedProjectPullRequestThread(thread, pullRequest.projectId)
+                        }
+                        onUnlinkFromThread={onUnlink}
+                        query={pullRequest}
+                        refresh={(command) => codeClient.refreshProjectPullRequestDetail(command)}
+                      />
+                    )}
                     onOpenPullRequests={() => setCodePullRequestsOpen(true)}
                     onOpenCodeSurface={(kind, threadId, title, terminalId, program) =>
                       void openCodeSurface(

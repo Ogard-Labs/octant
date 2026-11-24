@@ -80,6 +80,12 @@ export interface ProjectPullRequestReviewPaneProps {
   readonly pullRequestReviewClient?: PullRequestReviewClient;
   readonly pullRequestTarget?: PullRequestReviewTarget;
   /**
+   * Shown when the pull request is open inside a thread: its More actions
+   * menu then offers Unlink from this thread, which stops the thread listing
+   * it until the thread touches it again.
+   */
+  readonly onUnlinkFromThread?: () => void;
+  /**
    * "page" is the destination's reading pane (tabs, a status column); the
    * default is the dock's one column. Both hold the same actions and refusals.
    */

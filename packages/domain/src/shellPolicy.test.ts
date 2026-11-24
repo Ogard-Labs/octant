@@ -630,6 +630,31 @@ describe("workspace surface identity", () => {
     ).toBe(true);
   });
 
+  it("opens one pull request tab per pull request a thread worked on, apart from its own", () => {
+    const tab = (id: typeof ids.tabA, number?: number) =>
+      decodeWorkspaceTab({
+        kind: "code-pr",
+        id,
+        threadId: ids.codeThread,
+        mode: "code",
+        title: "Pull request",
+        ...(number === undefined
+          ? {}
+          : {
+              pullRequest: {
+                projectId: "00000000-0000-4000-8000-000000000001",
+                repositoryOwner: "acme",
+                repositoryName: "app",
+                number,
+              },
+            }),
+      });
+    expect(sameWorkspaceSurface(tab(ids.tabA, 7), tab(ids.tabB, 7))).toBe(true);
+    expect(sameWorkspaceSurface(tab(ids.tabA, 7), tab(ids.tabB, 8))).toBe(false);
+    expect(sameWorkspaceSurface(tab(ids.tabA), tab(ids.tabB, 7))).toBe(false);
+    expect(sameWorkspaceSurface(tab(ids.tabA), tab(ids.tabB))).toBe(true);
+  });
+
   it("keeps two files of one thread distinct by path and two terminals by identity", () => {
     const file = (id: typeof ids.tabA, relativePath: string) =>
       decodeWorkspaceTab({

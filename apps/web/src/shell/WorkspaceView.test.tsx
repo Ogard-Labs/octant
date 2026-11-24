@@ -1335,6 +1335,90 @@ describe("WorkspaceView pane title facts", () => {
   });
 });
 
+describe("WorkspaceView pull request a thread worked on", () => {
+  it("opens one from the Environment as a tab of that thread", async () => {
+    const props = propsFor(codeTab("code-overview", "Composition"));
+    (props.codeControllers as ReturnType<typeof createCodeThreadControllers>).publish(
+      codeIds.thread as never,
+      {
+        ...(props.codeController as object),
+        navigation: [
+          {
+            threadId: codeIds.thread,
+            projectId: ids.project,
+            pullRequestSummaries: {
+              items: [
+                {
+                  identity: {
+                    projectId: ids.project,
+                    repositoryOwner: "acme",
+                    repositoryName: "octant",
+                    number: 917,
+                  },
+                  title: "Faster issue validation",
+                  state: "merged",
+                  checks: "passing",
+                  review: "approved",
+                  mergeability: "unknown",
+                  freshness: "fresh",
+                  readyToMerge: false,
+                },
+              ],
+              hiddenCount: 0,
+            },
+          },
+        ],
+      } as never,
+    );
+    const onOpenThreadPullRequestTab = vi.fn();
+
+    render(<WorkspaceView {...props} onOpenThreadPullRequestTab={onOpenThreadPullRequestTab} />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: /^Pull request 917, Faster issue validation/ }),
+    );
+
+    expect(onOpenThreadPullRequestTab).toHaveBeenCalledWith(
+      codeIds.thread,
+      { projectId: ids.project, repositoryOwner: "acme", repositoryName: "octant", number: 917 },
+      "#917",
+    );
+  });
+
+  it("draws it with the pull-request page view and unlinks it from that thread", async () => {
+    const pullRequest = {
+      projectId: ids.project,
+      repositoryOwner: "acme",
+      repositoryName: "octant",
+      number: 917,
+    };
+    const tab = { ...codeTab("code-pr", "#917"), pullRequest } as WorkspaceTab;
+    const props = propsFor(tab);
+    const unlinkPullRequest = vi.fn(async () => ({ status: "ok" }) as const);
+    (props.codeControllers as ReturnType<typeof createCodeThreadControllers>).publish(
+      codeIds.thread as never,
+      {
+        ...(props.codeController as object),
+        unlinkPullRequest,
+      } as never,
+    );
+    const renderThreadPullRequest = vi.fn(
+      (input: Parameters<NonNullable<WorkspaceViewProps["renderThreadPullRequest"]>>[0]) => (
+        <button onClick={input.onUnlink} type="button">
+          {`Unlink #${String(input.pullRequest.number)}`}
+        </button>
+      ),
+    );
+
+    render(<WorkspaceView {...props} renderThreadPullRequest={renderThreadPullRequest} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Unlink #917" }));
+
+    expect(renderThreadPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: codeIds.thread, pullRequest }),
+    );
+    expect(unlinkPullRequest).toHaveBeenCalledWith(codeIds.thread, pullRequest);
+  });
+});
+
 describe("WorkspaceView concurrent Code threads", () => {
   it("shows each open Code thread its own composition rather than the focused one's", async () => {
     const threadBId = "b0000000-0000-4000-8000-000000000002";

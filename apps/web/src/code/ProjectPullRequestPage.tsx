@@ -15,6 +15,7 @@ import {
   Link2,
   MessageSquare,
   MoreHorizontal,
+  Unlink,
   RefreshCw,
   TriangleAlert,
 } from "../ui/icons";
@@ -331,7 +332,7 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                 </OctantMenuRoot>
               </div>
             )}
-            {act === undefined || merged ? null : (
+            {(act === undefined || merged) && props.onUnlinkFromThread === undefined ? null : (
               <OctantMenuRoot>
                 <OctantTooltip label="More">
                   <OctantMenuTrigger
@@ -344,9 +345,17 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                 <OctantMenuPortal>
                   <OctantMenuPositioner align="end">
                     <OctantMenuPopup aria-label="More actions" className="min-w-[13rem]">
-                      <OctantMenuItem disabled={closing} onClick={() => void closeOrReopen()}>
-                        {closed ? "Reopen pull request" : "Close pull request"}
-                      </OctantMenuItem>
+                      {props.onUnlinkFromThread === undefined ? null : (
+                        <OctantMenuItem onClick={props.onUnlinkFromThread}>
+                          <Unlink aria-hidden="true" size={14} />
+                          Unlink from this thread
+                        </OctantMenuItem>
+                      )}
+                      {act === undefined || merged ? null : (
+                        <OctantMenuItem disabled={closing} onClick={() => void closeOrReopen()}>
+                          {closed ? "Reopen pull request" : "Close pull request"}
+                        </OctantMenuItem>
+                      )}
                     </OctantMenuPopup>
                   </OctantMenuPositioner>
                 </OctantMenuPortal>
