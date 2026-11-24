@@ -26,7 +26,10 @@ export interface VideoGenerationClient {
    * An absolute, short-lived address for one finished clip, for a `<video>`
    * element's `src` or a download link. Ask again when it expires.
    */
-  clipUrl(jobId: VideoJobId): Promise<{ readonly url: string; readonly expiresAt: string }>;
+  clipUrl(
+    jobId: VideoJobId,
+    signal?: AbortSignal,
+  ): Promise<{ readonly url: string; readonly expiresAt: string }>;
 }
 
 export class VideoGenerationClientFailure extends Error {
@@ -63,7 +66,7 @@ export function createVideoGenerationClient(
         decodeHostAnswer(VideoJob),
       );
     },
-    async clipUrl(jobId) {
+    async clipUrl(jobId, signal) {
       const ticket = await requestJson(
         options,
         "/api/video/clip",
@@ -71,6 +74,7 @@ export function createVideoGenerationClient(
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify({ jobId: String(jobId) }),
+          signal: signal ?? null,
         },
         decodeHostAnswer(VideoClipTicketResponse),
       );
@@ -207,14 +211,16 @@ export function createThreadVideoResults(
   const client = createVideoGenerationClient(options);
   return {
     list: client.list,
-    async clipUrl(jobId) {
-      const ticket = await client.clipUrl(jobId);
+    async clipUrl(jobId, signal) {
+      const ticket = await client.clipUrl(jobId, signal);
       const chunks: Array<ArrayBuffer> = [];
       let offset = 0;
       let size: number | undefined;
       while (size === undefined || offset < size) {
+        signal?.throwIfAborted();
         const response = await options.fetch(ticket.url, {
           headers: { range: `bytes=${String(offset)}-` },
+          signal: signal ?? null,
         });
         if (!response.ok)
           throw new VideoGenerationClientFailure("The clip is unavailable.", response.status);
@@ -222,6 +228,7 @@ export function createThreadVideoResults(
           response.headers.get("content-range") ?? "",
         );
         const body = await response.arrayBuffer();
+        signal?.throwIfAborted();
         size = range === null ? body.byteLength : Number(range[3]);
         if (size > MAX_REMOTE_CLIP_BYTES) {
           throw new VideoGenerationClientFailure(

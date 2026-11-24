@@ -79,12 +79,17 @@ describe("a paired computer's Code start screen", () => {
     try {
       await expect(paired?.clipUrl(jobId)).resolves.toMatchObject({ url: "blob:paired-clip" });
       expect(createObjectURL).toHaveBeenCalledOnce();
+      const clip = createObjectURL.mock.calls[0]?.[0];
+      if (clip === undefined || !("arrayBuffer" in clip))
+        throw new Error("The player did not receive a clip blob.");
+      expect(new Uint8Array(await clip.arrayBuffer())).toEqual(Uint8Array.of(1, 2, 3));
     } finally {
       createObjectURL.mockRestore();
     }
     const videoRequests = sent.filter((url) => url.pathname.startsWith("/api/video/"));
     expect(videoRequests.map((url) => [url.origin, url.pathname])).toEqual([
       [ORIGIN, "/api/video/jobs"],
+      [ORIGIN, "/api/video/clip"],
       [ORIGIN, "/api/video/clip"],
       [ORIGIN, "/api/video/clip"],
     ]);

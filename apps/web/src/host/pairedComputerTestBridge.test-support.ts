@@ -44,9 +44,15 @@ export async function readyPairedBridge(
           });
         }
         if (headers.get("range") === "bytes=0-") {
-          return new Response(new Uint8Array([1, 2, 3]), {
+          return new Response(new Uint8Array([1, 2]), {
             status: 206,
-            headers: { "content-range": "bytes 0-2/3" },
+            headers: { "content-range": "bytes 0-1/3" },
+          });
+        }
+        if (headers.get("range") === "bytes=2-") {
+          return new Response(new Uint8Array([3]), {
+            status: 206,
+            headers: { "content-range": "bytes 2-2/3" },
           });
         }
         return Response.json({ error: "Expected a byte range." }, { status: 400 });

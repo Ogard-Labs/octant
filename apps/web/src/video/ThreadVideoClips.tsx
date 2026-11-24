@@ -28,6 +28,10 @@ export const VideoClientContext = createContext<
 const ACTIVE_POLL_MS = 5_000;
 const IDLE_POLL_MS = 30_000;
 
+function revokeClipUrl(url: string | undefined): void {
+  if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+}
+
 /**
  * A thread's clips: one `<video>` per finished clip, with controls,
  * `preload="metadata"` and no autoplay, a download link, and Stop for a job
@@ -85,35 +89,36 @@ function VideoClipCard(props: {
   const ready = job.status === "completed" && job.clip !== undefined;
 
   useEffect(() => {
+    setSrc(undefined);
     if (!ready) return;
-    let live = true;
+    const lifetime = new AbortController();
+    let loadedUrl: string | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = async () => {
       try {
-        const ticket = await client.clipUrl(job.id);
-        if (!live) {
+        const ticket = await client.clipUrl(job.id, lifetime.signal);
+        if (lifetime.signal.aborted) {
           // The load outlived the card: its blob is still allocated and no
           // later cleanup will see it.
-          if (ticket.url.startsWith("blob:")) URL.revokeObjectURL(ticket.url);
+          revokeClipUrl(ticket.url);
           return;
         }
+        if (loadedUrl !== ticket.url) revokeClipUrl(loadedUrl);
+        loadedUrl = ticket.url;
         setSrc(ticket.url);
         setFailed(false);
         // A fresh ticket before this one runs out, so a long watch keeps seeking.
         const renewIn = Math.max(30_000, Date.parse(ticket.expiresAt) - Date.now() - 60_000);
         timer = setTimeout(() => void load(), renewIn);
       } catch {
-        if (live) setFailed(true);
+        if (!lifetime.signal.aborted) setFailed(true);
       }
     };
     void load();
     return () => {
-      live = false;
+      lifetime.abort();
       if (timer !== undefined) clearTimeout(timer);
-      setSrc((current) => {
-        if (current?.startsWith("blob:") === true) URL.revokeObjectURL(current);
-        return undefined;
-      });
+      revokeClipUrl(loadedUrl);
     };
   }, [client, job.id, ready, loadAttempt]);
 
@@ -148,7 +153,7 @@ function VideoClipCard(props: {
       const renewed = await client.clipUrl(job.id);
       const saved = await saveFromTicket(renewed.url);
       // The retry's ticket serves the download only; a blob one is released.
-      if (renewed.url.startsWith("blob:")) URL.revokeObjectURL(renewed.url);
+      revokeClipUrl(renewed.url);
       if (saved) return;
     } catch {
       // Falls through to the failure note.

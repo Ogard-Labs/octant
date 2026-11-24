@@ -1,5 +1,6 @@
+import { createThreadVideoResults } from "@octant/client-runtime/video-generation-client";
 import { decodeVideoJob, type ImageGenerationScopeId, type VideoJob } from "@octant/contracts";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadVideoClips, VideoClientContext } from "./ThreadVideoClips";
@@ -39,6 +40,50 @@ function job(status: VideoJob["status"], id: string): VideoJob {
 }
 
 describe("ThreadVideoClips", () => {
+  it("stops a paired clip transfer when the viewer leaves the thread", async () => {
+    const finished = job("completed", "f4000000-0000-4000-8000-000000000003");
+    const firstRange = Promise.withResolvers<Response>();
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          url: `/api/video/clip?ticket=${"a".repeat(43)}`,
+          expiresAt: "2026-11-26T12:00:00.000Z",
+        }),
+      )
+      .mockReturnValueOnce(firstRange.promise)
+      .mockResolvedValue(
+        new Response(new Uint8Array([2]), {
+          status: 206,
+          headers: { "content-range": "bytes 1-1/2" },
+        }),
+      );
+    const client = {
+      ...createThreadVideoResults({ windowCapability: "", baseUrl: "http://127.0.0.1", fetch }),
+      list: async () => ({ jobs: [finished] }),
+    };
+    const completed = vi.spyOn(client, "clipUrl");
+    const { unmount } = render(
+      <VideoClientContext.Provider value={client}>
+        <ThreadVideoClips scopeId={scopeId} threadKind="work-thread" />
+      </VideoClientContext.Provider>,
+    );
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    const requestSignal = fetch.mock.calls[1]?.[1]?.signal;
+    unmount();
+    await act(async () => {
+      firstRange.resolve(
+        new Response(new Uint8Array([1]), {
+          status: 206,
+          headers: { "content-range": "bytes 0-0/2" },
+        }),
+      );
+      await completed.mock.results[0]?.value.catch(() => undefined);
+    });
+    expect(requestSignal?.aborted).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("lets a person try again after a clip fails to load", async () => {
     const finished = job("completed", "f4000000-0000-4000-8000-000000000003");
     const url = "http://127.0.0.1:3100/api/video/clip?ticket=fresh";

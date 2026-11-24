@@ -362,6 +362,8 @@ which the person sets, like any turn.
   paired client does not stop jobs. A paired browser or a desktop Code pane
   showing a paired computer reads clips through that computer's session in
   byte ranges, up to 512 MB, and plays them from memory.
+  Leaving the thread stops requesting clip ranges and frees its playback copy.
+  The desktop main process can finish one already-submitted bounded range.
   The phone reads authenticated byte ranges into a disposable app-cache file and
   opens it in the native Expo Video player without autoplay. Closing the clip,
   leaving or deleting its thread, or losing host access discards the cached copy.
