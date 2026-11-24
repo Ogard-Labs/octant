@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  OCTANT_KEYBINDING_ACTIONS,
   formatChord,
   isShadowedKeybinding,
   matchKeybinding,
@@ -8,6 +9,7 @@ import {
   parseChord,
   parseKeybindingOverrides,
   resolveKeybindings,
+  type OctantKeybindings,
 } from "./keybindings";
 
 const keyEvent = (
@@ -20,6 +22,11 @@ const keyEvent = (
   shiftKey: modifiers.shift === true,
   altKey: modifiers.alt === true,
 });
+
+const shadowedActions = (keybindings: OctantKeybindings) =>
+  OCTANT_KEYBINDING_ACTIONS.map((action) => action.id).filter((actionId) =>
+    isShadowedKeybinding(keybindings, actionId),
+  );
 
 describe("parseChord", () => {
   it("reads modifiers in any order and any casing", () => {
@@ -56,15 +63,13 @@ describe("resolveKeybindings", () => {
       expect.objectContaining({ actionId: "code-file-search" }),
       expect.objectContaining({ actionId: "not-an-action", reason: "No such action." }),
     ]);
-    expect(resolved.conflicts).toEqual([]);
+    expect(shadowedActions(resolved)).toEqual([]);
   });
 
   it("reports two actions that ended up on the same chord", () => {
     const resolved = resolveKeybindings({ "code-file-search": "Mod+K" });
 
-    expect(resolved.conflicts).toEqual([
-      { chord: "Mod+K", actionIds: ["command-palette", "code-file-search"] },
-    ]);
+    expect(shadowedActions(resolved)).toEqual(["code-file-search"]);
     // The collision is reported, not silently resolved by dropping a binding.
     expect(formatChord(resolved.bindings.get("code-file-search")!)).toBe("Mod+K");
   });
@@ -72,7 +77,7 @@ describe("resolveKeybindings", () => {
   it("does not report a Review-page key and a global action on the same chord as a conflict", () => {
     const resolved = resolveKeybindings({ "review-next": "Mod+Shift+M" });
 
-    expect(resolved.conflicts).toEqual([]);
+    expect(shadowedActions(resolved)).toEqual([]);
     const pressed = keyEvent("M", { meta: true, shift: true });
     expect(matchKeybinding(resolved, pressed, true)).toBe("dictate");
     expect(matchPageKeybinding(resolved, "review", pressed, true)).toBe("review-next");
@@ -84,26 +89,21 @@ describe("resolveKeybindings", () => {
       "code-file-search": "Mod+K",
     });
 
-    expect(resolved.conflicts).toEqual([
-      { chord: "Mod+K", actionIds: ["command-palette", "code-file-search"] },
-    ]);
+    expect(shadowedActions(resolved)).toEqual(["code-file-search"]);
+    expect(matchKeybinding(resolved, keyEvent("k", { meta: true }), true)).toBe("command-palette");
   });
 
   it("still reports two commands of one page on the same key", () => {
     const resolved = resolveKeybindings({ "review-previous": "J" });
 
-    expect(resolved.conflicts).toEqual([
-      { chord: "J", actionIds: ["review-next", "review-previous"] },
-    ]);
+    expect(shadowedActions(resolved)).toEqual(["review-previous"]);
     expect(matchPageKeybinding(resolved, "review", keyEvent("j"), true)).toBe("review-next");
   });
 
   it("keeps a chord saved before Dictate existed on the action it was saved for", () => {
     const resolved = resolveKeybindings({ "code-file-search": "Mod+Shift+M" });
 
-    expect(resolved.conflicts).toEqual([
-      { chord: "Mod+Shift+M", actionIds: ["code-file-search", "dictate"] },
-    ]);
+    expect(shadowedActions(resolved)).toEqual(["dictate"]);
     expect(matchKeybinding(resolved, keyEvent("M", { meta: true, shift: true }), true)).toBe(
       "code-file-search",
     );
@@ -147,7 +147,7 @@ describe("matchKeybinding", () => {
     expect(matchKeybinding(bindings, keyEvent("D", { ctrl: true, shift: true }), false)).toBe(
       "reply-detail-cycle",
     );
-    expect(bindings.conflicts).toEqual([]);
+    expect(shadowedActions(bindings)).toEqual([]);
   });
 
   it("keeps overrides saved before reply detail had a chord", () => {
@@ -244,23 +244,22 @@ describe("the terminal's way out", () => {
 
   it("reports a terminal action that a global action shadows", () => {
     const shared = resolveKeybindings({ "terminal-focus-next": "Mod+K" });
-    expect(shared.conflicts).toEqual([
-      { chord: "Mod+K", actionIds: ["command-palette", "terminal-focus-next"] },
-    ]);
+    expect(shadowedActions(shared)).toEqual(["terminal-focus-next"]);
   });
 
   it("still reports two terminal actions on the same chord", () => {
     const shared = resolveKeybindings({ "terminal-focus-previous": "Mod+Escape" });
-    expect(shared.conflicts).toEqual([
-      { chord: "Mod+Escape", actionIds: ["terminal-focus-next", "terminal-focus-previous"] },
-    ]);
+    expect(shadowedActions(shared)).toEqual(["terminal-focus-previous"]);
+    expect(matchTerminalKeybinding(shared, keyEvent("Escape", { meta: true }), true)).toBe(
+      "terminal-focus-next",
+    );
   });
 
   it("reports no conflict where both the terminal action and the global one run", () => {
     // The terminal keeps a chord it holds ahead of a later global action, and
     // that action still runs everywhere else.
     const shared = resolveKeybindings({ "terminal-focus-next": "Mod+Shift+M" });
-    expect(shared.conflicts).toEqual([]);
+    expect(shadowedActions(shared)).toEqual([]);
     const pressed = keyEvent("M", { meta: true, shift: true });
     expect(matchTerminalKeybinding(shared, pressed, true)).toBe("terminal-focus-next");
     expect(matchKeybinding(shared, pressed, true)).toBe("dictate");
@@ -271,7 +270,7 @@ describe("the terminal's way out", () => {
       "review-next": "Mod+Shift+Y",
       "terminal-focus-next": "Mod+Shift+Y",
     });
-    expect(shared.conflicts).toEqual([]);
+    expect(shadowedActions(shared)).toEqual([]);
     expect(matchTerminalKeybinding(shared, keyEvent("Y", { meta: true, shift: true }), true)).toBe(
       "terminal-focus-next",
     );
