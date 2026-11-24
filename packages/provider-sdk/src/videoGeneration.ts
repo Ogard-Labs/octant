@@ -47,7 +47,12 @@ export interface VideoAdapterClip {
 export type VideoAdapterStart =
   | { readonly status: "started"; readonly remoteId: string }
   | { readonly status: "refused"; readonly safetyRefusal: string }
-  | { readonly status: "failed"; readonly providerFailure: ProviderFailure };
+  | {
+      readonly status: "failed";
+      readonly providerFailure: ProviderFailure;
+      /** The attempt ended before the provider could start a job. */
+      readonly notStarted?: true;
+    };
 
 export type VideoAdapterPoll =
   | { readonly status: "running" }
@@ -225,6 +230,19 @@ export function refuseOutsideDeclaration(
   return check.status === "refused"
     ? videoFailure("invalid-configuration", check.reason)
     : undefined;
+}
+
+/** The gateway could not reach the origin, or the submission was rate limited. */
+export function isVideoStartRejection(status: number): boolean {
+  return status === 429 || status === 521 || status === 523 || status === 525 || status === 526;
+}
+
+export function classifyVideoStartHttpFailure(response: Response): VideoAdapterStart {
+  return {
+    status: "failed",
+    providerFailure: classifyVideoHttpFailure(response),
+    ...(isVideoStartRejection(response.status) ? { notStarted: true } : {}),
+  };
 }
 
 export function classifyVideoHttpFailure(response: Response, now = Date.now()): ProviderFailure {

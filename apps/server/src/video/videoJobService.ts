@@ -798,13 +798,13 @@ export class VideoJobService {
     }
     if (started.status === "failed") {
       const failure = started.providerFailure;
-      const rateLimited = failure.category === "rate-limited";
+      const rejected = started.notStarted === true || failure.category === "rate-limited";
       // A sent request can still be billed if Stop or a deadline cut off
-      // its answer. A received rate limit confirms refusal at submission.
+      // its answer. A confirmed rejection keeps its billing outcome.
       const mayHaveStarted =
+        !rejected &&
         !this.#knownUnsent(running) &&
-        (startMayHaveReachedProvider(failure) ||
-          ((running.stopRequested || startTimedOut) && !rateLimited));
+        (startMayHaveReachedProvider(failure) || running.stopRequested || startTimedOut);
       if (running.stopRequested) {
         this.#finish(
           sending,
@@ -826,7 +826,7 @@ export class VideoJobService {
       }
       this.#finish(sending, "failed", {
         failure:
-          startTimedOut && !rateLimited
+          startTimedOut && !rejected
             ? videoFailure("unavailable", "The clip timed out before it was sent.")
             : failure,
       });

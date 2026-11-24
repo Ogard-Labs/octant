@@ -17,7 +17,7 @@ import {
   type VideoModelCapabilities,
 } from "@octant/contracts/video-generation";
 import {
-  classifyVideoHttpFailure,
+  classifyVideoStartHttpFailure,
   isProviderFailure,
   type VideoAdapterForget,
   type VideoAdapterPoll,
@@ -1771,7 +1771,12 @@ describe("video jobs", () => {
   it.each([
     { status: 429, endRead: "the HTTP deadline", terminal: "failed", charged: false },
     { status: 429, endRead: "Stop", terminal: "cancelled", charged: false },
+    { status: 521, endRead: "the HTTP deadline", terminal: "failed", charged: false },
+    { status: 523, endRead: "the HTTP deadline", terminal: "failed", charged: false },
     { status: 524, endRead: "the HTTP deadline", terminal: "failed", charged: true },
+    { status: 525, endRead: "the HTTP deadline", terminal: "failed", charged: false },
+    { status: 526, endRead: "the HTTP deadline", terminal: "failed", charged: false },
+    { status: 526, endRead: "Stop", terminal: "cancelled", charged: false },
   ] as const)("accounts for a start with HTTP $status before $endRead", async (scenario) => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const reading = Promise.withResolvers<void>();
@@ -1796,7 +1801,7 @@ describe("video jobs", () => {
             auth: { header: "authorization", scheme: "Bearer" },
             signal: request.signal,
           });
-          return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
+          return classifyVideoStartHttpFailure(response);
         } catch (error) {
           if (!isProviderFailure(error)) throw error;
           return { status: "failed", providerFailure: error };
@@ -1818,8 +1823,13 @@ describe("video jobs", () => {
         expect(spend.settle).toHaveBeenCalledOnce();
         expect(spend.abandon).not.toHaveBeenCalled();
       } else {
-        if (scenario.terminal === "failed")
-          expect(done?.failure).toMatchObject({ category: "rate-limited", retryAfterMs: 60_000 });
+        if (scenario.terminal === "failed") {
+          expect(done?.failure).toMatchObject(
+            scenario.status === 429
+              ? { category: "rate-limited", retryAfterMs: 60_000 }
+              : { category: "unavailable" },
+          );
+        }
         expect(done?.settledCostUsdMicros).toBeUndefined();
         expect(spend.settle).not.toHaveBeenCalled();
         expect(spend.abandon).toHaveBeenCalledOnce();

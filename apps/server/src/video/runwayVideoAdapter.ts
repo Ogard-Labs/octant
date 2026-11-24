@@ -1,6 +1,7 @@
 import { decodeVideoModelCapabilities, type VideoModelCapabilities } from "@octant/contracts";
 import {
   classifyVideoHttpFailure,
+  classifyVideoStartHttpFailure,
   isProviderFailure,
   jsonField,
   readVideoJson,
@@ -188,9 +189,7 @@ async function start(
       body: JSON.stringify(body),
       signal: request.signal,
     });
-    if (!response.ok) {
-      return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
-    }
+    if (!response.ok) return classifyVideoStartHttpFailure(response);
     const id = jsonField(await readVideoJson(response), "id");
     if (typeof id !== "string" || !TASK_ID_PATTERN.test(id)) return invalidId();
     return { status: "started", remoteId: id };

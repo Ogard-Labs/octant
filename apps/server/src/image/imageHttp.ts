@@ -42,7 +42,7 @@ interface AuthenticatedImageHttpRequest {
   readonly body?: string;
   readonly form?: FormData;
   readonly signal?: AbortSignal;
-  readonly preserveRateLimitOnAbort?: boolean;
+  readonly preserveResponseOnAbort?: (status: number) => boolean;
   readonly fetch: ImageHttpFetch;
   readonly limits: ImageHttpLimits;
 }
@@ -144,7 +144,7 @@ export async function performImageHttpRequest(
         safelyCancel(response.body);
         if (
           expired.category === "interrupted" &&
-          !(request.preserveRateLimitOnAbort === true && response.status === 429)
+          request.preserveResponseOnAbort?.(response.status) !== true
         ) {
           throw expired;
         }

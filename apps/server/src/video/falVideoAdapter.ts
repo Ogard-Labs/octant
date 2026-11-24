@@ -6,6 +6,7 @@ import {
 } from "@octant/contracts";
 import {
   classifyVideoHttpFailure,
+  classifyVideoStartHttpFailure,
   isProviderFailure,
   jsonField,
   readVideoJson,
@@ -651,9 +652,7 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
         body: JSON.stringify(body),
         signal: request.signal,
       });
-      if (!response.ok) {
-        return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
-      }
+      if (!response.ok) return classifyVideoStartHttpFailure(response);
       const submitted = await readVideoJson(response);
       const requestId = jsonField(submitted, "request_id");
       if (typeof requestId !== "string" || !REQUEST_ID_PATTERN.test(requestId)) return invalidId();

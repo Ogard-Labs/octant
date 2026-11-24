@@ -1,6 +1,7 @@
 import { MAX_VIDEO_CLIP_BYTES } from "@octant/contracts/video-generation";
 import {
   isVideoEndpointAllowed,
+  isVideoStartRejection,
   videoFailure,
   type VideoGenerationPorts,
 } from "@octant/provider-sdk/video-generation";
@@ -65,8 +66,8 @@ export function makeVideoGenerationPorts(options: {
         ...request,
         instanceId: options.instanceId,
         credentialResolver: options.credentialResolver,
-        // A video submission with a received 429 can release its reservation.
-        preserveRateLimitOnAbort: request.method === "POST",
+        // A confirmed submission rejection can release its reservation.
+        ...(request.method === "POST" ? { preserveResponseOnAbort: isVideoStartRejection } : {}),
         // A fetch given an aborted signal sends nothing, so only a live one counts.
         fetch:
           signal === undefined || sends === undefined || request.method === "GET"
