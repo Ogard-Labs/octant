@@ -226,7 +226,7 @@ function BabysitControls(props: {
             const watch = view.autoFix;
             if (
               watch.status === "stopped" &&
-              watch.threadId === props.threadId &&
+              String(watch.threadId) === String(props.threadId) &&
               watch.babysit &&
               seededStop.current !== watch.stoppedAt
             ) {
@@ -252,7 +252,10 @@ function BabysitControls(props: {
 
   const invalidLabel = invalidBabysitLabel(label);
   const active = state?.status === "on";
-  const saved = state?.status === "stopped" && state.threadId === props.threadId && state.babysit;
+  const saved =
+    state?.status === "stopped" &&
+    String(state.threadId) === String(props.threadId) &&
+    state.babysit;
   const anotherThread = active && String(state.threadId) !== String(props.threadId);
   async function change() {
     if (writing.current || !state || anotherThread || !props.client.setProjectPullRequestAutoFix)

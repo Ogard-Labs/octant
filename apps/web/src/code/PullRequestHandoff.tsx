@@ -222,7 +222,7 @@ export function ThreadWatchHandoff({
   const reason =
     followUp?.origin === "automatic" &&
     followUp.state === "open" &&
-    followUp.threadId === threadId &&
+    String(followUp.threadId) === String(threadId) &&
     followUp.reason.startsWith(PULL_REQUEST_HANDOFF_HEADING)
       ? followUp.reason
       : undefined;
@@ -238,12 +238,10 @@ export function ThreadWatchHandoff({
             setRows(
               view.rows.filter(
                 (row) =>
-                  row.projectId === projectId &&
-                  row.state === "open" &&
-                  !row.draft &&
-                  row.babysit?.threadId === threadId &&
-                  row.babysit.status === "ready" &&
-                  row.linkedThreads.some((link) => link.threadId === threadId),
+                  String(row.projectId) === String(projectId) &&
+                  row.babysit?.status === "ready" &&
+                  String(row.babysit.threadId) === String(threadId) &&
+                  row.linkedThreads.some((link) => String(link.threadId) === String(threadId)),
               ),
             );
         })

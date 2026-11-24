@@ -1055,6 +1055,7 @@ export class GhPullRequestSwitchPort {
       if (
         verifyComplete &&
         threads.length === 0 &&
+        outsideThread === undefined &&
         (typeof more !== "boolean" ||
           (more && (typeof next !== "string" || page + 1 === MAX_REVIEW_THREAD_PAGES)))
       )

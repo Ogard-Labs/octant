@@ -230,6 +230,7 @@ describe("forge switch port", () => {
     const member = person("member", "MEMBER");
     const bot = person("automation", "NONE", "Bot");
     let includeMember = true;
+    let reviewPage = 0;
     const { port: forge } = port((args) => {
       const json = (value: unknown) => ({ exitCode: 0, stdout: JSON.stringify(value) });
       if (args[1] === "view")
@@ -250,14 +251,22 @@ describe("forge switch port", () => {
         isOutdated: false,
         comments: { nodes },
       });
-      const nodes = [
-        thread("outside-thread", [outsider]),
-        ...(includeMember ? [thread("member-thread", [member, outsider, bot])] : []),
-      ];
+      reviewPage++;
+      const nodes = args.some((arg) => arg.startsWith("after="))
+        ? []
+        : [
+            thread("outside-thread", [outsider]),
+            ...(includeMember ? [thread("member-thread", [member, outsider, bot])] : []),
+          ];
       return json({
         data: {
           repository: {
-            pullRequest: { reviewThreads: { nodes, pageInfo: { hasNextPage: false } } },
+            pullRequest: {
+              reviewThreads: {
+                nodes,
+                pageInfo: { hasNextPage: !includeMember, endCursor: String(reviewPage) },
+              },
+            },
           },
         },
       });

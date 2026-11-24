@@ -325,6 +325,8 @@ describe("CodeProjectPullRequests", () => {
       rows: heads.map((sha, i) => ({
         ...base,
         number: 12 + i,
+        state: i === 0 ? "unknown" : "open",
+        draft: i === 1,
         babysit: { threadId, status: "ready", readyHeadSha: sha },
       })),
     }).rows;
@@ -357,7 +359,8 @@ describe("CodeProjectPullRequests", () => {
         }}
       />,
     );
-    await user.click(await screen.findByRole("button", { name: "Merge octant/octant#13" }));
+    expect(await screen.findByRole("button", { name: "Merge octant/octant#12" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Merge octant/octant#13" }));
     expect(query).toHaveBeenCalledWith({ version: 1, threadId });
     expect(screen.queryByRole("button", { name: "Merge octant/octant#14" })).toBeNull();
     const dialog = within(screen.getByRole("dialog"));
