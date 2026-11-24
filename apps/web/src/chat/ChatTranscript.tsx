@@ -23,7 +23,7 @@ import type { PickerGroup } from "@octant/domain";
 import { threadHandoffDisclosure } from "../providers/conversationHandoff";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { TurnActions } from "../transcript/TurnActions";
-import { TurnHeader, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
+import { TurnHeader, TurnLiveLine, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
 import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import {
@@ -1161,6 +1161,15 @@ const AttemptBlock = memo(function AttemptBlock(props: {
             response
           </OctantButton>
         ) : null}
+        <TurnLiveLine
+          outcome={props.attempt.outcome}
+          {...(props.attempt.pendingQuestion === undefined
+            ? {}
+            : { label: "Waiting for your answer" })}
+          {...(usageLimit === undefined ? {} : { label: usageLimitLabels[usageLimit.kind] })}
+          startedAt={props.attempt.createdAt}
+          step={runningStepTitle(toolActivity)}
+        />
         <TurnActions
           at={props.attempt.updatedAt}
           copyValue={responseBody}

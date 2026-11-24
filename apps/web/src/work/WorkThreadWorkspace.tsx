@@ -215,6 +215,7 @@ import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TurnActions } from "../transcript/TurnActions";
 import {
   TurnHeader,
+  TurnLiveLine,
   TurnTime,
   turnWorkedFor,
   type TurnHeaderOutcome,
@@ -274,6 +275,11 @@ type WorkTranscriptRow =
       readonly key: string;
       readonly turn: WorkTurnState;
       readonly tasks: NonNullable<WorkTurnState["tasks"]>;
+    }
+  | {
+      readonly kind: "live";
+      readonly key: string;
+      readonly turn: WorkTurnState;
     }
   | {
       readonly kind: "steered";
@@ -1696,6 +1702,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           tasks: turn.tasks,
         });
       }
+      // The running line closes the running turn, under its task list, so it
+      // stays beside the newest content however long the turn grows.
+      if (turnHeaderOutcome(turn) === "running") {
+        rows.push({ kind: "live", key: `${String(turn.requestId)}-live`, turn });
+      }
       // The files land after the turn that produced them, so the transcript
       // reads as what was said and then what came out of it.
       if (turn.wroteFiles !== undefined) {
@@ -2994,6 +3005,21 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                           : { runningSummary: task.runningSummary }),
                       })),
                     }}
+                  />
+                );
+              }
+              if (row.kind === "live") {
+                return (
+                  <TurnLiveLine
+                    outcome={turnHeaderOutcome(row.turn)}
+                    startedAt={row.turn.acceptedAt}
+                    step={runningStepTitle(
+                      toolStepsActivity(
+                        row.turn.toolSteps,
+                        row.turn.toolStepsTruncated,
+                        row.turn.reasoningMs,
+                      ),
+                    )}
                   />
                 );
               }

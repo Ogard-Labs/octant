@@ -1,33 +1,24 @@
 import type { CodeOperationEvent } from "@octant/contracts";
 import { completedCallDurationMs } from "@octant/domain/turn-activity-timing";
-import type { ThreadTaskProgress } from "../transcript/ThreadTasksPanel";
 import type { TurnActivity, TurnActivityRow } from "../transcript/turnActivity";
 
 export type TaskActivityRow = Extract<TurnActivityRow, { kind: "task" }>;
 
 /**
- * The latest turn that journaled provider task progress, with whether it is
- * still in flight. Providers restate their whole plan as a turn proceeds, so
- * the newest list is the agent's ongoing work; merging older turns would mix
- * finished history into the current checklist.
- *
- * Returns undefined when nothing deserves a persistent panel: a settled turn
- * whose tasks all completed or failed is already told by the transcript, and a
- * turn that journaled no tasks has no list to show.
+ * A Code turn's activity split in two: the provider's task list, which the
+ * turn shows as its own group, and the rest, which folds behind the turn's
+ * summary line. Kept apart so a task row is never drawn or counted as a step.
  */
-export function liveTaskProgress(
-  turns: ReadonlyArray<{ readonly activity: TurnActivity; readonly running: boolean }>,
-): ThreadTaskProgress | undefined {
-  const turn = turns.findLast((candidate) =>
-    candidate.activity.rows.some((row) => row.kind === "task"),
-  );
-  if (turn === undefined) return undefined;
-  const tasks = turn.activity.rows.filter((row): row is TaskActivityRow => row.kind === "task");
-  const stillOpen = tasks.some(
-    (task) => task.state === "pending" || task.state === "running" || task.state === "waiting",
-  );
-  if (!turn.running && !stillOpen) return undefined;
-  return { tasks, running: turn.running };
+export function splitTurnTasks(activity: TurnActivity): {
+  readonly tasks: ReadonlyArray<TaskActivityRow>;
+  readonly activity: TurnActivity;
+} {
+  const tasks = activity.rows.filter((row): row is TaskActivityRow => row.kind === "task");
+  if (tasks.length === 0) return { tasks, activity };
+  return {
+    tasks,
+    activity: { ...activity, rows: activity.rows.filter((row) => row.kind !== "task") },
+  };
 }
 
 function upsert(

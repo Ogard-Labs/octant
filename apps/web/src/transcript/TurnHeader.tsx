@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useTimestampFormat } from "../theme/ThemeSettingsProvider";
 import {
   formatClockTime,
@@ -102,10 +102,9 @@ function outcomeIcon(outcome: TurnHeaderOutcome) {
 export function TurnHeader(props: TurnHeaderProps) {
   const timestampFormat = useTimestampFormat();
   const Icon = outcomeIcon(props.outcome);
-  const liveLine =
-    props.startedAt !== undefined &&
-    (props.outcome === "running" || props.outcome === "streaming") &&
-    props.label === undefined;
+  // A running turn's live line is drawn at the turn's end by `TurnLiveLine`,
+  // so the header holds no status while it shows.
+  const liveLine = turnShowsLiveLine(props);
   const hoverDetails = [props.provider, turnTimeTitle(props.at, timestampFormat)]
     .filter((value): value is string => value !== undefined)
     .join(" · ");
@@ -116,13 +115,7 @@ export function TurnHeader(props: TurnHeaderProps) {
         data-outcome={props.outcome}
         {...(hoverDetails.length === 0 ? {} : { title: hoverDetails })}
       >
-        {props.outcome === "completed" ? null : liveLine ? (
-          <LiveTurnStatus
-            icon={Icon === undefined ? undefined : <Icon aria-hidden="true" size={12} />}
-            startedAt={props.startedAt ?? ""}
-            step={props.step}
-          />
-        ) : (
+        {props.outcome === "completed" || liveLine ? null : (
           <span
             className="turn-header__status"
             // Only a turn still in flight, or paused on the person, is a live
@@ -148,32 +141,53 @@ export function TurnHeader(props: TurnHeaderProps) {
 }
 
 /**
- * "Working · 12s · Read", with the clock outside the live region: only a change
- * of step is announced, politely, never each second. The live region is always
- * present so the first step is announced when it fills it.
+ * Whether a turn reads as the live line: running or streaming, with a start
+ * time to count from, and no label of its own ("Waiting for your answer").
+ * The header and the line both ask, so exactly one of them shows the status.
  */
-function LiveTurnStatus(props: {
-  readonly icon: ReactNode;
-  readonly startedAt: string;
-  readonly step: string | undefined;
-}) {
+export function turnShowsLiveLine(
+  props: Pick<TurnHeaderProps, "outcome" | "startedAt" | "label">,
+): boolean {
+  return (
+    props.startedAt !== undefined &&
+    (props.outcome === "running" || props.outcome === "streaming") &&
+    props.label === undefined
+  );
+}
+
+/**
+ * "Working · 12s · Read" at the end of a running turn, under its reply and task
+ * list, so the line stays beside the newest content however long the turn
+ * grows; in the header it scrolled away with the top of the turn. The clock is
+ * outside the live region: only a change of step is announced, politely, never
+ * each second. The live region is always present so the first step is
+ * announced when it fills it. Draws nothing once the turn is not live.
+ */
+export function TurnLiveLine(
+  props: Pick<TurnHeaderProps, "outcome" | "startedAt" | "label" | "step">,
+) {
+  if (!turnShowsLiveLine(props) || props.startedAt === undefined) return null;
+  return <LiveTurnStatus startedAt={props.startedAt} step={props.step} />;
+}
+
+function LiveTurnStatus(props: { readonly startedAt: string; readonly step: string | undefined }) {
   const seconds = useElapsedSeconds(props.startedAt);
   const step = props.step === undefined || props.step.length === 0 ? undefined : props.step;
   return (
-    <span className="turn-header__status turn-header__status--live">
-      {props.icon}
+    <p className="turn-live-line">
+      <LoaderCircle aria-hidden="true" size={12} />
       <span>Working</span>
       {seconds === undefined ? null : (
         <>
           <span aria-hidden="true">·</span>
-          <span className="turn-header__elapsed">{formatDuration(seconds)}</span>
+          <span className="turn-live-line__elapsed">{formatDuration(seconds)}</span>
         </>
       )}
       {step === undefined ? null : <span aria-hidden="true">·</span>}
-      <span aria-live="polite" className="turn-header__step" role="status">
+      <span aria-live="polite" className="turn-live-line__step" role="status">
         {step}
       </span>
-    </span>
+    </p>
   );
 }
 

@@ -908,21 +908,35 @@ html[data-octant-increased-contrast="true"] .turn-action-menu__more .shell-icon-
   gap: 4px;
 }
 
-/* The running line ("Working · 12s · Read") shrinks its step to an ellipsis
-   instead of wrapping, and the clock keeps tabular digits in a fixed minimum
-   width so a tick never moves the words beside it. */
-.turn-header__status--live {
-  flex: 0 1 auto;
+/* The running line ("Working · 12s · Read") closes a running turn, under its
+   reply and task list. It shrinks its step to an ellipsis instead of wrapping,
+   and the clock keeps tabular digits in a fixed minimum width so a tick never
+   moves the words beside it. */
+.turn-live-line {
+  display: flex;
   min-width: 0;
+  align-items: center;
+  gap: 4px;
+  margin: var(--oct-space-2) 0 0;
+  color: var(--octant-text-muted);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
+  line-height: 1.35;
 }
 
-.turn-header__elapsed {
+.turn-live-line > * {
+  flex: 0 0 auto;
+}
+
+.turn-live-line__elapsed {
   /* Wide enough for the longest form, "59m 59s" and "10h 05m". */
   min-width: 8ch;
   font-variant-numeric: tabular-nums;
 }
 
-.turn-header__step {
+.turn-live-line > .turn-live-line__step {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
