@@ -68,6 +68,17 @@ const GH_SUCCESS_STATE_LINE = new RegExp(
   String.raw`\b(Pull request) (${OWNER})/(${REPOSITORY})#([1-9][0-9]{0,8}) (?:is marked as|is converted to|will be) `,
   "g",
 );
+/** What each of gh's success lines says was done. */
+const GH_LINE_ACTIONS: ReadonlyArray<readonly [RegExp, ThreadForgeAction]> = [
+  [/\bmerged pull request /i, "merged"],
+  [/ will be added to the merge queue/, "merged"],
+  [/\bwill be automatically merged /, "edited"],
+  [/\bauto-merge disabled for pull request /i, "edited"],
+  [/ is (?:marked as|converted to) /, "edited"],
+  [/\bclosed (?:pull request|issue) /i, "closed"],
+  [/\breopened (?:pull request|issue) /i, "reopened"],
+  [/\b(?:approved|reviewed|requested changes to) pull request /i, "reviewed"],
+];
 const LINEAR_IDENTIFIER = /^[A-Z][A-Z0-9]{0,9}-[1-9][0-9]{0,8}$/;
 const LINEAR_URL = /https:\/\/linear\.app\/[^/\s]+\/issue\/([A-Z][A-Z0-9]{0,9}-[1-9][0-9]{0,8})\b/g;
 
@@ -132,6 +143,36 @@ interface ShellCommand {
   readonly exitSpeaks: boolean;
 }
 
+/** The writes gh's own output says happened, each as "action identity". */
+function confirmedWritesIn(output: string): ReadonlySet<string> {
+  const confirmed = new Set<string>();
+  const confirm = (action: ThreadForgeAction, identity: GithubIdentity) =>
+    confirmed.add(`${action} ${identityKey(identity)}`);
+  for (const line of output.split("\n")) {
+    for (const identity of githubSuccessLinesIn(line)) {
+      for (const [says, action] of GH_LINE_ACTIONS) if (says.test(line)) confirm(action, identity);
+    }
+    for (const identity of githubUrlsIn(line)) {
+      confirm("created", identity);
+      if (line.includes("#issuecomment-")) confirm("commented", identity);
+    }
+  }
+  return confirmed;
+}
+
+/**
+ * Whether a command can end the shell while the call still succeeds (`exit`,
+ * `exit 0`, `exec`), so that what follows it may never have run. A failing
+ * `exit 1` would have failed the call.
+ */
+function endsTheShellWell(words: ReadonlyArray<string>): boolean {
+  return words.some(
+    (word, index) =>
+      word === "exec" ||
+      ((word === "exit" || word === "return") && !/^[1-9][0-9]*$/.test(words[index + 1] ?? "")),
+  );
+}
+
 /**
  * Splits a command line into words, honouring quotes, backslash escapes and
  * comments, and into separate commands at `&&`, `||`, `;`, `|`, `&` and line
@@ -142,6 +183,9 @@ function shellCommands(command: string): ReadonlyArray<ShellCommand> {
   const lists: Array<{ readonly commands: string[][]; andOnly: boolean }> = [];
   let list: { readonly commands: string[][]; andOnly: boolean } = { commands: [], andOnly: true };
   let words: string[] = [];
+  // Whether `&&`, `||` or `|` still waits for the command it joins: a line
+  // break after one of them does not end the list.
+  let joins = false;
   let word = "";
   let quote: '"' | "'" | undefined;
   let inWord = false;
@@ -152,11 +196,15 @@ function shellCommands(command: string): ReadonlyArray<ShellCommand> {
   };
   const endCommand = () => {
     endWord();
-    if (words.length > 0) list.commands.push(words);
+    if (words.length > 0) {
+      list.commands.push(words);
+      joins = false;
+    }
     words = [];
   };
   const endList = () => {
     endCommand();
+    joins = false;
     if (list.commands.length > 0) lists.push(list);
     list = { commands: [], andOnly: true };
   };
@@ -189,6 +237,7 @@ function shellCommands(command: string): ReadonlyArray<ShellCommand> {
     }
     if (character === "&" && next === "&") {
       endCommand();
+      joins = true;
       index += 1;
       continue;
     }
@@ -200,10 +249,12 @@ function shellCommands(command: string): ReadonlyArray<ShellCommand> {
     }
     if (character === "|" || character === "&") {
       endCommand();
+      joins = character === "|";
       if (character === "|" && (next === "|" || next === "&")) index += 1;
       list.andOnly = false;
       continue;
     }
+    if (character === "\n" && joins && words.length === 0 && !inWord) continue;
     if (character === "\n" || character === ";") {
       endList();
       continue;
@@ -216,10 +267,11 @@ function shellCommands(command: string): ReadonlyArray<ShellCommand> {
     inWord = true;
   }
   endList();
+  const mayEndEarly = lists.some((each) => each.commands.some(endsTheShellWell));
   return lists.flatMap((each, index) =>
     each.commands.map((found) => ({
       words: found,
-      exitSpeaks: each.andOnly && index === lists.length - 1,
+      exitSpeaks: each.andOnly && index === lists.length - 1 && !mayEndEarly,
     })),
   );
 }
@@ -403,16 +455,11 @@ function fromShell(
     .map(ghInvocation)
     .filter((invocation): invocation is GhInvocation => invocation !== undefined);
   const found = [...githubUrlsIn(output ?? ""), ...githubSuccessLinesIn(output ?? "")];
-  // What the output proves was written: gh's success lines ("Merged pull
-  // request acme/app#12") for any write, and a printed address only for a
-  // create or comment, which print the new thing's address. A read in a
-  // fallback prints addresses too, so an address alone proves no merge.
-  const confirmedByLine = new Set(
-    githubSuccessLinesIn(output ?? "").map((candidate) => identityKey(candidate)),
-  );
-  const confirmedByAddress = new Set(
-    githubUrlsIn(output ?? "").map((candidate) => identityKey(candidate)),
-  );
+  // What the output proves was written: gh's success line for that very write
+  // ("Closed issue acme/app#7" proves no reopen), the new thing's address for a
+  // create, and its own anchor for a comment. A read in a fallback prints
+  // addresses too, so a bare address proves nothing else.
+  const confirmed = confirmedWritesIn(output ?? "");
   const references: ThreadForgeReference[] = [];
   for (const invocation of invocations) {
     if (invocation.action === undefined) continue;
@@ -443,16 +490,7 @@ function fromShell(
     if (identity === undefined) continue;
     // When the call's exit status does not speak for this command (it ran
     // before a `||` fallback, say), only its own output confirms the write.
-    if (
-      !invocation.exitSpeaks &&
-      !confirmedByLine.has(identityKey(identity)) &&
-      !(
-        (action === "created" || action === "commented") &&
-        confirmedByAddress.has(identityKey(identity))
-      )
-    ) {
-      continue;
-    }
+    if (!invocation.exitSpeaks && !confirmed.has(`${action} ${identityKey(identity)}`)) continue;
     const state =
       identity.kind === "issue" && action === "closed"
         ? "closed"

@@ -736,7 +736,8 @@ command or arguments and its result with the shared
 `forgeReferencesFromToolCall` rules in `@octant/provider-sdk`. A read never
 counts, an identity the call does not pin down is left out, and a shell write
 counts only when the call's exit status speaks for that command (it is in the
-last `;`-separated list, joined by `&&` alone) or `gh`'s own output confirms it.
+last `;`-separated list, joined by `&&` alone, with no earlier successful exit)
+or `gh`'s own output says that very write happened.
 The Claude
 mapper keeps a shell, GitHub or Linear call's input until its result arrives
 for this; the Codex mapper reads a command that exited cleanly and its printed

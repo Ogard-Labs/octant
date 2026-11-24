@@ -240,6 +240,61 @@ describe("forgeReferencesFromToolCall", () => {
     expect(reference?.title).toBe("\u6f22".repeat(85));
   });
 
+  it("keeps a connecting operator's effect across the line break after it", () => {
+    const numbers = (command: string) =>
+      forgeReferencesFromToolCall({ toolName: "Bash", command })?.map((reference) =>
+        "number" in reference ? reference.number : 0,
+      );
+    // Closing 12 succeeded, so 13 never ran; neither exit status is known.
+    expect(numbers("gh pr close 12 -R acme/app ||\n  gh pr close 13 -R acme/app")).toBeUndefined();
+    expect(numbers("gh pr view 12 |\n\n gh pr close 13 -R acme/app")).toBeUndefined();
+    expect(numbers("gh pr close 12 -R acme/app &&\n  gh pr close 13 -R acme/app")).toEqual([
+      12, 13,
+    ]);
+  });
+
+  it("confirms a write only by a line that says what that write does", () => {
+    expect(
+      forgeReferencesFromToolCall({
+        toolName: "Bash",
+        command: "gh issue close 7 -R acme/app || gh issue reopen 7 -R acme/app",
+        output: "\u2713 Closed issue acme/app#7 (Docs)",
+      }),
+    ).toEqual([
+      {
+        forge: "github",
+        kind: "issue",
+        action: "closed",
+        owner: "acme",
+        repository: "app",
+        number: 7,
+        state: "closed",
+      },
+    ]);
+    // A comment prints its own anchor; the address a fallback view prints is not one.
+    const commented = (output: string) =>
+      forgeReferencesFromToolCall({
+        toolName: "Bash",
+        command: "gh pr comment 12 -R acme/app --body x || gh pr view 12 -R acme/app",
+        output,
+      });
+    expect(commented("https://github.com/acme/app/pull/12")).toBeUndefined();
+    expect(commented("https://github.com/acme/app/pull/12#issuecomment-9")).toHaveLength(1);
+  });
+
+  it("does not credit the exit status to a write that an earlier exit may have skipped", () => {
+    const numbers = (command: string) =>
+      forgeReferencesFromToolCall({ toolName: "Bash", command })?.map((reference) =>
+        "number" in reference ? reference.number : 0,
+      );
+    expect(
+      numbers("if merged; then echo done; exit 0; fi; gh pr edit 12 -R acme/app --title New"),
+    ).toBeUndefined();
+    expect(numbers("merged && exit; gh pr edit 12 -R acme/app --title New")).toBeUndefined();
+    // A failing exit would have failed the call.
+    expect(numbers("cd app || exit 1; gh pr edit 12 -R acme/app --title New")).toEqual([12]);
+  });
+
   it("leaves out an identity the journal would refuse, so it never loses the call", () => {
     expect(
       forgeReferencesFromToolCall({
