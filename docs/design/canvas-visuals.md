@@ -340,7 +340,8 @@ a dashboard, a table, math, a diagram, or a document-size design, including one
 that runs script) is drawn by the same blocks in the reply's card, as wide as
 the transcript column at any window width down to 390 px. Nothing in it widens
 the page: a wide table, a long formula, and a board scroll or pan inside their
-own block. Its height rests at 560 px, the part past it fades into
+own block. It shows whole up to 1,200 px, tall enough for a few metric tiles
+and charts to read without a click, and the part past it fades into
 **Show the whole Canvas** and the Canvas's open control, and the wheel stays
 with the thread until the person focuses the expanded Canvas. A board drawn
 there has no layout runtime, so it pans and zooms but its nodes do not move. A

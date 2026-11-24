@@ -91,11 +91,11 @@ export interface DiskCleanupRouteDependencies {
 }
 
 /**
- * Settings › Code › Worktrees on this computer and Xcode build data. Every
- * request is a window on this host's: the lists name folders on this computer
- * and removal deletes from its disk, so a paired device gets neither. The
- * last scan is kept in memory only, never journaled, and one scan runs at a
- * time.
+ * Settings › Code › Worktrees on this computer and Xcode build data. The lists
+ * name folders on this computer and removal deletes from its disk, so only a
+ * window on this host or a device the host's own person paired may ask; a
+ * hub-introduced or restricted device is refused. The last scan is kept in
+ * memory only, never journaled, and one scan runs at a time.
  */
 export function createDiskCleanupRouteHandler(dependencies: DiskCleanupRouteDependencies) {
   const now = dependencies.now ?? Date.now;

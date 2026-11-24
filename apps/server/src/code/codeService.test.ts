@@ -6465,6 +6465,7 @@ function serviceFixture(
     readonly content?: CodeContentStoreOptions;
     readonly pullRequests?: CodeServiceOptions["pullRequests"];
     readonly readLatestFinishedReceipt?: CodeServiceOptions["readLatestFinishedReceipt"];
+    readonly putAwayWhenDone?: CodeServiceOptions["putAwayWhenDone"];
     readonly gitHistory?: CodeServiceOptions["gitHistory"];
     readonly serverGitHistory?: CodeServiceOptions["serverGitHistory"];
     readonly liveTurns?: CodeServiceOptions["liveTurns"];
@@ -6572,6 +6573,7 @@ function serviceFixture(
     ...(options.readLatestFinishedReceipt === undefined
       ? {}
       : { readLatestFinishedReceipt: options.readLatestFinishedReceipt }),
+    ...(options.putAwayWhenDone === undefined ? {} : { putAwayWhenDone: options.putAwayWhenDone }),
     persistence: persistence as unknown as CodePersistencePort,
     access,
     checkouts,
@@ -6772,6 +6774,122 @@ describe("completing and snoozing a Code thread", () => {
     expect(reopened).toMatchObject({ kind: "thread-updated", thread: { version: 2 } });
     if (!("thread" in reopened)) throw new Error("expected the reopened thread");
     expect(reopened.thread).not.toHaveProperty("markedDoneAt");
+  });
+
+  it("puts a thread away when a person marks it Done and Settings says to, and leaves it in place while its turn runs", async () => {
+    const fixture = serviceFixture({
+      threads: [thread({ pinned: true })],
+      putAwayWhenDone: () => true,
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "mark-code-thread-done",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).resolves.toMatchObject({
+      kind: "thread-updated",
+      thread: { markedDoneAt: now, completedAt: now, version: 2 },
+    });
+    const recorded = (
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+        events: Array<{ payload: { thread: Record<string, unknown> } }>;
+      }
+    ).events[0]?.payload.thread;
+    expect(recorded?.completedAt).toBe(now);
+    expect(recorded).not.toHaveProperty("pinned");
+
+    const running = serviceFixture({ putAwayWhenDone: () => true });
+    running.persistence.readCodeRuntimeWorks.mockReturnValue(providerTurn("running"));
+    const markedWhileRunning = await running.service.execute(ids.window, {
+      kind: "mark-code-thread-done",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    if (!("thread" in markedWhileRunning)) throw new Error("expected the marked thread");
+    expect(markedWhileRunning.thread.markedDoneAt).toBe(now);
+    expect(markedWhileRunning.thread).not.toHaveProperty("completedAt");
+
+    // A turn the live registry already holds, before its runtime work is
+    // journaled, still counts as running.
+    const liveTurns = new LiveTurnRegistry();
+    liveTurns.tracker(String(ids.thread), "code-navigation").begin(now);
+    const justStarted = serviceFixture({ putAwayWhenDone: () => true, liveTurns });
+    const markedAsTurnStarts = await justStarted.service.execute(ids.window, {
+      kind: "mark-code-thread-done",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    if (!("thread" in markedAsTurnStarts)) throw new Error("expected the marked thread");
+    expect(markedAsTurnStarts.thread).not.toHaveProperty("completedAt");
+
+    const awaitingApproval = serviceFixture({
+      putAwayWhenDone: () => true,
+      awaitsHarnessApproval: () => true,
+    });
+    const markedWhileApprovalWaits = await awaitingApproval.service.execute(ids.window, {
+      kind: "mark-code-thread-done",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    if (!("thread" in markedWhileApprovalWaits)) throw new Error("expected the marked thread");
+    expect(markedWhileApprovalWaits.thread.markedDoneAt).toBe(now);
+    expect(markedWhileApprovalWaits.thread).not.toHaveProperty("completedAt");
+
+    const off = serviceFixture({ putAwayWhenDone: () => false });
+    const markedWithSettingOff = await off.service.execute(ids.window, {
+      kind: "mark-code-thread-done",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    if (!("thread" in markedWithSettingOff)) throw new Error("expected the marked thread");
+    expect(markedWithSettingOff.thread).not.toHaveProperty("completedAt");
+  });
+
+  it("puts a thread away once for its merged pull request, as the host, and not again after the person takes it back", async () => {
+    const pr41 = { baseRepository: "acme/app", number: 41 };
+    const pr42 = { baseRepository: "acme/app", number: 42 };
+    const same = (left: typeof pr42, right: typeof pr42) =>
+      left.number === right.number && left.baseRepository === right.baseRepository;
+    const fixture = serviceFixture();
+    expect(fixture.service.putAwayMergedThread(ids.thread, [pr41, pr42], same)).toEqual({
+      status: "put-away",
+    });
+    const append = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+      events: Array<{ actor: unknown; payload: { thread: Record<string, unknown> } }>;
+    };
+    expect(append.events[0]?.payload.thread.completedAt).toBe(now);
+    // Every merge seen is recorded, so one a cache later drops while another
+    // still shows never reads as new.
+    expect(append.events[0]?.payload.thread.putAwayForPullRequests).toEqual([pr41, pr42]);
+    // The host settles the thread; it never marks it Done for the person.
+    expect(append.events[0]?.payload.thread).not.toHaveProperty("markedDoneAt");
+    expect(append.events[0]?.actor).toMatchObject({ kind: "system" });
+
+    const takenBack = serviceFixture({
+      threads: [thread({ putAwayForPullRequests: [pr42] })],
+    });
+    expect(takenBack.service.putAwayMergedThread(ids.thread, [pr42], same)).toEqual({
+      status: "skipped",
+      reason: "already-put-away",
+    });
+    // A lower-numbered pull request that merged after the person took the
+    // thread back still counts: numbers order creation, not merging.
+    expect(takenBack.service.putAwayMergedThread(ids.thread, [pr41, pr42], same)).toEqual({
+      status: "put-away",
+    });
+    const afterLaterMerge = takenBack.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+      events: Array<{ payload: { thread: Record<string, unknown> } }>;
+    };
+    expect(afterLaterMerge.events[0]?.payload.thread.putAwayForPullRequests).toEqual([pr41, pr42]);
+
+    const running = serviceFixture();
+    running.persistence.readCodeRuntimeWorks.mockReturnValue(providerTurn("running"));
+    expect(running.service.putAwayMergedThread(ids.thread, [pr42], same)).toEqual({
+      status: "skipped",
+      reason: "busy",
+    });
+    expect(running.persistence.journal.append).not.toHaveBeenCalled();
   });
 
   it("refuses a routine or anything else acting as the host when it tries to mark a Code thread Done", async () => {

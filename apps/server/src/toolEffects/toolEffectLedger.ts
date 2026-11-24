@@ -92,23 +92,40 @@ export function executingToolCallId(): string | undefined {
  * the tool hears it; when the journal refuses that frame this throws, because
  * the tool would otherwise run under a record that says it did not.
  *
+ * `wait` receives `answered`, for an ask whose answer acts before the wait
+ * settles (a confirmed memory proposal is written, a confirmed routine is
+ * created, then the tool hears it): the service calls it as the answer
+ * arrives and before it acts, so the intent is on record first. It throws
+ * when the journal refuses the frame, and the service must then not act.
+ * Calling it more than once records once.
+ *
  * Only a wait that precedes every effect of its call belongs here. A prompt a
  * tool raises after it already acted (a download a click started) does not.
  */
-export async function whileAwaitingToolApproval<T>(wait: () => Promise<T>): Promise<T> {
+export async function whileAwaitingToolApproval<T>(
+  wait: (answered: () => void) => Promise<T>,
+): Promise<T> {
   const call = recordedCall.getStore();
-  if (call === undefined) return wait();
-  // A journal that refuses the awaiting frame leaves the call's record as it
-  // was, but the person is still being asked: the wait stays out of the
-  // call's deadline and run time either way.
+  if (call === undefined) return wait(() => undefined);
+  // If the journal refuses the waiting frame, the original intent still
+  // holds after restart and the person's wait still stays out of run time.
   const recorded = call.awaitingApproval();
   call.approvalWaitStarted?.();
   const startedAt = call.now?.() ?? Date.now();
+  let onRecord = false;
+  const answered = () => {
+    if (!recorded || onRecord) return;
+    call.approvalAnswered();
+    onRecord = true;
+  };
   try {
-    return await wait();
+    return await wait(answered);
   } finally {
-    if (recorded) call.approvalAnswered();
-    call.approvalWaited?.((call.now?.() ?? Date.now()) - startedAt);
+    try {
+      answered();
+    } finally {
+      call.approvalWaited?.((call.now?.() ?? Date.now()) - startedAt);
+    }
   }
 }
 
@@ -168,7 +185,10 @@ export interface TurnToolEffects {
    * `hostTools` is the set the turn offers its runtime: a start that names
    * one of them is the runtime's side of a call the host runs and records
    * itself, under another id, so it is not recorded a second time as a tool
-   * that may have changed something.
+   * that may have changed something; a `tool-request` for one of them that
+   * names the runtime's earlier report of it closes that report. An
+   * `approval-request` that names a reported call records that the call is
+   * waiting for the runtime's answer (`approvalAnswered` ends the wait).
    */
   readonly observe: (event: ProviderRuntimeEvent, hostTools?: AppManagedToolSet) => void;
 }
@@ -196,10 +216,41 @@ export function recordedToolSet(
   return effects === undefined ? bound : effects.tools(bound);
 }
 
+interface OpenCall {
+  readonly origin: ToolEffectOrigin;
+  readonly toolName: string;
+}
+
 interface OpenTurn {
   version: number;
-  readonly open: Map<string, ToolEffectOrigin>;
+  readonly open: Map<string, OpenCall>;
 }
+
+/**
+ * Runtime approval requests whose call's wait is on record, so the answer
+ * can put the call's intent back before the runtime hears it. An entry is
+ * the only link from a request to its durable wait, so it is never dropped
+ * while the request can still be answered: it leaves when the request is
+ * answered, when the call settles, or when the turn ends. When the index is
+ * full a new wait is not journaled at all, and its call keeps the intent it
+ * recorded at its start, so a restart holds it rather than continuing past
+ * an answer nobody put on record. (Dropping the oldest entry instead let an
+ * answer to it reach the runtime with the record still saying "waiting", and
+ * a restart could repeat the call.)
+ */
+const MAX_RUNTIME_ASKS = 512;
+
+/**
+ * What answering a runtime's approval request did to its call's record.
+ * `recorded`: the call's intent is back on record. `no-wait`: no wait was
+ * journaled for the request, so the record already reads as a call that may
+ * take effect. `refused`: the journal refused the frame, and the call must
+ * be refused.
+ */
+export type RuntimeApprovalAnswerRecord =
+  | { readonly status: "recorded" }
+  | { readonly status: "no-wait" }
+  | { readonly status: "refused" };
 
 /**
  * The record of tool calls about to take effect. A restart cuts a turn off
@@ -220,6 +271,14 @@ export class ToolEffectLedger {
   readonly #actor: typeof EventActor.Type;
   readonly #clock: () => string;
   readonly #turns = new Map<string, OpenTurn>();
+  readonly #runtimeAsks = new Map<
+    string,
+    {
+      readonly turn: { readonly threadId: string; readonly turnId: string };
+      readonly toolCallId: string;
+      readonly toolName: string;
+    }
+  >();
 
   constructor(options: {
     readonly journal: JournalPort;
@@ -271,7 +330,23 @@ export class ToolEffectLedger {
         },
       }),
       observe: (event, hostTools) => {
-        if (event.kind === "tool-start") {
+        if (event.kind === "approval-request") {
+          if (event.toolCallId !== undefined)
+            this.#awaitRuntimeApproval(
+              turn,
+              boundedCallId(event.toolCallId),
+              runtimeAskKey(event.sessionId, event.requestId),
+            );
+        } else if (event.kind === "tool-request") {
+          // The runtime said which of its reported calls this request is: the
+          // host runs it and records it under the request, so the runtime's
+          // own report of it is closed rather than left to hold the thread.
+          if (
+            event.toolCallId !== undefined &&
+            hostTools?.definitions.some((definition) => definition.name === event.toolName) === true
+          )
+            this.#settle(turn, boundedCallId(event.toolCallId), "runtime", "superseded");
+        } else if (event.kind === "tool-start") {
           const toolCallId = boundedCallId(event.toolCallId);
           if (this.#turns.get(turn.turnId)?.open.has(toolCallId) === true) return;
           // The host runs this call and records it before it does. Recorded
@@ -291,9 +366,44 @@ export class ToolEffectLedger {
             "runtime",
             event.kind === "tool-success" ? "succeeded" : "failed",
           );
+        } else if (
+          event.kind === "completed" ||
+          event.kind === "failed" ||
+          event.kind === "interrupted"
+        ) {
+          // The runtime asks nothing more of this turn; a wait still on
+          // record stays there and reads as a call that never ran.
+          this.#retireRuntimeAsks(turn.turnId);
         }
       },
     };
+  }
+
+  /**
+   * A person or a reviewer answered a runtime's approval request: the call it
+   * gates goes back on record as one that may take effect before the runtime
+   * hears the answer. False when that frame could not be written; the caller
+   * then refuses the call rather than let it run under a record that says it
+   * did not. A request the index does not know had no wait journaled: the
+   * index keeps every wait it journals until the request is answered, its
+   * call settles, or its turn ends.
+   */
+  approvalAnswered(answer: {
+    readonly sessionId: string;
+    readonly requestId: string;
+  }): RuntimeApprovalAnswerRecord {
+    const key = runtimeAskKey(answer.sessionId, answer.requestId);
+    const ask = this.#runtimeAsks.get(key);
+    if (ask === undefined) return { status: "no-wait" };
+    try {
+      this.#intend(ask.turn, ask.toolCallId, ask.toolName, "runtime");
+    } catch {
+      // Kept: the record still says "waiting", so a later answer to the same
+      // request must try again rather than pass as one with no wait.
+      return { status: "refused" };
+    }
+    this.#runtimeAsks.delete(key);
+    return { status: "recorded" };
   }
 
   /**
@@ -321,6 +431,7 @@ export class ToolEffectLedger {
     try {
       const unsettled = this.#unsettled(turn.turnId);
       if (unsettled === undefined || unsettled.size === 0) return;
+      this.#retireRuntimeAsks(turn.turnId);
       const state = this.#openTurn(turn.turnId);
       for (const toolCallId of unsettled.keys()) {
         this.#append(
@@ -390,7 +501,7 @@ export class ToolEffectLedger {
     toolCallId: string,
   ): boolean {
     const state = this.#turns.get(turn.turnId);
-    if (state?.open.get(toolCallId) !== "host") return false;
+    if (state?.open.get(toolCallId)?.origin !== "host") return false;
     try {
       this.#append(
         state,
@@ -401,6 +512,43 @@ export class ToolEffectLedger {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Marks a runtime's reported call as waiting for the runtime's approval
+   * request, when the request names a call whose start the host recorded.
+   * A frame the journal refuses leaves the call as it was: it holds.
+   */
+  #awaitRuntimeApproval(
+    turn: { readonly threadId: string; readonly turnId: string },
+    toolCallId: string,
+    key: string,
+  ): void {
+    const state = this.#turns.get(turn.turnId);
+    const call = state?.open.get(toolCallId);
+    if (state === undefined || call?.origin !== "runtime") return;
+    // A full index cannot keep the link back to this wait, so the wait is not
+    // journaled and the call holds after a restart.
+    if (!this.#runtimeAsks.has(key) && this.#runtimeAsks.size >= MAX_RUNTIME_ASKS) return;
+    try {
+      this.#append(
+        state,
+        turn.turnId,
+        TOOL_EFFECT_EVENT_NAMES.awaitingApproval,
+        decodeAwaitingApproval({ threadId: turn.threadId, turnId: turn.turnId, toolCallId }),
+      );
+    } catch {
+      return;
+    }
+    this.#runtimeAsks.set(key, { turn, toolCallId, toolName: call.toolName });
+  }
+
+  /** Drops the asks of a turn, or of one of its calls, that no answer can reach any more. */
+  #retireRuntimeAsks(turnId: string, toolCallId?: string): void {
+    for (const [key, ask] of this.#runtimeAsks) {
+      if (ask.turn.turnId === turnId && (toolCallId === undefined || ask.toolCallId === toolCallId))
+        this.#runtimeAsks.delete(key);
     }
   }
 
@@ -427,7 +575,7 @@ export class ToolEffectLedger {
         origin,
       }),
     );
-    state.open.set(toolCallId, origin);
+    state.open.set(toolCallId, { origin, toolName: name });
     this.#turns.delete(turn.turnId);
     this.#turns.set(turn.turnId, state);
     if (this.#turns.size > MAX_OPEN_TURNS) {
@@ -442,10 +590,11 @@ export class ToolEffectLedger {
     origin: ToolEffectOrigin,
     outcome: ToolEffectSettled["outcome"],
   ): void {
+    if (origin === "runtime") this.#retireRuntimeAsks(turn.turnId, toolCallId);
     const state = this.#turns.get(turn.turnId);
     // Only the side that recorded the start ends it: a runtime's report of a
     // call the host is still running says nothing of the host's own tool.
-    if (state?.open.get(toolCallId) !== origin) return;
+    if (state?.open.get(toolCallId)?.origin !== origin) return;
     try {
       this.#append(
         state,
@@ -504,6 +653,10 @@ function boundedCallId(value: string): string {
   return trimmed.length <= MAX_LABEL_LENGTH
     ? trimmed
     : createHash("sha256").update(trimmed).digest("hex");
+}
+
+function runtimeAskKey(sessionId: string, requestId: string): string {
+  return `${sessionId}\u0000${requestId}`;
 }
 
 function boundedToolName(value: string): string {

@@ -15,6 +15,7 @@ const defaultDestination = resolve(repositoryRoot, "apps/desktop/dist/native/oct
  */
 export const DEVICE_HELPER_SOURCES = [
   "main.swift",
+  "HostDisplay.swift",
   "SimulatorBridge.swift",
   "GuestInputConnection.swift",
   "DisplayStream.swift",

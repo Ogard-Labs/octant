@@ -118,6 +118,7 @@ function foldToolEvent(
     ...(published === undefined ? {} : { published }),
     ...(outsideContent === undefined ? {} : { outsideContent }),
     ...(routine === undefined ? {} : { routine }),
+    canvasPreview: event.canvasPreview ?? previous?.canvasPreview,
     ...(durationMs === undefined
       ? {}
       : {

@@ -1,7 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { ThreadArtifactsOffer, threadArtifactsOfferRow } from "./ThreadArtifactsChoice";
+import { canvasesByTurnRow, placeThreadCanvases, threadTurnSpans } from "./threadCanvasPlacement";
 
 const canvasesByRow = new Map<string, ReadonlyArray<unknown>>([
   ["turn-2", [{ canvasId: "a" }]],
@@ -10,6 +12,37 @@ const canvasesByRow = new Map<string, ReadonlyArray<unknown>>([
 const rowKeys = ["turn-1", "turn-2", "turn-3", "turn-4"];
 
 describe("the one-time offer of Claude artifacts in a thread", () => {
+  it("finds the first Canvas the thread draws above a reply", () => {
+    const rows = [
+      { key: "ask-1", at: "2026-10-06T09:00:00.000Z" },
+      { key: "reply-1", reply: true },
+      { key: "files-1" },
+    ];
+    const placement = placeThreadCanvases(
+      threadTurnSpans(
+        rows,
+        (row) => row.key,
+        (row) => row.at,
+        (row) => row.reply === true,
+      ),
+      [
+        {
+          canvasId: "summary",
+          presentation: "inline",
+          canvasCreatedAt: "2026-10-06T09:02:00.000Z",
+        } as unknown as CanvasThreadReferenceCard,
+      ],
+    );
+    expect(
+      threadArtifactsOfferRow({
+        choosable: true,
+        documentDelivery: undefined,
+        rowKeys: rows.map((row) => row.key),
+        canvasesByRow: canvasesByTurnRow(placement),
+      }),
+    ).toBe("reply-1");
+  });
+
   it("sits under the thread's first Canvas until the person decides, and never after", () => {
     expect(
       threadArtifactsOfferRow({

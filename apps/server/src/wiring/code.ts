@@ -959,6 +959,9 @@ export function wireCode(deps: CodeDependencies) {
           liveTurns,
           awaitsHarnessApproval: threadAwaitsHarnessApproval,
           readLatestFinishedReceipt: (threadId) => finishedReceipts.latest(threadId),
+          putAwayWhenDone: () =>
+            (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+              .putAwayThreadsWhenDone,
           gitHistory: new GitHistoryPort(),
           serverGitHistory: (thread) => {
             const project = serverProjectOf(serverProjectStore, thread);

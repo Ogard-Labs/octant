@@ -1,4 +1,8 @@
-import { decodeProjectMemoryProposal, type ProjectMemoryProposal } from "@octant/contracts";
+import {
+  decodeProjectMemoryProposal,
+  type ProjectMemoryProposal,
+  type ProjectMemoryProposalDecisionResult,
+} from "@octant/contracts";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -26,9 +30,11 @@ function proposal(overrides: Record<string, unknown> = {}): ProjectMemoryProposa
 function client(proposals: ReadonlyArray<ProjectMemoryProposal>) {
   return {
     listMemoryProposals: vi.fn(async () => proposals),
-    decideMemoryProposal: vi.fn(async () => ({
-      kind: "project-memory-proposal-declined" as const,
-    })),
+    decideMemoryProposal: vi.fn(
+      async (): Promise<ProjectMemoryProposalDecisionResult> => ({
+        kind: "project-memory-proposal-declined",
+      }),
+    ),
   } satisfies ProjectMemoryProposalClient;
 }
 
@@ -86,5 +92,20 @@ describe("ProjectMemoryProposalPrompt", () => {
     expect(card).toHaveTextContent("Replaces: Tabs.");
     expect(card).toHaveTextContent("Spaces.");
     expect(card).toHaveTextContent("Web pages");
+  });
+
+  it("says why a confirmed change the command refused failed, where the card was", async () => {
+    const fake = client([proposal()]);
+    fake.decideMemoryProposal.mockResolvedValueOnce({
+      kind: "project-memory-proposal-not-applied",
+      message: "Project memory could not be changed.",
+    });
+    renderPrompt(fake);
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Save to memory" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("group", { name: "Project memory change" })).toBeNull(),
+    );
+    expect(await screen.findByText("Project memory could not be changed.")).toBeInTheDocument();
   });
 });

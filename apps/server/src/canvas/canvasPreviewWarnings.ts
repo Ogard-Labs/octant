@@ -23,9 +23,11 @@ import type { CanvasPreviewDesignReading } from "./canvasPreviewFrames";
  * A preview answers one question: does this document read well where the thread
  * will draw it? These are the ways it demonstrably can fail to — a label the
  * slot cannot hold, a legend that runs past the frame, a series with no reading
- * in it, and ink that does not clear its contrast target. Length is not one of
- * them: the thread shows a long inline document as a teaser the person expands. Each is a value, not a sentence: the tool
- * reports the kind and the measurement, and the agent decides what to change.
+ * in it, and ink that does not clear its contrast target. Length counts only for
+ * an inline Canvas: the thread shows one whole up to a cap and fades the rest,
+ * so a summary drawn past the cap hides its own end. Each is a value, not a
+ * sentence: the tool reports the kind and the measurement, and the agent
+ * decides what to change.
  *
  * Most warnings are computed from the document and the target width alone, so
  * they are reported whether or not a browser rendered the picture. That is what
@@ -106,6 +108,16 @@ export type CanvasPreviewWarning =
        */
       readonly kind: "design-not-measured";
       readonly blockId: string;
+    }
+  | {
+      /**
+       * An inline Canvas drawn taller than the thread shows whole: past `cap`
+       * the thread fades it behind Show the whole Canvas. Measured in the
+       * drawn page, so it is reported only when a browser drew the picture.
+       */
+      readonly kind: "inline-past-cap";
+      readonly height: number;
+      readonly cap: number;
     }
   | {
       /**

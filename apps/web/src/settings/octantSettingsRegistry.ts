@@ -157,6 +157,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "default folder documents octant projectless folderless no project quick task files artifacts location path",
         },
         {
+          id: settingId("put-away-when-done"),
+          label: "Put away threads when they're done",
+          scope: "host",
+          keywords: "finished merged pull request settle automatically mark shelf sidebar hide",
+        },
+        {
           id: settingId("completed-thread-archive"),
           label: "Archive put-away threads",
           scope: "host",
@@ -1340,6 +1346,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Remembered applications",
           scope: "host",
           keywords: "computer use remembered applications project approvals forget",
+        },
+        {
+          id: settingId("computer-use-remembered-desktop-files"),
+          label: "Remembered desktop files",
+          scope: "host",
+          keywords: "disposable desktop send file transfer remembered project approvals forget",
         },
         {
           id: settingId("desktop-spend-cap"),

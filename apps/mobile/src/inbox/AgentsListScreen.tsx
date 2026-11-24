@@ -14,6 +14,7 @@ import {
   MobileInboxFailure,
   type MobileInboxHostFailure,
   type MobileInboxRow,
+  mobileWaitingAskLine,
   searchMobileTranscripts,
   type MobileTranscriptHit,
 } from "@octant/client-runtime";
@@ -479,7 +480,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
               <ListRow
                 accessory="none"
                 detail={`${hostLabel(row.hostId)} · ${modeLabel(row.mode)}${
-                  row.waitingOfferText === undefined ? "" : ` · ${row.waitingOfferText}`
+                  row.waitingAsk === undefined ? "" : ` · ${mobileWaitingAskLine(row.waitingAsk)}`
                 }`}
                 icon={modeIcon(row.mode)}
                 key={`${row.hostId}:${row.mode}:${row.threadId}`}

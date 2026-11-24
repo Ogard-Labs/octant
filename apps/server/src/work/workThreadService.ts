@@ -275,6 +275,8 @@ export interface WorkThreadServiceDependencies {
   readonly serverProjects?: ServerWorkProjectThreads;
   /** Reads the thread's latest finished receipt so Done attaches fresh proof. */
   readonly readLatestFinishedReceipt?: (threadId: string) => ThreadFinishedReceipt | undefined;
+  /** The person's Settings choice to put a thread away once it is marked Done; absent is off. */
+  readonly putAwayWhenDone?: () => boolean;
 }
 
 /**
@@ -339,10 +341,12 @@ export class WorkThreadService {
   readonly #readLatestFinishedReceipt:
     | ((threadId: string) => ThreadFinishedReceipt | undefined)
     | undefined;
+  readonly #putAwayWhenDone: () => boolean;
 
   constructor(dependencies: WorkThreadServiceDependencies) {
     this.#moveHold = dependencies.moveHold;
     this.#readLatestFinishedReceipt = dependencies.readLatestFinishedReceipt;
+    this.#putAwayWhenDone = dependencies.putAwayWhenDone ?? (() => false);
     this.#persistence = dependencies.persistence;
     this.#projects = dependencies.projects;
     this.#projection = dependencies.projection;
@@ -1116,8 +1120,17 @@ export class WorkThreadService {
         const completionReceiptId = selectCompletionReceiptId(
           this.#readLatestFinishedReceipt?.(String(current.id)),
         );
+        // Marking Done also puts the thread away when Settings says so, unless
+        // a turn still runs or waits on the person: the mark stands either way.
+        const markedAt = decodeTimestamp(this.#clock());
+        const putAway =
+          this.#putAwayWhenDone() &&
+          decideCompleteThread({
+            lifecycle: current.lifecycle,
+            ...(await this.#restSignals(current.id)),
+          }).status !== "refused";
         const confirmed = decodeWorkThread({
-          ...current,
+          ...(putAway ? { ...withoutThreadRest(current), completedAt: markedAt } : current),
           completionConfirmed: true,
           ...(command.satisfactionEvidence === undefined
             ? {}
@@ -1129,7 +1142,7 @@ export class WorkThreadService {
               }),
           ...(completionReceiptId === undefined ? {} : { completionReceiptId }),
           version: command.expectedVersion + 1,
-          updatedAt: decodeTimestamp(this.#clock()),
+          updatedAt: markedAt,
         });
         this.#append(
           current.id,

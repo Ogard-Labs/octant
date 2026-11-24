@@ -667,9 +667,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
 
       // A drag on a diagram, a person's change to a plan task, and a person's
       // one-click deck proposal are all board revisions: the same
-      // authorization, the same answer shape. None is admitted for a paired
-      // device (the remote classifier names none of them), so each is the
-      // host window's own act.
+      // authorization, the same answer shape. A window or a device the host's
+      // own person paired may make each; a hub-introduced or restricted device
+      // is refused by the person context below.
       if (
         (route === "layout-revise" ||
           route === "plan-revise" ||

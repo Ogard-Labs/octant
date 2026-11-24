@@ -1,4 +1,8 @@
 import {
+  createDesktopPaneClient,
+  type DesktopPaneClient,
+} from "@octant/client-runtime/desktop-pane-client";
+import {
   createConversationInputClient,
   type ConversationInputClient,
 } from "@octant/client-runtime/conversation-input-client";
@@ -90,6 +94,7 @@ export interface RemoteProductClients {
   readonly imageResults?: ThreadImageResults;
   readonly chat: ChatClient;
   readonly canvas: CanvasClient;
+  readonly desktop?: DesktopPaneClient;
   readonly code: CodeClient;
   readonly project: ProjectClient;
   /** The host's folders, for a new Project there; the host admits only its own person. */
@@ -257,6 +262,7 @@ export function createRemoteProductClients(
         pageOrigin: globalThis.location.origin,
       }),
     }),
+    desktop: createDesktopPaneClient(port),
     project: createProjectClient(port),
     folderBrowse: createFolderBrowseClient(port),
     provider: createProviderClient(port),
