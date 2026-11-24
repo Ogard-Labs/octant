@@ -10,6 +10,7 @@ import type {
   ImageGenerationProfileView,
   ImageGenerationScopeId,
 } from "@octant/contracts";
+import { decodeVideoGenerateOffer } from "@octant/contracts";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -182,6 +183,58 @@ describe("ServiceOfferPrompt", () => {
       rememberForThread: false,
     });
   });
+  it("shows a video offer's price and submits the chosen options on Generate", async () => {
+    const user = userEvent.setup();
+    const videoOffer = decodeVideoGenerateOffer({
+      offerId,
+      kind: "video-generate",
+      threadKind: "code-thread",
+      scopeId,
+      prompt: "A paper boat drifting across a pond",
+      images: [],
+      profileInstanceId: openAi,
+      profileName: "Gemini Video",
+      providerName: "Google",
+      model: {
+        modelId: "gemini-omni-1.2-flash",
+        displayName: "Gemini Omni Flash",
+        durations: { kind: "range", min: 3, max: 15 },
+        resolutions: ["720p", "1080p"],
+        aspectRatios: [{ ratio: "16:9" }],
+        audio: "always",
+        inputs: { firstFrame: true, lastFrame: false, maxReferenceImages: 2 },
+        price: {
+          kind: "per-token",
+          outputTokensPerSecond: [
+            { resolution: "720p", tokens: 5792 },
+            { resolution: "1080p", tokens: 11_584 },
+          ],
+          outputUsdMicrosPerMillionTokens: 12_000_000,
+        },
+        job: { cancel: "running", removal: { kind: "delete" }, resumeWindowHours: 24 },
+      },
+      options: { durationSeconds: 8, resolution: "720p", aspectRatio: "16:9", audio: true },
+      canRemember: true,
+      requestedAt: "2026-11-07T10:00:00.000Z",
+    });
+    const fake = client([videoOffer]);
+    renderPrompt(fake);
+    const card = await screen.findByRole("article", { name: "Video generation request" });
+    expect(card).toHaveTextContent("Make this video clip?");
+    expect(card).toHaveTextContent("About $0.56 for 8 s at 720p, billed by Google.");
+    await user.click(screen.getByRole("combobox", { name: "Resolution" }));
+    await user.click(await screen.findByRole("option", { name: "1080p" }));
+    expect(card).toHaveTextContent("About $1.11 for 8 s at 1080p, billed by Google.");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    expect(fake.decide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        offerId,
+        decision: "video-generate",
+        options: { durationSeconds: 8, resolution: "1080p", aspectRatio: "16:9", audio: true },
+      }),
+    );
+  });
+
   it("asks whether to generate the agent's picture with an image model, the suggested model chosen", async () => {
     renderPrompt(client([offer()]));
     const card = await screen.findByRole("article", { name: "Image generation request" });

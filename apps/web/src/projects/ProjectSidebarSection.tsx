@@ -154,6 +154,7 @@ import {
 import { useMinuteClock } from "./minuteClock";
 import { SidebarThreadRowContent, sidebarThreadRowLabel } from "./SidebarThreadRowContent";
 import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
+import { morePullRequestsThanTheFirst } from "./threadRowPullRequests";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import {
@@ -1654,6 +1655,7 @@ function ActivityThreadButton(props: {
   const parentTitle = lineageParentTitle(props.thread, props.lineageThreads);
   const selected = props.activeThreadId === props.thread.navigationId;
   const pullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
+  const morePullRequests = morePullRequestsThanTheFirst(props.thread.pullRequests);
   const checkout = shows.branch ? props.thread.checkoutChip : undefined;
   // As in the Project tree, a rested row keeps its wake time even when Last
   // updated is hidden.
@@ -1677,7 +1679,7 @@ function ActivityThreadButton(props: {
         title: props.thread.title,
         ...(shows.project ? { projectName: props.thread.projectName } : {}),
         ...(checkout === undefined ? {} : { branch: checkout.label }),
-        ...(pullRequest === undefined ? {} : { pullRequest }),
+        ...(pullRequest === undefined ? {} : { pullRequest, morePullRequests }),
         ...(rowState.label === undefined ? {} : { state: rowState.label }),
         ...(age === undefined ? {} : { age: age.label }),
       })}
@@ -1725,7 +1727,7 @@ function ActivityThreadButton(props: {
           ? { projectId: String(props.thread.projectId) }
           : {})}
         {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
-        {...(pullRequest === undefined ? {} : { pullRequest })}
+        {...(pullRequest === undefined ? {} : { pullRequest, morePullRequests })}
         {...(rowState.state === undefined ? {} : { state: rowState.state })}
         threadId={props.thread.threadId}
         unread={rowState.unread}

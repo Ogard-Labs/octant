@@ -253,9 +253,9 @@ describe("ProjectOverview", () => {
     ).toBeChecked();
   });
 
-  it("names the image model a Project's agents use without asking, and lets the person have them ask again", async () => {
+  it("lets the person restore video confirmation separately from image confirmation", async () => {
     const user = userEvent.setup();
-    const onImageGenerationAskAgain = vi.fn(async () => true);
+    const onGenerationAskAgain = vi.fn(async () => true);
     const chatProject = {
       id: "20000000-0000-4000-8000-000000000004",
       name: "Reading list",
@@ -270,7 +270,7 @@ describe("ProjectOverview", () => {
     const overview = (project: ProjectSummary) => (
       <ProjectOverview
         onArchive={vi.fn()}
-        onImageGenerationAskAgain={onImageGenerationAskAgain}
+        onGenerationAskAgain={onGenerationAskAgain}
         onRelink={vi.fn()}
         onRename={vi.fn()}
         project={project}
@@ -279,18 +279,33 @@ describe("ProjectOverview", () => {
     const { rerender } = render(overview(chatProject));
     expect(screen.queryByRole("button", { name: "Ask again" })).not.toBeInTheDocument();
 
+    const withImage = {
+      ...chatProject,
+      imageGenerationChoice: {
+        profileInstanceId: "20000000-0000-4000-8000-0000000000a1",
+        modelId: "gpt-image-2",
+      },
+    } as ProjectSummary;
     rerender(
       overview({
-        ...chatProject,
-        imageGenerationChoice: {
-          profileInstanceId: "20000000-0000-4000-8000-0000000000a1",
-          modelId: "gpt-image-2",
+        ...withImage,
+        videoGenerationChoice: {
+          profileInstanceId: "20000000-0000-4000-8000-0000000000a2",
+          modelId: "gemini-omni-1.2-flash",
         },
       } as ProjectSummary),
     );
     expect(screen.getByText(/generate images with gpt-image-2 without asking/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Ask again" }));
-    expect(onImageGenerationAskAgain).toHaveBeenCalledWith(chatProject.id);
+    const video = screen.getByRole("region", { name: "Video generation" });
+    expect(video).toHaveTextContent("gemini-omni-1.2-flash");
+    await user.click(within(video).getByRole("button", { name: "Ask again" }));
+    expect(onGenerationAskAgain).toHaveBeenCalledExactlyOnceWith(chatProject.id, "video");
+
+    rerender(overview(withImage));
+    expect(screen.queryByRole("region", { name: "Video generation" })).not.toBeInTheDocument();
+    const image = screen.getByRole("region", { name: "Image generation" });
+    await user.click(within(image).getByRole("button", { name: "Ask again" }));
+    expect(onGenerationAskAgain).toHaveBeenLastCalledWith(chatProject.id, "image");
   });
 
   it("keeps a Work Project's actions hidden until its Developer tools switch is turned on", async () => {
