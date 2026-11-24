@@ -1540,6 +1540,7 @@ export function startOctantServer(
       workResearchProjection,
       workResearchRoutes,
     } = wireWorkFiles({
+      isPairedDeviceSessionCurrent,
       speechGates,
       credentialResolver,
       serviceOffers,

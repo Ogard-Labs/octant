@@ -1,7 +1,11 @@
-import { decodeVideoJob, type VideoJob } from "@octant/contracts";
+import { decodeVideoJob, decodeWindowId, type VideoJob } from "@octant/contracts";
+import { decodeStableHostId, DeviceId, RemoteSessionId } from "@octant/contracts/remote-access";
+import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { createRemoteDevicePrincipal } from "../clientPrincipal";
+import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
-import { createVideoRouteHandler, parseRange } from "./videoRoutes";
+import { createVideoRouteHandler, parseRange, type VideoRouteDependencies } from "./videoRoutes";
 
 const nowMs = Date.parse("2026-11-22T12:00:00.000Z");
 const windowId = "70000000-0000-4000-8000-000000000001";
@@ -37,25 +41,32 @@ const job: VideoJob = decodeVideoJob({
   updatedAt: "2026-11-22T12:00:00.000Z",
 });
 
-function setup() {
+function setup(
+  isPairedDeviceSessionCurrent: VideoRouteDependencies["isPairedDeviceSessionCurrent"] = () =>
+    false,
+  clipJob = job,
+) {
   let canOpen = true;
   const windowAuthorityStore = new WindowAuthorityStore();
   windowAuthorityStore.register({ windowId: windowId as never, capability, now: nowMs });
   const stop = vi.fn();
+  const readClipRange = vi.fn<VideoRouteDependencies["jobs"]["readClipRange"]>(
+    async (_job, range) => {
+      const end = Math.min(range.end, clip.byteLength - 1);
+      return {
+        bytes: clip.slice(range.start, end + 1),
+        start: range.start,
+        end,
+        size: clip.byteLength,
+      };
+    },
+  );
   const handler = createVideoRouteHandler({
     jobs: {
-      getById: (id) => (String(id) === jobId ? job : undefined),
-      listByScope: () => [job],
+      getById: (id) => (String(id) === jobId ? clipJob : undefined),
+      listByScope: () => [clipJob],
       stop,
-      readClipRange: async (_job, range) => {
-        const end = Math.min(range.end, clip.byteLength - 1);
-        return {
-          bytes: clip.slice(range.start, end + 1),
-          start: range.start,
-          end,
-          size: clip.byteLength,
-        };
-      },
+      readClipRange,
       streamClip: async () => ({
         body: new ReadableStream<Uint8Array>({
           start(controller) {
@@ -67,10 +78,11 @@ function setup() {
       }),
     },
     authorizeScope: async () => canOpen,
+    isPairedDeviceSessionCurrent,
     windowAuthorityStore,
     now: () => nowMs,
   });
-  return { handler, stop, loseThread: () => (canOpen = false) };
+  return { handler, stop, readClipRange, loseThread: () => (canOpen = false) };
 }
 
 function request(
@@ -142,6 +154,52 @@ describe("video routes", () => {
     const url = await ticketUrl(handler);
     handler.revokeWindow(windowId as never);
     expect((await handler(new Request(`http://127.0.0.1:3100${url}`)))?.status).toBe(404);
+  });
+
+  it("drops a paired Chat clip ticket when its issuing session is no longer current", async () => {
+    let current = true;
+    const isPairedDeviceSessionCurrent = vi.fn(() => current);
+    const { handler, readClipRange } = setup(isPairedDeviceSessionCurrent, {
+      ...job,
+      threadKind: "chat-thread",
+    });
+    const principal = createRemoteDevicePrincipal({
+      hostId: decodeStableHostId("70000000-0000-4000-8000-000000000011"),
+      deviceId: Schema.decodeUnknownSync(DeviceId)("70000000-0000-4000-8000-000000000012"),
+      sessionId: Schema.decodeUnknownSync(RemoteSessionId)("70000000-0000-4000-8000-000000000013"),
+      origin: "https://host.example.test",
+      capabilityDigest: "c".repeat(64),
+      credentialGeneration: 2,
+      protocolVersion: 1,
+      admittedBy: "host-person",
+    });
+    const sessionNow = () => nowMs + 20;
+    const issue = new Request("http://127.0.0.1:3100/api/video/clip", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jobId }),
+    });
+    bindPrincipalRouteContext(issue, {
+      principal,
+      scopeId: decodeWindowId(String(principal.deviceId)),
+      sessionNow,
+    });
+    const issued = await handler(issue);
+    expect(issued?.status).toBe(200);
+    if (issued === undefined) throw new Error("The video routes did not answer.");
+    const { url } = (await issued.json()) as { url: string };
+    const range = () =>
+      new Request(`http://127.0.0.1:3100${url}`, { headers: { range: "bytes=0-9" } });
+    expect((await handler(range()))?.status).toBe(206);
+
+    current = false;
+    const revoked = await handler(range());
+    expect(revoked?.status).toBe(404);
+    expect(revoked?.headers.get("content-type")).not.toBe("video/mp4");
+    expect(isPairedDeviceSessionCurrent).toHaveBeenLastCalledWith(principal, sessionNow);
+    expect(readClipRange).toHaveBeenCalledOnce();
+    current = true;
+    expect((await handler(range()))?.status).toBe(404);
   });
 
   it("stops a job the window can open", async () => {

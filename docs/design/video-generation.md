@@ -351,9 +351,10 @@ which the person sets, like any turn.
   device's authority over the thread on every request, as image routes do.
 - A `<video>` element cannot send the window's credential, so the window asks
   for a ten-minute ticket for one clip and plays from its address, asking for a
-  new one before it runs out. Every ranged request on a ticket checks the
-  issuing window's or device's authority over the thread again, and a revoked
-  window's tickets are dropped. A ticket grants only that clip.
+  new one before it runs out. Each clip request rechecks the issuer's access
+  to its thread. Window revocation drops its tickets. A paired device's ticket
+  requires the original session and credential generation to remain current.
+  A ticket grants only that clip.
 - A running job shows its state in the thread with Stop; a failed or stopped
   one says why. Deleting a thread stops its jobs and removes its clips.
 - A paired browser or phone can watch and download clips from threads it can

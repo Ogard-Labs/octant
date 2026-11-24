@@ -63,7 +63,11 @@ import { createServerWorkFileListing } from "../serverProjects/serverWorkFiles";
 export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     AuthorityWiring,
-    "onWindowRevoked" | "serviceOffers" | "speechGates" | "windowAuthorityStore"
+    | "isPairedDeviceSessionCurrent"
+    | "onWindowRevoked"
+    | "serviceOffers"
+    | "speechGates"
+    | "windowAuthorityStore"
   > &
   Pick<
     WorkspaceWiring,
@@ -87,6 +91,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     serviceOffers,
     imageJobService,
     videoJobService,
+    isPairedDeviceSessionCurrent,
     onWindowRevoked,
     keptImageChoices,
     keptVideoChoices,
@@ -221,6 +226,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     jobs: videoJobService,
     authorizeScope: (windowId, threadKind, scopeId, principal) =>
       windowCanOpenThread(windowId, threadKind, String(scopeId), principal),
+    isPairedDeviceSessionCurrent,
     windowAuthorityStore,
   });
   onWindowRevoked((windowId) => videoRoutes.revokeWindow(windowId));

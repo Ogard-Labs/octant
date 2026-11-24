@@ -31,6 +31,7 @@ interface ClipTicket {
   readonly jobId: VideoJobId;
   readonly windowId: WindowId;
   readonly principal: ClientPrincipal;
+  readonly sessionNow?: () => number;
   readonly expiresAt: number;
 }
 
@@ -51,6 +52,10 @@ export interface VideoRouteDependencies {
     scopeId: ImageGenerationScopeId,
     principal?: ClientPrincipal,
   ) => Promise<boolean>;
+  readonly isPairedDeviceSessionCurrent: (
+    principal: Extract<ClientPrincipal, { kind: "remote-device" }>,
+    sessionNow?: () => number,
+  ) => boolean;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
 }
@@ -59,8 +64,7 @@ export interface VideoRouteDependencies {
  * A thread's video jobs, Stop, and its clips. Window authority first, then the
  * thread each job belongs to. Clips are served on a short-lived ticket because
  * a `<video>` element cannot send the window's credential; each ranged request
- * on a ticket checks the issuing window's authority over the thread again, so
- * a window that loses the thread loses the clip at its next request.
+ * on a ticket checks the issuer's current session and thread authority.
  */
 export function createVideoRouteHandler(dependencies: VideoRouteDependencies): VideoRouteHandler {
   const now = dependencies.now ?? Date.now;
@@ -105,6 +109,13 @@ export function createVideoRouteHandler(dependencies: VideoRouteDependencies): V
       return failure("This clip address has expired.", 404, origin);
     }
     const job = await authorizedJob(ticket.jobId, ticket.windowId, ticket.principal);
+    if (
+      ticket.principal.kind === "remote-device" &&
+      !dependencies.isPairedDeviceSessionCurrent(ticket.principal, ticket.sessionNow)
+    ) {
+      tickets.delete(key);
+      return failure("This clip address has expired.", 404, origin);
+    }
     if (job === undefined || job.clip === undefined) {
       return failure("The clip is unavailable.", 404, origin);
     }
@@ -245,7 +256,13 @@ export function createVideoRouteHandler(dependencies: VideoRouteDependencies): V
         sweep();
         const key = randomBytes(32).toString("base64url");
         const expiresAt = now() + VIDEO_CLIP_TICKET_TTL_MS;
-        tickets.set(key, { jobId: job.id, windowId, principal, expiresAt });
+        tickets.set(key, {
+          jobId: job.id,
+          windowId,
+          principal,
+          expiresAt,
+          ...(context.sessionNow === undefined ? {} : { sessionNow: context.sessionNow }),
+        });
         return json(
           decodeVideoClipTicketResponse({
             url: `${PREFIX}clip?ticket=${key}`,
