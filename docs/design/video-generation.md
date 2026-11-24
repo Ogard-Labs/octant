@@ -283,8 +283,9 @@ which the person sets, like any turn.
 - **Settle.** When the job ends, the reservation settles to the cost the
   driver computes from the usage the provider reports (Gemini's token count),
   or to the estimate when the provider reports none.
-  - A job that fails before any output is billed nothing and releases its
-    reservation.
+  - A confirmed failure before output releases its reservation when there
+    is no charged usage. An unconfirmed start follows the interruption
+    rule below.
   - A cancelled job settles at the reported usage, or at the estimate when
     none is reported, because a provider may bill a job it had already
     started.
