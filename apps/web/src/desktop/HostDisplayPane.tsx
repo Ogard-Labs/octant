@@ -128,7 +128,7 @@ export function HostDisplayPane({
     if (!view || !geometry || !controlling.current) return;
     queue.current = queue.current
       .then(async () => {
-        if (active.current !== view || !controlling.current) return;
+        if (active.current !== view) return;
         const answer = await client.request({
           kind: "host-display",
           action: "input",

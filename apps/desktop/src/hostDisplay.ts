@@ -149,6 +149,10 @@ export function createHostDisplay(options: {
     if (!input && current.reading) return { status: "no-frame" };
     if (input) current.input = true;
     else current.reading = true;
+    const disconnected = () => {
+      if (view === current) close();
+    };
+    signal?.addEventListener("abort", disconnected, { once: true });
     try {
       const result = await options.native(
         command.action === "input" ? command : { action: "frame" },
@@ -161,6 +165,7 @@ export function createHostDisplay(options: {
       }
       return result;
     } finally {
+      signal?.removeEventListener("abort", disconnected);
       if (input) current.input = false;
       else current.reading = false;
     }

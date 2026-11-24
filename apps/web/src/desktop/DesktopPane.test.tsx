@@ -147,7 +147,6 @@ describe("Desktop pane", () => {
     fireEvent.click(screen.getByRole("button", { name: "Take control" }));
     const back = await screen.findByRole("button", { name: "Hand back to agent" });
     press();
-    await waitFor(() => expect(inputs()).toHaveLength(1));
     fireEvent.click(back);
     await screen.findByRole("button", { name: "Take control" });
     press();

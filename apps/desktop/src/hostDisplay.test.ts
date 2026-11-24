@@ -2,6 +2,33 @@ import { describe, expect, it, vi } from "vitest";
 import { createHostDisplay } from "./hostDisplay";
 
 describe("personal control of the Mac display", () => {
+  it("discards an in-flight frame and ends agent access when the transport disconnects", async () => {
+    const frame = Promise.withResolvers<{ status: "host-frame"; jpeg: string; geometry: string }>();
+    const display = createHostDisplay({
+      available: () => true,
+      drainAgentInput: async () => {},
+      native: () => frame.promise,
+    });
+    const paired = { deviceId: crypto.randomUUID(), sessionId: crypto.randomUUID(), generation: 1 };
+    const base = { kind: "host-display", threadId: crypto.randomUUID() } as const;
+    try {
+      const opened = await display.request(paired, { ...base, action: "open" });
+      if (opened.status !== "viewing") throw new Error("expected a view");
+      const agent = display.agentLifetime(paired.deviceId, base.threadId);
+      const transport = new AbortController();
+      const pending = display.request(
+        paired,
+        { ...base, action: "frame", viewId: opened.viewId },
+        transport.signal,
+      );
+      transport.abort();
+      expect(agent?.aborted).toBe(true);
+      frame.resolve({ status: "host-frame", jpeg: "private", geometry: "main" });
+      expect(await pending).toMatchObject({ status: "refused" });
+    } finally {
+      display.close();
+    }
+  });
   it("binds frames and input to the device session and thread, and drains queued agent input before handoff", async () => {
     const native = vi.fn(async () => ({ status: "delivered" }) as const);
     const { resolve: finish, promise: draining } = Promise.withResolvers<void>();

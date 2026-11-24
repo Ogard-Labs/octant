@@ -128,6 +128,8 @@ const DESKTOP_LEASE_SWEEP_INTERVAL_MS = 30_000;
 export type ComputerUseDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     AuthorityWiring,
+    | "isPairedDeviceScope"
+    | "isRestrictedDeviceScope"
     | "machineChangeFeed"
     | "onWindowRevoked"
     | "processAuthorityNow"
@@ -423,9 +425,8 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
       : createComputerUseToolService({
           asksFromPairedWindow: (owner) =>
             owner.mode === "code" &&
-            !windowAuthorityStore
-              .listWindowIds()
-              .some((id) => String(id) === String(owner.windowId)),
+            deps.isPairedDeviceScope(owner.windowId) &&
+            !deps.isRestrictedDeviceScope(owner.windowId),
           ...(computerUseDesktop === undefined ? {} : { desktop: computerUseDesktop }),
           ...(!leasingOffered
             ? {}
