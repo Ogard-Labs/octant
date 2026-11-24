@@ -160,7 +160,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("put-away-when-done"),
           label: "Put away threads when they're done",
           scope: "host",
-          keywords: "finished merged pull request settle automatically mark shelf",
+          keywords: "finished merged pull request settle automatically mark shelf sidebar hide",
         },
         {
           id: settingId("completed-thread-archive"),

@@ -451,14 +451,12 @@ The renderer's first load has a byte budget, recorded in
 `scripts/initial-renderer-budget.json` and enforced by `bun run renderer:check`
 in CI. The budget counts the static graph Vite loads for `index.html`: the main
 entry is at most 1,618,546 B (1,581 KiB), the initial CSS at most 665,705 B
-(650 KiB), and the initial JavaScript and CSS at most 1,213,875 B after gzip
+(650 KiB), and the initial JavaScript and CSS at most 1,213,872 B after gzip
 level 6. A change that grows any measure past its budget fails. A change that
 shrinks one lowers the recorded budget. Raising a budget is a maintainer
 decision; the editable composer prompt that holds inline `@model` chips raised
 it once (maintainer decision, 2026-11-23), its picker and chip loading on first
-use, and the **Put away threads when they're done** setting raised the gzip
-budget by 3 B for its label, schema field and default, which the window needs
-at startup (maintainer decision, 2026-11-24). The budgets are exact bytes with no headroom, because the same
+use. The budgets are exact bytes with no headroom, because the same
 source measures identically on macOS and Linux with Bun 1.4.4.
 
 The window build marks every `Schema` call pure and treats every workspace
