@@ -3267,7 +3267,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             ...[
               settledThreadNotice({
                 settledAt: view?.thread.completedAt,
-                onUnsettle: () => void props.controller.reopenThread(props.threadId),
+                onUnsettle: readOnly
+                  ? undefined
+                  : () => void props.controller.reopenThread(props.threadId),
               }),
             ].filter((notice) => notice !== undefined),
             ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),

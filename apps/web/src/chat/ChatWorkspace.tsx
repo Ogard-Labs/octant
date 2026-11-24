@@ -1667,7 +1667,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             notices={[
               settledThreadNotice({
                 settledAt: thread.completedAt,
-                onUnsettle: () => void props.controller.reopenThread(thread.id),
+                onUnsettle: readOnly
+                  ? undefined
+                  : () => void props.controller.reopenThread(thread.id),
               }),
               sideChatNotice,
             ].filter((notice) => notice !== undefined)}

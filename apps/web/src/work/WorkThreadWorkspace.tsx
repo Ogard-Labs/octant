@@ -3774,7 +3774,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   settledThreadNotice({
                     settledAt: thread?.completedAt,
                     busy: completing,
-                    onUnsettle: () => void reopenCompleted(),
+                    onUnsettle: readOnly ? undefined : () => void reopenCompleted(),
                   }),
                 ].filter((notice) => notice !== undefined)),
             // A locked task is a fact the person acts on: it stays until
