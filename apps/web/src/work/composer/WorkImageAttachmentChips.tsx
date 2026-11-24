@@ -29,10 +29,7 @@ export function WorkImageAttachmentChips(props: {
   return (
     <div className="composer-chips work-composer-adapter__attachments" aria-label="Attached files">
       {images.staged.map((attachment) => (
-        <span
-          className="chip composer-file-chip work-composer-adapter__attachment"
-          key={attachment.id}
-        >
+        <span className="chip min-w-0 work-composer-adapter__attachment" key={attachment.id}>
           {attachment.previewUrl === "" ? (
             // A file that is not a picture has nothing to preview: its glyph
             // and name stand in the chip, and only pictures open the viewer.
@@ -62,7 +59,7 @@ export function WorkImageAttachmentChips(props: {
           )}
           <OctantButton
             aria-label={`Remove ${attachment.displayName}`}
-            className="chip-x window-no-drag"
+            className="chip-x shrink-0 window-no-drag"
             onClick={() => images.remove(attachment.id)}
             type="button"
             variant="bare"

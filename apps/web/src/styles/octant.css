@@ -5653,18 +5653,6 @@ html[data-octant-reduced-motion="true"] .callout {
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
 }
-.composer-file-chip {
-  min-width: 0;
-}
-.composer-file-chip__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.composer-file-chip__icon,
-.composer-file-chip .chip-x {
-  flex-shrink: 0;
-}
 /* 14px of paint so the chip stays chip-sized, 24px of target so it can
    be hit — growing the button itself would grow every chip with it */
 .chip .chip-x {

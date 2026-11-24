@@ -549,15 +549,15 @@ export function ChatComposer(props: ChatComposerProps) {
           {(props.pendingAttachments ?? []).map((attachmentSelection) => (
             <li
               key={String(attachmentSelection.id)}
-              className="chip chat-composer__selection composer-file-chip"
+              className="chip chat-composer__selection min-w-0"
             >
               <ComposerAttachmentIcon name={attachmentSelection.displayName} />
-              <span className="composer-file-chip__name">{attachmentSelection.displayName}</span>
+              <span className="truncate">{attachmentSelection.displayName}</span>
               {props.onRemoveAttachment === undefined ? null : (
                 <OctantButton
                   aria-label={`Remove ${attachmentSelection.displayName} attachment`}
                   disabled={props.attachmentRemovalDisabled}
-                  className="chip-x window-no-drag"
+                  className="chip-x shrink-0 window-no-drag"
                   onClick={() => props.onRemoveAttachment?.(attachmentSelection.id)}
                   type="button"
                   variant="bare"

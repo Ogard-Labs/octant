@@ -2958,7 +2958,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 <div className="code-thread-workspace__attachments" aria-label="Attached files">
                   {attachments.staged.map(({ previewUrl, reference }) => (
                     <span
-                      className="chip composer-file-chip code-thread-workspace__attachment"
+                      className="chip min-w-0 code-thread-workspace__attachment"
                       key={reference.attachmentId}
                     >
                       {previewUrl === "" ? (
@@ -2975,7 +2975,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       </span>
                       <OctantButton
                         aria-label={`Remove ${reference.displayName}`}
-                        className="chip-x window-no-drag"
+                        className="chip-x shrink-0 window-no-drag"
                         disabled={queuePreparing || messageQueue.busy || messageQueue.uncertain}
                         onClick={() => attachments.remove(reference.attachmentId)}
                         type="button"

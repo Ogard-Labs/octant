@@ -301,12 +301,12 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                       {stagedFiles.map((file, index) => {
                         const name = pastedImageName(file);
                         return (
-                          <li className="chip composer-file-chip" key={`${file.name}-${index}`}>
+                          <li className="chip min-w-0" key={`${file.name}-${index}`}>
                             <ComposerAttachmentIcon name={name} />
-                            <span className="composer-file-chip__name">{name}</span>
+                            <span className="truncate">{name}</span>
                             <OctantButton
                               aria-label={`Remove ${name} attachment`}
-                              className="chip-x window-no-drag"
+                              className="chip-x shrink-0 window-no-drag"
                               onClick={() =>
                                 setStagedFiles((current) =>
                                   current.filter((staged) => staged !== file),
