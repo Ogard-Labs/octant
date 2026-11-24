@@ -859,17 +859,23 @@ describe("pull request readers use the single forge identity owner", () => {
       const board = (await pullRequestService.boardSnapshot(windowId)).rows
         .flatMap((row) => row.linkedThreads)
         .map((thread) => String(thread.threadId));
+      const authorized = async () =>
+        expect(
+          await pullRequestService.authorizePullRequest(
+            windowId,
+            decodeCodeProjectPullRequestSwitchTarget(target),
+          ),
+        ).toMatchObject({ status: "authorized", linkedThreadIds: board });
+      // The switches answer alone, and again once a detail refresh has
+      // recorded the link it observed.
+      await authorized();
       const detail = await pullRequestService.refreshDetail(
         windowId,
         decodeCodeProjectPullRequestDetailRefreshCommand(target),
         signal,
       );
-      const authorized = await pullRequestService.authorizePullRequest(
-        windowId,
-        decodeCodeProjectPullRequestSwitchTarget(target),
-      );
       expect(detail.linkedThreads.map((thread) => String(thread.threadId))).toEqual(board);
-      expect(authorized).toMatchObject({ status: "authorized", linkedThreadIds: board });
+      await authorized();
       return board;
     };
     const unlink = (repository: string) =>
