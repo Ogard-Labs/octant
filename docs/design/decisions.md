@@ -43,7 +43,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 5         | 3       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
-| [Providers](#providers)                                                               | 10        | 8       | 2            | 0                   |
+| [Providers](#providers)                                                               | 11        | 8       | 3            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 10        | 8       | 2            | 0                   |
 | [Native harness](#native-harness)                                                     | 7         | 5       | 2            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **295**   | **178** | **113**      | **4**               |
+| **All areas**                                                                         | **296**   | **178** | **114**      | **4**               |
 
 ## Principles and hard lines
 
@@ -1664,6 +1664,20 @@ Image generation is a journaled job with exactly one profile, and voice is an ap
 - In attended Work and Code outside Plan, an agent may turn text (up to 4,096 characters, as MP3, WAV or Opus) into a new confined audio file in the turn's folder (the Work folder or the Code thread's checkout, including a linked worktree) using the configured Voice synthesis endpoint and voice after a shared offer that also covers the file write. Remembering applies only to the same thread, endpoint, model and voice in host memory and skips the card only at Accept edits and Full access (Ask first and Work Auto still ask). Agent narration leaves a slot for local read-aloud. [Architecture: Providers](../architecture.md#providers)
 
 Status: Partly built. Since: —; agent images in every mode 2026-11-07. Detail: [Architecture: Providers](../architecture.md#providers).
+
+### Video generation
+
+Short video clips run as a journaled job through provider-neutral video driver plugins on the person's own provider keys, following the image rule for asking, with the price on the card (maintainer decision, 2026-11-22: the design and the three first-party drivers).
+
+- Video works like image generation: drivers plug into a `videoGeneration` seam in `@octant/provider-sdk` through the plugin-host activation ladder, and more than one provider is supported. Each model declares its durations, resolutions, aspect ratios, audio, inputs, price basis, cancel, removal and resume window, and the host builds the card, price, limits, spend, storage, recovery and viewing from those facts the same way for every provider.
+- First-party drivers (maintainer decision, 2026-11-22): Google Gemini API (Gemini Omni Flash), Runway and fal; Replicate, MiniMax, xAI, Kling, Seedance, Wan, Luma, Pika and Vertex Veo are left to plugins. OpenAI's Videos API, Stability's video API and Bedrock Nova Reel are shut down.
+- A provider runtime's own native media output shows in the thread with no Octant gate, as in comparable agent workspaces; no runtime they drive makes video natively today.
+- The card shows the estimate from the model's declared price before Generate, and what Stop does when the model cannot cancel, and offers "Don't ask again" as for images; Full access, routines and paired devices behave as they do for images. Plan and Side Chats are never offered the tool.
+- Clips use each model's declared range. The host bounds only a clip's stored size (1 GB), job time (30 minutes) and queued video jobs (16 per host) and shares the image queue; the person's thread and Project spend ceilings apply, settled from the provider's reported usage, else the estimate.
+- Clips are stored beside generated images, exported and deleted with their thread, and the provider's copy is removed as soon as the clip is kept where the driver can; otherwise the card says how long the provider keeps it.
+- After a restart, a running job with a recorded provider id resumes within its declared resume window; one without settles at its estimate as interrupted.
+
+Status: Partly built. Since: 2026-11-22. Built: the video seam in `@octant/provider-sdk/video-generation` with its conformance harness, the declared-capability contract and pricing rules, and the Gemini API driver (Gemini Omni Flash). Not yet built: the host job service, the agent tool and card, the viewer and save, and the Runway and fal drivers. Detail: [Video generation](video-generation.md).
 
 ### Provider reach Octant no longer narrows
 
