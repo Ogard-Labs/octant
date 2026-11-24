@@ -61,6 +61,7 @@ export function providerCommandEntries(
  * `useComposerAtMenu`).
  */
 export function useComposerSlashCommands(input: {
+  readonly threadCommands?: ReadonlyArray<OctantCommand>;
   readonly draft: string;
   readonly onDraftChange: (draft: string, caret?: number) => void;
   readonly textarea?: () => ComposerInputElement | null;
@@ -68,6 +69,7 @@ export function useComposerSlashCommands(input: {
 }) {
   const listId = useId();
   const commands = [
+    ...(input.threadCommands ?? []),
     ...useOctantCommands().filter((command) => command.action.kind === "run"),
     ...providerCommandEntries(input.provider),
   ];

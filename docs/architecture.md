@@ -3938,6 +3938,38 @@ CI or reviewers should be woken, not left polling; maintainer request,
   starts the host records `thread.external-content-ingested@1` on the thread
   (label `pull-request-auto-fix`), so the taint rules apply; when that mark is
   refused, no turn is sent.
+- **Babysit a pull request.** Choosing `/babysit` in a Code thread opens its
+  linked pull requests. The person selects one and starts Auto-fix with a
+  completion rule. From the Pull requests list, a row offers the same controls
+  and a choice of repairing thread when several are linked. Each PR keeps its
+  own rules and stop state, including when several belong to the same thread.
+  Either surface can start a selection with shared conditions. The host applies
+  each start independently and preserves any active owner's rules. The list
+  shows the repairing thread and latest blocker or the completed head.
+  **Needs me** narrows it to watches with a human gate or a handoff. It handles required checks by default, or every reported
+  check if selected (this choice waits for at least one check to report).
+  The person can also require a named GitHub label. A
+  missing approval or label waits for the person. A branch GitHub requires
+  to be up to date receives a follow-up to merge its base. New top-level
+  comments and submitted review notes from owners, members, collaborators, or GitHub bot
+  accounts go to the same thread for triage once per GitHub ID. An open inline thread from
+  another author waits for a person to resolve it. Its comments cannot spend the repair
+  budget. Each started turn carrying review feedback, including an inline review thread,
+  spends one of the **Wakes per pull-request watch** set in Settings for this enrollment,
+  including after restart. When more feedback arrives at the limit, or two consecutive quiet
+  polls after a repair see the same head and the same previously handled failures, the watch
+  stops and requests a human follow-up in **Needs me**. The host stops babysitting when it
+  observes an open, non-draft, mergeable head with passing selected checks, cleared
+  repository gates, no current unresolved review threads and the requested label. It
+  confirms the head after the detail reads and records completion with a thread follow-up
+  naming that head. A thread's open PR follow-up keeps the latest handoff for each
+  repository and PR until acknowledged. The overview shows feedback turns used and the
+  limit, and names a requested reviewer, code owner or required deployment when GitHub
+  supplies the evidence. After a repair or feedback handoff, **Resume** starts a new
+  enrollment with its saved rules. Reopening the watch dialog also restores those rules for
+  editing. The ready follow-up and overview offer a separate **Merge** action that requires
+  the person to confirm the recorded head and method. The host checks the head and merge
+  requirements again.
 - **Auto-fix limits.** A failure is a check name, a review thread id, or the
   base conflict. Each started wake spends one attempt on every failure it
   carried; at most three attempts per failure, or the number in Settings ›
@@ -3955,9 +3987,16 @@ CI or reviewers should be woken, not left polling; maintainer request,
   the pull request's repository (`authority-lost`), or when the person turns
   it off. The host asks the Project check again before every pass, not only
   at the click; a revoked GitHub login or a thread that no longer links to
-  the pull request holds Auto-fix quiet, and after a host restart it stays
-  quiet until a window shows the pull request again, because the connection
-  is a per-window fact. Turning it on again starts a fresh attempt count.
+  the pull request holds Auto-fix quiet. After restart, babysitting resumes on
+  a host pass when a registered local window can authorize the saved Project,
+  repository, PR and repairing thread. The host remembers the recovered scope
+  and stops the watch if it loses project authority. A host-person-paired device
+  can also authorize the watch by opening its controls. Its exact device session
+  must remain current, including on a host with no local window. Polling does
+  not extend the session. The gateway’s guarded clock determines idle and
+  absolute expiry. Expiry or revocation stops the watch.
+  Other Auto-fix sessions wait for a window
+  to reopen the PR review. Turning it on again starts a fresh attempt count.
 - **Watch.** The pull-request tool's `watch` (rules above) binds the
   thread's own open pull request, the one linked to it on the board, to that
   thread; one thread watches a pull request at a time

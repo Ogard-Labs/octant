@@ -158,7 +158,7 @@ const SECTIONS: ReadonlyArray<{ readonly title: string; readonly rows: ReadonlyA
           key: "pullRequestWatchWakeLimit",
           id: "pull-request-watch-wakes",
           label: "Wakes per pull-request watch",
-          description: `A watch on a thread's pull request ends after this many turns it started. Default ${CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES}.`,
+          description: `Limits turns started by a pull-request watch and feedback turns started by a babysitter. Default ${CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES}.`,
           max: MAX_CODE_PROJECT_PULL_REQUEST_WATCH_WAKES_SETTING,
         },
         {

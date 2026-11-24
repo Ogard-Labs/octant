@@ -14,6 +14,7 @@ import {
   ArrowLeft,
   Check,
   GitPullRequest,
+  Eye,
   GitPullRequestDraft,
   Link2,
   ListFilter,
@@ -33,7 +34,12 @@ import {
   writeStoredValue,
 } from "../threadBoard/threadBoardState";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
-import { OctantButton } from "../ui/base/OctantButton";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
+import { RowWatchHandoff } from "./PullRequestHandoff";
+import { BulkBabysitDialog } from "./BulkBabysitDialog";
+import { pullRequestControlsLoadMessage } from "./ProjectPullRequestSupport";
+import { OverviewBabysitDialog, type BabysitClient } from "./PullRequestBabysitDialog";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import {
   OctantMenuCheckboxItem,
@@ -70,6 +76,7 @@ import {
   PULL_REQUEST_STATE_OPTIONS,
   activeFilterCount,
   activeFilterNames,
+  babysitProgress,
   blockingFact,
   filterByRepositories,
   filterPullRequests,
@@ -123,6 +130,7 @@ interface AgentForgeChoices {
 }
 
 export interface CodeProjectPullRequestsProps {
+  readonly babysitClient?: BabysitClient;
   readonly load: (query: CodeProjectPullRequestQuery) => Promise<CodeProjectPullRequestView>;
   readonly refresh: (
     command: CodeProjectPullRequestRefreshCommand,
@@ -183,6 +191,8 @@ type WorkspaceState =
 
 export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   const [workspace, setWorkspace] = useState<WorkspaceState>({ status: "loading" });
+  const [bulkRows, setBulkRows] = useState<ReadonlyArray<CodeProjectPullRequestRow>>();
+  const [watchKey, setWatchKey] = useState<string>();
   const [search, setSearch] = useState("");
   const storage = props.storage ?? defaultBoardStorage();
   const [sort, setSort] = useState<PullRequestSort>(
@@ -213,24 +223,43 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
     loadRef.current = props.load;
   });
 
-  useEffect(() => {
-    let active = true;
-    loadRef.current({ version: 1 }).then(
-      (view) => {
-        if (active) setWorkspace({ status: "ready", view });
-      },
-      () => {
-        if (active) {
-          setWorkspace({ status: "error", message: "The pull-request list could not be read." });
-        }
-      },
-    );
-    return () => {
-      active = false;
-    };
+  const listRevision = useRef(0);
+  const refreshing = useRef(false);
+  const reloadCached = useCallback(async () => {
+    if (refreshing.current) return;
+    const revision = ++listRevision.current;
+    try {
+      const view = await loadRef.current({ version: 1 });
+      if (listRevision.current === revision) setWorkspace({ status: "ready", view });
+    } catch (error) {
+      if (listRevision.current === revision)
+        setWorkspace((previous) =>
+          previous.status === "loading"
+            ? {
+                status: "error",
+                message:
+                  pullRequestControlsLoadMessage(error) ??
+                  "The pull-request list could not be read.",
+              }
+            : previous,
+        );
+    }
   }, []);
+  useEffect(() => {
+    void reloadCached();
+    return () => {
+      listRevision.current++;
+    };
+  }, [reloadCached]);
+  const canReadWatches = props.babysitClient?.queryProjectPullRequestSwitches !== undefined;
+  useEffect(() => {
+    if (canReadWatches) return scheduleVisibleInterval(() => void reloadCached(), 20_000);
+  }, [canReadWatches, reloadCached]);
 
   async function runRefresh(command: CodeProjectPullRequestRefreshCommand): Promise<void> {
+    if (refreshing.current) return;
+    refreshing.current = true;
+    const revision = ++listRevision.current;
     setWorkspace((previous) => {
       const view =
         previous.status === "ready" || previous.status === "refreshing"
@@ -242,17 +271,22 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
     });
     try {
       const view = await props.refresh(command);
+      if (listRevision.current !== revision) return;
       setWorkspace({ status: "ready", view });
-    } catch {
+    } catch (error) {
+      if (listRevision.current !== revision) return;
       setWorkspace((previous) => ({
         status: "error",
-        message: "The pull-request list could not be refreshed.",
+        message:
+          pullRequestControlsLoadMessage(error) ?? "The pull-request list could not be refreshed.",
         ...(previous.status === "ready" || previous.status === "refreshing"
           ? { view: previous.view }
           : previous.status === "error" && previous.view !== undefined
             ? { view: previous.view }
             : {}),
       }));
+    } finally {
+      refreshing.current = false;
     }
   }
 
@@ -326,6 +360,26 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
     filterPullRequests(matchingSearch, filters, props.viewerLogin),
     repositories,
   );
+  const watchRow =
+    watchKey === undefined
+      ? undefined
+      : scopedRows.find((row) => projectPullRequestKey(row) === watchKey);
+  const babysitClient = props.babysitClient;
+  const watchAction =
+    babysitClient?.queryProjectPullRequestSwitches && babysitClient.setProjectPullRequestAutoFix
+      ? (row: CodeProjectPullRequestRow) => (
+          <div>
+            <RowWatchHandoff row={row} client={babysitClient} onUpdated={reloadCached} />
+            <OctantIconButton
+              type="button"
+              label={`Babysit ${row.repositoryOwner}/${row.repositoryName}#${row.number}`}
+              onClick={() => setWatchKey(projectPullRequestKey(row))}
+            >
+              <Eye aria-hidden="true" size={16} />
+            </OctantIconButton>
+          </div>
+        )
+      : undefined;
   const selectedKey = props.renderDetail === undefined ? props.selectedRowKey : pickedKey;
   const selectedRow =
     selectedKey === undefined
@@ -465,7 +519,27 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
           )}
         </div>
       ) : (
-        <div className="surface-toolbar">{searchField}</div>
+        <div className="surface-toolbar">
+          {searchField}
+          {watchAction &&
+            visibleRows.filter(
+              (row) =>
+                row.state !== "closed" && row.state !== "merged" && row.linkedThreads.length > 0,
+            ).length > 1 && (
+              <OctantButton
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setBulkRows(
+                    visibleRows.filter((row) => row.state !== "closed" && row.state !== "merged"),
+                  )
+                }
+              >
+                Babysit multiple…
+              </OctantButton>
+            )}
+        </div>
       )}
       {ready && !dock && scopedRows.length > 0 ? (
         <div aria-label="Narrow by status" className="pr-page__chips" role="group">
@@ -514,6 +588,27 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         </>
       ) : null}
 
+      {bulkRows && props.babysitClient && (
+        <BulkBabysitDialog
+          rows={bulkRows}
+          client={props.babysitClient}
+          onClose={() => {
+            setBulkRows(undefined);
+            void reloadCached();
+          }}
+        />
+      )}
+      {watchRow && props.babysitClient ? (
+        <OverviewBabysitDialog
+          key={watchKey}
+          row={watchRow}
+          client={props.babysitClient}
+          onClose={() => {
+            setWatchKey(undefined);
+            void reloadCached();
+          }}
+        />
+      ) : null}
       {view === undefined ? (
         workspace.status === "error" ? (
           <OctantAlert className="code-project-pull-requests__status" tone="warning">
@@ -674,6 +769,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                     void runRefresh({ kind: "refresh-project", projectId: group.projectId })
                   }
                   onSelectRow={selectRow}
+                  onBabysit={watchAction}
                   project={connectedProjects.find(
                     (project) => String(project.projectId) === String(group.projectId),
                   )}
@@ -703,6 +799,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                     void runRefresh({ kind: "refresh-project", projectId: project.projectId })
                   }
                   onSelectRow={selectRow}
+                  onBabysit={watchAction}
                   project={project}
                   rows={[]}
                   selectedRowKey={selectedKey}
@@ -722,6 +819,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             <>
               <PullRequestRows
                 onSelectRow={selectRow}
+                onBabysit={watchAction}
                 qualifyRepository={qualifyRepository}
                 rows={dock ? visibleRows : visibleRows.slice(0, shown)}
                 selectedRowKey={selectedKey}
@@ -1168,6 +1266,7 @@ function RepositoryGroup(props: {
   readonly onRefresh: () => void;
   readonly emptyCopy?: string;
   readonly selectedRowKey: string | undefined;
+  readonly onBabysit: ((row: CodeProjectPullRequestRow) => ReactNode) | undefined;
   readonly onSelectRow: ((row: CodeProjectPullRequestRow) => void) | undefined;
   readonly backgroundRefresh?: ProjectSetting;
   readonly backgroundRefreshState?: CodeProjectPullRequestBackgroundRefreshState;
@@ -1226,6 +1325,7 @@ function RepositoryGroup(props: {
       ) : (
         <PullRequestRows
           onSelectRow={props.onSelectRow}
+          onBabysit={props.onBabysit}
           qualifyRepository={false}
           rows={props.rows}
           selectedRowKey={props.selectedRowKey}
@@ -1238,6 +1338,7 @@ function RepositoryGroup(props: {
 function PullRequestRows(props: {
   readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
   readonly selectedRowKey: string | undefined;
+  readonly onBabysit: ((row: CodeProjectPullRequestRow) => ReactNode) | undefined;
   readonly onSelectRow: ((row: CodeProjectPullRequestRow) => void) | undefined;
   /** Name the owner too: the list spans repositories and no group head says it. */
   readonly qualifyRepository: boolean;
@@ -1257,7 +1358,7 @@ function PullRequestRows(props: {
       {props.rows.map((row) => {
         const rowKey = projectPullRequestKey(row);
         return (
-          <li key={rowKey}>
+          <li key={rowKey} className={props.onBabysit ? "pr-page__watch-row" : undefined}>
             <PullRequestRow
               onSelect={select}
               qualifyRepository={props.qualifyRepository}
@@ -1265,6 +1366,11 @@ function PullRequestRows(props: {
               rowKey={rowKey}
               selected={props.selectedRowKey === rowKey}
             />
+            {props.onBabysit &&
+              row.state !== "closed" &&
+              row.state !== "merged" &&
+              props.onBabysit(row)}
+            {row.babysit && <p className="pr-page__watch-progress">{babysitProgress(row)}</p>}
           </li>
         );
       })}
