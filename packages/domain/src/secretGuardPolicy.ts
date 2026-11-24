@@ -660,6 +660,22 @@ const SECRET_SHAPES: ReadonlyArray<RegExp> = [
 
 export const SECRET_REDACTION = "[redacted secret]";
 
+/** Below this a value occurs in too much ordinary text to replace. */
+const MINIMUM_HELD_LENGTH = 8;
+/** Shorter than that, only a value no ordinary word or number looks like. */
+const MINIMUM_MIXED_LENGTH = 6;
+
+/**
+ * Whether a value can be replaced wherever it occurs: long enough, or short
+ * and mixed, and not part of the replacement, which every later pass would
+ * grow again.
+ */
+export function isHoldableSecretValue(value: string): boolean {
+  if (SECRET_REDACTION.includes(value.trim())) return false;
+  if (value.length >= MINIMUM_HELD_LENGTH) return true;
+  return value.length >= MINIMUM_MIXED_LENGTH && !/^(?:\p{L}+|\p{N}+)$/u.test(value);
+}
+
 /** Shorter values are too likely to occur in ordinary text to be replaced. */
 const MINIMUM_ISSUED_VALUE_LENGTH = 8;
 

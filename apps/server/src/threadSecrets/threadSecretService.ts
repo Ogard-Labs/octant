@@ -185,6 +185,7 @@ export type ThreadSecretLoan =
 const MAX_PENDING_REQUESTS = 256;
 /** Few enough that no thread's cards can keep another thread's from opening. */
 const MAX_PENDING_PER_THREAD = 2;
+const MAX_ANSWERED_PER_THREAD = 4;
 const MAX_ACTIVE_PER_THREAD = 64;
 /** A handle the agent never uses is not kept past this many newer ones. */
 const MAX_HANDLES_PER_SECRET = 8;
@@ -241,6 +242,11 @@ const refusal = (failure: ThreadSecretFailure): ThreadSecretRequestResult => ({
 export class ThreadSecretService {
   readonly #options: ThreadSecretServiceOptions;
   readonly #pending = new Map<string, PendingRequest>();
+  /** How the turn's last cards ended, so each can say so until its turn does. */
+  readonly #answered: Array<{
+    readonly caller: ThreadSecretCaller;
+    readonly card: ThreadSecretRequestCard;
+  }> = [];
   readonly #active = new Map<string, ActiveSecret>();
   /** Handle to secret id, oldest first. */
   readonly #handles = new Map<string, string>();
@@ -365,15 +371,21 @@ export class ThreadSecretService {
   view(windowId: string, threadId: string): ThreadSecretsView {
     this.sweep();
     return {
-      requests: [...this.#pending.values()]
-        .filter(
-          (pending) => pending.caller.windowId === windowId && pending.caller.threadId === threadId,
-        )
-        .map((pending) => ({
-          ...pending.card,
-          state: pending.state,
-          ...(pending.failure === undefined ? {} : { failure: pending.failure }),
-        })),
+      requests: [
+        ...this.#answered
+          .filter(({ caller }) => caller.windowId === windowId && caller.threadId === threadId)
+          .map(({ card }) => card),
+        ...[...this.#pending.values()]
+          .filter(
+            (pending) =>
+              pending.caller.windowId === windowId && pending.caller.threadId === threadId,
+          )
+          .map((pending) => ({
+            ...pending.card,
+            state: pending.state,
+            ...(pending.failure === undefined ? {} : { failure: pending.failure }),
+          })),
+      ],
       active: this.active(threadId),
     };
   }
@@ -395,6 +407,13 @@ export class ThreadSecretService {
           ? {}
           : { remainingMs: Math.max(0, Math.round(secret.endsAt - now)) }),
       }));
+  }
+
+  /** Whether a path is the file of a secret this thread holds. */
+  ownsFile(threadId: string, path: string): boolean {
+    return [...this.#active.values()].some(
+      (secret) => secret.threadId === threadId && secret.path === path,
+    );
   }
 
   revoke(threadId: string, secretId: string): ThreadSecretCommandResult {
@@ -562,6 +581,7 @@ export class ThreadSecretService {
       "turn-ended",
     );
     this.#endLeases((lease) => lease.threadId === threadId && lease.turnId === turnId);
+    this.#dropAnswered((caller) => caller.threadId === threadId && caller.turnId === turnId);
   }
 
   /** The thread was archived or deleted. */
@@ -573,10 +593,12 @@ export class ThreadSecretService {
       "thread-archived",
     );
     this.#endLeases((lease) => lease.threadId === threadId);
+    this.#dropAnswered((caller) => caller.threadId === threadId);
     this.#answers.delete(threadId);
   }
 
   revokeWindow(windowId: string): void {
+    this.#dropAnswered((caller) => caller.windowId === windowId);
     for (const pending of this.#pending.values())
       if (pending.caller.windowId === windowId) this.#cancel(pending);
   }
@@ -715,6 +737,8 @@ export class ThreadSecretService {
               signal?.removeEventListener("abort", stop);
               pending.lookup.abort();
               this.#pending.delete(id);
+              if (result.status === "saved" || result.status === "declined")
+                this.#keepAnswered(caller, { ...card, state: result.status });
               this.#changed();
               resolve(result);
             },
@@ -1108,6 +1132,19 @@ export class ThreadSecretService {
     return [...this.#active.values()].find(
       (secret) => secret.threadId === threadId && secret.secretName === secretName,
     );
+  }
+
+  #keepAnswered(caller: ThreadSecretCaller, card: ThreadSecretRequestCard): void {
+    this.#answered.push({ caller, card });
+    const own = this.#answered.filter((entry) => entry.caller.threadId === caller.threadId);
+    const [oldest] = own;
+    if (own.length > MAX_ANSWERED_PER_THREAD && oldest !== undefined)
+      this.#answered.splice(this.#answered.indexOf(oldest), 1);
+  }
+
+  #dropAnswered(which: (caller: ThreadSecretCaller) => boolean): void {
+    for (const entry of this.#answered.filter(({ caller }) => which(caller)))
+      this.#answered.splice(this.#answered.indexOf(entry), 1);
   }
 
   #cancel(pending: PendingRequest): void {

@@ -1,3 +1,4 @@
+import type { ThreadSecretService } from "../threadSecrets/threadSecretService";
 import { configureSandboxNetworkSnapshot } from "../process/sandboxRuntimePolicy";
 import { listServerProjectListeners } from "../serverProjects/serverProjectListeners";
 import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
@@ -141,8 +142,9 @@ import { makeSecretStoreBrokerClient } from "../secretStores/secretStoreBrokerCl
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { ToolEffectLedger } from "../toolEffects/toolEffectLedger";
 
-export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<
+export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> & {
+  readonly threadSecrets: Pick<ThreadSecretService, "ownsFile">;
+} & Pick<
     AuthorityWiring,
     | "agentRunParentAuthority"
     | "codeParentActiveTurn"
@@ -211,6 +213,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
 
 export function wireHarness(deps: HarnessDependencies) {
   const {
+    threadSecrets,
     hubActScopeSlot,
     resolveThreadStrict,
     safeNetworkStore,
@@ -1131,7 +1134,10 @@ export function wireHarness(deps: HarnessDependencies) {
         },
       ),
     servers: (threadId) => shieldServerStore.serversFor(threadProjectId(threadId)),
-    protectedSecretPath: (path) => isProtectedSecretPath(path),
+    // A thread's command that reads the file of a secret the person gave that
+    // thread does what it was given for; any other thread's file stays a secret.
+    protectedSecretPath: (path, threadId) =>
+      isProtectedSecretPath(path) && !threadSecrets.ownsFile(threadId, path),
     // Places count for Shield only while Network limits are on, as they do
     // for the proxies, so turning the switch off returns every call to the
     // thread's and Project's own rules.
@@ -1210,6 +1216,12 @@ export function wireHarness(deps: HarnessDependencies) {
     branches: (threadId) => codeThreadBranches(persistence, threadId),
     record: (input) => shieldServerStore.recordForgeChange(input),
   });
+  const isHarnessProvider = (
+    providerInstanceId: Parameters<typeof persistence.readProviderInstance>[0],
+  ): boolean => {
+    const instance = persistence.readProviderInstance(providerInstanceId);
+    return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
+  };
   const nativeHarnessComposition = createNativeHarnessComposition({
     forgeChanges: {
       branches: (threadId) => codeThreadBranches(persistence, threadId),
@@ -1271,10 +1283,7 @@ export function wireHarness(deps: HarnessDependencies) {
       holdsServerWorkThread: (thread) =>
         serverWorkProjectOf(serverProjectStore, thread) !== undefined,
     }),
-    isHarnessProvider: (providerInstanceId) => {
-      const instance = persistence.readProviderInstance(providerInstanceId);
-      return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
-    },
+    isHarnessProvider,
     tasks: nativeHarnessSessions,
     readsImages: ({ providerInstanceId, modelId }) =>
       providerRuntimeRegistry
@@ -1438,6 +1447,8 @@ export function wireHarness(deps: HarnessDependencies) {
     liftRestartRecovery,
     followUpSuggestionRoutes,
     nativeHarnessComposition,
+    threadKeepsSandbox,
+    isHarnessProvider,
     nativeHarnessEgressRoutes,
     nativeHarnessRoutingRoutes,
     imageDescriber,

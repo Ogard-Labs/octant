@@ -1,9 +1,13 @@
-import { OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS } from "@octant/contracts/credential-request";
+import {
+  OCTANT_CREDENTIAL_TOOL,
+  OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS,
+} from "@octant/contracts/credential-request";
 import { createCredentialCodeTool } from "@octant/plugin-host/code-tools";
 import type {
   CodeToolOperationEntry,
   CodeToolSavedCommandEntry,
 } from "@octant/plugin-api/code-tools";
+import type { ThreadSecretOperations } from "../threadSecrets/threadSecretTools";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
 
 type ToolResult = { readonly result: unknown; readonly isError: boolean };
@@ -30,13 +34,88 @@ const CREDENTIAL_TOOL_HELP = [
   "Plan refuses every operation but help. For anything else, including commands that need no credential, use the terminal or shell.",
 ].join("\n");
 
+const THREAD_SECRET_HELP = [
+  "- request-secret: opens Octant's private card, where the person enters a secret, picks a 1Password item or one Octant remembers, and chooses how long it lasts. You never see it. delivery handle returns a one-use handle an Octant tool redeems; delivery file returns the variable OCTANT_SECRET_<NAME> and, where this thread's commands run outside a sandbox, a file's path. Asking again for one that is still active opens no card. A decline is final: say what is blocked.",
+  "- run-with-secret with command and secrets: runs one command with those secrets as variables, under this thread's usual approvals, and returns its exit status and newest output with the values hidden. Name variables in the command, never a value.",
+].join("\n");
+
+/** A caller with no registered operation or saved command of its own. */
+const NOTHING_OFFERED: CredentialToolSource<never> = {
+  offered: false,
+  list: () => undefined,
+  use: async () => ({ result: { status: "refused" }, isError: true }),
+  close: async () => undefined,
+};
+
 /**
  * Octant's one credential tool, composed from the sides this caller can use.
  * It is offered only when at least one side has something to use, and an
  * operation whose side was not offered when the turn began stays refused for
- * the whole turn, so the schema the provider saw is exactly what it can call.
+ * the whole turn. Without thread secrets the schema names only what is offered.
  */
 export function createCredentialTool<
+  Registered extends CodeToolOperationEntry,
+  Saved extends CodeToolSavedCommandEntry,
+>(sides: {
+  readonly registered?: CredentialToolSource<Registered>;
+  readonly saved?: CredentialToolSource<Saved>;
+  /** Secrets the person gives this thread; absent where a card could not be answered. */
+  readonly secrets?: ThreadSecretOperations | undefined;
+}): AppManagedToolSet {
+  const base = createBaseTool({
+    registered: sides.registered ?? NOTHING_OFFERED,
+    saved: sides.saved ?? NOTHING_OFFERED,
+  });
+  const { secrets } = sides;
+  if (secrets === undefined) return base;
+  return withToolFamilyHelp(
+    {
+      ...base,
+      // One fixed definition, whatever this turn has to use: a provider that
+      // keeps a session's tools takes a changed definition for a new one, and
+      // entering Plan or saving a first command would break off the session.
+      definitions: [OCTANT_CREDENTIAL_TOOL],
+      execute: async (call) => {
+        if (call.name !== OCTANT_CREDENTIAL_TOOL.name) return base.execute(call);
+        const input = parsed(call.inputJson);
+        switch (input === undefined ? undefined : input["operation"]) {
+          case "request-secret":
+            return secrets.requestSecret(input, call.signal);
+          case "run-with-secret":
+            return secrets.runWithSecret(input, call.signal);
+          case "list":
+            return base.definitions.length === 0
+              ? { result: { operations: [], savedCommands: [] }, isError: false }
+              : base.execute(call);
+          default:
+            return base.execute(call);
+        }
+      },
+      close: async () => {
+        secrets.close();
+        await base.close?.();
+      },
+    },
+    { [OCTANT_CREDENTIAL_TOOL.name]: `${CREDENTIAL_TOOL_HELP}\n${THREAD_SECRET_HELP}` },
+  );
+}
+
+function parsed(inputJson: string): Readonly<Record<string, unknown>> | undefined {
+  // Bounded before it is read: the largest request is a full card, not a document.
+  if (inputJson.length > MAX_SECRET_INPUT_LENGTH) return undefined;
+  try {
+    const input: unknown = JSON.parse(inputJson);
+    return typeof input === "object" && input !== null
+      ? (input as Readonly<Record<string, unknown>>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const MAX_SECRET_INPUT_LENGTH = 16_384;
+
+function createBaseTool<
   Registered extends CodeToolOperationEntry,
   Saved extends CodeToolSavedCommandEntry,
 >(sides: {

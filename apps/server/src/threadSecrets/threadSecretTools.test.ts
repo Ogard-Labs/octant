@@ -91,7 +91,8 @@ function setup(
       reason: "Publish the preview build.",
       delivery,
     });
-    const id = service.view("window", THREAD).requests[0]?.id ?? "";
+    const id =
+      service.view("window", THREAD).requests.find(({ state }) => state === "pending")?.id ?? "";
     await service.answer(
       "window",
       THREAD,

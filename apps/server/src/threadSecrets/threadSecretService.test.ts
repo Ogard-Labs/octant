@@ -127,8 +127,13 @@ const request = (over: Record<string, unknown> = {}) =>
     ...over,
   });
 
+const waiting = (service: ThreadSecretService, threadId = THREAD) =>
+  service
+    .view(WINDOW, threadId)
+    .requests.filter(({ state }) => state === "pending" || state === "saving");
+
 const card = (service: ThreadSecretService, threadId = THREAD) => {
-  const [first] = service.view(WINDOW, threadId).requests;
+  const [first] = waiting(service, threadId);
   if (first === undefined) throw new Error("No card is waiting.");
   return first;
 };
@@ -297,7 +302,7 @@ describe("where a secret may not be asked for", () => {
       status: "refused",
       failure: "unsupported-mode",
     });
-    expect(context.service.view(WINDOW, THREAD).requests).toEqual([]);
+    expect(waiting(context.service)).toEqual([]);
   });
 
   it("refuses a thread that no longer admits the tool", async () => {
@@ -353,6 +358,33 @@ describe("the card", () => {
         { paired: false },
       ),
     ).toEqual({ status: "gone" });
+  });
+
+  it("says how it ended until its turn does, in its own window, and carries no value", async () => {
+    const context = host();
+    await grant(context);
+    const asked = context.service.request(context.caller, request({ name: "OTHER" }));
+    await context.service.answer(
+      WINDOW,
+      THREAD,
+      { id: card(context.service).id, action: "decline" },
+      { paired: false },
+    );
+    await asked;
+    const view = decodeThreadSecretsView(context.service.view(WINDOW, THREAD));
+    expect(view.requests.map(({ name, state }) => [name, state])).toEqual([
+      ["DEPLOY_TOKEN", "saved"],
+      ["OTHER", "declined"],
+    ]);
+    expect(JSON.stringify(view)).not.toContain(VALUE);
+    expect(context.service.view("another", THREAD).requests).toEqual([]);
+    for (let round = 0; round < 6; round += 1)
+      await grant(context, request({ name: `TOKEN_${round}` }));
+    expect(context.service.view(WINDOW, THREAD).requests).toHaveLength(4);
+    context.service.turnEnded(THREAD, "another");
+    expect(context.service.view(WINDOW, THREAD).requests).toHaveLength(4);
+    context.service.turnEnded(THREAD, "turn");
+    expect(context.service.view(WINDOW, THREAD).requests).toEqual([]);
   });
 
   it("starts on the last lifetime the person chose for the name, after a restart too", async () => {
@@ -429,12 +461,12 @@ describe("the card", () => {
     const input = request({ clientRequestId: "once" });
     const first = context.service.request(context.caller, input);
     const second = context.service.request(context.caller, input);
-    expect(context.service.view(WINDOW, THREAD).requests).toHaveLength(1);
+    expect(waiting(context.service)).toHaveLength(1);
     await save(context.service);
     const answer = await first;
     expect(await second).toEqual(answer);
     expect(await context.service.request(context.caller, input)).toEqual(answer);
-    expect(context.service.view(WINDOW, THREAD).requests).toEqual([]);
+    expect(waiting(context.service)).toEqual([]);
     expect(readFileSync(join(root, THREAD, "DEPLOY_TOKEN"), "utf8")).toBe(VALUE);
   });
 });
@@ -591,7 +623,7 @@ describe("a one-use handle", () => {
       ],
     });
     const second = await context.service.request(context.caller, input);
-    expect(context.service.view(WINDOW, THREAD).requests).toEqual([]);
+    expect(waiting(context.service)).toEqual([]);
     if (
       first.status !== "saved" ||
       second.status !== "saved" ||
@@ -607,14 +639,14 @@ describe("a one-use handle", () => {
     });
     context.state.now += 60 * 60_000;
     void context.service.request(context.caller, input);
-    expect(context.service.view(WINDOW, THREAD).requests).toHaveLength(1);
+    expect(waiting(context.service)).toHaveLength(1);
   });
 
   it("is never widened into a file without a new card", async () => {
     const context = host();
     await grant(context, request({ delivery: "handle" }));
     void context.service.request(context.caller, request({ delivery: "file" }));
-    expect(context.service.view(WINDOW, THREAD).requests).toHaveLength(1);
+    expect(waiting(context.service)).toHaveLength(1);
   });
 
   it("ends a secret given for one command", async () => {
@@ -751,7 +783,7 @@ describe("a one-use handle", () => {
       failure: "expired",
     });
     void context.service.request({ ...context.caller, turnId: "next" }, input);
-    expect(context.service.view(WINDOW, THREAD).requests).toHaveLength(1);
+    expect(waiting(context.service)).toHaveLength(1);
   });
 
   it("holds only the granted value and the latest one of an item that keeps rotating", async () => {
@@ -1140,7 +1172,7 @@ describe("a secret the person asked Octant to remember", () => {
     await grant(context, request(), { lifetime: "remember" });
     context.service.withdrawThread(THREAD);
     void context.service.request(context.caller, request());
-    expect(context.service.view(WINDOW, THREAD).requests).toHaveLength(1);
+    expect(waiting(context.service)).toHaveLength(1);
     expect(context.service.active()).toEqual([]);
   });
 
@@ -1352,9 +1384,9 @@ describe("what an agent cannot arrange", () => {
     const context = host();
     for (let index = 0; index < 20; index += 1)
       void context.service.request(context.caller, request({ name: `TOKEN_${index}` }));
-    expect(context.service.view(WINDOW, THREAD).requests).toHaveLength(2);
+    expect(waiting(context.service)).toHaveLength(2);
     void context.service.request({ ...context.caller, threadId: OTHER_THREAD }, request());
-    expect(context.service.view(WINDOW, OTHER_THREAD).requests).toHaveLength(1);
+    expect(waiting(context.service, OTHER_THREAD)).toHaveLength(1);
   });
 
   it("gets no earlier answer for another request under the same retry key", async () => {

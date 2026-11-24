@@ -104,7 +104,7 @@ export interface ShieldThreadFacts {
   /** The servers the person registered; SSH to any other host goes to the person. */
   readonly servers?: (threadId: string) => ReadonlyArray<ShieldServerRule>;
   /** The secret guard's list in force: whether a path is one it protects. */
-  readonly protectedSecretPath?: (path: string) => boolean;
+  readonly protectedSecretPath?: (path: string, threadId: string) => boolean;
   /** The places trusted for a Project while Network limits are on; none while they are off. */
   readonly safePlaces?: (projectId: string | undefined) => ReadonlyArray<SafeNetworkPlace>;
 }
@@ -252,6 +252,7 @@ export class OctantShield {
     // thread is marked even if its mark could not be read.
     const tainted =
       facts.tainted(request.threadId) || request.alsoTainted === true || watcherLabels.length > 0;
+    const { protectedSecretPath } = facts;
     const input: ShieldJudgeInput = {
       call: request.call,
       boundRoot: request.boundRoot,
@@ -261,9 +262,11 @@ export class OctantShield {
       servers: facts.servers?.(request.threadId) ?? [],
       ...(onServer !== undefined
         ? { protectedSecretPath: onServer.protectedPath, rootServer: onServer.server }
-        : facts.protectedSecretPath === undefined
+        : protectedSecretPath === undefined
           ? {}
-          : { protectedSecretPath: facts.protectedSecretPath }),
+          : {
+              protectedSecretPath: (path: string) => protectedSecretPath(path, request.threadId),
+            }),
       safePlaces: onServer !== undefined ? [] : (facts.safePlaces?.(reviewing.projectId) ?? []),
       level: reviewing.level,
       personMessages: facts.personMessages(request.threadId),
