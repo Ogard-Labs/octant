@@ -8,6 +8,7 @@ import {
   AggregateVersion,
   EventActor,
   decodeAutomationCommand,
+  type AutomationClientPrincipal,
   type AutomationDefinition,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -32,6 +33,7 @@ import {
   automationDefinitionFixture,
   automationDefinitionDraftFixture,
   automationLocalWindowPrincipal,
+  automationRemoteDevicePrincipal,
   AUTOMATION_TEST_IDS,
 } from "./automationTestFixtures";
 import type { AutomationDispatchOffer } from "./automationDispatchPort";
@@ -59,6 +61,7 @@ import {
 } from "./automationDispatchService";
 import { createAutomationWorkDispatchPort } from "./automationWorkDispatchPort";
 import { createAutomationRouteHandler } from "./automationRoutes";
+import { bindPrincipalRouteContext } from "../principalRouteContext";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -249,6 +252,7 @@ async function heldFixture() {
 function reviewCommand(
   host: Awaited<ReturnType<typeof fixture>>,
   disposition: "skip" | "run-once",
+  principal: AutomationClientPrincipal = automationLocalWindowPrincipal(),
 ) {
   const definition = host.projection.getDefinition(host.definition.id);
   const source = host.projection.getFileSource(host.definition.id);
@@ -257,7 +261,7 @@ function reviewCommand(
     kind: "rearm-file-automation",
     automationId: definition.id,
     expectedVersion: definition.version,
-    principal: automationLocalWindowPrincipal(),
+    principal,
     origin: { kind: "interactive" },
     sourceIdentity: source.sourceIdentity,
     observationRevision: source.observationRevision,
@@ -746,6 +750,96 @@ describe("file input reconciliation on the host routine owner", () => {
     });
   });
 
+  it("re-arms a held batch for a device the host's own person paired, journaled as that device, and refuses hub-introduced and restricted devices", async () => {
+    const host = await heldFixture();
+    const deviceId = "ba000000-0000-4000-8000-0000000000de";
+    const route = createAutomationRouteHandler({
+      projection: host.projection,
+      commands: host.commands,
+      windowAuthorityStore: new WindowAuthorityStore(),
+      projects: {
+        bootstrap: async () => ({
+          active: [
+            {
+              id: host.definition.projectId,
+              type: "work",
+              lifecycle: "active",
+            } as never,
+          ],
+          archived: [],
+          availability: [],
+          memory: [],
+        }),
+      },
+      hostId: "local",
+      now: () => 1,
+      personPairedDeviceCurrent: () => true,
+      prepareFileRearm: (input) => host.sources.prepareRearm(input),
+    });
+    const command = reviewCommand(host, "run-once");
+    const fromDevice = (admittedBy: "host-person" | "hub-roster" | undefined) => {
+      const request = new Request("http://127.0.0.1/api/automations/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: command.kind,
+          automationId: command.automationId,
+          expectedVersion: command.expectedVersion,
+          sourceIdentity: command.sourceIdentity,
+          observationRevision: command.observationRevision,
+          batchDigest: command.batchDigest,
+          disposition: command.disposition,
+        }),
+      });
+      bindPrincipalRouteContext(request, {
+        principal: {
+          kind: "remote-device",
+          hostId: "local" as never,
+          deviceId: deviceId as never,
+          credentialGeneration: 1,
+          origin: "https://remote.example",
+          protocolVersion: 1,
+          capabilityDigest: "d".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000403" as never,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        },
+        scopeId: decodeWindowId(deviceId),
+      });
+      return request;
+    };
+
+    for (const restricted of ["hub-roster", undefined] as const) {
+      expect(await (await route(fromDevice(restricted)))?.json()).toMatchObject({
+        kind: "automation-command-failed",
+        reason: "unauthorized",
+      });
+    }
+    expect(host.projection.getFileSource(host.definition.id)).toMatchObject({ phase: "held" });
+
+    expect(await (await route(fromDevice("host-person")))?.json()).toMatchObject({
+      kind: "automation-run-accepted",
+    });
+    expect(host.projection.getDefinition(host.definition.id)?.updatedBy).toMatchObject({
+      kind: "remote-device",
+      deviceId,
+    });
+    expect(host.projection.latestRun(host.definition.id)?.occurrence).toMatchObject({
+      source: { files: ["held.txt"], rearm: { reviewedDevice: { deviceId } } },
+    });
+    const rearmed = host.journal
+      .replay({ afterSequence: 0 as never, limit: 1_000 } as never)
+      .filter((event) => (event.payload as { fileSourceReview?: unknown }).fileSourceReview);
+    expect(rearmed.map((event) => event.actor)).toEqual([
+      { kind: "remote-device", actorId: deviceId, deviceId },
+    ]);
+    // The device's review replays into the same routine on a fresh projection.
+    const reloaded = new AutomationProjection();
+    expect(hydrateAutomationProjection({ store: host.store, projection: reloaded })).toBe("ok");
+    expect(reloaded.getFileSource(host.definition.id)).toEqual(
+      host.projection.getFileSource(host.definition.id),
+    );
+  });
+
   it.each(["final activity await", "returned proof"] as const)(
     "refuses selected-directory replacement at the re-arm %s boundary",
     async (stage) => {
@@ -861,11 +955,24 @@ describe("file input reconciliation on the host routine owner", () => {
     expect(host.offers).toHaveLength(1);
   });
 
-  it.each([false, true])(
-    "repairs the run-first reviewed intent without duplicate dispatch; superseded=%s",
-    async (superseded) => {
+  it.each([
+    ["window", false],
+    ["window", true],
+    ["paired device", false],
+  ] as const)(
+    "repairs the run-first reviewed intent of a %s without duplicate dispatch; superseded=%s",
+    async (reviewer, superseded) => {
       const host = await heldFixture();
-      const command = reviewCommand(host, "run-once");
+      const deviceId = "ba000000-0000-4000-8000-0000000000de";
+      const device: AutomationClientPrincipal = {
+        ...automationRemoteDevicePrincipal(),
+        admittedBy: "host-person",
+      } as AutomationClientPrincipal;
+      const command = reviewCommand(
+        host,
+        "run-once",
+        reviewer === "window" ? automationLocalWindowPrincipal() : device,
+      );
       const proof = await host.sources.prepareRearm({
         command,
         current: () => true,
@@ -921,6 +1028,16 @@ describe("file input reconciliation on the host routine owner", () => {
         expect(host.projection.getRun(queued.id)?.lifecycle).toBe(superseded ? "failed" : "queued");
       if (superseded)
         expect(host.projection.getDefinition(host.definition.id)?.lifecycle).toBe("paused");
+      if (reviewer === "paired device") {
+        // Recovery rebuilds the routine's author, and the journal's actor, as the device.
+        expect(host.projection.getDefinition(host.definition.id)?.updatedBy).toEqual(device);
+        const rearmed = host.journal
+          .replay({ afterSequence: 0 as never, limit: 1_000 } as never)
+          .filter((event) => (event.payload as { fileSourceReview?: unknown }).fileSourceReview);
+        expect(rearmed.map((event) => event.actor)).toEqual([
+          { kind: "remote-device", actorId: deviceId, deviceId },
+        ]);
+      }
     },
   );
 

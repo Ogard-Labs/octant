@@ -13,7 +13,11 @@ import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
 import { sideChatDraftNotice } from "../composer/sideChatDraftNotice";
-import type { ProviderInstanceId, ProviderModelOptionValues } from "@octant/contracts";
+import type {
+  ProviderInstanceId,
+  ProviderModelOptionValues,
+  ThreadCanvasPreviewReceipt,
+} from "@octant/contracts";
 import {
   decodeChatAttachmentId,
   type ChatAttachmentId,
@@ -110,6 +114,7 @@ import { activeChatTurns } from "@octant/domain/chat-policy";
 import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
+import { CanvasPreviewMiniature } from "../canvas/CanvasPreviewMiniature";
 import { placeByTurn, placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { buildCanvasCreationContext } from "../canvas/buildCanvasCreationContext";
@@ -567,6 +572,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     view !== undefined &&
     seesImages.takesImages === true &&
     !supportsAttachmentFile(threadObservation, view.thread.modelId, { type: "image/png" });
+  // Stable for the client's lifetime: every memoized attempt row receives it.
+  const previewCanvasClient = props.canvasClient;
+  const drawCanvasPreview = useCallback(
+    (preview: ThreadCanvasPreviewReceipt) =>
+      previewCanvasClient === undefined ? null : (
+        <CanvasPreviewMiniature client={previewCanvasClient} preview={preview} />
+      ),
+    [previewCanvasClient],
+  );
   if (view === undefined) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">
@@ -603,6 +617,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       activeChatTurns((shownRun?.view ?? view).turns),
       (turn) => String(turn.id),
       (turn) => turn.createdAt,
+      (turn) => turn.attempts.length > 0,
     ),
     shownRun === undefined
       ? threadCanvases.cards
@@ -1308,6 +1323,24 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               {...(props.sideChatReturnPending === undefined
                 ? {}
                 : { sideChatReturnPending: props.sideChatReturnPending })}
+              {...(canvasClient === undefined ? {} : { canvasPreview: drawCanvasPreview })}
+              {...(canvasClient === undefined
+                ? {}
+                : {
+                    beforeReply: (turn: ChatThreadView["turns"][number]) => {
+                      const cards = canvasPlacement.beforeReply.get(String(turn.id));
+                      return cards === undefined ? undefined : (
+                        <ThreadCanvases
+                          cards={cards}
+                          client={canvasClient}
+                          {...(props.onOpenCanvas === undefined
+                            ? {}
+                            : { onOpen: props.onOpenCanvas })}
+                          openLabel="Open Canvas"
+                        />
+                      );
+                    },
+                  })}
               {...(canvasClient === undefined && imageClient === undefined
                 ? {}
                 : {

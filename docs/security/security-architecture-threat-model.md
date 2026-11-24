@@ -209,9 +209,8 @@ unauthenticated or revoked caller, a hub-introduced device, a hub, peer or
 agent-grant principal passing as a person-paired device, a device laundering its
 principal into a local window, and identity supplied in a payload. For those
 sessions the closed action sets in the table below still hold. Not built yet:
-the journal does not name the device for every change (a Code operation's own
-events are journaled as the system, and cancelling a connector sign-in that is
-still waiting names no device;
+the journal does not name the device for every change (adopting a session
+started outside Octant journals its records as the system;
 [Architecture: Remote clients](../architecture.md#security-and-authority)).
 What the private listener forwards to no device (the listener's own controls,
 the desktop bridge, secret stores, the whole host's export)

@@ -20,6 +20,7 @@ import {
   type PermissionPersistence,
   type ProviderExecutionPolicy,
   type ProviderToolImage,
+  type ThreadCanvasPreviewReceipt,
   type WindowId,
 } from "@octant/contracts";
 import { JSONSchema, Schema } from "effect";
@@ -73,10 +74,20 @@ export const CANVAS_TOOL_NAME = "octant_canvas";
 
 /**
  * Said back with every inline result. Agents read the guidance once and still
- * wrote "the chart above" in live runs, while the thread draws it after the reply.
+ * misplaced the Canvas in their words in live runs. The thread now draws it
+ * above the reply, and a reply that restates the summary says everything twice.
  */
 const INLINE_WHERE_SHOWN =
-  "The thread draws this Canvas just below your reply, so refer to it as below.";
+  "The thread draws this Canvas above your reply, so do not describe it: reply with only what it does not already say.";
+
+/**
+ * Said back with an inline revision. The thread keeps a Canvas in the turn
+ * that created it, so a revision from a later turn is redrawn above that
+ * earlier reply, not this one; telling the agent to leave its findings out of
+ * this reply would leave the follow-up saying nothing of what changed.
+ */
+const INLINE_REVISED_WHERE_SHOWN =
+  "The thread redraws this Canvas in place, above the reply of the turn that created it. If that was an earlier turn, say in your reply what changed.";
 
 /**
  * How many blocks one authoring call may carry.
@@ -752,7 +763,7 @@ function toolDescription(
           : "this Code thread's checkout";
   return [
     `Create, read, or revise an Octant Canvas: a structured, revisable document bound to ${where}.`,
-    "Deliver work as a Canvas rather than as a long reply whenever the answer is something the user will keep, share, present, or come back to: a report, memo, plan, spec, review, audit, comparison, article, slide deck, dashboard, web page, design or mockup, diagram, or prototype, and any reply that needs headings, tables, or charts, or runs past a few paragraphs. Author it here, then reply with one or two sentences saying what it holds, without repeating its content.",
+    "Deliver work as a Canvas rather than as a long reply whenever the answer is something the user will keep, share, present, or come back to: a report, memo, plan, spec, review, audit, comparison, article, slide deck, dashboard, web page, design or mockup, diagram, or prototype, and any reply that needs headings, tables, or charts, or runs past a few paragraphs. Author it here; for a sidebar Canvas reply in one or two sentences saying what it holds, without repeating its content.",
     "Keep in the reply what is read once: short answers, a one-off snippet or command, clarifying questions (more than four decisions: a Canvas choice block), and conversation. When in doubt, make the Canvas; the user can ask for plain text instead.",
     scope === "run"
       ? "When the request iterates on earlier work, revise the existing Canvas instead of creating another: list returns this run's Canvases, and read returns one's current blocks and sequence."
@@ -760,7 +771,7 @@ function toolDescription(
     "Operations: describe, list, read, create, revise, preview. Before you author, call describe: with no block kinds it lists every kind, when to use the structured ones, the document recipes to start from, and a create example; with up to three blockKinds it returns their exact schemas, guidance, and examples. Start from a document recipe before inventing a shape, and make it look finished: typed blocks for data, a design frame only for the look.",
     "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, or CSS; only a design block's frames are HTML and CSS; they load nothing, and run script only in a design that declares it. Mermaid is never drawn; describe code-excerpt for how a Mermaid diagram you already have becomes a typed diagram. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in its dock; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
-    "Choose where the thread shows it. A visualization that answers the current question (a chart, a few metrics, a small dashboard, a short table, a diagram, or an interactive visual as a document-size design) goes inline: it is drawn just below your reply to this turn, so refer to it as below. Longer documents, plans, mockups, device-size designs, and work the user will keep editing stay in the sidebar (leave presentation out); when the host shows a card instead, the result says why in presentationNote.",
+    "Choose where the thread shows it. A visualization that answers the current question goes inline, and so does a summary of findings that carry numbers, a trend, or a comparison: a chart, a few metrics, a small dashboard, a short table, a diagram, or an interactive visual as a document-size design. It shows above your reply, so do not describe it; reply with only what it does not already say. Longer documents, plans, mockups, device-size designs, and work the user will keep editing stay in the sidebar (leave presentation out), beside a summary when one helps; when the host shows a card instead, the result says why in presentationNote.",
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks; people edit Canvases too, so read before revising and keep their changes. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
     "Preview once after you create or revise a chart, treemap, design, or inline Canvas, revise to fix what its warnings or picture show, then reply. An unchanged document previews the same.",
   ].join(" ");
@@ -1681,7 +1692,7 @@ function canvasToolSet(options: {
           ...(input.mermaid === undefined ? {} : { mermaid: input.mermaid }),
           ...(effective === undefined ? {} : { presentation: effective }),
           ...(note === undefined ? {} : { presentationNote: note }),
-          ...(effective === "inline" ? { whereShown: INLINE_WHERE_SHOWN } : {}),
+          ...(effective === "inline" ? { whereShown: INLINE_REVISED_WHERE_SHOWN } : {}),
           ...(strayed.length === 0 ? {} : { warning: outsideRequestWarning(strayed) }),
         },
       };
@@ -1915,11 +1926,15 @@ function previewToolResult(
   readonly result: unknown;
   readonly isError?: boolean;
   readonly images?: ReadonlyArray<ProviderToolImage>;
+  readonly canvasPreview?: ThreadCanvasPreviewReceipt;
 } {
   switch (outcome.kind) {
     case "preview":
       return {
         ...(outcome.image === undefined ? {} : { images: [outcome.image] }),
+        // The row shows the version drawn, never the picture: the reference
+        // is all the step keeps.
+        canvasPreview: { canvasId: outcome.canvasId, versionId: outcome.versionId },
         result: {
           canvasId: outcome.canvasId,
           sequence: outcome.sequence,

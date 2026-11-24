@@ -56,7 +56,8 @@ export type ToolEffectAwaitingApproval = typeof ToolEffectAwaitingApproval.Type;
  * a tool reports both as an error result. `superseded` closes a call whose
  * outcome was never written, when the agent run that made it starts again:
  * the restart that cut it off has already been read, and the same record
- * must not hold a later one.
+ * must not hold a later one; and it closes a runtime's own report of a call
+ * the runtime then handed to the host, which the host records itself.
  */
 export const ToolEffectSettled = Schema.Struct({
   threadId: Schema.UUID,

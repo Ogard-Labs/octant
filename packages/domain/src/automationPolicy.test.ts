@@ -8,6 +8,7 @@ import type {
 import { decodeAutomationTrigger } from "@octant/contracts/automation";
 import {
   AutomationPolicyRejected,
+  automationFileSourceReviewedBy,
   automationScheduledAtMatchesTrigger,
   automationWeeklyResolutionMatchesTrigger,
   buildAutomationWeeklyResolution,
@@ -901,5 +902,62 @@ describe("a routine a thread's agent sets up", () => {
     expect(decideRoutineFromAgent({ ...suggestion, followUp: true, posture: "full-access" })).toBe(
       "ask-on-card",
     );
+  });
+});
+
+describe("who may run a reviewed file batch", () => {
+  const shared = {
+    expectedDefinitionVersion: 3,
+    previousObservationRevision: 7,
+    previousSourceIdentity: "digest" as never,
+    previousBatchDigest: "digest" as never,
+    disposition: "run-once" as const,
+    reviewedAt: utc("2026-11-23T00:00:00Z"),
+  };
+  const windowPrincipal = {
+    kind: "local-window" as const,
+    windowId: "window-1" as never,
+    capabilityGeneration: 4,
+  };
+  const devicePrincipal = {
+    kind: "remote-device" as const,
+    hostId: "host-1" as never,
+    deviceId: "device-1" as never,
+    credentialGeneration: 2,
+    origin: "origin" as never,
+    protocolVersion: 1,
+    capabilityDigest: "digest" as never,
+    sessionId: "session-1" as never,
+    admittedBy: "host-person" as const,
+  };
+
+  it("runs the batch only for the window that reviewed it", () => {
+    const review = { ...shared, reviewedWindowId: "window-1", reviewedCapabilityGeneration: 4 };
+    expect(automationFileSourceReviewedBy(review, windowPrincipal)).toBe(true);
+    expect(
+      automationFileSourceReviewedBy(review, {
+        ...windowPrincipal,
+        windowId: "window-2" as never,
+      }),
+    ).toBe(false);
+    expect(
+      automationFileSourceReviewedBy(review, { ...windowPrincipal, capabilityGeneration: 5 }),
+    ).toBe(false);
+    expect(automationFileSourceReviewedBy(review, devicePrincipal)).toBe(false);
+  });
+
+  it("runs the batch only for the paired device that reviewed it", () => {
+    const review = { ...shared, reviewedDevice: devicePrincipal };
+    expect(automationFileSourceReviewedBy(review, devicePrincipal)).toBe(true);
+    expect(
+      automationFileSourceReviewedBy(review, { ...devicePrincipal, credentialGeneration: 3 }),
+    ).toBe(false);
+    expect(
+      automationFileSourceReviewedBy(review, {
+        ...devicePrincipal,
+        sessionId: "session-2" as never,
+      }),
+    ).toBe(false);
+    expect(automationFileSourceReviewedBy(review, windowPrincipal)).toBe(false);
   });
 });

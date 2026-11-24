@@ -4,6 +4,7 @@ import {
   type ProviderRuntimeEvent,
   type ShieldDecision,
   type ThreadCallTiming,
+  type ThreadCanvasPreviewReceipt,
   type ThreadRoutineReceipt,
   type ToolOutsideContentMark,
   type ThreadToolStep,
@@ -148,6 +149,7 @@ export function recordThreadToolStep(
           ? {}
           : { outsideContent: previous.outsideContent }),
         ...(previous?.routine === undefined ? {} : { routine: previous.routine }),
+        ...(previous?.canvasPreview === undefined ? {} : { canvasPreview: previous.canvasPreview }),
       };
       break;
     }
@@ -167,6 +169,7 @@ export function recordThreadToolStep(
           ? {}
           : { outsideContent: previous.outsideContent }),
         ...(previous?.routine === undefined ? {} : { routine: previous.routine }),
+        ...(previous?.canvasPreview === undefined ? {} : { canvasPreview: previous.canvasPreview }),
       };
       break;
     }
@@ -240,6 +243,47 @@ export function markThreadToolStepRoutine(
   },
   limit: number | undefined,
 ): ThreadToolSteps | undefined {
+  return markThreadToolStepReceipt(
+    current,
+    call,
+    limit,
+    { routine: call.routine },
+    (previous) => previous.routine?.routineId === call.routine.routineId,
+  );
+}
+
+/**
+ * Puts the Canvas version a `preview` call drew on that call's step, so the
+ * transcript can show what the agent checked, by the same rule as a routine
+ * receipt. Returns the same value when the step already carries it.
+ */
+export function markThreadToolStepCanvasPreview(
+  current: ThreadToolSteps | undefined,
+  call: {
+    readonly toolCallId: string;
+    readonly toolName: string;
+    readonly canvasPreview: ThreadCanvasPreviewReceipt;
+  },
+  limit: number | undefined,
+): ThreadToolSteps | undefined {
+  return markThreadToolStepReceipt(
+    current,
+    call,
+    limit,
+    { canvasPreview: call.canvasPreview },
+    (previous) => previous.canvasPreview?.versionId === call.canvasPreview.versionId,
+  );
+}
+
+function markThreadToolStepReceipt(
+  current: ThreadToolSteps | undefined,
+  call: { readonly toolCallId: string; readonly toolName: string },
+  limit: number | undefined,
+  receipt:
+    | { readonly routine: ThreadRoutineReceipt }
+    | { readonly canvasPreview: ThreadCanvasPreviewReceipt },
+  alreadyCarries: (previous: ThreadToolStep) => boolean,
+): ThreadToolSteps | undefined {
   const steps = current?.steps ?? [];
   const toolCallId = boundedIdentifier(call.toolCallId);
   const index = steps.findIndex((step) => step.toolCallId === toolCallId);
@@ -247,16 +291,16 @@ export function markThreadToolStepRoutine(
   if (previous === undefined && full(steps, limit)) {
     return current?.truncated === true ? current : { steps, truncated: true };
   }
-  if (previous?.routine?.routineId === call.routine.routineId) return current;
+  if (previous !== undefined && alreadyCarries(previous)) return current;
   const next: ThreadToolStep =
     previous === undefined
       ? {
           toolCallId,
           toolName: boundedIdentifier(call.toolName),
           state: "completed",
-          routine: call.routine,
+          ...receipt,
         }
-      : { ...previous, routine: call.routine };
+      : { ...previous, ...receipt };
   const nextSteps = steps.slice();
   if (index === -1) nextSteps.push(next);
   else nextSteps[index] = next;

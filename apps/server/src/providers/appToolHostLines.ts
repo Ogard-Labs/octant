@@ -39,7 +39,7 @@ const GUIDE_LINES: Readonly<Record<string, string>> = {
     "When the person mentions a Chat thread and wants something from it, ask it with octant_ask_thread and wait for its reply.",
   octant_browser: BROWSER_TOOL_HOST_LINE,
   octant_canvas:
-    "When a visualization answers the question (a chart, a few metrics, a small dashboard, a short table, a diagram), draw it inline below your reply with octant_canvas.",
+    "When findings carry numbers, a trend, or a comparison, or a visual answers the question, draw it inline with octant_canvas (a few metrics, a chart, a table, a diagram); it shows above your reply, which adds only what it does not.",
   octant_code:
     "Ask the language server about a saved file with octant_code: its errors, where a name is defined, and where it is used.",
   octant_computer: COMPUTER_TOOL_HOST_LINE,

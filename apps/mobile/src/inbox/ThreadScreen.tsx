@@ -23,6 +23,7 @@ import { useConnectionStatus } from "@octant/client-runtime/use-connection-statu
 import { presentStaleHostSecurity } from "@octant/domain";
 import type { RemoteThreadSurfaceKind } from "@octant/client-runtime";
 import { ApprovalDeferralSheet } from "../approvals/ApprovalDeferralSheet";
+import { MemoryProposalCard, RoutineProposalCard } from "../surfaces/AgentProposalCards";
 import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
 import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard";
@@ -594,6 +595,22 @@ export function ThreadScreen(props: ThreadScreenProps) {
                   threadId={selected.threadId}
                   transport={transport}
                 />
+              )}
+              {offlineDemo || transport === undefined ? null : (
+                <>
+                  <MemoryProposalCard
+                    key={`memory:${selected.hostId}:${selected.threadId}`}
+                    actsAsHostPerson={standing.actsAsHostPerson}
+                    threadId={selected.threadId}
+                    transport={transport}
+                  />
+                  <RoutineProposalCard
+                    key={`routine:${selected.hostId}:${selected.threadId}`}
+                    actsAsHostPerson={standing.actsAsHostPerson}
+                    threadId={selected.threadId}
+                    transport={transport}
+                  />
+                </>
               )}
               {offlineDemo || transport === undefined ? null : (
                 <NativeHarnessSessionPanel threadId={selected.threadId} transport={transport} />

@@ -146,6 +146,7 @@ const settings = {
   browserUploadFileCountLimit: 5,
   rememberedBrowserTransfers: [],
   rememberedComputerUseApps: [],
+  rememberedDesktopFileTransfers: [],
   persistentBrowserOwner: false,
   pairedDeviceLifetime: "30-days" as const,
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },

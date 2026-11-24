@@ -396,9 +396,12 @@ export type DesktopArtifactTransferGate =
  * content: the file goes from the thread's own checkout into a desktop on
  * this machine that the same agent already operates, and its shell could put
  * it there (maintainer decision, 2026-11-13). Below Full access it asks until
- * the person has answered for the thread. Auto-accept-edits covers edits to
- * the checkout, not sending a file out of it, so it asks as approval-gated
- * does.
+ * the person has answered for the thread. A "Remember for this Project"
+ * answer stands in for that only on a desktop on this machine: it was given
+ * for files that stay here, and with the billed confirmation off a cloud
+ * desktop would otherwise take checkout files off the machine on it without
+ * the thread ever being asked. Auto-accept-edits covers edits to the
+ * checkout, not sending a file out of it, so it asks as approval-gated does.
  */
 export function decideDesktopArtifactTransfer(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -406,6 +409,8 @@ export function decideDesktopArtifactTransfer(input: {
   readonly initiator: EventActor["kind"];
   /** The person already allowed the agent's transfers for this thread as it stands. */
   readonly answeredForThread: boolean;
+  /** A person's "Remember for this Project" answer covers the thread now. */
+  readonly answeredForProject: boolean;
   readonly confirmBilledDesktops: boolean;
 }): DesktopArtifactTransferGate {
   if (input.executionPolicy === "plan") return { kind: "refused", reason: "plan-mode" };
@@ -415,7 +420,11 @@ export function decideDesktopArtifactTransfer(input: {
   if (input.initiator === "local-user" || input.initiator === "remote-device") {
     return { kind: "proceed" };
   }
-  if (input.executionPolicy === "full-access" || input.answeredForThread) {
+  if (
+    input.executionPolicy === "full-access" ||
+    input.answeredForThread ||
+    (input.answeredForProject && input.locality === "host-local")
+  ) {
     return { kind: "proceed" };
   }
   return { kind: "ask", asks: "in-thread" };

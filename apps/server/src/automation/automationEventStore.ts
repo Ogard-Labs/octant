@@ -302,6 +302,8 @@ export type AutomationOccurrenceLedgerEvent =
     };
 
 export interface AppendAutomationOccurrenceLedgerInput {
+  /** A person's re-arm from a paired device is journaled as that device. */
+  readonly actor?: typeof EventActor.Type;
   readonly automationId: AutomationId;
   readonly expectedVersion: number;
   readonly events: ReadonlyArray<AutomationOccurrenceLedgerEvent>;
@@ -658,7 +660,7 @@ export class AutomationEventStore {
           eventName: event.eventName,
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: this.#actor,
+          actor: input.actor ?? this.#actor,
           occurredAt: (input.events[index] as AutomationOccurrenceLedgerEvent).at,
           payload: event.payload,
         })),

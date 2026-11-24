@@ -14,6 +14,7 @@ import {
   type MobileInboxHostFailure,
   type MobileWorkProjectOption,
   type MobileInboxRow,
+  mobileWaitingAskLine,
 } from "@octant/client-runtime";
 import { changeMobileTodos } from "@octant/client-runtime/mobile-todo-client";
 import type { CodeDeliveryTarget } from "@octant/contracts";
@@ -655,7 +656,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
                   : (projectName(row) ?? "Project"),
               )} · `
       }${hostLabels.get(row.hostId) ?? row.hostId.slice(0, 8)}${
-        row.waitingOfferText === undefined ? "" : ` · ${row.waitingOfferText}`
+        row.waitingAsk === undefined ? "" : ` · ${mobileWaitingAskLine(row.waitingAsk)}`
       }`}
       icon={modeIcon(row.mode)}
       key={`${row.hostId}:${row.mode}:${row.threadId}`}

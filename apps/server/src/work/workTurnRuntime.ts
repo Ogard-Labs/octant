@@ -17,6 +17,7 @@ import {
   FULL_ACCESS_SANDBOX_UNSUPPORTED,
   isNativeHarnessDriverKind,
   projectExtraFolderRoots,
+  markThreadToolStepCanvasPreview,
   markThreadToolStepOutsideContent,
   markThreadToolStepRoutine,
   outsideContentRecordedOnly,
@@ -1011,6 +1012,21 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   // protected secret, which its row then shows.
                   if (execution.outsideContent !== undefined) {
                     markToolRow(event.requestId, event.toolName, execution.outsideContent.labels);
+                  }
+                  if (execution.isError !== true && execution.canvasPreview !== undefined) {
+                    const next = markThreadToolStepCanvasPreview(
+                      toolSteps,
+                      {
+                        toolCallId: event.requestId,
+                        toolName: event.toolName,
+                        canvasPreview: execution.canvasPreview,
+                      },
+                      stepLimit,
+                    );
+                    if (next !== undefined && next !== toolSteps) {
+                      toolSteps = next;
+                      input.onToolSteps?.(next);
+                    }
                   }
                   if (execution.isError !== true && execution.routine !== undefined) {
                     const next = markThreadToolStepRoutine(

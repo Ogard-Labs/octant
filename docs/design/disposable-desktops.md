@@ -877,16 +877,54 @@ Rules this slice resolved:
   person's yes covers the thread's later transfers: it is journaled as
   `thread.standing-answer-recorded@1` (subject `desktop-file-transfer`) once
   the transfer it was given for is admitted, survives a host restart, and is
-  erased with the thread. An answer given before the thread read outside
-  content does not cover it afterwards, so the person is asked once more with
-  the mark in front of them. A refusal is never kept. Full access proceeds to
+  erased with the thread. Under Strict, an answer given before the thread
+  read outside content does not cover it afterwards, so the person is asked
+  once more with the mark in front of them; outside Strict the mark adds no
+  ask and the answer keeps covering the thread (maintainer decision,
+  2026-11-22, replacing the 2026-11-13 rule that withdrew it after outside
+  content at any setting, under
+  [Octant adds no restrictions of its own unless Strict is on](decisions.md#octant-adds-no-restrictions-of-its-own-unless-strict-is-on)).
+  A refusal is never kept. Full access proceeds to
   a host-local desktop without asking, whether or not the thread has read
   outside content (maintainer decision, 2026-11-13), and a person sending a
   file to one is not asked again. A transfer to a cloud desktop asks a person
   every time (`off-machine`) while "Confirm each billed desktop" is on
   ([lease settings](#built-lease-settings)), and that answer covers one file;
   with it off the transfer follows the thread's level as a host-local one
-  does. Not built yet: the card does not offer "Remember for the Project".
+  does.
+- **Remember for this Project.** An ask in the thread offers **Allow once**
+  and **Remember for this Project**, as the first-action approval does for an
+  application. A
+  remembered answer covers later transfers from every thread in that Project,
+  below Full access, into a desktop on this machine: they proceed without
+  asking and record nothing for the thread, so forgetting it brings the ask
+  back. It never covers a cloud desktop, even with "Confirm each billed
+  desktop" off, and a cloud desktop's ask does not offer it: the answer was
+  given for files that stay on this machine, and covering a cloud desktop
+  would send checkout files off it with no ask in the thread. It is journaled in shell settings (`rememberedDesktopFileTransfers`,
+  with the approving local user or person-paired device and the time), lists
+  under Settings › Computer use › Remembered desktop files with **Forget**,
+  and a settings replacement may only forget entries. Only a person's answer
+  remembers: a hub-introduced device's answer, or one given after the ask
+  stopped standing as offered (another Project, a mark arriving, the owner
+  changing), allows that one file or declines. The answering thread also
+  keeps its own answer, as the first action keeps its thread grant. Under
+  Strict, a Project's answer neither covers nor is offered on a thread that
+  has read outside content, as the first action withholds Project remembering
+  there; outside Strict the mark adds no restriction to it
+  ([Octant adds no restrictions of its own unless Strict is on](decisions.md#octant-adds-no-restrictions-of-its-own-unless-strict-is-on)).
+  Plan, Full access, and the off-machine ask are unchanged.
+  The offer travels on the Code approval as `canRememberForProject`. A Code
+  approval is an ask a person decides on, which a client keeps reading
+  strictly ([principles](../architecture.md#overview-and-principles): "The
+  host reads strictly; a client ignores what it does not know"), so a phone
+  or CLI build that predates the field refuses a conversation window or
+  stream frame that holds such an ask, answered or not. The minimum compatible client is the first Octant
+  release built with this offer; a client of 0.1.0-preview.20261122.11 or
+  earlier cannot read a Code thread that has asked it. Carrying the offer
+  outside the ask was rejected: it qualifies what the person's answer
+  authorizes, which is exactly what the strict ask exists to keep whole. The
+  window a host serves is built with the host and is not affected.
 - **Where it lands.** The file is written whole beside the lease's `home` and
   `inbox`, made read-only (`0444`), and renamed into the inbox under its base
   name, so the desktop never sees a partial file and a later transfer under
@@ -899,13 +937,20 @@ Rules this slice resolved:
   `no-root`.
 
 Evidence: `desktopLeaseService.test.ts` covers the journaled path, size, and
-hash, every path refusal, Plan, approval-gated asking, the cloud ask, the
+hash, every path refusal, Plan, approval-gated asking, a Project's answer
+sending unasked without recording one for the thread, the cloud ask, the
 approved bytes winning over a file changed during the answer, and authority
 changes during the answer. `desktopArtifactRead.test.ts` covers files that
 grow or shrink during the read, an ancestor swapped for a link between the
 checks and the open, and the platform that cannot name the open file;
 `desktopLeaseService.test.ts` also covers a second transfer while one waits,
-and a root change while the transfer waits in the lease's order. Under real Bubblewrap,
+and a root change while the transfer waits in the lease's order. `computerUseToolService.test.ts` covers a thread's answer withdrawn after
+outside content under Strict and kept outside it, a remembered Project answer
+covering another thread of that Project, not one in another Project, and
+ending once forgotten, and the offer withheld on a marked thread under
+Strict but kept outside it;
+`codeOperationRuntime.test.ts` covers the card's offer and the answer
+remembering only on an offered ask from a person. Under real Bubblewrap,
 `hostLocalDesktopProcess.test.ts` shows the delivered file is read-only
 inside the capsule and cannot be removed, that the port refuses names that
 leave the inbox and leases with no running desktop, and that a transfer
