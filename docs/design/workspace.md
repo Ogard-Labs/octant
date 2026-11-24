@@ -98,7 +98,7 @@ answer the pointer across their whole width. A row is its name leading, and at
 the trailing edge its current value in muted ink and its arrow. The level in
 force heads the menu, its name over where it came from ("Matches your
 default"), and a hairline closes that group. A row that opens in place
-(**Access details**, **Credential commands**, **Provider cloud sessions**)
+(**Access details**, **Credential commands**, **Active secrets**, **Provider cloud sessions**)
 turns its arrow and puts its content under it; the access report is a list of
 facts, each name leading and its value trailing, and the menu widens to 440px
 while it is open. As a padded card of loose text links the panel read as a
@@ -106,7 +106,9 @@ piece of a web page. Its rows are, in order and each only where it applies:
 the access level in force and where it came from (Work and Code) with its
 **Access details**, **Reply detail**, how the thread delivers documents
 (Code), **Provider tools** (a key provider's own setup for this thread),
-**Credential commands** (Code), **Provider cloud sessions** (Code, local
+**Credential commands** (Code), **Active secrets** (Work and Code, while the
+thread has one: each with its time left, its source and **Revoke**),
+**Provider cloud sessions** (Code, local
 host), **Continue elsewhere**, **On usage limit** (where the thread's provider
 has another account: **Wait for the reset** or **Hand off to** one named
 account, with **Move to account…** in the same menu in Work and Code, and a
