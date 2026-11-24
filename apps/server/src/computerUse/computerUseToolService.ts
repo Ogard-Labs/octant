@@ -419,11 +419,25 @@ export function createComputerUseToolService(options: {
       // its refusal names the desktop the thread needs instead.
       if (options.destination?.().status === "leasable") return NO_LIVE_DESKTOP;
       await options.desktop.configure(options.settings());
-      if (!(await options.desktop.reserve(owner)))
+      if (!(await options.desktop.reserve(owner))) {
+        const status = await options.desktop.status();
+        if (
+          !status.permissions.accessibility ||
+          !status.permissions.screenRecording ||
+          status.driver === "unavailable" ||
+          status.driver === "failed"
+        )
+          return refused(
+            "setup-required",
+            status.message ?? "Check the driver and macOS permissions in Computer use settings.",
+          );
         return refused(
-          "setup-required",
-          "Open Computer use in Settings to enable the plugin and grant Octant's macOS permissions.",
+          "not-permitted",
+          options.asksFromPairedWindow?.(owner)
+            ? "Keep the Mac desktop open in this thread and hand control back to the agent."
+            : "Computer use could not reserve this window. Check whether a person has control of the desktop.",
         );
+      }
     }
     if (signal?.aborted) {
       await releaseReservation(owner);
