@@ -295,6 +295,37 @@ describe("forgeReferencesFromToolCall", () => {
     expect(numbers("cd app || exit 1; gh pr edit 12 -R acme/app --title New")).toEqual([12]);
   });
 
+  it("reads an exit only where a command starts, and only before the write it could skip", () => {
+    const numbers = (command: string) =>
+      forgeReferencesFromToolCall({ toolName: "Bash", command })?.map((reference) =>
+        "number" in reference ? reference.number : 0,
+      );
+    expect(numbers("gh issue edit 7 -R acme/app --add-label exec")).toEqual([7]);
+    expect(numbers("echo exit; gh issue edit 7 -R acme/app --add-label return")).toEqual([7]);
+    expect(numbers("gh issue edit 7 -R acme/app --add-label done && exit 0")).toEqual([7]);
+    expect(numbers("exec 2>&1; gh issue edit 7 -R acme/app --add-label done")).toEqual([7]);
+    expect(numbers("exit 0; gh issue edit 7 -R acme/app --add-label done")).toBeUndefined();
+    expect(numbers("exec sh run.sh; gh issue edit 7 -R acme/app")).toBeUndefined();
+  });
+
+  it("takes a merge left to GitHub as merged when gh says it merged at once", () => {
+    const call = (output: string) =>
+      forgeReferencesFromToolCall({
+        toolName: "Bash",
+        command: "gh pr merge 12 --auto --squash -R acme/app; git status --short",
+        output,
+      })?.map((reference) => reference.action);
+    expect(call("\u2713 Squashed and merged pull request acme/app#12 (Add search)")).toEqual([
+      "merged",
+    ]);
+    expect(
+      call(
+        "\u2713 Pull request acme/app#12 will be automatically merged via squash when all requirements are met",
+      ),
+    ).toEqual(["edited"]);
+    expect(call("")).toBeUndefined();
+  });
+
   it("leaves out an identity the journal would refuse, so it never loses the call", () => {
     expect(
       forgeReferencesFromToolCall({

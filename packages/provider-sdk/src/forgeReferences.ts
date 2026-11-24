@@ -162,15 +162,17 @@ function confirmedWritesIn(output: string): ReadonlySet<string> {
 
 /**
  * Whether a command can end the shell while the call still succeeds (`exit`,
- * `exit 0`, `exec`), so that what follows it may never have run. A failing
- * `exit 1` would have failed the call.
+ * `exit 0`, `exec other`), so that what follows it may never have run. A
+ * failing `exit 1` would have failed the call, and an `exec` that only
+ * redirects ends nothing.
  */
 function endsTheShellWell(words: ReadonlyArray<string>): boolean {
-  return words.some(
-    (word, index) =>
-      word === "exec" ||
-      ((word === "exit" || word === "return") && !/^[1-9][0-9]*$/.test(words[index + 1] ?? "")),
-  );
+  const at = words.findIndex((word) => word === "exit" || word === "return" || word === "exec");
+  if (at === -1 || !words.slice(0, at).every(runsTheNextWord)) return false;
+  const next = words[at + 1] ?? "";
+  return words[at] === "exec"
+    ? next !== "" && !/^[0-9]*[<>&]/.test(next)
+    : !/^[1-9][0-9]*$/.test(next);
 }
 
 /**
@@ -267,19 +269,26 @@ function shellCommands(command: string): ReadonlyArray<ShellCommand> {
     inWord = true;
   }
   endList();
-  const mayEndEarly = lists.some((each) => each.commands.some(endsTheShellWell));
-  return lists.flatMap((each, index) =>
-    each.commands.map((found) => ({
-      words: found,
-      exitSpeaks: each.andOnly && index === lists.length - 1 && !mayEndEarly,
-    })),
-  );
+  const commands: ShellCommand[] = [];
+  let mayHaveEnded = false;
+  for (const [index, each] of lists.entries()) {
+    for (const found of each.commands) {
+      commands.push({
+        words: found,
+        exitSpeaks: each.andOnly && index === lists.length - 1 && !mayHaveEnded,
+      });
+      mayHaveEnded ||= endsTheShellWell(found);
+    }
+  }
+  return commands;
 }
 
 interface GhInvocation {
   readonly kind: Kind;
   /** Undefined for a read (`view`, `list`, `checks`, `diff`, …). */
   readonly action: ThreadForgeAction | undefined;
+  /** A merge with `--auto` (or ending one): GitHub merges it, now or later. */
+  readonly leavesMerge: boolean;
   /** The identity the command names itself, when it names one fully. */
   readonly named: GithubIdentity | undefined;
   /** The number the command names without a repository. */
@@ -392,11 +401,10 @@ function ghInvocation({ words, exitSpeaks }: ShellCommand): GhInvocation | undef
   const kind: Kind = noun === "pr" ? "pull-request" : "issue";
   const switches = GH_SWITCHES[`${noun} ${verb}`];
   const rest = words.slice(at + 3);
-  // `--auto` leaves the merge to GitHub, once the requirements are met.
-  const action =
-    noun === "pr" && verb === "merge" && rest.some((word) => /^--(disable-)?auto$/.test(word))
-      ? "edited"
-      : (noun === "pr" ? GH_PR_WRITES : GH_ISSUE_WRITES)[verb];
+  // `--auto` leaves the merge to GitHub until the requirements are met.
+  const leavesMerge =
+    noun === "pr" && verb === "merge" && rest.some((word) => /^--(disable-)?auto$/.test(word));
+  const action = leavesMerge ? "edited" : (noun === "pr" ? GH_PR_WRITES : GH_ISSUE_WRITES)[verb];
   let repository: { readonly owner: string; readonly repository: string } | undefined;
   let number: number | undefined;
   let named: GithubIdentity | undefined;
@@ -444,7 +452,7 @@ function ghInvocation({ words, exitSpeaks }: ShellCommand): GhInvocation | undef
   if (named === undefined && repository !== undefined && number !== undefined) {
     named = { kind, ...repository, number };
   }
-  return { kind, action, named, number, exitSpeaks };
+  return { kind, action, leavesMerge, named, number, exitSpeaks };
 }
 
 function fromShell(
@@ -463,7 +471,6 @@ function fromShell(
   const references: ThreadForgeReference[] = [];
   for (const invocation of invocations) {
     if (invocation.action === undefined) continue;
-    const action = invocation.action;
     const sameKind = invocations.filter((candidate) => candidate.kind === invocation.kind);
     let identity = invocation.named;
     if (identity === undefined && invocation.number !== undefined) {
@@ -490,6 +497,9 @@ function fromShell(
     if (identity === undefined) continue;
     // When the call's exit status does not speak for this command (it ran
     // before a `||` fallback, say), only its own output confirms the write.
+    // gh merges at once when nothing is left to wait for, and then says so.
+    const mergedAtOnce = invocation.leavesMerge && confirmed.has(`merged ${identityKey(identity)}`);
+    const action = mergedAtOnce ? "merged" : invocation.action;
     if (!invocation.exitSpeaks && !confirmed.has(`${action} ${identityKey(identity)}`)) continue;
     const state =
       identity.kind === "issue" && action === "closed"
