@@ -77,7 +77,8 @@ by model roles ([Model endpoints: Model roles](model-endpoints.md#model-roles)),
 in instead (Sign in with ChatGPT, Sign in with OpenRouter, Add endpoint), each
 sign-in one click with its terms as a consent line under the button. Voice &
 images holds transcription (one Transcribe with menu: Off, each endpoint's
-transcription model, Other model…), speech, a Test microphone row that plays a
+transcription model, Other model…), speech, the Microphone dictation records from in this window, a Test
+microphone row that plays a
 short clip back on this computer, the image profiles, custom image
 sources, and, once two image profiles are ready, **At Full access** with one
 select, **Image profile at Full access** (First ready profile, then each ready

@@ -22,6 +22,7 @@ import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { MicrophonePicker } from "../voice/MicrophonePicker";
 import { MicrophoneTest } from "../voice/MicrophoneTest";
 import { transcriptionChoices, type TranscriptionChoice } from "./harness/voiceModels";
 import { SettingRow, SettingsSection } from "./primitives";
@@ -119,6 +120,15 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
       )}
       <SettingsSection title="Microphone">
         <div className="setgroup">
+          <SettingRow
+            description="Dictation records from this microphone in this window."
+            focused={props.focusedSetting === settingId("microphone")}
+            label="Microphone"
+            scope="app"
+            settingId="microphone"
+          >
+            <MicrophonePicker />
+          </SettingRow>
           <SettingRow
             description="Record ten seconds and play it back. The audio stays on this computer unless you transcribe it."
             focused={props.focusedSetting === settingId("microphone-test")}

@@ -1152,6 +1152,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "voice transcription speech to text microphone dictation whisper stt model",
         },
         {
+          id: settingId("microphone"),
+          label: "Microphone",
+          scope: "app",
+          keywords: "voice microphone input device dictation headset usb choose",
+        },
+        {
           id: settingId("microphone-test"),
           label: "Test microphone",
           scope: "app",
