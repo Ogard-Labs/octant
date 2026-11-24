@@ -16,7 +16,6 @@
   "scripts": {
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "build": "tsdown src/index.ts --format esm --dts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
   },

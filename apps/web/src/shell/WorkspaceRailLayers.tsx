@@ -286,6 +286,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
         <div className="code-board-layer">
           <LazyRailSurface label="Pull requests">
             <CodeProjectPullRequests
+              babysitClient={props.codeClient}
               isNarrow={props.isNarrow}
               load={(query) => props.codeClient.queryProjectPullRequests(query)}
               onClose={props.onCloseCodePullRequests}

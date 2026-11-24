@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { CodeThreadId } from "./code";
 import {
   CodeOwnerMergeUnlockRefusal,
+  CodeProjectPullRequestLabel,
   CodeProjectPullRequestMergeMethod,
 } from "./codeProjectPullRequests";
 import { UtcTimestamp } from "./events";
@@ -76,6 +77,13 @@ export const CodeProjectPullRequestMergeWhenReadyCommand = Schema.Union(
 export type CodeProjectPullRequestMergeWhenReadyCommand =
   typeof CodeProjectPullRequestMergeWhenReadyCommand.Type;
 
+/** The person's completion conditions for Auto-fix on a linked pull request. */
+export const PullRequestBabysitRules = Schema.Struct({
+  checks: Schema.Literal("required", "all"),
+  requiredLabel: Schema.optional(CodeProjectPullRequestLabel),
+}).annotations(strict);
+export type PullRequestBabysitRules = typeof PullRequestBabysitRules.Type;
+
 /**
  * Turns Auto-fix on for one thread linked to the pull request, or off. The
  * host refuses a thread that is not linked to that pull request.
@@ -85,9 +93,12 @@ export const CodeProjectPullRequestAutoFixCommand = Schema.Union(
     kind: Schema.Literal("enable"),
     target: CodeProjectPullRequestSwitchTarget,
     threadId: CodeThreadId,
+    babysit: Schema.optional(PullRequestBabysitRules),
+    expectedStoppedAt: Schema.optional(UtcTimestamp),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("disable"),
+    threadId: Schema.optional(CodeThreadId),
     target: CodeProjectPullRequestSwitchTarget,
   }).annotations(strict),
 );
@@ -125,6 +136,9 @@ export type CodeProjectPullRequestMergeWhenReadyState =
 /** Why Auto-fix stopped on its own. */
 export const CodeProjectPullRequestAutoFixStopReason = Schema.Literal(
   "attempt-limit",
+  "feedback-limit",
+  "needs-help",
+  "ready",
   "merged",
   "closed",
   "thread-unavailable",
@@ -143,7 +157,7 @@ export type CodeProjectPullRequestAutoFixPauseReason =
 
 /** One failure Auto-fix watches for, by kind and a short opaque identity. */
 export const CodeProjectPullRequestAutoFixFailure = Schema.Struct({
-  kind: Schema.Literal("check", "review-thread", "conflict"),
+  kind: Schema.Literal("check", "review-thread", "conflict", "behind", "feedback"),
   /** Check name, review thread id, or `base` for a merge conflict. */
   key: boundedNonEmptyText(512),
 }).annotations(strict);
@@ -163,6 +177,7 @@ export const CodeProjectPullRequestAutoFixState = Schema.Union(
     status: Schema.Literal("on"),
     threadId: CodeThreadId,
     enabledAt: UtcTimestamp,
+    babysit: Schema.optional(PullRequestBabysitRules),
     pausedFor: Schema.optional(CodeProjectPullRequestAutoFixPauseReason),
     lastWake: Schema.optional(
       Schema.Struct({
@@ -181,6 +196,8 @@ export const CodeProjectPullRequestAutoFixState = Schema.Union(
     status: Schema.Literal("stopped"),
     threadId: CodeThreadId,
     reason: CodeProjectPullRequestAutoFixStopReason,
+    babysit: Schema.optional(PullRequestBabysitRules),
+    readyHeadSha: Schema.optional(boundedNonEmptyText(64)),
     stoppedAt: UtcTimestamp,
   }).annotations(strict),
 );
@@ -209,6 +226,7 @@ export type CodeProjectPullRequestSwitchesView = typeof CodeProjectPullRequestSw
 export const CodeProjectPullRequestSwitchOutcome = Schema.Union(
   Schema.Struct({
     status: Schema.Literal("applied"),
+    alreadyActive: Schema.optional(Schema.Literal(true)),
     view: CodeProjectPullRequestSwitchesView,
   }).annotations(strict),
   Schema.Struct({
@@ -218,6 +236,7 @@ export const CodeProjectPullRequestSwitchOutcome = Schema.Union(
       "not-open",
       "stale",
       "thread-not-linked",
+      "already-active",
       "method-not-allowed",
       "failed",
     ),
@@ -285,7 +304,10 @@ export const CodeProjectPullRequestAutoFixRecorded = Schema.Struct({
   target: CodeProjectPullRequestSwitchTarget,
   threadId: CodeThreadId,
   change: Schema.Union(
-    Schema.Struct({ kind: Schema.Literal("enabled") }).annotations(strict),
+    Schema.Struct({
+      kind: Schema.Literal("enabled"),
+      babysit: Schema.optional(PullRequestBabysitRules),
+    }).annotations(strict),
     Schema.Struct({ kind: Schema.Literal("disabled") }).annotations(strict),
     Schema.Struct({
       kind: Schema.Literal("woke"),
@@ -303,6 +325,7 @@ export const CodeProjectPullRequestAutoFixRecorded = Schema.Struct({
     Schema.Struct({
       kind: Schema.Literal("stopped"),
       reason: CodeProjectPullRequestAutoFixStopReason,
+      readyHeadSha: Schema.optional(boundedNonEmptyText(64)),
     }).annotations(strict),
   ),
 }).annotations(strict);

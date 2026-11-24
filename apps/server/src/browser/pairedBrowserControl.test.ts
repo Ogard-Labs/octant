@@ -14,9 +14,11 @@ import { describe, expect, it, vi } from "vitest";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { openSqlite } from "../persistence/sqlitePort";
 import { MonotonicRemoteClock } from "../remote/monotonicRemoteClock";
-import { RemoteRequestProofService } from "../remoteRequestProofService";
 import {
+  RemoteRequestProofService,
   isPairedDeviceSessionCurrent,
+} from "../remoteRequestProofService";
+import {
   PairedBrowserControlService,
   type PairedBrowserActor,
   type PairedBrowserHost,

@@ -81,6 +81,7 @@ export const MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS = 8;
  */
 export const CodeProjectPullRequestQuery = Schema.Struct({
   version: Schema.Literal(1),
+  threadId: Schema.optional(CodeThreadId),
 }).annotations(strict);
 export type CodeProjectPullRequestQuery = typeof CodeProjectPullRequestQuery.Type;
 
@@ -403,7 +404,7 @@ const CodeProjectPullRequestActionTarget = {
   number: Schema.Int.pipe(Schema.positive()),
 } as const;
 
-const CodeProjectPullRequestLabel = Schema.String.pipe(
+export const CodeProjectPullRequestLabel = Schema.String.pipe(
   Schema.filter(
     (value) =>
       value.length >= 1 &&
@@ -596,7 +597,41 @@ export const CodeProjectPullRequestFailingCheck = Schema.Struct({
 }).annotations(strict);
 export type CodeProjectPullRequestFailingCheck = typeof CodeProjectPullRequestFailingCheck.Type;
 
+/** A local watch's latest observation, joined only onto a row this window may read. */
+export const PullRequestBabysitStatus = Schema.Literal(
+  "checking",
+  "connection",
+  "draft",
+  "approval",
+  "label",
+  "checks",
+  "repair-check",
+  "repair-review",
+  "outside-review",
+  "repair-branch",
+  "repository",
+  "ready",
+  "attempt-limit",
+  "feedback-limit",
+  "needs-help",
+  "thread-unavailable",
+  "authority-lost",
+);
+export type PullRequestBabysitStatus = typeof PullRequestBabysitStatus.Type;
 export const CodeProjectPullRequestRow = Schema.Struct({
+  babysit: Schema.optional(
+    Schema.Struct({
+      threadId: CodeThreadId,
+      status: PullRequestBabysitStatus,
+      checks: Schema.optional(Schema.Literal("all", "required")),
+      stoppedAt: Schema.optional(UtcTimestamp),
+      feedbackTurns: Schema.optional(Schema.NonNegativeInt),
+      feedbackLimit: Schema.optional(Schema.Int.pipe(Schema.positive())),
+      blockerDetail: Schema.optional(boundedNonEmptyText(512)),
+      requiredLabel: Schema.optional(CodeProjectPullRequestLabel),
+      readyHeadSha: Schema.optional(boundedNonEmptyText(64)),
+    }).annotations(strict),
+  ),
   projectId: ProjectId,
   projectName: boundedNonEmptyText(512),
   repositoryOwner: GithubRepositoryOwner,

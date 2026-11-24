@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     "./owner-approvals": "./src/ownerApprovals.ts",
+    "./video-generation": "./src/videoGeneration.ts",
     "./provider-cloud-sessions": "./src/providerCloudSessions.ts",
     "./git-history": "./src/gitHistory.ts",
     ".": "./src/index.ts",
@@ -176,6 +177,7 @@
     "./tracker-reference": "./src/trackerReference.ts",
     "./github-onboarding": "./src/githubOnboarding.ts",
     "./code-project-pull-requests": "./src/codeProjectPullRequests.ts",
+    "./code-project-pull-request-switches": "./src/codeProjectPullRequestSwitches.ts",
     "./pull-request-identity": "./src/pullRequestIdentity.ts",
     "./canvas-share-snapshot": "./src/canvasShareSnapshot.ts",
     "./canvas-share-access-log": "./src/canvasShareAccessLog.ts",
@@ -195,13 +197,14 @@
     "./provider-file-review": "./src/providerFileReview.ts",
     "./code-provider-file-review": "./src/codeProviderFileReview.ts",
     "./code-tool-contribution": "./src/codeToolContribution.ts",
-    "./pull-request-reviewer": "./src/pullRequestReviewer.ts"
+    "./pull-request-reviewer": "./src/pullRequestReviewer.ts",
+    "./side-chat-return": "./src/sideChatReturn.ts",
+    "./thread-message-queue": "./src/threadMessageQueue.ts"
   },
   "scripts": {
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "build": "tsdown src/index.ts --format esm --dts",
-    "test": "vitest run",
+    "test": "vitest run --no-isolate",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

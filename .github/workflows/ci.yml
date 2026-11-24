@@ -23,9 +23,68 @@ permissions:
   contents: read
 
 jobs:
+  # Decide which heavy jobs a pull request actually needs before fanning out.
+  # Merge queue and manual runs exercise everything. Pure documentation changes
+  # still run `static` (formatter, decisions, path and wiring checks) while
+  # skipping the test, sandbox, Docker and native desktop suites.
+  scope:
+    name: Determine affected CI scope
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      pull-requests: read
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+      share: ${{ steps.scope.outputs.share }}
+      download_manifest: ${{ steps.scope.outputs.download_manifest }}
+      desktop_linux: ${{ steps.scope.outputs.desktop_linux }}
+    steps:
+      - name: Inspect changed paths
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          code=true
+          share=true
+          download_manifest=true
+          desktop_linux=true
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            files="$(gh api --paginate "repos/${{ github.repository }}/pulls/${PULL}/files" --jq '.[].filename')"
+            # Keep `docs/design/**` out of the docs-only skip: server tests read
+            # `docs/design/agent-tools.md`. Root `DESIGN.md` is checked by
+            # `static` (`decisions:check`) and independently by `visual-check.yml`.
+            if [ -n "$files" ] && ! grep -qvE '^(docs/|[^/]+\.md$|\.coderabbit\.yaml$)' <<< "$files" && ! grep -qE '^docs/design/' <<< "$files"; then
+              code=false
+              share=false
+              download_manifest=false
+              desktop_linux=false
+            else
+              if ! grep -qE '^(apps/share/|packages/|\.dockerignore$|bun\.lock$|package\.json$|\.github/workflows/ci\.yml$)' <<< "$files"; then
+                share=false
+              fi
+              if ! grep -qE '^(apps/web/|apps/server/|packages/|scripts/smoke-browser-download-manifest-ui\.ts$|bun\.lock$|package\.json$|\.github/workflows/ci\.yml$)' <<< "$files"; then
+                download_manifest=false
+              fi
+              if ! grep -qE '^(apps/desktop/|apps/server/|packages/cli/|packages/client-runtime/|packages/host-runtime/|packages/domain/|packages/contracts/|scripts/|bun\.lock$|package\.json$|\.github/workflows/ci\.yml$)' <<< "$files"; then
+                desktop_linux=false
+              fi
+            fi
+          fi
+          {
+            echo "code=${code}"
+            echo "share=${share}"
+            echo "download_manifest=${download_manifest}"
+            echo "desktop_linux=${desktop_linux}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Scope: code=${code} share=${share} download_manifest=${download_manifest} desktop_linux=${desktop_linux}"
+
   sandbox-native:
     name: Sandbox native contract (${{ matrix.os }})
-    if: github.event.pull_request.draft != true
+    needs: scope
+    if: github.event.pull_request.draft != true && needs.scope.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -43,7 +102,6 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends bubblewrap socat
-      - run: bun run build --filter='@octant/server^...' --concurrency=1
       - name: Native process ownership and policy effects
         env:
           OCTANT_REQUIRE_LINUX_ISOLATION: "1"
@@ -93,7 +151,9 @@ jobs:
       - run: bun run --cwd apps/server browser:uploads:smoke
       - run: bun run style:check
       - run: bun run decisions:check
-      - run: bun run typecheck --filter=!@octant/desktop --filter=!@octant/scripts
+      # Cap Turbo concurrency so parallel TypeScript 7.0 compilers do not OOM
+      # the 16 GB ubuntu-24.04 runner now that `typecheck` no longer serializes behind `^build`.
+      - run: bun run typecheck --concurrency=3 --filter=!@octant/desktop --filter=!@octant/scripts
       # Resolves the phone's Expo configuration for each release profile with
       # every config plugin applied, so a broken plugin or manifest change
       # fails on the PR rather than in a maintainer's EAS build. The release
@@ -118,7 +178,8 @@ jobs:
   # one, and the merge queue runs them on the commit that lands.
   electron-windows:
     name: Windows Electron installer cleanup and recovery
-    if: github.event.pull_request.draft != true && (github.event_name != 'pull_request' || github.base_ref == 'main')
+    needs: scope
+    if: github.event.pull_request.draft != true && needs.scope.outputs.code == 'true' && (github.event_name != 'pull_request' || github.base_ref == 'main')
     runs-on: windows-2025
     timeout-minutes: 10
     steps:
@@ -158,7 +219,8 @@ jobs:
 
   packages:
     name: Package tests
-    if: github.event.pull_request.draft != true
+    needs: scope
+    if: github.event.pull_request.draft != true && needs.scope.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -169,14 +231,16 @@ jobs:
       - run: bun install --frozen-lockfile
       # scripts tests build the Swift helpers and package the app; they run on the macOS job.
       # The web and server suites have their own sharded jobs below.
-      - run: bun run test --filter=!@octant/desktop --filter=!@octant/scripts --filter=!@octant/server --filter=!@octant/web
+      # Cap Turbo concurrency so Vitest pools do not oversubscribe the 4-vCPU runner.
+      - run: bun run test --concurrency=2 --filter=!@octant/desktop --filter=!@octant/scripts --filter=!@octant/server --filter=!@octant/web
 
   # The pure policy and schema suites on Windows, so a POSIX path assumption in
   # them shows up before a Windows host relies on it. Not a required check (not
   # in `checks` below) until it has been seen green on the hosted runner.
   packages-windows:
     name: Package tests on Windows (domain, contracts)
-    if: github.event.pull_request.draft != true && (github.event_name != 'pull_request' || github.base_ref == 'main')
+    needs: scope
+    if: github.event.pull_request.draft != true && needs.scope.outputs.code == 'true' && (github.event_name != 'pull_request' || github.base_ref == 'main')
     runs-on: windows-2025
     timeout-minutes: 20
     steps:
@@ -186,17 +250,23 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
       - run: bun install --frozen-lockfile
-      - run: bun run test --filter=@octant/domain --filter=@octant/contracts
+      - run: bun run test --concurrency=2 --filter=@octant/domain --filter=@octant/contracts
 
   # Work and Code on Windows against real Windows processes: the process-tree
   # stop, a Code terminal and the harness shell opening PowerShell, and
   # compiled fake Codex, Claude, OpenCode, Pi and Kilo ACP runtimes. Not a
-  # required check (not in `checks` below) until it has been seen green on
-  # the hosted runner.
+  # required check (not in `checks` below) until it has been seen green on the
+  # hosted runner.
   server-windows:
     name: Server Full access tests on Windows
-    if: github.event.pull_request.draft != true && (github.event_name != 'pull_request' || github.base_ref == 'main')
+    needs: scope
+    if: github.event.pull_request.draft != true && needs.scope.outputs.code == 'true' && (github.event_name != 'pull_request' || github.base_ref == 'main')
     runs-on: windows-2025
     timeout-minutes: 20
     steps:
@@ -205,6 +275,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - name: Compile the fake provider runtimes into Windows programs
         shell: pwsh
@@ -241,7 +316,8 @@ jobs:
   # merge queue lands the commit, so users can `docker pull` instead of building.
   share-image:
     name: Build the share-service image
-    if: github.event.pull_request.draft != true
+    needs: scope
+    if: github.event.pull_request.draft != true && needs.scope.outputs.share == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -268,7 +344,8 @@ jobs:
 
   web:
     name: Web tests (${{ matrix.shard }}/5)
-    if: github.event.pull_request.draft != true
+    needs: scope
+    if: github.event.pull_request.draft != true && needs.scope.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -282,11 +359,12 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
-      - run: bun run test --filter=@octant/web -- --shard=${{ matrix.shard }}/5
+      - run: bun run --cwd apps/web test -- --shard=${{ matrix.shard }}/5
 
   server:
-    name: Server tests (${{ matrix.shard }}/4)
-    if: github.event.pull_request.draft != true
+    name: Server unit tests (${{ matrix.shard }}/4)
+    needs: scope
+    if: github.event.pull_request.draft != true && needs.scope.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -299,16 +377,37 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
-      # The suite imports the workspace packages from their built output.
-      - run: bun run build --filter='@octant/server^...'
       - env:
           OCTANT_DATA_DIR: ${{ runner.temp }}/octant-ci-data
           # The runner image ships kotlinc and java, so the pairing smoke test
           # runs the phone's Android TLS exchange on a JVM. Required here so an
           # image without them fails the shard instead of skipping it.
           OCTANT_REQUIRE_KOTLINC: "1"
+        run: bun run --cwd apps/server test:unit -- --exclude=src/bunServe.test.ts --shard=${{ matrix.shard }}/4
+
+  # Process and smoke suites run serially (`maxWorkers: 1`), so keeping them on
+  # dedicated shards prevents a slow serial smoke from skewing parallel unit shards.
+  server-process:
+    name: Server process tests (${{ matrix.shard }}/2)
+    needs: scope
+    if: github.event.pull_request.draft != true && needs.scope.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - env:
+          OCTANT_DATA_DIR: ${{ runner.temp }}/octant-ci-data
+          OCTANT_REQUIRE_KOTLINC: "1"
         # Process-spawning and browser-realm suites need a macOS host or a real network; run them locally.
-        run: bun run --cwd apps/server test -- --exclude=src/bunServe.test.ts --exclude=src/providers/acpProcess.test.ts --exclude=src/remote/remoteExitEvidenceA.smoke.test.ts --shard=${{ matrix.shard }}/4
+        run: bun run --cwd apps/server test:process -- --exclude=src/providers/acpProcess.test.ts --exclude=src/remote/remoteExitEvidenceA.smoke.test.ts --shard=${{ matrix.shard }}/2
 
   checks:
     # The branch rules require a check with exactly this name. It passes only
@@ -319,21 +418,31 @@ jobs:
     # Skipped on a draft along with the jobs it needs. A draft cannot merge, and
     # marking it ready runs this again before the merge queue runs it once more.
     if: always() && github.event.pull_request.draft != true
-    needs: [static, packages, web, server, sandbox-native]
+    needs: [scope, static, packages, web, server, server-process, sandbox-native]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          STATIC_RESULT: ${{ needs.static.result }}
+          CODE_SCOPE: ${{ needs.scope.outputs.code }}
+          CODE_RESULTS: ${{ needs.packages.result }} ${{ needs.web.result }} ${{ needs.server.result }} ${{ needs.server-process.result }} ${{ needs.sandbox-native.result }}
         run: |
-          echo "static, packages, web, server: $RESULTS"
-          for result in $RESULTS; do
-            [ "$result" = "success" ] || exit 1
+          echo "scope=$SCOPE_RESULT static=$STATIC_RESULT code=$CODE_SCOPE jobs=($CODE_RESULTS)"
+          [ "$SCOPE_RESULT" = "success" ] || exit 1
+          [ "$STATIC_RESULT" = "success" ] || exit 1
+          for result in $CODE_RESULTS; do
+            if [ "$CODE_SCOPE" = "false" ]; then
+              [ "$result" = "skipped" ] || [ "$result" = "success" ] || exit 1
+            else
+              [ "$result" = "success" ] || exit 1
+            fi
           done
 
   download-manifest-ui:
     name: Browser download manifest rendered review
-    if: github.event.pull_request.draft != true
+    needs: scope
+    if: github.event.pull_request.draft != true && needs.scope.outputs.download_manifest == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -342,6 +451,13 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+      - name: Read the pinned browser version
+        id: playwright
+        run: echo "version=$(bun -e 'console.log(require("playwright-core/package.json").version)')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
       - run: bun node_modules/playwright-core/cli.js install --with-deps chromium
       - run: bun run smoke:browser-download-manifest-ui
         env:
@@ -355,7 +471,8 @@ jobs:
 
   desktop:
     name: Desktop and scripts (macOS)
-    if: github.event.pull_request.draft != true && (github.event_name != 'pull_request' || github.base_ref == 'main')
+    needs: scope
+    if: github.event.pull_request.draft != true && needs.scope.outputs.code == 'true' && (github.event_name != 'pull_request' || github.base_ref == 'main')
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -363,14 +480,27 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - run: bun run --cwd apps/server browser:uploads:smoke
+      - name: Read the pinned Electron version
+        id: electron
+        run: echo "version=$(bun -e 'console.log(require("./apps/desktop/package.json").devDependencies.electron)')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/octant-electron-cache
+          key: electron-binary-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
       # Desktop tests import the pinned Electron package too, so install it
       # before they run rather than waiting for the later native smokes.
       - name: Install pinned Electron for native process checks
         id: pinned_electron
         env:
           GH_TOKEN: ${{ github.token }}
+          electron_config_cache: ${{ runner.temp }}/octant-electron-cache
         run: bun scripts/ensure-ci-electron.ts
       - name: Native download redirect source receipt
         timeout-minutes: 2
@@ -411,34 +541,12 @@ jobs:
       - name: Canvas prototype containment
         timeout-minutes: 8
         run: bun run smoke:canvas-prototype-containment
-      # Confined Code and Work opens prove where they landed with
-      # O_NOFOLLOW_ANY on macOS and /proc/self/fd on Linux. The server job
-      # runs only the Linux path, so the ancestor-swap port tests run here too.
-      - run: >-
-          bun run --cwd apps/server test --
-          src/canvas/artifactMirrorFilePort.test.ts
-          src/persistence/threadArtifactPurge.test.ts
-          src/code/codeDirectoryPort.test.ts
-          src/work/workFilesystemPort.test.ts
-          src/work/workConfinedWrite.test.ts
       # The scripts suite covers the signing pipeline: what would be run, in
       # what order, and that a declared release refuses to finish unsigned. The
       # signing itself needs the maintainer's Developer ID and notary
       # credentials, so it is not exercised here — no secret is read on a pull
       # request, and this job deliberately does not package a release.
       - run: bun run --cwd scripts test
-      # Language services: the bundled TypeScript server answers a two-file
-      # fixture under Seatbelt, and a hostile server a person added cannot run
-      # another program, reach the network, or write the checkout. A debug
-      # session's fixture adapter and program stop, step, and exit under
-      # Seatbelt while the program cannot write outside the checkout or reach
-      # a host no rule allows. The Linux server shards run the same tests under
-      # Bubblewrap; this is their macOS evidence.
-      - run: >-
-          bun run --cwd apps/server test --
-          src/code/codeLanguageServiceProcess.test.ts
-          src/code/installedLanguageServersProcess.test.ts
-          src/code/codeDebugServiceProcess.test.ts
       # The packaged app runs outside provider drivers on Electron's Node, so
       # the escape tests below also run a driver on the Electron the desktop
       # app pins. The earlier install step makes that binary mandatory rather
@@ -453,27 +561,40 @@ jobs:
       - name: Nightly client smoke
         timeout-minutes: 10
         run: bun scripts/smoke-nightly-client.ts
-      # An outside provider driver runs under its own Seatbelt profile and
-      # Linux refuses to start one, so its escape tests (network, files
-      # outside its package, the home folder, exec, host variables) skip on
-      # the server shards and only run here. The Cua daemon port finds the
-      # home with `/usr/bin/id -P` on macOS and `getent` on Linux; its tests
-      # hold that answer against Node's own user-database lookup, so this is
-      # the evidence the macOS lookup returns the home.
-      - run: >-
-          bun run --cwd apps/server test --
-          src/providers/outsideDriverProcess.escape.test.ts
-          src/computerUse/desktopDaemonPort.test.ts
-      # The sandbox escape probes gated on darwin skip on the Linux server
-      # shards, so this is where they run against the real sandbox-exec: the
-      # Seatbelt profile's write, Keychain, home and egress denials; a child
-      # that starts its own session still ends with its owner and stays
-      # confined; a runtime's network is its proxy alone; the secret guard
-      # refuses protected files; and a credential command runs confined.
-      - name: Seatbelt escape probes
-        timeout-minutes: 10
+      # Combined into one Vitest invocation to avoid repeated startup overhead;
+      # every group stays listed here for macOS-specific evidence:
+      # - Confined Code/Work opens prove O_NOFOLLOW_ANY on macOS (server shards
+      #   only exercise /proc/self/fd on Linux):
+      #     artifactMirrorFilePort, threadArtifactPurge, codeDirectoryPort,
+      #     workFilesystemPort, workConfinedWrite.
+      # - Language and debug services run under Seatbelt here (Linux runs the
+      #   Bubblewrap assertions when `/usr/bin/bwrap` is present):
+      #     codeLanguageServiceProcess, installedLanguageServersProcess,
+      #     codeDebugServiceProcess.
+      # - Outside provider drivers run under their own Seatbelt profile (Linux
+      #   refuses them), and Cua's daemon port resolves home via `/usr/bin/id -P`
+      #   on macOS vs `getent` on Linux:
+      #     outsideDriverProcess.escape, desktopDaemonPort.
+      # - Seatbelt escape probes (darwin-gated on Linux shards): Seatbelt write,
+      #   Keychain, home and egress denials, session escape cleanup, hostile
+      #   proxy-only egress, secret guard, and confined credential commands:
+      #     seatbeltProfile, sandboxLaunchPolicyProcess, sessionEscapeProcess,
+      #     secretGuard, providerRuntimeNetwork.hostile,
+      #     confinedCommandCredentialProcess.
+      - name: macOS server, language-service and Seatbelt escape probes
+        timeout-minutes: 12
         run: >-
           bun run --cwd apps/server test --
+          src/canvas/artifactMirrorFilePort.test.ts
+          src/persistence/threadArtifactPurge.test.ts
+          src/code/codeDirectoryPort.test.ts
+          src/work/workFilesystemPort.test.ts
+          src/work/workConfinedWrite.test.ts
+          src/code/codeLanguageServiceProcess.test.ts
+          src/code/installedLanguageServersProcess.test.ts
+          src/code/codeDebugServiceProcess.test.ts
+          src/providers/outsideDriverProcess.escape.test.ts
+          src/computerUse/desktopDaemonPort.test.ts
           src/process/seatbeltProfile.test.ts
           src/process/sandboxLaunchPolicyProcess.test.ts
           src/process/sessionEscapeProcess.test.ts
@@ -483,7 +604,8 @@ jobs:
 
   desktop-linux:
     name: Desktop Linux client trust
-    if: github.event.pull_request.draft != true
+    needs: scope
+    if: github.event.pull_request.draft != true && needs.scope.outputs.desktop_linux == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -491,6 +613,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       # Bubblewrap needs unprivileged user namespaces, which Ubuntu's AppArmor
       # restricts by default. Only this throwaway runner relaxes it; the user
@@ -532,9 +659,17 @@ jobs:
       # Playwright; its launch hook timed out on ubuntu-24.04 (run
       # 42205818274). It is not part of Linux client trust, and the macOS job
       # above runs it with the rest of the desktop suite.
+      - name: Read the pinned Electron version
+        id: electron
+        run: echo "version=$(bun -e 'console.log(require("./apps/desktop/package.json").devDependencies.electron)')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/octant-electron-cache
+          key: electron-binary-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
       - name: Install pinned Electron for desktop imports
         env:
           GH_TOKEN: ${{ github.token }}
+          electron_config_cache: ${{ runner.temp }}/octant-electron-cache
         run: bun scripts/ensure-ci-electron.ts
       - run: bun run --cwd apps/desktop test -- --exclude=src/browserSurfaceHost.realPage.test.ts
       # Nightly's test data and Octant's credentials in one real unlocked

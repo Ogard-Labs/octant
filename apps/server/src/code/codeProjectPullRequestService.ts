@@ -419,16 +419,23 @@ export class CodeProjectPullRequestService {
     windowId: WindowId,
     query: CodeProjectPullRequestQuery,
   ): Promise<CodeProjectPullRequestView> {
-    const projects = await this.#resolveProjects(windowId);
+    const [projects, threads] = await Promise.all([
+      this.#resolveProjects(windowId),
+      query.threadId === undefined ? undefined : this.#threads.list(),
+    ]);
     this.#observeListRead();
-    const rows = this.#authorizedActiveRows(projects);
+    const board = threads === undefined ? undefined : this.#boardSnapshot(projects, threads);
+    const rows =
+      query.threadId !== undefined && board !== undefined
+        ? openRowsForThread(board.rows, query.threadId)
+        : this.#authorizedActiveRows(projects);
     return this.#view({
       query,
       projects,
       rows,
       repositoriesTruncated: this.#cache?.repositoriesTruncated ?? false,
       pullRequestsTruncated: this.#cache?.pullRequestsTruncated ?? false,
-      freshness: this.#queryFreshness(),
+      freshness: board?.freshness ?? this.#queryFreshness(),
     });
   }
 
@@ -443,6 +450,13 @@ export class CodeProjectPullRequestService {
       this.#threads.list(),
     ]);
     this.#observeListRead();
+    return this.#boardSnapshot(projects, threads);
+  }
+
+  #boardSnapshot(
+    projects: ReadonlyArray<CodeProjectPullRequestConnection>,
+    threads: ReadonlyArray<CodeProjectLinkedThreadFact>,
+  ): BoardSnapshot {
     const cachedRows = this.#authorizedRows(projects);
     const rows = this.#boundRows(this.#mergeRows(cachedRows, this.#knownRows(projects, threads)));
     const freshness = this.#queryFreshness();
@@ -723,18 +737,12 @@ export class CodeProjectPullRequestService {
     threadId: CodeThreadId,
   ): Promise<ReadonlyArray<CodeProjectPullRequestSwitchTarget>> {
     const snapshot = await this.boardSnapshot(windowId);
-    return snapshot.rows
-      .filter(
-        (row) =>
-          (row.state === "open" || row.state === "unknown") &&
-          row.linkedThreads.some((thread) => String(thread.threadId) === String(threadId)),
-      )
-      .map((row) => ({
-        projectId: row.projectId,
-        repositoryOwner: row.repositoryOwner,
-        repositoryName: row.repositoryName,
-        number: row.number,
-      }));
+    return openRowsForThread(snapshot.rows, threadId).map((row) => ({
+      projectId: row.projectId,
+      repositoryOwner: row.repositoryOwner,
+      repositoryName: row.repositoryName,
+      number: row.number,
+    }));
   }
 
   async merge(
@@ -2772,4 +2780,12 @@ function summarizeObservedReviews(
   if (reviews.some((review) => review.state === "approved")) return "approved";
   if (reviews.some((review) => review.state === "pending")) return "pending";
   return reviews.length === 0 ? "none" : "unknown";
+}
+
+function openRowsForThread(rows: ReadonlyArray<CodeProjectPullRequestRow>, threadId: CodeThreadId) {
+  return rows.filter(
+    (row) =>
+      (row.state === "open" || row.state === "unknown") &&
+      row.linkedThreads.some((thread) => String(thread.threadId) === String(threadId)),
+  );
 }

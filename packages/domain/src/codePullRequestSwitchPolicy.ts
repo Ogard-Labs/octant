@@ -4,6 +4,7 @@ import {
   CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES,
   MAX_CODE_PROJECT_PULL_REQUEST_WATCH_SIGNALS,
   type CodeProjectPullRequestAutoFixFailure,
+  type PullRequestBabysitRules,
   type CodeProjectPullRequestAutoFixPauseReason,
   type CodeProjectPullRequestAutoFixRecorded,
   type CodeProjectPullRequestAutoFixStopReason,
@@ -15,6 +16,11 @@ import {
   type CodeProjectPullRequestWatchSignal,
   type CodeProjectPullRequestWatchStopReason,
 } from "@octant/contracts";
+
+export const PULL_REQUEST_HANDOFF_HEADING = "Pull request updates\n";
+export function readyPullRequestNotice(headSha: string): string {
+  return `ready to merge at ${headSha}`;
+}
 
 export type PullRequestMergeWhenReadyFold =
   | { readonly status: "off" }
@@ -41,14 +47,21 @@ export type PullRequestAutoFixFold =
       readonly status: "on";
       readonly threadId: string;
       readonly enabledAt: string;
+      readonly babysit?: PullRequestBabysitRules;
+      /** Each finding sent for the current head, even if another wake sent different findings. */
+      readonly handled?: { readonly headSha: string; readonly failures: ReadonlySet<string> };
       /** Started wakes per failure identity since the switch was last turned on. */
       readonly attempts: ReadonlyMap<string, number>;
+      readonly feedbackWakes: number;
       readonly lastWake?: PullRequestAutoFixWakeFold;
     }
   | {
       readonly status: "stopped";
       readonly threadId: string;
       readonly reason: CodeProjectPullRequestAutoFixStopReason;
+      readonly babysit?: PullRequestBabysitRules;
+      readonly readyHeadSha?: string;
+      readonly feedbackWakes?: number;
       readonly stoppedAt: string;
     };
 
@@ -115,6 +128,10 @@ export function failureIdentity(failure: CodeProjectPullRequestAutoFixFailure): 
   return `${failure.kind}:${failure.key}`;
 }
 
+function isReviewFeedback(failure: CodeProjectPullRequestAutoFixFailure): boolean {
+  return failure.kind === "feedback" || failure.kind === "review-thread";
+}
+
 function failureSignature(failures: ReadonlyArray<CodeProjectPullRequestAutoFixFailure>): string {
   return failures.map(failureIdentity).toSorted().join("\n");
 }
@@ -165,6 +182,8 @@ export function applyPullRequestSwitchEvent(
         threadId: String(threadId),
         enabledAt: event.occurredAt,
         attempts: new Map(),
+        feedbackWakes: 0,
+        ...(change.babysit === undefined ? {} : { babysit: change.babysit }),
       },
     };
   }
@@ -176,18 +195,31 @@ export function applyPullRequestSwitchEvent(
         status: "stopped",
         threadId: String(threadId),
         reason: change.reason,
+        ...(fold.autoFix.status !== "off" && fold.autoFix.babysit
+          ? { babysit: fold.autoFix.babysit, feedbackWakes: fold.autoFix.feedbackWakes }
+          : {}),
+        ...(change.readyHeadSha === undefined ? {} : { readyHeadSha: change.readyHeadSha }),
         stoppedAt: event.occurredAt,
       },
     };
   }
   if (fold.autoFix.status !== "on") return fold;
   const attempts = new Map(fold.autoFix.attempts);
+  const handled =
+    fold.autoFix.babysit && change.result === "started"
+      ? new Set(
+          fold.autoFix.handled?.headSha === change.headSha ? fold.autoFix.handled.failures : [],
+        )
+      : undefined;
   // Only a wake that started a turn spent an attempt; a refused one never
   // reached the agent.
+  let feedbackWakes = fold.autoFix.feedbackWakes;
   if (change.result === "started") {
+    if (fold.autoFix.babysit && change.failures.some(isReviewFeedback)) feedbackWakes++;
     for (const failure of change.failures) {
       const identity = failureIdentity(failure);
       attempts.set(identity, (attempts.get(identity) ?? 0) + 1);
+      handled?.add(identity);
     }
   }
   return {
@@ -195,6 +227,8 @@ export function applyPullRequestSwitchEvent(
     autoFix: {
       ...fold.autoFix,
       attempts,
+      feedbackWakes,
+      ...(handled ? { handled: { headSha: change.headSha, failures: handled } } : {}),
       lastWake: {
         at: event.occurredAt,
         headSha: change.headSha,
@@ -209,10 +243,12 @@ export function applyPullRequestSwitchEvent(
 export interface PullRequestAutoFixObservation {
   readonly state: "open" | "merged" | "closed";
   readonly headSha: string;
+  readonly babysitReady?: boolean;
   readonly failures: ReadonlyArray<CodeProjectPullRequestAutoFixFailure>;
 }
 
 export type PullRequestAutoFixDecision =
+  | { readonly kind: "confirm-stall"; readonly signature: string }
   | { readonly kind: "idle" }
   | { readonly kind: "paused"; readonly reason: CodeProjectPullRequestAutoFixPauseReason }
   | { readonly kind: "stop"; readonly reason: CodeProjectPullRequestAutoFixStopReason }
@@ -227,7 +263,8 @@ export type PullRequestAutoFixDecision =
  *
  * - A merged or closed pull request stops it.
  * - No failure, or the same failures on the same head it already woke a turn
- *   for, is idle: the agent is on it, or nothing changed since. A wake that
+ *   for, is idle in ordinary Auto-fix. A babysitter hands remaining failures
+ *   to the person after two quiet observations of the same head and failures. A wake that
  *   never started a turn (refused, or never sent) is tried again, because
  *   the reason is usually transient.
  * - A failure that already spent the attempt limit stops it, so a fix that
@@ -242,12 +279,43 @@ export function decidePullRequestAutoFix(input: {
   readonly personTyping: boolean;
   /** Attempts per failure from Settings; absent is the default three. */
   readonly maxAttempts?: number;
+  readonly maxFeedbackWakes?: number;
+  readonly priorStall?: string;
 }): PullRequestAutoFixDecision {
   const { fold, observation } = input;
   if (fold.status !== "on") return { kind: "idle" };
   if (observation.state === "merged") return { kind: "stop", reason: "merged" };
   if (observation.state === "closed") return { kind: "stop", reason: "closed" };
-  if (observation.failures.length === 0) return { kind: "idle" };
+  if (observation.failures.length === 0) {
+    if (fold.babysit && observation.babysitReady && !input.turnActive) {
+      return { kind: "stop", reason: "ready" };
+    }
+    return { kind: "idle" };
+  }
+  const handled = fold.handled;
+  const failures =
+    handled?.headSha === observation.headSha
+      ? observation.failures.filter((failure) => !handled.failures.has(failureIdentity(failure)))
+      : observation.failures;
+  if (failures.length === 0) {
+    if (!fold.babysit || input.turnActive || input.personTyping) return { kind: "idle" };
+    const signature = JSON.stringify([
+      observation.headSha,
+      ...observation.failures.map(failureIdentity).toSorted(),
+    ]);
+    return input.priorStall === signature
+      ? { kind: "stop", reason: "needs-help" }
+      : { kind: "confirm-stall", signature };
+  }
+  // A repair may push a new head before it resolves the review. Recheck its result after the turn.
+  if (fold.babysit && input.turnActive) return { kind: "paused", reason: "turn-active" };
+  if (
+    fold.babysit &&
+    failures.some(isReviewFeedback) &&
+    fold.feedbackWakes >= (input.maxFeedbackWakes ?? CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES)
+  ) {
+    return { kind: "stop", reason: "feedback-limit" };
+  }
   if (
     fold.lastWake !== undefined &&
     fold.lastWake.result === "started" &&
@@ -257,14 +325,14 @@ export function decidePullRequestAutoFix(input: {
     return { kind: "idle" };
   }
   const spent = Math.max(
-    ...observation.failures.map((failure) => fold.attempts.get(failureIdentity(failure)) ?? 0),
+    ...failures.map((failure) => fold.attempts.get(failureIdentity(failure)) ?? 0),
   );
   if (spent >= (input.maxAttempts ?? CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS)) {
     return { kind: "stop", reason: "attempt-limit" };
   }
   if (input.turnActive) return { kind: "paused", reason: "turn-active" };
   if (input.personTyping) return { kind: "paused", reason: "person-typing" };
-  return { kind: "wake", attempt: spent + 1, failures: observation.failures };
+  return { kind: "wake", attempt: spent + 1, failures };
 }
 
 export function watchSignalIdentity(signal: CodeProjectPullRequestWatchSignal): string {

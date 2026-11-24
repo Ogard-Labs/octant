@@ -19,6 +19,11 @@ import { createHostShield, shieldRoutesApprovals } from "../shield/hostShield";
 import { chosenAutoReviewer, hostSandboxRefusal } from "@octant/domain/guardrail-policy";
 import { readsSecretsThenEgress } from "@octant/domain/shield-judge-policy";
 import { createAutomaticModelAccountCheck } from "../automaticModels/automaticModelAccount";
+import {
+  createThreadTitleGenerator,
+  threadTitleSubscriptionCredentials,
+} from "../automaticModels/threadTitle";
+import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { createPersonMemorySweep } from "../personMemory/personMemoryWiring";
 import { createDecisionReviewModelPort } from "../turnDecisions/decisionReviewWiring";
 import { isProtectedSecretPath } from "../process/secretGuard";
@@ -201,6 +206,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<WorkspaceWiring, "projectService"> & {
     /** The member's Act item for its hub, bound by the hub side after this is built. */
     readonly hubActScopeSlot: HubActScopeSlot;
+    readonly threadMoveHolds: ThreadMoveHolds;
   };
 
 export function wireHarness(deps: HarnessDependencies) {
@@ -904,10 +910,63 @@ export function wireHarness(deps: HarnessDependencies) {
   // and ending, so the refusal and the count of running turns sit at the one
   // admission all three modes share.
   const hostDrain = new HostDrain({ now: Date.now });
+  const resolveConfiguredDriver = (
+    providerInstanceId: ProviderInstanceId,
+    driverOptions = configuredDriverOptions,
+  ) => {
+    const instance = persistence.readProviderInstance(providerInstanceId);
+    if (instance === undefined || !instance.enabled) return undefined;
+    try {
+      return makeConfiguredProviderDriver(instance, driverOptions);
+    } catch {
+      return undefined;
+    }
+  };
+  // The account the person chose for an automatic call is asked as it is: off,
+  // not ready or at its limit, it is reported and no other account is tried.
+  const automaticModelAccountUnavailable = createAutomaticModelAccountCheck({
+    readProviderInstance: (id) => persistence.readProviderInstance(id),
+    readiness: (id) => providerRuntimeRegistry.observedState(id)?.readiness,
+    limits: () => providerUsageLimitsService.snapshot(),
+  });
+  // Title requests use the configured credential broker and endpoint without
+  // the agent harness's model fallback, search, or transcript services.
+  const {
+    nativeHarness: _agentHarness,
+    nativeHarnessTranscripts: _transcripts,
+    subscriptionOAuth,
+    ...titleDriverOptions
+  } = configuredDriverOptions;
+  const titleCredentials = titleDriverOptions.credentialResolver;
+  const subscriptionTitleDriverOptions = {
+    ...titleDriverOptions,
+    ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
+    ...(titleCredentials === undefined
+      ? {}
+      : {
+          credentialResolver: threadTitleSubscriptionCredentials(titleCredentials),
+        }),
+  };
+  const titleFirstTurn = createThreadTitleGenerator({
+    persistence,
+    workThreads: workThreadProjection,
+    ...(titleDriverOptions.fetch === undefined ? {} : { fetch: titleDriverOptions.fetch }),
+    resolveDriver: (id, source, fetch) =>
+      resolveConfiguredDriver(id, {
+        ...(source === "subscription" ? subscriptionTitleDriverOptions : titleDriverOptions),
+        fetch,
+      }),
+    accountUnavailable: automaticModelAccountUnavailable,
+    isHeld: (thread) => deps.threadMoveHolds.isHeld(thread),
+    leavesNoTrace: (thread) => personMemory.leavesNoTrace(thread),
+    spendCeiling,
+    scratchRoot: harnessWorkDirectory,
+  });
   const nativeHarnessHooks = {
     toolEffects: (turn: Parameters<ToolEffectLedger["forTurn"]>[0]) =>
       toolEffectLedger.forTurn(turn),
     ...(promptDigest === undefined ? {} : { promptDigest }),
+    titleFirstTurn,
     answerQuestion: (threadId: string, questionId: string, answer: string) => {
       return nativeHarnessQuestions.answer(threadId, questionId, answer);
     },
@@ -1001,22 +1060,6 @@ export function wireHarness(deps: HarnessDependencies) {
       await nativeHarnessObserver.turnCompleted(input);
     },
   };
-  const resolveConfiguredDriver = (providerInstanceId: ProviderInstanceId) => {
-    const instance = persistence.readProviderInstance(providerInstanceId);
-    if (instance === undefined || !instance.enabled) return undefined;
-    try {
-      return makeConfiguredProviderDriver(instance, configuredDriverOptions);
-    } catch {
-      return undefined;
-    }
-  };
-  // The account the person chose for an automatic call is asked as it is: off,
-  // not ready or at its limit, it is reported and no other account is tried.
-  const automaticModelAccountUnavailable = createAutomaticModelAccountCheck({
-    readProviderInstance: (id) => persistence.readProviderInstance(id),
-    readiness: (id) => providerRuntimeRegistry.observedState(id)?.readiness,
-    limits: () => providerUsageLimitsService.snapshot(),
-  });
   const readTurnExecutionPolicy = codeTurnExecutionPolicyReader({
     readCodeThread: (threadId) => persistence.readCodeThread(threadId),
     codeSessionAuthority,

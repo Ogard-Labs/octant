@@ -25,6 +25,9 @@
     "./cloud-iam-conformance": "./src/cloudIamConformance.ts",
     "./image-generation": "./src/imageGeneration.ts",
     "./image-generation-conformance": "./src/imageGenerationConformance.ts",
+    "./video-generation": "./src/videoGeneration.ts",
+    "./video-generation-policy": "./src/videoGenerationPolicy.ts",
+    "./video-generation-conformance": "./src/videoGenerationConformance.ts",
     "./cloud-sessions": "./src/cloudSessions.ts",
     "./openai-cloud-session-protocol": "./src/openAiCloudSessionProtocol.ts",
     "./cloud-session-conformance": "./src/cloudSessionConformance.ts",
@@ -33,8 +36,7 @@
   "scripts": {
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "build": "tsdown src/index.ts --format esm --dts",
-    "test": "vitest run",
+    "test": "vitest run --no-isolate",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

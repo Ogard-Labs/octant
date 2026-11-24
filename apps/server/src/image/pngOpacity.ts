@@ -59,6 +59,78 @@ export function pngWithoutAlpha(bytes: Uint8Array): PngOpacity {
   };
 }
 
+/**
+ * The colour-description chunks a source carried, spliced into a PNG the
+ * host re-encoded from it: the profile, gamma, chromaticities and sRGB
+ * intent travel with the image so the icon keeps the colour the source
+ * declared. A source that is not a readable PNG declares none, so the
+ * re-encode is returned as it is.
+ */
+export function carryPngColour(source: Uint8Array, png: Uint8Array): Uint8Array {
+  // Byte 25 of a whole PNG is the colour type in its IHDR; it is read only
+  // once the bytes are long enough to hold one.
+  const targetColorType = png.byteLength > 25 ? png[25] : undefined;
+  const colour = pngColourChunks(source, targetColorType);
+  if (colour === undefined || colour.length === 0 || !hasSignature(png)) return png;
+  const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  // Colour chunks belong before IDAT; right after the leading IHDR is always
+  // one such place.
+  const ihdrEnd = 8 + 12 + view.getUint32(8);
+  if (ihdrEnd >= png.byteLength) return png;
+  return concat([png.subarray(0, ihdrEnd), ...colour, png.subarray(ihdrEnd)]);
+}
+
+/**
+ * The colour-description chunks a PNG declares ahead of its image data, read
+ * without inflating or decoding a pixel: an indexed, interlaced or 16-bit
+ * source describes colour the same way an RGB or RGBA one does, so the
+ * re-encode keeps it regardless of the layout the pixels are stored in.
+ * `targetColorType`, when given, is the re-encode's own colour type: an ICC
+ * profile names one colour space, so it travels only when source and target
+ * share a family — grayscale (0, 4) or RGB (2, 3, 6). Gamma, chromaticities
+ * and the sRGB intent read the same in either.
+ */
+function pngColourChunks(
+  bytes: Uint8Array,
+  targetColorType?: number,
+): ReadonlyArray<Uint8Array> | undefined {
+  if (!hasSignature(bytes)) return undefined;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 8;
+  let header = false;
+  let sourceColorType: number | undefined;
+  const colour: Uint8Array[] = [];
+  while (offset + 8 <= bytes.byteLength) {
+    const length = view.getUint32(offset);
+    const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
+    const start = offset + 8;
+    if (start + length + 4 > bytes.byteLength) return undefined;
+    if (type === "IHDR") {
+      header = true;
+      sourceColorType = bytes[start + 9];
+    } else if (
+      type === "iCCP" &&
+      targetColorType !== undefined &&
+      colourFamily(sourceColorType) !== colourFamily(targetColorType)
+    ) {
+      // A profile for a grayscale source would misread an RGB re-encode.
+    } else if (COLOUR_CHUNKS.has(type)) {
+      colour.push(bytes.subarray(offset, start + length + 4));
+    } else if (type === "IDAT" || type === "IEND") {
+      break;
+    }
+    offset = start + length + 4;
+  }
+  return header ? colour : undefined;
+}
+
+/** PNG colour types live in two colour spaces: grayscale (0, 4) or RGB (2, 3, 6). */
+function colourFamily(colorType: number | undefined): "gray" | "rgb" | undefined {
+  if (colorType === 0 || colorType === 4) return "gray";
+  if (colorType === 2 || colorType === 3 || colorType === 6) return "rgb";
+  return undefined;
+}
+
 function parsePng(bytes: Uint8Array):
   | {
       readonly width: number;
@@ -74,7 +146,6 @@ function parsePng(bytes: Uint8Array):
   let offset = 8;
   let header: { width: number; height: number; colorType: 2 | 6 } | undefined;
   const idat: Uint8Array[] = [];
-  const colour: Uint8Array[] = [];
   while (offset + 8 <= bytes.byteLength) {
     const length = view.getUint32(offset);
     const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
@@ -90,8 +161,6 @@ function parsePng(bytes: Uint8Array):
         return undefined;
       }
       header = { width: bodyView.getUint32(0), height: bodyView.getUint32(4), colorType };
-    } else if (COLOUR_CHUNKS.has(type) && idat.length === 0) {
-      colour.push(bytes.subarray(offset, start + length + 4));
     } else if (type === "IDAT") {
       idat.push(body);
     } else if (type === "IEND") {
@@ -101,7 +170,11 @@ function parsePng(bytes: Uint8Array):
   }
   if (header === undefined || idat.length === 0) return undefined;
   try {
-    return { ...header, colour, data: new Uint8Array(inflateSync(concat(idat))) };
+    return {
+      ...header,
+      colour: pngColourChunks(bytes) ?? [],
+      data: new Uint8Array(inflateSync(concat(idat))),
+    };
   } catch {
     return undefined;
   }

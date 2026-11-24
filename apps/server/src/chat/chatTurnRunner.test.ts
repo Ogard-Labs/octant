@@ -187,6 +187,7 @@ describe("ChatTurnRunner", () => {
   it("subscribes before send and passes chat scratch confinement to acquire", async () => {
     const acquireInputs: ProviderAcquireInput[] = [];
     let subscribedBeforeSend = false;
+    const order: string[] = [];
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
       subscribe: Effect.sync(() => {
@@ -198,6 +199,7 @@ describe("ChatTurnRunner", () => {
         Effect.gen(function* () {
           expect(subscribedBeforeSend).toBe(true);
           expect(input.context).toEqual([{ kind: "instructions", text: "Stay concise." }]);
+          order.push("sent");
           yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "Hello" } as never);
           yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
         }),
@@ -218,6 +220,13 @@ describe("ChatTurnRunner", () => {
     const { scheduler, reservation } = makeScheduler();
     const runner = new ChatTurnRunner({
       capacityScheduler: scheduler,
+      spendCeiling: {
+        admit: () => {
+          order.push("admitted");
+          return { status: "admitted", reservedTokens: 100, reservations: [] };
+        },
+        settle: vi.fn(),
+      },
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
         webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
@@ -235,6 +244,9 @@ describe("ChatTurnRunner", () => {
           thread: thread(),
           attempt: attempt(),
           prompt: "hello",
+          onPromptSent: () => {
+            order.push("title");
+          },
           context: [{ kind: "instructions", text: "Stay concise." }],
           scratchRoot,
           driver,
@@ -268,6 +280,7 @@ describe("ChatTurnRunner", () => {
 
     expect(acquireInputs[0]).toMatchObject({ mode: "chat", projectRoot: scratchRoot });
     expect(updates.at(-1)?.outcome).toBe("completed");
+    expect(order).toEqual(["admitted", "sent", "title"]);
   });
 
   it("refuses original continuation inputs revoked during native startup", async () => {
@@ -441,6 +454,7 @@ describe("ChatTurnRunner", () => {
     const message =
       "This thread's money ceiling cannot be checked because some of its usage in this window has no price.";
     const acquire = vi.fn(() => Effect.die(new Error("A refused turn never reaches the provider")));
+    const onPromptSent = vi.fn();
     const harness = makeHarness();
     const updates: ChatAttempt[] = [];
     const { scheduler, reservation } = makeScheduler();
@@ -478,6 +492,7 @@ describe("ChatTurnRunner", () => {
           thread: thread(),
           attempt: attempt(),
           prompt: "hello",
+          onPromptSent,
           scratchRoot: "/tmp/octant-scratch/thread",
           driver: { kind: "codex", probe: () => Effect.die(new Error("unused")), acquire },
           providerInstanceId,
@@ -510,6 +525,7 @@ describe("ChatTurnRunner", () => {
 
     expect(result._tag).toBe("Failure");
     expect(acquire).not.toHaveBeenCalled();
+    expect(onPromptSent).not.toHaveBeenCalled();
     expect(updates.at(-1)).toMatchObject({
       outcome: "interrupted",
       failure: { code: "unknown-spend", message },

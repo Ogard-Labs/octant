@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   decodeCodeProjectPullRequestSwitchTarget,
+  decodeCodeProjectPullRequestView,
+  decodeUtcTimestamp,
   decodeWindowId,
   type CodeProjectPullRequestMergeMethod,
 } from "@octant/contracts";
@@ -16,7 +18,9 @@ import { openSqlite } from "../persistence/sqlitePort";
 import {
   CodeProjectPullRequestSwitchService,
   type PullRequestAutoFixThreads,
+  type PullRequestSwitchAuthority,
   type PullRequestSwitchForge,
+  type PullRequestSwitchLimits,
 } from "./codeProjectPullRequestSwitchService";
 import type {
   GhAutoFixFailureDetail,
@@ -83,6 +87,9 @@ function fixture(
     readonly allowAutoMerge?: boolean;
     readonly methods?: Partial<Record<CodeProjectPullRequestMergeMethod, boolean>>;
     readonly linked?: ReadonlyArray<string>;
+    readonly authorize?: PullRequestSwitchAuthority["authorizePullRequest"];
+    readonly limits?: () => PullRequestSwitchLimits;
+    readonly localWindows?: () => ReadonlyArray<typeof windowId>;
     readonly threadPullRequests?: ReadonlyArray<typeof target>;
   } = {},
 ) {
@@ -119,15 +126,20 @@ function fixture(
       order.push("turn");
       return true;
     }),
+    readFollowUp: vi.fn<NonNullable<PullRequestAutoFixThreads["readFollowUp"]>>(),
     notifyPerson: vi.fn<PullRequestAutoFixThreads["notifyPerson"]>(async () => undefined),
   };
   const create = () =>
     new CodeProjectPullRequestSwitchService({
+      ...(options.limits && { limits: options.limits }),
+      ...(options.localWindows ? { localWindows: options.localWindows } : {}),
       authority: {
-        authorizePullRequest: async () =>
-          authority === "authorized"
-            ? { status: "authorized", linkedThreadIds: options.linked ?? [String(threadId)] }
-            : { status: authority },
+        authorizePullRequest:
+          options.authorize ??
+          (async () =>
+            authority === "authorized"
+              ? { status: "authorized", linkedThreadIds: options.linked ?? [String(threadId)] }
+              : { status: authority }),
         linkedPullRequests: async () => options.threadPullRequests ?? [target],
       },
       forge,
@@ -164,6 +176,479 @@ function fixture(
 
 const MERGE_WHEN_READY = "code.project-pull-request-merge-when-ready-recorded@1";
 const AUTO_FIX = "code.project-pull-request-auto-fix-recorded@1";
+
+describe("Babysit from a Code thread", () => {
+  it("revalidates a paired owner's session on a headless host and stops on revocation", async () => {
+    const f = fixture({ localWindows: () => [] });
+    let current = true;
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: { checks: "required" } },
+      "user",
+      undefined,
+      () => current,
+    );
+    await f.service.tick(signal);
+    expect(f.forge.observe).toHaveBeenCalledTimes(1);
+    current = false;
+    await f.service.tick(signal);
+    expect(f.forge.observe).toHaveBeenCalledTimes(1);
+    expect((await f.service.query(windowId, target)).autoFix).toMatchObject({
+      status: "stopped",
+      reason: "authority-lost",
+    });
+  });
+  it("stops a recovered babysitter when its authorizing project is archived", async () => {
+    const f = fixture({ localWindows: () => [windowId] });
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: { checks: "required" } },
+      "user",
+    );
+    const restored = f.restart();
+    await restored.tick(signal);
+    f.setAuthority("not-authorized");
+    await restored.tick(signal);
+    f.setAuthority("authorized");
+    await restored.tick(signal);
+    expect(f.forge.observe).toHaveBeenCalledTimes(1);
+    expect((await restored.query(windowId, target)).autoFix).toMatchObject({
+      status: "stopped",
+      reason: "authority-lost",
+    });
+  });
+  it("preserves an active babysitter's rules on a plain Auto-fix enable", async () => {
+    const f = fixture();
+    const rules = { checks: "all", requiredLabel: "qa" } as const;
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: rules },
+      "user",
+    );
+    expect(
+      await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user"),
+    ).toEqual({ status: "refused", reason: "already-active" });
+    expect((await f.service.query(windowId, target)).autoFix).toMatchObject({ babysit: rules });
+    expect(f.recorded(AUTO_FIX)).toHaveLength(1);
+  });
+  it("resumes only an enrolled babysitter once the local project connection returns", async () => {
+    let windows: ReadonlyArray<typeof windowId> = [];
+    const f = fixture({ localWindows: () => windows });
+    const other = { ...target, number: 13 };
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: { checks: "required" } },
+      "user",
+    );
+    await f.service.setAutoFix(windowId, { kind: "enable", target: other, threadId }, "user");
+    const restored = f.restart();
+    await restored.tick(signal);
+    windows = [windowId];
+    f.setAuthority("disconnected");
+    await restored.tick(signal);
+    expect(f.forge.observe).not.toHaveBeenCalled();
+    f.setAuthority("authorized");
+    f.observe(observed({ babysitReady: true }));
+    await restored.tick(signal);
+    expect(f.forge.observe).toHaveBeenCalledTimes(1);
+    expect(f.threads.notifyPerson).toHaveBeenCalledExactlyOnceWith(
+      threadId,
+      expect.stringContaining("a1"),
+    );
+    expect((await restored.query(windowId, other)).autoFix.status).toBe("on");
+  });
+
+  it("skips a stale window and refuses a project connection without the recorded thread link", async () => {
+    const stale = decodeWindowId("00000000-0000-4000-8000-000000000902");
+    let linked = true;
+    const f = fixture({
+      localWindows: () => [stale, windowId],
+      authorize: async (id) => {
+        if (String(id) === String(stale)) throw new Error("window closed");
+        return { status: "authorized", linkedThreadIds: linked ? [String(threadId)] : [] };
+      },
+    });
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: { checks: "all" } },
+      "user",
+    );
+    const restored = f.restart();
+    linked = false;
+    await restored.tick(signal);
+    expect(f.forge.observe).not.toHaveBeenCalled();
+    linked = true;
+    await restored.tick(signal);
+    expect(f.forge.observe).toHaveBeenCalledTimes(1);
+  });
+
+  it("projects blockers and the ready commit onto the linked row without polling GitHub on list reads", async () => {
+    const f = fixture();
+    const row = {
+      ...target,
+      projectName: "Octant",
+      title: "Change",
+      state: "open",
+      draft: false,
+      author: "dev",
+      mergeability: "mergeable",
+      baseBranch: "main",
+      headBranch: "feature/x",
+      updatedAt: "2026-10-31T10:00:00.000Z",
+      checks: "pending",
+      review: "pending",
+      linkedThreads: [{ threadId, title: "Build fixes" }],
+    };
+    const view = decodeCodeProjectPullRequestView({
+      version: 1,
+      query: { version: 1 },
+      generatedAt: row.updatedAt,
+      freshness: { status: "fresh" },
+      repositoriesTruncated: false,
+      pullRequestsTruncated: false,
+      projects: [],
+      rows: [row, { ...row, number: 13 }],
+    });
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: { checks: "required", requiredLabel: "qa" } },
+      "user",
+    );
+    f.observe(observed({ babysitBlocker: "label" }));
+    await f.service.tick(signal);
+    const rows = f.service.withBabysitProgress(view).rows;
+    expect(rows[0]?.babysit).toEqual({
+      threadId,
+      status: "label",
+      requiredLabel: "qa",
+      checks: "required",
+      feedbackTurns: 0,
+      feedbackLimit: 10,
+    });
+    expect(rows[1]?.babysit).toBeUndefined();
+    const unlinked = { ...view, rows: view.rows.map((r) => ({ ...r, linkedThreads: [] })) };
+    expect(f.service.withBabysitProgress(unlinked).rows[0]?.babysit).toBeUndefined();
+    expect(f.forge.observe).toHaveBeenCalledTimes(1);
+    f.observe(observed({ babysitReady: true }));
+    await f.service.tick(signal);
+    expect(f.restart().withBabysitProgress(view).rows[0]?.babysit).toMatchObject({
+      status: "ready",
+      readyHeadSha: "a1",
+    });
+  });
+
+  it("returns an idempotent result for a repeated bulk start and preserves different existing rules", async () => {
+    const f = fixture();
+    const command = {
+      kind: "enable",
+      target,
+      threadId,
+      babysit: { checks: "all", requiredLabel: "qa" },
+    } as const;
+    expect(await f.service.setAutoFix(windowId, command, "user")).not.toHaveProperty(
+      "alreadyActive",
+    );
+    expect(await f.service.setAutoFix(windowId, command, "user")).toMatchObject({
+      status: "applied",
+      alreadyActive: true,
+    });
+    expect(
+      await f.service.setAutoFix(windowId, { ...command, babysit: { checks: "required" } }, "user"),
+    ).toEqual({ status: "refused", reason: "already-active" });
+    expect(f.recorded(AUTO_FIX)).toHaveLength(1);
+  });
+
+  it("keeps independent watches for two PRs owned by the same thread after replay", async () => {
+    const second = { ...target, number: 13 };
+    const f = fixture({ threadPullRequests: [target, second] });
+    const firstRules = { checks: "required" } as const;
+    const secondRules = { checks: "all", requiredLabel: "QA" } as const;
+    for (const [pr, rules] of [
+      [target, firstRules],
+      [second, secondRules],
+    ] as const) {
+      await f.service.setAutoFix(
+        windowId,
+        { kind: "enable", threadId, target: pr, babysit: rules },
+        "user",
+      );
+    }
+    const restored = f.restart();
+    expect((await restored.query(windowId, target)).autoFix).toMatchObject({
+      status: "on",
+      babysit: firstRules,
+    });
+    expect((await restored.query(windowId, second)).autoFix).toMatchObject({
+      status: "on",
+      babysit: secondRules,
+    });
+    await restored.setAutoFix(windowId, { kind: "disable", threadId, target }, "user");
+    expect((await restored.query(windowId, second)).autoFix).toMatchObject({
+      status: "on",
+      threadId,
+      babysit: secondRules,
+    });
+  });
+
+  it("keeps every unacknowledged ready PR in the thread, including matching numbers in different repositories", async () => {
+    const f = fixture();
+    let followUp: ReturnType<typeof f.threads.readFollowUp>;
+    f.threads.readFollowUp.mockImplementation(() => followUp);
+    f.threads.notifyPerson.mockImplementation(async (_thread, reason) => {
+      followUp = { state: "open", origin: "automatic", reason };
+    });
+    const enable = async (repositoryName: string) =>
+      f.service.setAutoFix(
+        windowId,
+        {
+          kind: "enable",
+          threadId,
+          target: decodeCodeProjectPullRequestSwitchTarget({ ...target, repositoryName }),
+          babysit: { checks: "all" },
+        },
+        "user",
+      );
+    await enable("first");
+    await enable("second");
+    f.observe(observed({ babysitReady: true, headSha: "aaaa" }));
+    await f.service.tick(signal);
+    expect(followUp?.reason).toContain("octant/first#12 ready to merge at aaaa");
+    expect(followUp?.reason).toContain("octant/second#12 ready to merge at aaaa");
+    await enable("first");
+    f.observe(observed({ babysitReady: true, headSha: "bbbb" }));
+    await f.service.tick(signal);
+    expect(followUp?.reason).not.toContain("first#12 ready to merge at aaaa");
+    expect(followUp?.reason).toContain("first#12 ready to merge at bbbb");
+    followUp = { state: "completed", origin: "automatic", reason: followUp!.reason };
+    await enable("third");
+    await f.service.tick(signal);
+    expect(followUp?.reason).toContain("third#12");
+    expect(followUp?.reason).not.toContain("second#12");
+  });
+
+  it("notifies once when the thread finishes without clearing its same-head failure", async () => {
+    const f = fixture();
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", threadId, target, babysit: { checks: "required" } },
+      "user",
+    );
+    f.observe(observed({ failures: [lint] }));
+    await f.service.tick(signal);
+    f.setTurnActive(true);
+    await f.service.tick(signal);
+    expect(f.threads.notifyPerson).not.toHaveBeenCalled();
+    f.setTurnActive(false);
+    await f.service.tick(signal);
+    expect(f.threads.notifyPerson).not.toHaveBeenCalled();
+    await f.service.tick(signal);
+    await f.restart().tick(signal);
+    expect(f.threads.notifyPerson).toHaveBeenCalledExactlyOnceWith(
+      threadId,
+      expect.stringContaining("unresolved failures"),
+    );
+    expect((await f.service.query(windowId, target)).autoFix).toMatchObject({
+      status: "stopped",
+      reason: "needs-help",
+    });
+  });
+
+  it("keeps watching through a stale head and resumes only the stopped enrollment the person saw", async () => {
+    const f = fixture();
+    const rules = { checks: "all", requiredLabel: "qa" } as const;
+    const enable = { kind: "enable", threadId, target, babysit: rules } as const;
+    await f.service.setAutoFix(windowId, enable, "user");
+    f.observe(observed({ failures: [lint] }));
+    await f.service.tick(signal);
+    await f.service.tick(signal);
+    expect(f.threads.notifyPerson).not.toHaveBeenCalled();
+    const head = "b".repeat(40);
+    f.observe(observed({ headSha: head, babysitReady: true }));
+    await f.service.tick(signal);
+    expect(f.threads.notifyPerson).toHaveBeenCalledExactlyOnceWith(
+      threadId,
+      expect.stringContaining(head),
+    );
+    const restored = f.restart();
+    const stopped = (await restored.query(windowId, target)).autoFix;
+    expect(stopped).toMatchObject({
+      status: "stopped",
+      reason: "ready",
+      readyHeadSha: head,
+      babysit: rules,
+    });
+    if (stopped.status !== "stopped") throw new Error("Watch should be ready");
+    expect(
+      await restored.setAutoFix(
+        windowId,
+        { ...enable, expectedStoppedAt: decodeUtcTimestamp("2025-01-01T00:00:00.000Z") },
+        "user",
+      ),
+    ).toEqual({ status: "refused", reason: "stale" });
+    const command = { ...enable, expectedStoppedAt: stopped.stoppedAt };
+    expect(await restored.setAutoFix(windowId, command, "user")).toMatchObject({
+      status: "applied",
+      view: { autoFix: { status: "on", babysit: rules } },
+    });
+    expect(await restored.setAutoFix(windowId, command, "user")).toEqual({
+      status: "refused",
+      reason: "stale",
+    });
+  });
+
+  it("hands back fresh feedback after the configured budget survives restart", async () => {
+    const f = fixture({ limits: () => ({ watchWakes: 1, watchDays: 3, autoFixAttempts: 3 }) });
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", threadId, target, babysit: { checks: "required" } },
+      "user",
+    );
+    const feedback = (id: string) =>
+      observed({
+        activity: {
+          checks: "passed",
+          failedChecks: [],
+          conflicting: false,
+          reviews: [],
+          comments: [
+            {
+              author: "bot",
+              trustedFeedback: true,
+              id,
+              at: "2026-10-31T10:00:10Z",
+              body: "Review this change.",
+            },
+          ],
+        },
+      });
+    const outside = observed({
+      activity: {
+        checks: "passed",
+        failedChecks: [],
+        conflicting: false,
+        reviews: [],
+        comments: [
+          { author: "passerby", id: "outside", at: "2026-10-31T10:00:10Z", body: "Try my idea." },
+        ],
+      },
+    });
+    f.observe(outside);
+    await f.service.tick(signal);
+    expect(f.threads.startTurn).not.toHaveBeenCalled();
+    f.observe(feedback("first"));
+    await f.service.tick(signal);
+    const restored = f.restart();
+    await restored.query(windowId, target);
+    f.observe(feedback("second"));
+    await restored.tick(signal);
+    await restored.tick(signal);
+    expect(f.threads.startTurn).toHaveBeenCalledTimes(1);
+    expect(f.threads.notifyPerson).toHaveBeenCalledExactlyOnceWith(
+      threadId,
+      expect.stringContaining("feedback turn limit"),
+    );
+    expect((await restored.query(windowId, target)).autoFix).toMatchObject({
+      status: "stopped",
+      reason: "feedback-limit",
+    });
+  });
+
+  it("requires fresh paired authority on reconnect and checks it again before acting on a forge read", async () => {
+    const f = fixture({ localWindows: () => [] });
+    let current = true;
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", threadId, target, babysit: { checks: "required" } },
+      "user",
+      undefined,
+      () => current,
+    );
+    const restored = f.restart();
+    await restored.query(windowId, target);
+    await restored.tick(signal);
+    expect(f.forge.observe).not.toHaveBeenCalled();
+    await restored.query(windowId, target, () => current);
+    f.forge.observe.mockImplementationOnce(async () => {
+      current = false;
+      return observed({ failures: [lint] });
+    });
+    await restored.tick(signal);
+    expect(f.forge.observe).toHaveBeenCalledTimes(1);
+    expect(f.threads.startTurn).not.toHaveBeenCalled();
+    expect((await restored.query(windowId, target)).autoFix).toMatchObject({
+      status: "stopped",
+      reason: "authority-lost",
+    });
+  });
+
+  it("triages new bot comments once before handing back a green head", async () => {
+    const f = fixture();
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", threadId, target, babysit: { checks: "required" } },
+      "user",
+    );
+    const activity: GhPullRequestActivity = {
+      checks: "passed",
+      failedChecks: [],
+      conflicting: false,
+      reviews: [],
+      comments: [
+        {
+          author: "ci-bot",
+          trustedFeedback: true,
+          id: "comment-5",
+          at: "2026-10-31T10:00:10Z",
+          body: "Review the cache key.",
+        },
+      ],
+    };
+    f.observe(observed({ activity, babysitReady: true }));
+    await f.service.tick(signal);
+    expect(f.threads.startTurn).toHaveBeenCalledExactlyOnceWith(
+      threadId,
+      expect.stringContaining("Review the cache key."),
+    );
+    expect(f.threads.notifyPerson).not.toHaveBeenCalled();
+    const restored = f.restart();
+    await restored.query(windowId, target);
+    await restored.tick(signal);
+    expect(f.threads.startTurn).toHaveBeenCalledTimes(1);
+    expect((await restored.query(windowId, target)).autoFix).toMatchObject({
+      status: "stopped",
+      readyHeadSha: "a1",
+    });
+  });
+
+  it("restores the chosen rules and reports the ready head once without merging", async () => {
+    const f = fixture();
+    const babysit = { checks: "all", requiredLabel: "qa-approved" } as const;
+    await f.service.setAutoFix(windowId, { kind: "enable", threadId, target, babysit }, "user");
+    const restarted = f.restart();
+    expect((await restarted.query(windowId, target)).autoFix).toMatchObject({ babysit });
+    await restarted.tick(signal);
+    expect(f.forge.observe).toHaveBeenCalledWith(expect.anything(), signal, {
+      failures: true,
+      activity: false,
+      babysit,
+    });
+    expect(f.threads.notifyPerson).not.toHaveBeenCalled();
+    f.observe(observed({ babysitReady: true }));
+    await restarted.tick(signal);
+    await restarted.tick(signal);
+    expect((await restarted.query(windowId, target)).autoFix).toMatchObject({
+      status: "stopped",
+      reason: "ready",
+      readyHeadSha: "a1",
+    });
+    expect(f.threads.notifyPerson).toHaveBeenCalledExactlyOnceWith(
+      threadId,
+      expect.stringContaining("a1"),
+    );
+    expect(f.threads.startTurn).not.toHaveBeenCalled();
+    expect(f.forge.enableAutoMerge).not.toHaveBeenCalled();
+  });
+});
 
 describe("Merge when ready", () => {
   it("refuses a paired device that did not confirm the head before reaching the forge", async () => {

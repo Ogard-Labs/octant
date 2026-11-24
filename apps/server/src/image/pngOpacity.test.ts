@@ -1,6 +1,6 @@
 import { deflateSync, inflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { pngWithoutAlpha } from "./pngOpacity";
+import { carryPngColour, pngWithoutAlpha } from "./pngOpacity";
 
 /**
  * A 10×10 RGBA PNG whose rows use every filter in turn (row y uses filter
@@ -98,7 +98,120 @@ describe("PNG opacity", () => {
     expect(out.subarray(33, 49).equals(gama)).toBe(true);
     expect(out[25]).toBe(2);
   });
+
+  it("carries an indexed source's colour chunks into a re-encode without reading its pixels", () => {
+    const source = Buffer.from(EVERY_FILTER_RGBA, "base64");
+    // A colourType-3 (palette) header: the opacity parser refuses its pixels,
+    // but the colour description a re-encode carries is read from chunks alone.
+    const ihdr = Buffer.from(source.subarray(0, 33));
+    ihdr[25] = 3;
+    const body = Buffer.from([0x67, 0x41, 0x4d, 0x41, 0, 1, 0x86, 0xa0]);
+    const gama = Buffer.alloc(12 + 4);
+    gama.writeUInt32BE(4, 0);
+    body.copy(gama, 4);
+    gama.writeUInt32BE(crc32(body), 12);
+    const indexed = Buffer.concat([ihdr, gama, source.subarray(33)]);
+    const reencoded = pngWithoutAlpha(new Uint8Array(source));
+    if (reencoded.status !== "opaque") throw new Error(reencoded.status);
+    const carried = carryPngColour(new Uint8Array(indexed), reencoded.png);
+    expect(Buffer.from(carried).subarray(33, 49).equals(gama)).toBe(true);
+  });
+
+  it("carries a grayscale source's ICC profile only into a grayscale re-encode", () => {
+    const source = pngWith(0, [iccpChunk, gamaChunk]);
+    // A grayscale destination shares the source's colour family, so the
+    // profile travels with the gamma.
+    expect(chunkTypes(carryPngColour(source, pngWith(4, [])))).toEqual([
+      "IHDR",
+      "iCCP",
+      "gAMA",
+      "IDAT",
+      "IEND",
+    ]);
+    // An RGB re-encode would misread a grayscale profile: gamma still travels.
+    expect(chunkTypes(carryPngColour(source, pngWith(6, [])))).toEqual([
+      "IHDR",
+      "gAMA",
+      "IDAT",
+      "IEND",
+    ]);
+  });
+
+  it("carries an RGB or palette source's ICC profile into an RGB or RGBA re-encode", () => {
+    const iccp = chunkBytes("iCCP", new TextEncoder().encode("sRGB\0\0profile"));
+    for (const sourceType of [2, 3, 6] as const) {
+      for (const targetType of [2, 6] as const) {
+        expect(
+          chunkTypes(carryPngColour(pngWith(sourceType, [iccp]), pngWith(targetType, []))),
+        ).toEqual(["IHDR", "iCCP", "IDAT", "IEND"]);
+      }
+    }
+  });
+
+  it("carries gamma, chromaticities and the sRGB intent across colour families", () => {
+    const source = pngWith(0, [gamaChunk, chrmChunk, srgbChunk]);
+    expect(chunkTypes(carryPngColour(source, pngWith(6, [])))).toEqual([
+      "IHDR",
+      "gAMA",
+      "cHRM",
+      "sRGB",
+      "IDAT",
+      "IEND",
+    ]);
+  });
 });
+
+/** A whole PNG: signature, one-colour-type IHDR, the given ancillary chunks, IDAT, IEND. */
+function pngWith(colorType: number, ancillary: ReadonlyArray<Uint8Array>): Uint8Array {
+  const ihdr = new Uint8Array(13);
+  const view = new DataView(ihdr.buffer);
+  view.setUint32(0, 1);
+  view.setUint32(4, 1);
+  ihdr.set([8, colorType, 0, 0, 0], 8);
+  const parts = [
+    Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunkBytes("IHDR", ihdr),
+    ...ancillary,
+    chunkBytes("IDAT", new Uint8Array(deflateSync(new Uint8Array([0, 0])))),
+    chunkBytes("IEND", new Uint8Array()),
+  ];
+  const out = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0));
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.byteLength;
+  }
+  return out;
+}
+
+/** A whole PNG chunk: length, type, body and a valid CRC. */
+function chunkBytes(type: string, body: Uint8Array): Uint8Array {
+  const out = new Uint8Array(12 + body.byteLength);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, body.byteLength);
+  out.set(new TextEncoder().encode(type), 4);
+  out.set(body, 8);
+  view.setUint32(8 + body.byteLength, crc32(out.subarray(4, 8 + body.byteLength)));
+  return out;
+}
+
+const iccpChunk = chunkBytes("iCCP", new TextEncoder().encode("gray\0\0profile"));
+const gamaChunk = chunkBytes("gAMA", Uint8Array.from([0, 1, 0x86, 0xa0]));
+const chrmChunk = chunkBytes("cHRM", new Uint8Array(32));
+const srgbChunk = chunkBytes("sRGB", Uint8Array.from([0]));
+
+/** The type of every chunk in a PNG, in order. */
+function chunkTypes(png: Uint8Array): ReadonlyArray<string> {
+  const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  const types: string[] = [];
+  let offset = 8;
+  while (offset + 8 <= png.byteLength) {
+    const length = view.getUint32(offset);
+    types.push(String.fromCharCode(...png.subarray(offset + 4, offset + 8)));
+    offset += 12 + length;
+  }
+  return types;
+}
 
 /** The PNG chunk CRC (CRC-32 over the type and data). */
 function crc32(bytes: Uint8Array): number {

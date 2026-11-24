@@ -2,8 +2,8 @@ import "./testStorage.test-support";
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
-import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
-import { resetTranscriptScrollMemory } from "./transcript/TranscriptWindow";
+import { resetComposerThreadDrafts } from "./composer/composerThreadDraftReset";
+import { resetTranscriptScrollMemory } from "./transcript/transcriptScrollMemory";
 
 const transcriptWindowHeight = 480;
 const transcriptRowHeight = 80;
@@ -96,7 +96,7 @@ Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
 afterEach(() => {
   cleanup();
   resetTranscriptScrollMemory();
-  composerThreadDrafts.clearAll();
+  resetComposerThreadDrafts();
   globalThis.localStorage?.clear();
   globalThis.sessionStorage?.clear();
 });

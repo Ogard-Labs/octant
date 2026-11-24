@@ -44,10 +44,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 26
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
       - run: bun install --frozen-lockfile
+      - name: Read the pinned Electron version
+        id: electron
+        run: |
+          $version = (Get-Content apps/desktop/package.json -Raw | ConvertFrom-Json).devDependencies.electron
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/octant-electron-cache
+          key: electron-binary-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
       - name: Prepare the pinned Electron runtime
         env:
           GH_TOKEN: ${{ github.token }}
+          electron_config_cache: ${{ runner.temp }}/octant-electron-cache
         run: node scripts/ensure-ci-electron.ts
       - name: Build the owned native peer mechanism fixture
         id: peer_fixture
@@ -62,6 +77,7 @@ jobs:
         id: portable
         env:
           OCTANT_PACKAGE_TARGET: win32-x64
+          electron_config_cache: ${{ runner.temp }}/octant-electron-cache
         run: bun run package:desktop
       - name: Stage unchanged normal Stable bytes under the current user known folder
         run: ./scripts/stage-windows-desktop-qa.ps1 -Mode Stable -PackageDirectory "$pwd/out/Octant-win32-x64"
@@ -122,7 +138,9 @@ jobs:
         env:
           OCTANT_PACKAGE_TARGET: win32-x64
           OCTANT_PACKAGE_FLAVOR: nightly
+          electron_config_cache: ${{ runner.temp }}/octant-electron-cache
         run: |
+          $env:OCTANT_QA_WINDOWS_PREBUILT_NATIVE_DIR = Join-Path $env:OCTANT_WINDOWS_QA_STABLE 'resources/native'
           $env:OCTANT_RELEASE_VERSION = bun -e "import { DESKTOP_PACKAGE_IDENTITY } from './scripts/package-desktop'; console.log(DESKTOP_PACKAGE_IDENTITY.version + '-preview.' + new Date().toISOString().slice(0, 10).replaceAll('-', '') + '.1')"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun run package:desktop
@@ -153,5 +171,73 @@ jobs:
         with:
           name: octant-windows-x64-qa
           path: out/*-win32-x64.zip
+          if-no-files-found: error
+          retention-days: 3
+
+  # Reuses the Stable package built by `package` so PRs targeting main exercise
+  # the full unsigned per-user installer lifecycle without running
+  # `package:desktop` a second time in parallel.
+  installer:
+    needs: package
+    if: github.event.pull_request.draft != true
+    name: Per-user installer (unsigned)
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate the installer scripts' syntax
+        run: |
+          foreach ($octantScript in @('scripts/smoke-windows-installer.ps1', 'scripts/windows-installer/install-nsis.ps1', 'scripts/windows-installer/start-installed.ps1')) {
+            $octantTokens = $null
+            $octantParseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $pwd $octantScript), [ref]$octantTokens, [ref]$octantParseErrors)
+            if ($octantParseErrors.Count) { throw ($octantParseErrors.Message -join "`n") }
+          }
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Fetch the pinned NSIS
+        run: ./scripts/windows-installer/install-nsis.ps1
+      - uses: actions/download-artifact@v4
+        with:
+          name: octant-windows-x64-qa
+          path: out
+      - name: Unpack the Stable Windows package built above
+        run: |
+          $octantZip = @(Get-ChildItem -LiteralPath out -Filter 'Octant-*-win32-x64.zip' | Where-Object { $_.Name -notlike 'Octant Nightly-*' })
+          if ($octantZip.Count -ne 1) { throw "Expected one Stable Windows package archive, found $($octantZip.Count)" }
+          tar.exe -xf $octantZip[0].FullName -C out
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path -LiteralPath 'out/Octant-win32-x64/Octant.exe')) { throw 'Extracted Stable package is missing Octant.exe' }
+      - name: Write the uninstaller
+        run: bun scripts/package-windows-installer.ts uninstaller --package out/Octant-win32-x64 --out "out/windows-uninstaller/Uninstall Octant.exe"
+      - name: Build the installer
+        run: bun scripts/package-windows-installer.ts installer --package out/Octant-win32-x64 --uninstaller "out/windows-uninstaller/Uninstall Octant.exe" --out-dir out/windows-installer
+      - name: Refuse the unsigned installer the way an update would
+        run: |
+          $octantInstaller = @(Get-ChildItem -LiteralPath out/windows-installer -Filter '*-win32-x64-setup.exe')
+          if ($octantInstaller.Count -ne 1) { throw 'Expected one installer' }
+          bun scripts/smoke-windows-installer-trust.ts $octantInstaller[0].FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build the owned-job launcher
+        run: |
+          cmake -S scripts/windows-desktop-qa -B "$env:RUNNER_TEMP/desktop-owner" -A x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build "$env:RUNNER_TEMP/desktop-owner" --config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install, start, update over and uninstall for this user
+        run: |
+          $octantInstaller = @(Get-ChildItem -LiteralPath out/windows-installer -Filter '*-win32-x64-setup.exe')
+          ./scripts/smoke-windows-installer.ps1 -Installer $octantInstaller[0].FullName -Launcher "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: octant-windows-x64-installer-unsigned
+          path: out/windows-installer/*-win32-x64-setup.exe
           if-no-files-found: error
           retention-days: 3
