@@ -1,4 +1,4 @@
-import { threadRowShortAge } from "../projects/ProjectThreadList";
+import { threadRowShortAge } from "../projects/threadRowShortAge";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { ComposerNoticeItem } from "./ComposerNotice";
 
