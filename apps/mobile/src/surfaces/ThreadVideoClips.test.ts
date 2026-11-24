@@ -24,7 +24,7 @@ vi.mock("../../design-system", async () => ({
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
-it("keeps the downloaded clip through a list failure and clears it when access is lost", async () => {
+it("keeps a downloaded clip through reconnection and clears it when access is lost", async () => {
   vi.useFakeTimers();
   cache.mockResolvedValue({ uri: "file:///cache/clip.mp4", exists: true, delete: remove });
   const threadId = "e4000000-0000-4000-8000-000000000002";
@@ -69,12 +69,13 @@ it("keeps the downloaded clip through a list failure and clears it when access i
     listStatus = status;
     await act(async () => vi.advanceTimersByTimeAsync(5_000));
   };
-  try {
-    await act(async () =>
+  const render = async (transport: MobileRemoteTransport | undefined) =>
+    act(async () =>
       root.render(
         createElement(ThemeProvider, {
           preference: "light",
           children: createElement(ThreadVideoClips, {
+            hostId: "host",
             transport,
             threadId,
             threadKind: "work-thread",
@@ -82,10 +83,20 @@ it("keeps the downloaded clip through a list failure and clears it when access i
         }),
       ),
     );
+  try {
+    await render(transport);
     await act(async () => node.querySelector<HTMLElement>('[aria-label="Open video"]')?.click());
-    expect(playing()).not.toBeNull();
+    const player = playing();
+    expect(player).not.toBeNull();
+    await render(undefined);
     await poll(503);
-    expect(playing()).not.toBeNull();
+    expect(playing()).toBe(player);
+    expect(remove).not.toHaveBeenCalled();
+    const reconnectFetch = vi.fn(transport.authenticatedFetch);
+    await render({ ...transport, authenticatedFetch: reconnectFetch });
+    await poll(503);
+    expect(reconnectFetch).toHaveBeenCalledOnce();
+    expect(playing()).toBe(player);
     expect(remove).not.toHaveBeenCalled();
     await poll(200);
     expect(cache).toHaveBeenCalledOnce();

@@ -364,7 +364,7 @@ which the person sets, like any turn.
   The phone reads authenticated byte ranges into a disposable app-cache file and
   opens it in the native Expo Video player without autoplay. Closing the clip,
   leaving or deleting its thread, or losing host access discards the cached copy.
-  A temporary list failure leaves the already-downloaded clip playing.
+  A temporary list failure or reconnection leaves the already-downloaded clip playing.
 - A clip can be placed in a Canvas design as a `generated-video` asset in a
   later change. This design does not add the asset kind.
 

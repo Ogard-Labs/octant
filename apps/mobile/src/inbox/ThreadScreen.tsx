@@ -732,14 +732,14 @@ export function ThreadScreen(props: ThreadScreenProps) {
               />
               {!offlineDemo &&
               Platform.OS !== "web" &&
-              hostHealth === "ready" &&
-              standing.actsAsHostPerson &&
-              transport !== undefined ? (
+              selectedHost !== undefined &&
+              hostHealth !== "unauthorized" ? (
                 <ThreadVideoClips
-                  key={`${selected.hostId}:${selected.mode}:${selected.threadId}`}
+                  key={`${selected.hostId}:${selectedHost.credentialGeneration}:${selected.mode}:${selected.threadId}`}
+                  hostId={selected.hostId}
                   threadId={selected.threadId}
                   threadKind={`${selected.mode}-thread`}
-                  transport={transport}
+                  transport={hostHealth === "ready" ? transport : undefined}
                 />
               ) : null}
             </>

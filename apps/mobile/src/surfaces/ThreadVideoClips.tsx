@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useEvent } from "expo";
 import type { File } from "expo-file-system";
@@ -20,13 +20,33 @@ import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { cacheVideoClip } from "./videoClipCache";
 
 export function ThreadVideoClips(props: {
-  readonly transport: MobileRemoteTransport;
+  readonly hostId: string;
+  readonly transport: MobileRemoteTransport | undefined;
   readonly threadId: string;
   readonly threadKind: VideoJobThreadKind;
 }) {
   const { colors } = useTheme();
-  const { transport, threadId, threadKind } = props;
-  const client = useMemo(() => createMobileThreadVideos(transport), [transport]);
+  const { hostId, transport, threadId, threadKind } = props;
+  const activeTransport = useRef(transport);
+  useLayoutEffect(() => {
+    activeTransport.current = transport;
+  }, [transport]);
+  // The connection may disappear or be replaced while a local clip is playing.
+  // Keep that player and its file while new requests use the current session.
+  const client = useMemo(
+    () =>
+      createMobileThreadVideos({
+        hostId,
+        async authenticatedFetch(request) {
+          const current = activeTransport.current;
+          if (current === undefined) {
+            throw new RemoteConnectionError("unavailable", "The host is reconnecting.");
+          }
+          return current.authenticatedFetch(request);
+        },
+      }),
+    [hostId],
+  );
   const load = useCallback(async () => {
     try {
       return await client.list({ threadKind, scopeId: decodeImageGenerationScopeId(threadId) });
