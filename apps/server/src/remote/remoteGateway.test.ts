@@ -2,6 +2,7 @@ import {
   createHash,
   createPublicKey,
   generateKeyPairSync,
+  randomUUID,
   sign,
   verify,
   type KeyObject,
@@ -47,9 +48,16 @@ vi.mock("./remoteRequestRegistry", async (importOriginal) => {
     },
   };
 });
+import { decodeVideoClipTicketResponse, decodeVideoJob } from "@octant/contracts";
 import { decodeStableHostId, type PairedDeviceLifetime } from "@octant/contracts/remote-access";
 import { buildHostHelloSignaturePayload, buildRemoteRequestProofPayload } from "@octant/domain";
-import { isPairedDeviceSessionCurrent } from "../remoteRequestProofService";
+import {
+  isAuthenticatedPairedDeviceSessionCurrent,
+  isPairedDeviceSessionCurrent,
+} from "../remoteRequestProofService";
+import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
+import { createVideoRouteHandler } from "../video/videoRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { Journal } from "../persistence/journal";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -67,8 +75,6 @@ import {
   type RemoteGatewayOptions,
 } from "./remoteGateway";
 import { canonicalDeviceKeyFacts } from "./deviceKeyFacts";
-import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
-import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createLocalDeviceAdministrationRouteHandler } from "./localDeviceAdministrationRoutes";
 import { executeFinalizationSequence } from "./remoteGatewayFinalization";
 import { createPushNotificationTokenStore } from "./pushNotificationTokenStore";
@@ -273,6 +279,116 @@ function insertActiveSession(
       nowMs + 600_000,
       createHash("sha256").update(sessionIdDigest).digest("hex"),
     );
+}
+
+function seedPairedRequests(connection: ReturnType<typeof openSqlite>) {
+  const deviceKeys = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const publicPem = deviceKeys.publicKey.export({ format: "pem", type: "spki" }).toString().trim();
+  const keyFacts = canonicalDeviceKeyFacts(publicPem);
+  if (keyFacts === undefined) throw new Error("Expected valid P-256 key facts");
+  const deviceId = "22222222-2222-4222-8222-222222222222";
+  const sessionId = "33333333-3333-4333-8333-333333333333";
+  const sessionDigest = createHash("sha256").update(sessionId, "utf8").digest("hex");
+  const csrfToken = "csrf-token-value";
+  const csrfDigest = createHash("sha256").update(csrfToken, "utf8").digest("hex");
+
+  connection
+    .prepare(
+      `INSERT INTO remote_device_projection (
+         device_id, host_id, device_key_fingerprint, device_public_key,
+         device_label, origin, protocol_floor, credential_generation,
+         created_at, expires_at, last_seen_at, state, revoked_at, revoked_reason
+       ) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, 'active', NULL, NULL)`,
+    )
+    .run(
+      deviceId,
+      hostId,
+      keyFacts.fingerprint,
+      publicPem,
+      "Paired Phone",
+      ORIGIN,
+      nowIso,
+      new Date(nowMs + 7 * 24 * 60 * 60_000).toISOString(),
+      nowIso,
+    );
+  connection
+    .prepare(
+      `INSERT INTO remote_security_audit_projection (
+         event_kind, host_id, device_id, protocol_version, credential_generation,
+         source_class, result_category, reason_code, correlation_id, occurred_at
+       ) VALUES ('device-approved', ?, ?, 1, 1, 'lan-private', 'ok', 'user-approved', ?, ?)`,
+    )
+    .run(hostId, deviceId, "44444444-4444-4444-8444-444444444444", nowIso);
+  connection
+    .prepare(
+      `INSERT INTO remote_session_store (
+         session_id_digest, host_id, device_id, credential_generation, origin,
+         protocol_version, capability_digest, issued_at, last_seen_at,
+         idle_expires_at, absolute_expires_at, csrf_digest, state
+       ) VALUES (?, ?, ?, 1, ?, 1, ?, ?, ?, ?, ?, ?, 'active')`,
+    )
+    .run(
+      sessionDigest,
+      hostId,
+      deviceId,
+      ORIGIN,
+      "c".repeat(64),
+      nowMs,
+      nowMs,
+      nowMs + 15 * 60_000,
+      nowMs + 60 * 60_000,
+      csrfDigest,
+    );
+
+  const signedRequest = (
+    path: string,
+    timestampMs: number,
+    input: { method: "POST"; body: object } | { method: "GET"; range?: string },
+  ) => {
+    const body = input.method === "POST" ? JSON.stringify(input.body) : "";
+    const bodyDigest = createHash("sha256").update(body, "utf8").digest("hex");
+    const timestamp = new Date(timestampMs).toISOString();
+    const proof = {
+      method: input.method,
+      canonicalPathQuery: path,
+      timestamp,
+      nonce: randomUUID(),
+      bodyDigest,
+      ...(input.method === "POST" ? { csrfDigest } : {}),
+    };
+    const payload = buildRemoteRequestProofPayload({
+      sessionId,
+      proof,
+    });
+    const signature = sign("sha256", Buffer.from(payload, "utf8"), {
+      key: deviceKeys.privateKey,
+      dsaEncoding: "ieee-p1363",
+    }).toString("base64url");
+    const encodedProof = Buffer.from(JSON.stringify({ ...proof, signature }), "utf8").toString(
+      "base64url",
+    );
+    return new Request(`${ORIGIN}${path}`, {
+      method: input.method,
+      headers: {
+        host: "192.168.1.20:9443",
+        origin: ORIGIN,
+        "sec-fetch-site": "same-origin",
+        cookie: `__Secure-octant-remote-session=${sessionId}`,
+        ...(input.method === "POST"
+          ? {
+              "content-type": "application/json",
+              "x-octant-csrf": csrfToken,
+              "x-octant-command-id": randomUUID(),
+            }
+          : input.range === undefined
+            ? {}
+            : { range: input.range }),
+        "x-octant-device-proof": encodedProof,
+      },
+      ...(input.method === "POST" ? { body } : {}),
+    });
+  };
+  return { deviceId, sessionId, signedRequest };
 }
 
 function countActiveSessions(connection: ReturnType<typeof openSqlite>): number {
@@ -1652,6 +1768,230 @@ describe("RemoteGateway — approval for a window that never finished", () => {
     await gateway.stop();
   });
 
+  it("serves a paired clip ticket until its issuing session signs out", async () => {
+    const capturing = createCapturingServe();
+    const { gateway, connection } = setup({
+      serve: capturing.serve,
+      productDispatch: createAuthenticatedProductDispatch({
+        dispatch: (request) => videoRoutes(request),
+      }),
+    });
+    const bytes = Uint8Array.of(1, 2, 3);
+    const job = decodeVideoJob({
+      id: "e4000000-0000-4000-8000-000000000003",
+      status: "completed",
+      threadKind: "chat-thread",
+      scopeId: "e4000000-0000-4000-8000-000000000002",
+      profileInstanceId: "e4000000-0000-4000-8000-000000000001",
+      driverKind: "gemini-video",
+      modelId: "gemini-omni-1.2-flash",
+      promptHash: "a".repeat(64),
+      options: { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: true },
+      imageCount: 0,
+      estimatedCostUsdMicros: 695_040,
+      clip: {
+        clipId: "e4000000-0000-4000-8000-000000000004",
+        hash: "b".repeat(64),
+        size: bytes.byteLength,
+        durationSeconds: 10,
+        resolution: "720p",
+        aspectRatio: "16:9",
+      },
+      providerCopy: "removed",
+      version: 2,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+    const readClipRange = vi.fn(async () => ({ bytes, start: 0, end: 2, size: bytes.length }));
+    const videoRoutes = createVideoRouteHandler({
+      jobs: {
+        getById: (id) => (String(id) === String(job.id) ? job : undefined),
+        listByScope: () => [job],
+        stop: vi.fn(),
+        readClipRange,
+        streamClip: async () => undefined,
+      },
+      authorizeScope: async (_window, kind, scope) =>
+        kind === job.threadKind && String(scope) === String(job.scopeId),
+      isPairedDeviceSessionCurrent: (issuer, sessionNow) =>
+        isAuthenticatedPairedDeviceSessionCurrent(connection, issuer, (sessionNow ?? Date.now)()),
+      windowAuthorityStore: new WindowAuthorityStore(),
+      now: () => nowMs,
+    });
+
+    try {
+      const { signedRequest } = seedPairedRequests(connection);
+      await gateway.start();
+      const fetch = capturing.getFetch();
+      if (fetch === undefined) throw new Error("Expected captured gateway fetch");
+
+      const issued = await fetch(
+        signedRequest("/api/video/clip", nowMs, { method: "POST", body: { jobId: job.id } }),
+        lanFacts,
+      );
+      expect(issued.status).toBe(200);
+      const { url } = decodeVideoClipTicketResponse(await issued.json());
+      const range = "bytes=0-2";
+      const playing = await fetch(signedRequest(url, nowMs, { method: "GET", range }), lanFacts);
+      expect(playing.status).toBe(206);
+      expect(playing.headers.get("content-range")).toBe("bytes 0-2/3");
+      expect(new Uint8Array(await playing.arrayBuffer())).toEqual(bytes);
+
+      const signedOut = await fetch(
+        signedRequest("/api/remote/auth/sign-out", nowMs, { method: "POST", body: {} }),
+        lanFacts,
+      );
+      expect(signedOut.status).toBe(200);
+      // The gateway would reject the session first. Check that the route also refuses its ticket.
+      const afterSignOut = await videoRoutes(
+        new Request(`http://127.0.0.1:3100${url}`, { headers: { range } }),
+      );
+      expect(afterSignOut?.status).toBe(404);
+      expect(readClipRange).toHaveBeenCalledOnce();
+    } finally {
+      await gateway.stop();
+      connection.close();
+    }
+  });
+
+  it("lets directly paired Read only and Approve and steer devices watch clip ranges while refusing inaccessible threads and Stop", async () => {
+    const bytes = new Uint8Array([9, 8, 7]);
+    const accessibleScope = "e4000000-0000-4000-8000-000000000002";
+    const forbiddenScope = "e4000000-0000-4000-8000-000000000099";
+    const job = decodeVideoJob({
+      id: "e4000000-0000-4000-8000-000000000003",
+      status: "completed",
+      threadKind: "chat-thread",
+      scopeId: accessibleScope,
+      profileInstanceId: "e4000000-0000-4000-8000-000000000001",
+      driverKind: "gemini-video",
+      modelId: "gemini-omni-1.2-flash",
+      promptHash: "a".repeat(64),
+      options: { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: true },
+      imageCount: 0,
+      estimatedCostUsdMicros: 695_040,
+      clip: {
+        clipId: "e4000000-0000-4000-8000-000000000004",
+        hash: "b".repeat(64),
+        size: bytes.byteLength,
+        durationSeconds: 10,
+        resolution: "720p",
+        aspectRatio: "16:9",
+      },
+      providerCopy: "removed",
+      version: 2,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+    const forbiddenJob = decodeVideoJob({
+      ...job,
+      id: "e4000000-0000-4000-8000-000000000098",
+      scopeId: forbiddenScope,
+    });
+    const stop = vi.fn();
+    const readClipRange = vi.fn(async () => ({ bytes, start: 0, end: 2, size: bytes.length }));
+    const capturing = createCapturingServe();
+    const { gateway, connection } = setup({
+      serve: capturing.serve,
+      productDispatch: createAuthenticatedProductDispatch({
+        dispatch: async (request) => await videoRoutes(request),
+      }),
+    });
+    const videoRoutes = createVideoRouteHandler({
+      jobs: {
+        getById: (id) =>
+          String(id) === String(job.id)
+            ? job
+            : String(id) === String(forbiddenJob.id)
+              ? forbiddenJob
+              : undefined,
+        listByScope: (scope) => (String(scope) === accessibleScope ? [job] : [forbiddenJob]),
+        stop,
+        readClipRange,
+        streamClip: async () => undefined,
+      },
+      authorizeScope: async (_window, kind, scope) =>
+        kind === job.threadKind && String(scope) === accessibleScope,
+      isPairedDeviceSessionCurrent: (issuer, sessionNow) =>
+        isAuthenticatedPairedDeviceSessionCurrent(connection, issuer, (sessionNow ?? Date.now)()),
+      windowAuthorityStore: new WindowAuthorityStore(),
+      now: () => nowMs,
+    });
+
+    try {
+      const { deviceId, signedRequest } = seedPairedRequests(connection);
+      await gateway.start();
+      const fetch = capturing.getFetch();
+      const admin = gateway.localDeviceAdministration();
+      if (fetch === undefined || admin === undefined) {
+        throw new Error("Expected captured gateway fetch and device administration");
+      }
+
+      const localActor: EventActor = decodeEventActor({
+        kind: "local-user",
+        actorId: "77777777-7777-4777-8777-777777777777",
+      });
+      for (const accessLevel of ["read-only", "approve-and-steer"] as const) {
+        admin.setDeviceAccessLevel({ deviceId, accessLevel, actor: localActor });
+
+        const listed = await fetch(
+          signedRequest(
+            `/api/video/jobs?scopeId=${accessibleScope}&threadKind=chat-thread`,
+            nowMs,
+            {
+              method: "GET",
+            },
+          ),
+          lanFacts,
+        );
+        expect(listed.status).toBe(200);
+        expect(((await listed.json()) as { jobs: unknown[] }).jobs).toHaveLength(1);
+
+        const issued = await fetch(
+          signedRequest("/api/video/clip", nowMs, { method: "POST", body: { jobId: job.id } }),
+          lanFacts,
+        );
+        expect(issued.status).toBe(200);
+        const { url } = decodeVideoClipTicketResponse(await issued.json());
+        const playing = await fetch(
+          signedRequest(url, nowMs, { method: "GET", range: "bytes=0-2" }),
+          lanFacts,
+        );
+        expect(playing.status).toBe(206);
+        expect(playing.headers.get("content-range")).toBe("bytes 0-2/3");
+        expect(new Uint8Array(await playing.arrayBuffer())).toEqual(bytes);
+
+        const forbiddenList = await fetch(
+          signedRequest(`/api/video/jobs?scopeId=${forbiddenScope}&threadKind=chat-thread`, nowMs, {
+            method: "GET",
+          }),
+          lanFacts,
+        );
+        expect(forbiddenList.status).toBe(404);
+
+        const forbiddenTicket = await fetch(
+          signedRequest("/api/video/clip", nowMs, {
+            method: "POST",
+            body: { jobId: forbiddenJob.id },
+          }),
+          lanFacts,
+        );
+        expect(forbiddenTicket.status).toBe(404);
+
+        const stopped = await fetch(
+          signedRequest(`/api/video/jobs/${job.id}/stop`, nowMs, { method: "POST", body: {} }),
+          lanFacts,
+        );
+        expect(stopped.status).toBe(404);
+        expect(stop).not.toHaveBeenCalled();
+      }
+      expect(readClipRange).toHaveBeenCalledTimes(2);
+    } finally {
+      await gateway.stop();
+      connection.close();
+    }
+  });
+
   it("shares its monotonic clock with product dispatch so Browser session checks match gateway expiry across forward wall-clock jumps", async () => {
     let wallMs = nowMs;
     let steadyMs = 5_000;
@@ -1671,110 +2011,10 @@ describe("RemoteGateway — approval for a window that never finished", () => {
       const fetch = capturing.getFetch();
       if (fetch === undefined) throw new Error("Expected captured gateway fetch");
 
-      const deviceKeys = generateKeyPairSync("ec", { namedCurve: "P-256" });
-      const publicPem = deviceKeys.publicKey
-        .export({ format: "pem", type: "spki" })
-        .toString()
-        .trim();
-      const keyFacts = canonicalDeviceKeyFacts(publicPem);
-      if (keyFacts === undefined) throw new Error("Expected valid P-256 key facts");
-      const deviceId = "22222222-2222-4222-8222-222222222222";
-      const sessionId = "33333333-3333-4333-8333-333333333333";
-      const sessionDigest = createHash("sha256").update(sessionId, "utf8").digest("hex");
-      const csrfToken = "csrf-token-value";
-      const csrfDigest = createHash("sha256").update(csrfToken, "utf8").digest("hex");
-
-      connection
-        .prepare(
-          `INSERT INTO remote_device_projection (
-             device_id, host_id, device_key_fingerprint, device_public_key,
-             device_label, origin, protocol_floor, credential_generation,
-             created_at, expires_at, last_seen_at, state, revoked_at, revoked_reason
-           ) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, 'active', NULL, NULL)`,
-        )
-        .run(
-          deviceId,
-          hostId,
-          keyFacts.fingerprint,
-          publicPem,
-          "Paired Phone",
-          ORIGIN,
-          nowIso,
-          new Date(wallMs + 7 * 24 * 60 * 60_000).toISOString(),
-          nowIso,
-        );
-      connection
-        .prepare(
-          `INSERT INTO remote_security_audit_projection (
-             event_kind, host_id, device_id, protocol_version, credential_generation,
-             source_class, result_category, reason_code, correlation_id, occurred_at
-           ) VALUES ('device-approved', ?, ?, 1, 1, 'lan-private', 'ok', 'user-approved', ?, ?)`,
-        )
-        .run(hostId, deviceId, "44444444-4444-4444-8444-444444444444", nowIso);
-      connection
-        .prepare(
-          `INSERT INTO remote_session_store (
-             session_id_digest, host_id, device_id, credential_generation, origin,
-             protocol_version, capability_digest, issued_at, last_seen_at,
-             idle_expires_at, absolute_expires_at, csrf_digest, state
-           ) VALUES (?, ?, ?, 1, ?, 1, ?, ?, ?, ?, ?, ?, 'active')`,
-        )
-        .run(
-          sessionDigest,
-          hostId,
-          deviceId,
-          ORIGIN,
-          "c".repeat(64),
-          wallMs,
-          wallMs,
-          wallMs + 15 * 60_000,
-          wallMs + 60 * 60_000,
-          csrfDigest,
-        );
-
-      const signedProductRequest = (nonce: string, commandId: string, timestampMs: number) => {
-        const body = JSON.stringify({ threadId: "55555555-5555-4555-8555-555555555555" });
-        const bodyDigest = createHash("sha256").update(body, "utf8").digest("hex");
-        const timestamp = new Date(timestampMs).toISOString();
-        const proof = {
-          method: "POST",
-          canonicalPathQuery: "/api/browser/contexts/current",
-          timestamp,
-          nonce,
-          bodyDigest,
-          csrfDigest,
-        };
-        const payload = buildRemoteRequestProofPayload({
-          sessionId,
-          proof,
-        });
-        const signature = sign("sha256", Buffer.from(payload, "utf8"), {
-          key: deviceKeys.privateKey,
-          dsaEncoding: "ieee-p1363",
-        }).toString("base64url");
-        const encodedProof = Buffer.from(JSON.stringify({ ...proof, signature }), "utf8").toString(
-          "base64url",
-        );
-        return new Request(`${ORIGIN}/api/browser/contexts/current`, {
-          method: "POST",
-          headers: {
-            host: "192.168.1.20:9443",
-            origin: ORIGIN,
-            "sec-fetch-site": "same-origin",
-            "content-type": "application/json",
-            cookie: `__Secure-octant-remote-session=${sessionId}`,
-            "x-octant-csrf": csrfToken,
-            "x-octant-command-id": commandId,
-            "x-octant-device-proof": encodedProof,
-          },
-          body,
-        });
-      };
-
-      const first = await fetch(
-        signedProductRequest("nonce-1", "66666666-6666-4666-8666-666666666666", wallMs),
-        lanFacts,
-      );
+      const { deviceId, sessionId, signedRequest } = seedPairedRequests(connection);
+      const path = "/api/browser/contexts/current";
+      const body = { threadId: "55555555-5555-4555-8555-555555555555" };
+      const first = await fetch(signedRequest(path, wallMs, { method: "POST", body }), lanFacts);
       expect(first.status).toBe(200);
       if (capturedSessionNow === undefined) {
         throw new Error("Expected product dispatch to receive gateway sessionNow");
@@ -1816,7 +2056,7 @@ describe("RemoteGateway — approval for a window that never finished", () => {
       // not ratcheted, so product dispatch and Browser checks agree the session
       // is still active.
       const secondDuringJump = await fetch(
-        signedProductRequest("nonce-2", "77777777-7777-4777-8777-777777777777", boundedNow),
+        signedRequest(path, boundedNow, { method: "POST", body }),
         lanFacts,
       );
       expect(secondDuringJump.status).toBe(200);

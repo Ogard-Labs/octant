@@ -327,6 +327,21 @@ export function classifyProductAction(request: Request): string | undefined {
     // paired device never dumps the host.
     return method === "POST" ? "project.overview.read" : undefined;
   }
+  if (path.startsWith("/api/video/")) {
+    // Listing a thread's video jobs, minting a single-clip playback ticket,
+    // and reading clip byte ranges are scoped reads of a thread the device
+    // can already open. Stopping a job stays uncatalogued and local-only.
+    if (
+      (method === "GET" || method === "HEAD") &&
+      (path === "/api/video/jobs" || path === "/api/video/clip")
+    ) {
+      return "project.overview.read";
+    }
+    if (method === "POST" && path === "/api/video/clip") {
+      return "project.overview.read";
+    }
+    return undefined;
+  }
   if (path === "/api/agent-grants" || path === "/api/agent-grants/threads") {
     // What each outside agent may do and which threads it started.
     return method === "GET" ? "settings.read-non-secret" : undefined;
