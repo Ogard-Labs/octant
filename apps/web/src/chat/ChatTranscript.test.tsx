@@ -7,7 +7,7 @@ import { decodeChatThreadView } from "@octant/contracts/chat";
 import { decodeThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import type { PickerGroup } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
-import { ChatTranscript } from "./ChatTranscript";
+import { ChatPendingQuestions, ChatTranscript } from "./ChatTranscript";
 import { SideTaskProvider } from "../followUps/SideTaskCards";
 
 const now = "2026-07-20T08:00:00.000Z";
@@ -1094,7 +1094,12 @@ describe("ChatTranscript", () => {
         },
       ],
     });
-    render(<ChatTranscript onAnswerQuestion={onAnswerQuestion} view={view} />);
+    render(
+      <>
+        <ChatTranscript view={view} />
+        <ChatPendingQuestions onAnswerQuestion={onAnswerQuestion} view={view} />
+      </>,
+    );
 
     expect(screen.getByText("Waiting for your answer")).toBeVisible();
     expect(screen.getByText("Question 1 of 2")).toBeVisible();
@@ -1144,7 +1149,12 @@ describe("ChatTranscript", () => {
         },
       ],
     });
-    render(<ChatTranscript onAnswerQuestion={onAnswerQuestion} view={view} />);
+    render(
+      <>
+        <ChatTranscript view={view} />
+        <ChatPendingQuestions onAnswerQuestion={onAnswerQuestion} view={view} />
+      </>,
+    );
     expect(screen.getByLabelText("Answered question")).toHaveTextContent(
       "Answered with a secret, which Octant did not keep",
     );
@@ -1184,7 +1194,12 @@ describe("ChatTranscript", () => {
         },
       ],
     });
-    render(<ChatTranscript onAnswerQuestion={onAnswerQuestion} view={view} />);
+    render(
+      <>
+        <ChatTranscript view={view} />
+        <ChatPendingQuestions onAnswerQuestion={onAnswerQuestion} view={view} />
+      </>,
+    );
 
     const card = screen.getByLabelText("Provider question");
     await user.click(within(card).getByRole("radio", { name: "Type your own answer" }));
@@ -1222,11 +1237,14 @@ describe("ChatTranscript", () => {
       ],
     });
     render(
-      <ChatTranscript
-        onAnswerQuestion={onAnswerQuestion}
-        onDismissQuestion={onDismissQuestion}
-        view={view}
-      />,
+      <>
+        <ChatTranscript view={view} />
+        <ChatPendingQuestions
+          onAnswerQuestion={onAnswerQuestion}
+          onDismissQuestion={onDismissQuestion}
+          view={view}
+        />
+      </>,
     );
 
     const card = screen.getByLabelText("Provider question");
@@ -1279,7 +1297,15 @@ describe("ChatTranscript", () => {
         {content}
       </QuestionnaireDraftsProvider>
     );
-    const card = <ChatTranscript onAnswerQuestion={submit} view={pending(ids.secondAttempt)} />;
+    // The thread as the workspace draws it: the transcript, which keeps a
+    // pending question's draft, and the question docked above the composer.
+    const thread = (view: ReturnType<typeof viewFixture>) => (
+      <>
+        <ChatTranscript view={view} />
+        <ChatPendingQuestions onAnswerQuestion={submit} view={view} />
+      </>
+    );
+    const card = thread(pending(ids.secondAttempt));
     const { rerender } = render(wrap(card));
     await user.click(screen.getByRole("radio", { name: "PDF" }));
     await user.type(screen.getByRole("textbox", { name: /Anything to add/ }), "Local note");
@@ -1287,12 +1313,12 @@ describe("ChatTranscript", () => {
     rerender(wrap(card));
     expect(screen.getByRole("radio", { name: "PDF" })).toBeChecked();
     expect(screen.getByRole("textbox", { name: /Anything to add/ })).toHaveValue("Local note");
-    rerender(wrap(<ChatTranscript onAnswerQuestion={submit} view={pending(ids.firstAttempt)} />));
+    rerender(wrap(thread(pending(ids.firstAttempt))));
     expect(screen.getByRole("radio", { name: "PDF" })).not.toBeChecked();
     rerender(wrap(card));
     expect(screen.getByRole("radio", { name: "PDF" })).not.toBeChecked();
     await user.click(screen.getByRole("radio", { name: "PDF" }));
-    rerender(wrap(<ChatTranscript onAnswerQuestion={submit} view={viewFixture()} />));
+    rerender(wrap(thread(viewFixture())));
     rerender(wrap(card));
     expect(screen.getByRole("radio", { name: "PDF" })).not.toBeChecked();
     expect(screen.getByRole("textbox", { name: /Anything to add/ })).toHaveValue("");

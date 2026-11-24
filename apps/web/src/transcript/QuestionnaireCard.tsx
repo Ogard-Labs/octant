@@ -9,7 +9,6 @@ import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { chooseByNumber, moveOrChooseInRadioGroup } from "../ui/base/radioGroupKeys";
 import { OptionKey } from "./OptionKey";
-import "./question-keys.css";
 
 export interface QuestionnaireCardProps {
   readonly draftIdentity?: QuestionnaireDraftIdentity | undefined;
@@ -162,13 +161,13 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
                     <span className="provider-question-card__option-label">
                       {option.label}
                       {option.recommended === true ? " (Recommended)" : ""}
+                      <OptionKey index={optionIndex} />
                     </span>
                     {option.description === undefined ? null : (
                       <span className="provider-question-card__option-description">
                         {option.description}
                       </span>
                     )}
-                    <OptionKey index={optionIndex} />
                   </>
                 );
                 const choose = () => {
@@ -237,8 +236,8 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
                   >
                     <span className="provider-question-card__option-label">
                       Write another answer
+                      <OptionKey index={question.options.length} />
                     </span>
-                    <OptionKey index={question.options.length} />
                   </OctantButton>
                   {custom ? (
                     <label className="questionnaire__written">

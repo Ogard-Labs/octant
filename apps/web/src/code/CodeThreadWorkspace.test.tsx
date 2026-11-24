@@ -2937,7 +2937,7 @@ describe("CodeThreadWorkspace", () => {
     const composer = screen
       .getByRole("textbox", { name: "Follow-up message" })
       .closest(".thread-composer");
-    const requests = approval.closest(".code-thread-workspace__provider-requests");
+    const requests = approval.closest(".thread-pending-requests");
 
     expect(approval).toHaveClass("approval-row--request");
     expect(requests).not.toBeNull();

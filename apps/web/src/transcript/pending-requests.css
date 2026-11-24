@@ -1,0 +1,13 @@
+/* The pending requests' stack and measure; the shared request row and the
+   question card supply their own controls and neutral surface. */
+.thread-pending-requests {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 8px;
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.thread-pending-requests .approval-row {
+  width: 100%;
+}

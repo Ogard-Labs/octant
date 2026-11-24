@@ -42,6 +42,7 @@ import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControl
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { SideTaskInline } from "../followUps/SideTaskCards";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
+import { PendingRequests } from "../transcript/PendingRequests";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
@@ -93,21 +94,6 @@ export interface ChatTranscriptProps {
    * snooze of its own.
    */
   readonly onSnoozeAtUsageReset?: () => void;
-  /**
-   * Answers a question a running attempt asked and is blocked on. Absent when
-   * the surface cannot answer, which keeps the question read-only instead of
-   * offering a control nothing would deliver.
-   */
-  readonly onAnswerQuestion?: (input: {
-    readonly turnId: ChatTurnId;
-    readonly attemptId: ChatAttemptId;
-    readonly requestId: string;
-    readonly answer: string;
-    /** The question asks for a secret: sent as the command's `secretAnswer`, never recorded. */
-    readonly secret?: true;
-  }) => void | boolean | Promise<void | boolean>;
-  /** Cancels the turn a question belongs to, without answering it. */
-  readonly onDismissQuestion?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
   /** Starts a second thread carrying the conversation through this turn. */
   readonly onBranchTurn?: (turnId: ChatTurnId) => void;
   /**
@@ -635,14 +621,11 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 <AttemptBlock
                   serverUrl={props.serverUrl}
                   windowCapability={props.windowCapability}
-                  questionDraftScope={`chat:${String(props.view.thread.id)}`}
                   attempt={attempt}
                   contentById={contentById}
                   key={attempt.id}
                   onFork={forkFromReply === undefined ? undefined : () => onAction("fork-reply")}
                   forkDisabled={props.busy === true}
-                  onAnswerQuestion={props.onAnswerQuestion}
-                  onDismissQuestion={props.onDismissQuestion}
                   onQuoteSelection={props.onQuoteSelection}
                   onRetryAttempt={props.onRetryAttempt}
                   onStopTurn={props.onStopTurn}
@@ -857,6 +840,75 @@ function RouteReceipt(props: { readonly decision: ChatTurnRouteDecision }) {
   );
 }
 
+export interface ChatPendingQuestionsProps {
+  readonly view: ChatThreadView;
+  /**
+   * Answers a question a running attempt asked and is blocked on. Absent when
+   * the surface cannot answer, which keeps the question read-only instead of
+   * offering a control nothing would deliver.
+   */
+  readonly onAnswerQuestion?: (input: {
+    readonly turnId: ChatTurnId;
+    readonly attemptId: ChatAttemptId;
+    readonly requestId: string;
+    readonly answer: string;
+    /** The question asks for a secret: sent as the command's `secretAnswer`, never recorded. */
+    readonly secret?: true;
+  }) => void | boolean | Promise<void | boolean>;
+  /** Cancels the turn a question belongs to, without answering it. */
+  readonly onDismissQuestion?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
+}
+
+/**
+ * The questions a running Chat reply asked and is blocked on, docked above the
+ * composer where they are answered. The reply that asked keeps its "Waiting
+ * for your answer" status in the transcript, and an answered question's
+ * summary stays there; only the open card moves, so a long reply cannot carry
+ * it out of view.
+ */
+export function ChatPendingQuestions(props: ChatPendingQuestionsProps) {
+  const { onAnswerQuestion, onDismissQuestion } = props;
+  if (onAnswerQuestion === undefined) return null;
+  const waiting = activeChatTurns(props.view.turns).flatMap((turn) =>
+    turn.attempts.flatMap((attempt) =>
+      attempt.pendingQuestion === undefined ? [] : [{ attempt, question: attempt.pendingQuestion }],
+    ),
+  );
+  if (waiting.length === 0) return null;
+  const scope = `chat:${String(props.view.thread.id)}`;
+  return (
+    <PendingRequests>
+      {waiting.map(({ attempt, question }) => (
+        <ProviderQuestionCard
+          key={question.requestId}
+          draftIdentity={{ scope, requestId: chatQuestionDraftRequestId(attempt) }}
+          questionnaire={question.questionnaire}
+          onAnswer={(answer) =>
+            onAnswerQuestion({
+              turnId: attempt.turnId,
+              attemptId: attempt.id,
+              requestId: question.requestId,
+              answer,
+              ...(question.secret === true ? { secret: true } : {}),
+            })
+          }
+          onDismiss={
+            onDismissQuestion === undefined
+              ? undefined
+              : () => onDismissQuestion(attempt.turnId, attempt.id)
+          }
+          options={question.options}
+          {...(question.questionIndex === undefined
+            ? {}
+            : { questionIndex: question.questionIndex, questionCount: question.questionCount })}
+          prompt={question.prompt}
+          secret={question.secret === true}
+        />
+      ))}
+    </PendingRequests>
+  );
+}
+
 function chatQuestionDraftRequestId(attempt: ChatAttempt): string {
   return JSON.stringify([
     String(attempt.turnId),
@@ -875,14 +927,11 @@ function subagentsUntil(at: string | undefined): { readonly subagentsUntil?: str
 }
 
 const AttemptBlock = memo(function AttemptBlock(props: {
-  readonly questionDraftScope: string;
   readonly attempt: ChatAttempt;
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
   readonly citations: ChatThreadView["citations"];
   readonly contentById: ReadonlyMap<string, ChatContentBody>;
-  readonly onAnswerQuestion: ChatTranscriptProps["onAnswerQuestion"];
-  readonly onDismissQuestion: ChatTranscriptProps["onDismissQuestion"];
   readonly onQuoteSelection: ChatTranscriptProps["onQuoteSelection"];
   readonly onRetryAttempt: ChatTranscriptProps["onRetryAttempt"];
   readonly onStopTurn: ChatTranscriptProps["onStopTurn"];
@@ -1109,40 +1158,6 @@ const AttemptBlock = memo(function AttemptBlock(props: {
           <SupportCorrelationControl correlationId={String(props.attempt.id)} />
         ) : null}
         {props.citations.length > 0 ? <CitationList citations={props.citations} /> : null}
-        {props.attempt.pendingQuestion === undefined ||
-        props.onAnswerQuestion === undefined ? null : (
-          <ProviderQuestionCard
-            key={props.attempt.pendingQuestion.requestId}
-            draftIdentity={{
-              scope: props.questionDraftScope,
-              requestId: chatQuestionDraftRequestId(props.attempt),
-            }}
-            questionnaire={props.attempt.pendingQuestion.questionnaire}
-            onAnswer={(answer) =>
-              props.onAnswerQuestion?.({
-                turnId: props.attempt.turnId,
-                attemptId: props.attempt.id,
-                requestId: props.attempt.pendingQuestion!.requestId,
-                answer,
-                ...(props.attempt.pendingQuestion?.secret === true ? { secret: true } : {}),
-              })
-            }
-            onDismiss={
-              props.onDismissQuestion === undefined
-                ? undefined
-                : () => props.onDismissQuestion?.(props.attempt.turnId, props.attempt.id)
-            }
-            options={props.attempt.pendingQuestion.options}
-            {...(props.attempt.pendingQuestion.questionIndex === undefined
-              ? {}
-              : {
-                  questionIndex: props.attempt.pendingQuestion.questionIndex,
-                  questionCount: props.attempt.pendingQuestion.questionCount,
-                })}
-            prompt={props.attempt.pendingQuestion.prompt}
-            secret={props.attempt.pendingQuestion.secret === true}
-          />
-        )}
         {(props.attempt.answeredQuestions ?? []).length === 0
           ? null
           : props.attempt.answeredQuestions!.map((question) => (

@@ -8,7 +8,6 @@ import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { moveOrChooseInRadioGroup } from "../ui/base/radioGroupKeys";
 import { OptionKey } from "./OptionKey";
-import "./question-keys.css";
 
 export interface ProviderQuestionCardProps {
   readonly draftIdentity?: QuestionnaireDraftIdentity | undefined;
@@ -94,17 +93,20 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
               aria-checked={selected === option.label}
               className="provider-question-card__option"
               onClick={() => setSelected(option.label)}
+              size={null}
               role="radio"
               type="button"
               variant="ghost"
             >
-              <span className="provider-question-card__option-label">{option.label}</span>
+              <span className="provider-question-card__option-label">
+                {option.label}
+                <OptionKey index={index} />
+              </span>
               {option.description === undefined ? null : (
                 <span className="provider-question-card__option-description">
                   {option.description}
                 </span>
               )}
-              <OptionKey index={index} />
             </OctantButton>
           </div>
         ))}
@@ -113,12 +115,15 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
             aria-checked={custom}
             className="provider-question-card__option"
             onClick={() => setSelected(CUSTOM)}
+            size={null}
             role="radio"
             type="button"
             variant="ghost"
           >
-            <span className="provider-question-card__option-label">Type your own answer</span>
-            <OptionKey index={props.options.length} />
+            <span className="provider-question-card__option-label">
+              Type your own answer
+              <OptionKey index={props.options.length} />
+            </span>
           </OctantButton>
           {custom && !secret ? (
             <OctantInput
