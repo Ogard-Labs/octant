@@ -530,26 +530,36 @@ export function wireChat(deps: ChatDependencies) {
       resolveHostRunTools: ({ thread }) =>
         withheldFromSideChat({
           sideChat: sideChatSidecars.findBySidecarThread(thread.id) !== undefined,
-          tools: () =>
-            combineAppManagedToolSets(
+          tools: () => {
+            const video = createThreadVideoAgentTools({
+              windowId: ROUTINE_HOST_SCOPE_ID,
+              threadKind: "chat-thread",
+              scopeId: decodeImageGenerationScopeId(String(thread.id)),
+              offers: videoOffers,
+              kept: keptVideoChoices,
+              jobs: videoJobService,
+              imageSources: chatImageSourcesFor(thread),
+              imageJobs: imageJobService,
+              unattended: true,
+            });
+            return combineAppManagedToolSets(
               createCanvasAgentTools({
                 windowId: ROUTINE_HOST_SCOPE_ID,
                 hostRun: true,
                 thread,
                 port: canvasAgentToolPort,
               }),
-              createThreadVideoAgentTools({
-                windowId: ROUTINE_HOST_SCOPE_ID,
-                threadKind: "chat-thread",
-                scopeId: decodeImageGenerationScopeId(String(thread.id)),
-                offers: videoOffers,
-                kept: keptVideoChoices,
-                jobs: videoJobService,
-                imageSources: chatImageSourcesFor(thread),
-                imageJobs: imageJobService,
-                unattended: true,
-              }),
-            ),
+              video === undefined
+                ? undefined
+                : taintAppManagedToolResults({
+                    tools: video,
+                    threadId: thread.id,
+                    recordExternalContentIngestion: (input) =>
+                      externalContentIngestionStore.record(input),
+                    uuid: randomUUID,
+                  }),
+            );
+          },
         }),
       resolveComputerUseTools: ({ windowId, thread }) =>
         withheldFromSideChat({
