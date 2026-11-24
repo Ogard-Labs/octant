@@ -968,20 +968,45 @@ describe("video jobs", () => {
     expect(sleeps[0]).toBe(60_000);
   });
 
-  it("keeps polling through a rate-limited answer until the provider completes the clip", async () => {
-    const { service, calls } = harness({
-      polls: [
-        {
+  it.each(["rate-limited", "unauthenticated", "unauthorized"] as const)(
+    "keeps polling after a $0 status check until the provider completes the clip",
+    async (category) => {
+      const { service, calls } = harness({
+        polls: [
+          {
+            status: "failed",
+            providerFailure: { category, message: "Status unavailable." },
+          },
+        ],
+      });
+      const queued = await enqueue(service);
+      const done = await service.whenTerminal(queued.id);
+      expect(calls.poll).toBeGreaterThanOrEqual(2);
+      expect(done).toMatchObject({ status: "completed" });
+      expect(done?.settledCostUsdMicros).toBeGreaterThan(0);
+    },
+  );
+
+  it("settles the estimate when an accepted clip still cannot be read at the deadline", async () => {
+    const { service, calls, spend, advance } = harness({
+      poll: async () => {
+        if (calls.poll === 2) advance(VIDEO_JOB_TIMEOUT_MS);
+        return {
           status: "failed",
-          providerFailure: { category: "rate-limited", message: "Slow down." },
-        },
-      ],
+          providerFailure: { category: "unauthorized", message: "Status access denied." },
+        };
+      },
     });
     const queued = await enqueue(service);
     const done = await service.whenTerminal(queued.id);
-    expect(calls.poll).toBeGreaterThanOrEqual(2);
-    expect(done).toMatchObject({ status: "completed" });
-    expect(done?.settledCostUsdMicros).toBeGreaterThan(0);
+    expect(done).toMatchObject({
+      status: "failed",
+      remoteId: "remote-1",
+      settledCostUsdMicros: queued.estimatedCostUsdMicros,
+    });
+    expect(calls.poll).toBe(2);
+    expect(spend.abandon).not.toHaveBeenCalled();
+    expect(spend.settle).toHaveBeenCalledOnce();
   });
 
   it("ends a job on the provider's own failure answer, billed nothing", async () => {

@@ -344,6 +344,10 @@ reading its reply. If the start times out, the slot opens for another job.
 The failed start settles at the estimate when the provider may have received
 it. A start the host knows it never sent bills nothing.
 
+If a provider rejects authentication on a status check for an accepted clip,
+the host keeps polling within the job time. It settles at the estimate if it
+still cannot confirm the outcome at the deadline.
+
 At startup the host reconciles every video job the journal left unfinished:
 
 - A job that was **queued**, so nothing was sent, is marked failed as
