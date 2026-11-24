@@ -460,6 +460,7 @@ interface QueueUrls {
 
 function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGenerationPorts) {
   let declared: FalEndpoints | undefined;
+  let submittedModels: ReadonlyArray<VideoModelCapabilities> | undefined;
   /** Routes fal's submit answer returned, per request id; ids are reconstructed otherwise. */
   const remembered = new Map<string, QueueUrls>();
   const urlsFor = (remoteId: string): QueueUrls | undefined =>
@@ -655,6 +656,9 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
       const submitted = await readVideoJson(response);
       const requestId = jsonField(submitted, "request_id");
       if (typeof requestId !== "string" || !REQUEST_ID_PATTERN.test(requestId)) return invalidId();
+      // Even a partial read may describe the endpoint well enough to submit.
+      // The host needs that declaration to journal the accepted id without I/O.
+      submittedModels = read.failure === undefined ? undefined : known.map((entry) => entry.model);
       const remoteId = remoteIdOf(endpoint.endpointId, requestId);
       const [status, result, cancel] = ["status_url", "response_url", "cancel_url"].map((name) =>
         jsonField(submitted, name),
@@ -786,9 +790,10 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
   };
 
   return {
-    // A failed or partial discovery is thrown, not cached: the host keeps no
-    // stale model list and the next read tries again.
     models: async () => {
+      if (submittedModels !== undefined) return submittedModels;
+      // Profile discovery must still retry a failed or partial read. Only an
+      // accepted submission can use its own already-read declarations above.
       const read = await endpoints();
       if (read.failure !== undefined) throw read.failure;
       return read.endpoints.map((endpoint) => endpoint.model);

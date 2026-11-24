@@ -188,6 +188,9 @@ activation ladder.
      unit is a per-second rate only when no option changes the billing, a
      per-video unit a flat rate for the endpoint's default clip, anything
      else unpublished, which the dollar ceiling refuses).
+   - After fal accepts a clip, the driver keeps the declaration it submitted
+     with so the host records the queue ID and its cleanup policy without
+     repeating discovery.
 
 Between them, these three reach every live model family in the survey except
 Pika's own models. Runway also resells MiniMax H3, which fal does not host.

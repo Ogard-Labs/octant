@@ -141,6 +141,38 @@ describe("fal video driver", () => {
     });
   });
 
+  it("keeps a submitted clip's declaration when pricing discovery failed", async () => {
+    const respond = script();
+    const recorder = ports((request) => {
+      if (new URL(request.url).pathname === "/v1/models/pricing") {
+        throw { category: "unavailable", message: "Pricing could not be reached." };
+      }
+      return respond(request);
+    });
+    const adapter = falVideoDriver.create({ profile, ports: recorder.ports });
+    const started = await adapter.start({
+      modelId: veo,
+      prompt: "A boat",
+      options,
+      references: [],
+      signal: new AbortController().signal,
+    });
+    expect(started).toEqual({ status: "started", remoteId: `fal-ai/veo3.1#${requestId}` });
+    const sentBeforeLookup = recorder.sent.length;
+    await expect(adapter.models()).resolves.toContainEqual(
+      expect.objectContaining({
+        modelId: veo,
+        price: { kind: "unpublished" },
+        job: {
+          cancel: "running",
+          removal: { kind: "expires", afterHours: 2 },
+          resumeWindowHours: 1,
+        },
+      }),
+    );
+    expect(recorder.sent).toHaveLength(sentBeforeLookup);
+  });
+
   it("sends exactly one DELETE for the request's stored payloads when the host asks", async () => {
     const recorder = ports((request) =>
       request.method === "DELETE"
