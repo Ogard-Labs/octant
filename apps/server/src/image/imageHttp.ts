@@ -42,6 +42,7 @@ interface AuthenticatedImageHttpRequest {
   readonly body?: string;
   readonly form?: FormData;
   readonly signal?: AbortSignal;
+  readonly preserveResponseOnAbort?: (response: Response) => boolean;
   readonly fetch: ImageHttpFetch;
   readonly limits: ImageHttpLimits;
 }
@@ -133,7 +134,29 @@ export async function performImageHttpRequest(
       await cancelResponseBody(response);
       throw imageFailure("invalid-configuration", "The configured endpoint returned a redirect.");
     }
-    await reportKeyRejection(attempt.lease, response);
+    if (!response.ok && attempt.lease !== undefined) {
+      const expired = await Promise.race([
+        reportKeyRejection(attempt.lease, response, deadline.signal).then(() => undefined),
+        deadline.failure.catch((failure: ProviderFailure) => failure),
+      ]);
+      if (expired !== undefined) {
+        // The deadline releases the pool's clone. Release the original too.
+        safelyCancel(response.body);
+        if (
+          expired.category === "interrupted" &&
+          request.preserveResponseOnAbort?.(response) !== true
+        ) {
+          throw expired;
+        }
+        // The provider already answered. Preserve its refusal and retry
+        // metadata when only the optional error text timed out.
+        return new Response(null, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers,
+        });
+      }
+    }
     return boundResponse(response, request.limits, request.signal);
   } finally {
     deadline.close();

@@ -213,11 +213,15 @@ describe("bundled image-driver plugins", () => {
     expect(new Set(every.map((plugin) => plugin.manifest.extensionId)).size).toBe(every.length);
   });
 
-  it("admits the bundled video provider by default and stops when its plugin is disabled", () => {
-    expect([...admittedBundledVideoDriverKinds()]).toEqual(["gemini-video"]);
-    expect(admittedBundledVideoDriverKinds({ "gemini-video": { pluginDesired: false } }).size).toBe(
-      0,
-    );
+  it("admits the bundled video providers by default and stops one when its plugin is disabled", () => {
+    expect([...admittedBundledVideoDriverKinds()]).toEqual([
+      "gemini-video",
+      "runway-video",
+      "fal-video",
+    ]);
+    expect([
+      ...admittedBundledVideoDriverKinds({ "gemini-video": { pluginDesired: false } }),
+    ]).toEqual(["runway-video", "fal-video"]);
     expect(
       bundledProviderDriverCatalog().some((listing) => listing.entry.driverKind === "gemini-video"),
     ).toBe(false);

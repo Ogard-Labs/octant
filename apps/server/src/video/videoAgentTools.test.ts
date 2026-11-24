@@ -121,10 +121,12 @@ function harness(options: {
   readonly frameRead?: () => Promise<Uint8Array | undefined>;
   readonly readClip?: () => Promise<Uint8Array>;
   readonly writeClip?: NonNullable<VideoAgentToolPort["save"]>["write"];
+  readonly beforeQuote?: (signal: AbortSignal | undefined) => Promise<void>;
 }) {
   const quote = vi.fn(
-    async (input: { readonly options: { readonly resolution: string } }): Promise<VideoQuote> =>
-      model.resolutions.includes(input.options.resolution)
+    async (input: Parameters<VideoAgentToolPort["jobs"]["quote"]>[0]): Promise<VideoQuote> => {
+      await options.beforeQuote?.(input.signal);
+      return model.resolutions.includes(input.options.resolution)
         ? {
             status: "ready",
             driverKind: "gemini-video",
@@ -136,7 +138,8 @@ function harness(options: {
         : {
             status: "refused",
             reason: `Gemini Omni Flash does not offer ${input.options.resolution}.`,
-          },
+          };
+    },
   );
   const enqueue = vi.fn(async () => (options.pending === true ? running : finished));
   const stop = vi.fn();
@@ -213,12 +216,58 @@ function harness(options: {
 }
 
 describe("octant_create_video on the host", () => {
+  it.each([1, 2])("returns cancelled when Stop interrupts quote %i", async (stopAt) => {
+    const controller = new AbortController();
+    const quoting = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let count = 0;
+    const { call, askGenerate, enqueue } = harness({
+      answer: { status: "video-generate", options: finished.options, rememberForThread: false },
+      beforeQuote: async (signal) => {
+        if (++count !== stopAt) return;
+        quoting.resolve();
+        signal?.addEventListener("abort", () => release.resolve(), { once: true });
+        await release.promise;
+      },
+    });
+    const settled = vi.fn();
+    const outcome = call({ prompt: "A paper boat on a pond" }, controller.signal).then(settled);
+    try {
+      await quoting.promise;
+      controller.abort();
+      await vi.waitFor(() =>
+        expect(settled).toHaveBeenCalledWith(
+          expect.objectContaining({
+            result: expect.objectContaining({ status: "cancelled" }),
+          }),
+        ),
+      );
+      expect(askGenerate).toHaveBeenCalledTimes(stopAt - 1);
+      expect(enqueue).not.toHaveBeenCalled();
+    } finally {
+      release.resolve();
+      await outcome;
+    }
+  });
+
   it("asks on a card with the model's defaults and makes the clip with the person's choices", async () => {
     const chosen = { durationSeconds: 5, resolution: "1080p", aspectRatio: "16:9", audio: true };
-    const { call, askGenerate, enqueue } = harness({
+    const { signal } = new AbortController();
+    const { call, quote, askGenerate, enqueue } = harness({
       answer: { status: "video-generate", options: chosen, rememberForThread: false },
     });
-    await call({ prompt: "A paper boat on a pond" });
+    await call({ prompt: "A paper boat on a pond" }, signal);
+    expect(quote).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        options: finished.options,
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(quote).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ options: chosen, signal: expect.any(AbortSignal) }),
+    );
     expect(askGenerate).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "video-generate",
@@ -230,7 +279,12 @@ describe("octant_create_video on the host", () => {
       expect.any(AbortSignal),
     );
     expect(enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({ profileInstanceId: profileId, options: chosen, references: [] }),
+      expect.objectContaining({
+        profileInstanceId: profileId,
+        options: chosen,
+        references: [],
+        signal: expect.any(AbortSignal),
+      }),
     );
   });
 

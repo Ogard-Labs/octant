@@ -1,6 +1,7 @@
 import { MAX_VIDEO_CLIP_BYTES } from "@octant/contracts/video-generation";
 import {
   isVideoEndpointAllowed,
+  isVideoStartRejection,
   videoFailure,
   type VideoGenerationPorts,
 } from "@octant/provider-sdk/video-generation";
@@ -27,9 +28,8 @@ export const VIDEO_HTTP_LIMITS: ImageHttpLimits = {
 
 /**
  * Which requests that carried a given signal reached the host's port, and
- * which of those were handed to the network. A start aborted while its
- * credential was still being read reached the port but was never sent, so
- * the provider cannot have made or billed that clip.
+ * which could start a job and were handed to the network. A pricing or
+ * schema GET cannot start a clip, even if it reached the provider before Stop.
  */
 export interface VideoSendRecord {
   readonly reached: WeakSet<AbortSignal>;
@@ -66,9 +66,11 @@ export function makeVideoGenerationPorts(options: {
         ...request,
         instanceId: options.instanceId,
         credentialResolver: options.credentialResolver,
+        // A confirmed submission rejection can release its reservation.
+        ...(request.method === "POST" ? { preserveResponseOnAbort: isVideoStartRejection } : {}),
         // A fetch given an aborted signal sends nothing, so only a live one counts.
         fetch:
-          signal === undefined || sends === undefined
+          signal === undefined || sends === undefined || request.method === "GET"
             ? fetch
             : async (input, init) => {
                 if (init?.signal?.aborted !== true) sends.sent.add(signal);
