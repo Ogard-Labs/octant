@@ -716,6 +716,7 @@ export function startOctantServer(
       onWindowRevoked,
       processAuthorityTime,
       windowAuthorityStore,
+      workThreadProjection,
       readReference: commandBroker?.requestCardRead,
     });
     yield* Effect.addFinalizer(() => Effect.sync(() => threadSecrets.close()));

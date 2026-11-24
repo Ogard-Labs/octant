@@ -10,12 +10,12 @@ import {
 import type {
   ThreadSecretAnswer,
   ThreadSecretAnswerField,
-  ThreadSecretCommandResult,
   ThreadSecretFailure,
   ThreadSecretLifetime,
   ThreadSecretRequestCard,
   ThreadSecretSource,
 } from "@octant/contracts/thread-secrets";
+import type { ThreadSecretReply } from "@octant/client-runtime/thread-secrets-client";
 import { isHoldableSecretValue } from "@octant/domain/secret-guard-policy";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { octantButtonClassName, OctantButton, OctantIconButton } from "../ui/base/OctantButton";
@@ -78,9 +78,6 @@ const MAX_VALUE_LENGTH = 4096;
 const TOO_LONG = "That is longer than 4,096 characters, so none of it was pasted.";
 const UNKNOWN_OUTCOME =
   "The result is not known. What you entered was cleared and is not sent again.";
-
-/** The host's answer, or that it refused the request with nothing read from it. */
-export type ThreadSecretReply = ThreadSecretCommandResult | { readonly status: "not-taken" };
 
 /**
  * Asks the person for a secret. What is typed stays in this card until it is

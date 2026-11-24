@@ -2,6 +2,10 @@ import type {
   CredentialRequestReference,
   CredentialRequestResolution,
 } from "@octant/contracts/credential-request";
+import {
+  MAX_THREAD_SECRETS_LISTED,
+  type ThreadSecretsHostView,
+} from "@octant/contracts/thread-secrets";
 import type {
   ActiveThreadSecret,
   ThreadSecretAnswer,
@@ -83,6 +87,8 @@ export interface ThreadSecretServiceOptions {
     | undefined;
   /** Absent on a host with no credential store, which offers to remember nothing. */
   readonly remembered?: RememberedThreadSecrets | undefined;
+  /** Names a thread for the person's list of active secrets. */
+  readonly threadTitle?: ((threadId: string) => string | undefined) | undefined;
   /** The waiting cards or the active list changed. */
   readonly onChanged?: (() => void) | undefined;
   /** A card began to wait. Names the thread and the card and nothing of its content. */
@@ -414,6 +420,30 @@ export class ThreadSecretService {
     return [...this.#active.values()].some(
       (secret) => secret.threadId === threadId && secret.path === path,
     );
+  }
+
+  /** Everything the person may end: the newest active secrets and all that is remembered. */
+  hostView(): ThreadSecretsHostView {
+    this.sweep();
+    return {
+      active: this.active()
+        .slice(-MAX_THREAD_SECRETS_LISTED)
+        .map((secret) => {
+          const threadTitle = this.#options.threadTitle?.(secret.threadId);
+          return { ...secret, ...(threadTitle === undefined ? {} : { threadTitle }) };
+        }),
+      remembered: this.#options.remembered?.list() ?? [],
+    };
+  }
+
+  /** Removes a remembered secret; a thread it was given to keeps it for its own time. */
+  async forget(id: string): Promise<ThreadSecretCommandResult> {
+    const { remembered } = this.#options;
+    if (remembered === undefined || !remembered.list().some((entry) => entry.id === id))
+      return { status: "gone" };
+    return (await remembered.forget(id))
+      ? { status: "accepted" }
+      : { status: "refused", failure: "unavailable" };
   }
 
   revoke(threadId: string, secretId: string): ThreadSecretCommandResult {

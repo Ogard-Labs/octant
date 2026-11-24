@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { CodeThread, WindowId, WorkThread } from "@octant/contracts";
+import {
+  decodeCodeThreadId,
+  decodeWorkThreadId,
+  type CodeThread,
+  type WindowId,
+  type WorkThread,
+} from "@octant/contracts";
 import type { CredentialRequestReference } from "@octant/contracts/credential-request";
 import type { CredentialRequestResolution } from "@octant/contracts/credential-request";
 import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
@@ -25,6 +31,7 @@ import {
   type ThreadSecretOperations,
 } from "../threadSecrets/threadSecretTools";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { ServerStart } from "./serverShape";
 
 export type ThreadSecretsDependencies = Pick<ServerStart, "options" | "persistence"> &
@@ -36,7 +43,8 @@ export type ThreadSecretsDependencies = Pick<ServerStart, "options" | "persisten
     | "onWindowRevoked"
     | "processAuthorityTime"
     | "windowAuthorityStore"
-  > & {
+  > &
+  Pick<FoundationsWiring, "workThreadProjection"> & {
     readonly readReference?:
       | ((
           reference: CredentialRequestReference,
@@ -76,6 +84,9 @@ export function wireThreadSecrets(deps: ThreadSecretsDependencies) {
     hold: holdSecretValue,
     ...(remembered === undefined ? {} : { remembered }),
     ...(deps.readReference === undefined ? {} : { readReference: deps.readReference }),
+    threadTitle: (threadId) =>
+      persistence.readCodeThread(decodeCodeThreadId(threadId))?.title ??
+      deps.workThreadProjection.read(decodeWorkThreadId(threadId))?.title,
     onAsked: deps.onWaitingAsk,
     onChanged: () => deps.machineChangeFeed.publish(["tool-approvals"]),
   });

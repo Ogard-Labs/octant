@@ -205,7 +205,7 @@ import {
   waitUntilDocumentVisible,
 } from "../polling/documentVisibility";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
-import { ThreadSecrets } from "../credentials/threadSecretSurfaces";
+import { ActiveThreadSecrets, ThreadSecrets } from "../credentials/threadSecretSurfaces";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ImportedTerminalHistory } from "../terminalSessions/ImportedTerminalHistory";
 import {
@@ -3511,6 +3511,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       disabled={accessChanging || creating || completionLocked}
                       providerInstanceId={thread.providerInstanceId}
                       threadId={String(thread.id)}
+                    />
+                    <ActiveThreadSecrets
+                      threadId={String(props.threadId)}
+                      serverUrl={props.serverUrl}
+                      windowCapability={props.windowCapability}
                     />
                     <ContinueElsewhere
                       mode="work"

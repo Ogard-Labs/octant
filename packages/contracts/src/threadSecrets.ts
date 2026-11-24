@@ -17,6 +17,9 @@ import { WindowId } from "./shell";
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const MAX_THREAD_SECRET_FIELDS = 8;
+export const MAX_REMEMBERED_THREAD_SECRETS = 128;
+/** The newest are listed; one thread holds at most 64. */
+export const MAX_THREAD_SECRETS_LISTED = 512;
 /** The variable a command reads a secret from is this and the secret's name. */
 export const THREAD_SECRET_ENVIRONMENT_PREFIX = "OCTANT_SECRET_";
 
@@ -375,6 +378,20 @@ export const ThreadSecretsView = Schema.Struct({
 }).annotations(strict);
 export type ThreadSecretsView = typeof ThreadSecretsView.Type;
 
+/** Every thread's active secrets and everything remembered, for Settings on this host. */
+export const ThreadSecretsHostView = Schema.Struct({
+  active: Schema.Array(
+    Schema.Struct({
+      ...ActiveThreadSecret.fields,
+      threadTitle: Schema.optional(Schema.String),
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(MAX_THREAD_SECRETS_LISTED)),
+  remembered: Schema.Array(RememberedThreadSecret).pipe(
+    Schema.maxItems(MAX_REMEMBERED_THREAD_SECRETS),
+  ),
+}).annotations(strict);
+export type ThreadSecretsHostView = typeof ThreadSecretsHostView.Type;
+
 /** Private submission only, like the answer it carries. */
 export const ThreadSecretCommand = Schema.Union(
   Schema.Struct({
@@ -387,6 +404,8 @@ export const ThreadSecretCommand = Schema.Union(
     threadId: ThreadId,
     secretId: Schema.UUID,
   }).annotations(strict),
+  /** Removes a remembered secret. Threads that hold it keep it for their own time. */
+  Schema.Struct({ kind: Schema.Literal("forget"), id: Schema.UUID }).annotations(strict),
 );
 export type ThreadSecretCommand = typeof ThreadSecretCommand.Type;
 
@@ -487,4 +506,5 @@ export const decodeThreadSecretRequestInput = Schema.decodeUnknownEither(ThreadS
 export const decodeThreadSecretCommand = Schema.decodeUnknownEither(ThreadSecretCommand);
 export const decodeThreadSecretJournalRecord = Schema.decodeUnknownSync(ThreadSecretJournalRecord);
 export const decodeThreadSecretsView = Schema.decodeUnknownSync(ThreadSecretsView);
+export const decodeThreadSecretsHostView = Schema.decodeUnknownSync(ThreadSecretsHostView);
 export const decodeThreadSecretCommandResult = Schema.decodeUnknownSync(ThreadSecretCommandResult);
