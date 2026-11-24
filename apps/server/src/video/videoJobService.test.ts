@@ -1768,7 +1768,11 @@ describe("video jobs", () => {
     },
   );
 
-  it("releases reserved spend when a rate-limited start's body outlasts the HTTP deadline", async () => {
+  it.each([
+    { status: 429, endRead: "the HTTP deadline", terminal: "failed", charged: false },
+    { status: 429, endRead: "Stop", terminal: "cancelled", charged: false },
+    { status: 524, endRead: "the HTTP deadline", terminal: "failed", charged: true },
+  ] as const)("accounts for a start with HTTP $status before $endRead", async (scenario) => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const reading = Promise.withResolvers<void>();
     const cancelled = vi.fn();
@@ -1782,7 +1786,7 @@ describe("video jobs", () => {
               highWaterMark: 0,
             },
           ),
-          { status: 429, headers: { "retry-after": "60" } },
+          { status: scenario.status, headers: { "retry-after": "60" } },
         ),
       start: async (ports, request) => {
         try {
@@ -1802,15 +1806,24 @@ describe("video jobs", () => {
     try {
       const queued = await enqueue(service);
       await reading.promise;
-      await vi.advanceTimersByTimeAsync(VIDEO_HTTP_LIMITS.connectionTimeoutMs);
+      if (scenario.endRead === "Stop") service.stop(queued.id);
+      else await vi.advanceTimersByTimeAsync(VIDEO_HTTP_LIMITS.connectionTimeoutMs);
       const done = await service.whenTerminal(queued.id);
-      expect(done).toMatchObject({
-        status: "failed",
-        failure: { category: "rate-limited", retryAfterMs: 60_000 },
-      });
-      expect(done?.settledCostUsdMicros).toBeUndefined();
-      expect(spend.settle).not.toHaveBeenCalled();
-      expect(spend.abandon).toHaveBeenCalledOnce();
+      expect(done?.status).toBe(scenario.terminal);
+      if (scenario.charged) {
+        expect(done).toMatchObject({
+          failure: { category: "interrupted" },
+          settledCostUsdMicros: 695_040,
+        });
+        expect(spend.settle).toHaveBeenCalledOnce();
+        expect(spend.abandon).not.toHaveBeenCalled();
+      } else {
+        if (scenario.terminal === "failed")
+          expect(done?.failure).toMatchObject({ category: "rate-limited", retryAfterMs: 60_000 });
+        expect(done?.settledCostUsdMicros).toBeUndefined();
+        expect(spend.settle).not.toHaveBeenCalled();
+        expect(spend.abandon).toHaveBeenCalledOnce();
+      }
       expect(cancelled).toHaveBeenCalledOnce();
     } finally {
       service.close();

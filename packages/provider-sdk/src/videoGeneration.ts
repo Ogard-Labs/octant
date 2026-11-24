@@ -251,15 +251,8 @@ export function classifyVideoHttpFailure(response: Response, now = Date.now()): 
       );
     case 408:
     case 504:
+    case 524:
       return videoFailure("unavailable", "The provider request timed out.");
-    case 500:
-    case 502:
-    case 503:
-    case 529:
-      return videoFailure(
-        "unavailable",
-        `The provider is unavailable (HTTP ${response.status}). Try again shortly.`,
-      );
     case 429: {
       const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"), now);
       return {
@@ -269,6 +262,12 @@ export function classifyVideoHttpFailure(response: Response, now = Date.now()): 
       };
     }
     default:
+      if (response.status >= 500 && response.status < 600) {
+        return videoFailure(
+          "unavailable",
+          `The provider is unavailable (HTTP ${response.status}). Try again shortly.`,
+        );
+      }
       return videoFailure(
         "provider-failed",
         `The provider request failed with HTTP ${response.status}.`,

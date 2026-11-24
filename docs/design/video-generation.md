@@ -323,12 +323,14 @@ which the person sets, like any turn.
   or to the estimate when the provider reports none.
   - A confirmed failure before output releases its reservation when there
     is no charged usage. A rate-limit status still confirms refusal if
-    reading the error body times out. An unconfirmed start follows the interruption
-    rule below. A confirmed completion with invalid output still settles to
-    reported usage or to the estimate when no usage was reported.
+    Stop or a deadline interrupts the error body. A gateway 5xx leaves a
+    sent start unconfirmed, so the host counts the estimate. A confirmed
+    completion with invalid output still settles to reported usage or to
+    the estimate when no usage was reported.
   - A cancelled job settles at the reported usage, or at the estimate when
     none is reported, because a provider may bill a job it had already
-    started. A provider's explicit charge takes precedence even before the
+    started. Stop releases the reservation after a confirmed start rate
+    limit. A provider's explicit charge takes precedence even before the
     model price is available. fal reports zero for a cancellation confirmed
     while the job was queued. Runway's DELETE leaves the estimate in place.
 - No video-only ceiling is added: the person's own ceilings already cover it.

@@ -797,25 +797,23 @@ export class VideoJobService {
       return;
     }
     if (started.status === "failed") {
-      if (running.stopRequested && this.#knownUnsent(running)) {
-        this.#finish(sending, "cancelled", {});
-        return;
-      }
-      // Stop aborted the start request after it may have reached the
-      // provider, which can still make and bill the clip.
+      const failure = started.providerFailure;
+      const rateLimited = failure.category === "rate-limited";
+      // A sent request can still be billed if Stop or a deadline cut off
+      // its answer. A received rate limit confirms refusal at submission.
+      const mayHaveStarted =
+        !this.#knownUnsent(running) &&
+        (startMayHaveReachedProvider(failure) ||
+          ((running.stopRequested || startTimedOut) && !rateLimited));
       if (running.stopRequested) {
-        this.#finish(sending, "cancelled", {
-          settledCostUsdMicros: estimateOrZero(sending),
-          billed: true,
-        });
+        this.#finish(
+          sending,
+          "cancelled",
+          mayHaveStarted ? { settledCostUsdMicros: estimateOrZero(sending), billed: true } : {},
+        );
         return;
       }
-      // The provider may bill an unconfirmed start. A timeout while obtaining
-      // the key can also report "unavailable", before any request was sent.
-      if (
-        (startTimedOut || startMayHaveReachedProvider(started.providerFailure)) &&
-        !this.#knownUnsent(running)
-      ) {
+      if (mayHaveStarted) {
         this.#finish(sending, "failed", {
           failure: videoFailure(
             "interrupted",
@@ -827,9 +825,10 @@ export class VideoJobService {
         return;
       }
       this.#finish(sending, "failed", {
-        failure: startTimedOut
-          ? videoFailure("unavailable", "The clip timed out before it was sent.")
-          : started.providerFailure,
+        failure:
+          startTimedOut && !rateLimited
+            ? videoFailure("unavailable", "The clip timed out before it was sent.")
+            : failure,
       });
       return;
     }

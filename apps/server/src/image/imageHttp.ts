@@ -42,6 +42,7 @@ interface AuthenticatedImageHttpRequest {
   readonly body?: string;
   readonly form?: FormData;
   readonly signal?: AbortSignal;
+  readonly preserveRateLimitOnAbort?: boolean;
   readonly fetch: ImageHttpFetch;
   readonly limits: ImageHttpLimits;
 }
@@ -141,7 +142,12 @@ export async function performImageHttpRequest(
       if (expired !== undefined) {
         // The deadline releases the pool's clone. Release the original too.
         safelyCancel(response.body);
-        if (expired.category === "interrupted") throw expired;
+        if (
+          expired.category === "interrupted" &&
+          !(request.preserveRateLimitOnAbort === true && response.status === 429)
+        ) {
+          throw expired;
+        }
         // The provider already answered. Preserve its refusal and retry
         // metadata when only the optional error text timed out.
         return new Response(null, {
