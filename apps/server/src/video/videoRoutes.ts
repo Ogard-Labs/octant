@@ -11,7 +11,7 @@ import {
   type VideoJobThreadKind,
   type WindowId,
 } from "@octant/contracts";
-import { isAgentGrantSession, type ClientPrincipal } from "../clientPrincipal";
+import { principalIsDirectlyPaired, type ClientPrincipal } from "../clientPrincipal";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -200,11 +200,7 @@ export function createVideoRouteHandler(dependencies: VideoRouteDependencies): V
     // A device the host's person paired directly watches and downloads clips
     // of threads it can open at any access level, without stopping jobs.
     // Hub-introduced devices and agent grants stay refused.
-    const directlyPaired =
-      principal.kind === "remote-device" &&
-      principal.admittedBy === "host-person" &&
-      !isAgentGrantSession(principal);
-    if (remote && !directlyPaired) {
+    if (remote && !principalIsDirectlyPaired(principal)) {
       return failure("Video jobs are unavailable.", 404, origin);
     }
 
