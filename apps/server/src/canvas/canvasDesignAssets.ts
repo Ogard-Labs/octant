@@ -239,6 +239,7 @@ export async function prepareCanvasDesignAssetFile(input: {
   readonly root: string;
   readonly path: string;
   readonly maximumBytes: number;
+  readonly pathRefused?: (absolutePath: string) => boolean;
 }): Promise<
   | Extract<CanvasDesignAssetRead, { status: "unavailable" }>
   | {
@@ -272,6 +273,9 @@ export async function prepareCanvasDesignAssetFile(input: {
   if (resolved === undefined || !resolved.stat.isFile) {
     return { status: "unavailable", reason: "refused" };
   }
+  const pathRefused = (canonical: string) =>
+    input.pathRefused?.(candidate) === true || input.pathRefused?.(canonical) === true;
+  if (pathRefused(resolved.canonical)) return { status: "unavailable", reason: "refused" };
   if (resolved.stat.size > input.maximumBytes) {
     return { status: "unavailable", reason: "too-large" };
   }
@@ -282,7 +286,8 @@ export async function prepareCanvasDesignAssetFile(input: {
       if ((await input.filesystem.realpath(input.root).catch(() => undefined)) !== canonicalRoot)
         return undefined;
       const current = await resolveContainedWorkPath(input.filesystem, canonicalRoot, candidate);
-      if (current?.canonical !== resolved.canonical) return undefined;
+      if (current?.canonical !== resolved.canonical || pathRefused(current.canonical))
+        return undefined;
       return readConfinedWorkFile({
         filesystem: input.filesystem,
         canonicalPath: resolved.canonical,

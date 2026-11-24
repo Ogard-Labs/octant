@@ -198,6 +198,14 @@ const ProjectFields = {
    * kept again.
    */
   imageGenerationAskAgain: Schema.optional(Schema.Literal(true)),
+  /**
+   * The video profile and model the Project's agents generate clips with
+   * without asking, kept by the same rule as the image choice (maintainer
+   * decision, 2026-11-22: one consent rule keyed by media kind).
+   */
+  videoGenerationChoice: Schema.optional(ProjectImageGenerationChoice),
+  /** As `imageGenerationAskAgain`, for video. */
+  videoGenerationAskAgain: Schema.optional(Schema.Literal(true)),
   lifecycle: ProjectLifecycle,
   pinned: Schema.Boolean,
   rank: ProjectRank,
@@ -917,6 +925,11 @@ export const ProjectCommand = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("change-project-image-generation-choice"),
     ...ProjectCommandFields,
+    /**
+     * Which media the choice is for. Absent means image, so commands and
+     * events journaled before video decode unchanged.
+     */
+    media: Schema.optional(Schema.Literal("image", "video")),
     /** The choice to keep; absent drops it, so the next call asks again. */
     imageGenerationChoice: Schema.optional(ProjectImageGenerationChoice),
   }).annotations(strict),

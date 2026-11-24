@@ -1,3 +1,4 @@
+import { videoOfferDecisionRules } from "../video/videoOfferDecisionRules";
 import { decodeChatThreadId, decodeEventActor } from "@octant/contracts";
 import {
   decodeImageGenerationScopeId,
@@ -1779,6 +1780,7 @@ describe("ChatService", () => {
       offers: waiting,
       rules: {
         ...imageOfferDecisionRules(imageProfiles),
+        ...videoOfferDecisionRules({}),
         transcribe: transcriptionDecision,
         narrate: narrationDecision,
       },

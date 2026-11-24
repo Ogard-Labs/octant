@@ -6,6 +6,7 @@ import type {
 } from "@octant/contracts";
 import {
   composeThreadBoardPullRequestSummaries,
+  composeThreadNavigationPullRequestSummaries,
   matchPullRequestRowsToCodeThread,
 } from "@octant/domain/thread-board-pull-request-policy";
 
@@ -24,6 +25,26 @@ export function joinCodeThreadBoardPullRequests(input: {
     rows: input.snapshot.rows,
   });
   return composeThreadBoardPullRequestSummaries({
+    rows: input.snapshot.rows,
+    snapshotFreshness: input.snapshot.freshness,
+    githubRevoked: input.snapshot.githubRevoked,
+    matches,
+  });
+}
+
+/**
+ * The same exact matches as a board card's, bounded and ordered for the
+ * thread's navigation entry, which lists every pull request it worked on.
+ */
+export function joinCodeThreadNavigationPullRequests(input: {
+  readonly threadId: CodeThreadId;
+  readonly snapshot: ThreadBoardPullRequestSnapshot;
+}): ThreadBoardPullRequestSummaries {
+  const matches = matchPullRequestRowsToCodeThread({
+    threadId: String(input.threadId),
+    rows: input.snapshot.rows,
+  });
+  return composeThreadNavigationPullRequestSummaries({
     rows: input.snapshot.rows,
     snapshotFreshness: input.snapshot.freshness,
     githubRevoked: input.snapshot.githubRevoked,

@@ -6,6 +6,7 @@ import {
   decodeProviderInstanceId,
   decodeProviderModelId,
   type ProviderInstance,
+  type ProviderModelId,
 } from "@octant/contracts";
 import {
   decodeVideoModelCapabilities,
@@ -46,9 +47,12 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
 });
 
-function capabilities(job: VideoModelCapabilities["job"]): VideoModelCapabilities {
+function capabilities(
+  job: VideoModelCapabilities["job"],
+  model: string = "gemini-omni-1.2-flash",
+): VideoModelCapabilities {
   return decodeVideoModelCapabilities({
-    modelId: "gemini-omni-1.2-flash",
+    modelId: model,
     displayName: "Gemini Omni Flash",
     durations: { kind: "range", min: 3, max: 15 },
     resolutions: ["720p", "1080p"],
@@ -64,7 +68,7 @@ function capabilities(job: VideoModelCapabilities["job"]): VideoModelCapabilitie
   });
 }
 
-function profile(): ProviderInstance {
+function profile(allowlist: ReadonlyArray<ProviderModelId> = [modelId]): ProviderInstance {
   return {
     id: profileId,
     displayName: "Gemini Video",
@@ -74,7 +78,11 @@ function profile(): ProviderInstance {
     createdAt: now as ProviderInstance["createdAt"],
     updatedAt: now as ProviderInstance["updatedAt"],
     driverKind: "gemini-video",
-    configuration: { kind: "gemini-video-http", modelAllowlist: [modelId], defaultModel: modelId },
+    configuration: {
+      kind: "gemini-video-http",
+      modelAllowlist: [...allowlist],
+      defaultModel: allowlist[0] ?? modelId,
+    },
   };
 }
 
@@ -90,6 +98,10 @@ interface Script {
   beforeModels?: (call: number) => Promise<void>;
   /** Rejects models() once, on a numbered call, or for good, as a failed discovery read can. */
   modelsFail?: "once" | "always" | number;
+  /** Answers models() from the read's count, for a catalog that changes under the host. */
+  modelsRead?: (call: number) => ReadonlyArray<VideoModelCapabilities>;
+  /** The profile's configured models; a shorter answer is a partial read. */
+  allowlist?: ReadonlyArray<ProviderModelId>;
 }
 
 function fakeDriver(script: Script) {
@@ -102,6 +114,7 @@ function fakeDriver(script: Script) {
   let modelsFailOnce = script.modelsFail === "once";
   const driver: VideoGenerationDriver = {
     driverKind: "gemini-video",
+    providerName: "Example Video",
     providerHosts: ["video.example.test"],
     create: ({ ports }) => {
       return {
@@ -113,7 +126,7 @@ function fakeDriver(script: Script) {
             modelsFailOnce = false;
             throw { category: "unavailable", message: "Discovery failed." };
           }
-          return [model];
+          return script.modelsRead?.(modelsCalls) ?? [model];
         },
         start: async (request) => {
           calls.start += 1;
@@ -171,7 +184,9 @@ function harness(script: Script, directory?: string) {
   const fetched: Array<string> = [];
   const sleeps: Array<number> = [];
   let clockMs = Date.parse(now);
-  const instance: { current: ProviderInstance | undefined } = { current: profile() };
+  const instance: { current: ProviderInstance | undefined } = {
+    current: profile(script.allowlist),
+  };
   const spend = {
     admit: vi.fn((_request: SpendCeilingTurnRequest) => ({
       status: "admitted" as const,
@@ -960,6 +975,27 @@ describe("video jobs", () => {
     const queued = await enqueue(service);
     const done = await service.whenTerminal(queued.id);
     expect(done).toMatchObject({ status: "completed", remoteId: "remote-1" });
+  });
+
+  it("lists a provider model that a later catalog read restores", async () => {
+    const restoredId = decodeProviderModelId("fal-ai/restored");
+    const job = { cancel: "running", removal: { kind: "delete" }, resumeWindowHours: 24 } as const;
+    const first = capabilities(job);
+    const restored = capabilities(job, "fal-ai/restored");
+    const { service, advance } = harness({
+      model: first,
+      allowlist: [modelId, restoredId],
+      modelsRead: (call) => (call === 1 ? [first] : [first, restored]),
+    });
+    await vi.waitFor(() => expect(service.readyProfilesNow()[0]?.models).toHaveLength(1));
+    // Inside the retry window the partial list is offered without a new read.
+    expect(service.readyProfilesNow()[0]?.models).toHaveLength(1);
+    advance(61_000);
+    await vi.waitFor(() =>
+      expect(service.readyProfilesNow()[0]?.models.map((m) => String(m.modelId))).toContain(
+        "fal-ai/restored",
+      ),
+    );
   });
 
   it("ends a sent job as interrupted when discovery cannot describe it after a restart", async () => {

@@ -27,6 +27,7 @@ const BROADEST = [
   "octant_code",
   "octant_computer",
   "octant_create_image",
+  "octant_create_video",
   "octant_credential",
   "octant_debug",
   "octant_github",
@@ -185,7 +186,9 @@ describe("appToolHostLines", () => {
     ]);
     for (const line of lines) expect(line.text.length).toBeLessThanOrEqual(240);
     const characters = lines.reduce((total, line) => total + line.text.length + 1, 0);
-    expect(Math.ceil(characters / 4)).toBeLessThanOrEqual(1_000);
+    // Raised from 1,000 to 1,050 when adding octant_create_video's 75-char line
+    // on top of the expanded Canvas routing line (widest guide: 1,014 tokens).
+    expect(Math.ceil(characters / 4)).toBeLessThanOrEqual(1_050);
   });
 
   it("fails for a first-party tool name with no line and passes for the names deliberately left out", () => {

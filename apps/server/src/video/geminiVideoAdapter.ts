@@ -435,6 +435,7 @@ async function forget(ports: VideoGenerationPorts, remoteId: string): Promise<Vi
  */
 export const geminiVideoDriver: VideoGenerationDriver = {
   driverKind: "gemini-video",
+  providerName: "Google",
   providerHosts: ["generativelanguage.googleapis.com"],
   create: ({ profile, ports }) => ({
     models: async () => declaredFor(profile),

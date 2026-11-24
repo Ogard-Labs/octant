@@ -40,6 +40,7 @@ const asFailure = (error: unknown) =>
 function taskDriver(options: { readonly checkFirst: boolean }): VideoGenerationDriver {
   return {
     driverKind: "gemini-video",
+    providerName: "Example Video",
     providerHosts: ["video.example.test"],
     create: ({ ports }) => ({
       models: async () => [capabilities],

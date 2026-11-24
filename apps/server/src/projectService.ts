@@ -1066,6 +1066,7 @@ export class ProjectService implements ProjectServiceApi {
             current,
             command.imageGenerationChoice,
             timestamp,
+            command.media ?? "image",
           );
           kind = "project-image-generation-choice-changed";
           eventName = "project.image-generation-choice-changed@1";

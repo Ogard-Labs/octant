@@ -69,6 +69,7 @@ import { createProtectedFilesRouteHandler } from "../protectedFilesRoutes";
 import { ExtensionToolApprovalService } from "../extensions/extensionToolApprovalService";
 import { AutomationEventStore } from "../automation/automationEventStore";
 import { RoutineProposalService } from "../automation/routineProposalService";
+import { VideoOfferService } from "../video/videoOfferService";
 import { ImageGenerationOfferService } from "../image/imageGenerationOfferService";
 import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
 import { ServiceOfferService } from "../offers/serviceOfferService";
@@ -379,6 +380,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     },
   );
   const imageGenerationOffers = new ImageGenerationOfferService(serviceOffers);
+  const videoOffers = new VideoOfferService(serviceOffers);
   // An ask waits with no expiry, so a thread archived while its turn is
   // still parked on one must give it up here. Later areas register the asks
   // they hold, as they register window revocations below.
@@ -562,6 +564,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     extensionToolApprovalService,
     routineProposalService,
     imageGenerationOffers,
+    videoOffers,
     serviceOffers,
     speechGates,
     threadNarration,
