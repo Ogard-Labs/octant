@@ -634,7 +634,7 @@ import {
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
 import { createPairedComputerFetch } from "./host/pairedComputerFetch";
 import { usePairedComputerReads } from "./host/usePairedComputerReads";
-import type { BootstrapDestinationTarget } from "./host/useBootstrapDestinations";
+import type { RepositoryBootstrapRequest } from "./projects/RepositoryBootstrapHost";
 import {
   isPairedComputerAsk,
   isPairedComputerThread,
@@ -739,14 +739,9 @@ const PairedComputerCodeSurface = lazy(() =>
     default: PairedComputerCodeSurface,
   })),
 );
-const AddRepositoryToComputerDialog = lazy(() =>
-  import("./projects/AddRepositoryToComputerDialog").then(({ AddRepositoryToComputerDialog }) => ({
-    default: AddRepositoryToComputerDialog,
-  })),
-);
-const BootstrapDestinationsBridge = lazy(() =>
-  import("./host/useBootstrapDestinations").then(({ BootstrapDestinationsBridge }) => ({
-    default: BootstrapDestinationsBridge,
+const RepositoryBootstrapHost = lazy(() =>
+  import("./projects/RepositoryBootstrapHost").then(({ RepositoryBootstrapHost }) => ({
+    default: RepositoryBootstrapHost,
   })),
 );
 const MoveThreadToProjectDialog = lazy(() =>
@@ -2724,20 +2719,10 @@ function LaunchedShell(
   const [pairedProjectToSelect, setPairedProjectToSelect] = useState<
     { readonly hostId: string; readonly projectId: string; readonly sequence: number } | undefined
   >(undefined);
-  const [bootstrapRefreshKey, setBootstrapRefreshKey] = useState(0);
-  const [bootstrapDestinations, setBootstrapDestinations] = useState<
-    ReadonlyArray<BootstrapDestinationTarget>
-  >([]);
-  const [bootstrapDialog, setBootstrapDialog] = useState<
-    | {
-        readonly projectId?: ProjectId;
-        readonly destinationHostId?: HostId;
-      }
-    | undefined
-  >(undefined);
-  const bootstrapSourceHostName =
-    hosts.find((host) => String(host.hostId) === String(LOCAL_HOST_ID))?.displayName ??
-    localHostDisplayName();
+  const [hasBootstrapDestination, setHasBootstrapDestination] = useState(false);
+  const [bootstrapDialog, setBootstrapDialog] = useState<RepositoryBootstrapRequest | undefined>(
+    undefined,
+  );
   const openAddRepositoryToComputer = useCallback((projectId: ProjectId) => {
     setBootstrapDialog({ projectId });
   }, []);
@@ -3188,23 +3173,6 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
-  const localActiveCodeProjects = useMemo(
-    () =>
-      projectController.allProjects.filter(
-        (project): project is Extract<ProjectSummary, { readonly type: "code" }> =>
-          project.type === "code" && project.lifecycle === "active",
-      ),
-    [projectController.allProjects],
-  );
-  const bootstrapDialogTargetProject = useMemo(
-    () =>
-      bootstrapDialog?.projectId === undefined
-        ? undefined
-        : localActiveCodeProjects.find(
-            (candidate) => String(candidate.id) === String(bootstrapDialog.projectId),
-          ),
-    [bootstrapDialog?.projectId, localActiveCodeProjects],
-  );
   // Where the list lives: this host by default, or another computer the
   // person chose in Settings › To-dos, reached through this window's own
   // pairing with it. No to-do is sent anywhere else, and nothing is queued
@@ -9270,7 +9238,7 @@ function LaunchedShell(
                     pairedComputerThreads,
                     onOpenPairedComputerThread: openPairedComputerThreadLatest,
                   })}
-              {...(bootstrapDestinations.length > 0
+              {...(hasBootstrapDestination
                 ? { onAddToAnotherComputer: openAddRepositoryToComputer }
                 : {})}
               federatedHostStates={federatedHostStates}
@@ -9444,7 +9412,7 @@ function LaunchedShell(
                     {...(renderPairedComputerCodeStart === undefined
                       ? {}
                       : { renderPairedComputerCodeStart })}
-                    {...(bootstrapDestinations.length > 0
+                    {...(hasBootstrapDestination
                       ? { onAddToAnotherComputer: openAddRepositoryToComputer }
                       : {})}
                     dockOpen={dockOpen}
@@ -9828,48 +9796,36 @@ function LaunchedShell(
           hostBridge={props.hostBridge}
           onOpenHubSettings={() => void controller.openSettings({ section: "remote-access" })}
         />
-        {hostFederationTransports === undefined ? null : (
-          <BootstrapDestinationsBridge
-            onTargetsChange={setBootstrapDestinations}
-            refreshKey={bootstrapRefreshKey}
-            transports={hostFederationTransports}
-          />
-        )}
       </Suspense>
       <OctantDialogPresence>
         <FilesClosePrompt />
       </OctantDialogPresence>
-      <Suspense fallback={null}>
-        <OctantDialogPresence>
-          {bootstrapDialog === undefined ? null : (
-            <AddRepositoryToComputerDialog
-              destinations={bootstrapDestinations}
-              {...(bootstrapDialog.destinationHostId === undefined
-                ? {}
-                : { initialDestinationHostId: bootstrapDialog.destinationHostId })}
-              localProjects={localActiveCodeProjects}
-              onClose={() => setBootstrapDialog(undefined)}
-              onCompleted={(result) => {
-                setBootstrapRefreshKey((count) => count + 1);
-                handleSelectCreateHost(result.destinationHostId);
-                setPairedProjectToSelect((previous) => ({
-                  hostId: String(result.destinationHostId),
-                  projectId: String(result.projectId),
-                  sequence: (previous?.sequence ?? 0) + 1,
-                }));
-                closeWorkspaceReaders();
-                void controller.openDraftThread("code");
-              }}
-              open
-              {...(bootstrapDialogTargetProject === undefined
-                ? {}
-                : { project: bootstrapDialogTargetProject })}
-              sourceBootstrapPort={launchedClients.repositoryBootstrapPort}
-              sourceHostName={bootstrapSourceHostName}
-            />
-          )}
-        </OctantDialogPresence>
-      </Suspense>
+      {hostFederationTransports === undefined ? null : (
+        <Suspense fallback={null}>
+          <RepositoryBootstrapHost
+            allProjects={projectController.allProjects}
+            onClose={() => setBootstrapDialog(undefined)}
+            onCompleted={(result) => {
+              handleSelectCreateHost(result.destinationHostId);
+              setPairedProjectToSelect((previous) => ({
+                hostId: String(result.destinationHostId),
+                projectId: String(result.projectId),
+                sequence: (previous?.sequence ?? 0) + 1,
+              }));
+              closeWorkspaceReaders();
+              void controller.openDraftThread("code");
+            }}
+            onHasDestinationChange={setHasBootstrapDestination}
+            request={bootstrapDialog}
+            sourceBootstrapPort={launchedClients.repositoryBootstrapPort}
+            sourceHostName={
+              hosts.find((host) => String(host.hostId) === String(LOCAL_HOST_ID))?.displayName ??
+              localHostDisplayName()
+            }
+            transports={hostFederationTransports}
+          />
+        </Suspense>
+      )}
       <Suspense fallback={null}>
         <OctantDialogPresence>
           {moveRequest === undefined ? null : (
