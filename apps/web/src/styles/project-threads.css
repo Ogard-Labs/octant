@@ -586,6 +586,7 @@
   bottom: 0;
   max-height: 40%;
   overflow-y: auto;
+  border-top: 1px solid var(--oct-hairline);
   background: var(--octant-sidebar-opaque);
 }
 
