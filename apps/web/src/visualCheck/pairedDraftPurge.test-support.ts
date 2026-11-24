@@ -4,7 +4,7 @@ import type { Page } from "playwright-core";
 export async function verifyPairedDraftPurge(page: Page): Promise<void> {
   await page.addScriptTag({
     type: "module",
-    url: "/src/visualCheck/pairedDraftPurge.browser.ts",
+    url: "/src/visualCheck/pairedDraftPurge.browser.test-support.ts",
   });
   const result = await page.evaluate(() => window.octantPairedDraftPurge);
   assert.deepEqual(result, {
