@@ -12,7 +12,11 @@ import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
 import { sideChatDraftNotice } from "../composer/sideChatDraftNotice";
-import type { ProviderInstanceId, ProviderModelOptionValues } from "@octant/contracts";
+import type {
+  ProviderInstanceId,
+  ProviderModelOptionValues,
+  ThreadCanvasPreviewReceipt,
+} from "@octant/contracts";
 import {
   decodeChatAttachmentId,
   type ChatAttachmentId,
@@ -72,7 +76,7 @@ import {
 import { attemptCanForceStop } from "./attemptForceStop";
 import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
-import { ChatTranscript } from "./ChatTranscript";
+import { ChatTranscript, type ChatTranscriptProps } from "./ChatTranscript";
 import { canvasCardsForShownRun, madeInShownRun } from "./chatTranscriptWindow";
 import { formatOutgoingMessageWithQuotes, type TranscriptQuoteChip } from "./quoteSelection";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
@@ -109,6 +113,7 @@ import { activeChatTurns } from "@octant/domain/chat-policy";
 import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
+import { CanvasPreviewMiniature } from "../canvas/CanvasPreviewMiniature";
 import { placeByTurn, placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { buildCanvasCreationContext } from "../canvas/buildCanvasCreationContext";
@@ -130,6 +135,7 @@ import {
 } from "../transcript/ThreadConnectionNotice";
 
 export interface ChatWorkspaceProps {
+  readonly readOnly?: boolean;
   readonly controller: ChatController;
   readonly onReturnSideChatReply?: import("./ChatTranscript").ChatTranscriptProps["onReturnSideChatReply"];
   readonly sideChatReturnPending?: boolean;
@@ -229,6 +235,7 @@ const ACTIVE_TOOL_APPROVAL_POLL_MS = 500;
 const IDLE_TOOL_APPROVAL_POLL_MS = 5_000;
 
 export function ChatWorkspace(props: ChatWorkspaceProps) {
+  const readOnly = props.readOnly === true;
   const view = props.controller.activeView;
   const continuation = useContinuationInputPolicy(
     "chat",
@@ -566,6 +573,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     view !== undefined &&
     seesImages.takesImages === true &&
     !supportsAttachmentFile(threadObservation, view.thread.modelId, { type: "image/png" });
+  // Stable for the client's lifetime: every memoized attempt row receives it.
+  const previewCanvasClient = props.canvasClient;
+  const drawCanvasPreview = useCallback(
+    (preview: ThreadCanvasPreviewReceipt) =>
+      previewCanvasClient === undefined ? null : (
+        <CanvasPreviewMiniature client={previewCanvasClient} preview={preview} />
+      ),
+    [previewCanvasClient],
+  );
   if (view === undefined) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">
@@ -602,6 +618,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       activeChatTurns((shownRun?.view ?? view).turns),
       (turn) => String(turn.id),
       (turn) => turn.createdAt,
+      (turn) => turn.attempts.length > 0,
     ),
     shownRun === undefined
       ? threadCanvases.cards
@@ -1114,7 +1131,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               {props.controller.errorMessage}
             </OctantAlert>
           )}
-          {props.controller.toolCatalogHandoffRequired === true ? (
+          {!readOnly && props.controller.toolCatalogHandoffRequired === true ? (
             <ToolCatalogContinuation
               disabled={connectionLost || props.controller.pendingDraft.trim().length === 0}
               onContinue={() => void submitTurn(props.controller.pendingDraft, true)}
@@ -1124,7 +1141,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             <header className="chat-workspace__header">
               <h1 className="sr-only">{view.thread.title}</h1>
               <ChatThreadActionsMenu
-                {...(props.moveToProject === undefined
+                {...(readOnly || props.moveToProject === undefined
                   ? {}
                   : {
                       moveToProject: {
@@ -1143,7 +1160,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                         },
                       },
                     })}
-                {...(accountMoveTargets.length === 0
+                {...(readOnly || accountMoveTargets.length === 0
                   ? {}
                   : {
                       moveToAccount: {
@@ -1205,72 +1222,74 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 className="chat-workspace__canvas thread-column"
                 id={canvasPanelId}
               >
-                <CanvasCreatePanel
-                  client={props.canvasClient}
-                  context={buildCanvasCreationContext({
-                    hostId: props.hostId ?? ("local" as HostId),
-                    mode: "chat",
-                    originThreadId: thread.id,
-                    projectId: thread.projectId ?? null,
-                  })}
-                  onAskAgentToFill={async (request) => {
-                    const turn = canvasRecipeFillTurn(request);
-                    let asked: boolean;
-                    if (queueFollowUp) {
-                      // A response is running or messages are already waiting:
-                      // the ask joins the durable queue behind them, as a typed
-                      // follow-up would, rather than being refused or jumping it.
-                      // It passes no draft, so the person's composer is untouched.
-                      asked =
-                        messageQueue.available &&
-                        !messageQueue.busy &&
-                        !messageQueue.uncertain &&
-                        (await messageQueue.enqueue({
-                          mode: "chat",
-                          prompt: turn.message,
-                          attachmentIds: [],
-                          previewSelections: [],
-                          canvasSelections: [turn.selection],
-                          extensionSelections: [],
-                          threadMentionIds: [],
-                        })) === "accepted";
-                    } else {
-                      // The ordinary send, behind the same command queue as the
-                      // composer's, so it runs on the thread's current model and
-                      // authority. It keeps the composer's draft: this turn is
-                      // not the text the person was writing.
-                      asked = await enqueueThreadCommand(async (previous) => ({
-                        value: await props.controller.sendTurn(
-                          turn.message,
-                          [],
-                          [],
-                          [turn.selection],
-                          [],
-                          [],
-                          previous !== undefined && previous.threadId === String(thread.id)
-                            ? previous.version
-                            : undefined,
-                          { composerDraft: "keep" },
-                        ),
-                      }));
-                    }
-                    // The panel closes on creation, so a refused ask is said
-                    // beside the composer, where the person can ask by hand.
-                    if (!asked) {
-                      setSendNotice(
-                        `“${request.receipt.title}” is ready, but its agent could not be asked to fill it. Ask in this thread.`,
-                      );
-                    }
-                    return asked;
-                  }}
-                  onCreated={() => {
-                    setCanvasRefreshKey((current) => current + 1);
-                    setCanvasPanelOpen(false);
-                  }}
-                  // The panel stays open after an import, on what was taken out
-                  // of the page; the thread shows the new Canvas meanwhile.
-                  onImported={() => setCanvasRefreshKey((current) => current + 1)}
-                />
+                {readOnly ? null : (
+                  <CanvasCreatePanel
+                    client={props.canvasClient}
+                    context={buildCanvasCreationContext({
+                      hostId: props.hostId ?? ("local" as HostId),
+                      mode: "chat",
+                      originThreadId: thread.id,
+                      projectId: thread.projectId ?? null,
+                    })}
+                    onAskAgentToFill={async (request) => {
+                      const turn = canvasRecipeFillTurn(request);
+                      let asked: boolean;
+                      if (queueFollowUp) {
+                        // A response is running or messages are already waiting:
+                        // the ask joins the durable queue behind them, as a typed
+                        // follow-up would, rather than being refused or jumping it.
+                        // It passes no draft, so the person's composer is untouched.
+                        asked =
+                          messageQueue.available &&
+                          !messageQueue.busy &&
+                          !messageQueue.uncertain &&
+                          (await messageQueue.enqueue({
+                            mode: "chat",
+                            prompt: turn.message,
+                            attachmentIds: [],
+                            previewSelections: [],
+                            canvasSelections: [turn.selection],
+                            extensionSelections: [],
+                            threadMentionIds: [],
+                          })) === "accepted";
+                      } else {
+                        // The ordinary send, behind the same command queue as the
+                        // composer's, so it runs on the thread's current model and
+                        // authority. It keeps the composer's draft: this turn is
+                        // not the text the person was writing.
+                        asked = await enqueueThreadCommand(async (previous) => ({
+                          value: await props.controller.sendTurn(
+                            turn.message,
+                            [],
+                            [],
+                            [turn.selection],
+                            [],
+                            [],
+                            previous !== undefined && previous.threadId === String(thread.id)
+                              ? previous.version
+                              : undefined,
+                            { composerDraft: "keep" },
+                          ),
+                        }));
+                      }
+                      // The panel closes on creation, so a refused ask is said
+                      // beside the composer, where the person can ask by hand.
+                      if (!asked) {
+                        setSendNotice(
+                          `“${request.receipt.title}” is ready, but its agent could not be asked to fill it. Ask in this thread.`,
+                        );
+                      }
+                      return asked;
+                    }}
+                    onCreated={() => {
+                      setCanvasRefreshKey((current) => current + 1);
+                      setCanvasPanelOpen(false);
+                    }}
+                    // The panel stays open after an import, on what was taken out
+                    // of the page; the thread shows the new Canvas meanwhile.
+                    onImported={() => setCanvasRefreshKey((current) => current + 1)}
+                  />
+                )}
                 <CanvasThreadReferenceCardList
                   cards={threadCanvases.cards.filter(
                     (card) => !canvasPlacement.placed.has(String(card.canvasId)),
@@ -1307,6 +1326,24 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               {...(props.sideChatReturnPending === undefined
                 ? {}
                 : { sideChatReturnPending: props.sideChatReturnPending })}
+              {...(canvasClient === undefined ? {} : { canvasPreview: drawCanvasPreview })}
+              {...(canvasClient === undefined
+                ? {}
+                : {
+                    beforeReply: (turn: ChatThreadView["turns"][number]) => {
+                      const cards = canvasPlacement.beforeReply.get(String(turn.id));
+                      return cards === undefined ? undefined : (
+                        <ThreadCanvases
+                          cards={cards}
+                          client={canvasClient}
+                          {...(props.onOpenCanvas === undefined
+                            ? {}
+                            : { onOpen: props.onOpenCanvas })}
+                          openLabel="Open Canvas"
+                        />
+                      );
+                    },
+                  })}
               {...(canvasClient === undefined && imageClient === undefined
                 ? {}
                 : {
@@ -1340,7 +1377,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     ),
                   })}
               busy={isSending || branchPending}
-              {...(activeAttempt === undefined
+              {...(readOnly || activeAttempt === undefined
                 ? {}
                 : {
                     stoppingTurn: stoppingAttemptId !== undefined,
@@ -1377,7 +1414,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                       onJumpToLatest: props.controller.jumpToLatest,
                     },
                   })}
-              {...(checkpoints.available
+              {...(!readOnly && checkpoints.available
                 ? {
                     checkpoints: {
                       byTurnId: checkpoints.byAnchor,
@@ -1406,119 +1443,124 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               {...(props.providerGroups === undefined
                 ? {}
                 : { providerGroups: props.providerGroups })}
-              onQuoteSelection={({ turnId, text }) => {
-                setPendingQuotes((current) => [
-                  ...current,
-                  {
-                    id: crypto.randomUUID(),
-                    turnId: String(turnId),
-                    text,
-                  },
-                ]);
-              }}
-              onBranchTurn={(turnId) => {
-                if (branchPending) return;
-                setBranchPending(true);
-                void (async () => {
-                  try {
-                    const result = await props.controller.execute({
-                      kind: "branch-chat-thread",
-                      threadId: view.thread.id,
-                      expectedVersion: view.thread.version,
-                      turnId,
-                      title: branchTitle(view.thread.title),
-                    });
-                    // The server owns the branch; opening it is the only honest
-                    // acknowledgement — silence here left the thread invisible.
-                    if (result?.kind === "thread-created") props.onThreadBranched?.(result.thread);
-                  } finally {
-                    if (mountedRef.current) setBranchPending(false);
-                  }
-                })();
-              }}
-              onRewindTurn={({ turnId, prompt, removedTurns }) =>
-                setRewind({
-                  turnId,
-                  prompt,
-                  removedTurns,
-                  tailTurnId: String(activeChatTurns(view.turns).at(-1)?.id),
-                  busy: false,
-                })
-              }
-              onRetryAttempt={(turnId, attemptId) => {
-                void enqueueThreadCommand(async (previous) => {
-                  const result = await props.controller.execute({
-                    kind: "retry-chat-turn",
-                    threadId: view.thread.id,
-                    expectedVersion: queuedVersion(previous),
-                    turnId,
-                    attemptId,
-                  });
-                  return { value: undefined, base: baseFromResult(result) };
-                }).catch(() => undefined);
-              }}
-              onScheduleUsageResume={(turnId, attemptId) => {
-                void enqueueThreadCommand(async (previous) => {
-                  const result = await props.controller.execute({
-                    kind: "schedule-chat-usage-resume",
-                    threadId: view.thread.id,
-                    expectedVersion: queuedVersion(previous),
-                    turnId,
-                    attemptId,
-                  });
-                  return { value: undefined, base: baseFromResult(result) };
-                }).catch(() => undefined);
-              }}
-              onCancelUsageResume={() => {
-                void enqueueThreadCommand(async (previous) => {
-                  const result = await props.controller.execute({
-                    kind: "cancel-chat-usage-resume",
-                    threadId: view.thread.id,
-                    expectedVersion: queuedVersion(previous),
-                  });
-                  return { value: undefined, base: baseFromResult(result) };
-                }).catch(() => undefined);
-              }}
-              onSnoozeAtUsageReset={() => {
-                void enqueueThreadCommand(async (previous) => {
-                  const result = await props.controller.execute({
-                    kind: "snooze-chat-thread-at-usage-reset",
-                    threadId: view.thread.id,
-                    expectedVersion: queuedVersion(previous),
-                  });
-                  return { value: undefined, base: baseFromResult(result) };
-                }).catch(() => undefined);
-              }}
-              onAnswerQuestion={({ turnId, attemptId, requestId, answer, secret }) => {
-                return enqueueThreadCommand(async (previous) => {
-                  const result = await props.controller.execute({
-                    kind: "answer-chat-turn-question",
-                    threadId: view.thread.id,
-                    expectedVersion: queuedVersion(previous),
-                    turnId,
-                    attemptId,
-                    requestId,
-                    // A secret question's answer rides in the command only.
-                    ...(secret === true ? { secretAnswer: answer } : { answer }),
-                  });
-                  return {
-                    value: result?.kind === "attempt-updated",
-                    base: baseFromResult(result),
-                  };
-                }).catch(() => false);
-              }}
-              onDismissQuestion={(turnId, attemptId) => {
-                void enqueueThreadCommand(async (previous) => {
-                  const result = await props.controller.execute({
-                    kind: "interrupt-chat-turn",
-                    threadId: view.thread.id,
-                    expectedVersion: queuedVersion(previous),
-                    turnId,
-                    attemptId,
-                  });
-                  return { value: undefined, base: baseFromResult(result) };
-                }).catch(() => undefined);
-              }}
+              {...(readOnly
+                ? {}
+                : ({
+                    onQuoteSelection: ({ turnId, text }) => {
+                      setPendingQuotes((current) => [
+                        ...current,
+                        {
+                          id: crypto.randomUUID(),
+                          turnId: String(turnId),
+                          text,
+                        },
+                      ]);
+                    },
+                    onBranchTurn: (turnId) => {
+                      if (branchPending) return;
+                      setBranchPending(true);
+                      void (async () => {
+                        try {
+                          const result = await props.controller.execute({
+                            kind: "branch-chat-thread",
+                            threadId: view.thread.id,
+                            expectedVersion: view.thread.version,
+                            turnId,
+                            title: branchTitle(view.thread.title),
+                          });
+                          // The server owns the branch; opening it is the only honest
+                          // acknowledgement — silence here left the thread invisible.
+                          if (result?.kind === "thread-created")
+                            props.onThreadBranched?.(result.thread);
+                        } finally {
+                          if (mountedRef.current) setBranchPending(false);
+                        }
+                      })();
+                    },
+                    onRewindTurn: ({ turnId, prompt, removedTurns }) =>
+                      setRewind({
+                        turnId,
+                        prompt,
+                        removedTurns,
+                        tailTurnId: String(activeChatTurns(view.turns).at(-1)?.id),
+                        busy: false,
+                      }),
+                    onRetryAttempt: (turnId, attemptId) => {
+                      void enqueueThreadCommand(async (previous) => {
+                        const result = await props.controller.execute({
+                          kind: "retry-chat-turn",
+                          threadId: view.thread.id,
+                          expectedVersion: queuedVersion(previous),
+                          turnId,
+                          attemptId,
+                        });
+                        return { value: undefined, base: baseFromResult(result) };
+                      }).catch(() => undefined);
+                    },
+                    onScheduleUsageResume: (turnId, attemptId) => {
+                      void enqueueThreadCommand(async (previous) => {
+                        const result = await props.controller.execute({
+                          kind: "schedule-chat-usage-resume",
+                          threadId: view.thread.id,
+                          expectedVersion: queuedVersion(previous),
+                          turnId,
+                          attemptId,
+                        });
+                        return { value: undefined, base: baseFromResult(result) };
+                      }).catch(() => undefined);
+                    },
+                    onCancelUsageResume: () => {
+                      void enqueueThreadCommand(async (previous) => {
+                        const result = await props.controller.execute({
+                          kind: "cancel-chat-usage-resume",
+                          threadId: view.thread.id,
+                          expectedVersion: queuedVersion(previous),
+                        });
+                        return { value: undefined, base: baseFromResult(result) };
+                      }).catch(() => undefined);
+                    },
+                    onSnoozeAtUsageReset: () => {
+                      void enqueueThreadCommand(async (previous) => {
+                        const result = await props.controller.execute({
+                          kind: "snooze-chat-thread-at-usage-reset",
+                          threadId: view.thread.id,
+                          expectedVersion: queuedVersion(previous),
+                        });
+                        return { value: undefined, base: baseFromResult(result) };
+                      }).catch(() => undefined);
+                    },
+                    onAnswerQuestion: ({ turnId, attemptId, requestId, answer, secret }) => {
+                      return enqueueThreadCommand(async (previous) => {
+                        const result = await props.controller.execute({
+                          kind: "answer-chat-turn-question",
+                          threadId: view.thread.id,
+                          expectedVersion: queuedVersion(previous),
+                          turnId,
+                          attemptId,
+                          requestId,
+                          // A secret question's answer rides in the command only.
+                          ...(secret === true ? { secretAnswer: answer } : { answer }),
+                        });
+                        return {
+                          value: result?.kind === "attempt-updated",
+                          base: baseFromResult(result),
+                        };
+                      }).catch(() => false);
+                    },
+                    onDismissQuestion: (turnId, attemptId) => {
+                      void enqueueThreadCommand(async (previous) => {
+                        const result = await props.controller.execute({
+                          kind: "interrupt-chat-turn",
+                          threadId: view.thread.id,
+                          expectedVersion: queuedVersion(previous),
+                          turnId,
+                          attemptId,
+                        });
+                        return { value: undefined, base: baseFromResult(result) };
+                      }).catch(() => undefined);
+                    },
+                  } satisfies Partial<ChatTranscriptProps>))}
+              readOnly={readOnly}
               view={view}
             />
           </div>
@@ -1529,15 +1571,19 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               {...(view.followUp === undefined ? {} : { followUp: view.followUp })}
               items={view.workItems}
               {...(props.narrow === undefined ? {} : { narrow: props.narrow })}
-              onCancel={(command) => void props.controller.execute(command)}
-              onComplete={(command) => void props.controller.execute(command)}
-              onCompleteFollowUp={(command) => void props.controller.execute(command)}
-              onEdit={(command) => void props.controller.execute(command)}
+              onCancel={readOnly ? undefined : (command) => void props.controller.execute(command)}
+              onComplete={
+                readOnly ? undefined : (command) => void props.controller.execute(command)
+              }
+              onCompleteFollowUp={
+                readOnly ? undefined : (command) => void props.controller.execute(command)
+              }
+              onEdit={readOnly ? undefined : (command) => void props.controller.execute(command)}
             />
           )}
           <ExtensionToolApprovalPrompt
             className="chat-workspace__tool-approval thread-column"
-            client={props.extensionClient}
+            client={readOnly ? undefined : props.extensionClient}
             threadId={activeThreadId === undefined ? undefined : String(activeThreadId)}
             turnActive={turnActive}
           />
@@ -1566,7 +1612,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             threadKind="chat-thread"
             turnActive={turnActive}
           />
-          {pendingBrowserApproval === undefined ? null : (
+          {readOnly || pendingBrowserApproval === undefined ? null : (
             <OctantApprovalCard
               actions={
                 <>
@@ -1597,7 +1643,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             />
           )}
           <OctantDialogPresence>
-            {rewind !== undefined ? (
+            {!readOnly && rewind !== undefined ? (
               <RewindDialog
                 busy={rewind?.busy === true}
                 files={{
@@ -1615,6 +1661,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             ) : null}
           </OctantDialogPresence>
           <ChatComposer
+            readOnly={readOnly}
             benchmarkProjectId={view.thread.projectId}
             notices={sideChatNotice === undefined ? [] : [sideChatNotice]}
             key={String(thread.id)}

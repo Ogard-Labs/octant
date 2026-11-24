@@ -204,14 +204,21 @@ on it, acts as the person, the host asks for no further proof of presence, and
 the journal shows what was done only afterwards. An attacker holding one such
 device can approve a device of their own, so revoking the stolen device alone
 does not end their reach: the person revokes every device they do not recognize.
+Since 2026-11-22 the person may narrow this (maintainer decision): a device
+paired at Approve and steer or Read only is not the person and is held to the
+remote action catalogue, or to its reads, before any side effect; Pause remote
+access refuses every paired device and outside agent at once, leaving only the
+hub links between the person's own computers, while keeping their pairings and
+grants, and
+Sign out all other devices revokes every device but the one asking. Full stays
+the default, so the residual above stands for every device left at Full.
 The attacks this class still names are a replayed or expired session, an
 unauthenticated or revoked caller, a hub-introduced device, a hub, peer or
 agent-grant principal passing as a person-paired device, a device laundering its
 principal into a local window, and identity supplied in a payload. For those
 sessions the closed action sets in the table below still hold. Not built yet:
-the journal does not name the device for every change (a Code operation's own
-events are journaled as the system, and cancelling a connector sign-in that is
-still waiting names no device;
+the journal does not name the device for every change (adopting a session
+started outside Octant journals its records as the system;
 [Architecture: Remote clients](../architecture.md#security-and-authority)).
 What the private listener forwards to no device (the listener's own controls,
 the desktop bridge, secret stores, the whole host's export)

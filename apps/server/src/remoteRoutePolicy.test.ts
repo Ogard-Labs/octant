@@ -137,14 +137,14 @@ describe("remote route policy", () => {
 
     const bare = await fixture.route(request("/"));
     expect(bare.headers.get("content-security-policy")).toBe(
-      `default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; frame-src ${origin}/api/canvas/design-page`,
+      `default-src 'self'; img-src 'self' data: blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; frame-src ${origin}/api/canvas/design-page`,
     );
     await bare.arrayBuffer();
 
     roster = ["https://mac.tail1.ts.net", "https://studio.tail1.ts.net:8443"];
     const named = await fixture.route(request("/"));
     expect(named.headers.get("content-security-policy")).toBe(
-      `default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; connect-src 'self' https://mac.tail1.ts.net https://studio.tail1.ts.net:8443; frame-src ${origin}/api/canvas/design-page`,
+      `default-src 'self'; img-src 'self' data: blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; connect-src 'self' https://mac.tail1.ts.net https://studio.tail1.ts.net:8443; frame-src ${origin}/api/canvas/design-page`,
     );
     await named.arrayBuffer();
   });

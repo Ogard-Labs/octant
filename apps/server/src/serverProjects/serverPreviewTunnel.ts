@@ -7,7 +7,9 @@ import {
   type EventActor,
   type RemoteServerGrantId,
 } from "@octant/contracts";
+import type { DeviceAccessLevel } from "@octant/contracts/remote-access";
 import type { ServerPortForwardCloseReason } from "@octant/contracts/server-projects";
+import { admittedDeviceAuthorityKind } from "@octant/domain/remote-access-policy";
 import type { RelayUpstreamStream } from "../remote/remoteServerProxyRelay";
 import {
   pinnedHostKeyOptions,
@@ -221,9 +223,10 @@ export class ServerPreviewTunnels {
       readonly deviceId: string;
       readonly credentialGeneration: number;
       readonly admittedBy?: "host-person" | "hub-roster";
+      readonly accessLevel?: DeviceAccessLevel;
     },
   ): ServerPreviewRelayStreamResult {
-    if (principal.admittedBy !== "host-person") {
+    if (admittedDeviceAuthorityKind(principal) !== "person-paired-device") {
       return { kind: "refused", reason: "grant-closed" };
     }
     let matched: Preview | undefined;

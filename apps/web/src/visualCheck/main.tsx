@@ -100,6 +100,11 @@ function Scene(props: { readonly id: string; readonly scheme: "light" | "dark" }
       }
       // StrictMode runs this effect twice; only the live run may click.
       if (cancelled) return;
+      if (scene?.scrollTo !== undefined) {
+        const target = document.querySelector<HTMLElement>(scene.scrollTo);
+        if (target === null) throw new Error(`Scene ${props.id} has no ${scene.scrollTo}.`);
+        target.scrollIntoView({ block: "center" });
+      }
       if (scene?.open !== undefined) {
         const trigger = document.querySelector<HTMLElement>(scene.open);
         if (trigger === null) throw new Error(`Scene ${props.id} has no ${scene.open} to open.`);

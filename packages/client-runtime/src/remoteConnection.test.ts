@@ -22,6 +22,7 @@ import {
 import {
   createRemoteConnection,
   RemoteConnectionError,
+  remoteRefusalCopy,
   type AuthenticatedRequestInput,
   type DeviceKeyStore,
   type RemoteConnectionState,
@@ -616,6 +617,30 @@ describe("RemoteConnection state machine", () => {
       retryAfterMs: 30_000,
     });
     expect(connection.state()).toBe("unavailable");
+  });
+
+  it("keeps the pairing and says why when the host has paused remote access", async () => {
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: async () =>
+        Response.json(
+          { status: "rejected", category: "unavailable", reasonCode: "remote-access-paused" },
+          { status: 403 },
+        ),
+      deviceKey: store,
+      pairing: { ticketId: TICKET_ID, ticketProof: TICKET_PROOF, deviceLabel: DEVICE_LABEL },
+    });
+
+    await expect(connection.connect()).rejects.toMatchObject({
+      category: "unavailable",
+      reasonCode: "remote-access-paused",
+      message: expect.stringMatching(/Remote access is paused on this computer/),
+    });
+    expect(connection.state()).toBe("unavailable");
+    expect(remoteRefusalCopy({ reasonCode: "device-access-level" })).toMatch(/access level/);
+    expect(remoteRefusalCopy({ reasonCode: "revoked" })).toBeUndefined();
   });
 
   it("reports unauthorized when the device is revoked", async () => {

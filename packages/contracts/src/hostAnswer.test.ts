@@ -71,6 +71,14 @@ describe("decodeHostAnswer", () => {
     expect(() => decodeHostAnswer(CodeOperationStreamFrame)(answer)).toThrow(/is unexpected/);
   });
 
+  it("reads a Code approval that offers Remember for this Project", () => {
+    // A build that predates the offer reads it as the test above reads
+    // `browserOrigin` and refuses the answer, so the offer's minimum client is
+    // recorded in its specification.
+    const offer = frame({ ...approvalAsk, canRememberForProject: true });
+    expect(decodeHostAnswer(CodeOperationStreamFrame)(offer)).toEqual(offer);
+  });
+
   it("reads the answer around an ask leniently when the ask itself is whole", () => {
     const answer = frame(approvalAsk, { replayHint: "newer hosts add this" });
     expect(decodeHostAnswer(CodeOperationStreamFrame)(answer)).toEqual(frame(approvalAsk));

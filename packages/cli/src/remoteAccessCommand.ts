@@ -30,6 +30,13 @@ export type RemoteAccessCliCommand =
   | { readonly action: "list-devices" }
   | { readonly action: "revoke-device"; readonly deviceId: string }
   | { readonly action: "revoke-all-devices" }
+  /**
+   * Remote access's pause, over this computer's own channel. A paired device
+   * may pause a host but never resume it, so on a host with no window this is
+   * how the person resumes.
+   */
+  | { readonly action: "remote-access-status" }
+  | { readonly action: "remote-access-pause"; readonly paused: boolean }
   | { readonly action: "listener-status" }
   | {
       readonly action: "listener-enable";
@@ -38,6 +45,8 @@ export type RemoteAccessCliCommand =
       /** Absent: the host serves the certificate it makes itself. */
       readonly pasted?: { readonly certificatePath: string; readonly privateKeyPath: string };
     }
+  /** No flags: the listener is re-enabled with the settings the host saved. */
+  | { readonly action: "listener-enable"; readonly saved: true }
   | { readonly action: "listener-disable" }
   | {
       readonly action: "listener-transition";
@@ -81,6 +90,12 @@ export function resolveAuthCliCommand(
     if (rest.length !== 0 || Object.keys(flags).length !== 0) return undefined;
     return { action: "list-devices" };
   }
+  if (action === "status" || action === "pause" || action === "resume") {
+    if (rest.length !== 0 || Object.keys(flags).length !== 0) return undefined;
+    return action === "status"
+      ? { action: "remote-access-status" }
+      : { action: "remote-access-pause", paused: action === "pause" };
+  }
   if (action !== "revoke") return undefined;
   if (Object.keys(flags).some((flag) => flag !== "all")) return undefined;
   if (flags.all === true) {
@@ -117,6 +132,7 @@ export function resolveListenerCliCommand(
     return action === "disable" ? { action: "listener-disable" } : { action: "listener-status" };
   }
   if (action !== "enable") return undefined;
+  if (Object.keys(flags).length === 0) return { action: "listener-enable", saved: true };
   const allowed = new Set(["hostname", "port", "cert", "key"]);
   if (Object.keys(flags).some((flag) => !allowed.has(flag))) return undefined;
   const { hostname, port, cert, key } = flags;
@@ -168,7 +184,72 @@ export async function runRemoteAccessCliCommand(
   ) {
     return await runPairingDecisionCommand(input, command);
   }
+  if (command.action === "remote-access-status" || command.action === "remote-access-pause") {
+    return await runRemoteAccessPauseCommand(input, command);
+  }
   return await runDeviceCommand(input, command);
+}
+
+/**
+ * Reads or changes the pause on this computer's own channel. The host keeps
+ * the pause through a restart, and answers it only while the listener's
+ * gateway runs, so a refusal for that names the step that brings it back.
+ */
+async function runRemoteAccessPauseCommand(
+  input: RunRemoteAccessCliCommandInput,
+  command: Extract<
+    RemoteAccessCliCommand,
+    { readonly action: "remote-access-status" | "remote-access-pause" }
+  >,
+): Promise<number> {
+  const response =
+    command.action === "remote-access-status"
+      ? await input.session.send({ path: "/api/desktop/remote/access-pause", method: "GET" })
+      : await input.session.send({
+          path: "/api/desktop/remote/access-pause",
+          method: "POST",
+          body: { paused: command.paused },
+        });
+  const expected = command.action === "remote-access-status" ? 200 : 201;
+  const body = response.body;
+  const paused =
+    typeof body === "object" && body !== null && "paused" in body ? body.paused : undefined;
+  if (response.status !== expected || typeof paused !== "boolean") {
+    input.stderr.write(
+      response.status === 503
+        ? listenerOffMessage()
+        : `${failureMessage(response, "Octant refused to change remote access.")}\n`,
+    );
+    return 1;
+  }
+  input.stdout.write(
+    command.action === "remote-access-status"
+      ? paused
+        ? "Remote access is paused: every paired device and outside agent is refused. Resume it with `octant auth resume`.\n"
+        : "Remote access is on.\n"
+      : paused
+        ? "Remote access paused. Every paired device and outside agent is refused until you run `octant auth resume`.\n"
+        : "Remote access resumed.\n",
+  );
+  return 0;
+}
+
+/**
+ * The enable hint: a bare `octant listener enable` re-runs the host's saved
+ * settings, and names its own needs when none exist.
+ */
+function listenerOffMessage(): string {
+  return "Remote access answers only while the remote listener is on. Start it with `octant listener enable`, then try again; a pause is kept until you resume it.\n";
+}
+
+/** The endpoint the host remembers enabling, from the listener status answer. */
+function savedListenerEndpointOf(
+  body: unknown,
+): { readonly hostname: string; readonly port: number } | undefined {
+  const saved = fieldOf(body, "saved");
+  const hostname = fieldOf(saved, "hostname");
+  const port = fieldOf(saved, "port");
+  return typeof hostname === "string" && typeof port === "number" ? { hostname, port } : undefined;
 }
 
 export const DEFAULT_PAIR_LISTENER_PORT = 8443;
@@ -542,7 +623,23 @@ async function runListenerCommand(
   >,
 ): Promise<number> {
   let response: LocalControlResponse;
-  if (command.action === "listener-enable") {
+  if (command.action === "listener-enable" && "saved" in command) {
+    const status = await input.session.send({
+      path: "/api/desktop/private-listener/status",
+      method: "GET",
+    });
+    if (status.status !== 200 || savedListenerEndpointOf(status.body) === undefined) {
+      input.stderr.write(
+        "`octant listener enable` needs --hostname and --port: no listener settings are saved on this host.\n",
+      );
+      return 1;
+    }
+    response = await input.session.send({
+      path: "/api/desktop/private-listener/enable",
+      method: "POST",
+      body: { saved: true },
+    });
+  } else if (command.action === "listener-enable") {
     const read = input.readTextFile ?? ((path: string) => readFile(path, "utf8"));
     let pems: { certificatePem: string; privateKeyPem: string } | undefined;
     if (command.pasted !== undefined) {
@@ -714,6 +811,8 @@ function pairingFailureMessage(response: LocalControlResponse, fallback: string)
 
 interface ListenerStatusOutput {
   readonly state: string;
+  readonly hostname: string | null;
+  readonly port: number | null;
   readonly origin: string | null;
   readonly exposureClass: string | null;
   readonly certificateFingerprint: string | null;
@@ -726,6 +825,8 @@ interface ListenerStatusOutput {
 function listenerStatusOf(body: unknown): ListenerStatusOutput | undefined {
   const status = fieldOf(body, "status");
   const state = fieldOf(status, "state");
+  const hostname = fieldOf(status, "hostname");
+  const port = fieldOf(status, "port");
   const origin = fieldOf(status, "origin");
   const exposureClass = fieldOf(status, "exposureClass");
   const certificateFingerprint = fieldOf(status, "certificateFingerprint");
@@ -744,6 +845,9 @@ function listenerStatusOf(body: unknown): ListenerStatusOutput | undefined {
   }
   if (
     typeof state !== "string" ||
+    // A host from before the remembered setting was reported sends neither.
+    !(hostname === undefined || nullableString(hostname)) ||
+    !(port === undefined || port === null || typeof port === "number") ||
     !nullableString(origin) ||
     !nullableString(exposureClass) ||
     !nullableString(certificateFingerprint) ||
@@ -754,6 +858,8 @@ function listenerStatusOf(body: unknown): ListenerStatusOutput | undefined {
   }
   return {
     state,
+    hostname: hostname ?? null,
+    port: port ?? null,
     origin,
     exposureClass,
     certificateFingerprint,

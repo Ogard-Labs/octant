@@ -241,9 +241,10 @@ export type HostRestartRecoveryHold = typeof HostRestartRecoveryHold.Type;
 /**
  * A hold's reason as it crosses the wire. A reason this build does not know
  * decodes to `other` and keeps its detail, which the host wrote for a person,
- * so the status of a newer host still decodes. (`uncertain-tool-call` was
- * added as a strict literal, and a client built before it refuses the whole
- * status of a host that reports one.)
+ * so the status of a newer host still decodes. (`uncertain-tool-call`
+ * shipped with this in Octant 0.1.0-preview.20261114.3; a client of
+ * 0.1.0-preview.20261113.2 or earlier reads the reasons as a closed list and
+ * refuses the whole status of a host that reports one.)
  */
 const RestartRecoveryHoldOnWire = Schema.transform(BoundedLabel, HostRestartRecoveryHold, {
   strict: true,

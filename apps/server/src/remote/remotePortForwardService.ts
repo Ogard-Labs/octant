@@ -67,10 +67,16 @@ export const FORWARD_WRITE_BUDGET_BYTES = 8 * 1024 * 1024;
 
 /**
  * Who asks for a forward, read from this computer's own record of the device
- * and session: a device its person paired, a device only the hub introduced
- * (any other device session that is no agent grant's), or an agent grant.
+ * and session: a device its person paired at Full, one they paired at Approve
+ * and steer (a thread's running server only, with no hub Act item over it), a
+ * device only the hub introduced (any other device session that is no agent
+ * grant's), or an agent grant.
  */
-export type RemotePortForwardAsker = "host-person" | "hub-introduced" | "agent-grant";
+export type RemotePortForwardAsker =
+  | "host-person"
+  | "steering-device"
+  | "hub-introduced"
+  | "agent-grant";
 
 /**
  * Re-observes a thread's listed server under the asking device's own scope,
@@ -179,10 +185,12 @@ export class RemotePortForwardService {
         threadId: resolved.threadId,
         projectId: resolved.projectId,
       };
-    } else if (asker === "hub-introduced") {
+    } else if (asker === "hub-introduced" || asker === "steering-device") {
       return refused(
         "source-required",
-        "A device the hub introduced can forward only a running server of a thread, not a port it names.",
+        asker === "hub-introduced"
+          ? "A device the hub introduced can forward only a running server of a thread, not a port it names."
+          : "This device's access level forwards only a running server of a thread, not a port it names.",
       );
     } else {
       port = request.port;

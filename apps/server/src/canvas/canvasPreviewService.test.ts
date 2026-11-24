@@ -253,6 +253,49 @@ describe("createCanvasPreviewService", () => {
     );
   });
 
+  it("draws an inline preview at the thread's default column width", async () => {
+    const renderer = rendererStub({
+      kind: "rendered",
+      png: new Uint8Array([1]),
+      height: 200,
+      designs: [],
+    });
+    const service = createCanvasPreviewService({ canvas: canvasStub(), renderer });
+    const outcome = await service.preview(request({ width: "inline" }), context, project);
+    expect(renderer.render).toHaveBeenCalledWith(expect.objectContaining({ width: 760 }));
+    expect(outcome).toMatchObject({ kind: "preview", width: 760 });
+  });
+
+  it("warns when an inline Canvas is taller than the thread shows whole, and not when it fits", async () => {
+    const preview = async (height: number) =>
+      createCanvasPreviewService({
+        canvas: canvasStub(),
+        renderer: rendererStub({ kind: "rendered", png: new Uint8Array([1]), height, designs: [] }),
+      }).preview(request({ width: "inline" }), context, project);
+
+    const tall = await preview(1_480);
+    expect(tall.kind === "preview" ? tall.warnings : []).toContainEqual({
+      kind: "inline-past-cap",
+      height: 1_480,
+      cap: 1_200,
+    });
+    const fits = await preview(1_200);
+    expect(fits.kind === "preview" ? fits.warnings : []).toEqual([]);
+  });
+
+  it("does not warn about height for a sidebar Canvas, which the thread does not draw whole", async () => {
+    const outcome = await createCanvasPreviewService({
+      canvas: canvasStub(),
+      renderer: rendererStub({
+        kind: "rendered",
+        png: new Uint8Array([1]),
+        height: 3_000,
+        designs: [],
+      }),
+    }).preview(request({ width: "sidebar" }), context, project);
+    expect(outcome.kind === "preview" ? outcome.warnings : []).toEqual([]);
+  });
+
   it("names a build without the preview page and a failed look apart from a missing browser", async () => {
     for (const [reason, omitted] of [
       ["no-renderer", "no-renderer"],

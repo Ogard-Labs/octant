@@ -73,20 +73,50 @@ export function RoutineProposalPrompt(props: {
   );
 
   const pending = proposals[0];
-  if (pending === undefined || client === undefined) return null;
+  if (client === undefined) return null;
+
+  const note =
+    message === undefined ? null : (
+      <OctantAlert className="follow-up-cards__error" tone="danger">
+        {message}
+      </OctantAlert>
+    );
+  // With the card gone the failure still says why where the card was.
+  if (pending === undefined) {
+    if (note === null) return null;
+    return (
+      <section aria-label="Asked by the agent" className={`follow-up-cards ${props.className}`}>
+        {note}
+      </section>
+    );
+  }
 
   async function decide(decision: "confirm" | "decline") {
     if (pending === undefined || client === undefined || busy) return;
     setBusy(true);
     setMessage(undefined);
     try {
-      // Every answer takes the proposal off the host's list, whatever came
-      // of it; the agent's tool result says what happened, and a created
-      // routine appears in this thread's Environment.
-      await client.decideProposal({ proposalId: pending.proposalId, decision });
-      setProposals((current) =>
-        current.filter((proposal) => proposal.proposalId !== pending.proposalId),
-      );
+      const outcome = await client.decideProposal({
+        proposalId: pending.proposalId,
+        decision,
+      });
+      if (
+        outcome.kind === "routine-proposal-answer-unrecorded" ||
+        outcome.kind === "automation-command-failed"
+      ) {
+        // The host could not record or act on the answer: the failure reads
+        // above the still-answerable card, as on the phone. A proposal the
+        // host did consume leaves the list on the next refresh; the note
+        // stays where the card was.
+        setMessage(outcome.message);
+      } else {
+        // A recorded answer takes the proposal off the host's list; the
+        // agent's tool result says what happened, and a created routine
+        // appears in this thread's Environment.
+        setProposals((current) =>
+          current.filter((proposal) => proposal.proposalId !== pending.proposalId),
+        );
+      }
     } catch {
       setMessage("Your answer could not be sent. The proposal is still waiting; try again.");
     } finally {
@@ -98,11 +128,7 @@ export function RoutineProposalPrompt(props: {
     return (
       <section aria-label="Asked by the agent" className={`follow-up-cards ${props.className}`}>
         <RoutineChangeCard busy={busy} decide={decide} request={pending} />
-        {message === undefined ? null : (
-          <OctantAlert className="follow-up-cards__error" tone="danger">
-            {message}
-          </OctantAlert>
-        )}
+        {note}
       </section>
     );
   }
@@ -150,11 +176,7 @@ export function RoutineProposalPrompt(props: {
           </OctantButton>
         </div>
       </article>
-      {message === undefined ? null : (
-        <OctantAlert className="follow-up-cards__error" tone="danger">
-          {message}
-        </OctantAlert>
-      )}
+      {note}
     </section>
   );
 }

@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { decodeHostDisplayRequest, decodeHostDisplayScope } from "@octant/contracts";
 import { ParseResult } from "effect";
 import {
   decodeComputerControlCommand,
@@ -14,7 +15,8 @@ const failure = (status: number) =>
   Response.json({ error: "computer-use-broker-refused" }, { status });
 
 export function computerUseBrokerHandler(
-  service: Omit<ComputerUseDesktopService, "test">,
+  service: Omit<ComputerUseDesktopService, "test" | "hostDisplay" | "closeHostDisplay"> &
+    Partial<Pick<ComputerUseDesktopService, "hostDisplay">>,
   token: string,
 ) {
   return async (request: Request, peer = "127.0.0.1"): Promise<Response> => {
@@ -40,6 +42,19 @@ export function computerUseBrokerHandler(
         await service.configure(decodeComputerUseSettings(body.settings));
         return Response.json({ ok: true });
       }
+      if (
+        body.operation === "host-display" &&
+        service.hostDisplay &&
+        "scope" in body &&
+        "command" in body
+      )
+        return Response.json(
+          await service.hostDisplay(
+            decodeHostDisplayScope(body.scope),
+            decodeHostDisplayRequest(body.command),
+            request.signal,
+          ),
+        );
       if (!("owner" in body)) return failure(400);
       const owner = decodeComputerUseOwner(body.owner);
       if (body.operation === "reserve")
@@ -71,7 +86,10 @@ async function readBody(request: IncomingMessage): Promise<Uint8Array | undefine
   return Buffer.concat(chunks, length);
 }
 
-export async function startComputerUseBroker(service: Omit<ComputerUseDesktopService, "test">) {
+export async function startComputerUseBroker(
+  service: Omit<ComputerUseDesktopService, "test" | "hostDisplay" | "closeHostDisplay"> &
+    Partial<Pick<ComputerUseDesktopService, "hostDisplay">>,
+) {
   const token = randomBytes(32).toString("base64url");
   const handle = computerUseBrokerHandler(service, token);
   const server = createServer((incoming, outgoing) => {

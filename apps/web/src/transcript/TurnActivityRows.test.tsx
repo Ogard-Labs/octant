@@ -1144,3 +1144,41 @@ describe("the tool list", () => {
     expect(bare.querySelector(".turn-activity__status svg")).not.toBeNull();
   });
 });
+
+describe("a Canvas preview's row", () => {
+  const preview = { canvasId: "canvas-1", versionId: "version-3" };
+  const activity: TurnActivity = {
+    reasoning: "",
+    rows: [
+      {
+        kind: "tool",
+        id: "preview-1",
+        toolName: "octant_canvas",
+        state: "completed",
+        summary: "Previewed the Canvas.",
+        canvasPreview: preview,
+      },
+    ],
+  };
+
+  it("draws the previewed version only once the person opens the row", async () => {
+    const draw = vi.fn(() => <p>Previewed version</p>);
+    render(<TurnActivityRows activity={activity} canvasPreview={draw} running={false} />);
+    expect(draw).not.toHaveBeenCalled();
+    expect(screen.queryByText("Previewed version")).toBeNull();
+
+    const row = screen
+      .getAllByRole("button")
+      .find(
+        (button) =>
+          button.closest("details")?.querySelector(".turn-activity__body") !== null &&
+          (button.getAttribute("aria-label") ?? "").length > 0 &&
+          button.closest("details")?.getAttribute("data-kind") === "tool",
+      );
+    if (row === undefined) throw new Error("No tool row");
+    await userEvent.click(row);
+
+    expect(draw).toHaveBeenCalledWith(preview);
+    expect(screen.getByText("Previewed version")).toBeTruthy();
+  });
+});

@@ -1,6 +1,11 @@
 import type { EventEnvelope } from "@octant/contracts";
 import {
   REMOTE_ACCESS_EVENT_NAMES,
+  DEFAULT_DEVICE_ACCESS_LEVEL,
+  isDeviceAccessLevel,
+  type DeviceAccessLevel,
+  type DeviceAccessLevelChangedV1,
+  type RemoteAccessPauseChangedV1,
   type DeviceRegistrationV1,
   type HostIdentityInitializedV1,
   type DeviceKeyRotatedV1,
@@ -27,6 +32,12 @@ interface ProjectionStatements {
   readonly receipt: SqliteStatement;
   readonly audit: SqliteStatement;
 }
+
+// Prepared when one of their rare events arrives rather than with the rest:
+// a store still on a schema before their tables (as older-store tests build)
+// applies every other remote event without them.
+const UPSERT_ACCESS_LEVEL = `INSERT INTO remote_device_access_level_projection (device_id, host_id, access_level, changed_at) VALUES (?, ?, ?, ?) ON CONFLICT(device_id) DO UPDATE SET host_id = excluded.host_id, access_level = excluded.access_level, changed_at = excluded.changed_at`;
+const UPSERT_PAUSE = `INSERT INTO remote_access_pause_projection (pause_key, host_id, paused, changed_at) VALUES ('host', ?, ?, ?) ON CONFLICT(pause_key) DO UPDATE SET host_id = excluded.host_id, paused = excluded.paused, changed_at = excluded.changed_at`;
 
 export interface HostIdentityProjectionRow {
   readonly identity_key: "host";
@@ -76,7 +87,7 @@ export class RemoteAccessProjection implements Projection {
 
   reset(connection: SqliteConnection): void {
     connection.exec(
-      "DELETE FROM remote_device_projection; DELETE FROM remote_security_audit_projection; DELETE FROM remote_command_receipt_projection; DELETE FROM remote_session_invalidation_projection;",
+      "DELETE FROM remote_device_projection; DELETE FROM remote_security_audit_projection; DELETE FROM remote_command_receipt_projection; DELETE FROM remote_session_invalidation_projection; DELETE FROM remote_device_access_level_projection; DELETE FROM remote_access_pause_projection;",
     );
   }
 
@@ -215,6 +226,30 @@ export class RemoteAccessProjection implements Projection {
           record.correlationId,
           record.occurredAt,
         );
+        // The level the person chose is written with their approval; an
+        // approval without one (every one before levels) reads as Full.
+        if (
+          record.eventKind === "device-approved" &&
+          record.reasonCode === "user-approved" &&
+          record.deviceId !== undefined &&
+          record.accessLevel !== undefined
+        ) {
+          connection
+            .prepare(UPSERT_ACCESS_LEVEL)
+            .run(record.deviceId, record.hostId, record.accessLevel, record.occurredAt);
+        }
+        return;
+      }
+      case REMOTE_ACCESS_EVENT_NAMES.deviceAccessLevelChanged: {
+        const value = payload as DeviceAccessLevelChangedV1;
+        connection
+          .prepare(UPSERT_ACCESS_LEVEL)
+          .run(value.deviceId, value.hostId, value.accessLevel, value.changedAt);
+        return;
+      }
+      case REMOTE_ACCESS_EVENT_NAMES.remoteAccessPauseChanged: {
+        const value = payload as RemoteAccessPauseChangedV1;
+        connection.prepare(UPSERT_PAUSE).run(value.hostId, value.paused ? 1 : 0, value.changedAt);
         return;
       }
       default:
@@ -296,6 +331,27 @@ export function readDeviceApprovedByPerson(
     )
     .all(deviceId) as ReadonlyArray<{ readonly reasonCode: string }>;
   return rows.length > 0 && rows.every((row) => row.reasonCode === "user-approved");
+}
+
+/** The level the person chose for a device they paired; Full when none is recorded. */
+export function readDeviceAccessLevel(
+  connection: SqliteConnection,
+  deviceId: string,
+): DeviceAccessLevel {
+  const row = connection
+    .prepare(
+      "SELECT access_level AS accessLevel FROM remote_device_access_level_projection WHERE device_id = ?",
+    )
+    .get(deviceId) as { readonly accessLevel: unknown } | undefined;
+  return isDeviceAccessLevel(row?.accessLevel) ? row.accessLevel : DEFAULT_DEVICE_ACCESS_LEVEL;
+}
+
+/** Whether the person has paused remote access on this host. */
+export function readRemoteAccessPaused(connection: SqliteConnection): boolean {
+  const row = connection
+    .prepare("SELECT paused FROM remote_access_pause_projection WHERE pause_key = 'host'")
+    .get() as { readonly paused: number } | undefined;
+  return row?.paused === 1;
 }
 
 export function readRemoteSessionInvalidation(

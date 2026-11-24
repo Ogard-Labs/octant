@@ -51,6 +51,7 @@ import {
   createTurnActivityTiming,
   INITIAL_TURN_LOOP_STATE,
   isNativeHarnessDriverKind,
+  markThreadToolStepCanvasPreview,
   markThreadToolStepOutsideContent,
   observeTurnMetrics,
   observeTurnRuntimeEvent,
@@ -1691,6 +1692,20 @@ export class ChatTurnRunner {
                       event.requestId,
                       event.toolName,
                       execution.outsideContent.labels,
+                    );
+                  }
+                  const canvasPreview = execution.canvasPreview;
+                  if (execution.isError !== true && canvasPreview !== undefined) {
+                    yield* foldToolSteps((before) =>
+                      markThreadToolStepCanvasPreview(
+                        before,
+                        {
+                          toolCallId: event.requestId,
+                          toolName: event.toolName,
+                          canvasPreview,
+                        },
+                        stepLimit,
+                      ),
                     );
                   }
                   // The run time is the actual execute interval minus any

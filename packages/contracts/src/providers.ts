@@ -3588,6 +3588,15 @@ export const ProviderRuntimeEvent = Schema.Union(
     requestId: BoundedProviderRequestId,
     toolName: BoundedProviderToolName,
     inputJson: BoundedProviderJson,
+    /**
+     * The `toolCallId` of the runtime's own `tool-start` report of this call,
+     * when the adapter can tell which report it is. A runtime that names its
+     * calls freely (an ACP agent) reports a host tool once as its own call
+     * and once as this request; the host records the request itself, so the
+     * report it names here is not left to hold the thread after a restart.
+     * Absent when the adapter cannot tell.
+     */
+    toolCallId: Schema.optional(Schema.NonEmptyTrimmedString),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

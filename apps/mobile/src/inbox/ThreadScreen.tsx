@@ -12,23 +12,24 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   chatAttemptStatusLabel,
   mobileAttachmentOffer,
-  readRemoteSessionStanding,
   setMobileUsageResume,
-  RESTRICTED_REMOTE_SESSION,
   type MobileAttachmentSource,
   type MobileInboxRow,
-  type RemoteSessionStanding,
 } from "@octant/client-runtime";
 import { useConnectionStatus } from "@octant/client-runtime/use-connection-status";
 import { presentStaleHostSecurity } from "@octant/domain";
 import type { RemoteThreadSurfaceKind } from "@octant/client-runtime";
 import { ApprovalDeferralSheet } from "../approvals/ApprovalDeferralSheet";
+import { MemoryProposalCard, RoutineProposalCard } from "../surfaces/AgentProposalCards";
 import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
 import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard";
 import { ServiceOfferCard } from "../surfaces/ServiceOfferCard";
 import { WorkRequestCards } from "../surfaces/WorkRequestCards";
-import { listMobileThreadSurfaces } from "../surfaces/threadSurfacePresentation";
+import {
+  conversationComposerAccess,
+  listMobileThreadSurfaces,
+} from "../surfaces/threadSurfacePresentation";
 import {
   MOBILE_COPY,
   MOBILE_TAB_LABELS,
@@ -71,6 +72,7 @@ import {
   MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS,
   enteredMobileForeground,
 } from "./threadRefreshPolicy";
+import { useRemoteSessionStanding } from "./useRemoteSessionStanding";
 
 // Shown while the host is unreachable, whether the app's connection or the
 // chat event stream noticed first.
@@ -120,20 +122,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const [surface, setSurface] = useState<RemoteThreadSurfaceKind>("chat");
   // The surfaces on offer come from the shared remote matrix, so a host that
   // would refuse one never has it shown here.
-  // What the host says this phone's session is, asked per host. Until it
-  // answers, and whenever it does not, the session is shown as restricted.
-  const [standing, setStanding] = useState<RemoteSessionStanding>(RESTRICTED_REMOTE_SESSION);
-  useEffect(() => {
-    setStanding(RESTRICTED_REMOTE_SESSION);
-    if (transport === undefined || offlineDemo) return;
-    let current = true;
-    void readRemoteSessionStanding(transport).then((answer) => {
-      if (current) setStanding(answer);
-    });
-    return () => {
-      current = false;
-    };
-  }, [transport, offlineDemo]);
+  const standing = useRemoteSessionStanding(transport, offlineDemo);
+  const watchingOnly = standing.accessLevel === "read-only";
   const surfaces = useMemo(
     () => listMobileThreadSurfaces({ mode: selected?.mode ?? "chat", session: standing }),
     [selected?.mode, standing],
@@ -279,12 +269,17 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const threadAttachments = mode === "work" ? work : mode === "code" ? code : chat;
   const pendingAttachments = threadAttachments.pendingAttachments;
   const attachFrom = (source: MobileAttachmentSource) => {
-    if (offlineDemo) return;
+    if (offlineDemo || !composerAccess.editable) return;
     setAttachOpen(false);
     void threadAttachments.attach(source, attachmentOffer);
   };
+  // A read-only pairing has no composer, so it has nothing to attach to either.
+  const composerAccess = conversationComposerAccess(surfaces);
   const attachProps =
-    !offlineDemo && staleGate.allowProductMutations && attachmentOffer.sources.length > 0
+    !offlineDemo &&
+    composerAccess.editable &&
+    staleGate.allowProductMutations &&
+    attachmentOffer.sources.length > 0
       ? { onPressAttach: () => setAttachOpen(true) }
       : {};
   const followUpComposerCopy =
@@ -386,12 +381,13 @@ export function ThreadScreen(props: ThreadScreenProps) {
     };
   })();
   const composerEditable =
-    mode === "chat"
+    composerAccess.editable &&
+    (mode === "chat"
       ? staleGate.allowProductMutations && chat.activeAttempt === undefined
       : staleGate.allowProductMutations &&
         !workTurnLive &&
         !codeTurnLive &&
-        (mode === "code" || work.thread !== undefined);
+        (mode === "code" || work.thread !== undefined));
   const appendToDraft = useCallback(
     (text: string) => setPrompt((draft) => appendTranscript(draft, text)),
     [],
@@ -593,10 +589,31 @@ export function ThreadScreen(props: ThreadScreenProps) {
                   actsAsHostPerson={standing.actsAsHostPerson}
                   threadId={selected.threadId}
                   transport={transport}
+                  watchingOnly={watchingOnly}
                 />
               )}
               {offlineDemo || transport === undefined ? null : (
-                <NativeHarnessSessionPanel threadId={selected.threadId} transport={transport} />
+                <>
+                  <MemoryProposalCard
+                    key={`memory:${selected.hostId}:${selected.threadId}`}
+                    actsAsHostPerson={standing.actsAsHostPerson}
+                    threadId={selected.threadId}
+                    transport={transport}
+                  />
+                  <RoutineProposalCard
+                    key={`routine:${selected.hostId}:${selected.threadId}`}
+                    actsAsHostPerson={standing.actsAsHostPerson}
+                    threadId={selected.threadId}
+                    transport={transport}
+                  />
+                </>
+              )}
+              {offlineDemo || transport === undefined ? null : (
+                <NativeHarnessSessionPanel
+                  threadId={selected.threadId}
+                  transport={transport}
+                  watchingOnly={watchingOnly}
+                />
               )}
               {offlineDemo || transport === undefined || !standing.actsAsHostPerson ? null : (
                 <ServiceOfferCard
@@ -615,6 +632,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
                   projectId={String(work.thread.projectId)}
                   threadId={String(work.thread.id)}
                   transport={transport}
+                  watchingOnly={watchingOnly}
                 />
               )}
               {busy && chat.activeAttempt === undefined ? (
@@ -771,6 +789,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 : MOBILE_COPY.working
             }
             editable={composerEditable}
+            footerHint={composerAccess.reason}
             modelLabel={modelLabel}
             onChangeText={setPrompt}
             onPressModel={() => setModelOpen(true)}
@@ -794,7 +813,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
               : MOBILE_COPY.turnRunning
           }
           editable={composerEditable}
-          footerHint={followUpComposerCopy?.footerHint}
+          footerHint={composerAccess.reason ?? followUpComposerCopy?.footerHint}
           modelLabel={
             selected.mode === "work" && work.thread !== undefined
               ? mobileModelLabel(models.options, String(work.thread.modelId))

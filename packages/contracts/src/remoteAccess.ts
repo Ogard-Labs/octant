@@ -185,6 +185,36 @@ export const NegotiatedProtocolV1 = Schema.Struct({
 }).annotations(strict);
 export type NegotiatedProtocolV1 = typeof NegotiatedProtocolV1.Type;
 
+/**
+ * How much a device the host's own person paired may do there, chosen when the
+ * person approves the pairing and changed later in Settings (maintainer
+ * decision, 2026-11-22). `full` is the person, as a local window is;
+ * `approve-and-steer` is held to the remote action catalogue, as a device the
+ * hub's roster introduced is; `read-only` reaches only the catalogue's reads.
+ * The host stores it and never takes it from the client.
+ */
+export const DEVICE_ACCESS_LEVELS = ["full", "approve-and-steer", "read-only"] as const;
+export const DeviceAccessLevel = Schema.Literal(...DEVICE_ACCESS_LEVELS);
+export type DeviceAccessLevel = typeof DeviceAccessLevel.Type;
+/** The level a pairing takes unless the person picks another, and the level of every older record. */
+export const DEFAULT_DEVICE_ACCESS_LEVEL: DeviceAccessLevel = "full";
+export const DEVICE_ACCESS_LEVEL_LABELS: Readonly<Record<DeviceAccessLevel, string>> = {
+  full: "Full",
+  "approve-and-steer": "Approve and steer",
+  "read-only": "Read only",
+};
+export function isDeviceAccessLevel(value: unknown): value is DeviceAccessLevel {
+  return (DEVICE_ACCESS_LEVELS as ReadonlyArray<unknown>).includes(value);
+}
+/**
+ * The reason the private listener gives every paired request while the person
+ * has paused remote access. It is not a credential failure, so a client keeps
+ * its pairing and says why.
+ */
+export const REMOTE_ACCESS_PAUSED_REASON = "remote-access-paused" as const;
+/** The reason a product route gives a device whose access level does not reach the action. */
+export const DEVICE_ACCESS_LEVEL_REFUSED_REASON = "device-access-level" as const;
+
 export const SecurityAuditRecordV1 = Schema.Struct({
   eventKind: redactedCode,
   hostId: StableHostId,
@@ -196,6 +226,12 @@ export const SecurityAuditRecordV1 = Schema.Struct({
   reasonCode: redactedCode,
   correlationId: CorrelationId,
   occurredAt: UtcTimestamp,
+  /**
+   * On a `device-approved` record the person wrote: the level they chose for
+   * the device. Absent on every other record and on approvals made before
+   * levels existed, which read as `full`.
+   */
+  accessLevel: Schema.optional(DeviceAccessLevel),
 }).annotations(strict);
 export type SecurityAuditRecordV1 = typeof SecurityAuditRecordV1.Type;
 
@@ -337,6 +373,28 @@ export const DeviceAlertChangedV1 = Schema.Struct({
 }).annotations(strict);
 export type DeviceAlertChangedV1 = typeof DeviceAlertChangedV1.Type;
 
+/** A person changed a paired device's access level; the envelope's actor is who changed it. */
+export const DeviceAccessLevelChangedV1 = Schema.Struct({
+  hostId: StableHostId,
+  deviceId: DeviceId,
+  previousLevel: DeviceAccessLevel,
+  accessLevel: DeviceAccessLevel,
+  changedAt: UtcTimestamp,
+}).annotations(strict);
+export type DeviceAccessLevelChangedV1 = typeof DeviceAccessLevelChangedV1.Type;
+
+/**
+ * A person paused or resumed remote access; the envelope's actor is who did.
+ * While paused the private listener refuses every paired device and keeps
+ * every record and key.
+ */
+export const RemoteAccessPauseChangedV1 = Schema.Struct({
+  hostId: StableHostId,
+  paused: Schema.Boolean,
+  changedAt: UtcTimestamp,
+}).annotations(strict);
+export type RemoteAccessPauseChangedV1 = typeof RemoteAccessPauseChangedV1.Type;
+
 export const HostKeyRotatedV1 = Schema.Struct({
   hostId: StableHostId,
   previousKeyGeneration: positiveInteger,
@@ -449,6 +507,8 @@ export const REMOTE_ACCESS_EVENT_NAMES = {
   commandReceiptRecorded: "remote.command-receipt-recorded@1",
   securityAuditRecorded: "remote.security-audit-recorded@1",
   deviceAlertChanged: "remote.device-alert-changed@1",
+  deviceAccessLevelChanged: "remote.device-access-level-changed@1",
+  remoteAccessPauseChanged: "remote.access-pause-changed@1",
 } as const;
 
 export const decodeClientHelloV1 = Schema.decodeUnknownSync(ClientHelloV1);
@@ -479,6 +539,12 @@ export const decodeDeviceRegistrationDeadlineChangedV1 = Schema.decodeUnknownSyn
   DeviceRegistrationDeadlineChangedV1,
 );
 export const decodeHostKeyRotatedV1 = Schema.decodeUnknownSync(HostKeyRotatedV1);
+export const decodeDeviceAccessLevelChangedV1 = Schema.decodeUnknownSync(
+  DeviceAccessLevelChangedV1,
+);
+export const decodeRemoteAccessPauseChangedV1 = Schema.decodeUnknownSync(
+  RemoteAccessPauseChangedV1,
+);
 export const decodeRemoteCommandReceiptRecordedV1 = Schema.decodeUnknownSync(
   RemoteCommandReceiptRecordedV1,
 );
@@ -511,4 +577,10 @@ export type RemoteClientPrincipal =
        * stay held to the remote action catalogue.
        */
       readonly admittedBy?: "host-person" | "hub-roster";
+      /**
+       * The level the person chose for a device they paired, set only when it
+       * is narrower than `full`. Such a device is not the host's person: it is
+       * held to the remote action catalogue, and to its reads at `read-only`.
+       */
+      readonly accessLevel?: Exclude<DeviceAccessLevel, "full">;
     };

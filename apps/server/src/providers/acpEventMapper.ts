@@ -31,6 +31,8 @@ interface AcpToolState {
   childAgentId?: string;
   /** The agent that subagent runs as, when the agent named it. */
   childAgentName?: string;
+  /** Paired with a request the agent then made for one of the host's tools. */
+  handedToHost?: true;
 }
 
 /** Where the agent's own text stands in this turn, once it has written any. */
@@ -484,6 +486,31 @@ const FILE_SEARCH_INPUT_KEYS: ReadonlySet<string> = new Set([
   "cwd",
   "root",
 ]);
+
+/**
+ * The agent's own report of a call it is now handing to the host as a request
+ * for the host tool `toolName`, when exactly one report can be it: an open
+ * call, not already paired, whose title names Octant and the tool (agents
+ * spell an MCP call `mcp__octant-browser__read`, `read (octant-browser MCP
+ * Server)` or `Tool: octant-browser/read`). An agent titles its calls freely,
+ * so anything less certain names nothing, and the report stays recorded as
+ * the agent's own call.
+ */
+export function acpReportOfHostTool(
+  context: AcpEventContext,
+  toolName: string,
+): string | undefined {
+  const wanted = toolName.toLowerCase();
+  const candidates = [...context.tools.values()].filter((state) => {
+    if (state.terminal || state.handedToHost === true || state.title === undefined) return false;
+    const title = state.title.toLowerCase();
+    return title.includes("octant") && title.split(/[^a-z0-9_]+|__/).includes(wanted);
+  });
+  const only = candidates.length === 1 ? candidates[0] : undefined;
+  if (only === undefined) return undefined;
+  only.handedToHost = true;
+  return only.toolCallId;
+}
 
 export function mapAcpNotification(
   context: AcpEventContext,

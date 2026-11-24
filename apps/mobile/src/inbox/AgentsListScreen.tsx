@@ -14,6 +14,7 @@ import {
   MobileInboxFailure,
   type MobileInboxHostFailure,
   type MobileInboxRow,
+  mobileWaitingAskLine,
   searchMobileTranscripts,
   type MobileTranscriptHit,
 } from "@octant/client-runtime";
@@ -56,8 +57,7 @@ function sentenceCase(value: string): string {
 
 export function AgentsListScreen(props: AgentsListScreenProps) {
   const { colors } = useTheme();
-  const { transports, hosts, inboxHostFilter, setInboxHostFilter, refreshHosts } =
-    useMobileSession();
+  const { transports, hosts, inboxHostFilter, setInboxHostFilter } = useMobileSession();
   const [rows, setRows] = useState<ReadonlyArray<MobileInboxRow>>([]);
   const [failures, setFailures] = useState<ReadonlyArray<MobileInboxHostFailure>>([]);
   const [error, setError] = useState<string | undefined>();
@@ -103,7 +103,9 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
   const {
     placementTransport,
     placementLabel,
+    placementAccessReason,
     placementDisabledReason,
+    refreshPlacement,
     staleGate,
     models,
     modelOptionId,
@@ -161,6 +163,10 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
     }
     if (!staleGate.allowProductMutations) {
       setComposerError(staleGate.message);
+      return;
+    }
+    if (placementAccessReason !== undefined) {
+      setComposerError(placementAccessReason);
       return;
     }
     setCreating(true);
@@ -342,6 +348,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
             />
             <ToolbarButton
               accessibilityLabel="New Chat thread"
+              disabled={placementAccessReason !== undefined}
               icon="create-outline"
               onPress={() => setComposerOpen(true)}
               testID="mobile-agents-compose"
@@ -479,7 +486,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
               <ListRow
                 accessory="none"
                 detail={`${hostLabel(row.hostId)} · ${modeLabel(row.mode)}${
-                  row.waitingOfferText === undefined ? "" : ` · ${row.waitingOfferText}`
+                  row.waitingAsk === undefined ? "" : ` · ${mobileWaitingAskLine(row.waitingAsk)}`
                 }`}
                 icon={modeIcon(row.mode)}
                 key={`${row.hostId}:${row.mode}:${row.threadId}`}
@@ -500,10 +507,19 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
           {staleGate.message}
         </Text>
       ) : null}
+      {placementAccessReason === undefined ? null : (
+        <Text accessibilityLiveRegion="polite" style={styles.help}>
+          {placementAccessReason}
+        </Text>
+      )}
       <HomeComposerSheet
         availableModes={["chat"]}
         busy={creating}
-        editable={staleGate.allowProductMutations && placementTransport !== undefined}
+        editable={
+          staleGate.allowProductMutations &&
+          placementTransport !== undefined &&
+          placementAccessReason === undefined
+        }
         error={composerError}
         mode="chat"
         modelLabel={modelLabel}
@@ -512,7 +528,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
         onPressModel={() => setModelOpen(true)}
         onSelectMode={() => undefined}
         onSubmit={() => void createChatThread()}
-        onRefreshHost={() => void refreshHosts()}
+        onRefreshHost={refreshPlacement}
         placementLabel={placementLabel}
         placementDisabledReason={placementDisabledReason}
         prompt={prompt}

@@ -4,6 +4,7 @@ import type {
   ComputerUseSensitiveFieldKind,
   ProjectId,
   RememberedComputerUseApp,
+  RememberedDesktopFileTransfer,
   ToolActionAuthority,
 } from "@octant/contracts";
 import { sameToolActionAuthority } from "@octant/contracts";
@@ -74,6 +75,17 @@ export function computerUseAppRemembered(
   return remembered.some(
     (entry) => String(entry.projectId) === String(projectId) && entry.appId === appId,
   );
+}
+
+/**
+ * Whether a remembered Project answer covers an agent's file sent into a
+ * disposable desktop on this machine by a thread in this Project.
+ */
+export function desktopFileTransferRemembered(
+  remembered: ReadonlyArray<RememberedDesktopFileTransfer>,
+  projectId: ProjectId,
+): boolean {
+  return remembered.some((entry) => String(entry.projectId) === String(projectId));
 }
 
 export function evaluateComputerUseAction(

@@ -14,6 +14,7 @@ import {
   type MobileInboxHostFailure,
   type MobileWorkProjectOption,
   type MobileInboxRow,
+  mobileWaitingAskLine,
 } from "@octant/client-runtime";
 import { changeMobileTodos } from "@octant/client-runtime/mobile-todo-client";
 import type { CodeDeliveryTarget } from "@octant/contracts";
@@ -102,7 +103,6 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     hosts,
     hostsLoaded,
     health,
-    refreshHosts,
   } = useMobileSession();
   const emptyState =
     props.homeMode === "inbox" ? inboxEmptyState({ hosts, hostsLoaded }) : undefined;
@@ -150,7 +150,9 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const {
     placementTransport,
     placementLabel,
+    placementAccessReason,
     placementDisabledReason,
+    refreshPlacement,
     staleGate,
     models,
     modelOptionId,
@@ -185,7 +187,10 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   useEffect(() => {
     setCodeRetry(undefined);
   }, [placementTransport]);
-  const composerEditable = staleGate.allowProductMutations && placementTransport !== undefined;
+  const composerEditable =
+    staleGate.allowProductMutations &&
+    placementTransport !== undefined &&
+    placementAccessReason === undefined;
   const appendToDraft = useCallback((text: string) => {
     setPrompt((draft) => appendTranscript(draft, text));
     setCodeRetry(undefined);
@@ -421,6 +426,10 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
       setComposerError(staleGate.message);
       return;
     }
+    if (placementAccessReason !== undefined) {
+      setComposerError(placementAccessReason);
+      return;
+    }
     setCreating(true);
     setComposerError(undefined);
     try {
@@ -492,9 +501,10 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   };
 
   const footerHint =
-    placementLabel !== undefined
+    placementAccessReason ??
+    (placementLabel !== undefined
       ? `${MOBILE_COPY.newThreadsUse} ${placementLabel}`
-      : MOBILE_COPY.composerDisclaimerShort;
+      : MOBILE_COPY.composerDisclaimerShort);
   const tabCreateMode: MobileCreateMode | undefined =
     props.homeMode === "inbox"
       ? undefined
@@ -655,7 +665,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
                   : (projectName(row) ?? "Project"),
               )} · `
       }${hostLabels.get(row.hostId) ?? row.hostId.slice(0, 8)}${
-        row.waitingOfferText === undefined ? "" : ` · ${row.waitingOfferText}`
+        row.waitingAsk === undefined ? "" : ` · ${mobileWaitingAskLine(row.waitingAsk)}`
       }`}
       icon={modeIcon(row.mode)}
       key={`${row.hostId}:${row.mode}:${row.threadId}`}
@@ -689,6 +699,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
             {props.homeMode === "inbox" && emptyState === undefined ? (
               <ToolbarButton
                 accessibilityLabel="New thread"
+                disabled={placementAccessReason !== undefined}
                 icon="create-outline"
                 onPress={() => {
                   setComposerMode("chat");
@@ -713,6 +724,11 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         {props.homeMode === "inbox" ? null : (
           <Text style={styles.subhero}>{modePresentation?.description}</Text>
         )}
+        {props.homeMode === "inbox" && placementAccessReason !== undefined ? (
+          <Text accessibilityLiveRegion="polite" style={styles.subhero}>
+            {placementAccessReason}
+          </Text>
+        ) : null}
 
         {transportError !== undefined ? (
           <Text style={styles.transportError} testID="mobile-home-transport-error">
@@ -1016,7 +1032,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
               sourceLabel: MOBILE_COPY.todoSource,
               onRemoveSource: () => setTodoSource(undefined),
             })}
-        onRefreshHost={() => void refreshHosts()}
+        onRefreshHost={refreshPlacement}
         placementLabel={placementLabel}
         placementDisabledReason={placementDisabledReason}
         projectLabel={composerProjectLabel}

@@ -8,6 +8,7 @@ import {
 } from "@octant/contracts";
 import type { ServiceOfferService } from "../offers/serviceOfferService";
 import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
+import { whileAwaitingToolApproval } from "../toolEffects/toolEffectLedger";
 
 export interface ImageGenerationChoice {
   readonly profileInstanceId: ProviderInstanceId;
@@ -58,15 +59,19 @@ export class ImageGenerationOfferService {
     readonly offer: ImageGenerationOfferRequest;
     readonly signal?: AbortSignal;
   }): Promise<ImageGenerationOfferOutcome> {
-    const outcome = await this.#offers.wait({
-      ...input,
-      stamp: (offerId, requestedAt) =>
-        decodeImageGenerationOffer({
-          ...input.offer,
-          offerId: decodeImageGenerationOfferId(offerId),
-          requestedAt,
-        }),
-    });
+    // Every offer comes before what it offers (a generation, a save, an icon
+    // set's files), so while it waits the call's record says nothing ran.
+    const outcome = await whileAwaitingToolApproval(() =>
+      this.#offers.wait({
+        ...input,
+        stamp: (offerId, requestedAt) =>
+          decodeImageGenerationOffer({
+            ...input.offer,
+            offerId: decodeImageGenerationOfferId(offerId),
+            requestedAt,
+          }),
+      }),
+    );
     return outcome.status === "transcribe" || outcome.status === "narrate"
       ? { status: "cancelled" }
       : outcome;

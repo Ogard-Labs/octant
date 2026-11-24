@@ -1168,7 +1168,12 @@ from their phone or laptop what they could do sitting at any of them. An
 A device paired with a host, which that host's person approved from a party
 the host already trusted, is the person on that host and holds what a local
 window holds there with no owner mark and no unlock (maintainer decision, 2026-11-12;
-[Architecture: Remote clients](../architecture.md#security-and-authority)).
+[Architecture: Remote clients](../architecture.md#security-and-authority)). That
+holds at the Full access level, the default; a device the person paired at
+Approve and steer or Read only is held to that level instead (maintainer
+decision, 2026-11-22). Pausing remote access on a host refuses its paired
+devices and outside agents: only the member-to-member routes between the
+person's own computers keep working.
 Owner devices keep meaning only where the hub's own rules need a named owner:
 the owner list and its changes, confirming new members, failover and standby
 promotion, a thread move's ticket, and acting on a host the device was never
@@ -1589,8 +1594,9 @@ has read outside content meets the same rule as a helper on its own host
 below Full access it needs its person's one answer for the thread, the same
 journaled `delegation` answer (`thread.standing-answer-recorded@1`) a helper on
 A asks for, so one answer covers both kinds of helper; Plan stays refused
-(`parent-tainted`). A Work thread cannot yet ask its person below Full access,
-so there it is still refused, as for a helper on A. B then:
+(`parent-tainted`). A Work thread below Full access asks through the host's
+approval card, as for a helper on A; a Work routine run, which nobody can
+answer, is still refused. B then:
 
 1. checks the peer grant and clamps the request to the smaller of the peer
    grant and B's own Project authority (equal or narrower, as for any child

@@ -6,6 +6,7 @@ import {
   ClientPrincipalError,
   assertNoPrincipalIdentityInPayload,
   createRemoteDevicePrincipal,
+  principalIsHubIntroduced,
   requireLocalWindowId,
   resolveAuthenticatedPrincipal,
   resolveLocalWindowPrincipal,
@@ -112,6 +113,36 @@ describe("clientPrincipal adapter", () => {
     expect(principal.kind).toBe("remote-device");
     expect(JSON.stringify(principal)).not.toContain("local-window");
     expect(() => requireLocalWindowId(principal)).toThrow(/local-window/i);
+  });
+
+  it("counts a device as hub-introduced by who let it on, not by the level its person chose", () => {
+    const device = (input: {
+      readonly admittedBy?: "host-person" | "hub-roster";
+      readonly accessLevel?: "approve-and-steer" | "read-only";
+    }) =>
+      createRemoteDevicePrincipal({
+        hostId,
+        deviceId,
+        credentialGeneration: 1,
+        origin: "https://remote.octant.local",
+        protocolVersion: 1,
+        capabilityDigest: digest,
+        sessionId,
+        ...input,
+      });
+    // Paired directly and narrowed: not the hub's, so the hub's Act list never holds it.
+    expect(
+      principalIsHubIntroduced(
+        device({ admittedBy: "host-person", accessLevel: "approve-and-steer" }),
+      ),
+    ).toBe(false);
+    expect(
+      principalIsHubIntroduced(device({ admittedBy: "host-person", accessLevel: "read-only" })),
+    ).toBe(false);
+    expect(principalIsHubIntroduced(device({ admittedBy: "host-person" }))).toBe(false);
+    // The roster's device and an unproved pairing still are.
+    expect(principalIsHubIntroduced(device({ admittedBy: "hub-roster" }))).toBe(true);
+    expect(principalIsHubIntroduced(device({}))).toBe(true);
   });
 
   it("rejects invalid remote principal materials", () => {

@@ -97,6 +97,8 @@ function tool(
     remote?: RemoteDelegationPort;
     mode?: "chat" | "work" | "code";
     ingestion?: "recorded" | "refused";
+    strict?: boolean;
+    childMarked?: boolean;
     resultTexts?: Readonly<Record<string, string>>;
     sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   } = {},
@@ -177,6 +179,10 @@ function tool(
       ...(options.remote === undefined ? {} : { remote: options.remote }),
       listTargets: () => options.targets ?? TARGETS,
       isTainted: () => options.tainted ?? false,
+      ...(options.strict === undefined ? {} : { strict: () => options.strict === true }),
+      ...(options.childMarked === undefined
+        ? {}
+        : { childMarked: () => options.childMarked === true }),
       ...(options.noRouting
         ? {}
         : {
@@ -700,6 +706,38 @@ describe("agents managed tools", () => {
     expect(outcome.result).toMatchObject({ status: "completed", text: "child reply" });
     expect(ingested).toEqual([ids.run]);
     expect(settlements).toHaveLength(1);
+  });
+
+  it("under Strict hands back a reply from a child that read no outside content without marking the parent", async () => {
+    const { set, ingested, settlements } = tool({
+      strict: true,
+      childMarked: false,
+      runs: [queuedRun({ lifecycleStatus: "completed", result: { text: "x" } as never })],
+    });
+    const outcome = await call(set, { operation: "wait", runId: ids.run, timeoutMs: 10 });
+    expect(outcome.result).toMatchObject({ status: "completed", text: "child reply" });
+    expect(ingested).toEqual([]);
+    expect(settlements).toHaveLength(1);
+  });
+
+  it("under Strict marks the parent before it hands back a reply from a child that read outside content", async () => {
+    const { set, ingested } = tool({
+      strict: true,
+      childMarked: true,
+      runs: [queuedRun({ lifecycleStatus: "completed", result: { text: "x" } as never })],
+    });
+    const outcome = await call(set, { operation: "wait", runId: ids.run, timeoutMs: 10 });
+    expect(outcome.result).toMatchObject({ status: "completed", text: "child reply" });
+    expect(ingested).toEqual([ids.run]);
+  });
+
+  it("under Strict treats a child whose own mark cannot be read as marked", async () => {
+    const { set, ingested } = tool({
+      strict: true,
+      runs: [queuedRun({ lifecycleStatus: "completed", result: { text: "x" } as never })],
+    });
+    await call(set, { operation: "wait", runId: ids.run, timeoutMs: 10 });
+    expect(ingested).toEqual([ids.run]);
   });
 
   it("keeps a child's reply owed when the mark on its parent cannot be recorded", async () => {

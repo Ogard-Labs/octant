@@ -14,7 +14,7 @@ import { HarnessRetryEventFields } from "./harnessRetry";
 import { AccountMoveTextHandoffCause, ContextHandoffOmissions } from "./contextHandoff";
 import { ProviderChildActivityEvent } from "./providers";
 import { ProviderNativeSessionId } from "./providerNativeSession";
-import { ThreadPublishedPage } from "./threadToolSteps";
+import { ThreadCanvasPreviewReceipt, ThreadPublishedPage } from "./threadToolSteps";
 import { ThreadCallTiming } from "./threadToolStepList";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
 import { ThreadBoardFinishedMark } from "./finishedReceipt";
@@ -1177,6 +1177,13 @@ const AnswerProviderApproval = Schema.Struct({
   ...OperationScope,
   approvalId: CodeApprovalId,
   decision: Schema.Literal("approved", "denied"),
+  /**
+   * With `approved`, on an ask whose `approval-requested` offers
+   * `canRememberForProject`: the person chose "Remember for this Project".
+   * The host honors it only from a person, and only while the ask still
+   * offers it; otherwise the answer allows this one ask.
+   */
+  rememberForProject: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 const ForceStopProviderTurn = Schema.Struct({
   kind: Schema.Literal("force-stop-provider-turn"),
@@ -1950,6 +1957,8 @@ const ToolEvent = Schema.Struct({
   outsideContent: Schema.optional(ToolOutsideContentMark),
   /** The routine the call set up; the transcript shows what was created. */
   routine: Schema.optional(ThreadRoutineReceipt),
+  /** The Canvas version the call previewed; the row draws that version. */
+  canvasPreview: Schema.optional(ThreadCanvasPreviewReceipt),
   /** Present only on a terminal state of a call whose bounds were trusted. */
   timing: Schema.optional(ThreadCallTiming),
 }).annotations(strict);
@@ -2021,6 +2030,12 @@ const ApprovalEvent = Schema.Struct({
       plan: Schema.optional(CodeEvidenceReference),
     }).annotations(strict),
   ),
+  /**
+   * The ask may be answered with "Remember for this Project" as well as for
+   * this once: an agent's file sent into a disposable desktop on this
+   * machine. Absent on every other approval.
+   */
+  canRememberForProject: Schema.optional(Schema.Literal(true)),
   /**
    * Legacy mark from approvals for physical-device and distribution effects,
    * which no longer exist. Nothing sets or reads it now. It stays in the schema
@@ -2593,6 +2608,7 @@ export const CodeConversationStep = Schema.Union(
     published: Schema.optional(ThreadPublishedPage),
     outsideContent: Schema.optional(ToolOutsideContentMark),
     routine: Schema.optional(ThreadRoutineReceipt),
+    canvasPreview: Schema.optional(ThreadCanvasPreviewReceipt),
     /** Present only on a completed step whose bounds were trusted. */
     timing: Schema.optional(ThreadCallTiming),
   }).annotations(strict),

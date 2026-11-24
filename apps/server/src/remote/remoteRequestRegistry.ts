@@ -23,6 +23,11 @@ export interface RemoteRequestRegistration {
   readonly deviceId: string;
   readonly sessionIdDigest: string;
   readonly cancel: () => void;
+  /**
+   * The request's own abort signal, which names this entry to a device-wide
+   * cancellation that must leave the asking request to finish its reply.
+   */
+  readonly request?: AbortSignal;
 }
 
 export interface RemoteRequestRegistryDiagnostics {
@@ -41,6 +46,8 @@ export interface RemoteRequestRegistry {
   readonly cancelByDevice: (input: {
     readonly hostId: string;
     readonly deviceId: string;
+    /** One request of the device left running: the one whose change caused the cancellation. */
+    readonly exceptRequest?: AbortSignal;
   }) => CancellationResult;
   readonly cancelAll: () => CancellationResult;
   readonly size: () => number;
@@ -122,6 +129,7 @@ export function createRemoteRequestRegistry(
         deviceId: input.deviceId,
         sessionIdDigest: input.sessionIdDigest,
         cancel: input.cancel,
+        ...(input.request === undefined ? {} : { request: input.request }),
         released: false,
         canceled: false,
         cancelHookFailed: false,
@@ -154,7 +162,11 @@ export function createRemoteRequestRegistry(
       let canceled = 0;
       let cancelHookFailures = 0;
       for (const entry of Array.from(entries.values())) {
-        if (entry.hostId === input.hostId && entry.deviceId === input.deviceId) {
+        if (
+          entry.hostId === input.hostId &&
+          entry.deviceId === input.deviceId &&
+          (input.exceptRequest === undefined || entry.request !== input.exceptRequest)
+        ) {
           const result = cancelEntry(entry);
           if (result === true) canceled += 1;
           else if (result === "hook-failed") {

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   changedThreadToolStep,
   markThreadToolStepOutsideContent,
+  markThreadToolStepCanvasPreview,
   markThreadToolStepRoutine,
   recordThreadAppToolStep,
   recordThreadShieldReview,
@@ -375,6 +376,31 @@ describe("Octant Shield's decisions among a turn's tool steps", () => {
     );
     expect(marked?.steps).toHaveLength(1);
     expect(marked?.steps[0]).toMatchObject({ state: "completed", routine: { paused: false } });
+  });
+
+  it("keeps the Canvas version a preview drew through the call's later result", () => {
+    const started = fold([
+      event({ kind: "tool-start", toolCallId: "p", toolName: "octant_canvas" }),
+    ]);
+    const canvasPreview = { canvasId: "canvas-1", versionId: "version-3" };
+    const marked = markThreadToolStepCanvasPreview(
+      started,
+      { toolCallId: "p", toolName: "octant_canvas", canvasPreview },
+      64,
+    );
+    expect(
+      markThreadToolStepCanvasPreview(
+        marked,
+        { toolCallId: "p", toolName: "octant_canvas", canvasPreview },
+        64,
+      ),
+    ).toBe(marked);
+    const finished = recordThreadToolStep(
+      marked,
+      event({ kind: "tool-success", toolCallId: "p", summary: "previewed" }),
+      64,
+    );
+    expect(finished?.steps[0]).toMatchObject({ state: "completed", canvasPreview });
   });
 
   it("shows a decision as a completed step of its own beside the tool's", () => {
