@@ -254,7 +254,8 @@ try {
   const oldVersion = Buffer.from(frame);
   oldVersion[4] = 1;
   const unknownPurpose = Buffer.from(frame);
-  unknownPurpose[83] = 9;
+  // The first number past the purposes both peers know.
+  unknownPurpose[83] = 10;
   const wrongFamily = Buffer.from(frame);
   wrongFamily[6] = 2;
   requireValue(
@@ -353,7 +354,7 @@ try {
   const preserved = await Promise.all(concurrent.map(({ store, ref }) => store.resolve(ref)));
   requireValue(
     preserved.every((value, index) => value === `synthetic-parallel-${index}`),
-    "concurrent writes preserve all eight purposes across families and stores",
+    "concurrent writes preserve every purpose across families and stores",
   );
   stage = "replica-broker-start";
   broker = await startCredentialBroker(
