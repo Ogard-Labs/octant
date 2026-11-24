@@ -317,6 +317,26 @@ describe("RemoteWorkspace", () => {
     expect(read).toHaveBeenCalledTimes(2);
   });
 
+  it("opens the selected Code thread’s desktop only when the paired person asks", async () => {
+    const { clients, coordinator } = coordinatorFixture();
+    const request = vi.fn(async () => ({ status: "refused", reason: "not-permitted" }) as const);
+    render(
+      <RemoteWorkspace
+        actsAsHostPerson
+        clients={{ ...clients, desktop: { request, frame: vi.fn() } }}
+        connected
+        mode="code"
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Backlog coordinator" }));
+    const desktop = await screen.findByRole("button", { name: "Desktop" });
+    expect(request).not.toHaveBeenCalled();
+    fireEvent.click(desktop);
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith({ kind: "overview", threadId: coordinator.id }),
+    );
+  });
+
   it("approves a worker while its coordinator is selected and leaves the coordinator idle and sendable", async () => {
     const { clients, code, executeOperation, getWorkerId } = coordinatorFixture();
     render(<RemoteWorkspace actsAsHostPerson clients={clients} connected mode="code" />);

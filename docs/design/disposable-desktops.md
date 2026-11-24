@@ -1067,6 +1067,7 @@ Desktop tab.
 
 Rules this slice resolved:
 
+- A directly paired laptop opens **Desktop** from the selected remote Code thread. Opening the pane reads the thread’s overview through its paired session. Starting or showing a desktop is a separate action. Closing the pane or changing threads closes its view.
 - **A view is host memory, minted by a person's act.** A tab shows a screen
   only through a view the host mints when the person starts a desktop in that
   tab or presses **Show desktop**. Views are never journaled or persisted, so

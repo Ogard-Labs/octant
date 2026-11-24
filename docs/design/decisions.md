@@ -4089,7 +4089,7 @@ A Project owns at most one desktop recipe that only a person edits, and a thread
 - A lease belongs to one thread, a thread holds at most two by default, and only Work and Code threads may lease. The per-thread and per-host counts are Settings defaults a person changes, at a local window or a paired device (maintainer decision, 2026-11-12; built for a person-paired device, refused for hub-introduced devices), each from one to eight (maintainer request, 2026-11-12).
 - Failures are named refusal values, never throws or hangs.
 - Teardown runs on a host-owned path that stays authorized after thread archive, recipe removal or plugin disable, and can only release, verify and list.
-- Any client that may open the thread may view and operate its desktop; the person's own input needs no approval and is journaled.
+- Any client that may open the thread may view and operate its disposable desktop; the person's own input needs no approval and is journaled. A remote Code thread opens the existing Desktop pane over the paired session.
 
 Status: Partly built. Since: 2026-10-26. Detail: [Disposable desktops: model](disposable-desktops.md#model) and [authority](disposable-desktops.md#authority).
 

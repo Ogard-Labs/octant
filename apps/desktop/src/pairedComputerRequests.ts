@@ -71,6 +71,8 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   { method: "POST", path: "/api/server-proxy/forwards" },
   { method: "GET", path: "/api/host/resources" },
   { method: "POST", path: "/api/code/local-servers/commands" },
+  { method: "POST", path: "/api/code/desktops" },
+  { method: "POST", path: "/api/code/desktops/frame" },
   { method: "GET", path: "/api/todos" },
   { method: "GET", path: "/api/todos/changes" },
   { method: "POST", path: "/api/todos/commands" },
