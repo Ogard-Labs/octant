@@ -451,7 +451,7 @@ The renderer's first load has a byte budget, recorded in
 `scripts/initial-renderer-budget.json` and enforced by `bun run renderer:check`
 in CI. The budget counts the static graph Vite loads for `index.html`: the main
 entry is at most 1,613,707 B (1,576 KiB), the initial CSS at most 666,495 B
-(651 KiB), and the initial JavaScript and CSS at most 1,219,801 B after gzip
+(651 KiB), and the initial JavaScript and CSS at most 1,219,820 B after gzip
 level 6. A change that grows any measure past its budget fails. A change that
 shrinks one lowers the recorded budget. Raising a budget is a maintainer
 decision; the editable composer prompt that holds inline `@model` chips raised
@@ -459,7 +459,9 @@ it once (maintainer decision, 2026-11-23), its picker and chip loading on first
 use. Before the workspace tree-shaking re-baseline, the maintainer also
 approved an increase for video offer schemas that the window decodes for
 Needs you (2026-11-22). Deferring that decoding is a follow-up. The question card docked above the composer, with its
-1-9 number keys, raised it again (maintainer decision, 2026-11-24). The budgets are exact bytes with no headroom, because the same
+1-9 number keys, raised it again (maintainer decision, 2026-11-24), and the
+Settled thread state raised its gzip measure by 19 B (maintainer decision,
+2026-11-24). The budgets are exact bytes with no headroom, because the same
 source measures identically on macOS and Linux with Bun 1.4.4.
 
 The window build marks every `Schema` call pure and treats every workspace
@@ -3442,7 +3444,7 @@ Reopen clears it. Reporting finished never marks a thread Done.
 With **Settle threads when they're done** on (the default), Mark done on a
 Work or Code thread also settles it, the host settles a Work or Code thread
 once the turn that filed its passing finished report completes, and the host
-settles a Code thread once a pull request linked to it merged, read from
+settles a Code thread once a pull request it delivers merged, read from
 cached evidence only; none of them marks a thread Done, and Un-settle brings it
 back
 ([Workspace: thread visibility and completion](design/workspace.md#thread-visibility-and-completion)).
