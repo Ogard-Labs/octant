@@ -7219,10 +7219,11 @@ ls-remote` against the thread's remote and the GitHub reads they already
   decision, 2026-11-13); a hub-introduced or restricted device is refused
   those. A device's queue change is journaled with the device as its actor. The message
   waits under the device's own scope, so its turn keeps every limit a turn
-  the device sends directly has. Each command and each dispatch asks again
+  the device sends directly has. Each mutation and each dispatch asks again
   that the device is still paired, its current access level allows the mode's
   send action, and the thread's Project is one the mode serves (for Code, an
-  active one). Changing the device to Read only holds its queued messages.
+  active one). Changing the device to Read only holds its queued messages
+  and still lets it read the queue for that thread.
   A Code dispatch has no request to be admitted by, so it is admitted as that
   device for the dispatch alone and holds nothing afterwards. The paired
   clients do not yet offer the queue in their composer.

@@ -132,6 +132,13 @@ describe("queued turn admission", () => {
     if (inspection.status === "held") throw new Error("Expected an admitted scope.");
 
     level = "read-only";
+    expect(await port.inspect({ scope, windowId: deviceId, intent: "read" })).toMatchObject({
+      status: "ready",
+    });
+    expect(await port.inspect({ scope, windowId: deviceId, intent: "enqueue" })).toEqual({
+      status: "held",
+      reason: "unauthorized",
+    });
     expect(
       await port.admit({
         scope,

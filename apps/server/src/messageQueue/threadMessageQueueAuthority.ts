@@ -32,21 +32,20 @@ const DEVICE_SEND_ACTION: Readonly<Record<OctantMode, string>> = {
 /**
  * Whose authority a queued message may wait under. A local window keeps its
  * own rule. A paired device has no window and no workspace, so it is judged
- * as its own send would be: still paired, allowed the mode's send action, and
- * the thread's Project one that mode serves (for Code, an active one). The
- * queue checks again at dispatch, when pairing or access may have changed.
+ * against its current level and the thread's Project. A snapshot uses the
+ * route's read action. A change or dispatch requires the mode's send action.
  */
 export function createThreadMessageQueueAuthority(
   deps: ThreadMessageQueueAuthorityDependencies,
 ): Pick<ThreadMessageQueuePortDependencies, "isWindowLive" | "canAccess"> {
   return {
     isWindowLive: (scopeId) => deps.isLocalWindowLive(scopeId) || deps.isPairedDevice(scopeId),
-    canAccess: (scopeId, mode, projectId) => {
+    canAccess: (scopeId, mode, projectId, intent) => {
       if (!deps.isPairedDevice(scopeId)) return deps.localWindowCanAccess(scopeId, mode, projectId);
       const accessLevel = deps.deviceAccessLevel(scopeId);
       const decision = authorizePrincipalAction({
         principalKind: "remote-device",
-        action: DEVICE_SEND_ACTION[mode],
+        action: intent === "read" ? "project.overview.read" : DEVICE_SEND_ACTION[mode],
         ...(accessLevel === undefined ? {} : { accessLevel }),
       });
       if (decision.kind !== "allow") return false;

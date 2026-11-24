@@ -66,6 +66,7 @@ export interface ThreadMessageQueuePortDependencies {
     windowId: WindowId,
     mode: OctantMode,
     projectId: ProjectId | undefined,
+    intent: ThreadMessageQueueInspectionInput["intent"],
   ) => boolean;
   readonly effectiveCodeThread?: (windowId: WindowId, thread: CodeThread) => CodeThread;
   /**
@@ -278,7 +279,7 @@ export function createThreadMessageQueuePort(
       return { status: "held", reason: "thread-unavailable" };
     const facts = readFacts(deps, input.scope, input.windowId);
     if (facts === undefined) return { status: "held", reason: "not-found" };
-    if (!deps.canAccess(input.windowId, input.scope.mode, facts.thread.projectId))
+    if (!deps.canAccess(input.windowId, input.scope.mode, facts.thread.projectId, input.intent))
       return { status: "held", reason: "unauthorized" };
     const project =
       facts.thread.projectId === undefined
