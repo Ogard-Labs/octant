@@ -8,6 +8,7 @@ import type {
 import { useCallback, useEffect, useState, type ComponentType } from "react";
 import "../followUps/follow-up-suggestions.css";
 import { ImageGenerateOfferCard, ImageSaveOfferCard } from "../image/imageOfferCards";
+import { VideoGenerateOfferCard, VideoSaveOfferCard } from "../video/videoOfferCards";
 import {
   THREAD_ACTIVITY_RECOVERY_MS,
   useThreadActivityRevision,
@@ -34,6 +35,8 @@ const CARD_RENDERERS: Record<ServiceOffer["kind"], ComponentType<OfferCardProps>
   save: ImageSaveOfferCard,
   transcribe: TranscriptionOfferCard,
   narrate: NarrationOfferCard,
+  "video-generate": VideoGenerateOfferCard,
+  "video-save": VideoSaveOfferCard,
 };
 
 export function ServiceOfferPrompt(props: {

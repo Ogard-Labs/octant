@@ -15,6 +15,14 @@ const boundedNonEmptyText = (maximumBytes: number) =>
  */
 export const MAX_THREAD_BOARD_PULL_REQUEST_DISPLAY = 3;
 
+/**
+ * Maximum pull-request summaries a Code thread's navigation entry carries. The
+ * sidebar's hover card and the thread's Environment tool list every pull
+ * request the thread worked on, so this bound is far above a board card's;
+ * overflow is still reported through `hiddenCount`.
+ */
+export const MAX_THREAD_NAVIGATION_PULL_REQUEST_DISPLAY = 50;
+
 export const ThreadBoardPullRequestIdentity = Schema.Struct({
   projectId: ProjectId,
   repositoryOwner: GithubRepositoryOwner,
@@ -142,6 +150,17 @@ export const ThreadBoardPullRequestSummaries = Schema.Struct({
 }).annotations(strict);
 export type ThreadBoardPullRequestSummaries = typeof ThreadBoardPullRequestSummaries.Type;
 
+/**
+ * The same summaries as a board card's, bounded for a thread's navigation
+ * entry instead. The decoded shape is identical, so one renderer reads both.
+ */
+export const ThreadNavigationPullRequestSummaries = Schema.Struct({
+  items: Schema.Array(ThreadBoardPullRequestSummary).pipe(
+    Schema.maxItems(MAX_THREAD_NAVIGATION_PULL_REQUEST_DISPLAY),
+  ),
+  hiddenCount: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
+
 export const decodeThreadBoardPullRequestIdentity = Schema.decodeUnknownSync(
   ThreadBoardPullRequestIdentity,
 );
@@ -150,4 +169,7 @@ export const decodeThreadBoardPullRequestSummary = Schema.decodeUnknownSync(
 );
 export const decodeThreadBoardPullRequestSummaries = Schema.decodeUnknownSync(
   ThreadBoardPullRequestSummaries,
+);
+export const decodeThreadNavigationPullRequestSummaries = Schema.decodeUnknownSync(
+  ThreadNavigationPullRequestSummaries,
 );

@@ -2859,7 +2859,29 @@ coordinator, and the provider's mark ends the last line. The Project tree's top
 line is the branch alone, because the Project is its heading. A row with no place
 to name carries its state or time at the end of the title line. The row is one
 button whose accessible name reads title, Project, branch, pull request, then
-state or time; a state is never colour alone. Thread rows
+state or time; a state is never colour alone. A thread with more than one pull
+request names the first in the order below and counts the rest after it in the
+meta ink (#327 open +15); its name says "and 15 more pull requests".
+
+Pointing at a row, or focusing it, opens its details card after a short delay,
+beside the sidebar: the title and age, the states in words, then the Project,
+branch, provider and model ("Claude · Opus 5.5", the model read from its id),
+and fork lineage, one fact per line. Below a rule come the pull requests the
+thread worked on, up to 50, in flight first (open and draft), then merged, then
+closed, each group newest first, with any past 50 counted as "+N more". Each is
+one line: the state glyph in the state colour, a checks dot while it can still
+merge, the number and the title, and the repository only when the thread's pull
+requests span more than one. Checks, review, conflicts and freshness are in the
+line's tooltip and accessible name. Past ten lines the list scrolls inside the
+card. A click opens the pull request in Review; Cmd-click, or the line's GitHub
+control, which appears with the line's hover or focus, opens it on GitHub. The
+row's menus reach the same destinations: up to three pull requests inline, more
+under one Pull requests submenu of the right-click menu, while the flat
+overflow menu keeps the first three. A pull request the thread's tool calls
+created, merged or reviewed links the thread as its own branch does, and every
+GitHub and Linear issue those calls touched is listed in the thread's
+Environment tool and, at most five with the rest counted, in the card; both are
+designed, not built (maintainer decisions, 2026-11-23). Thread rows
 are not indented under their Project, so every row's fill sits the same
 distance from both edges of the sidebar. In Code, a Project whose threads run
 in two or more checkouts nests them under one heading per checkout, primary
@@ -3638,8 +3660,11 @@ New routine are the two items of one "+" menu (Add a routine) at its right
 end.
 
 **The thread's pull requests.** Under its other rows, a Code thread's Changes
-section lists the pull requests this thread opened or is tied to, newest first,
-under a small "Pull requests" caption: each is one row of fixed height with the
+section lists the pull requests this thread opened or is tied to, up to 50, in
+flight first (open and draft), then merged, then closed, each group newest
+first, under a small "Pull requests" caption. Past ten, the rest fold behind
+one quiet "Show more (n)" row that becomes "Show less", as the sidebar folds a
+long thread list. Each pull request is one row of fixed height with the
 state's mark in its colour (open, draft, merged, closed, or a neutral mark when
 the state is not known), the title on one line, then the repository, the
 number and the state in the meta ink, with "Ready to merge" and a stale or
@@ -3667,7 +3692,7 @@ opens that pull request in the app; a "…" menu beside it (More for pull reques
 #N), shown on hover and keyboard focus and always on touch, offers Open on
 GitHub and Copy link. The list is the host's cached reading: opening the strip
 reaches no forge, and the link is built from the repository and number, never
-taken as text. The host sends at most three and a count of the rest, which the
+taken as text. The host sends at most 50 and a count of the rest, which the
 list says as "N more not shown". A thread with no pull request shows no caption
 and no row, and the folded Changes summary adds the count ("Clean · 1 PR").
 The Project's own open pull requests stay under Delivery (maintainer request,

@@ -36,7 +36,10 @@ import { UsageResumeThreadState } from "./usageResume";
 import { ThreadUsageLimitHandoff } from "./usageLimitHandoff";
 import { BrowserProfileChoice } from "./projectBrowser";
 import { ThreadDocumentDelivery } from "./threadToolSteps";
-import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
+import {
+  ThreadBoardPullRequestSummaries,
+  ThreadNavigationPullRequestSummaries,
+} from "./threadBoardPullRequests";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -1680,6 +1683,15 @@ export const CodeNavigationRuntime = Schema.Struct({
     }).annotations(strict),
   ),
   pullRequestSummaries: Schema.optional(ThreadBoardPullRequestSummaries),
+  /**
+   * Every pull request the thread worked on, up to the navigation bound, in
+   * flight first. A separate field rather than a longer `pullRequestSummaries`:
+   * a client decodes a host's answer dropping fields it does not know but
+   * refusing a known field out of its range, so a previous build reading a
+   * thread with four pull requests would have lost the whole navigation.
+   * Current clients read this one and fall back to `pullRequestSummaries`.
+   */
+  threadPullRequests: Schema.optional(ThreadNavigationPullRequestSummaries),
   /** The latest turn's start and latest step while it runs; absent otherwise. */
   ...ThreadLiveTurnFields,
 }).annotations(strict);

@@ -37,6 +37,8 @@ function codeTodoThreadRows(navigation: CodeNavigation): ReadonlyArray<ChatThrea
     .filter((thread) => thread.lifecycle !== "archived")
     .map((thread) => {
       const runtime = runtimeByThread.get(String(thread.id));
+      // The whole list from a host that sends it, else the board's three.
+      const pullRequests = runtime?.threadPullRequests ?? runtime?.pullRequestSummaries;
       return {
         threadId: String(thread.id),
         title: thread.title,
@@ -47,9 +49,7 @@ function codeTodoThreadRows(navigation: CodeNavigation): ReadonlyArray<ChatThrea
             : {}),
         ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
         ...(thread.markedDoneAt === undefined ? {} : { markedDone: true as const }),
-        ...(runtime?.pullRequestSummaries === undefined
-          ? {}
-          : { pullRequests: runtime.pullRequestSummaries }),
+        ...(pullRequests === undefined ? {} : { pullRequests }),
       };
     });
 }

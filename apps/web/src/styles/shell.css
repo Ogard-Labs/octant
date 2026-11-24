@@ -2124,162 +2124,6 @@ html[data-octant-density="compact"]
   }
 }
 
-/* Delayed, non-modal info card shown for a thread row. It uses only facts
-   already available in the navigation item and Project context. */
-.thread-row-info-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 296px;
-}
-
-/* The title and recency share one compact line so the card is scannable before
-   the supporting state and context details below it. */
-.thread-row-info-card__header {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  justify-content: space-between;
-}
-
-.thread-row-info-card__states {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  min-width: 0;
-}
-
-.thread-row-info-card__state {
-  padding: 2px var(--oct-space-2);
-  color: var(--oct-muted);
-  background: var(--oct-fg-soft);
-  border-radius: var(--oct-radius-sm);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
-  line-height: 1.4;
-}
-
-.thread-row-info-card__age {
-  flex: 0 0 auto;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.thread-row-info-card__title {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--oct-fg);
-  font-weight: var(--oct-weight-medium);
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* One fact per line. Dot-joined into a single paragraph, the same facts wrapped
-   mid-value and read as prose rather than as a set of properties. */
-.thread-row-info-card__facts {
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-1);
-}
-
-.thread-row-info-card__fact {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  color: var(--oct-fg);
-  font-size: var(--oct-text-xs);
-}
-
-.thread-row-info-card__fact svg {
-  flex: 0 0 auto;
-  color: var(--oct-meta);
-}
-
-.thread-row-info-card__fact-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Linked pull requests close the card as their own group: a rule above them
-   says these are things to open, where the facts above are things to read. */
-.thread-row-info-card__prs {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-top: 8px;
-  border-top: 1px solid var(--oct-border-soft);
-}
-
-.thread-row-info-card__pr {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  min-width: 0;
-}
-
-/* Number and title on the first line, repository and facts on the second,
-   with the glyph spanning both. The reference is a card-shaped control, so
-   it drops the button recipe's fixed height rather than clipping its second
-   line. */
-.thread-row-info-card__pr-reference {
-  display: grid;
-  flex: 1 1 auto;
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: 8px;
-  row-gap: 1px;
-  align-items: center;
-  min-width: 0;
-  height: auto;
-  min-height: 0;
-  padding: 4px var(--oct-space-2);
-  text-align: left;
-  font-weight: 400;
-}
-
-.thread-row-info-card__pr-reference > svg {
-  grid-row: span 2;
-  color: var(--oct-meta);
-}
-
-.thread-row-info-card__pr-title,
-.thread-row-info-card__pr-meta {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--oct-text-xs);
-  line-height: 1.35;
-}
-
-.thread-row-info-card__pr-title {
-  color: var(--oct-fg);
-  font-weight: var(--oct-weight-medium);
-}
-
-.thread-row-info-card__pr-meta {
-  color: var(--oct-meta);
-}
-
-.thread-row-info-card__pr-github {
-  flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
-  min-height: 24px;
-  padding: 0;
-  color: var(--oct-meta);
-  border-radius: var(--oct-radius-sm);
-}
-
-.thread-row-info-card__pr-more {
-  padding: 2px var(--oct-space-2);
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
 /* Thread menus are action palettes, not generic context popups. The menu is
    as wide as its longest row up to a bound, so a checked switch's tick widens
    the menu instead of cutting its label (a fixed 248px showed "Wake when a
@@ -3074,8 +2918,7 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   list-style: none;
 }
 
-/* The bare variant draws nothing, so these take the ghost hover fill themselves. */
-.thread-row-info-card__pr-github:hover,
+/* The bare variant draws nothing, so this takes the ghost hover fill itself. */
 .draft-thread__recent-item:hover {
   background: var(--muted);
 }
@@ -4087,6 +3930,12 @@ form > .work-composer-adapter__attachments {
 .sidebar-navigation__thread-pr-mark {
   display: inline-flex;
   flex: none;
+  color: var(--oct-meta);
+}
+
+/* The thread's other pull requests, counted after the first in the same quiet
+   ink, so a thread that worked through many is not read as having one. */
+.sidebar-navigation__thread-pr-more {
   color: var(--oct-meta);
 }
 

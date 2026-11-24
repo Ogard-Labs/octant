@@ -1,5 +1,7 @@
 import {
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useContext,
   useId,
@@ -9,12 +11,10 @@ import {
   useState,
 } from "react";
 import { threadRowShortAge } from "./threadRowShortAge";
-import type { ReactElement, ReactNode } from "react";
+import type { ComponentType, ReactElement, ReactNode } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import {
   Archive,
-  Cpu,
   BellRing,
   ChevronRight,
   CircleAlert,
@@ -22,10 +22,7 @@ import {
   LoaderCircle,
   Check,
   Clock,
-  ExternalLink,
-  FolderGit2,
   GitBranch,
-  GitFork,
   GitPullRequest,
   MoreHorizontal,
   Pin,
@@ -48,9 +45,11 @@ import {
   SIDEBAR_THREAD_STATUS_LABEL,
 } from "@octant/domain/sidebar-thread-status-policy";
 import type { SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
-import { describePullRequestSummary } from "../threadBoard/ThreadBoardPullRequestSummaries";
-import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
-import { pullRequestKey, threadRowPullRequestDestinations } from "./threadRowPullRequests";
+import {
+  morePullRequestsThanTheFirst,
+  THREAD_ROW_MENU_INLINE_PULL_REQUESTS,
+  threadRowPullRequestDestinations,
+} from "./threadRowPullRequests";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
 import { useSidebarRowProperties } from "../shell/sidebarRowProperties";
@@ -193,22 +192,6 @@ export function threadRowState(props: {
 }
 
 /**
- * The states worth naming at the top of the card, most actionable first. A row
- * can hold several at once, so each is its own marker rather than a joined
- * phrase.
- */
-function threadRowStates(thread: ChatThreadNavigationItem): ReadonlyArray<string> {
-  const states: string[] = [];
-  if (thread.followUp === true) states.push("Follow-up");
-  if (thread.unread === true) states.push("Unread");
-  if (thread.pinned === true) states.push("Pinned");
-  if (thread.woke === true) states.push("Snooze ended");
-  else if (thread.shelf === "snoozed") states.push("Snoozed");
-  if (thread.shelf === "completed") states.push("Settled");
-  return states;
-}
-
-/**
  * Distance from now in the coarsest unit that still reads as true, so the
  * header carries recency without the reader parsing a date. Falls back to the
  * absolute date past a year, where "14mo ago" stops being useful.
@@ -246,200 +229,42 @@ export function threadRowAgeFact(
   return { label, title };
 }
 
-export function threadRowAge(updatedAt: string | undefined): string | undefined {
-  if (updatedAt === undefined) return undefined;
-  const date = new Date(updatedAt);
-  if (Number.isNaN(date.getTime())) return undefined;
-  const minutes = Math.round((Date.now() - date.getTime()) / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 365) return `${days}d ago`;
-  return date.toLocaleDateString();
-}
-
-/** One icon-and-label line of the info card. */
-interface ThreadRowFact {
-  readonly icon: IconComponent;
-  readonly key: string;
-  readonly label: string;
-}
-
-/**
- * Builds the card's fact rows from values already present in the navigation
- * item and Project context. It does not invent transcript detail, model names,
- * or turn counts; those are not in the row's contract.
- */
-function threadRowFacts(props: {
-  readonly lineageParentTitle?: string;
-  readonly projectName: string | undefined;
-  readonly thread: ChatThreadNavigationItem;
-}): ReadonlyArray<ThreadRowFact> {
-  const facts: ThreadRowFact[] = [];
-  if (props.projectName !== undefined) {
-    facts.push({ icon: FolderGit2, key: "project", label: props.projectName });
-  }
-  if (props.thread.checkoutChip !== undefined) {
-    facts.push({ icon: GitBranch, key: "checkout", label: props.thread.checkoutChip.label });
-  }
-  if (props.thread.provider !== undefined) {
-    facts.push({ icon: Cpu, key: "provider", label: props.thread.provider.displayName });
-  }
-  if (props.lineageParentTitle !== undefined) {
-    facts.push({ icon: GitFork, key: "lineage", label: `Forked from ${props.lineageParentTitle}` });
-  } else if (props.thread.lineageParentThreadId !== undefined) {
-    facts.push({
-      icon: GitFork,
-      key: "lineage",
-      label: "Forked from a thread no longer available",
-    });
-  }
-  return facts;
-}
-
-/**
- * Compact references to the row's exact linked pull requests, inside the card.
- *
- * A click opens the pull request in Octant's Review dock; Cmd-click (Ctrl on
- * other platforms) and the trailing control go to github.com, so both
- * destinations stay one gesture apart. Without a Review route the reference
- * is plain text — a button that could open nothing would read as broken —
- * and without an external route neither the control nor the modifier is
- * offered. The facts come from the cached snapshot the row already carries;
- * nothing here asks GitHub for more.
- */
-function ThreadRowPullRequests(props: {
-  readonly actions: ThreadRowActions;
-  readonly summaries: ThreadBoardPullRequestSummaries;
-}) {
-  const openInReview = props.actions.onOpenPullRequest;
-  const openOnGithub = props.actions.onOpenPullRequestOnGithub;
-  return (
-    <span aria-label="Linked pull requests" className="thread-row-info-card__prs" role="group">
-      {props.summaries.items.map((summary) => {
-        const number = String(summary.identity.number);
-        const repo = `${summary.identity.repositoryOwner}/${summary.identity.repositoryName}`;
-        const meta = [repo, ...describePullRequestSummary(summary)].join(" · ");
-        const externalUrl =
-          openOnGithub === undefined ? undefined : githubPullRequestUrl(summary.identity);
-        const reference = (
-          <>
-            <GitPullRequest aria-hidden="true" size={14} />
-            <span className="thread-row-info-card__pr-title">
-              #{number} {summary.title}
-            </span>
-            <span className="thread-row-info-card__pr-meta">{meta}</span>
-          </>
-        );
-        return (
-          <span className="thread-row-info-card__pr" key={pullRequestKey(summary.identity)}>
-            {openInReview === undefined ? (
-              <span className="thread-row-info-card__pr-reference">{reference}</span>
-            ) : (
-              <OctantButton
-                aria-label={`Open pull request #${number}: ${summary.title} · ${meta}`}
-                className="thread-row-info-card__pr-reference thread-row-info-card__pr-open"
-                onClick={(event) => {
-                  if (event.metaKey || event.ctrlKey) {
-                    if (externalUrl !== undefined) openOnGithub?.(summary.identity);
-                    return;
-                  }
-                  openInReview(summary.identity);
-                }}
-                title={
-                  externalUrl === undefined
-                    ? "Opens in Review"
-                    : "Opens in Review. Cmd-click opens on GitHub."
-                }
-                type="button"
-                variant="ghost"
-              >
-                {reference}
-              </OctantButton>
-            )}
-            {externalUrl === undefined ? null : (
-              <OctantIconButton
-                className="thread-row-info-card__pr-github"
-                label={`Open #${number} on GitHub`}
-                onClick={() => openOnGithub?.(summary.identity)}
-                title={`Open #${number} on GitHub`}
-                type="button"
-                variant="bare"
-              >
-                <ExternalLink aria-hidden="true" size={14} />
-              </OctantIconButton>
-            )}
-          </span>
-        );
-      })}
-      {props.summaries.hiddenCount === 0 ? null : (
-        <span className="thread-row-info-card__pr-more">
-          +{String(props.summaries.hiddenCount)} more
-        </span>
-      )}
-    </span>
-  );
-}
-
-/**
- * A delayed, non-modal summary of the facts the navigation row and its Project
- * context already carry, plus the row's exact linked pull requests.
- *
- * It reads on the ordinary raised surface rather than the inverted tooltip
- * ground: the card's own tokens paint `--oct-fg` text, which on the tooltip's
- * `--oct-fg` background rendered the title invisible and left the facts at a
- * grey that failed against near-black.
- */
-function ThreadRowInfoCard(props: {
+interface ThreadRowInfoCardProps {
   readonly actions: ThreadRowActions;
   readonly lineageParentTitle?: string;
   readonly projectName: string | undefined;
   readonly thread: ChatThreadNavigationItem;
-}) {
-  const states = threadRowStates(props.thread);
-  const age = threadRowAge(props.thread.updatedAt);
-  const facts = threadRowFacts({
-    ...(props.lineageParentTitle === undefined
-      ? {}
-      : { lineageParentTitle: props.lineageParentTitle }),
-    projectName: props.projectName,
-    thread: props.thread,
-  });
-  return (
-    <span className="thread-row-info-card">
-      <span className="thread-row-info-card__header">
-        <span className="thread-row-info-card__title">{props.thread.title}</span>
-        {age === undefined ? null : <span className="thread-row-info-card__age">{age}</span>}
-      </span>
-      {states.length === 0 ? null : (
-        <span className="thread-row-info-card__states">
-          {states.map((state) => (
-            <span className="thread-row-info-card__state" key={state}>
-              {state}
-            </span>
-          ))}
-        </span>
-      )}
-      {facts.length === 0 ? null : (
-        <span className="thread-row-info-card__facts">
-          {facts.map((fact) => (
-            <span className="thread-row-info-card__fact" key={fact.key}>
-              <fact.icon aria-hidden="true" size={14} />
-              <span className="thread-row-info-card__fact-label">{fact.label}</span>
-            </span>
-          ))}
-        </span>
-      )}
-      {props.thread.pullRequests === undefined ||
-      (props.thread.pullRequests.items.length === 0 &&
-        props.thread.pullRequests.hiddenCount === 0) ? null : (
-        <ThreadRowPullRequests actions={props.actions} summaries={props.thread.pullRequests} />
-      )}
-    </span>
-  );
 }
+
+interface LoadedThreadRowInfoCard {
+  readonly default: ComponentType<ThreadRowInfoCardProps>;
+}
+
+/**
+ * The card and its styles load on the first approach to a row, not with the
+ * window: a row is drawn at startup, its card only when someone asks for it.
+ * A card that cannot load (a tab left open across an update asks for a file
+ * the host no longer has) names the thread instead: thrown out of render, the
+ * failure would take the whole window down for a hover.
+ *
+ * Awaited in a try rather than given a rejection handler: the window build
+ * moves a `.then` on an import inside its own stylesheet wait, where the
+ * handler never sees a stylesheet that failed.
+ */
+async function importThreadRowInfoCard(): Promise<LoadedThreadRowInfoCard> {
+  try {
+    const module = await import("./ThreadRowInfoCard");
+    return { default: module.ThreadRowInfoCard };
+  } catch {
+    return { default: ({ thread }) => <span>{thread.title}</span> };
+  }
+}
+
+// Shared by the approach and the card: a second import would not wait for a
+// stylesheet the first is still loading, and would draw the card unstyled.
+let threadRowInfoCard: Promise<LoadedThreadRowInfoCard> | undefined;
+const loadThreadRowInfoCard = () => (threadRowInfoCard ??= importThreadRowInfoCard());
+const ThreadRowInfoCard = lazy(loadThreadRowInfoCard);
 
 /**
  * Wraps a row trigger so the info card appears after a short delay on hover or
@@ -460,16 +285,19 @@ export function ThreadRowInfoPopup(props: {
       besideSidebar
       delay={400}
       content={
-        <ThreadRowInfoCard
-          actions={props.actions}
-          {...(props.lineageParentTitle === undefined
-            ? {}
-            : { lineageParentTitle: props.lineageParentTitle })}
-          projectName={props.projectName}
-          thread={props.thread}
-        />
+        <Suspense fallback={null}>
+          <ThreadRowInfoCard
+            actions={props.actions}
+            {...(props.lineageParentTitle === undefined
+              ? {}
+              : { lineageParentTitle: props.lineageParentTitle })}
+            projectName={props.projectName}
+            thread={props.thread}
+          />
+        </Suspense>
       }
       label="Thread details"
+      onApproach={() => void loadThreadRowInfoCard()}
       side="right"
     >
       {props.children}
@@ -493,7 +321,13 @@ export function ThreadRowActionsGutter(props: {
   // finished row most often wants; Archive moves to the menus for such rows,
   // since the slot holds two buttons and a third would cut every title short.
   const settled = props.thread.completedAt !== undefined;
-  const pullRequestDestinations = threadRowPullRequestDestinations(props.thread, props.actions);
+  // The overflow menu is flat, so it lists only the first few pull requests;
+  // the right-click menu and the hover card reach the rest.
+  const pullRequestDestinations = threadRowPullRequestDestinations(
+    props.thread,
+    props.actions,
+    THREAD_ROW_MENU_INLINE_PULL_REQUESTS,
+  );
   // The overflow menu is flat, so each wake time is its own row here; the
   // right-click menu folds the same times under one Snooze item.
   const snoozePresets =
@@ -884,6 +718,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
     );
   }
   const rowPullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
+  const morePullRequests = morePullRequestsThanTheFirst(props.thread.pullRequests);
   const rowCheckout =
     shows.branch && props.hideCheckoutFact !== true ? props.thread.checkoutChip : undefined;
   // A snoozed row says when it comes back, not when it was last touched; a row
@@ -907,7 +742,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
       aria-label={sidebarThreadRowLabel({
         title: props.thread.title,
         ...(rowCheckout === undefined ? {} : { branch: rowCheckout.label }),
-        ...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest }),
+        ...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest, morePullRequests }),
         ...(rowState.label === undefined ? {} : { state: rowState.label }),
         ...(rowAge === undefined ? {} : { age: rowAge.title ?? rowAge.label }),
       })}
@@ -950,7 +785,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
           ? {}
           : { workerOf: props.thread.coordinatorTitle })}
         {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
-        {...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest })}
+        {...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest, morePullRequests })}
         {...(rowState.state === undefined ? {} : { state: rowState.state })}
         threadId={props.thread.threadId}
         unread={rowState.unread}

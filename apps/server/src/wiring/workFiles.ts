@@ -25,6 +25,7 @@ import { WorkResearchProjection } from "../work/workResearchProjection";
 import { createWorkResearchSourcePort } from "../work/workResearchSourcePort";
 import { saveGeneratedCodeImage, saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createImageRouteHandler } from "../image/imageRoutes";
+import { videoOfferDecisionRules } from "../video/videoOfferDecisionRules";
 import { imageOfferDecisionRules } from "../image/imageOfferDecisionRules";
 import { createServiceOfferRouteHandler } from "../offers/serviceOfferRoutes";
 import { createSpeechRouteHandler } from "../speech/speechRoutes";
@@ -60,7 +61,10 @@ import { createServerWorkFileListing } from "../serverProjects/serverWorkFiles";
 
 export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<AuthorityWiring, "serviceOffers" | "speechGates" | "windowAuthorityStore"> &
-  Pick<WorkspaceWiring, "keptImageChoices" | "projectService" | "shellService"> &
+  Pick<
+    WorkspaceWiring,
+    "keptImageChoices" | "keptVideoChoices" | "projectService" | "shellService"
+  > &
   Pick<ProvidersWiring, "credentialResolver" | "imageJobService" | "providerDataDirectory"> &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
   Pick<CodeWiring, "roots"> &
@@ -76,6 +80,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     serviceOffers,
     imageJobService,
     keptImageChoices,
+    keptVideoChoices,
     options,
     persistence,
     projectService,
@@ -189,6 +194,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     offers: serviceOffers,
     rules: {
       ...imageOfferDecisionRules({ ...imageProfiles, kept: keptImageChoices }),
+      ...videoOfferDecisionRules({ kept: keptVideoChoices }),
       transcribe: transcriptionDecision,
       narrate: narrationDecision,
     },

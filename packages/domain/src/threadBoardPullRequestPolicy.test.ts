@@ -4,6 +4,7 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   composeThreadBoardPullRequestSummaries,
+  composeThreadNavigationPullRequestSummaries,
   deriveConservativeReadyToMerge,
   deriveThreadBoardPullRequestState,
   matchPullRequestRowsToCodeThread,
@@ -144,6 +145,40 @@ describe("thread board pull-request policy", () => {
     expect(summaries.items).toHaveLength(3);
     expect(summaries.hiddenCount).toBe(2);
     expect(summaries.items[0]?.readyToMerge).toBe(true);
+  });
+
+  it("lists up to fifty of a thread's pull requests, in flight first, then merged, then closed", () => {
+    const states = ["closed", "merged", "open", "merged", "open"] as const;
+    const matches = Array.from({ length: 52 }, (_, index) => ({
+      row: row({
+        number: index + 1,
+        state: states[index % states.length] ?? "open",
+        draft: index === 4,
+        updatedAt: new Date(Date.UTC(2026, 7, 22, 0, index)).toISOString(),
+      }),
+    }));
+    const summaries = composeThreadNavigationPullRequestSummaries({
+      rows: matches.map((match) => match.row),
+      snapshotFreshness: {
+        status: "fresh",
+        lastSuccessfulRefreshAt: decodeTimestamp("2026-08-22T08:00:00.000Z"),
+      },
+      githubRevoked: false,
+      matches,
+    });
+    expect(summaries.items).toHaveLength(50);
+    expect(summaries.hiddenCount).toBe(2);
+    const order = summaries.items.map((summary) => summary.state);
+    const firstMerged = order.indexOf("merged");
+    const firstClosed = order.indexOf("closed");
+    expect(
+      order.slice(0, firstMerged).every((state) => state === "open" || state === "draft"),
+    ).toBe(true);
+    expect(order.slice(firstMerged, firstClosed).every((state) => state === "merged")).toBe(true);
+    expect(order.slice(firstClosed).every((state) => state === "closed")).toBe(true);
+    // Within a group the most recently updated comes first.
+    expect(summaries.items[0]?.identity.number).toBe(50);
+    expect(summaries.items[1]?.identity.number).toBe(48);
   });
 
   it("preserves a restart-recovered identity as unknown and stale", () => {

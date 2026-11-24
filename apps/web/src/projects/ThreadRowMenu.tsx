@@ -1,7 +1,11 @@
 import type { CoordinatorWorkerLevel, ThreadBoardPullRequestIdentity } from "@octant/contracts";
 import { COORDINATOR_WORKER_LEVELS } from "./coordinatorChoices";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
-import { threadRowPullRequestDestinations } from "./threadRowPullRequests";
+import {
+  THREAD_ROW_MENU_INLINE_PULL_REQUESTS,
+  threadRowPullRequestDestinations,
+  type ThreadRowPullRequestDestination,
+} from "./threadRowPullRequests";
 import {
   Archive,
   BellRing,
@@ -192,6 +196,23 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
   );
 }
 
+function PullRequestMenuItems(props: {
+  readonly destinations: ReadonlyArray<ThreadRowPullRequestDestination>;
+}) {
+  return props.destinations.map((destination) => (
+    <OctantContextMenuItem
+      className="thread-row-context-menu__item"
+      key={destination.key}
+      label={destination.label}
+      onClick={destination.run}
+    >
+      <MenuContent icon={destination.key.startsWith("pr-github:") ? ExternalLink : GitPullRequest}>
+        {destination.label}
+      </MenuContent>
+    </OctantContextMenuItem>
+  ));
+}
+
 /**
  * The right-click menu for one thread row.
  *
@@ -364,21 +385,24 @@ export function ThreadRowMenu(props: {
           <OctantContextMenuSeparator />
           <OctantContextMenuGroup>
             {/* Every destination the hover card offers is here too, because
-                the menu is where keyboard and touch reach them. */}
-            {pullRequestDestinations.map((destination) => (
-              <OctantContextMenuItem
-                className="thread-row-context-menu__item"
-                key={destination.key}
-                label={destination.label}
-                onClick={destination.run}
-              >
-                <MenuContent
-                  icon={destination.key.endsWith("github") ? ExternalLink : GitPullRequest}
+                the menu is where keyboard and touch reach them. A thread with
+                more than a few pull requests lists them one level down. */}
+            {(props.thread.pullRequests?.items.length ?? 0) <=
+            THREAD_ROW_MENU_INLINE_PULL_REQUESTS ? (
+              <PullRequestMenuItems destinations={pullRequestDestinations} />
+            ) : (
+              <OctantContextMenuSub>
+                <OctantContextMenuSubTrigger
+                  className="thread-row-context-menu__item"
+                  label="Pull requests"
                 >
-                  {destination.label}
-                </MenuContent>
-              </OctantContextMenuItem>
-            ))}
+                  <MenuContent icon={GitPullRequest}>Pull requests</MenuContent>
+                </OctantContextMenuSubTrigger>
+                <OctantContextMenuSubContent className="thread-row-context-menu">
+                  <PullRequestMenuItems destinations={pullRequestDestinations} />
+                </OctantContextMenuSubContent>
+              </OctantContextMenuSub>
+            )}
           </OctantContextMenuGroup>
         </>
       )}
