@@ -153,6 +153,7 @@ import {
 import { THREAD_MOVE_REFUSALS, decideThreadMove } from "@octant/domain/thread-project-move-policy";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
+import type { FinishedReportSettleOutcome } from "../finishedReceipts/finishedReportSettle";
 import {
   ConcurrencyConflict,
   JournalWriteFailed,
@@ -3389,6 +3390,37 @@ export class CodeService {
       "system",
     );
     return alreadyPutAway ? { status: "recorded" } : { status: "put-away" };
+  }
+
+  /**
+   * Settle a thread on the host's behalf because the turn in which its agent
+   * filed a finished report completed. Re-reads the thread and decides from
+   * the authoritative record; a thread whose turn still runs or waits on the
+   * person answers busy, so the caller may try again shortly. Coordinators,
+   * child work and a pending decision are the caller's to rule out first.
+   */
+  settleFinishedThread(threadId: CodeThreadId): FinishedReportSettleOutcome {
+    const current = this.#persistence.readCodeThread(threadId);
+    if (current === undefined) return { status: "skipped", reason: "not-found" };
+    if (current.lifecycle !== "active") return { status: "skipped", reason: "not-active" };
+    if (current.completedAt !== undefined) return { status: "skipped", reason: "already-settled" };
+    if (!this.#mayPutAwayDone(current)) return { status: "skipped", reason: "busy" };
+    const updatedAt = decodeTimestamp(this.#clock());
+    const next = decodeCodeThread({
+      ...withoutPinned(withoutRest(current)),
+      completedAt: updatedAt,
+      version: current.version + 1,
+      updatedAt,
+    });
+    this.#append(
+      "code-thread",
+      current.id,
+      current.version,
+      "code.thread-updated@1",
+      { kind: "thread-updated", thread: next },
+      "system",
+    );
+    return { status: "settled" };
   }
 
   /**

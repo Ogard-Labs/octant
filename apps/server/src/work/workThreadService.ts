@@ -51,6 +51,7 @@ import {
   type WorkTranscriptSearch,
   type ImportedSessionHistory,
 } from "@octant/contracts";
+import type { FinishedReportSettleOutcome } from "../finishedReceipts/finishedReportSettle";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import {
   clipTranscriptSearchSnippet,
@@ -757,6 +758,48 @@ export class WorkThreadService {
     } catch (error) {
       throw this.#mapFailure(error);
     }
+  }
+
+  /**
+   * Settle a thread on the host's behalf because the turn in which its agent
+   * filed a finished report completed; the caller has read the person's
+   * Settle threads when they're done switch. Decides from the runtime the host observes, as a
+   * person's Settle does; a turn still running or waiting answers busy, so the
+   * caller may try again shortly. A pending decision is the caller's to rule
+   * out first.
+   */
+  async settleFinishedThread(threadId: WorkThreadId): Promise<FinishedReportSettleOutcome> {
+    this.#assertReady();
+    const current = this.#projection.read(threadId);
+    if (current === undefined) return { status: "skipped", reason: "not-found" };
+    if (current.lifecycle !== "active") return { status: "skipped", reason: "not-active" };
+    if (current.completedAt !== undefined) return { status: "skipped", reason: "already-settled" };
+    const decision = decideCompleteThread({
+      lifecycle: current.lifecycle,
+      ...(await this.#restSignals(current.id)),
+    });
+    if (decision.status === "refused") return { status: "skipped", reason: "busy" };
+    // The read above awaited the runtime; a person's change meanwhile wins.
+    const latest = this.#projection.read(threadId);
+    if (latest === undefined || latest.version !== current.version) {
+      return { status: "skipped", reason: "busy" };
+    }
+    const updatedAt = decodeTimestamp(this.#clock());
+    const settled = decodeWorkThread({
+      ...withoutThreadRest(latest),
+      completedAt: updatedAt,
+      version: latest.version + 1,
+      updatedAt,
+    });
+    this.#append(
+      latest.id,
+      latest.version,
+      "work.thread-updated@1",
+      { kind: "thread-updated", thread: settled },
+      "system",
+    );
+    this.#projection.apply({ kind: "thread-updated", thread: settled });
+    return { status: "settled" };
   }
 
   async execute(

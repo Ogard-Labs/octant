@@ -2209,6 +2209,26 @@ describe("WorkThreadService", () => {
     expect(markedWhileRunning.thread).not.toHaveProperty("completedAt");
   });
 
+  it("settles a finished thread for the host, but not while its turn still runs", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    await expect(fixture.service.settleFinishedThread(ids.thread)).resolves.toEqual({
+      status: "settled",
+    });
+    await expect(fixture.service.settleFinishedThread(ids.thread)).resolves.toEqual({
+      status: "skipped",
+      reason: "already-settled",
+    });
+
+    const running = serviceFixture({
+      threads: [thread()],
+      observeRuntime: () => ({ executing: true, awaitingInput: false }) as never,
+    });
+    await expect(running.service.settleFinishedThread(ids.thread)).resolves.toEqual({
+      status: "skipped",
+      reason: "busy",
+    });
+  });
+
   it("keeps an evidence note an older client sends with the mark", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
 

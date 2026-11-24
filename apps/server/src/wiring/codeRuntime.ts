@@ -1,6 +1,7 @@
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { splitRepositoryName } from "../code/pullRequestLinkService";
 import { MergedThreadPutAway } from "../code/mergedThreadPutAway";
+import { FinishedReportSettle } from "../finishedReceipts/finishedReportSettle";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { designSystemTurnContext } from "../designSystems/designSystemContext";
 import {
@@ -25,6 +26,7 @@ import {
   decodeProviderSessionId,
   RUNTIME_STARTED_TURN_PROMPT,
   decodeCodeRelativePath,
+  decodeCodeOperationEventFrame,
   decodeCodeThreadId,
   type CodeThreadId,
   decodeContextSubjectRef,
@@ -2588,6 +2590,56 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     const unsubscribeCoordinator = persistence.journal.subscribeCommitted((append) =>
       coordinatorService.onCommittedEvents(append.events),
     );
+    // A Code turn that filed a finished report settles its thread once it
+    // completes, under the same rules the merge sweep keeps: never a
+    // coordinator, child work still running or unread, or a pending decision.
+    // Only the in-process service can act as the host.
+    const finishedReportSettle =
+      hostCodeService === undefined
+        ? undefined
+        : new FinishedReportSettle({
+            completedTurn: (event) => {
+              if (event.eventName !== "code.operation-event-recorded@1") return undefined;
+              const frame = decodeCodeOperationEventFrame(event.payload);
+              return frame.event.kind === "operation-state" && frame.event.state === "completed"
+                ? { threadId: String(frame.threadId), turnId: String(frame.operationId) }
+                : undefined;
+            },
+            latestReportTurnId: (threadId) => finishedReceipts.latest(threadId)?.receipt.turnId,
+            enabled: () =>
+              (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                .putAwayThreadsWhenDone,
+            settle: async (threadId) => {
+              const id = decodeCodeThreadId(threadId);
+              const thread = persistence.readCodeThread(id);
+              if (thread === undefined) return { status: "skipped", reason: "not-found" };
+              if (thread.coordinator === true) return { status: "skipped", reason: "coordinator" };
+              if (codeTurnDecisions.forThread(thread) !== undefined) {
+                return { status: "skipped", reason: "decision-pending" };
+              }
+              const view = await codeThreadMetadataService.project([
+                {
+                  thread,
+                  projectProjectionPresent: persistence.readProject(thread.projectId) !== undefined,
+                },
+              ]);
+              const children = view.threads[0]?.childAgents;
+              if (
+                children !== undefined &&
+                (children.active > 0 || children.unacknowledgedResults > 0)
+              ) {
+                return { status: "skipped", reason: "child-work" };
+              }
+              return hostCodeService.settleFinishedThread(id);
+            },
+            onError: (message, error) => console.error(`[code-settle] ${message}`, error),
+          });
+    const unsubscribeFinishedReportSettle =
+      finishedReportSettle === undefined
+        ? () => undefined
+        : persistence.journal.subscribeCommitted((append) =>
+            finishedReportSettle.onCommittedEvents(append.events),
+          );
     coordinatorWorkersHolder.read = (threadId) => coordinatorService.workersOf(threadId);
     continueWorkerOnFallback.current = (threadId, availability, stopped) =>
       coordinatorService.continueOnFallback(String(threadId), availability, stopped);
@@ -2595,6 +2647,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         unsubscribeCoordinator();
+        unsubscribeFinishedReportSettle();
         coordinatorDoneWhenAbort.abort();
         coordinatorService.stop();
       }),
