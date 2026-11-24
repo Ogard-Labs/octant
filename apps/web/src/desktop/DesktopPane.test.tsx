@@ -161,8 +161,8 @@ describe("Desktop pane", () => {
     const image = await screen.findByAltText("Mac host display");
     Object.assign(image, { setPointerCapture: vi.fn() });
     image.getBoundingClientRect = () => new DOMRect(0, 0, 100, 100);
-    const wheel = () =>
-      fireEvent.wheel(image, { clientX: 50, clientY: 25, deltaY: 20, cancelable: true });
+    const wheel = (ctrlKey = false) =>
+      fireEvent.wheel(image, { clientX: 50, clientY: 25, deltaY: 20, cancelable: true, ctrlKey });
     const gesture = (button: number, endX: number) => {
       fireEvent.pointerDown(image, { button, clientX: 50, clientY: 25, pointerId: 1 });
       fireEvent.pointerUp(image, { button, clientX: endX, clientY: 25, pointerId: 1 });
@@ -176,6 +176,7 @@ describe("Desktop pane", () => {
     gesture(2, 80);
     gesture(2, 50);
     gesture(0, 80);
+    expect(wheel(true)).toBe(true);
     const localScrollAllowed = wheel();
     fireEvent.click(handBack);
     await screen.findByRole("button", { name: "Take control" });

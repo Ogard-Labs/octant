@@ -188,7 +188,8 @@ export function HostDisplayPane({
     const element = image.current;
     if (!element || !control) return;
     const wheel = (e: WheelEvent) => {
-      if (!controlling.current) return;
+      // Chromium also delivers trackpad pinch-to-zoom as Ctrl-wheel.
+      if (!controlling.current || e.ctrlKey) return;
       const box = element.getBoundingClientRect();
       if (box.width <= 0 || box.height <= 0) return;
       e.preventDefault();
