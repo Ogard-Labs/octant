@@ -166,6 +166,13 @@ describe("resolveListenerCliCommand", () => {
     expect(resolveListenerCliCommand(["disable"], {})).toEqual({ action: "listener-disable" });
   });
 
+  it("enables with the saved settings when no flags are named", () => {
+    expect(resolveListenerCliCommand(["enable"], {})).toEqual({
+      action: "listener-enable",
+      saved: true,
+    });
+  });
+
   it("asks the host for its own certificate when neither a certificate nor a key is named", () => {
     expect(resolveListenerCliCommand(["enable"], { hostname: "100.64.0.7", port: "8455" })).toEqual(
       {
@@ -260,6 +267,88 @@ describe("resolveAuthCliCommand", () => {
 
   it("refuses a revocation that names no recognizable device", () => {
     expect(resolveAuthCliCommand(["revoke", "device-2"], {})).toBeUndefined();
+  });
+
+  it("reads, pauses and resumes remote access", () => {
+    expect(resolveAuthCliCommand(["status"], {})).toEqual({ action: "remote-access-status" });
+    expect(resolveAuthCliCommand(["pause"], {})).toEqual({
+      action: "remote-access-pause",
+      paused: true,
+    });
+    expect(resolveAuthCliCommand(["resume"], {})).toEqual({
+      action: "remote-access-pause",
+      paused: false,
+    });
+    expect(resolveAuthCliCommand(["resume", "now"], {})).toBeUndefined();
+    expect(resolveAuthCliCommand(["pause"], { all: true })).toBeUndefined();
+  });
+});
+
+describe("pausing and resuming remote access from this computer", () => {
+  it("resumes a paused host over the local channel and says so", async () => {
+    let paused = true;
+    const test = fixture((request) => {
+      if (request.path !== "/api/desktop/remote/access-pause") {
+        return { status: 404, body: {} };
+      }
+      if (request.method === "POST") {
+        paused = (request.body as { paused: boolean }).paused;
+        return { status: 201, body: { paused } };
+      }
+      return { status: 200, body: { paused } };
+    });
+
+    expect(await test.run({ action: "remote-access-status" })).toBe(0);
+    expect(test.out.join("")).toContain("Remote access is paused");
+    expect(await test.run({ action: "remote-access-pause", paused: false })).toBe(0);
+    expect(test.sent.at(-1)).toEqual({
+      path: "/api/desktop/remote/access-pause",
+      method: "POST",
+      body: { paused: false },
+    });
+    expect(test.out.join("")).toContain("Remote access resumed");
+    expect(paused).toBe(false);
+  });
+
+  it("says the listener must be on when the host has no gateway to answer", async () => {
+    const test = fixture(() => ({
+      status: 503,
+      body: { category: "unavailable", message: "Local device administration is unavailable." },
+    }));
+    expect(await test.run({ action: "remote-access-pause", paused: false })).toBe(1);
+    expect(test.err.join("")).toContain("`octant listener enable`");
+  });
+
+  it("suggests the bare enable command, which re-runs the saved settings", async () => {
+    const test = fixture((request) =>
+      request.path === "/api/desktop/private-listener/status"
+        ? {
+            status: 200,
+            body: {
+              status: {
+                state: "disabled",
+                hostname: null,
+                port: null,
+                origin: null,
+                exposureClass: null,
+                certificateFingerprint: null,
+                certificateSource: null,
+                tlsPin: null,
+              },
+              saved: { hostname: "100.64.0.7", port: 8455 },
+            },
+          }
+        : {
+            status: 503,
+            body: {
+              category: "unavailable",
+              message: "Local device administration is unavailable.",
+            },
+          },
+    );
+    expect(await test.run({ action: "remote-access-pause", paused: false })).toBe(1);
+    expect(test.err.join("")).toContain("Start it with `octant listener enable`");
+    expect(test.err.join("")).not.toContain("--hostname");
   });
 });
 
@@ -459,6 +548,35 @@ describe("runRemoteAccessCliCommand", () => {
     const printed = test.out.join("");
     expect(printed).toContain("Certificate source self-made");
     expect(printed).toContain("Key pin sha256-47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU");
+  });
+
+  it("re-enables with the saved settings when none are named", async () => {
+    const test = fixture((request) =>
+      request.path === "/api/desktop/private-listener/status"
+        ? {
+            status: 200,
+            body: {
+              status: { ...READY_STATUS, state: "disabled" },
+              saved: { hostname: "100.64.0.7", port: 8455 },
+            },
+          }
+        : { status: 200, body: { status: READY_STATUS } },
+    );
+    expect(await test.run({ action: "listener-enable", saved: true })).toBe(0);
+    expect(test.sent).toEqual([
+      { path: "/api/desktop/private-listener/status", method: "GET" },
+      { path: "/api/desktop/private-listener/enable", method: "POST", body: { saved: true } },
+    ]);
+  });
+
+  it("refuses a bare enable when the host saved no listener settings", async () => {
+    const test = fixture(() => ({
+      status: 200,
+      body: { status: { ...READY_STATUS, state: "disabled" } },
+    }));
+    expect(await test.run({ action: "listener-enable", saved: true })).toBe(1);
+    expect(test.sent).toEqual([{ path: "/api/desktop/private-listener/status", method: "GET" }]);
+    expect(test.err.join("")).toContain("needs --hostname and --port");
   });
 
   it("drops the default HTTPS port from the origin as Settings does", async () => {

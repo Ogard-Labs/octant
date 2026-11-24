@@ -114,6 +114,7 @@ export interface ChatComposerModelOption {
 const MODEL_OPTION_DEFAULT_ID = "(provider default)";
 
 export interface ChatComposerProps {
+  readonly readOnly?: boolean;
   readonly benchmarkProjectId?: ProjectId | undefined;
   /** Caller-owned pending text. The component never persists or clears this value itself. */
   readonly draft: string;
@@ -954,6 +955,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
   return (
     <ThreadComposer
+      readOnly={props.readOnly === true}
       queue={props.queue}
       {...(props.threadBusy === undefined ? {} : { threadBusy: props.threadBusy })}
       presentation="follow-up"

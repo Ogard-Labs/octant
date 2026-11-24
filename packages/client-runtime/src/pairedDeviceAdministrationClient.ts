@@ -4,6 +4,7 @@ import type {
   RemotePairingTicketSourceClass,
   RemotePendingPairingRequest,
 } from "@octant/contracts/desktop-bridge";
+import type { DeviceAccessLevel } from "@octant/contracts/remote-access";
 
 /** A host answer, or its refusal in words a person can act on. */
 export type PairedDeviceAdministrationAnswer<T = undefined> =
@@ -27,11 +28,22 @@ export interface PairedDeviceAdministrationClient {
   ) => Promise<PairedDeviceAdministrationAnswer>;
   readonly revokeDevice: (deviceId: string) => Promise<PairedDeviceAdministrationAnswer>;
   readonly revokeAllDevices: () => Promise<PairedDeviceAdministrationAnswer>;
+  /** Revokes every paired device but this one. */
+  readonly signOutOtherDevices: () => Promise<PairedDeviceAdministrationAnswer>;
+  readonly setDeviceAccessLevel: (
+    deviceId: string,
+    accessLevel: DeviceAccessLevel,
+  ) => Promise<PairedDeviceAdministrationAnswer>;
+  /** Pauses remote access for every paired device, this one included; only the host resumes it. */
+  readonly pauseRemoteAccess: () => Promise<PairedDeviceAdministrationAnswer>;
   readonly reconcileExpiredDevices: () => Promise<PairedDeviceAdministrationAnswer>;
   readonly listPairingRequests: () => Promise<
     PairedDeviceAdministrationAnswer<ReadonlyArray<RemotePendingPairingRequest>>
   >;
-  readonly approvePairingRequest: (ticketId: string) => Promise<PairedDeviceAdministrationAnswer>;
+  readonly approvePairingRequest: (
+    ticketId: string,
+    accessLevel?: DeviceAccessLevel,
+  ) => Promise<PairedDeviceAdministrationAnswer>;
   readonly denyPairingRequest: (ticketId: string) => Promise<PairedDeviceAdministrationAnswer>;
   readonly createPairingTicket: (
     sourceClass: RemotePairingTicketSourceClass,
@@ -107,11 +119,18 @@ export function createPairedDeviceAdministrationClient(port: {
       change("/api/remote/devices/rename", { deviceId, deviceLabel }),
     revokeDevice: (deviceId) => change("/api/remote/devices/revoke", { deviceId }),
     revokeAllDevices: () => change("/api/remote/devices/revoke-all", {}),
+    signOutOtherDevices: () => change("/api/remote/devices/sign-out-others", {}),
+    setDeviceAccessLevel: (deviceId, accessLevel) =>
+      change("/api/remote/devices/access-level", { deviceId, accessLevel }),
+    pauseRemoteAccess: () => change("/api/remote/access-pause", { paused: true }),
     reconcileExpiredDevices: () => change("/api/remote/devices/reconcile-expired", {}),
     listPairingRequests: () =>
       list<RemotePendingPairingRequest>("/api/remote/pairing-requests", "pending"),
-    async approvePairingRequest(ticketId) {
-      const answer = await ask("/api/remote/pairing-requests/approve", { ticketId });
+    async approvePairingRequest(ticketId, accessLevel) {
+      const answer = await ask("/api/remote/pairing-requests/approve", {
+        ticketId,
+        ...(accessLevel === undefined ? {} : { accessLevel }),
+      });
       if (answer.status === "ok") return { status: "ok" };
       return {
         status: "refused",

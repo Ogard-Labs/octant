@@ -34,6 +34,12 @@ export type DeviceSourceClass = "loopback" | "lan-private" | "tailscale" | "unkn
 /** The network classes a device may claim a ticket over; `unknown` cannot pair. */
 export type PairingTicketSourceClass = Exclude<DeviceSourceClass, "unknown">;
 export type DeviceState = "active" | "revoked" | "expired";
+/** What the person lets a device they paired do; the server decides from its own record. */
+export type DeviceAccessLevel = "full" | "approve-and-steer" | "read-only";
+
+function isDeviceAccessLevel(value: unknown): value is DeviceAccessLevel {
+  return value === "full" || value === "approve-and-steer" || value === "read-only";
+}
 
 export interface MintedPairingTicket {
   readonly ticketId: string;
@@ -70,6 +76,7 @@ export interface DeviceInventoryEntry {
   readonly state: DeviceState;
   readonly revokedAt?: string;
   readonly revokedReason?: string;
+  readonly accessLevel?: DeviceAccessLevel;
 }
 
 export interface RemoteCredentialOperationReceipt {
@@ -85,7 +92,14 @@ export interface RemoteDeviceControlRuntime {
   readonly listPairingRequests: () => Promise<ReadonlyArray<PendingPairingRequest>>;
   readonly approvePairingRequest: (input: {
     readonly ticketId: string;
+    readonly accessLevel?: DeviceAccessLevel;
   }) => Promise<{ readonly decision: "approved"; readonly device: DeviceInventoryEntry }>;
+  readonly setDeviceAccessLevel: (input: {
+    readonly deviceId: string;
+    readonly accessLevel: DeviceAccessLevel;
+  }) => Promise<void>;
+  readonly readRemoteAccessPaused: () => Promise<boolean>;
+  readonly setRemoteAccessPaused: (input: { readonly paused: boolean }) => Promise<boolean>;
   readonly denyPairingRequest: (input: {
     readonly ticketId: string;
     readonly reasonCode: string;
@@ -110,10 +124,16 @@ export interface RemoteDeviceControlRuntime {
 export interface RemoteDeviceControlService {
   readonly mintPairingTicket: (sourceClass: string) => Promise<MintedPairingTicket>;
   readonly listPairingRequests: () => Promise<ReadonlyArray<PendingPairingRequest>>;
-  readonly approvePairingRequest: (ticketId: string) => Promise<{
+  readonly approvePairingRequest: (
+    ticketId: string,
+    accessLevel?: unknown,
+  ) => Promise<{
     readonly decision: "approved";
     readonly device: DeviceInventoryEntry;
   }>;
+  readonly setDeviceAccessLevel: (deviceId: string, accessLevel: unknown) => Promise<void>;
+  readonly readRemoteAccessPaused: () => Promise<boolean>;
+  readonly setRemoteAccessPaused: (paused: unknown) => Promise<boolean>;
   readonly denyPairingRequest: (
     ticketId: string,
     reasonCode: string,
@@ -148,9 +168,26 @@ export function createRemoteDeviceControlService(options: {
       return await invoke(() => options.runtime.mintPairingTicket({ sourceClass }));
     },
     listPairingRequests: () => invoke(options.runtime.listPairingRequests),
-    approvePairingRequest: async (ticketId: string) => {
+    approvePairingRequest: async (ticketId: string, accessLevel?: unknown) => {
       validateUuid(ticketId, "pairing request");
-      return await invoke(() => options.runtime.approvePairingRequest({ ticketId }));
+      if (accessLevel !== undefined && !isDeviceAccessLevel(accessLevel)) {
+        throw new RemoteDeviceControlFailure("invalid");
+      }
+      return await invoke(() =>
+        options.runtime.approvePairingRequest(
+          accessLevel === undefined ? { ticketId } : { ticketId, accessLevel },
+        ),
+      );
+    },
+    setDeviceAccessLevel: async (deviceId: string, accessLevel: unknown) => {
+      validateUuid(deviceId, "device");
+      if (!isDeviceAccessLevel(accessLevel)) throw new RemoteDeviceControlFailure("invalid");
+      await invoke(() => options.runtime.setDeviceAccessLevel({ deviceId, accessLevel }));
+    },
+    readRemoteAccessPaused: () => invoke(options.runtime.readRemoteAccessPaused),
+    setRemoteAccessPaused: async (paused: unknown) => {
+      if (typeof paused !== "boolean") throw new RemoteDeviceControlFailure("invalid");
+      return await invoke(() => options.runtime.setRemoteAccessPaused({ paused }));
     },
     denyPairingRequest: async (ticketId: string, reasonCode: string) => {
       validateUuid(ticketId, "pairing request");
@@ -202,6 +239,22 @@ export function createRemoteDeviceControlHttpRuntime(
           "/api/desktop/remote/pairing-requests/approve",
           input,
         ),
+      ),
+    setDeviceAccessLevel: async (input) => {
+      const value = await request(
+        fetch,
+        options,
+        "POST",
+        "/api/desktop/remote/devices/access-level",
+        input,
+      );
+      requireExactKeys(value, ["change"]);
+    },
+    readRemoteAccessPaused: async () =>
+      decodePaused(await request(fetch, options, "GET", "/api/desktop/remote/access-pause")),
+    setRemoteAccessPaused: async (input) =>
+      decodePaused(
+        await request(fetch, options, "POST", "/api/desktop/remote/access-pause", input),
       ),
     denyPairingRequest: async (input) =>
       decodeDecision(
@@ -317,6 +370,12 @@ function decodeDecision(value: unknown): { readonly decision: "denied" } {
   return { decision: "denied" };
 }
 
+function decodePaused(value: unknown): boolean {
+  requireExactKeys(value, ["paused"]);
+  if (typeof value.paused !== "boolean") throw new RemoteDeviceControlFailure("failed");
+  return value.paused;
+}
+
 function decodeDevices(value: unknown): ReadonlyArray<DeviceInventoryEntry> {
   requireExactKeys(value, ["devices"]);
   if (!Array.isArray(value.devices)) throw new RemoteDeviceControlFailure("failed");
@@ -404,10 +463,11 @@ function decodeDeviceEntry(value: Record<string, unknown>): DeviceInventoryEntry
     "protocolFloor",
     "state",
   ];
-  const allowed = new Set([...required, "revokedAt", "revokedReason"]);
+  const allowed = new Set([...required, "revokedAt", "revokedReason", "accessLevel"]);
   if (
     Object.keys(value).some((key) => !allowed.has(key)) ||
-    required.some((key) => !(key in value))
+    required.some((key) => !(key in value)) ||
+    (value.accessLevel !== undefined && !isDeviceAccessLevel(value.accessLevel))
   ) {
     throw new RemoteDeviceControlFailure("failed");
   }
@@ -446,6 +506,7 @@ function decodeDeviceEntry(value: Record<string, unknown>): DeviceInventoryEntry
     state: value.state as DeviceState,
     ...(typeof value.revokedAt === "string" ? { revokedAt: value.revokedAt } : {}),
     ...(typeof value.revokedReason === "string" ? { revokedReason: value.revokedReason } : {}),
+    ...(isDeviceAccessLevel(value.accessLevel) ? { accessLevel: value.accessLevel } : {}),
   });
 }
 

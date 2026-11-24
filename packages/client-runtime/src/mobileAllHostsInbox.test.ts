@@ -131,11 +131,130 @@ describe("listAllHostsMobileInbox", () => {
     expect(result.failures).toEqual([]);
     expect(result.rows.find((row) => row.hostId === "studio")).toMatchObject({
       live: "needs-input",
-      waitingOfferText: "Generate an image?",
+      waitingAsk: { label: "Offer", text: "Generate an image?" },
     });
-    expect(result.rows.find((row) => row.hostId === "laptop")).not.toHaveProperty(
-      "waitingOfferText",
-    );
+    expect(result.rows.find((row) => row.hostId === "laptop")).not.toHaveProperty("waitingAsk");
+  });
+
+  it("lists every kind of waiting ask the host names, each on the thread it opens", async () => {
+    const chatThreadId = "00000000-0000-4000-8000-000000000001";
+    const workThreadId = "00000000-0000-4000-8000-000000000002";
+    const codeThreadId = "00000000-0000-4000-8000-000000000003";
+    const browserThreadId = "00000000-0000-4000-8000-000000000004";
+    const routineThreadId = "00000000-0000-4000-8000-000000000005";
+    const leadThreadId = "00000000-0000-4000-8000-000000000006";
+    const futureThreadId = "00000000-0000-4000-8000-000000000007";
+    const projectId = "00000000-0000-4000-8000-0000000000aa";
+    const host = transportFor({
+      hostId: "studio",
+      threadId: chatThreadId,
+      title: "Studio chat",
+      updatedAt: now,
+    });
+    const ask = (kind: string, mode: string, threadId: string, text: string, n: number) => ({
+      kind,
+      mode,
+      askId: `00000000-0000-4000-8000-00000000010${n}`,
+      ...(mode === "chat" ? {} : { projectId }),
+      threadId,
+      threadTitle: `Thread ${n}`,
+      text,
+      requestedAt: now,
+    });
+    const result = await listAllHostsMobileInbox([
+      {
+        ...host,
+        authenticatedFetch: (request) =>
+          request.path === "/api/pending-requests"
+            ? Promise.resolve(
+                Response.json({
+                  requests: [
+                    {
+                      mode: "code",
+                      kind: "approval",
+                      projectId,
+                      threadId: browserThreadId,
+                      threadTitle: "Browse docs",
+                      requestedAt: now,
+                      text: "Open the docs site",
+                      browserOrigin: "https://docs.example.com",
+                      answer: {
+                        threadId: browserThreadId,
+                        checkoutId: "00000000-0000-4000-8000-0000000000bb",
+                        approvalId: "00000000-0000-4000-8000-0000000000cc",
+                      },
+                    },
+                    {
+                      mode: "work",
+                      kind: "lead-approval",
+                      projectId,
+                      threadId: leadThreadId,
+                      threadTitle: "Lead run",
+                      requestedAt: now,
+                      text: "Run the build",
+                    },
+                    {
+                      mode: "work",
+                      kind: "a-kind-from-a-newer-host",
+                      threadId: futureThreadId,
+                      threadTitle: "Newer ask",
+                      requestedAt: now,
+                    },
+                    { mode: "code", kind: "a-kind-with-no-thread" },
+                  ],
+                  truncated: false,
+                  asks: [
+                    ask("memory-proposal", "chat", chatThreadId, "Remember the deploy window", 1),
+                    ask("tool-approval", "work", workThreadId, "Search the tracker", 2),
+                    ask("image-offer", "code", codeThreadId, "Generate a diagram?", 3),
+                    ask("routine-proposal", "work", routineThreadId, "Run nightly checks", 4),
+                    ask("browser-approval", "code", browserThreadId, "Upload a file", 5),
+                  ],
+                }),
+              )
+            : host.authenticatedFetch(request),
+      },
+    ]);
+
+    expect(result.failures).toEqual([]);
+    const opened = (mode: string, threadId: string) =>
+      result.rows.find((row) => row.mode === mode && row.threadId === threadId);
+    expect(opened("chat", chatThreadId)).toMatchObject({
+      hostId: "studio",
+      title: "Studio chat",
+      live: "needs-input",
+      waitingAsk: { label: "Memory proposal", text: "Remember the deploy window" },
+    });
+    expect(opened("work", workThreadId)).toMatchObject({
+      hostId: "studio",
+      title: "Thread 2",
+      projectId,
+      live: "needs-input",
+      waitingAsk: { label: "Tool approval", text: "Search the tracker" },
+    });
+    expect(opened("code", codeThreadId)).toMatchObject({
+      hostId: "studio",
+      live: "needs-input",
+      waitingAsk: { label: "Image offer", text: "Generate a diagram?" },
+    });
+    expect(opened("work", routineThreadId)).toMatchObject({
+      live: "needs-input",
+      waitingAsk: { label: "Routine proposal", text: "Run nightly checks" },
+    });
+    expect(opened("code", browserThreadId)).toMatchObject({
+      title: "Browse docs",
+      live: "needs-input",
+      waitingAsk: { label: "Browser approval", text: "Open the docs site" },
+    });
+    expect(opened("work", leadThreadId)).toMatchObject({
+      waitingAsk: { label: "Approval", text: "Run the build" },
+    });
+    expect(opened("work", futureThreadId)).toMatchObject({
+      title: "Newer ask",
+      live: "needs-input",
+      waitingAsk: { label: "Waiting on you" },
+    });
+    expect(result.rows).toHaveLength(7);
   });
 
   it("merges rows from healthy hosts and sorts by freshness", async () => {

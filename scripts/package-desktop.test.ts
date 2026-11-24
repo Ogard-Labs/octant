@@ -10,6 +10,7 @@ import {
   readdir,
   stat,
   symlink,
+  utimes,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -90,7 +91,9 @@ import {
   stageExternalRuntimePackages,
   stageLinuxAppDir,
   stageHostPayload,
+  stampBundleBuildDate,
 } from "./package-desktop";
+import { createArchiveArgv } from "./sign-desktop";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
@@ -454,6 +457,38 @@ describe("desktop packaging boundary", () => {
           validateBundleIdentity(root, desktopIdentity("nightly")),
         ).resolves.toBeUndefined();
         await expect(validateBundleIdentity(root, desktopIdentity("stable"))).rejects.toThrow();
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin")(
+    "dates the app bundle by its build, not by the Electron archive it was unpacked from, through the release zip",
+    async () => {
+      const root = await mkdtemp(resolve(tmpdir(), "octant-bundle-date-"));
+      try {
+        // Electron's darwin zip stores every entry, the .app directory included,
+        // as 1980-01-01; packaging only writes below Contents/, so without a
+        // stamp Finder shows that date for the installed app.
+        const app = resolve(root, "Octant.app");
+        await mkdir(resolve(app, "Contents/MacOS"), { recursive: true });
+        await writeFile(resolve(app, "Contents/MacOS/Octant"), "");
+        const electronArchiveDate = new Date("1980-01-01T00:00:00Z");
+        for (const path of [resolve(app, "Contents/MacOS"), resolve(app, "Contents"), app])
+          await utimes(path, electronArchiveDate, electronArchiveDate);
+        const packagedAt = new Date("2026-11-24T13:18:53Z");
+
+        await stampBundleBuildDate(app, packagedAt);
+
+        const archivePath = resolve(root, "Octant.zip");
+        const [command = "", ...args] = createArchiveArgv({ appPath: app, archivePath });
+        execFileSync(command, args);
+        const extracted = resolve(root, "extracted");
+        execFileSync("/usr/bin/ditto", ["-x", "-k", archivePath, extracted]);
+        const { mtime } = await stat(resolve(extracted, "Octant.app"));
+        // A zip records local times to two seconds.
+        expect(Math.abs(mtime.getTime() - packagedAt.getTime())).toBeLessThanOrEqual(2_000);
       } finally {
         await rm(root, { recursive: true, force: true });
       }

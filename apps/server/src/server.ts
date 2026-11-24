@@ -481,6 +481,8 @@ export function startOctantServer(
       stopDesktopLeases,
       webAssets,
     } = wireComputerUse({
+      isPairedDeviceScope,
+      isRestrictedDeviceScope,
       resolveThreadStrict,
       // Deferred: Work's running turns are wired later in this scope.
       runningWorkTurnAccess: (threadId) => runningWorkTurnAccess(threadId),
@@ -619,6 +621,7 @@ export function startOctantServer(
       providerAvailabilityMarks,
     } = yield* wireProviders({
       hubActScopeSlot,
+      toolEffectLedger,
       resolveThreadStrict,
       resolveHostStrict,
       hostResourceBudget,

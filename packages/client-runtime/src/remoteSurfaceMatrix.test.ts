@@ -11,25 +11,26 @@ import {
 
 describe("remoteSurfaceMatrix", () => {
   it("classifies mode and auxiliary surfaces as remote-approvable", () => {
-    for (const surface of listRemoteShellSurfacesByAvailability("remote")) {
-      expect(remoteShellSurfaceAvailability(surface)).toBe("remote");
+    // A reported session without a level, not the unread fallback, is the
+    // catalogue's baseline remote device.
+    const reported = { actsAsHostPerson: false };
+    for (const surface of listRemoteShellSurfacesByAvailability("remote", reported)) {
+      expect(remoteShellSurfaceAvailability(surface, reported)).toBe("remote");
     }
-    expect(listRemoteShellSurfacesByAvailability("remote").map((surface) => surface.id)).toEqual([
-      "chat",
-      "work",
-      "code",
-      "preview",
-      "provider-models",
-      "settings-read",
-    ]);
+    expect(
+      listRemoteShellSurfacesByAvailability("remote", reported).map((surface) => surface.id),
+    ).toEqual(["chat", "work", "code", "preview", "provider-models", "settings-read"]);
   });
 
   it("classifies desktop-only surfaces as local-host-only", () => {
-    for (const surface of listRemoteShellSurfacesByAvailability("local-host-only")) {
-      expect(remoteShellSurfaceAvailability(surface)).toBe("local-host-only");
+    const reported = { actsAsHostPerson: false };
+    for (const surface of listRemoteShellSurfacesByAvailability("local-host-only", reported)) {
+      expect(remoteShellSurfaceAvailability(surface, reported)).toBe("local-host-only");
     }
     expect(
-      listRemoteShellSurfacesByAvailability("local-host-only").map((surface) => surface.id),
+      listRemoteShellSurfacesByAvailability("local-host-only", reported).map(
+        (surface) => surface.id,
+      ),
     ).toEqual([
       "shell-settings",
       "design-systems",
@@ -62,13 +63,6 @@ describe("remoteSurfaceMatrix", () => {
 });
 
 describe("the surfaces a companion client may watch a thread through", () => {
-  it("lets a paired device act only where the catalog says acting is remote work", () => {
-    expect(listRemoteThreadSurfacesByReach("interactive").map((surface) => surface.id)).toEqual([
-      "chat",
-      "browser",
-    ]);
-  });
-
   it("keeps a terminal watchable and never typeable from a companion client", () => {
     const terminal = listRemoteThreadSurfaces().find((surface) => surface.id === "terminal");
     if (terminal === undefined) throw new Error("the terminal surface is missing");
@@ -148,7 +142,7 @@ describe("what a session that acts as the host's own person reaches", () => {
     ).toEqual(["listener-controls"]);
   });
 
-  it("holds a restricted session to the catalogue, as a session that says nothing is held", () => {
+  it("holds a restricted session to the catalogue, and a session that says nothing to the read-only fallback", () => {
     const local = [
       "shell-settings",
       "design-systems",
@@ -170,9 +164,19 @@ describe("what a session that acts as the host's own person reaches", () => {
         (surface) => surface.id,
       ),
     ).toEqual(local);
+    // Standing unread narrows to Read only: the catalogue's reads stay
+    // remote and everything else reads as host work.
+    const readOnly = { actsAsHostPerson: false, accessLevel: "read-only" as const };
+    expect(listRemoteShellSurfacesByAvailability("remote").map((surface) => surface.id)).toEqual(
+      listRemoteShellSurfacesByAvailability("remote", readOnly).map((surface) => surface.id),
+    );
     expect(
       listRemoteShellSurfacesByAvailability("local-host-only").map((surface) => surface.id),
-    ).toEqual(local);
+    ).toEqual(
+      listRemoteShellSurfacesByAvailability("local-host-only", readOnly).map(
+        (surface) => surface.id,
+      ),
+    );
   });
 
   it("lets a person-paired device type into a terminal a restricted session only watches", () => {
@@ -182,6 +186,28 @@ describe("what a session that acts as the host's own person reaches", () => {
     expect(
       listRemoteThreadSurfacesByReach("interactive", restricted).map((surface) => surface.id),
     ).toEqual(["chat", "browser"]);
+  });
+
+  it("lets a device paired Read only watch every surface and act on none", () => {
+    const readOnly = { actsAsHostPerson: false, accessLevel: "read-only" as const };
+    expect(listRemoteThreadSurfacesByReach("interactive", readOnly)).toEqual([]);
+    expect(
+      listRemoteThreadSurfacesByReach("read-only", readOnly).map((surface) => surface.id),
+    ).toEqual(["chat", "browser", "terminal", "simulator", "canvas", "preview"]);
+    // Sending a turn is not watching, so the modes' composers are not offered.
+    expect(
+      listRemoteShellSurfacesByAvailability("remote", readOnly).map((surface) => surface.id),
+    ).toEqual(["preview", "provider-models", "settings-read"]);
+  });
+
+  it("gives a device paired at Approve and steer what the catalogue gives a restricted session", () => {
+    const steer = { actsAsHostPerson: false, accessLevel: "approve-and-steer" as const };
+    expect(
+      listRemoteThreadSurfacesByReach("interactive", steer).map((surface) => surface.id),
+    ).toEqual(["chat", "browser"]);
+    expect(listRemoteShellSurfacesByAvailability("remote", steer)).toEqual(
+      listRemoteShellSurfacesByAvailability("remote", restricted),
+    );
   });
 
   it("reads the session's standing from the host's own-device answer and nothing else", async () => {
@@ -210,6 +236,17 @@ describe("what a session that acts as the host's own person reaches", () => {
     expect(
       await readRemoteSessionStanding(answering(200, { ...device, actsAsHostPerson: false })),
     ).toEqual({ actsAsHostPerson: false });
+    // The device's own level says why controls are missing; an unknown level is not trusted.
+    expect(
+      await readRemoteSessionStanding(
+        answering(200, { ...device, actsAsHostPerson: false, accessLevel: "read-only" }),
+      ),
+    ).toEqual({ actsAsHostPerson: false, accessLevel: "read-only" });
+    expect(
+      await readRemoteSessionStanding(
+        answering(200, { ...device, actsAsHostPerson: false, accessLevel: "owner" }),
+      ),
+    ).toEqual({ actsAsHostPerson: false, accessLevel: "read-only" });
   });
 
   it("reads a session as restricted when the host does not say, refuses, or cannot be reached", async () => {
@@ -223,6 +260,7 @@ describe("what a session that acts as the host's own person reaches", () => {
     for (const authenticatedFetch of restrictedAnswers) {
       expect(await readRemoteSessionStanding({ authenticatedFetch })).toEqual({
         actsAsHostPerson: false,
+        accessLevel: "read-only",
       });
     }
     const olderHost = {

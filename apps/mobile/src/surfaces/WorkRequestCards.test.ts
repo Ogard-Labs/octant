@@ -107,7 +107,11 @@ function authenticator(outcome: "confirmed" | "denied" = "confirmed") {
   } satisfies BiometricAuthenticator;
 }
 
-async function render(transport: MobileRemoteTransport, auth: BiometricAuthenticator) {
+async function render(
+  transport: MobileRemoteTransport,
+  auth: BiometricAuthenticator,
+  watchingOnly = false,
+) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -123,6 +127,7 @@ async function render(transport: MobileRemoteTransport, auth: BiometricAuthentic
           threadId,
           projectId,
           refreshIntervalMs: 60_000,
+          watchingOnly,
         }),
       }),
     );
@@ -229,6 +234,20 @@ describe("a Work level change on the phone", () => {
 });
 
 describe("a provider question on the phone", () => {
+  it("shows a pending question and its choices without accepting input when watching", async () => {
+    const { transport, commands } = hostWith({
+      kind: "user-input",
+      prompt: "Which venue?",
+      options: ["Hall A", "Hall B"],
+    });
+    const container = await render(transport, authenticator(), true);
+    expect(container.textContent).toContain("Which venue?");
+    expect(byText(container, "radio", "Hall B").getAttribute("aria-disabled")).toBe("true");
+    expect(container.querySelector('[data-testid="mobile-work-question-submit"]')).toBeNull();
+    expect(container.querySelector("input")).toBeNull();
+    expect(commands).toEqual([]);
+  });
+
   it("sends the chosen option's words, with no confirmation", async () => {
     const { transport, commands } = hostWith({
       kind: "user-input",

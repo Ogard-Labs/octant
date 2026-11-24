@@ -2,6 +2,7 @@ import type { ReviewDecision, ToolOutsideContentMark } from "@octant/contracts/s
 import type {
   HarnessRetryNotice,
   ThreadPublishedPage,
+  ThreadCanvasPreviewReceipt,
   ThreadRoutineReceipt,
   ThreadToolStep,
 } from "@octant/contracts";
@@ -33,6 +34,8 @@ export type TurnActivityRow =
       readonly outsideContent?: ToolOutsideContentMark;
       /** The routine the call created, shown as a receipt card under the turn. */
       readonly routine?: ThreadRoutineReceipt;
+      /** The Canvas version the call previewed, drawn inside the opened row. */
+      readonly canvasPreview?: ThreadCanvasPreviewReceipt | undefined;
       /** How long the call ran, when the host recorded its start and end. */
       readonly durationMs?: number;
       /** The person-facing approval wait subtracted from `durationMs`, when any. */
@@ -114,6 +117,7 @@ export function toolStepsActivity(
             ...(step.published === undefined ? {} : { published: step.published }),
             ...(step.outsideContent === undefined ? {} : { outsideContent: step.outsideContent }),
             ...(step.routine === undefined ? {} : { routine: step.routine }),
+            canvasPreview: step.canvasPreview,
             ...callTimingRowFields(step.timing),
           },
     ),

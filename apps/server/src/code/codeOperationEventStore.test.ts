@@ -912,6 +912,61 @@ describe("CodeOperationEventStore", () => {
     fixture.connection.close();
   });
 
+  it("keeps a Canvas preview's reference on replay when the runtime restates the call without it", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "89000000-0000-4000-8000-000000000036",
+      digest: "d".repeat(64),
+      byteLength: 9,
+    });
+    const toolCallId = "89000000-0000-4000-8000-000000000063";
+    const canvasPreview = { canvasId: "canvas-1", versionId: "version-3" };
+    let cursor = 0;
+    const append = (event: Parameters<typeof store.append>[0]["event"]) =>
+      store.append({ threadId, operationId, expectedCursor: cursor++, event });
+
+    append(
+      decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: "89000000-0000-4000-8000-000000000040",
+        modelId: "model-one",
+        sessionId: "89000000-0000-4000-8000-000000000050",
+        prompt,
+      }),
+    );
+    append({ kind: "tool-activity", toolCallId, toolName: "octant_canvas", state: "started" });
+    append({
+      kind: "tool-activity",
+      toolCallId,
+      toolName: "octant_canvas",
+      state: "completed",
+      canvasPreview,
+    });
+    // Claude Code's own tool result restates the call and carries no receipt.
+    append({
+      kind: "tool-activity",
+      toolCallId,
+      toolName: "octant_canvas",
+      state: "completed",
+      summary: "Previewed the Canvas.",
+    });
+    append(stateEvent("completed"));
+
+    const [turn] = store.conversation({ threadId, afterCursor: 0, limit: 10 }).turns;
+    expect(turn?.steps).toEqual([
+      {
+        kind: "tool",
+        toolCallId,
+        toolName: "octant_canvas",
+        state: "completed",
+        summary: "Previewed the Canvas.",
+        canvasPreview,
+      },
+    ]);
+    fixture.connection.close();
+  });
+
   it("stops recording steps at the bound and says the turn had more", () => {
     const fixture = openJournal();
     const store = createStore(fixture.journal);

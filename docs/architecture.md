@@ -3196,7 +3196,7 @@ not bypass its settings. The selected target and routing decisions remain
 visible. Off, paused, and unauthorized parents cannot start helpers. A parent
 that read outside content can: at Full access delegation is not refused and
 the mark follows into the child; below Full access the person is asked once
-per thread and their yes is journaled for the thread
+per thread, in every mode, and their yes is journaled for the thread
 (`thread.standing-answer-recorded@1`, erased with the thread), so later
 helpers start unasked and a waiting helper is kept; Plan stays refused
 (maintainer decision, 2026-11-13). The level is the one the turn runs at.
@@ -3337,12 +3337,13 @@ child cannot continue, and unsupported continuation never becomes a silent
 fresh start. The prior result must first reach its parent or be explicitly
 collected; a refused follow-up keeps that result available. Status reads do not
 consume replies. Only complete replies that fit the tool response bound are
-consumed, by `wait`. A reply `wait` hands back from a child that was itself
-marked marks the parent as having read
-outside content first, as a delivered reply does, because the child may relay
-what it fetched; a mark that cannot be recorded keeps the reply owed
-(maintainer request, 2026-11-12; not built yet: today every child reply marks
-its parent).
+consumed, by `wait`. Under Strict a reply `wait` hands back from a child that
+was itself marked marks the parent as having read outside content first, as a
+delivered reply does, because the child may relay what it fetched; a reply from
+an unmarked child leaves the parent unmarked, and a child whose own mark cannot
+be read counts as marked. Outside Strict every reply `wait` hands back marks the
+parent, which adds no ask there. A mark that cannot be recorded keeps the reply
+owed (maintainer request, 2026-11-12, scoped to Strict on 2026-11-22).
 
 Managed Claude children persist the identity written by the adapter in private,
 purgeable child content, bound to the admitted child and saved session. This
@@ -4373,11 +4374,13 @@ Chat still take no app-managed tools.
   a settling interval of 2–60 seconds and at most 1–32 automatic starts per
   explicit arm (default 8). Configuration and reviewed re-arm are the person's
   actions, at a local window or a device the host's own person paired
-  (maintainer decision, 2026-11-12). Built: configuration, from such a device
-  (maintainer decision, 2026-11-13); where a window's capability is read again
-  while the folder is prepared, the device's pairing is read again on the host.
-  Not built yet: a reviewed re-arm is local-window only, because its journaled
-  review record names the reviewing window. Ordinary pause, archive
+  (maintainer decision, 2026-11-12). Built: configuration and reviewed re-arm,
+  from such a device (maintainer decision, 2026-11-13); where a window's
+  capability is read again while the folder is prepared or the held input is
+  reviewed, the device's pairing is read again on the host. The journaled
+  review record names the reviewing window or device, and recovery rebuilds the
+  routine's author from it; a hub-introduced or restricted device cannot
+  re-arm. Ordinary pause, archive
   and thread cancellation keep their existing
   authority. No thread agent proposes a file routine. The existing host scheduler
   owns observation and dispatch; there is no second runner or hosted watcher.
@@ -4503,7 +4506,7 @@ Chat still take no app-managed tools.
   exact recorded operation, session, prompt, checkout and provider, never from
   the thread's latest unrelated turn. Pause, restart, quiet time and ordinary Save reset no budget.
   Explicit Review/Re-arm requires current source and Project authority from a
-  local window (not built yet for a file routine: a device the host's own person paired; such a device re-arms an event routine),
+  local window or a device the host's own person paired,
   no active run, and the displayed definition version. It skips held events,
   restores the allowance and establishes a fresh quiet baseline. A lost response
   remains unconfirmed and is never automatically resent.
@@ -6477,11 +6480,19 @@ or .zip>` write the same files, built by one host command
   threads that window can open. A client decodes a hold reason it does not
   know as `other` and still shows the host's own sentence for it, so a reason
   a later host adds does not fail the status (maintainer decision,
-  2026-11-13). This protects clients built from now on. A client built before
-  it reads the reason as a closed list and refuses the whole status of a host
-  that reports an `uncertain-tool-call` hold, until that start's report is
-  replaced by the next one; the window a host serves is built with the host
-  and is not affected. Chat and Work turns are continued by the same
+  2026-11-13). The fallback and `uncertain-tool-call` shipped together, so the
+  minimum compatible client is Octant 0.1.0-preview.20261114.3: a client of
+  0.1.0-preview.20261113.2 or earlier reads the reason as a closed list and
+  refuses the whole status of a host that reports an `uncertain-tool-call`
+  hold, until that start's report is replaced by the next one; the window a
+  host serves is built with the host and is not affected. The host control
+  wire has no protocol version to raise for this, and recording more waits
+  for a person (below) adds no hold reason, so no client minimum moves with
+  it. A Code approval that offers "Remember for this Project" sets its own
+  client minimum: the first release built with it, after
+  0.1.0-preview.20261122.11
+  ([Disposable desktops: artifact transfer](design/disposable-desktops.md#artifact-transfer)).
+  Chat and Work turns are continued by the same
   rule (Chat and Work restart recovery, below), and so are Work goal loops,
   subagent runs (subagent restart recovery, below) and pending coordinator
   wakes (coordinator wake restart recovery, below).
@@ -6526,17 +6537,45 @@ or .zip>` write the same files, built by one host command
   Writing the first frame only after approval was rejected: the record cannot
   know which tools will ask, so every tool would have to announce its own
   effect and one that forgot would run unrecorded. This way a tool whose
-  approval service says nothing keeps today's hold. Built for the two
-  approvals asked before a call does anything: the harness's own tool
-  approvals (shell, edit, goal checks and the rest of
-  `NativeHarnessApprovalStore`) and a selected MCP server's tool approval.
-  Not built yet: Browser site, upload, download and sign-in prompts, routine
-  and memory proposals, image offers and a tool's question to the person keep
-  the first frame, so a call waiting on one of them still holds its thread (a
-  Browser prompt can follow a click that already happened, so it is not known
-  to precede every effect); and a runtime's own tool waiting on the runtime's
-  approval request still holds, because the request names no tool call and
-  the answer is sent from eleven places across the three modes.
+  approval service says nothing keeps today's hold. Every ask below goes
+  through the one wrapper, `whileAwaitingToolApproval`, at the service's own
+  wait, and each is asked before its call does anything (maintainer request,
+  2026-11-22):
+
+  - the harness's own tool approvals (shell, edit, goal checks and the rest
+    of `NativeHarnessApprovalStore`) and a selected MCP server's tool
+    approval;
+  - a Browser site, sign-in, upload, page-script or page-tool question
+    (`BrowserToolApprovalService`) before the first operation of the call.
+    A later operation in a batch or saved-flow replay keeps the restart hold
+    because an earlier operation may have taken effect. A download question
+    also keeps the hold because it can follow the action that started it;
+  - a routine proposal or change request and a Project memory proposal. A
+    confirm creates or changes the routine, or writes the memory, before the
+    tool hears it, so the service calls the wrapper's `answered` as the answer
+    arrives and before it acts; a journal that refuses the frame refuses the
+    answer ("not created", "not applied") and nothing is changed;
+  - an image generation offer, which comes before the generation, save or
+    icon set it offers;
+  - a tool's question to the person (`NativeHarnessQuestionStore`).
+
+  A runtime's own tool waiting on the runtime's approval request is recorded
+  the same way when the request names the call (`approval-request`'s
+  `toolCallId`) and the host recorded that call's start: the turn's record
+  appends the awaiting frame when it reads the request. The answer reaches
+  the runtime only through the connection, from whichever mode or reviewer
+  sent it, so `withRecordedApprovalAnswers` on every configured driver
+  appends the intended frame again before forwarding it, and turns an allow
+  into a refusal when the journal refuses that frame. The host keeps the link
+  from each such request to its awaiting frame in memory until the request is
+  answered, the call settles, or the turn ends, and never drops it earlier: an
+  answer the host could not match would reach the runtime with the record
+  still saying "waiting", and a restart could repeat the call. When that index
+  is full (512 waiting requests), the awaiting frame is not written and the
+  call keeps holding. Still not recorded,
+  so the call keeps holding: a Browser download question, which can follow
+  the click that started the download in the same call; a runtime approval
+  request that names no call, or names one whose start the host had not read.
 
   What the record covers, by who runs the tool:
 
@@ -6559,9 +6598,14 @@ or .zip>` write the same files, built by one host command
     offers: the tool's own name (Codex, Pi), `mcp__octant__<tool>` (Claude
     Code) and `octant-<16 hex>_<tool>` (OpenCode; this spelling is not
     checked against a live OpenCode). Any other spelling stays a runtime
-    tool. Not built yet: an ACP agent titles its calls freely, so its start
-    for a host tool is still recorded as a runtime tool and can hold the
-    thread; and, not provable from what a runtime reports, a tool the runtime
+    tool. An ACP agent titles its calls freely, so its start is recorded as a
+    runtime tool; when the agent then requests a host tool and exactly one
+    open call it reported, not yet paired, has a title naming Octant and the
+    tool (`mcp__octant-browser__read`, `read (octant-browser MCP Server)`),
+    the adapter names that report on the `tool-request` (`toolCallId`), and
+    the record closes it as `superseded` because the host records the request
+    itself. Anything less certain stays a runtime tool and can hold the
+    thread. Not provable from what a runtime reports: a tool the runtime
     started that the host had not read when it stopped leaves no record, and
     that turn continues as before.
   - A managed child agent run (maintainer decision, 2026-11-13): the tools
@@ -7175,9 +7219,11 @@ ls-remote` against the thread's remote and the GitHub reads they already
   decision, 2026-11-13); a hub-introduced or restricted device is refused
   those. A device's queue change is journaled with the device as its actor. The message
   waits under the device's own scope, so its turn keeps every limit a turn
-  the device sends directly has. Each command and each dispatch asks again
-  that the device is still paired, is allowed the mode's send action, and
-  that the thread's Project is one the mode serves (for Code, an active one).
+  the device sends directly has. Each mutation and each dispatch asks again
+  that the device is still paired, its current access level allows the mode's
+  send action, and the thread's Project is one the mode serves (for Code, an
+  active one). Changing the device to Read only holds its queued messages
+  and still lets it read the queue for that thread.
   A Code dispatch has no request to be admitted by, so it is admitted as that
   device for the dispatch alone and holds nothing afterwards. The paired
   clients do not yet offer the queue in their composer.
@@ -14539,6 +14585,8 @@ completed or skipped onboarding, the local desktop instead opens Computer use
 Settings once on launch, without changing that onboarding outcome. Settings exposes plugin enablement, separate
 Accessibility and Screen Recording shortcuts, the driver version and update
 controls. Both surfaces refresh permissions on focus and visibility changes.
+If Octant cannot load its native permission checker, Settings reports that it
+couldn’t check either permission and computer control remains unavailable.
 Enabled, permissions granted and verified working are separate facts. Only an
 explicit successful test reports Verified working. Driver restart/replacement,
 disablement, permission loss or an unreadable driver permission answer clears
@@ -16584,7 +16632,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   can be recovered from the notice. Selecting a waiting service offer in the
   desktop menu bar opens its originating local window. If it is gone, no
   other window receives the request or the authority to answer.
-  The phone Inbox shows the action line on its thread; the phone's in-thread
+  The phone's Needs you shows the action line on its thread; the phone's in-thread
   card requires device confirmation before sending image generation or save.
   A memory or routine proposal and an image offer are still not raised by a
   turn the host runs with no person behind it (their owning sections refuse
@@ -16639,9 +16687,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   parent it still owns), never by a window's Project binding, which a device
   scope does not have. Each new waiting ask is told to the paired phones through the
   existing sealed push path, as an approval-needed notification naming the
-  thread under that phone's settings and nothing of the ask; the phone app
-  itself shows the MCP prompt on its thread and has no list of the other
-  asks yet. Freshness rides the Machine change feed: a waiting ask starting or ending publishes `tool-approvals`, any harness question,
+  thread under that phone's settings and nothing of the ask. The phone app
+  lists every request and ask of this read in its Needs you, each row naming
+  the ask's kind and the host's one line and opening its thread, whose own
+  card answers it; it reads each item on its own, so a kind it cannot read is
+  listed as a generic row on the thread the item names and hides no other
+  row. Freshness rides the Machine change feed: a waiting ask starting or ending publishes `tool-approvals`, any harness question,
   the lead's own or a child's, asked or settled publishes `work-navigation` and
   `code-navigation` (a Chat lead's question is journaled on the attempt), and
   any harness approval, the
@@ -18467,8 +18518,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   classifier. A remote principal can never exceed host, mode, provider, Project,
   or thread authority, cannot mint local receipts, and every remote mutation is
   journaled with its principal. An authenticated paired device the host's own
-  person paired is the person and holds what a local window holds on every
-  route the private listener forwards (maintainer decision, 2026-11-12): the
+  person paired is the person: full by default, narrower if the person chooses
+  (maintainer decisions, 2026-11-12 and 2026-11-22). At Full it holds what a
+  local window holds on every route the private listener forwards: the
   split of actions into ones a device may approve and ones that need the host
   no longer holds it. Each rule that held a paired device to less now names
   the new rule beside what is built today; the delivery notes, test evidence,
@@ -18499,15 +18551,82 @@ approval-gated` command that undoes it. The terminal shows no one-time
     refusal, an unreachable host) as restricted and hides what the host would
     refuse. The answer shapes only what a client shows; the host decides every
     request from its own record.
+  - **A device's access level.** The person picks one of three levels when
+    approving a pairing (at a window or from a Full device) and can change it
+    later in Settings › Remote access › Paired devices: **Full** (the default),
+    **Approve and steer**, or **Read only**. The level reuses the remote action
+    catalogue rather than adding a permission system of its own: Approve and
+    steer is the catalogue a hub-introduced device is held to, without the
+    hub's Act item, since a device the person paired directly is not the hub's
+    (`principalIsHubIntroduced` reads the admission, not the level; its port
+    forwards reach a thread's running server only), and Read only is the
+    catalogue's reads alone, which clients show as watching only
+    (`project.overview.read`,
+    `code.language.read`, `browser.observe`, `simulator.observe`,
+    `terminal.read`, `preview.open-authorized`, `settings.read-non-secret`,
+    `provider.list-models`, `usage.spend-ceiling.read`). The level is the
+    host's record, never the client's: the `device-approved` audit record
+    carries it (absent on older records, which read as Full) and
+    `remote.device-access-level-changed@1` records each change with its actor
+    and the level before and after. The gateway marks a level below Full on
+    the principal beside its admission on every request, from a cache it
+    updates when the level changes, and ends that device's open requests so
+    its next one meets the new level. `principalAuthorityKind` judges such a
+    device `remote-device`, so every check of the host's person refuses it and
+    the product dispatch holds it to the catalogue, and at Read only to the
+    reads, before any route runs; a narrowed device can never raise itself.
+    Read only keeps eligible pending Work, harness and MCP tool requests
+    visible on the phone. The cards omit decisions and editable answers.
+    On the phone's start screens, the selected computer's standing disables
+    new Chat, Work and Code threads with a watching-only explanation. Existing
+    threads remain openable, and new threads wait for standing to be confirmed
+    whenever the phone switches its selected computer.
+    The phone refreshes standing while its start or thread screen is in the
+    foreground and when it returns, so host-side changes reach open screens.
+    Routes that change something but rode a read action before (revising or
+    refreshing a Canvas, a connector's sign-in and operations) carry their own
+    write actions, and the local-servers commands route and the server proxy
+    are outside Read only. A device's own sign-out, key rotation and
+    self-revoke keep working at every level. Hub-introduced devices and agent
+    grants have no level and keep their own limits. The own-device answer
+    (`/api/remote/auth/device`) reports a device's own `accessLevel` beside
+    `actsAsHostPerson`, for a device the host's person paired only, so a client
+    can say why a control is missing; like `actsAsHostPerson` it grants
+    nothing.
+  - **Pause remote access and signing out other devices.** Pausing is a host
+    setting journaled as `remote.access-pause-changed@1` with its actor. While
+    it is on, the private listener refuses every paired device's session
+    request and authenticated request (product, self-service and server proxy)
+    with `403` and reason `remote-access-paused`, ends their open requests and
+    proxy sessions, and keeps every device record, key and session row; a
+    client keeps its pairing and says remote access is paused. A window turns it
+    on or off; a Full device may turn it on, which takes its own access too,
+    and never off. The pause is kept through a restart, so a host with no window
+    reads and changes it from its own shell with `octant auth status`,
+    `octant auth pause` and `octant auth resume`, over the same authenticated
+    local channel `octant listener` and `octant pair` use; the listener must be
+    on for the host to answer. A pause and a level change are read again once a
+    request's body has arrived and the request is registered, so neither
+    misses an upload still in flight, and the request that made the change is
+    the only one of the asking device's left to finish its reply. Pausing means nothing remote reaches the host except the
+    person's own computers, so an outside agent's key claim and MCP calls
+    (`/api/agent-access/claim`, `/api/agent-access/mcp`) get the same refusal.
+    Pausing ends their in-flight calls and milestone streams, and keeps their
+    grants for when access resumes. Only the hub's
+    member-to-member routes between this person's own computers, which each
+    member signs with its identity key, keep working. **Sign out all
+    other devices** (`/api/remote/devices/sign-out-others`) revokes every other
+    paired device's key and sessions and keeps the asking device; a window has
+    no device of its own and uses Revoke all.
   - **What a person-paired device does.** As a local window does, with no
     owner unlock: sets a thread, a Project, or the default to Full access and
     starts a Work or Code thread there; changes a Project's access, actions,
     Developer tools, desktop recipe, provider trust, "Agents may merge",
     coordinator and wake switches, and Shield model; remembers a tool approval
     and reads and revokes remembered ones; installs, updates, trusts, enables,
-    and removes a package, adds a server, pins a plugin, and signs in to or reconnects a server; sets up a file-arrival or event routine and lists the event sources, journaled as the device (`/api/automations`; maintainer decision, 2026-11-13); lists the files of a Work thread whose Project lives on a server, held to the device session's lifetime where a window's listing is held to its native request (`/api/work/files/listing`; maintainer decision, 2026-11-13); scans the host for installed provider commands and connects what the scan found, the provider journaled as the device (`/api/providers/discovery/scan`, `connect`; maintainer decision, 2026-11-13); reads the catalog of Projects on a server and a server's load (`/api/server-projects`, `/api/server-projects/resources`; maintainer decision, 2026-11-13); reads the local provider usage history and resets or trims the host's usage ledger, whose audit row names the device (`/api/usage/local-history`, `reset`, `retain`; maintainer decision, 2026-11-13); lists, reads, creates, and saves a Project's design systems (`/api/design-systems`; maintainer decision, 2026-11-13); searches, previews, installs, updates, and removes skills and reconciles the skill folders (`/api/extensions/skills`; maintainer decision, 2026-11-13); adds, changes, and removes a provider, starts a
+    and removes a package, adds a server, pins a plugin, and signs in to or reconnects a server; sets up a file-arrival or event routine and lists the event sources, journaled as the device (`/api/automations`; maintainer decision, 2026-11-13); lists the files of a Work thread whose Project lives on a server, held to the device session's lifetime where a window's listing is held to its native request (`/api/work/files/listing`; maintainer decision, 2026-11-13); scans the host for installed provider commands and connects what the scan found, the provider journaled as the device (`/api/providers/discovery/scan`, `connect`; maintainer decision, 2026-11-13); reads the catalog of Projects on a server and a server's load (`/api/server-projects`, `/api/server-projects/resources`; maintainer decision, 2026-11-13), and binds, renames, and removes a server Project and changes its saved actions and Developer tools switch, in records that name the device, runs its setup check (`/api/remote-setup-check`), and opens its preview through the relay (`/api/server-project-preview`); submits, reads, and cancels provider cloud jobs, journaled as the device (`/api/provider-cloud`); scans and removes the host's worktrees and Xcode build data (`/api/code/host-worktrees`, `/api/apple/xcode-build-data`); switches a Canvas to another design system or to none (`/api/canvas/design-system-apply`); reads the local provider usage history and resets or trims the host's usage ledger, whose audit row names the device (`/api/usage/local-history`, `reset`, `retain`; maintainer decision, 2026-11-13); lists, reads, creates, and saves a Project's design systems (`/api/design-systems`; maintainer decision, 2026-11-13); searches, previews, installs, updates, and removes skills and reconciles the skill folders (`/api/extensions/skills`; maintainer decision, 2026-11-13); adds, changes, and removes a provider, starts a
     provider sign-in, and stores, replaces, or removes a provider key
-    ([Provider credentials](#security-and-authority)); navigates and types in the host's agent Browser and reviews its session, upload, and download permissions, for every active Work or Code Project, since no workspace on the host is bound for a device; writes to a thread terminal and lists, reads, and starts a
+    ([Provider credentials](#security-and-authority)); navigates and types in the host's agent Browser and reviews its session, upload, and download permissions, for every active Work or Code Project, since no workspace on the host is bound for a device; takes a Browser page over from the agent and hands it back (`/api/browser/contexts/take-over`, `hand-back`, `/api/browser/remote-control/`), reads a signed-in profile's page, reads and takes captures, chooses a task profile, manages Browser profiles and extensions, and lists, runs, and deletes flows, an agent saving one on its turn; writes to a thread terminal and lists, reads, and starts a
     thread from a terminal session; merges a pull request or a stack, acts on
     a pull request, and switches Merge when ready and Auto-fix; approves or
     declines a coordinator's proposed worker; opens its own Project terminal
@@ -18540,11 +18659,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     secret a window on the host holds and whose native controls (a folder
     picker, an external editor) exist only there; a window's own shell (its bootstrap, workspace commands and local sessions); linking a secret store and
     pointing a key at it, which are acts at the machine; pointing a runtime at an executable, which goes through the host's native file picker; choosing a new skill folder or a local plugin folder, which goes through the host's native folder picker; the replica store and its membership; and the whole host's
-    export, bulk data with no bound for a remote caller. Not built yet: provider cloud sessions (the submission policy and the job records know only a local window), server Projects beyond reading (binding, renaming, removing and their actions and Developer tools switch, whose journaled records name only a local window; the setup check; a server preview's tunnel), disk cleanup, switching a Canvas to another design system, the reviewed re-arm of a file routine, and diagnostics are not open to a person-paired device either. In
-    the Browser no device takes the page over from the agent or hands it
-    back, reads a signed-in profile's page or a capture, grants login
-    permission, chooses a task profile, or runs, saves, or deletes a flow.
-    Removing a provider together with its key is not offered to a device.
+    export, bulk data with no bound for a remote caller. Importing cookies from the host's Keychain into a Browser profile and a server Project's port forward, which listens on the host's own loopback, stay with a window too. Not built yet: the list of ports a server serves, which a preview picks from (`/api/server-project-listeners`); diagnostics (`/api/diagnostics/export`, `/api/diagnostics/journal-growth` and the support bundle under `/api/diagnostics/bundle`, which `authorizeDiagnosticsExportActor` grants only a local window); and granting a site login permission in the Browser (`/api/browser/credential-use`) are not open to a person-paired device either. Removing a provider together with its key is not offered to a device, which removes the provider and then the key.
   - **The journal names the device.** A person-paired device's change is
     journaled with the device as its actor (`remote-device`, its id), resolved
     once from the authenticated principal and never from the request; a local
@@ -18557,16 +18672,24 @@ approval-gated` command that undoes it. The terminal shows no one-time
     memory-limits change, whose payload says a device made it; and a sign-in
     the host completes after a restart, attributed to the device that began it
     from the journal's own start record. The Browser routes hand the same
-    actor to the profile, extension, flow and capture services, so each would
-    journal a device's change as the device's; a device reaches none of those
-    changes today, as the list above says. A device-code or cloud sign-in
+    actor to the profile, extension, flow and capture services, so each
+    journals a person-paired device's change as the device's. A device-code or cloud sign-in
     begins only at the host's terminal, so it is the local person's. A device
     is named by its own id in every record, a restricted device's included;
     a second test refuses a module that writes a device's actor under any
-    other id. Not built yet: a Code operation's own events are journaled as
-    the system, for a local window as for a device (the records it writes for
-    the person name the device); cancelling a connector sign-in that is still
-    waiting names no device.
+    other id. A Code operation's own events name whoever started it, a local
+    window or a paired device: what the request journals names its caller,
+    and what the operation journals after answering (a turn's streamed
+    output, a terminal's) names whoever its first event names. A person's
+    action that lands on a turn another principal started names the person
+    who acted: a Stop's marker and an approval's answer on the turn that
+    asked name the window or device that sent them. An operation
+    the host starts by itself (a routine, a recovery) and what the host
+    settles by itself after a restart (a turn the restart cut off) are the
+    system's. Cancelling a connector sign-in that is still waiting, by
+    signing out or by removing the server, names whoever cancelled it, never
+    whoever began the attempt. Not built yet: adopting a session started
+    outside Octant journals its records as the system.
 
   A hub acting on its spoke, or a spoke
   delegating to another spoke, is such a remote principal on the receiving
@@ -18811,6 +18934,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   administration route without PEMs, or `octant listener enable` without
   `--cert` and `--key`), a certificate the host makes itself. A pasted
   certificate always wins, and the self-made key then stays unused on disk.
+  A bare `octant listener enable` reuses the host's saved listener settings —
+  address, port, and the certificate and key already stored, pasted or
+  self-made — and refuses, naming `--hostname` and `--port`, when no
+  listener settings have been saved; explicit flags still replace the
+  saved values for this run and the next.
   - **Key and certificate.** The self-made key is its own ECDSA P-256 key, not
     the host identity key, which signs the remote hello and whose rotation
     revokes every device. The certificate is a self-signed X.509 v3 leaf for

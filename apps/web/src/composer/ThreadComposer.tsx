@@ -144,6 +144,8 @@ export interface ThreadComposerRow {
  */
 export interface ThreadComposerProps {
   readonly presentation?: "follow-up";
+  /** A watching device has no controls that change the thread. */
+  readonly readOnly?: boolean;
   /** Existing-thread checkout context, in the strip above the message surface. */
   readonly context?: ReactNode;
   /** The thread's info panel; its item in the + menu opens it. */
@@ -214,6 +216,7 @@ export interface ThreadComposerProps {
  */
 export function ThreadComposer(props: ThreadComposerProps) {
   const frozenBar = useFrozenBar();
+  if (props.readOnly === true) return null;
   const held = props.presentation === "follow-up" && frozenBar !== undefined;
   // A held thread takes no message, but its access level and a credential
   // command waiting for review are still the person's to read and answer. The

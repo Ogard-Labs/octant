@@ -90,6 +90,31 @@ function choices(container: ParentNode): readonly string[] {
 }
 
 describe("MCP tool prompt on the phone", () => {
+  it("keeps the prompt readable without Allow or Deny when watching", async () => {
+    const { transport, answers } = hostWithOnePrompt();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () =>
+      root.render(
+        createElement(ThemeProvider, {
+          preference: "light",
+          children: createElement(ExtensionToolApprovalCard, {
+            transport,
+            threadId,
+            watchingOnly: true,
+            refreshIntervalMs: 60_000,
+          }),
+        }),
+      ),
+    );
+    expect(container.textContent).toContain("Allow search?");
+    expect(container.textContent).toContain('{"q":"plan"}');
+    expect(choices(container)).toEqual([]);
+    expect(answers).toEqual([]);
+  });
+
   it("offers Allow and Deny only, and approves the call once", async () => {
     const { transport, answers } = hostWithOnePrompt();
     const container = document.createElement("div");

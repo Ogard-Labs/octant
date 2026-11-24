@@ -27,6 +27,7 @@ import {
   rename,
   rm,
   stat,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
@@ -1616,7 +1617,21 @@ async function packageDarwinDesktop(
   await validateRuntimeFrameworkIndependence(finalApp, join(finalApp, DESKTOP_NODE_RUNTIME_APP));
   await validateNodeRuntimeFuses(join(finalApp, DESKTOP_NODE_RUNTIME_APP));
   await validateBundleIdentity(finalApp, identity);
+  await stampBundleBuildDate(finalApp);
   return finalApp;
+}
+
+/**
+ * Electron's darwin zip dates every entry, the .app directory included,
+ * 1980-01-01, and the packager keeps those dates. Packaging only writes below
+ * Contents/, so Finder showed January 1, 1980 as the installed app's Date
+ * Modified. The release zip and the disk image copy keep the date set here.
+ */
+export async function stampBundleBuildDate(
+  appPath: string,
+  packagedAt: Date = new Date(),
+): Promise<void> {
+  await utimes(appPath, packagedAt, packagedAt);
 }
 
 /**

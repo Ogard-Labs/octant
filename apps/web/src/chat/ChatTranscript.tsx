@@ -15,6 +15,7 @@ import type {
   ChatTurnRouteDecision,
   ChatAttemptId,
 } from "@octant/contracts/chat";
+import type { ThreadCanvasPreviewReceipt } from "@octant/contracts";
 import type { ProviderUsageLimit } from "@octant/contracts/providers";
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns, chatTurnAnsweredAttempt } from "@octant/domain/chat-policy";
@@ -64,6 +65,7 @@ import {
 import type { ChatTranscriptWindowState, ChatWindowPageState } from "./chatTranscriptWindow";
 
 export interface ChatTranscriptProps {
+  readonly readOnly?: boolean;
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
   /** The decoded, authoritative transcript projection. */
@@ -72,6 +74,17 @@ export interface ChatTranscriptProps {
   readonly sideChatReturnPending?: boolean;
   /** What the thread places after a turn, such as a Canvas that turn wrote. */
   readonly afterTurn?: (turn: ChatThreadView["turns"][number]) => ReactNode;
+  /**
+   * What the thread places inside a turn's last reply, above its text, such as
+   * the Canvas that turn wrote. Undefined when the turn has nothing to place,
+   * so a reply with nothing above it keeps its memoized render.
+   */
+  readonly beforeReply?: (turn: ChatThreadView["turns"][number]) => ReactNode;
+  /**
+   * Draws the Canvas version a preview call drew, inside its opened tool row.
+   * Keep it stable across renders: every attempt row receives it.
+   */
+  readonly canvasPreview?: (preview: ThreadCanvasPreviewReceipt) => ReactNode;
   /**
    * Runs an attempt again: a failed or interrupted attempt retries, and a
    * completed one regenerates. The server decides what the attempt allows.
@@ -411,8 +424,10 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       <section aria-label="Conversation" className="chat-transcript transcript-scroll">
         {lead}
         <div className="chat-transcript__empty">
-          <h2>Start the conversation</h2>
-          <p>Ask a question, draft something, or explore an idea.</p>
+          <h2>{props.readOnly === true ? "No messages yet" : "Start the conversation"}</h2>
+          {props.readOnly === true ? null : (
+            <p>Ask a question, draft something, or explore an idea.</p>
+          )}
         </div>
         {trail}
       </section>
@@ -669,6 +684,10 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                     index === turn.attempts.length - 1
                   }
                   threadUsageResume={props.view.thread.usageResume}
+                  beforeReply={
+                    index === turn.attempts.length - 1 ? props.beforeReply?.(turn) : undefined
+                  }
+                  canvasPreview={props.canvasPreview}
                 />
               ))}
             </TurnActionMenu>
@@ -900,6 +919,9 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   /** This attempt is the conversation's tail — the only stop a resume can continue. */
   readonly tailAttempt: boolean;
   readonly threadUsageResume: ChatThreadView["thread"]["usageResume"];
+  /** Drawn between the attempt's steps and its reply text: the turn's Canvases. */
+  readonly beforeReply?: ReactNode;
+  readonly canvasPreview: ChatTranscriptProps["canvasPreview"];
 }) {
   const handoff = handoffLabel(props.previousAttempt, props.attempt, props.providerGroups ?? []);
   const responseContents = props.attempt.responseRefs.map((reference) =>
@@ -1041,6 +1063,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
               props.attempt.outcome === "cancelled"
             }
             {...(toolCallRecords === undefined ? {} : { toolCallRecords })}
+            {...(props.canvasPreview === undefined ? {} : { canvasPreview: props.canvasPreview })}
             subagents={{
               from: props.subagentsFrom,
               ...(props.subagentsUntil === undefined ? {} : { until: props.subagentsUntil }),
@@ -1062,6 +1085,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
             }}
           />
         )}
+        {props.beforeReply}
         {props.attempt.responseRefs.length === 0 ? null : responseBody === undefined ? (
           <OctantAlert tone="warning">Response content is unavailable.</OctantAlert>
         ) : (
@@ -1109,8 +1133,20 @@ const AttemptBlock = memo(function AttemptBlock(props: {
           <SupportCorrelationControl correlationId={String(props.attempt.id)} />
         ) : null}
         {props.citations.length > 0 ? <CitationList citations={props.citations} /> : null}
-        {props.attempt.pendingQuestion === undefined ||
-        props.onAnswerQuestion === undefined ? null : (
+        {props.attempt.pendingQuestion === undefined ? null : props.onAnswerQuestion ===
+          undefined ? (
+          <div className="approval-row approval-row--request">
+            <div className="approval-row__text">
+              {props.attempt.pendingQuestion.questionnaire === undefined ? (
+                <p>{props.attempt.pendingQuestion.prompt}</p>
+              ) : (
+                props.attempt.pendingQuestion.questionnaire.questions.map((question) => (
+                  <p key={question.id}>{question.prompt}</p>
+                ))
+              )}
+            </div>
+          </div>
+        ) : (
           <ProviderQuestionCard
             key={props.attempt.pendingQuestion.requestId}
             draftIdentity={{

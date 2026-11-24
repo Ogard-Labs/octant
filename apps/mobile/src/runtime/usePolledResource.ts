@@ -6,7 +6,13 @@ import { pollWhileActive, type AppActivity } from "./pollWhileActive";
 const nativeAppActivity: AppActivity = {
   isActive: () => AppState.currentState === "active",
   onChange: (listener) => {
-    const subscription = AppState.addEventListener("change", (next) => listener(next === "active"));
+    let active = AppState.currentState === "active";
+    const subscription = AppState.addEventListener("change", (next) => {
+      const nextActive = next === "active";
+      if (nextActive === active) return;
+      active = nextActive;
+      listener(active);
+    });
     return () => subscription.remove();
   },
 };

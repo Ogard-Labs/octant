@@ -15,10 +15,14 @@ import {
 } from "@octant/contracts";
 import { ParseResult } from "effect";
 import {
+  MAX_WAITING_ASK_TEXT_LENGTH,
   PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE,
-  PendingRequestList,
+  PendingRequest,
+  WaitingAsk,
+  type WaitingAskKind,
 } from "@octant/contracts/pending-requests";
 import { ChatNdjsonFailure, iterateChatEventNdjson } from "./chatNdjsonStream";
+import { remoteRefusalCopy } from "./remoteConnection";
 
 export type MobileInboxMode = "chat" | "work" | "code";
 export type MobileCodeReviewState = CodeThreadReviewState["state"];
@@ -36,6 +40,21 @@ export interface MobileThreadRuntimeReport {
   readonly awaitingInput?: boolean | undefined;
 }
 
+/**
+ * A waiting ask as a row names it: what kind of ask, and the host's own line
+ * about it when this build could read one. A row only finds the ask; its
+ * thread's own card answers it.
+ */
+export interface MobileWaitingAsk {
+  readonly label: string;
+  readonly text?: string;
+}
+
+/** How a row's detail line names its waiting ask. */
+export function mobileWaitingAskLine(ask: MobileWaitingAsk): string {
+  return ask.text === undefined ? ask.label : `${ask.label}: ${ask.text}`;
+}
+
 export interface MobileInboxRow {
   readonly hostId: string;
   readonly mode: MobileInboxMode;
@@ -48,7 +67,8 @@ export interface MobileInboxRow {
   readonly projectId?: string;
   readonly pinned?: boolean;
   readonly live?: MobileThreadLiveState;
-  readonly waitingOfferText?: string;
+  /** The oldest approval, question or other ask the host says waits on the person here. */
+  readonly waitingAsk?: MobileWaitingAsk;
   /** The thread's aggregate version, which a row action sends as its expected version. */
   readonly version?: number;
   /** Put away (completed) at this time; absent while the thread is on the active list. */
@@ -116,9 +136,15 @@ async function decodeJson<T>(
   failureMessage: string,
 ): Promise<T> {
   if (!response.ok) {
+    // A paused host or this device's access level is the person's to change,
+    // so the phone says which rather than a generic failure.
+    const refusal =
+      response.status === 403
+        ? remoteRefusalCopy(await response.json().catch(() => undefined))
+        : undefined;
     throw new MobileInboxFailure(
       response.status === 403 ? "rejected" : "unavailable",
-      failureMessage,
+      refusal === undefined ? failureMessage : `${failureMessage} ${refusal}`,
     );
   }
   try {
@@ -342,27 +368,167 @@ export interface AllHostsMobileInbox {
   readonly failures: ReadonlyArray<MobileInboxHostFailure>;
 }
 
-async function readMobileOfferLines(
+const WAITING_ASK_LABELS: Readonly<Record<WaitingAskKind, string>> = {
+  "tool-approval": "Tool approval",
+  "memory-proposal": "Memory proposal",
+  "routine-proposal": "Routine proposal",
+  "image-offer": "Image offer",
+  "service-offer": "Offer",
+  "browser-approval": "Browser approval",
+  "browser-sign-in": "Browser sign-in",
+};
+
+const PENDING_REQUEST_LABELS: Readonly<Record<PendingRequest["kind"], string>> = {
+  approval: "Approval",
+  question: "Question",
+  decision: "Decision",
+  "child-approval": "Subagent approval",
+  "child-question": "Subagent question",
+  "lead-approval": "Approval",
+  "lead-question": "Question",
+};
+
+/** What a row says for an ask this app version does not know. */
+const UNKNOWN_ASK_LABEL = "Waiting on you";
+
+interface MobileListedAsk {
+  readonly mode: MobileInboxMode;
+  readonly threadId: string;
+  readonly threadTitle: string;
+  readonly requestedAt: string;
+  readonly projectId?: string;
+  readonly ask: MobileWaitingAsk;
+}
+
+const decodePendingRequestItem = decodeHostAnswer(PendingRequest);
+const decodeWaitingAskItem = decodeHostAnswer(WaitingAsk);
+
+function listedAsk(
+  item: {
+    readonly mode: MobileInboxMode;
+    readonly threadId: string;
+    readonly threadTitle: string;
+    readonly requestedAt: string;
+    readonly projectId?: string | undefined;
+  },
+  ask: MobileWaitingAsk,
+): MobileListedAsk {
+  return {
+    mode: item.mode,
+    threadId: String(item.threadId),
+    threadTitle: item.threadTitle,
+    requestedAt: item.requestedAt,
+    ...(item.projectId === undefined ? {} : { projectId: String(item.projectId) }),
+    ask,
+  };
+}
+
+/**
+ * An item this build cannot decode still names a thread the person is waited
+ * on in, so it is listed by its thread alone and opens it. Nothing it says
+ * beyond the host's one line is shown, and no list answers it.
+ */
+function unknownAsk(item: unknown): MobileListedAsk | undefined {
+  if (typeof item !== "object" || item === null) return undefined;
+  const fields = item as Readonly<Record<string, unknown>>;
+  const mode = fields["mode"];
+  const threadId = fields["threadId"];
+  if (mode !== "chat" && mode !== "work" && mode !== "code") return undefined;
+  if (typeof threadId !== "string" || threadId.trim().length === 0) return undefined;
+  const text = fields["text"];
+  const title = fields["threadTitle"];
+  const requestedAt = fields["requestedAt"];
+  const projectId = fields["projectId"];
+  return {
+    mode,
+    threadId,
+    threadTitle: typeof title === "string" && title.trim().length > 0 ? title : "Thread",
+    requestedAt: typeof requestedAt === "string" ? requestedAt : "",
+    ...(typeof projectId === "string" ? { projectId } : {}),
+    ask: {
+      label: UNKNOWN_ASK_LABEL,
+      ...(typeof text === "string" && text.trim().length > 0
+        ? { text: text.trim().slice(0, MAX_WAITING_ASK_TEXT_LENGTH) }
+        : {}),
+    },
+  };
+}
+
+function pendingRequestAsk(item: unknown): MobileListedAsk | undefined {
+  try {
+    const request = decodePendingRequestItem(item);
+    const label =
+      request.mode === "code" && request.kind === "approval" && request.browserOrigin !== undefined
+        ? WAITING_ASK_LABELS["browser-approval"]
+        : PENDING_REQUEST_LABELS[request.kind];
+    return listedAsk(request, { label, text: request.text });
+  } catch {
+    return unknownAsk(item);
+  }
+}
+
+function waitingAskItem(item: unknown): MobileListedAsk | undefined {
+  try {
+    const ask = decodeWaitingAskItem(item);
+    return listedAsk(ask, { label: WAITING_ASK_LABELS[ask.kind], text: ask.text });
+  } catch {
+    return unknownAsk(item);
+  }
+}
+
+/**
+ * Every approval, question, decision and other waiting ask the host lists for
+ * this device, the oldest per thread. Each item is read on its own, so one
+ * kind a newer host adds lists that thread under a generic label instead of
+ * hiding every other ask the list holds.
+ */
+async function readMobileWaitingAsks(
   transport: MobileRemoteTransport,
-): Promise<ReadonlyMap<string, string>> {
-  const lines = new Map<string, string>();
+): Promise<ReadonlyMap<string, MobileListedAsk>> {
+  const asks = new Map<string, MobileListedAsk>();
   try {
     const response = await transport.authenticatedFetch({
       method: "GET",
       path: "/api/pending-requests",
       headers: { accept: PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE },
     });
-    if (!response.ok) return lines;
-    const list = decodeHostAnswer(PendingRequestList)(await response.json());
-    for (const ask of list.asks ?? []) {
-      if (ask.kind !== "service-offer") continue;
-      const key = `${ask.mode}:${ask.threadId}`;
-      if (!lines.has(key)) lines.set(key, ask.text);
+    if (!response.ok) return asks;
+    const body: unknown = await response.json();
+    if (typeof body !== "object" || body === null) return asks;
+    const { requests, asks: otherAsks } = body as Readonly<Record<string, unknown>>;
+    const listed = [
+      ...(Array.isArray(requests) ? requests.map(pendingRequestAsk) : []),
+      ...(Array.isArray(otherAsks) ? otherAsks.map(waitingAskItem) : []),
+    ];
+    for (const entry of listed) {
+      if (entry === undefined) continue;
+      const key = `${entry.mode}:${entry.threadId}`;
+      const held = asks.get(key);
+      if (held === undefined || entry.requestedAt < held.requestedAt) asks.set(key, entry);
     }
   } catch {
     // An older or restricted host may not offer this read at all.
   }
-  return lines;
+  return asks;
+}
+
+/**
+ * A thread a waiting ask names that the bootstraps did not list (its mode's
+ * bootstrap failed, or it changed between the reads) is still listed, from
+ * the ask's own thread title, so the ask is never hidden.
+ */
+function askOnlyRow(hostId: string, entry: MobileListedAsk): MobileInboxRow {
+  return {
+    hostId,
+    mode: entry.mode,
+    threadId: entry.threadId,
+    title: entry.threadTitle,
+    status: "active",
+    freshness: entry.requestedAt,
+    ...(entry.projectId === undefined ? {} : { projectId: entry.projectId }),
+    live: "needs-input",
+    waitingAsk: entry.ask,
+  };
 }
 
 /**
@@ -376,17 +542,24 @@ export async function listAllHostsMobileInbox(
 
   const settled = await Promise.allSettled(
     transports.map(async (transport) => {
-      const [inboxInput, offerLines] = await Promise.all([
+      const [inboxInput, waitingAsks] = await Promise.all([
         fetchMobileInboxBootstrapRows(transport),
-        readMobileOfferLines(transport),
+        readMobileWaitingAsks(transport),
       ]);
-      const rowsWithOffers = (board?: CodeBoardView) =>
-        rowsFromMobileInboxBootstrap(inboxInput, board).map((row) => {
-          const text = offerLines.get(`${row.mode}:${row.threadId}`);
-          return text === undefined
-            ? row
-            : { ...row, live: "needs-input" as const, waitingOfferText: text };
+      const rowsWithOffers = (board?: CodeBoardView): ReadonlyArray<MobileInboxRow> => {
+        const unlisted = new Map(waitingAsks);
+        const rows = rowsFromMobileInboxBootstrap(inboxInput, board).map((row) => {
+          const key = `${row.mode}:${row.threadId}`;
+          const entry = waitingAsks.get(key);
+          if (entry === undefined) return row;
+          unlisted.delete(key);
+          return { ...row, live: "needs-input" as const, waitingAsk: entry.ask };
         });
+        return [
+          ...rows,
+          ...[...unlisted.values()].map((entry) => askOnlyRow(transport.hostId, entry)),
+        ];
+      };
       try {
         const board = await fetchMobileCodeBoard(transport);
         return {

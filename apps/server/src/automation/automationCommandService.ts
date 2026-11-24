@@ -21,7 +21,9 @@ import type { AutomationEventSourcePreparation } from "./automationEventSources"
 import type { AutomationFileActivityPorts } from "./automationFileSourceActivity";
 import { isDeepStrictEqual } from "node:util";
 import {
+  admittedDeviceAuthorityKind,
   AutomationPolicyRejected,
+  automationFileSourceReviewedBy,
   buildAutomationWeeklyResolution,
   isAgentRunActiveStatus,
   isAutomationMutationAllowed,
@@ -196,7 +198,8 @@ export class AutomationCommandService {
       return failure("unsupported", "Only local Work file routines can be re-armed here.");
     const previous = this.#projection.getFileSource(command.automationId);
     if (
-      command.principal.kind !== "local-window" ||
+      (command.principal.kind === "remote-device" &&
+        command.principal.admittedBy !== "host-person") ||
       prepared === undefined ||
       previous === undefined ||
       prepared.automationId !== command.automationId ||
@@ -205,8 +208,7 @@ export class AutomationCommandService {
       prepared.review.previousSourceIdentity !== command.sourceIdentity ||
       prepared.review.previousBatchDigest !== command.batchDigest ||
       prepared.review.disposition !== command.disposition ||
-      prepared.review.reviewedWindowId !== command.principal.windowId ||
-      prepared.review.reviewedCapabilityGeneration !== command.principal.capabilityGeneration ||
+      !automationFileSourceReviewedBy(prepared.review, command.principal) ||
       previous.observationRevision !== command.observationRevision ||
       previous.sourceIdentity !== command.sourceIdentity ||
       (previous.held?.digest ?? previous.baselineDigest) !== command.batchDigest ||
@@ -248,6 +250,7 @@ export class AutomationCommandService {
     };
     if (command.disposition === "skip") {
       this.#store.appendOccurrenceLedger({
+        ...personActor(command.principal),
         automationId: definition.id,
         expectedVersion: definition.version,
         events: [rearmed],
@@ -269,8 +272,9 @@ export class AutomationCommandService {
       },
     };
     const run = buildAutomationRunForOccurrence({ definition: updated, occurrence, now });
-    this.#store.appendRunCreated({ run });
+    this.#store.appendRunCreated({ ...personActor(command.principal), run });
     this.#store.appendOccurrenceLedger({
+      ...personActor(command.principal),
       automationId: definition.id,
       expectedVersion: definition.version,
       events: [rearmed, { kind: "occurrence-claimed", occurrence, runId: run.id, at: now }],
@@ -837,7 +841,10 @@ function isSchemaParseError(error: unknown): boolean {
  * decision, 2026-11-13).
  */
 function actsAsHostPerson(principal: AutomationClientPrincipal): boolean {
-  return principal.kind === "local-window" || principal.admittedBy === "host-person";
+  return (
+    principal.kind === "local-window" ||
+    admittedDeviceAuthorityKind(principal) === "person-paired-device"
+  );
 }
 
 /**

@@ -89,6 +89,9 @@ export const MOBILE_COPY = {
   pairHostHeadline: "Connect this phone to your laptop.",
   pairHostSubhead: "Use the short-lived ticket from desktop Remote Access.",
   pairBeforeCreate: "Pair a computer before starting a thread.",
+  threadCreationWatchingOnly: "Watching only. Start new threads on your computer.",
+  threadCreationAccessUnconfirmed:
+    "Starting a thread requires the computer to confirm this phone’s access.",
   pairEnterCode: "Enter a code instead",
   pairTypeDetails: "Type the details instead",
   pairCompareHint: "Check that this code matches the one on your computer, then approve there.",
@@ -233,6 +236,10 @@ export const MOBILE_COPY = {
   approvalDeny: "Deny",
   approvalSendFailed: "Couldn't send that. Check the connection and try again.",
   approvalReconnecting: "Reconnecting…",
+  proposalAnswerOnComputer: "Answer this on the computer.",
+  proposalNotSaved: (reason: string) =>
+    `Not saved: ${reason.replace(/[.\s]+$/, "")}. Nothing was changed.`,
+  proposalFailureDismiss: "Dismiss",
   approvalBiometricUnavailable: "Set up Face ID, Touch ID or a passcode to allow from this phone.",
   approvalBiometricDenied:
     "Allow cancelled. Confirm with Face ID, Touch ID or your passcode to allow.",

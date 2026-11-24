@@ -1297,6 +1297,9 @@ describe("ChatTranscript", () => {
     expect(screen.getByRole("radio", { name: "PDF" })).not.toBeChecked();
     expect(screen.getByRole("textbox", { name: /Anything to add/ })).toHaveValue("");
     expect(submit).not.toHaveBeenCalled();
+    rerender(wrap(<ChatTranscript readOnly view={pending(ids.firstAttempt)} />));
+    expect(screen.getByText("Which format?")).toBeVisible();
+    expect(screen.queryByRole("radio", { name: "PDF" })).not.toBeInTheDocument();
   });
   it("keeps an unanswered question read-only when the host serves no answer route", () => {
     const view = viewFixture({
@@ -1316,6 +1319,7 @@ describe("ChatTranscript", () => {
     render(<ChatTranscript view={view} />);
 
     expect(screen.getByText("Waiting for your answer")).toBeVisible();
+    expect(screen.getByText("Proceed?")).toBeVisible();
     expect(screen.queryByLabelText("Provider question")).not.toBeInTheDocument();
   });
 
@@ -2184,3 +2188,17 @@ function waitingReceipt() {
     message: "No selected model is currently eligible. Check provider readiness and pool policy.",
   };
 }
+
+describe("what a turn made, in the Chat transcript", () => {
+  it("draws the turn's Canvas above the reply text, inside the last reply only", () => {
+    const beforeReply = vi.fn(() => <section aria-label="Canvas: Summary">Summary tiles</section>);
+    render(<ChatTranscript beforeReply={beforeReply} view={viewFixture()} />);
+
+    const canvas = screen.getByRole("region", { name: "Canvas: Summary" });
+    const reply = screen.getByText("Here is the summary.");
+    // The Canvas precedes the reply in reading order.
+    expect(canvas.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Two attempts, one Canvas: only the last reply receives it.
+    expect(screen.getAllByRole("region", { name: "Canvas: Summary" })).toHaveLength(1);
+  });
+});

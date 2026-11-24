@@ -72,6 +72,73 @@ describe("placing Canvases in a transcript", () => {
   });
 });
 
+describe("placing Canvases above the reply", () => {
+  // The first turn ends on a files row after its reply; the second turn has
+  // no reply yet.
+  const replyRows: ReadonlyArray<Row & { readonly reply?: true }> = [
+    { key: "ask-1", at: "2026-10-06T09:00:00.000Z" },
+    { key: "reply-1a", reply: true },
+    { key: "reply-1b", reply: true },
+    { key: "files-1" },
+    { key: "ask-2", at: "2026-10-06T09:10:00.000Z" },
+    { key: "approval-2" },
+  ];
+  const replyTurns = threadTurnSpans(
+    replyRows,
+    (row) => row.key,
+    (row) => row.at,
+    (row) => row.reply === true,
+  );
+
+  it("draws a turn's Canvas above its last reply, even when rows follow the reply", () => {
+    const placement = placeThreadCanvases(replyTurns, [
+      card("summary", {
+        presentation: "inline",
+        canvasCreatedAt: "2026-10-06T09:02:00.000Z" as never,
+      }),
+    ]);
+
+    expect(placement.beforeReply.get("reply-1b")?.map((entry) => String(entry.canvasId))).toEqual([
+      "summary",
+    ]);
+    expect(placement.byRow.size).toBe(0);
+    expect([...placement.placed]).toEqual(["summary"]);
+  });
+
+  it("draws it above the reply when one row both opens the turn and holds its reply", () => {
+    const chatTurns = threadTurnSpans(
+      [{ key: "turn-1", at: "2026-10-06T09:00:00.000Z" }],
+      (row) => row.key,
+      (row) => row.at,
+      () => true,
+    );
+    const placement = placeThreadCanvases(chatTurns, [
+      card("summary", {
+        presentation: "inline",
+        canvasCreatedAt: "2026-10-06T09:01:00.000Z" as never,
+      }),
+    ]);
+
+    expect(placement.beforeReply.get("turn-1")?.map((entry) => String(entry.canvasId))).toEqual([
+      "summary",
+    ]);
+  });
+
+  it("keeps a turn's Canvas after its last row while the turn has no reply", () => {
+    const placement = placeThreadCanvases(replyTurns, [
+      card("early", {
+        presentation: "inline",
+        canvasCreatedAt: "2026-10-06T09:11:00.000Z" as never,
+      }),
+    ]);
+
+    expect(placement.byRow.get("approval-2")?.map((entry) => String(entry.canvasId))).toEqual([
+      "early",
+    ]);
+    expect(placement.beforeReply.size).toBe(0);
+  });
+});
+
 describe("placing anything a turn made in a transcript", () => {
   it("puts each item after the turn that made it and leaves earlier or undated ones for the list", () => {
     const items = [

@@ -275,6 +275,7 @@ describe("shell settings policy", () => {
       browserUploadFileCountLimit: 5,
       rememberedBrowserTransfers: [],
       rememberedComputerUseApps: [],
+      rememberedDesktopFileTransfers: [],
       persistentBrowserOwner: false,
       pairedDeviceLifetime: "30-days",
     });
@@ -298,6 +299,7 @@ describe("shell settings policy", () => {
       browserUploadFileCountLimit: 5,
       rememberedBrowserTransfers: [],
       rememberedComputerUseApps: [],
+      rememberedDesktopFileTransfers: [],
       persistentBrowserOwner: false,
     });
     expect(current.chatEnabled).toBe(true);
@@ -401,6 +403,35 @@ describe("shell settings policy", () => {
       replaceShellSettings(current, {
         ...current,
         rememberedComputerUseApps: [{ ...entry, appId: "com.apple.Mail" }],
+      }),
+    ).toThrow();
+  });
+
+  it("lets Settings forget a remembered desktop file answer and refuses adding or altering one", () => {
+    const settings = defaultShellSettings();
+    const entry = {
+      projectId: "30000000-0000-4000-8000-000000000001" as never,
+      grantedBy: {
+        kind: "local-user" as const,
+        actorId: "00000000-0000-4000-8000-000000000002" as never,
+      },
+      grantedAt: "2026-11-19T12:00:00.000Z" as never,
+    };
+    const current: ShellSettings = { ...settings, rememberedDesktopFileTransfers: [entry] };
+
+    expect(
+      replaceShellSettings(current, { ...current, rememberedDesktopFileTransfers: [] })
+        .rememberedDesktopFileTransfers,
+    ).toEqual([]);
+    expect(() =>
+      replaceShellSettings(settings, { ...settings, rememberedDesktopFileTransfers: [entry] }),
+    ).toThrow();
+    expect(() =>
+      replaceShellSettings(current, {
+        ...current,
+        rememberedDesktopFileTransfers: [
+          { ...entry, projectId: "30000000-0000-4000-8000-000000000002" as never },
+        ],
       }),
     ).toThrow();
   });

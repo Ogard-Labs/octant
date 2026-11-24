@@ -176,6 +176,7 @@ import {
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
 import type { PrincipalRouteContext } from "../principalRouteContext";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { CODE_TERMINAL_TOOL_NAME } from "./codeAppManagedTools";
 import { GhPullRequestPort, type GhCommandPort } from "./ghPullRequestPort";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
@@ -1827,6 +1828,145 @@ describe("CodeOperationRuntime", () => {
     );
     expect(onProviderTurnRequested).not.toHaveBeenCalled();
     fixture.close();
+  });
+
+  it("journals every event of a turn as whoever started it: the window, the paired device, or the host", async () => {
+    const localPerson = eventActorForPrincipal({ kind: "local-window" });
+    const device = eventActorForPrincipal({
+      kind: "remote-device",
+      deviceId: "90000000-0000-4000-8000-0000000000e1",
+    });
+    for (const [index, startedBy] of [localPerson, device, undefined].entries()) {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        approvalValidator: false,
+      });
+      try {
+        const start = operationId(4_200 + index);
+        await expect(
+          fixture.runtime.execute(
+            windowId,
+            {
+              kind: "start-provider-turn",
+              operationId: start,
+              threadId,
+              checkoutId,
+              sessionId,
+              prompt: fixture.prompt,
+            },
+            startedBy === undefined ? {} : { actor: startedBy },
+          ),
+        ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+        // What the provider streams after the start has answered is still
+        // the turn's, and so still its starter's.
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+        await Effect.runPromise(
+          Queue.offer(queue, providerEvent({ kind: "text-delta", text: "Done." })),
+        );
+        await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+        await vi.waitFor(async () =>
+          expect(await lastOperationEvent(fixture.runtime, start)).toMatchObject({
+            kind: "operation-state",
+            state: "completed",
+          }),
+        );
+        const actors = fixture.operationActors(start);
+        expect(actors.length).toBeGreaterThan(3);
+        expect(new Set(actors.map((named) => JSON.stringify(named)))).toEqual(
+          new Set([JSON.stringify(startedBy ?? actor)]),
+        );
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    }
+  });
+
+  it("names the paired device that answered and stopped a turn a window started", async () => {
+    const localPerson = eventActorForPrincipal({ kind: "local-window" });
+    const device = eventActorForPrincipal({
+      kind: "remote-device",
+      deviceId: "90000000-0000-4000-8000-0000000000e1",
+    });
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    try {
+      const start = operationId(4_300);
+      await expect(
+        fixture.runtime.execute(
+          windowId,
+          {
+            kind: "start-provider-turn",
+            operationId: start,
+            threadId,
+            checkoutId,
+            sessionId,
+            prompt: fixture.prompt,
+          },
+          { actor: localPerson },
+        ),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "provider-approval-1",
+            action: "write",
+            description: "Modify src/a.ts",
+          }),
+        ),
+      );
+      let frames: readonly OperationFrame[] = [];
+      await vi.waitFor(async () => {
+        frames = await fixture.runtime.subscribe(windowId, threadId, start, 0, 100);
+        expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(true);
+      });
+      const approval = frames.find(
+        (
+          frame,
+        ): frame is OperationFrame & {
+          event: { kind: "approval-requested"; approvalId: string };
+        } => frame.event.kind === "approval-requested",
+      );
+      await fixture.runtime.execute(
+        windowId,
+        {
+          kind: "answer-provider-approval",
+          operationId: operationId(4_301),
+          threadId,
+          checkoutId,
+          approvalId: approval!.event.approvalId,
+          decision: "approved",
+        },
+        { actor: device },
+      );
+      await fixture.runtime.execute(
+        windowId,
+        {
+          kind: "cancel-provider-turn",
+          operationId: operationId(4_302),
+          threadId,
+          checkoutId,
+        },
+        { actor: device },
+      );
+
+      frames = await fixture.runtime.subscribe(windowId, threadId, start, 0, 100);
+      const actors = fixture.operationActors(start);
+      const actorOf = (kind: string) =>
+        actors[frames.findIndex((frame) => frame.event.kind === kind)];
+      expect(actorOf("approval-requested")).toEqual(localPerson);
+      expect(actorOf("approval-answered")).toEqual(device);
+      expect(actorOf("conversation-turn-stop-requested")).toEqual(device);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
   });
 
   it("keeps feedback images pending through refused credentials and sends them once on retry", async () => {
@@ -14320,6 +14460,16 @@ function runtimeFixture(options: {
     },
     reviewFindings: () => readCodeReviewFindings(connection, threadId),
     readExternalContentTaint: () => readThreadExternalContentTaint(connection, String(threadId)),
+    /** The actor each of an operation's journaled events names, in order. */
+    operationActors: (id: CodeOperationId) =>
+      journal
+        .replayAggregate({
+          aggregateType: "code-operation",
+          aggregateId: String(id),
+          afterVersion: 0,
+          limit: 1_000,
+        })
+        .map((event) => event.actor),
     /** Journal a runtime work record directly, as an earlier process left it. */
     appendRuntimeWork: (work: Record<string, unknown> & { readonly id: string }) =>
       journal.append({
@@ -14810,6 +14960,12 @@ it("settles an answer to an approval a host exit left waiting as interrupted", a
 
 it("settles a turn a host restart cut off as interrupted when the harness gives up on it", async () => {
   const fixture = runtimeFixture({});
+  const device = eventActorForPrincipal({
+    kind: "remote-device",
+    deviceId: "90000000-0000-4000-8000-0000000000e2",
+  });
+  // A paired device started the turn before the restart.
+  const asDevice = fixture.operationEvents.actingFor(operationId(98), device);
   try {
     fixture.operationEvents.append({
       threadId,
@@ -14829,11 +14985,14 @@ it("settles a turn a host restart cut off as interrupted when the harness gives 
       expectedCursor: 1,
       event: decodeCodeOperationEvent({ kind: "operation-state", state: "waiting" }),
     });
+    asDevice();
     expect(
       fixture.conversation().turns.find((turn) => turn.operationId === operationId(98)),
     ).toMatchObject({ status: "waiting" });
 
     fixture.runtime.settleCutOffTurns?.(String(threadId));
+    // The host ended it, so the interruption is the host's, not the device's.
+    expect(fixture.operationActors(operationId(98))).toEqual([device, device, actor]);
 
     expect(
       fixture.conversation().turns.find((turn) => turn.operationId === operationId(98)),
@@ -16172,6 +16331,96 @@ it("binds the Computer tool to the desktop the send named and asks its approvals
   await expect(answer).resolves.toBe("approved");
   await fixture.runtime.close();
   fixture.close();
+});
+
+it("carries a person's Remember for this Project answer only on an ask that offered it", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const bindings: Array<
+    Parameters<NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"]>>[0]
+  > = [];
+  const fixture = runtimeFixture({
+    provider: providerDriver(connection),
+    supportsAppManagedTools: true,
+    computerUseTools: (input) => {
+      bindings.push(input);
+      return {
+        definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+        execute: async () => ({ result: { kind: "apps", apps: [] } }),
+      };
+    },
+  });
+  const startOperation = operationId(92);
+  await fixture.runtime.execute(windowId, {
+    kind: "start-provider-turn",
+    operationId: startOperation,
+    threadId,
+    checkoutId,
+    sessionId,
+    prompt: fixture.prompt,
+    computerUseDestination: {
+      kind: "desktop-lease" as const,
+      leaseId: decodeDesktopLeaseId("95000000-0000-4000-8000-000000000003"),
+    },
+  });
+  await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+  const ask = bindings.at(-1)?.ask;
+  if (ask === undefined) throw new Error("The tool was never bound.");
+  const askedAt = async (summary: string) => {
+    let requested:
+      | Extract<CodeOperationEventFrame["event"], { kind: "approval-requested" }>
+      | undefined;
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 50);
+      const frame = frames.find(
+        (candidate) =>
+          candidate.event.kind === "approval-requested" && candidate.event.summary === summary,
+      );
+      if (frame?.event.kind === "approval-requested") requested = frame.event;
+      expect(requested).toBeDefined();
+    });
+    if (requested === undefined) throw new Error("The turn never asked.");
+    return requested;
+  };
+  const answerRemembering = (approvalId: string, id: number, initiator: "user" | "agent") =>
+    fixture.runtime.execute(
+      windowId,
+      {
+        kind: "answer-provider-approval",
+        operationId: operationId(id),
+        threadId,
+        checkoutId,
+        approvalId,
+        decision: "approved",
+        rememberForProject: true,
+      },
+      { initiator },
+    );
+  try {
+    const offered = ask("Send dist/app?", undefined, { canRememberForProject: true });
+    const offeredAsk = await askedAt("Send dist/app?");
+    expect(offeredAsk.canRememberForProject).toBe(true);
+    await answerRemembering(offeredAsk.approvalId, 93, "user");
+    await expect(offered).resolves.toEqual({
+      kind: "remembered-for-project",
+      approver: { kind: "window", windowId },
+    });
+
+    // An ask that never offered it allows this once.
+    const plain = ask("Send dist/other?");
+    const plainAsk = await askedAt("Send dist/other?");
+    expect(plainAsk.canRememberForProject).toBeUndefined();
+    await answerRemembering(plainAsk.approvalId, 94, "user");
+    await expect(plain).resolves.toBe("approved");
+
+    // A caller answering as an agent allows this once too.
+    const byAgent = ask("Send dist/third?", undefined, { canRememberForProject: true });
+    await answerRemembering((await askedAt("Send dist/third?")).approvalId, 95, "agent");
+    await expect(byAgent).resolves.toBe("approved");
+  } finally {
+    await fixture.runtime.close();
+    fixture.close();
+  }
 });
 
 it("offers a selected MCP server's tools to the Code provider", async () => {

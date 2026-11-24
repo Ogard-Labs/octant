@@ -26,6 +26,7 @@ import { DeviceSpinner } from "../device/DeviceStage";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
+import { HostDisplayPane } from "./HostDisplayPane";
 import { DesktopPreview } from "./DesktopPreview";
 import {
   desktopDollars,
@@ -291,6 +292,9 @@ export function DesktopPane(props: {
 
   return (
     <section aria-label="Desktop" className="device-pane desktop-pane">
+      {overview?.hostDisplay && (
+        <HostDisplayPane key={threadId} client={client} threadId={threadId} />
+      )}
       <DesktopToolbar
         describe={(lease) => {
           const place = desktopWhere(providers, lease);

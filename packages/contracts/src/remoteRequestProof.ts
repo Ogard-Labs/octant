@@ -1,6 +1,12 @@
 import { Schema } from "effect";
 import { UtcTimestamp } from "./events";
-import { DeviceId, RemoteCommandId, RemoteSessionId, StableHostId } from "./remoteAccess";
+import {
+  DeviceAccessLevel,
+  DeviceId,
+  RemoteCommandId,
+  RemoteSessionId,
+  StableHostId,
+} from "./remoteAccess";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const uuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -181,6 +187,13 @@ export const RemoteOwnDeviceMetadataV1 = Schema.Struct({
    * decides each request from its own record.
    */
   actsAsHostPerson: Schema.optional(Schema.Boolean),
+  /**
+   * The level the host's person chose for this device, so a client can say
+   * why a control is missing. Present only for a device that person paired;
+   * absent for a device the hub introduced, an agent grant, and an older host.
+   * Like `actsAsHostPerson` it grants nothing.
+   */
+  accessLevel: Schema.optional(DeviceAccessLevel),
 }).annotations(strict);
 export type RemoteOwnDeviceMetadataV1 = typeof RemoteOwnDeviceMetadataV1.Type;
 
