@@ -5,7 +5,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { decodeCodeProviderFileReviewRequest } from "@octant/contracts/code-provider-file-review";
 import { decodeProjectId } from "@octant/contracts/projects";
-import { decodeCodeCommand } from "@octant/contracts/code";
+import { decodeCodeCommand, decodeCodeThreadId } from "@octant/contracts/code";
 import {
   CodeClientFailure,
   CodeClientSnapshotRequiredError,
@@ -649,6 +649,21 @@ describe("code client", () => {
       client.setProjectPullRequestAutoFix?.({ kind: "enable", target } as never),
     ).rejects.toMatchObject({ category: "invalid" });
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends composer activity only for a valid thread", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.noteComposerActivity?.("bad" as never)).rejects.toMatchObject({
+      category: "invalid",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    await client.noteComposerActivity?.(decodeCodeThreadId(ids.thread));
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/composer-activity`,
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ threadId: ids.thread }) }),
+    );
   });
 
   it("reads a Code thread follow-up view over the authenticated endpoint", async () => {

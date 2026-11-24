@@ -10,18 +10,6 @@ import {
 import {
   decodeCodeCheckoutId,
   decodeCodeBoardQuery,
-  decodeCodeProjectPullRequestQuery,
-  decodeCodeProjectPullRequestRefreshCommand,
-  decodeCodeProjectPullRequestDetailQuery,
-  decodeCodeProjectPullRequestDetailRefreshCommand,
-  decodeCodeProjectPullRequestAutoFixCommand,
-  decodeCodeProjectPullRequestActionCommand,
-  decodeCodeProjectPullRequestActionContextQuery,
-  decodeCodeProjectPullRequestMergeCommand,
-  decodeCodeProjectPullRequestStackMergeCommand,
-  decodeCodeProjectPullRequestMergeWhenReadyCommand,
-  decodeCodeProjectPullRequestSwitchTarget,
-  decodeCodeThreadComposerActivity,
   decodeCodeCommand,
   decodeCodeEvidenceContentId,
   decodeCodeEvidenceBatchRequest,
@@ -45,23 +33,23 @@ import {
   CodeBoardView,
   type CodeProjectPullRequestQuery,
   type CodeProjectPullRequestRefreshCommand,
-  CodeProjectPullRequestView,
+  type CodeProjectPullRequestView,
   type CodeProjectPullRequestDetailQuery,
   type CodeProjectPullRequestDetailRefreshCommand,
-  CodeProjectPullRequestDetailView,
+  type CodeProjectPullRequestDetailView,
   type CodeProjectPullRequestAutoFixCommand,
   type CodeProjectPullRequestActionCommand,
-  CodeProjectPullRequestActionContext,
+  type CodeProjectPullRequestActionContext,
   type CodeProjectPullRequestActionContextQuery,
-  CodeProjectPullRequestActionOutcome,
+  type CodeProjectPullRequestActionOutcome,
   type CodeProjectPullRequestMergeCommand,
-  CodeProjectPullRequestMergeOutcome,
+  type CodeProjectPullRequestMergeOutcome,
   type CodeProjectPullRequestStackMergeCommand,
-  CodeProjectPullRequestStackMergeOutcome,
+  type CodeProjectPullRequestStackMergeOutcome,
   type CodeProjectPullRequestMergeWhenReadyCommand,
-  CodeProjectPullRequestSwitchOutcome,
+  type CodeProjectPullRequestSwitchOutcome,
   type CodeProjectPullRequestSwitchTarget,
-  CodeProjectPullRequestSwitchesView,
+  type CodeProjectPullRequestSwitchesView,
   type CodeBootstrap,
   CodeNavigation,
   type CodeCheckoutId,
@@ -428,6 +416,11 @@ export class CodeClientSnapshotRequiredError extends Error {
   }
 }
 
+// PR list, review and watch schemas are only needed when the client reads or changes a PR.
+const loadPullRequestContracts = () => import("@octant/contracts/code-project-pull-requests");
+const loadPullRequestSwitchContracts = () =>
+  import("@octant/contracts/code-project-pull-request-switches");
+
 export function createCodeClient(options: CodeClientOptions): CodeClient {
   const fetch = bindFetchPort(options.fetch);
   validateLoopbackBaseUrl(options.baseUrl);
@@ -623,6 +616,8 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       );
     },
     async queryProjectPullRequests(query) {
+      const { decodeCodeProjectPullRequestQuery, CodeProjectPullRequestView } =
+        await loadPullRequestContracts();
       let validated: CodeProjectPullRequestQuery;
       try {
         validated = decodeCodeProjectPullRequestQuery(query);
@@ -641,6 +636,8 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       );
     },
     async refreshProjectPullRequests(command) {
+      const { decodeCodeProjectPullRequestRefreshCommand, CodeProjectPullRequestView } =
+        await loadPullRequestContracts();
       let validated: CodeProjectPullRequestRefreshCommand;
       try {
         validated = decodeCodeProjectPullRequestRefreshCommand(command);
@@ -659,6 +656,8 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       );
     },
     async queryProjectPullRequestDetail(query) {
+      const { decodeCodeProjectPullRequestDetailQuery, CodeProjectPullRequestDetailView } =
+        await loadPullRequestContracts();
       let validated: CodeProjectPullRequestDetailQuery;
       try {
         validated = decodeCodeProjectPullRequestDetailQuery(query);
@@ -677,6 +676,8 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       );
     },
     async refreshProjectPullRequestDetail(command) {
+      const { decodeCodeProjectPullRequestDetailRefreshCommand, CodeProjectPullRequestDetailView } =
+        await loadPullRequestContracts();
       let validated: CodeProjectPullRequestDetailRefreshCommand;
       try {
         validated = decodeCodeProjectPullRequestDetailRefreshCommand(command);
@@ -695,6 +696,8 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       );
     },
     async mergeProjectPullRequest(command) {
+      const { decodeCodeProjectPullRequestMergeCommand, CodeProjectPullRequestMergeOutcome } =
+        await loadPullRequestContracts();
       let validated: CodeProjectPullRequestMergeCommand;
       try {
         validated = decodeCodeProjectPullRequestMergeCommand(command);
@@ -708,6 +711,10 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       );
     },
     async mergeProjectPullRequestStack(command) {
+      const {
+        decodeCodeProjectPullRequestStackMergeCommand,
+        CodeProjectPullRequestStackMergeOutcome,
+      } = await loadPullRequestContracts();
       let validated: CodeProjectPullRequestStackMergeCommand;
       try {
         validated = decodeCodeProjectPullRequestStackMergeCommand(command);
@@ -721,6 +728,8 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       );
     },
     async actOnProjectPullRequest(command) {
+      const { decodeCodeProjectPullRequestActionCommand, CodeProjectPullRequestActionOutcome } =
+        await loadPullRequestContracts();
       let validated: CodeProjectPullRequestActionCommand;
       try {
         validated = decodeCodeProjectPullRequestActionCommand(command);
@@ -739,6 +748,10 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       );
     },
     async readProjectPullRequestActionContext(query) {
+      const {
+        decodeCodeProjectPullRequestActionContextQuery,
+        CodeProjectPullRequestActionContext,
+      } = await loadPullRequestContracts();
       let validated: CodeProjectPullRequestActionContextQuery;
       try {
         validated = decodeCodeProjectPullRequestActionContextQuery(query);
@@ -757,6 +770,8 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       );
     },
     async queryProjectPullRequestSwitches(target) {
+      const { decodeCodeProjectPullRequestSwitchTarget, CodeProjectPullRequestSwitchesView } =
+        await loadPullRequestSwitchContracts();
       let validated: CodeProjectPullRequestSwitchTarget;
       try {
         validated = decodeCodeProjectPullRequestSwitchTarget(target);
@@ -775,6 +790,10 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       );
     },
     async setProjectPullRequestMergeWhenReady(command) {
+      const {
+        decodeCodeProjectPullRequestMergeWhenReadyCommand,
+        CodeProjectPullRequestSwitchOutcome,
+      } = await loadPullRequestSwitchContracts();
       let validated: CodeProjectPullRequestMergeWhenReadyCommand;
       try {
         validated = decodeCodeProjectPullRequestMergeWhenReadyCommand(command);
@@ -788,6 +807,8 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       );
     },
     async setProjectPullRequestAutoFix(command) {
+      const { decodeCodeProjectPullRequestAutoFixCommand, CodeProjectPullRequestSwitchOutcome } =
+        await loadPullRequestSwitchContracts();
       let validated: CodeProjectPullRequestAutoFixCommand;
       try {
         validated = decodeCodeProjectPullRequestAutoFixCommand(command);
@@ -808,7 +829,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
     async noteComposerActivity(threadId) {
       let validated: { readonly threadId: CodeThreadId };
       try {
-        validated = decodeCodeThreadComposerActivity({ threadId });
+        validated = { threadId: decodeCodeThreadId(threadId) };
       } catch {
         throw invalidProjectPullRequestSwitch();
       }
