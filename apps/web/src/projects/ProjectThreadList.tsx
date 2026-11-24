@@ -202,7 +202,7 @@ function threadRowStates(thread: ChatThreadNavigationItem): ReadonlyArray<string
   if (thread.pinned === true) states.push("Pinned");
   if (thread.woke === true) states.push("Snooze ended");
   else if (thread.shelf === "snoozed") states.push("Snoozed");
-  if (thread.shelf === "completed") states.push("Put away");
+  if (thread.shelf === "completed") states.push("Settled");
   return states;
 }
 
@@ -556,7 +556,7 @@ export function ThreadRowActionsGutter(props: {
         : [
             {
               icon: <RotateCcw aria-hidden="true" size={14} />,
-              label: "Reopen thread",
+              label: "Un-settle thread",
               value: "reopen",
             } as const,
           ]

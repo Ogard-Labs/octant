@@ -96,7 +96,7 @@ describe("arranging a mode's threads on the phone", () => {
       ["Needs input", ["asleep-but-asks"]],
       ["Idle", ["open"]],
       ["Snoozed", ["asleep"]],
-      ["Put away", ["done"]],
+      ["Settled", ["done"]],
     ]);
   });
 });

@@ -897,7 +897,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           : (
               [
                 { key: "snoozed", label: "Snoozed", threads: snoozedThreads },
-                { key: "completed", label: "Put away", threads: completedThreads },
+                { key: "completed", label: "Settled", threads: completedThreads },
               ] as const
             ).map((shelf) =>
               shelf.threads.length === 0 ? null : (

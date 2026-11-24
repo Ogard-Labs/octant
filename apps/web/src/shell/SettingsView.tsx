@@ -2737,15 +2737,15 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Threads">
         <div className="setgroup">
           <SettingRow
-            description="Marking a Work or Code thread Done puts it away, and so does a Code thread's pull request merging. Reopen brings it back."
+            description="A thread settles when its agent files a finished report and that turn completes, when you mark a Work or Code thread Done, and when a Code thread's pull request merges. Un-settle brings it back."
             focused={focusedSetting === settingId("put-away-when-done")}
-            label="Put away threads when they're done"
+            label="Settle threads when they're done"
             scope="host"
             settingId="put-away-when-done"
           >
             <OctantSwitch
               checked={props.settings.putAwayThreadsWhenDone}
-              label="Put away threads when they're done"
+              label="Settle threads when they're done"
               onCheckedChange={(checked) =>
                 props.onSettingsChange({ putAwayThreadsWhenDone: checked })
               }

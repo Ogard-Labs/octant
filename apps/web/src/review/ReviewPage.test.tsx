@@ -374,7 +374,7 @@ describe("ReviewPage", () => {
       .mockResolvedValue({ status: "ok" });
     render(<ReviewPage {...props({ onComplete })} />);
 
-    expect(within(current()).getByRole("button", { name: /^Put away/ })).toBeVisible();
+    expect(within(current()).getByRole("button", { name: /^Settle/ })).toBeVisible();
     expect(screen.queryByRole("button", { name: /^Complete/ })).toBeNull();
     await user.keyboard("c");
     expect(onComplete).toHaveBeenCalledWith(first);

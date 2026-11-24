@@ -2685,9 +2685,9 @@ function liveTurnFacts(activity: WorkThreadRuntimeActivity) {
 }
 
 const WORK_COMPLETE_REFUSALS = {
-  archived: "An archived thread cannot be put away.",
-  executing: "Wait for the running turn to finish before putting this thread away.",
-  "awaiting-input": "This thread is waiting on you; answer it before putting it away.",
+  archived: "An archived thread cannot be settled.",
+  executing: "Wait for the running turn to finish before settling this thread.",
+  "awaiting-input": "This thread is waiting on you; answer it before settling it.",
 } as const;
 
 const WORK_SNOOZE_REFUSALS = {

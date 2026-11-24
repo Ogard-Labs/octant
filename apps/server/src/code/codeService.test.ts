@@ -6716,7 +6716,7 @@ describe("completing and snoozing a Code thread", () => {
         expectedVersion: 1,
       }),
     ).rejects.toMatchObject({
-      failure: { category: "invalid", message: /before putting this thread away/ },
+      failure: { category: "invalid", message: /before settling this thread/ },
     });
 
     const waiting = serviceFixture();
@@ -6728,7 +6728,7 @@ describe("completing and snoozing a Code thread", () => {
         expectedVersion: 1,
       }),
     ).rejects.toMatchObject({
-      failure: { category: "invalid", message: /answer it before putting it away/ },
+      failure: { category: "invalid", message: /answer it before settling it/ },
     });
     expect(running.persistence.journal.append).not.toHaveBeenCalled();
     expect(waiting.persistence.journal.append).not.toHaveBeenCalled();

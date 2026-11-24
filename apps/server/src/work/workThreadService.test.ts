@@ -3206,7 +3206,7 @@ describe("completing and snoozing a Work thread", () => {
         expectedVersion: 1,
       }),
     ).rejects.toMatchObject({
-      failure: { category: "invalid", message: /before putting this thread away/ },
+      failure: { category: "invalid", message: /before settling this thread/ },
     });
 
     const waiting = serviceFixture({

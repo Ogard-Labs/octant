@@ -300,19 +300,19 @@ export function ThreadRowMenu(props: {
               props.actions.onReopenThread === undefined ? null : (
                 <OctantContextMenuItem
                   className="thread-row-context-menu__item"
-                  label="Reopen"
+                  label="Un-settle"
                   onClick={() => props.actions.onReopenThread?.(threadId)}
                 >
-                  <MenuContent icon={RotateCcw}>Reopen</MenuContent>
+                  <MenuContent icon={RotateCcw}>Un-settle</MenuContent>
                 </OctantContextMenuItem>
               )
             ) : props.actions.onCompleteThread === undefined ? null : (
               <OctantContextMenuItem
                 className="thread-row-context-menu__item"
-                label="Put away"
+                label="Settle"
                 onClick={() => props.actions.onCompleteThread?.(threadId)}
               >
-                <MenuContent icon={Check}>Put away</MenuContent>
+                <MenuContent icon={Check}>Settle</MenuContent>
               </OctantContextMenuItem>
             )}
             {props.thread.snooze !== undefined ? (
