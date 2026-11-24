@@ -377,3 +377,16 @@ it("asks the provider again when the Voice dictionary changes instead of reusing
   if (!(form instanceof FormData)) throw new Error("expected a multipart request");
   expect(form.get("prompt")).toBe("Octant");
 });
+
+it("keeps reusing the paid transcript when a Voice change does not alter what the provider is sent", async () => {
+  const f = fixture();
+  const first = f.call();
+  await f.answer(true);
+  expect((await first).result).toMatchObject({ status: "transcribed" });
+
+  // The call names its own language, so a new Voice default changes nothing sent.
+  f.settings.preferences = { language: "en" };
+  expect((await f.call({ offset: 32_000 })).result).toMatchObject({ status: "transcribed" });
+  expect((await f.call()).result).toMatchObject({ status: "transcribed" });
+  expect(f.fetch).toHaveBeenCalledTimes(1);
+});

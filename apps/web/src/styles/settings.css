@@ -882,7 +882,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   gap: 2px;
   padding-inline-start: var(--oct-space-2);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
 }
 
 .voice-settings__test > audio {

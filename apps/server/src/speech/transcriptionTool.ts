@@ -21,7 +21,11 @@ import { isProtectedSecretPath } from "../process/secretGuard";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { TaintAppManagedToolResultsInput } from "../providers/appManagedToolTaint";
 import { adaptMediaToolSet } from "../providers/mediaToolAdapter";
-import type { SpeechAdapter, SpeechTranscriptionPreferences } from "./speechAdapter";
+import {
+  transcriptionRequestIdentity,
+  type SpeechAdapter,
+  type SpeechTranscriptionPreferences,
+} from "./speechAdapter";
 import { sniffSpeechAudioMediaType } from "./speechAudio";
 import type { SpeechGates } from "./speechGates";
 
@@ -132,10 +136,20 @@ export class ThreadTranscription {
               reason: "The folder, access or Voice destination changed.",
             };
           }
-          // A changed Voice language or dictionary is a different request, so
-          // it must not be answered from a transcript made under the old ones.
+          // Keyed on what the provider would actually be sent, so a Voice
+          // change it never sees still reuses the paid transcript, and one it
+          // does see asks again.
           const preferences = input.preferences?.() ?? {};
-          const key = JSON.stringify([thread, audio.digest, target, language, preferences]);
+          const key = JSON.stringify([
+            thread,
+            audio.digest,
+            target,
+            transcriptionRequestIdentity(
+              ready.instance.configuration.baseUrl,
+              language,
+              preferences,
+            ),
+          ]);
           const cached = this.#pages.get(key);
           if (cached !== undefined) return { status: "transcribed", text: cached.text };
           if (!allowFreshRequest) return { status: "cache-miss" };

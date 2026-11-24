@@ -73,6 +73,27 @@ export function transcriptionPreferencesOf(
   };
 }
 
+/**
+ * What a transcription actually sends besides the audio: the language after
+ * the request's own wins over Voice settings', and the dictionary in the form
+ * this endpoint receives it. Two requests with the same identity get the same
+ * answer, so a cache keyed on it neither repeats a paid call for a settings
+ * change the provider never sees nor reuses text made under different input.
+ */
+export function transcriptionRequestIdentity(
+  baseUrl: string,
+  language: string | undefined,
+  preferences: SpeechTranscriptionPreferences,
+): string {
+  const dictionary = preferences.dictionary ?? [];
+  return JSON.stringify({
+    language: language ?? preferences.language ?? null,
+    ...(isMistralHost(baseUrl)
+      ? { contextBias: dictionary }
+      : { prompt: transcriptionPromptOf(dictionary) ?? null }),
+  });
+}
+
 export interface SpeechAdapterOptions {
   readonly instance: OpenAiCompatibleProviderInstance;
   readonly transcriptionPreferences?: SpeechTranscriptionPreferences;
