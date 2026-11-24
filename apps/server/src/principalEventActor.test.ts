@@ -7,7 +7,7 @@ const SOURCE_ROOT = import.meta.dirname;
 
 /** What a module calls when it judges a device the host's own person paired as that person. */
 const JUDGES_A_DEVICE_AS_THE_PERSON =
-  /\b(principalActsAsHostPerson|principalAuthorityKind|boundPrincipalIsRestricted)\b/;
+  /\b(principalActsAsHostPerson|principalIsDirectlyPaired|principalAuthorityKind|boundPrincipalIsRestricted)\b/;
 
 /**
  * Modules that judge such a device without resolving its actor themselves,
