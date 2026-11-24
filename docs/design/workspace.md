@@ -3022,7 +3022,7 @@ be the one a press replaced, which took the section off screen while its tab
 stayed open.
 
 Every tool has one of two size classes (`rightUtilityDockModel.ts`). **Fixed**
-tools are Environment (300px) and the panel tools (Vitals, Plan, Agents,
+tools are Environment (300px) and the panel tools (Vitals, Plan, Tasks, Agents,
 Delivery, Side Chat, Artifacts, Pull requests, Tests and Debug) at 360px
 (`COMPACT_DOCK_WIDTH`): they never change width whatever opens or closes beside
 them and have no resize handle. **Flexible** tools (Browser, Terminal, Review,
