@@ -27,7 +27,7 @@ import {
 } from "./modelCatalogPolicy";
 import { amazonBedrockRuntimeHost } from "./cloudIamSignIn";
 import {
-  isImageProfileDriverKind,
+  isMediaProfileDriverKind,
   isNativeHarnessDriverKind,
   providerKeepsConversation,
 } from "./providerPolicy";
@@ -47,6 +47,7 @@ const driverLabels: Readonly<Record<Exclude<ProviderDriverKind, AcpAgentKind>, s
   "gemini-native-image": "Gemini Image",
   "bfl-image": "Black Forest Labs Image",
   "ideogram-image": "Ideogram Image",
+  "gemini-video": "Gemini Video",
   // A bundled kind's name is never borrowed: an outside instance is labelled
   // as what it is, beside its package's own display name.
   "outside-harness-endpoint": "Outside driver",
@@ -393,7 +394,7 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
   );
   const groups: PickerGroup[] = [];
   for (const instance of ordered) {
-    if (isImageProfileDriverKind(instance.driverKind)) continue;
+    if (isMediaProfileDriverKind(instance.driverKind)) continue;
     const observed = input.observedByInstance.get(instance.id);
     if (observed === undefined) {
       maybeAppendUnavailableCurrent(groups, instance, input, observed);

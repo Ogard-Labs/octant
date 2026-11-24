@@ -55,7 +55,13 @@ export type VideoAdapterPoll =
       readonly usage?: VideoAdapterUsage;
     }
   | { readonly status: "refused"; readonly safetyRefusal: string }
-  | { readonly status: "failed"; readonly providerFailure: ProviderFailure }
+  | {
+      readonly status: "failed";
+      readonly providerFailure: ProviderFailure;
+      /** The provider billed generation even though no usable clip was returned. */
+      readonly billed?: true;
+      readonly usage?: VideoAdapterUsage;
+    }
   | { readonly status: "cancelled"; readonly usage?: VideoAdapterUsage };
 
 export type VideoAdapterForget =
@@ -76,9 +82,11 @@ export interface VideoGenerationAdapter {
    * Asks the provider to stop, then reports the job's state with any usage it
    * states. Called only when the model declares it can cancel. A result still
    * `running` means the stop is not yet confirmed: the job service keeps
-   * polling until a terminal state or the job time runs out.
+   * polling until a terminal state or the job time runs out. The signal
+   * bounds the call: once the job time has run out, the host asks for a stop
+   * only as cleanup and does not wait for a finished clip to download again.
    */
-  readonly cancel: (remoteId: string) => Promise<VideoAdapterPoll>;
+  readonly cancel: (remoteId: string, signal?: AbortSignal) => Promise<VideoAdapterPoll>;
   /**
    * Removes the provider's stored copy. Called after every terminal state when
    * the model declares `removal: delete`; the job service retries a failure.
