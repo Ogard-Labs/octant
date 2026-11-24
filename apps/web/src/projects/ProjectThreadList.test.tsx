@@ -41,6 +41,13 @@ function pullRequest(
 
 const identity12 = { projectId, repositoryOwner: "octant", repositoryName: "octant", number: 12 };
 
+/** The info card loads on the first approach to a row, so it can open a moment before its content. */
+async function findThreadDetails(): Promise<HTMLElement> {
+  const card = await screen.findByRole("group", { name: "Thread details" });
+  await waitFor(() => expect(card).not.toBeEmptyDOMElement());
+  return card;
+}
+
 describe("ProjectThreadList nesting", () => {
   it("lists a started task right under the thread that suggested it, marked as nested", () => {
     const parent = { threadId: "parent", title: "Redesign the shell" };
@@ -796,7 +803,7 @@ describe("ProjectThreadRows", () => {
     const row = screen.getByRole("button", { name: /Controller foundation/ });
     await user.hover(row);
 
-    const card = await screen.findByRole("group", { name: "Thread details" });
+    const card = await findThreadDetails();
     expect(card).toHaveTextContent("Controller foundation");
     expect(card).toHaveTextContent("Core Project");
     expect(card).toHaveTextContent("Pinned");
@@ -817,7 +824,7 @@ describe("ProjectThreadRows", () => {
 
     await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
 
-    const card = await screen.findByRole("group", { name: "Thread details" });
+    const card = await findThreadDetails();
     expect(card).toHaveTextContent("Claude · Opus 5.5");
   });
 
@@ -832,7 +839,7 @@ describe("ProjectThreadRows", () => {
 
     await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
 
-    const card = await screen.findByRole("group", { name: "Thread details" });
+    const card = await findThreadDetails();
     expect(card).toHaveTextContent("Put away");
     expect(card).not.toHaveTextContent("Completed");
   });
@@ -1057,7 +1064,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await user.hover(screen.getByRole("button", { name: /Second direction/ }));
-    const card = await screen.findByRole("group", { name: "Thread details" });
+    const card = await findThreadDetails();
     expect(card).toHaveTextContent("Forked from Original direction");
   });
 
@@ -1113,7 +1120,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
-    const card = await screen.findByRole("group", { name: "Thread details" });
+    const card = await findThreadDetails();
     const reference = within(card).getByRole("button", { name: /Open pull request #12/ });
     expect(reference).toHaveAccessibleName(
       "Open pull request #12: Sidebar pull request 12 · octant/octant · Open · Checks passing · Approved · Stale snapshot",
@@ -1141,7 +1148,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
-    const card = await screen.findByRole("group", { name: "Thread details" });
+    const card = await findThreadDetails();
 
     await user.keyboard("{Meta>}");
     await user.click(within(card).getByRole("button", { name: /Open pull request #12/ }));
@@ -1165,7 +1172,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
-    const card = await screen.findByRole("group", { name: "Thread details" });
+    const card = await findThreadDetails();
 
     expect(within(card).queryByRole("group", { name: "Linked pull requests" })).toBeNull();
     expect(within(card).queryByRole("button")).toBeNull();
@@ -1190,7 +1197,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
-    const card = await screen.findByRole("group", { name: "Thread details" });
+    const card = await findThreadDetails();
     const list = within(card).getByRole("group", { name: "Linked pull requests" });
 
     expect(within(list).getAllByRole("button")).toHaveLength(3);
@@ -1212,7 +1219,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
-    const card = await screen.findByRole("group", { name: "Thread details" });
+    const card = await findThreadDetails();
     const list = within(card).getByRole("group", { name: "Linked pull requests" });
 
     expect(within(list).getAllByRole("button", { name: /^Open pull request #/ })).toHaveLength(50);
@@ -1257,7 +1264,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
-    const card = await screen.findByRole("group", { name: "Thread details" });
+    const card = await findThreadDetails();
 
     expect(within(card).getByRole("button", { name: /^Open pull request #7:/ })).toHaveTextContent(
       "site",
@@ -1346,7 +1353,7 @@ describe("ProjectThreadRows", () => {
     const row = screen.getByRole("button", { name: /Controller foundation/ });
     await user.hover(row);
 
-    const card = await screen.findByRole("group", { name: "Thread details" });
+    const card = await findThreadDetails();
     expect(card).not.toHaveTextContent("Updated");
     expect(card).not.toHaveTextContent("Invalid Date");
   });
@@ -1623,7 +1630,7 @@ describe("ProjectThreadRows display properties", () => {
 
     // Hiding the row's chip is not hiding the link: the card the row already
     // owns keeps the exact pull request and its destinations.
-    const card = await screen.findByRole("group", { name: "Thread details" });
+    const card = await findThreadDetails();
     expect(within(card).getByRole("group", { name: "Linked pull requests" })).toBeVisible();
     await user.click(within(card).getByRole("button", { name: /Open pull request #12/ }));
     expect(onOpenPullRequest).toHaveBeenCalledWith(expect.objectContaining({ number: 12 }));

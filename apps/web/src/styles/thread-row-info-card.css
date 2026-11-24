@@ -1,0 +1,239 @@
+/* Delayed, non-modal info card shown for a thread row. It uses only facts
+   already available in the navigation item and Project context. */
+.thread-row-info-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 296px;
+}
+
+/* The title and recency share one compact line so the card is scannable before
+   the supporting state and context details below it. */
+.thread-row-info-card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.thread-row-info-card__states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.thread-row-info-card__state {
+  padding: 2px var(--oct-space-2);
+  color: var(--oct-muted);
+  background: var(--oct-fg-soft);
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  line-height: 1.4;
+}
+
+.thread-row-info-card__age {
+  flex: 0 0 auto;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.thread-row-info-card__title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* One fact per line. Dot-joined into a single paragraph, the same facts wrapped
+   mid-value and read as prose rather than as a set of properties. */
+.thread-row-info-card__facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+}
+
+.thread-row-info-card__fact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+}
+
+.thread-row-info-card__fact svg {
+  flex: 0 0 auto;
+  color: var(--oct-meta);
+}
+
+.thread-row-info-card__fact-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Linked pull requests close the card as their own group: a rule above them
+   says these are things to open, where the facts above are things to read. */
+.thread-row-info-card__prs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+/* One line per pull request, so a thread that worked through dozens still
+   reads at a glance; past ten lines the list scrolls inside the card and the
+   header above it stays put. */
+.thread-row-info-card__pr-list {
+  --thread-row-info-card-pr-line: 26px;
+
+  display: flex;
+  flex-direction: column;
+  max-height: calc(10 * var(--thread-row-info-card-pr-line));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.thread-row-info-card__pr {
+  display: flex;
+  flex: 0 0 var(--thread-row-info-card-pr-line);
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* The state glyph, checks dot, number, title and (when the pull requests span
+   repositories) the repository share one line. The reference is a
+   card-shaped control, so it drops the button recipe's fixed height. */
+.thread-row-info-card__pr-reference {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  padding: var(--oct-space-1) var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.thread-row-info-card__pr-state {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.thread-row-info-card__pr-state[data-pr-state="open"] {
+  color: var(--oct-pr-open);
+}
+
+.thread-row-info-card__pr-state[data-pr-state="merged"] {
+  color: var(--oct-pr-merged);
+}
+
+.thread-row-info-card__pr-state[data-pr-state="closed"] {
+  color: var(--oct-pr-closed);
+}
+
+.thread-row-info-card__pr-state[data-pr-state="draft"],
+.thread-row-info-card__pr-state[data-pr-state="unknown"] {
+  color: var(--oct-pr-draft);
+}
+
+/* Checks as a dot beside the glyph, only while the pull request can still
+   merge; the words are in the line's tooltip and accessible name. */
+.thread-row-info-card__pr-checks {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-inline-start: -2px;
+  border-radius: 50%;
+  background: var(--oct-meta);
+}
+
+.thread-row-info-card__pr-checks[data-checks="none"] {
+  background: transparent;
+}
+
+.thread-row-info-card__pr-checks[data-checks="passing"] {
+  background: var(--octant-success-text);
+}
+
+.thread-row-info-card__pr-checks[data-checks="failing"] {
+  background: var(--octant-danger-text);
+}
+
+.thread-row-info-card__pr-checks[data-checks="pending"] {
+  background: var(--octant-warning-text);
+}
+
+.thread-row-info-card__pr-number {
+  flex: 0 0 auto;
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-row-info-card__pr-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The repository keeps its width (up to a third of the line) and the title
+   gives way first: squeezed together, both truncated to a letter or two. */
+.thread-row-info-card__pr-repository {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 33%;
+  overflow: hidden;
+  color: var(--oct-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The GitHub control appears with its line's hover or focus, so titles keep
+   the width the rest of the time; it stays in the layout, so revealing it
+   moves nothing. */
+.thread-row-info-card__pr-github {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  color: var(--oct-meta);
+  border-radius: var(--oct-radius-sm);
+  opacity: 0;
+}
+
+/* The bare variant draws nothing, so this takes the ghost hover fill itself. */
+.thread-row-info-card__pr-github:hover {
+  background: var(--muted);
+}
+
+.thread-row-info-card__pr:hover .thread-row-info-card__pr-github,
+.thread-row-info-card__pr:focus-within .thread-row-info-card__pr-github {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .thread-row-info-card__pr-github {
+    opacity: 1;
+  }
+}
+
+.thread-row-info-card__pr-more {
+  padding: 2px var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
