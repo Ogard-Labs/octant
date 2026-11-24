@@ -111,6 +111,7 @@ import {
   ProjectImageGenerationChoiceChanged,
   ProjectBrandKitChanged,
   ProjectDesignSystemChanged,
+  ProjectLinearTargetChanged,
   WorkProjectDeveloperToolsChanged,
   WorkProjectActionsChanged,
   WorkProjectPermissionModeChanged,
@@ -676,6 +677,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.image-generation-choice-changed@1", 1, ProjectImageGenerationChoiceChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
     .register("project.design-system-changed@1", 1, ProjectDesignSystemChanged)
+    .register("project.linear-target-changed@1", 1, ProjectLinearTargetChanged)
     .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)
     .register("project.extra-folder-added@1", 1, ProjectExtraFolderAdded)
     .register("project.extra-folder-removed@1", 1, ProjectExtraFolderRemoved)

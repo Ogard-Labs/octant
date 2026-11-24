@@ -84,9 +84,15 @@ export function createTrackerReferenceClientPorts(
             available: linearInput.available,
             getIssue: async (key: string) => {
               try {
-                // get-issue takes an opaque node id; tracker tags only carry the
-                // public identifier (ABC-99). list-issues is the seam that
-                // resolves identifiers, and the row has the chip fields.
+                if (typeof linearInput.client.getIssueByIdentifier === "function") {
+                  const detail = await linearInput.client.getIssueByIdentifier({ identifier: key });
+                  return {
+                    kind: "resolved" as const,
+                    title: detail.title,
+                    url: detail.url,
+                    state: linearStateToChipState(detail.state.type),
+                  };
+                }
                 const page = await linearInput.client.listIssues({
                   search: key,
                   pageSize: 50,

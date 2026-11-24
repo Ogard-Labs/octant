@@ -21,7 +21,17 @@ import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/de
 import type { ProjectColor, ProjectProviderPolicy } from "@octant/contracts/projects";
 import type { ProviderInstance } from "@octant/contracts/providers";
 import { ChevronDown, Ellipsis, SquarePen } from "../ui/icons";
-import { Children, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Children,
+  lazy,
+  Suspense,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { homeRelativePath } from "../lib/homeRelativePath";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
@@ -41,6 +51,12 @@ import type { ExtraFolderChange, ProjectChange } from "./useProjectController";
 import { ProjectDesktopRecipeSection } from "./ProjectDesktopRecipeSection";
 import { ProjectAutoReviewerSection } from "./ProjectAutoReviewerSection";
 import { ProjectPullRequestReviewerSection } from "../code/PullRequestReviewerSettings";
+
+const LazyProjectLinearTargetSection = lazy(() =>
+  import("./ProjectLinearTargetSection").then((module) => ({
+    default: module.ProjectLinearTargetSection,
+  })),
+);
 import {
   ProjectModelRolesSection,
   type ProjectModelRolesSectionProps,
@@ -127,6 +143,13 @@ export interface ProjectOverviewProps {
   readonly onDesignSystemChange?: (
     projectId: ProjectId,
     designSystem: DesignSystemChoice | null,
+  ) => Promise<boolean>;
+  /** Connected Linear client; when present, bound Projects show Linear team/project mapping. */
+  readonly linearClient?: import("@octant/client-runtime/integration-client").IntegrationClient;
+  /** Absent when the host cannot accept the change; the panel then stays read-only. */
+  readonly onLinearTargetChange?: (
+    projectId: ProjectId,
+    target: import("@octant/contracts").ProjectLinearTarget | null,
   ) => Promise<boolean>;
   /** Absent when the host cannot accept the change; a Code Project's recipe is then not shown. */
   readonly onDesktopRecipeChange?: (
@@ -660,6 +683,33 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                   disabled={archived || connectionStale}
                   project={props.project}
                 />
+              </ProjectOverviewInspector>
+            )}
+            {props.linearClient === undefined || props.project.type === "chat" ? null : (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-linear-target`}
+                label="Linear"
+                summary={
+                  props.project.linearTarget === undefined
+                    ? "Bind a Linear team to scope issues and octant_linear reads"
+                    : props.project.linearTarget.projectName === undefined
+                      ? `${props.project.linearTarget.teamName} (${props.project.linearTarget.teamKey})`
+                      : `${props.project.linearTarget.teamName} (${props.project.linearTarget.teamKey}) · ${props.project.linearTarget.projectName}`
+                }
+              >
+                <Suspense fallback={null}>
+                  <LazyProjectLinearTargetSection
+                    disabled={archived || connectionStale}
+                    linearClient={props.linearClient}
+                    {...(props.onLinearTargetChange === undefined
+                      ? {}
+                      : {
+                          onChoose: async (target) =>
+                            (await props.onLinearTargetChange?.(props.project.id, target)) ?? false,
+                        })}
+                    project={props.project}
+                  />
+                </Suspense>
               </ProjectOverviewInspector>
             )}
             {props.onBrandKitChange === undefined ? null : (

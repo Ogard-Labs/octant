@@ -118,11 +118,18 @@ describe("Linear integration plugin", () => {
     if (observation.kind !== "authentication") return;
     expect(observation.snapshot).toEqual({
       state: "ready",
-      account: { login: "ogard-labs", source: "oauth", scopes: ["read"] },
+      account: {
+        login: "ogard-labs",
+        displayName: "Ada",
+        workspace: "Og",
+        source: "oauth",
+        scopes: ["read"],
+      },
       capabilities: [
         { operationId: "linear.assignment-source", available: true },
         { operationId: "list-issues", available: true },
         { operationId: "get-issue", available: true },
+        { operationId: "get-issue-by-identifier", available: true },
         { operationId: "list-issue-filters", available: true },
       ],
     });

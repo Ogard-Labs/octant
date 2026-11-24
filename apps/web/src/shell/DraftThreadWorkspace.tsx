@@ -1,3 +1,4 @@
+import { matchProjectForLinearIssue } from "@octant/domain";
 import {
   decodeThreadWorkingDirectory,
   type CoordinatorBounds,
@@ -74,9 +75,9 @@ import type {
 } from "@octant/contracts";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
-import { useGithubIssuesCreateAvailable } from "../github/CreateFromIssuePicker";
+import { useGithubIssuesCreateAvailable } from "../github/githubIssuesReadAhead";
 import { CreateFromControl } from "../composer/CreateFromControl";
-import { useLinearIssuesCreateAvailable } from "../linear/CreateFromLinearIssuePicker";
+import { useLinearIssuesCreateAvailable } from "../linear/linearIssuesReadAhead";
 import {
   draftThreadModePresentation,
   resolveCodeNewThreadWorkspace,
@@ -148,7 +149,7 @@ import {
 import { WorkKindSwitch } from "./WorkKindSwitch";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { createTerminalSessionClient } from "@octant/client-runtime/terminal-session-client";
-import { TERMINAL_SESSION_TOOL_NAMES } from "../terminalSessions/CreateFromTerminalSessionPicker";
+import { TERMINAL_SESSION_TOOL_NAMES } from "../terminalSessions/terminalSessionsReadAhead";
 import { ComposerInput, type ComposerInputElement } from "../composer/ComposerInput";
 
 // Cloning a repository from GitHub is a first-time step, not a start-screen
@@ -486,12 +487,23 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     (props.mode === "work" || props.mode === "code")
       ? { client: terminalSessionClient, projectId: selectedProjectId }
       : undefined;
+  const selectedProjectSummary = props.projects?.find(
+    (project) =>
+      selectedProjectId !== undefined && String(project.id) === String(selectedProjectId),
+  );
+  const selectedProjectLinearTarget =
+    selectedProjectSummary !== undefined && selectedProjectSummary.type !== "chat"
+      ? selectedProjectSummary.linearTarget
+      : undefined;
   const createFromControl =
     (issuesCreateAvailable && props.githubClient !== undefined) ||
     (linearCreateAvailable && props.linearClient !== undefined) ||
     terminalSessions !== undefined ? (
       <CreateFromControl
         {...(terminalSessions === undefined ? {} : { terminalSessions })}
+        {...(selectedProjectLinearTarget === undefined
+          ? {}
+          : { defaultLinearTarget: selectedProjectLinearTarget })}
         onSelectTerminal={(session) => {
           setCreateFromSelection({
             kind: "terminal",
@@ -801,6 +813,19 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     );
   };
   const pickLinearWork = (row: LinearIssueRow) => {
+    const matchedProject = matchProjectForLinearIssue(
+      (props.projects ?? []).filter(
+        (project): project is Exclude<ProjectSummary, { readonly type: "chat" }> =>
+          project.type !== "chat",
+      ),
+      row,
+    );
+    if (
+      matchedProject !== undefined &&
+      String(matchedProject.id) !== String(selectedProjectId ?? "")
+    ) {
+      selectProject(matchedProject.id);
+    }
     setCreateFromSelection({
       kind: "linear",
       request: { id: row.id },

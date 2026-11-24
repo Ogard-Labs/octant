@@ -99,6 +99,33 @@ describe("Linear issue browser", () => {
     expect(link).toHaveAttribute("target", "_blank");
   });
 
+  it("pre-filters issues to the active Project's Linear binding when opened", async () => {
+    const listIssues = vi.fn(async () => page);
+    render(
+      <LinearIssueBrowser
+        defaultLinearTarget={{
+          teamId: "22222222-2222-4222-8222-222222222222",
+          teamKey: "ENG",
+          teamName: "Engineering",
+          projectId: "44444444-4444-4444-8444-444444444444",
+          projectName: "Octant",
+        }}
+        getIssue={vi.fn(async () => detail)}
+        listIssueFilters={vi.fn(async () => filters)}
+        listIssues={listIssues}
+        onClose={() => undefined}
+      />,
+    );
+    await waitFor(() =>
+      expect(listIssues).toHaveBeenCalledWith({
+        filter: {
+          teamId: "22222222-2222-4222-8222-222222222222",
+          projectId: "44444444-4444-4444-8444-444444444444",
+        },
+      }),
+    );
+  });
+
   it("sends search to the Integration read", async () => {
     const user = userEvent.setup();
     const { listIssues } = renderBrowser();

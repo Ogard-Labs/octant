@@ -1,17 +1,31 @@
 import { useCallback, useEffect, useState } from "react";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
+import type { ProjectId, ProjectLinearTarget, ProjectSummary } from "@octant/contracts";
 import type {
   IntegrationAuthenticationSnapshot,
   IntegrationAuthenticationState,
 } from "@octant/contracts/integration";
+import type { LinearIssueFilterOptions } from "@octant/contracts/linear-issues";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SettingRow, SettingsFactList, SettingsSection, SettingsState } from "./primitives";
+
+const LINEAR_API_KEYS_URL = "https://linear.app/settings/account/security";
+const UNBOUND = "__none__";
+const ANY_PROJECT = "__any__";
 
 export interface LinearConnectionSettingsProps {
   readonly client: IntegrationClient;
+  /** Active host Projects eligible for Linear team/project mapping. */
+  readonly projects?: ReadonlyArray<ProjectSummary>;
+  /** Local-host-only Project mutation; absent on remote/read-only windows. */
+  readonly onProjectLinearTargetChange?: (
+    projectId: ProjectId,
+    target: ProjectLinearTarget | null,
+  ) => Promise<boolean>;
 }
 
 type SnapshotState =
@@ -28,7 +42,11 @@ const STATE_LABELS: Readonly<Record<IntegrationAuthenticationState, string>> = {
   unavailable: "Unavailable",
 };
 
-export function LinearConnectionSettings({ client }: LinearConnectionSettingsProps) {
+export function LinearConnectionSettings({
+  client,
+  projects,
+  onProjectLinearTargetChange,
+}: LinearConnectionSettingsProps) {
   const [snapshotState, setSnapshotState] = useState<SnapshotState>({ kind: "loading" });
   const [refreshing, setRefreshing] = useState(false);
   const [commandBusy, setCommandBusy] = useState(false);
@@ -37,6 +55,10 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [personalKey, setPersonalKey] = useState("");
   const [personalBusy, setPersonalBusy] = useState(false);
+  const [filters, setFilters] = useState<LinearIssueFilterOptions>();
+  const [filtersLoading, setFiltersLoading] = useState(false);
+  const [savingProjectId, setSavingProjectId] = useState<string>();
+  const [mappingError, setMappingError] = useState<string>();
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -59,6 +81,40 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
     setSnapshotState({ kind: "loading" });
     void refresh();
   }, [refresh]);
+
+  const connectedSnapshot =
+    snapshotState.kind === "ready" &&
+    (snapshotState.snapshot.state === "ready" || snapshotState.snapshot.state === "scope-limited");
+
+  const bindableProjects = (projects ?? []).filter(
+    (project): project is Exclude<ProjectSummary, { readonly type: "chat" }> =>
+      project.type !== "chat" && project.lifecycle === "active",
+  );
+
+  useEffect(() => {
+    if (!connectedSnapshot || bindableProjects.length === 0) {
+      setFilters(undefined);
+      setFiltersLoading(false);
+      return;
+    }
+    let active = true;
+    setFiltersLoading(true);
+    void client.listIssueFilters().then(
+      (options) => {
+        if (!active) return;
+        setFilters(options);
+        setFiltersLoading(false);
+      },
+      () => {
+        if (!active) return;
+        setFilters(undefined);
+        setFiltersLoading(false);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [client, connectedSnapshot, bindableProjects.length]);
 
   const runCommand = async (kind: "setup" | "refresh" | "logout") => {
     setCommandBusy(true);
@@ -105,6 +161,11 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
   const { snapshot } = snapshotState;
   const account = snapshot.account;
   const connected = snapshot.state === "ready" || snapshot.state === "scope-limited";
+  const personalKeyStored =
+    snapshot.personalCredentialStored === true || account?.source === "personal-api-key";
+  const linkedCount = bindableProjects.filter(
+    (project) => project.linearTarget !== undefined,
+  ).length;
   const reconnect =
     snapshot.state === "unauthorized" &&
     snapshot.remediation !== undefined &&
@@ -113,6 +174,25 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
     snapshot.interaction?.kind === "authorization-redirect"
       ? snapshot.interaction.authorizationUri
       : undefined;
+
+  const teams = filters?.teams ?? [];
+  const linearProjects = filters?.projects ?? [];
+
+  async function saveMapping(projectId: ProjectId, next: ProjectLinearTarget | null) {
+    if (onProjectLinearTargetChange === undefined) return;
+    setSavingProjectId(String(projectId));
+    setMappingError(undefined);
+    try {
+      const ok = await onProjectLinearTargetChange(projectId, next);
+      if (!ok) setMappingError("Could not save the Project's Linear binding.");
+    } catch (error: unknown) {
+      setMappingError(
+        error instanceof Error ? error.message : "Could not save the Project's Linear binding.",
+      );
+    } finally {
+      setSavingProjectId(undefined);
+    }
+  }
 
   return (
     <section
@@ -125,8 +205,22 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
         <SettingsFactList
           facts={[
             { label: "State", value: STATE_LABELS[snapshot.state] },
+            ...(account?.displayName === undefined
+              ? []
+              : [{ label: "User", value: account.displayName }]),
             ...(account === undefined ? [] : [{ label: "Workspace", value: account.login }]),
             ...(account === undefined ? [] : [{ label: "Source", value: account.source }]),
+            ...(connected && projects !== undefined
+              ? [
+                  {
+                    label: "Linked projects",
+                    value:
+                      linkedCount === 1
+                        ? "1 project linked"
+                        : `${String(linkedCount)} projects linked`,
+                  },
+                ]
+              : []),
           ]}
         />
         {snapshot.remediation === undefined ? null : (
@@ -197,6 +291,114 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
         </div>
       </SettingsSection>
 
+      {connected && bindableProjects.length > 0 ? (
+        <SettingsSection
+          description="Pick the Linear team (and optional Linear project) each Project scopes its issues and octant_linear reads to."
+          title="Projects"
+        >
+          {filtersLoading && teams.length === 0 ? (
+            <p className="settings-section-line">Loading Linear teams…</p>
+          ) : (
+            <div className="setgroup">
+              {bindableProjects.map((project) => {
+                const current = project.linearTarget;
+                const busy = savingProjectId === String(project.id);
+                const teamOptions = [
+                  { id: UNBOUND, label: "Not bound" },
+                  ...teams.map((team) => ({ id: team.id, label: team.label })),
+                  ...(current !== undefined && !teams.some((team) => team.id === current.teamId)
+                    ? [{ id: current.teamId, label: `${current.teamName} (${current.teamKey})` }]
+                    : []),
+                ];
+                const projectOptions = [
+                  { id: ANY_PROJECT, label: "Any Linear project" },
+                  ...linearProjects.map((item) => ({ id: item.id, label: item.label })),
+                  ...(current?.projectId !== undefined &&
+                  current.projectName !== undefined &&
+                  !linearProjects.some((item) => item.id === current.projectId)
+                    ? [{ id: current.projectId, label: current.projectName }]
+                    : []),
+                ];
+                return (
+                  <SettingRow
+                    description={project.type === "code" ? "Code Project" : "Work Project"}
+                    key={String(project.id)}
+                    label={project.name}
+                    scope="host"
+                    settingId={`linear-project-${String(project.id)}`}
+                  >
+                    <div className="linear-settings__controls">
+                      <OctantSelectField
+                        aria-label={`${project.name} Linear team`}
+                        disabled={busy || onProjectLinearTargetChange === undefined}
+                        onValueChange={(teamId) => {
+                          if (teamId === UNBOUND) {
+                            void saveMapping(project.id, null);
+                            return;
+                          }
+                          const found = teams.find((team) => team.id === teamId);
+                          if (found === undefined) return;
+                          const teamKey = found.key ?? extractTeamKey(found.label);
+                          const teamName = found.name ?? extractTeamName(found.label);
+                          if (teamKey === undefined) return;
+                          void saveMapping(project.id, {
+                            teamId: found.id,
+                            teamKey,
+                            teamName,
+                            ...(current?.projectId !== undefined &&
+                            current.projectName !== undefined
+                              ? { projectId: current.projectId, projectName: current.projectName }
+                              : {}),
+                          });
+                        }}
+                        options={teamOptions}
+                        placeholder="Not bound"
+                        value={current?.teamId ?? UNBOUND}
+                      />
+                      {current !== undefined && linearProjects.length > 0 ? (
+                        <OctantSelectField
+                          aria-label={`${project.name} Linear project`}
+                          disabled={busy || onProjectLinearTargetChange === undefined}
+                          onValueChange={(linearProjectId) => {
+                            if (linearProjectId === ANY_PROJECT) {
+                              void saveMapping(project.id, {
+                                teamId: current.teamId,
+                                teamKey: current.teamKey,
+                                teamName: current.teamName,
+                              });
+                              return;
+                            }
+                            const found = linearProjects.find(
+                              (item) => item.id === linearProjectId,
+                            );
+                            if (found === undefined) return;
+                            void saveMapping(project.id, {
+                              teamId: current.teamId,
+                              teamKey: current.teamKey,
+                              teamName: current.teamName,
+                              projectId: found.id,
+                              projectName: found.label,
+                            });
+                          }}
+                          options={projectOptions}
+                          placeholder="Any Linear project"
+                          value={current.projectId ?? ANY_PROJECT}
+                        />
+                      ) : null}
+                    </div>
+                  </SettingRow>
+                );
+              })}
+            </div>
+          )}
+          <div className="settings-feedback-slot" aria-live="polite">
+            {mappingError === undefined ? null : (
+              <SettingsState kind="error">{mappingError}</SettingsState>
+            )}
+          </div>
+        </SettingsSection>
+      ) : null}
+
       <SettingsSection
         description="A personal API key is stored in the same host secret store as OAuth tokens, and is never used as an OAuth fallback."
         title="Advanced"
@@ -216,10 +418,21 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
             <label className="linear-settings__note" htmlFor="linear-personal-api-key">
               Personal API key
             </label>
+            <p className="linear-settings__note">
+              {personalKeyStored
+                ? "A personal API key is stored on this host. "
+                : "Stored on this host. "}
+              <a href={LINEAR_API_KEYS_URL} rel="noreferrer" target="_blank">
+                Create one
+              </a>
+            </p>
             <OctantInput
               autoComplete="off"
               id="linear-personal-api-key"
               onChange={(event) => setPersonalKey(event.currentTarget.value)}
+              placeholder={
+                personalKeyStored ? "Stored secret, enter a new key to replace" : "lin_api_…"
+              }
               type="password"
               value={personalKey}
             />
@@ -249,7 +462,7 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
                 Store key
               </OctantButton>
               <OctantButton
-                disabled={personalBusy}
+                disabled={personalBusy || snapshot.personalCredentialStored === false}
                 onClick={() => {
                   setPersonalBusy(true);
                   void client
@@ -299,4 +512,13 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
       ) : null}
     </section>
   );
+}
+
+function extractTeamKey(label: string): string | undefined {
+  const match = /\(([A-Z][A-Z0-9]{0,9})\)$/.exec(label.trim());
+  return match?.[1];
+}
+
+function extractTeamName(label: string): string {
+  return label.replace(/\s*\([A-Z][A-Z0-9]{0,9}\)$/, "").trim() || label;
 }

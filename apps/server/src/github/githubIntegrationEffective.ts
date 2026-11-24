@@ -70,3 +70,10 @@ export function githubReadToolSetIfEffective(
 ): AppManagedToolSet {
   return isGithubIntegrationEffective(snapshot) ? create() : emptyGithubReadToolSet;
 }
+
+export function linearReadToolSetIfEffective(
+  snapshot: Pick<ExtensionSnapshot, "packages">,
+  create: () => AppManagedToolSet,
+): AppManagedToolSet {
+  return isLinearIntegrationEffective(snapshot) ? create() : emptyGithubReadToolSet;
+}

@@ -97,7 +97,10 @@ import type { CodeRouteService } from "../codeRoutes";
 import { GitMutationPort } from "../code/gitMutationPort";
 import { codeThreadTurns } from "../code/codeForkPoint";
 import { seedCodeForkHarnessSession } from "../harness/nativeHarnessFork";
-import { githubReadToolSetIfEffective } from "../github/githubIntegrationEffective";
+import {
+  githubReadToolSetIfEffective,
+  linearReadToolSetIfEffective,
+} from "../github/githubIntegrationEffective";
 import { TerminalBrowserGrantService } from "../code/terminalBrowserGrantService";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import {
@@ -412,6 +415,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "consumeCreateFromIssueFramed"
     | "githubExtensionSnapshot"
     | "githubReadToolService"
+    | "linearReadToolService"
     | "peekCreateFromIssueFramed"
     | "siblingThreadsService"
     | "threadOutsideContentMarks"
@@ -563,6 +567,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     fileMentionService,
     githubExtensionSnapshot,
     githubReadToolService,
+    linearReadToolService,
     isCodeProviderModelAllowed,
     liveTurns,
     machineChangeFeed,
@@ -1934,6 +1939,18 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         githubReadTools: ({ windowId, thread, readThread }) =>
           githubReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
             githubReadToolService.createToolSet({ windowId, thread, readThread }),
+          ),
+        linearReadTools: ({ windowId, thread, readThread }) =>
+          linearReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
+            linearReadToolService.createToolSet({
+              windowId,
+              thread,
+              readThread,
+              readProjectLinearTarget: () => {
+                const project = persistence.readProject(thread.projectId);
+                return project?.type === "code" ? project.linearTarget : undefined;
+              },
+            }),
           ),
         contributedTools: (input) =>
           codeToolContributors.length === 0

@@ -30,6 +30,7 @@ const BROADEST = [
   "octant_credential",
   "octant_debug",
   "octant_github",
+  "octant_linear",
   "octant_look",
   "octant_memory",
   "octant_narrate",
@@ -185,7 +186,7 @@ describe("appToolHostLines", () => {
     ]);
     for (const line of lines) expect(line.text.length).toBeLessThanOrEqual(240);
     const characters = lines.reduce((total, line) => total + line.text.length + 1, 0);
-    expect(Math.ceil(characters / 4)).toBeLessThanOrEqual(1_000);
+    expect(Math.ceil(characters / 4)).toBeLessThanOrEqual(1_050);
   });
 
   it("fails for a first-party tool name with no line and passes for the names deliberately left out", () => {

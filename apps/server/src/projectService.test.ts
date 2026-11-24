@@ -1939,6 +1939,44 @@ describe("ProjectService", () => {
     expect(fixture.append).toHaveBeenCalledTimes(1);
   });
 
+  it("journals a Project's Linear team and project binding and clears it cleanly", async () => {
+    const project = codeProject();
+    const fixture = fixtureService({ projects: [project] });
+    const target = {
+      teamId: "team-oct",
+      teamKey: "OCT",
+      teamName: "Octant",
+      projectId: "proj-preview",
+      projectName: "Preview 1",
+    };
+    const bound = await fixture.service.executeProject(windowId, {
+      kind: "change-project-linear-target",
+      projectId: project.id,
+      expectedVersion: 1,
+      linearTarget: target,
+    });
+    expect(bound).toMatchObject({
+      kind: "project-linear-target-changed",
+      project: { linearTarget: target, version: 2 },
+    });
+    expect(fixture.append.mock.calls[0]?.[0]?.events?.[0]?.eventName).toBe(
+      "project.linear-target-changed@1",
+    );
+    const cleared = await fixture.service.executeProject(windowId, {
+      kind: "change-project-linear-target",
+      projectId: project.id,
+      expectedVersion: 2,
+      linearTarget: null,
+    });
+    expect(cleared).toMatchObject({
+      kind: "project-linear-target-changed",
+      project: { version: 3 },
+    });
+    expect(cleared.kind === "project-linear-target-changed" && cleared.project.linearTarget).toBe(
+      undefined,
+    );
+  });
+
   it("refuses a desktop recipe the recipe schema refuses and journals nothing", async () => {
     // The host offers the recipe's provider, so only the schema can refuse.
     const fixture = fixtureService({

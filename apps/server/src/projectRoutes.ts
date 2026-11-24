@@ -525,6 +525,20 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
+      // A Project's Linear binding scopes project-pinned Linear agent reads on
+      // this host, so only the host's own person (a local window or a device
+      // they paired) sets or clears it; hub-introduced and restricted devices
+      // are refused.
+      if (command.kind === "change-project-linear-target" && boundPrincipalIsRestricted(request)) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "A Project's Linear binding is set on the host.",
+          },
+          403,
+          origin,
+        );
+      }
       // Trusting a key provider in a Project lets that runtime load the
       // Project's own hooks, MCP servers, and plugins, code no Octant review
       // step saw, so only the host's own person decides it, at a local

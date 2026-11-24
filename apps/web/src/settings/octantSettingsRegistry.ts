@@ -1456,6 +1456,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "connect reconnect refresh connection sign in login",
         },
         {
+          id: settingId("linear-projects"),
+          label: "Linear project mapping",
+          scope: "host",
+          keywords: "linear team project binding mapping scope octant_linear issues",
+        },
+        {
           id: settingId("linear-disconnect"),
           label: "Disconnect Linear",
           scope: "host",

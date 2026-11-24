@@ -50,6 +50,8 @@ const GUIDE_LINES: Readonly<Record<string, string>> = {
     "When you need breakpoints, stepping, or a stopped program's stack and variables, run the checkout's program under octant_debug.",
   octant_github:
     "Read the repository's issues, pull requests, and projects with octant_github, which uses the person's connected account, rather than gh or the GitHub API.",
+  octant_linear:
+    "Read this Project's Linear issues with octant_linear using the connected account.",
   octant_look: LOOK_TOOL_HOST_LINE,
   octant_memory:
     "When the person states a durable fact, decision or convention about this Project that its future threads should retain, use octant_memory; keep transient task details in the current thread.",

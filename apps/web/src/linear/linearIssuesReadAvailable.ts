@@ -26,6 +26,7 @@ export function withLinearIssuesReadSync(
   client: IntegrationClient,
   onAvailable: (available: boolean) => void,
 ): IntegrationClient {
+  const getByIdentifier = client.getIssueByIdentifier;
   return {
     authenticationSnapshot: () => client.authenticationSnapshot(),
     executeAuthenticationCommand: async (command) => {
@@ -36,6 +37,9 @@ export function withLinearIssuesReadSync(
     executeOperation: (operationId, input) => client.executeOperation(operationId, input),
     listIssues: (input) => client.listIssues(input),
     getIssue: (input) => client.getIssue(input),
+    ...(getByIdentifier === undefined
+      ? {}
+      : { getIssueByIdentifier: (input) => getByIdentifier.call(client, input) }),
     listIssueFilters: () => client.listIssueFilters(),
     storePersonalCredential: (credential) => client.storePersonalCredential(credential),
     deletePersonalCredential: () => client.deletePersonalCredential(),

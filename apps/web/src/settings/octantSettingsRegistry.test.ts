@@ -603,6 +603,7 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "sync-approver-*": "sync-members",
   "sync-join-request-*": "sync-members",
   "sync-member-*": "sync-members",
+  "linear-project-*": "linear-projects",
 };
 
 /** The typography rows `ThemeAppearanceEditor` builds from a surface and a field. */

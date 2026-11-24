@@ -348,6 +348,7 @@ export type ShellActions = {
   readonly askAgainForProjectImageGeneration: ProjectController["askAgainForImageGeneration"];
   readonly setProjectBrandKit: ProjectController["setBrandKit"];
   readonly setProjectDesignSystem: ProjectController["setDesignSystem"];
+  readonly setProjectLinearTarget: ProjectController["setLinearTarget"];
   readonly setProjectDesktopRecipe: ProjectController["setDesktopRecipe"];
   readonly setProjectActions: ProjectController["setActions"];
   readonly setProjectWorkStatusFile: ProjectController["setWorkStatusFile"];

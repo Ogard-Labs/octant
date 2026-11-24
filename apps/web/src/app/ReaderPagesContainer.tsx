@@ -407,6 +407,10 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
           name: activeProject.connectedRepository.repository,
         }
       : undefined;
+  const activeProjectLinearTarget =
+    activeProject !== undefined && activeProject.type !== "chat"
+      ? activeProject.linearTarget
+      : undefined;
 
   const projectThreadCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -565,6 +569,9 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         {...(activeProjectRepository === undefined
           ? {}
           : { projectRepository: activeProjectRepository })}
+        {...(activeProjectLinearTarget === undefined
+          ? {}
+          : { projectLinearTarget: activeProjectLinearTarget })}
         codeBoardOpen={codeBoardOpen}
         threadBoardAvailable={threadBoardAvailable}
         codePullRequestsOpen={codePullRequestsOpen}

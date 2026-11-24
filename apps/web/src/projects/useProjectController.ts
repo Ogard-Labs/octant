@@ -15,6 +15,7 @@ import {
   type MemoryKind,
   type ProjectBootstrap,
   type ProjectId,
+  type ProjectLinearTarget,
   type ProjectMemoryView,
   type ProjectSummary,
   type ProjectType,
@@ -635,6 +636,31 @@ export function useProjectController(options: ProjectControllerOptions) {
   }
 
   /**
+   * Bind a Work or Code Project to a Linear team (and optional Linear project),
+   * or pass `null` to clear the binding.
+   */
+  async function setLinearTarget(
+    projectId: ProjectId,
+    linearTarget: ProjectLinearTarget | null,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project === undefined || project.type === "chat") return false;
+    return execute(
+      {
+        kind: "change-project-linear-target",
+        projectId,
+        expectedVersion: project.version,
+        linearTarget,
+      },
+      linearTarget === null
+        ? "Linear binding removed."
+        : linearTarget.projectName === undefined
+          ? `Linear bound to ${linearTarget.teamName} (${linearTarget.teamKey}).`
+          : `Linear bound to ${linearTarget.teamName} (${linearTarget.teamKey}) · ${linearTarget.projectName}.`,
+    );
+  }
+
+  /**
    * Set, replace, or (with `null`) remove a Code Project's disposable desktop
    * recipe, entering or removing its cloud provider's key with it. The key
    * goes to the host in this one request and is kept nowhere here.
@@ -1189,6 +1215,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     askAgainForImageGeneration,
     setBrandKit,
     setDesignSystem,
+    setLinearTarget,
     setDesktopRecipe,
     setActions,
     setWorkStatusFile,

@@ -6315,6 +6315,7 @@ function LaunchedShell(
       askAgainForProjectImageGeneration: projectController.askAgainForImageGeneration,
       setProjectBrandKit: projectController.setBrandKit,
       setProjectDesignSystem: projectController.setDesignSystem,
+      setProjectLinearTarget: projectController.setLinearTarget,
       setProjectDesktopRecipe: projectController.setDesktopRecipe,
       setProjectActions: projectController.setActions,
       setProjectWorkStatusFile: projectController.setWorkStatusFile,

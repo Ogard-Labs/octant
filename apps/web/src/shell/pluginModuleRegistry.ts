@@ -1,6 +1,7 @@
 import { createElement, type ComponentType, type ReactElement } from "react";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
+import type { ProjectId, ProjectLinearTarget, ProjectSummary } from "@octant/contracts";
 import GitHubSettingsSectionModule from "../settings/GitHubSettingsSectionModule";
 import LinearSettingsSectionModule from "../settings/LinearSettingsSectionModule";
 
@@ -11,6 +12,10 @@ import LinearSettingsSectionModule from "../settings/LinearSettingsSectionModule
 export interface PluginSettingsSectionProps {
   readonly githubClient?: GithubClient | undefined;
   readonly integrationClient?: IntegrationClient | undefined;
+  readonly linearProjects?: ReadonlyArray<ProjectSummary> | undefined;
+  readonly onProjectLinearTargetChange?:
+    | ((projectId: ProjectId, target: ProjectLinearTarget | null) => Promise<boolean>)
+    | undefined;
 }
 
 export type PluginSettingsSectionModule = ComponentType<PluginSettingsSectionProps>;
@@ -27,10 +32,15 @@ function GitHubSettingsAdapter(props: PluginSettingsSectionProps): ReactElement 
 }
 
 function LinearSettingsAdapter(props: PluginSettingsSectionProps): ReactElement {
-  return createElement(
-    LinearSettingsSectionModule,
-    props.integrationClient === undefined ? {} : { integrationClient: props.integrationClient },
-  );
+  return createElement(LinearSettingsSectionModule, {
+    ...(props.integrationClient === undefined
+      ? {}
+      : { integrationClient: props.integrationClient }),
+    ...(props.linearProjects === undefined ? {} : { projects: props.linearProjects }),
+    ...(props.onProjectLinearTargetChange === undefined
+      ? {}
+      : { onProjectLinearTargetChange: props.onProjectLinearTargetChange }),
+  });
 }
 
 const builtInSettingsSectionModules = new Map<string, PluginSettingsSectionModule>([

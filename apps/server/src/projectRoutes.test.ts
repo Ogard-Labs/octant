@@ -1298,6 +1298,93 @@ describe("Project icon change route", () => {
     const paired = await (await route(from("/api/projects/bootstrap", "host-person")))?.json();
     expect(ids(paired.active)).toEqual(ids(projects));
   });
+
+  it("admits a person-paired device and local window on change-project-linear-target while refusing hub-introduced and restricted devices", async () => {
+    const executeProject = vi.fn(() => ({
+      kind: "project-linear-target-changed",
+      project: project(),
+    }));
+    const route = routeFixture({ executeProject });
+    const headers = {
+      "content-type": "application/json",
+      "x-octant-window-capability": capability,
+    };
+    const commandBody = JSON.stringify({
+      kind: "change-project-linear-target",
+      projectId,
+      expectedVersion: 1,
+      linearTarget: { teamId: "team-1", teamKey: "ENG", teamName: "Engineering" },
+    });
+
+    const hubIntroduced = new Request("http://127.0.0.1/api/projects/commands", {
+      method: "POST",
+      headers,
+      body: commandBody,
+    });
+    bindPrincipalRouteContext(hubIntroduced, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: pairedDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000714" as never,
+        admittedBy: "hub-roster",
+      }),
+      scopeId: windowId,
+    });
+    expect((await route(hubIntroduced))?.status).toBe(403);
+
+    const restricted = new Request("http://127.0.0.1/api/projects/commands", {
+      method: "POST",
+      headers,
+      body: commandBody,
+    });
+    bindPrincipalRouteContext(restricted, {
+      principal: { kind: "remote-device" } as never,
+      scopeId: windowId,
+    });
+    expect((await route(restricted))?.status).toBe(403);
+    expect(executeProject).not.toHaveBeenCalled();
+
+    const personPaired = new Request("http://127.0.0.1/api/projects/commands", {
+      method: "POST",
+      headers,
+      body: commandBody,
+    });
+    bindPrincipalRouteContext(personPaired, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: pairedDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000715" as never,
+        admittedBy: "host-person",
+      }),
+      scopeId: windowId,
+    });
+    expect((await route(personPaired))?.status).toBe(200);
+
+    const localResponse = await route(
+      new Request("http://127.0.0.1/api/projects/commands", {
+        method: "POST",
+        headers,
+        body: commandBody,
+      }),
+    );
+    expect(localResponse?.status).toBe(200);
+    expect(executeProject).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({
+        kind: "change-project-linear-target",
+        projectId,
+      }),
+      localUser,
+    );
+  });
 });
 
 function routeFixture(

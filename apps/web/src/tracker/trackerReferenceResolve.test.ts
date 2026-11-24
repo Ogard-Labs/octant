@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { TrackerReference } from "@octant/contracts";
+import { createTrackerReferenceClientPorts } from "./trackerReferenceClientPorts";
 import {
   githubUnavailableReason,
   linearFailureToLookup,
@@ -183,5 +185,42 @@ describe("tracker reference helpers", () => {
     expect(githubUnavailableReason("unauthorized")).toBe("unauthorized");
     expect(githubUnavailableReason("insecure-storage")).toBe("unavailable");
     expect(githubUnavailableReason("external-token")).toBe("unavailable");
+  });
+
+  it("resolves Linear tracker keys through direct identifier lookup without listing workspace issues", async () => {
+    const getIssueByIdentifier = vi.fn(async () => ({
+      id: "issue-1",
+      identifier: "OCT-42",
+      title: "Direct chip lookup",
+      state: { name: "In Progress", type: "started" },
+      url: "https://linear.app/ogard-labs/issue/OCT-42",
+      description: "",
+      descriptionTruncated: false,
+      comments: [],
+    }));
+    const listIssues = vi.fn();
+    const client = {
+      getIssueByIdentifier,
+      listIssues,
+    } as unknown as IntegrationClient;
+    const ports = createTrackerReferenceClientPorts({
+      linear: { available: true, client },
+    });
+    const resolved = await resolveTrackerReferences(
+      [{ patternKind: "tracker-key", raw: "OCT-42", key: "OCT-42" }],
+      ports,
+    );
+    expect(getIssueByIdentifier).toHaveBeenCalledWith({ identifier: "OCT-42" });
+    expect(listIssues).not.toHaveBeenCalled();
+    expect(resolved).toEqual([
+      {
+        status: "resolved",
+        reference: { patternKind: "tracker-key", raw: "OCT-42", key: "OCT-42" },
+        kind: "issue",
+        title: "Direct chip lookup",
+        url: "https://linear.app/ogard-labs/issue/OCT-42",
+        state: "open",
+      },
+    ]);
   });
 });
