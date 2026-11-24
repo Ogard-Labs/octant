@@ -321,6 +321,29 @@ describe("the harness shell at Full access on a Windows host", () => {
     90_000,
   );
 
+  it.runIf(process.platform === "win32").each([
+    ["powershell", "[Console]::Out.Write($env:OCTANT_SECRET_TOKEN)", ""],
+    ["cmd", "@echo(%OCTANT_SECRET_TOKEN%", "%OCTANT_SECRET_TOKEN%"],
+  ] as const)(
+    "gives one command its variables in %s and the next command none of them",
+    async (windowsShell, command, absent) => {
+      const { checkout, harness } = fixture(windowsShell);
+      const value = "s3cret-Value with spaces";
+      const given = await harness.run({
+        command,
+        cwd: checkout,
+        timeoutMs: 60_000,
+        environment: { OCTANT_SECRET_TOKEN: value },
+      });
+      expect(given).toMatchObject({ status: "ran", exitCode: 0 });
+      expect(given.output).toContain(value);
+      const next = await harness.run({ command, cwd: checkout, timeoutMs: 60_000 });
+      expect(next.output).not.toContain(value);
+      expect(next.output.trim() === absent || next.output.trim() === "").toBe(true);
+    },
+    120_000,
+  );
+
   it.runIf(process.platform === "win32")(
     "ends a command and the program it started when the command times out",
     async () => {

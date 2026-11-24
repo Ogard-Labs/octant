@@ -176,14 +176,15 @@ export const ThreadSecretRequestInput = Schema.Struct({
   );
 export type ThreadSecretRequestInput = typeof ThreadSecretRequestInput.Type;
 
-export const MAX_THREAD_SECRET_COMMAND_BYTES = 16_384;
+/** Short enough that whoever approves the command sees all of it. */
+export const MAX_THREAD_SECRET_COMMAND_LENGTH = 1_500;
 
 /** The `run-with-secret` operation's input: one command, and the secrets it is given. */
 export const ThreadSecretRunInput = Schema.Struct({
   operation: Schema.Literal("run-with-secret"),
   command: Schema.String.pipe(
     Schema.minLength(1),
-    Schema.maxLength(MAX_THREAD_SECRET_COMMAND_BYTES),
+    Schema.maxLength(MAX_THREAD_SECRET_COMMAND_LENGTH),
     Schema.filter((value) => value.trim() !== "" && !value.includes("\u0000"), {
       message: () => "A command is text.",
     }),

@@ -143,7 +143,7 @@ describe("a command run with a secret", () => {
     for (const over of [
       { command: "  " },
       { command: "a\u0000b" },
-      { command: "x".repeat(16_385) },
+      { command: "x".repeat(1_501) },
       { secrets: [] },
       { secrets: ["A", "A"] },
       { secrets: ["PATH; rm"] },
