@@ -557,7 +557,8 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     (threadsByProject !== undefined &&
       (unfiled.length > 0 ||
         [...threadsByProject.byProjectId.values()].some((group) => group.length > 0))) ||
-    activity.groups.some((group) => group.threads.length > 0);
+    activity.groups.some((group) => group.threads.length > 0) ||
+    activity.working.length > 0;
   const viewingArchivedProjects = currentFilters?.lifecycle === "archived";
   const showFilteredThreadsEmpty =
     filteringThreads && threadsReady && !hasVisibleThreads && !viewingArchivedProjects;
@@ -713,6 +714,55 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
 
   const rowPropertyView: SidebarRowPropertyView = activityView ? "activity" : "projects";
 
+  const snoozedShelf = { key: "snoozed", label: "Snoozed", threads: snoozedThreads } as const;
+  const settledShelf = { key: "completed", label: "Settled", threads: completedThreads } as const;
+  function renderShelf(shelf: typeof snoozedShelf | typeof settledShelf) {
+    const select = onSelectThread;
+    if (select === undefined) return null;
+    return shelf.threads.length === 0 ? null : (
+      <OctantCollapsible
+        className="project-archive project-shelf"
+        data-shelf={shelf.key}
+        key={shelf.key}
+        onToggle={(event) => {
+          if (shelf.key === "completed") setCompletedShelfOpen(event.currentTarget.open);
+        }}
+        open={
+          (shelf.key === "completed" && completedShelfOpen) ||
+          (props.activeThreadId !== undefined &&
+            shelf.threads.some(
+              (thread) => (thread.navigationId ?? thread.threadId) === props.activeThreadId,
+            ))
+            ? true
+            : undefined
+        }
+        summary={
+          <>
+            <span className="project-archive__label">{shelf.label}</span>
+            <span>{shelf.threads.length}</span>
+          </>
+        }
+      >
+        <div className="project-threads">
+          <ProjectThreadRows
+            {...(props.threadActions === undefined ? {} : { actions: props.threadActions })}
+            {...(props.activeThreadId === undefined
+              ? {}
+              : { activeThreadId: props.activeThreadId })}
+            {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
+            {...(props.onRenameThread === undefined
+              ? {}
+              : { onRenameThread: props.onRenameThread })}
+            collapsedLimit={SIDEBAR_THREAD_LIMIT}
+            onSelectThread={select}
+            projectNameForThread={projectNameForThread}
+            threads={shelf.threads}
+          />
+        </div>
+      </OctantCollapsible>
+    );
+  }
+
   const listTools =
     (props.projectViewsEnabled === true &&
       projectViewState !== undefined &&
@@ -811,25 +861,33 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           </p>
         ) : null}
         {showFilteredThreadsEmpty ? null : nestThreads && activityView ? (
-          <SidebarRowPropertiesContext.Provider value={rowProperties.activity}>
-            <ActivityThreadList
-              {...(props.activeThreadId === undefined
-                ? {}
-                : { activeThreadId: props.activeThreadId })}
-              {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
-              {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
-              {...(filteringThreads && threadsReady
-                ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE }
-                : {})}
-              actions={props.threadActions ?? {}}
-              counted={arrangement === "status"}
-              groups={activity.groups}
-              mode={activityMode}
-              lineageThreads={everyListedThread ?? []}
-              onSelectThread={props.onSelectThread!}
-              searching={searching}
-            />
-          </SidebarRowPropertiesContext.Provider>
+          // With every thread running, the foot lists them all; the empty
+          // list above would otherwise say there are no threads yet.
+          activity.groups.length === 0 && activity.working.length > 0 ? null : (
+            <SidebarRowPropertiesContext.Provider value={rowProperties.activity}>
+              <ActivityThreadList
+                {...(props.activeThreadId === undefined
+                  ? {}
+                  : { activeThreadId: props.activeThreadId })}
+                {...(props.openThreadIds === undefined
+                  ? {}
+                  : { openThreadIds: props.openThreadIds })}
+                {...(props.openThreadIds === undefined
+                  ? {}
+                  : { openThreadIds: props.openThreadIds })}
+                {...(filteringThreads && threadsReady
+                  ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE }
+                  : {})}
+                actions={props.threadActions ?? {}}
+                counted={arrangement === "status"}
+                groups={activity.groups}
+                mode={activityMode}
+                lineageThreads={everyListedThread ?? []}
+                onSelectThread={props.onSelectThread!}
+                searching={searching}
+              />
+            </SidebarRowPropertiesContext.Provider>
+          )
         ) : (
           <>
             {/* Grouping builds no sections when this mode has no Projects, so
@@ -892,62 +950,10 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             ) : null}
           </>
         )}
-        {onSelectThread === undefined
+        {onSelectThread === undefined ? null : renderShelf(snoozedShelf)}
+        {onSelectThread === undefined || (nestThreads && activityView)
           ? null
-          : (
-              [
-                { key: "snoozed", label: "Snoozed", threads: snoozedThreads },
-                { key: "completed", label: "Settled", threads: completedThreads },
-              ] as const
-            ).map((shelf) =>
-              shelf.threads.length === 0 ? null : (
-                <OctantCollapsible
-                  className="project-archive project-shelf"
-                  data-shelf={shelf.key}
-                  key={shelf.key}
-                  onToggle={(event) => {
-                    if (shelf.key === "completed") setCompletedShelfOpen(event.currentTarget.open);
-                  }}
-                  open={
-                    (shelf.key === "completed" && completedShelfOpen) ||
-                    (props.activeThreadId !== undefined &&
-                      shelf.threads.some(
-                        (thread) =>
-                          (thread.navigationId ?? thread.threadId) === props.activeThreadId,
-                      ))
-                      ? true
-                      : undefined
-                  }
-                  summary={
-                    <>
-                      <span className="project-archive__label">{shelf.label}</span>
-                      <span>{shelf.threads.length}</span>
-                    </>
-                  }
-                >
-                  <div className="project-threads">
-                    <ProjectThreadRows
-                      {...(props.threadActions === undefined
-                        ? {}
-                        : { actions: props.threadActions })}
-                      {...(props.activeThreadId === undefined
-                        ? {}
-                        : { activeThreadId: props.activeThreadId })}
-                      {...(props.openThreadIds === undefined
-                        ? {}
-                        : { openThreadIds: props.openThreadIds })}
-                      {...(props.onRenameThread === undefined
-                        ? {}
-                        : { onRenameThread: props.onRenameThread })}
-                      collapsedLimit={SIDEBAR_THREAD_LIMIT}
-                      onSelectThread={onSelectThread}
-                      projectNameForThread={projectNameForThread}
-                      threads={shelf.threads}
-                    />
-                  </div>
-                </OctantCollapsible>
-              ),
-            )}
+          : renderShelf(settledShelf)}
         {(currentFilters === undefined || currentFilters.lifecycle === "active") &&
         props.archivedProjects.length > 0 ? (
           <OctantCollapsible
@@ -975,6 +981,34 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               </div>
             ))}
           </OctantCollapsible>
+        ) : null}
+        {onSelectThread !== undefined &&
+        nestThreads &&
+        activityView &&
+        (activity.working.length > 0 || completedThreads.length > 0) ? (
+          // Running and settled threads sit at the foot of Status and the
+          // Activity feed, where they stay in sight however far the list
+          // above scrolls, and do not move its rows as their turns start and
+          // end. Each thread is listed once: here, or in the list above.
+          <div aria-label="Working and settled" className="sidebar-live-dock" role="group">
+            {activity.working.length === 0 ? null : (
+              <SidebarRowPropertiesContext.Provider value={rowProperties.activity}>
+                <ActivityThreadList
+                  {...(props.activeThreadId === undefined
+                    ? {}
+                    : { activeThreadId: props.activeThreadId })}
+                  actions={props.threadActions ?? {}}
+                  counted
+                  groups={[{ id: "working", label: "Working", threads: activity.working }]}
+                  lineageThreads={everyListedThread ?? []}
+                  mode={activityMode}
+                  onSelectThread={onSelectThread}
+                  searching={searching}
+                />
+              </SidebarRowPropertiesContext.Provider>
+            )}
+            {renderShelf(settledShelf)}
+          </div>
         ) : null}
       </nav>
     </SidebarRowPropertiesContext.Provider>

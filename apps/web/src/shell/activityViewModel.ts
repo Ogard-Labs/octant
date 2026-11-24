@@ -72,6 +72,18 @@ export interface SidebarActivityGroup {
 
 export interface SidebarActivityView {
   readonly groups: ReadonlyArray<SidebarActivityGroup>;
+  /**
+   * Threads whose turn is running, listed at the foot of the sidebar rather
+   * than among the groups: a running thread changes state on its own, and in
+   * the middle of a long list it moved rows around and could scroll out of
+   * sight. A pinned or coordinating thread keeps its fixed place instead.
+   */
+  readonly working: ReadonlyArray<SidebarActivityThread>;
+}
+
+/** A thread the foot of the sidebar lists while its turn runs. */
+function isDockedWorking(thread: SidebarActivityThread): boolean {
+  return thread.activity === "working" && thread.pinned !== true && thread.coordinator !== true;
 }
 
 /**
@@ -218,6 +230,9 @@ export function filterSidebarActivityView(
 ): SidebarActivityView {
   if (normalizeSearchText(query) === "") return view;
   return {
+    working: view.working.filter((thread) =>
+      matchesSidebarSearch(query, thread.title, thread.projectName),
+    ),
     groups: view.groups
       .map((group) => ({
         ...group,
@@ -240,11 +255,13 @@ export function buildSidebarActivityView(input: {
   const rows = input.threads
     .map((thread) => toActivityThread(thread, projectNames, input.unfiledLabel ?? "No Project"))
     .sort(compareActivityThreads);
+  const working = rows.filter(isDockedWorking);
+  const listed = rows.filter((thread) => !isDockedWorking(thread));
   // A pin is the user saying "keep this where I can see it", so it outranks
   // both attention and recency; a pinned thread that also needs attention still
   // shows its mark, it just does not move.
-  const pinned = rows.filter((thread) => thread.pinned === true);
-  const unpinned = rows.filter((thread) => thread.pinned !== true);
+  const pinned = listed.filter((thread) => thread.pinned === true);
+  const unpinned = listed.filter((thread) => thread.pinned !== true);
   const priority = unpinned.filter(
     (thread) => thread.attention === "unread" || thread.attention === "follow-up",
   );
@@ -270,15 +287,16 @@ export function buildSidebarActivityView(input: {
     if (threads === undefined || threads.length === 0) continue;
     groups.push({ id: bucket.id, label: bucket.label, threads });
   }
-  return { groups };
+  return { groups, working };
 }
 
 /**
  * The Status arrangement: what each thread needs from the person, in the
  * order they would act on it. Pinned comes first, as in the feed. A thread
- * waiting on an approval or an answer needs input; a finished turn nobody has
- * looked at is ready for review; a running turn is working; everything else is
- * idle. Each group lists its newest threads first.
+ * waiting on an approval or an answer needs you; a finished turn nobody has
+ * looked at is ready for review; everything else is idle. A running turn is
+ * listed under Working at the foot of the sidebar instead. Each group lists
+ * its newest threads first.
  */
 export function buildSidebarStatusView(input: {
   readonly projects: ReadonlyArray<SidebarActivityProject>;
@@ -302,16 +320,16 @@ export function buildSidebarStatusView(input: {
       label: "Pinned",
       holds: (thread) => thread.pinned === true || thread.coordinator === true,
     },
-    { id: "needs-input", label: "Needs input", holds: (thread) => thread.activity === "attention" },
+    { id: "needs-input", label: "Needs you", holds: (thread) => thread.activity === "attention" },
     {
       id: "ready-for-review",
       label: "Ready for review",
       holds: (thread) => thread.activity === "unread",
     },
-    { id: "working", label: "Working", holds: (thread) => thread.activity === "working" },
     { id: "idle", label: "Idle", holds: () => true },
   ];
-  const placed = new Set<string>();
+  const working = rows.filter(isDockedWorking);
+  const placed = new Set<string>(working.map((thread) => thread.navigationId));
   const groups: SidebarActivityGroup[] = [];
   for (const bucket of buckets) {
     const threads = rows.filter(
@@ -320,7 +338,7 @@ export function buildSidebarStatusView(input: {
     for (const thread of threads) placed.add(thread.navigationId);
     if (threads.length > 0) groups.push({ id: bucket.id, label: bucket.label, threads });
   }
-  return { groups };
+  return { groups, working };
 }
 
 function toActivityThread(

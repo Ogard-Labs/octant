@@ -578,6 +578,17 @@
   margin-top: 4px;
 }
 
+/* Working and Settled stay at the foot of Status and the Activity feed while
+   the list above scrolls. The cap keeps a long Working list from taking the
+   sidebar; past it the foot scrolls inside itself. */
+.sidebar-live-dock {
+  position: sticky;
+  bottom: 0;
+  max-height: 40%;
+  overflow-y: auto;
+  background: var(--octant-sidebar-opaque);
+}
+
 .project-row--archived {
   margin-top: 4px;
 }
