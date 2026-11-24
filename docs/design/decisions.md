@@ -3001,10 +3001,11 @@ Accessibility is a baseline for every changed surface, not a late pass.
 - Text contrast targets 4.5:1 (3:1 for large text and non-text marks). State always uses text, shape or label in addition to colour.
 - Keyboard focus draws one neutral inset edge on `:focus-visible` only. Feature CSS never suppresses, recolours or doubles it.
 - No surface is a keyboard trap. The terminal sends every key to its shell and has a documented chord to move focus out.
+- Settings › Keybindings marks a shortcut as not running only when another action that answers in the same place keeps its chord: two global actions, two commands of one page, two terminal commands, or a terminal command behind a global action listed ahead of it. The action listed first keeps the chord.
 - Theme, typography, density, translucency, contrast and reduced-motion settings persist through the server-authoritative journal; renderer state is presentation only.
 - A refused server command is never a silent no-op, and loading, stale, denied, empty and error states keep stable geometry.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Accessibility](../../DESIGN.md#accessibility).
+Status: Built. Since: —. Detail: [DESIGN.md: Accessibility](../../DESIGN.md#accessibility) and [Workspace: Keybinding conflicts](workspace.md#keybinding-conflicts).
 
 ### Guarded quit
 

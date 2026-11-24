@@ -4192,6 +4192,17 @@ keeps the theme's roles. The measurements are in
 thumb where no option exists are in `styles/code.css` and name the library
 classes they hold on.
 
+### Keybinding conflicts
+
+Settings › Keybindings says an action "Shares … with another action and will not
+run" only where that is true. Two actions on one chord conflict when they answer
+in the same place: two global actions, two commands of the same page, or two
+terminal commands. A terminal command also conflicts with a global action listed
+ahead of it, because the terminal yields that chord. The action listed first
+keeps the chord. A page's command never conflicts with a global or a terminal
+action, and a terminal command listed ahead of a global action keeps the chord
+in the terminal while the global action runs everywhere else.
+
 ### Terminal keyboard exit
 
 A surface that takes Tab and Escape for its own use is never a keyboard trap.
