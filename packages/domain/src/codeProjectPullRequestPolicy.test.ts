@@ -52,6 +52,39 @@ describe("Code Project pull-request policy", () => {
     expect(byIdentity).toEqual([{ threadId: "thread-identity", title: "Recorded identity" }]);
   });
 
+  it("links a thread to a pull request a tool call wrote to in another of the Project's repositories, and only there", () => {
+    const thread = {
+      threadId: "thread-tool",
+      projectId: "project-a",
+      title: "Complete open PRs",
+      repository: octantRepo,
+      pullRequestNumbers: [
+        {
+          number: 7,
+          observedAt: "2026-11-24T08:00:00Z",
+          repository: { owner: "Octant", name: "Site" },
+        },
+      ],
+    };
+    const pullRequest = (repository: { owner: string; name: string }) => ({
+      projectId: "project-a",
+      repository,
+      number: 7,
+      headBranch: "feature/docs",
+      title: "Docs",
+    });
+    expect(
+      matchLinkedThreadsToPullRequest({
+        pullRequest: pullRequest({ owner: "octant", name: "site" }),
+        threads: [thread],
+      }),
+    ).toEqual([{ threadId: "thread-tool", title: "Complete open PRs" }]);
+    // The same number in the thread's own repository is a different pull request.
+    expect(
+      matchLinkedThreadsToPullRequest({ pullRequest: pullRequest(octantRepo), threads: [thread] }),
+    ).toEqual([]);
+  });
+
   it("never matches a linked thread by title or loose branch text", () => {
     expect(
       matchLinkedThreadsToPullRequest({

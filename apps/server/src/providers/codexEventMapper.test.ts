@@ -560,6 +560,55 @@ describe("mapCodexMessage", () => {
     ]);
   });
 
+  it("names the pull request a command created, and credits nothing to a command that failed", () => {
+    const completed = (command: string, exitCode: number) => {
+      const ctx = context();
+      map(
+        ctx,
+        notification("item/started", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: { ...commandItem, command },
+          startedAtMs: 10,
+        }),
+      );
+      return map(
+        ctx,
+        notification("item/completed", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            ...commandItem,
+            command,
+            status: "completed",
+            exitCode,
+            aggregatedOutput: "https://github.com/acme/app/pull/44\n",
+          },
+          completedAtMs: 20,
+        }),
+      ).flatMap((result) => (result.kind === "event" ? [result.event] : []));
+    };
+
+    expect(completed("/bin/zsh -lc 'gh pr create --fill'", 0)).toEqual([
+      expect.objectContaining({
+        kind: "tool-success",
+        forgeReferences: [
+          {
+            forge: "github",
+            kind: "pull-request",
+            action: "created",
+            owner: "acme",
+            repository: "app",
+            number: 44,
+          },
+        ],
+      }),
+    ]);
+    expect(completed("/bin/zsh -lc 'gh pr create --fill'", 1)[0]).not.toHaveProperty(
+      "forgeReferences",
+    );
+  });
+
   it("names a started file change by its Project-relative path, never its diff", () => {
     const results = map(
       context(),

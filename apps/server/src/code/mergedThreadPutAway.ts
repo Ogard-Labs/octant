@@ -1,6 +1,10 @@
 import type { CodeThread, CodeThreadId } from "@octant/contracts";
 import type { MergedPullRequest, MergedThreadPutAwayOutcome } from "./codeService";
-import type { CodeThreadMetadataService } from "./codeThreadMetadataService";
+import type {
+  CodeThreadOwnPullRequest,
+  CodeThreadMetadataService,
+} from "./codeThreadMetadataService";
+import { splitRepositoryName } from "./pullRequestLinkService";
 
 /**
  * How often the host looks for Code threads whose pull request merged. The
@@ -33,10 +37,11 @@ export interface MergedThreadPutAwayOptions {
   /** The board's cached-only projection: it never calls GitHub or Git. */
   readonly metadata: Pick<CodeThreadMetadataService, "project">;
   /**
-   * Merged pull requests the Pull requests refresh cache links to the thread.
-   * A merge made outside Octant reaches this cache, not the thread's history.
+   * The merged pull requests the Pull requests refresh cache shows as this
+   * thread's own delivery (`threadDeliversPullRequest`). A merge made outside
+   * Octant reaches this cache, not the thread's history.
    */
-  readonly cachedMerges: (threadId: CodeThreadId) => ReadonlyArray<MergedPullRequest>;
+  readonly cachedMerges: (thread: CodeThread) => ReadonlyArray<MergedPullRequest>;
   /** A finished turn's decision still waiting on the person keeps the thread in view. */
   readonly decisionPending: (thread: CodeThread) => boolean;
   readonly samePullRequest: SameMergedPullRequest;
@@ -51,7 +56,44 @@ export interface MergedThreadPutAwayOptions {
 }
 
 /**
- * Puts a Code thread away once a pull request linked to it merged. Only a
+ * Whether a cached pull request is what the thread delivers: one Octant's own
+ * pull-request operations recorded for it, or one on its delivery branch in its
+ * delivery repository. That is the repository its target names, and the one
+ * those operations ran in: a server thread's target is a `local/…` placeholder,
+ * which only the operation resolves. A thread is also linked to pull requests
+ * its tool calls reviewed or commented on, in any of the Project's
+ * repositories, and merging one of those delivers nothing here, even when it
+ * shares a number or a branch name with the thread's own.
+ */
+export function threadDeliversPullRequest(input: {
+  readonly thread: Pick<CodeThread, "deliveryTarget" | "projectId">;
+  readonly own: ReadonlyArray<CodeThreadOwnPullRequest>;
+  readonly pullRequest: {
+    readonly repositoryOwner: string;
+    readonly repositoryName: string;
+    readonly number: number;
+    readonly headBranch: string;
+  };
+  readonly sameRepository: (
+    projectId: CodeThread["projectId"],
+    left: { readonly owner: string; readonly name: string },
+    right: { readonly owner: string; readonly name: string },
+  ) => boolean;
+}): boolean {
+  const { thread, own, pullRequest } = input;
+  const here = { owner: pullRequest.repositoryOwner, name: pullRequest.repositoryName };
+  const same = (repository: { readonly owner: string; readonly name: string }) =>
+    input.sameRepository(thread.projectId, repository, here);
+  if (own.some((entry) => entry.number === pullRequest.number && same(entry.repository))) {
+    return true;
+  }
+  if (pullRequest.headBranch !== thread.deliveryTarget.branchIntent) return false;
+  const target = splitRepositoryName(thread.deliveryTarget.proposedBaseRepository);
+  return (target !== undefined && same(target)) || own.some((entry) => same(entry.repository));
+}
+
+/**
+ * Puts a Code thread away once a pull request it delivers merged. Only a
  * merge settles a thread on its own: an opened pull request, a finished
  * investigation or a local commit is Done on the board yet still work the
  * person is likely to come back to the same day. Child work still running or
@@ -141,7 +183,7 @@ export class MergedThreadPutAway {
       ...(linked.kind === "linked" && linked.state === "merged" && linked.matchesDeliveryBranch
         ? [{ baseRepository: linked.baseRepository, number: linked.number }]
         : []),
-      ...this.#options.cachedMerges(thread.id),
+      ...this.#options.cachedMerges(thread),
     ];
     // Both sources often name the same merge; it is one merge. Past the
     // record's bound the same fixed slice is kept every pass, so a thread with

@@ -1309,6 +1309,39 @@ describe("ProjectThreadRows", () => {
     expect(screen.queryByRole("menuitem", { name: "Open pull request #15" })).toBeNull();
   });
 
+  it("shows five touched issues in the hover card and counts the rest", async () => {
+    const user = userEvent.setup();
+    const items = Array.from({ length: 7 }, (_, index) => ({
+      forge: "github" as const,
+      owner: "octant",
+      repository: "octant",
+      number: index + 1,
+      title: `Issue ${String(index + 1)}`,
+      ...(index === 0 ? { state: "closed" } : {}),
+      observedAt: "2026-11-24T09:00:00.000Z",
+    }));
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, touchedIssues: { items, hiddenCount: 1 } }]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
+    const card = await findThreadDetails();
+    const group = within(card).getByRole("group", { name: "Issues" });
+
+    expect(within(group).getAllByRole("img")).toHaveLength(5);
+    expect(
+      within(group).getByRole("img", { name: "GitHub issue #1, Issue 1, octant/octant, closed" }),
+    ).toBeVisible();
+    expect(group).toHaveTextContent("+3 more");
+    // The row itself never counts issues.
+    expect(screen.getByRole("button", { name: /Controller foundation/ })).not.toHaveTextContent(
+      /issue/i,
+    );
+  });
+
   it("offers both pull-request destinations from the row menus for keyboard and coarse pointers", async () => {
     const user = userEvent.setup();
     const onOpenPullRequest = vi.fn();

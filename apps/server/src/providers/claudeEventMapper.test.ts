@@ -686,6 +686,66 @@ describe("mapClaudeMessage", () => {
     ]);
   });
 
+  it("names the pull request a shell command merged on its success, and none for a read", () => {
+    const ctx = context();
+    mapped(ctx, {
+      kind: "assistant",
+      sessionId: claudeSessionId,
+      messageId: "message-1",
+      content: [
+        {
+          kind: "tool-use",
+          toolUseId: "sdk-merge",
+          toolName: "Bash",
+          input: { command: "gh pr merge 327 --squash" },
+        },
+        {
+          kind: "tool-use",
+          toolUseId: "sdk-view",
+          toolName: "Bash",
+          input: { command: "gh pr view 328" },
+        },
+      ],
+      usage,
+    });
+    const settled = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [
+          {
+            toolUseId: "sdk-merge",
+            isError: false,
+            text: "✓ Squashed and merged pull request acme/app#327 (Add shortcuts)",
+          },
+          {
+            toolUseId: "sdk-view",
+            isError: false,
+            text: "https://github.com/acme/app/pull/328",
+          },
+        ],
+      }),
+    ).filter((next) => next.kind === "tool-success");
+
+    expect(settled).toMatchObject([
+      {
+        kind: "tool-success",
+        forgeReferences: [
+          {
+            forge: "github",
+            kind: "pull-request",
+            action: "merged",
+            owner: "acme",
+            repository: "app",
+            number: 327,
+          },
+        ],
+      },
+      { kind: "tool-success" },
+    ]);
+    expect(settled[1]).not.toHaveProperty("forgeReferences");
+  });
+
   it("reports a streamed tool call's input once its whole message arrives", () => {
     const ctx = context();
     mapped(ctx, {

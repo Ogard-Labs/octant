@@ -1,12 +1,27 @@
 import "../styles/thread-row-info-card.css";
-import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
+import type { ThreadBoardPullRequestSummaries, ThreadTouchedIssues } from "@octant/contracts";
 import { pullRequestStateMark } from "../code/pullRequestState";
+import {
+  touchedIssueIsFinished,
+  touchedIssueKey,
+  touchedIssueName,
+  touchedIssuePlace,
+  touchedIssueReference,
+} from "../environment/touchedIssues";
 import { readableModelId } from "../providers/providerModelLabel";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { describePullRequestSummary } from "../threadBoard/ThreadBoardPullRequestSummaries";
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
-import { Cpu, ExternalLink, FolderGit2, GitBranch, GitFork } from "../ui/icons";
+import {
+  CircleCheck,
+  CircleDot,
+  Cpu,
+  ExternalLink,
+  FolderGit2,
+  GitBranch,
+  GitFork,
+} from "../ui/icons";
 import type { IconComponent } from "../ui/icons";
 import type { ThreadRowActions } from "./ThreadRowMenu";
 import { pullRequestKey } from "./threadRowPullRequests";
@@ -227,6 +242,58 @@ function ThreadRowPullRequests(props: {
   );
 }
 
+/** At most this many touched issues are named in the card; the rest are counted. */
+const CARD_TOUCHED_ISSUES = 5;
+
+/**
+ * The issues the thread's tool calls wrote to, after its pull requests, in the
+ * same one-line recipe: open or finished mark, reference and title, with the
+ * repository or Linear and the state in the tooltip and accessible name. They
+ * are facts here, not links: every one is listed, with its page, in the
+ * thread's Environment tool.
+ */
+function ThreadRowIssues(props: { readonly issues: ThreadTouchedIssues }) {
+  const shown = props.issues.items.slice(0, CARD_TOUCHED_ISSUES);
+  const more = props.issues.items.length - shown.length + props.issues.hiddenCount;
+  return (
+    <span aria-label="Issues" className="thread-row-info-card__prs" role="group">
+      <span className="thread-row-info-card__pr-list">
+        {shown.map((issue) => {
+          const finished = touchedIssueIsFinished(issue);
+          const Icon = finished ? CircleCheck : CircleDot;
+          const name = touchedIssueName(issue);
+          return (
+            <span className="thread-row-info-card__pr" key={touchedIssueKey(issue)}>
+              <span
+                aria-label={name}
+                className="thread-row-info-card__pr-reference"
+                role="img"
+                title={name}
+              >
+                <span
+                  className="thread-row-info-card__pr-state"
+                  data-pr-state={finished ? "merged" : "open"}
+                >
+                  <Icon aria-hidden="true" size={14} />
+                </span>
+                <span className="thread-row-info-card__pr-number">
+                  {touchedIssueReference(issue)}
+                </span>
+                <span className="thread-row-info-card__pr-title">
+                  {issue.title ?? touchedIssuePlace(issue)}
+                </span>
+              </span>
+            </span>
+          );
+        })}
+      </span>
+      {more === 0 ? null : (
+        <span className="thread-row-info-card__pr-more">+{String(more)} more</span>
+      )}
+    </span>
+  );
+}
+
 /**
  * A delayed, non-modal summary of the facts the navigation row and its Project
  * context already carry, plus the row's exact linked pull requests.
@@ -280,6 +347,10 @@ export function ThreadRowInfoCard(props: {
       (props.thread.pullRequests.items.length === 0 &&
         props.thread.pullRequests.hiddenCount === 0) ? null : (
         <ThreadRowPullRequests actions={props.actions} summaries={props.thread.pullRequests} />
+      )}
+      {props.thread.touchedIssues === undefined ||
+      props.thread.touchedIssues.items.length === 0 ? null : (
+        <ThreadRowIssues issues={props.thread.touchedIssues} />
       )}
     </span>
   );

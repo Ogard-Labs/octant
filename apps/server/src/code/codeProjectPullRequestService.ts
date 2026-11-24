@@ -484,7 +484,20 @@ export class CodeProjectPullRequestService {
    * pull requests, so a merge made outside Octant shows here even though the
    * thread's own operation history still holds the open state it last saw.
    */
-  mergedPullRequestsForThread(threadId: string): ReadonlyArray<{
+  mergedPullRequestsForThread(
+    threadId: string,
+    /**
+     * Whether a merged row is the thread's own delivery. A thread is also
+     * linked to pull requests its tool calls only reviewed or commented on,
+     * and merging one of those does not deliver the thread.
+     */
+    delivers: (
+      row: Pick<
+        CodeProjectPullRequestRow,
+        "repositoryOwner" | "repositoryName" | "number" | "headBranch"
+      >,
+    ) => boolean,
+  ): ReadonlyArray<{
     readonly baseRepository: string;
     readonly number: number;
   }> {
@@ -493,7 +506,8 @@ export class CodeProjectPullRequestService {
       .filter(
         (row) =>
           row.state === "merged" &&
-          row.linkedThreads.some((thread) => String(thread.threadId) === threadId),
+          row.linkedThreads.some((thread) => String(thread.threadId) === threadId) &&
+          delivers(row),
       )
       .map((row) => this.#canonicalizeRow(row))
       .map((row) => ({
@@ -1822,19 +1836,22 @@ export class CodeProjectPullRequestService {
       }
       for (const thread of threads) {
         if (thread.projectId !== String(project.projectId)) continue;
-        if (
-          !this.#areSameRepository(project.projectId, thread.repository, {
-            owner: project.repositoryOwner,
-            name: project.repositoryName,
-          })
-        ) {
-          continue;
-        }
         for (const identity of thread.pullRequestNumbers ?? []) {
+          // A number from Octant's own operations is in the thread's own
+          // repository; one a tool call wrote to names its repository.
+          const repository = identity.repository ?? thread.repository;
+          if (
+            !this.#areSameRepository(project.projectId, repository, {
+              owner: project.repositoryOwner,
+              name: project.repositoryName,
+            })
+          ) {
+            continue;
+          }
           const link = this.#resolveLink({
             projectId: project.projectId,
-            repositoryOwner: thread.repository.owner,
-            repositoryName: thread.repository.name,
+            repositoryOwner: repository.owner,
+            repositoryName: repository.name,
             number: identity.number,
           });
           rows.push({
