@@ -1,4 +1,5 @@
-import type { EventEnvelope } from "@octant/contracts";
+import type { AgentRunLifecycleStatus, EventEnvelope } from "@octant/contracts";
+import { isAgentRunActiveStatus } from "@octant/domain";
 
 /** A turn's state change the journal just recorded, in one mode's own words. */
 export interface TurnUpdate {
@@ -25,7 +26,10 @@ export type FinishedReportSettleOutcome =
 export interface FinishedReportSettlePorts {
   /** The turn state change a committed event records, or nothing for any other event. */
   readonly turnUpdate: (event: EventEnvelope) => TurnUpdate | undefined;
-  /** The turn the thread's latest finished report was filed in, if it names one. */
+  /**
+   * The turn the thread's latest finished report was filed in, while that
+   * report is still fresh: a later file change leaves its checks unproven.
+   */
   readonly latestReportTurnId: (threadId: string) => string | undefined;
   /**
    * Settles the thread as the host, re-deciding against its authoritative
@@ -100,9 +104,37 @@ export class FinishedReportSettle {
     for (let tries = 1; tries < BUSY_TRIES && outcome.status === "skipped"; tries += 1) {
       if (outcome.reason !== "busy") break;
       await wait(BUSY_WAIT_MS);
-      if (this.#latestTurn.get(threadId) !== turnId) return { status: "skipped", reason: "busy" };
+      // Re-read at the write: a newer turn, a file change that left the report
+      // stale, or the switch turned off during the wait each end the attempt.
+      if (
+        this.#latestTurn.get(threadId) !== turnId ||
+        this.#ports.latestReportTurnId(threadId) !== turnId ||
+        !this.#ports.enabled()
+      ) {
+        return { status: "skipped", reason: "busy" };
+      }
       outcome = await this.#ports.settle(threadId);
     }
     return outcome;
   }
+}
+
+/**
+ * Whether a lead's Octant-managed child runs still need the person: a run
+ * still going, or a finished one whose result the lead has not read. The
+ * Work board counts the same unread results.
+ */
+export function managedChildWorkPending(
+  runs: ReadonlyArray<{
+    readonly lifecycleStatus: AgentRunLifecycleStatus;
+    readonly resultAcknowledgement: { readonly required: boolean; readonly acknowledged: boolean };
+  }>,
+): boolean {
+  return runs.some(
+    (run) =>
+      isAgentRunActiveStatus(run.lifecycleStatus) ||
+      ((run.lifecycleStatus === "completed" || run.lifecycleStatus === "failed") &&
+        run.resultAcknowledgement.required &&
+        !run.resultAcknowledgement.acknowledged),
+  );
 }

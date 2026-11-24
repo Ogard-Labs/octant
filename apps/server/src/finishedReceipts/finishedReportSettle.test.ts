@@ -2,6 +2,7 @@ import type { EventEnvelope } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
   FinishedReportSettle,
+  managedChildWorkPending,
   type FinishedReportSettleOutcome,
   type FinishedReportSettlePorts,
 } from "./finishedReportSettle";
@@ -95,6 +96,40 @@ describe("settling a thread whose agent filed a finished report", () => {
     release();
     await flush();
     expect(settle).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops trying once a file change leaves the report stale during the wait", async () => {
+    const busy = { status: "skipped", reason: "busy" } as const;
+    let reportTurn: string | undefined = "turn-2";
+    const { settle, settler: subject } = settler({
+      outcomes: [busy, { status: "settled" }],
+      latestReportTurnId: () => reportTurn,
+      wait: async () => {
+        reportTurn = undefined;
+      },
+    });
+    subject.onCommittedEvents([turnEvent("thread-a", "turn-2", "completed")]);
+    await flush();
+    expect(settle).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a lead in view while a helper runs or its result is unread", () => {
+    const ack = (required: boolean, acknowledged: boolean) => ({ required, acknowledged });
+    expect(
+      managedChildWorkPending([
+        { lifecycleStatus: "running", resultAcknowledgement: ack(false, false) },
+      ]),
+    ).toBe(true);
+    expect(
+      managedChildWorkPending([
+        { lifecycleStatus: "completed", resultAcknowledgement: ack(true, false) },
+      ]),
+    ).toBe(true);
+    expect(
+      managedChildWorkPending([
+        { lifecycleStatus: "completed", resultAcknowledgement: ack(true, true) },
+      ]),
+    ).toBe(false);
   });
 
   it("gives up after a few tries when the thread stays busy", async () => {

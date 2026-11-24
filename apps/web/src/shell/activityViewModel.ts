@@ -262,12 +262,14 @@ export function buildSidebarActivityView(input: {
   // shows its mark, it just does not move.
   const pinned = listed.filter((thread) => thread.pinned === true);
   const unpinned = listed.filter((thread) => thread.pinned !== true);
-  const priority = unpinned.filter(
-    (thread) => thread.attention === "unread" || thread.attention === "follow-up",
-  );
-  const remaining = unpinned.filter(
-    (thread) => thread.attention !== "unread" && thread.attention !== "follow-up",
-  );
+  // A thread waiting on an approval or an answer needs the person whatever
+  // its read state, so it never folds away under an older day.
+  const isPriority = (thread: SidebarActivityThread) =>
+    thread.activity === "attention" ||
+    thread.attention === "unread" ||
+    thread.attention === "follow-up";
+  const priority = unpinned.filter(isPriority);
+  const remaining = unpinned.filter((thread) => !isPriority(thread));
   const groups: SidebarActivityGroup[] = [];
   if (pinned.length > 0) {
     groups.push({ id: "pinned", label: "Pinned", threads: pinned });

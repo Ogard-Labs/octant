@@ -1,7 +1,10 @@
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { splitRepositoryName } from "../code/pullRequestLinkService";
 import { MergedThreadPutAway } from "../code/mergedThreadPutAway";
-import { FinishedReportSettle } from "../finishedReceipts/finishedReportSettle";
+import {
+  FinishedReportSettle,
+  managedChildWorkPending,
+} from "../finishedReceipts/finishedReportSettle";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { designSystemTurnContext } from "../designSystems/designSystemContext";
 import {
@@ -20,6 +23,7 @@ import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
+  decodeAgentRunParentThreadId,
   decodeCodeEvidenceContentId,
   decodeCodeFailure,
   decodeCodeOperationId,
@@ -2609,7 +2613,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                   }
                 : undefined;
             },
-            latestReportTurnId: (threadId) => finishedReceipts.latest(threadId)?.receipt.turnId,
+            latestReportTurnId: (threadId) => {
+              const latest = finishedReceipts.latest(threadId);
+              return latest === undefined || latest.stale ? undefined : latest.receipt.turnId;
+            },
             enabled: () =>
               (persistence.readShellSettings()?.settings ?? defaultShellSettings())
                 .putAwayThreadsWhenDone,
@@ -2629,8 +2636,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               ]);
               const children = view.threads[0]?.childAgents;
               if (
-                children !== undefined &&
-                (children.active > 0 || children.unacknowledgedResults > 0)
+                (children !== undefined &&
+                  (children.active > 0 || children.unacknowledgedResults > 0)) ||
+                // Octant-managed helpers live apart from the provider's own
+                // child events, so they are read from their projection.
+                managedChildWorkPending(
+                  persistence.agentRunProjection.parentSummary(
+                    decodeAgentRunParentThreadId(String(id)),
+                  ),
+                )
               ) {
                 return { status: "skipped", reason: "child-work" };
               }

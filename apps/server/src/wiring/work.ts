@@ -10,7 +10,10 @@ import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
 import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStore";
 import { WorkMessageWake } from "../work/workMessageWake";
-import { FinishedReportSettle } from "../finishedReceipts/finishedReportSettle";
+import {
+  FinishedReportSettle,
+  managedChildWorkPending,
+} from "../finishedReceipts/finishedReportSettle";
 import { workTurnDecision } from "../turnDecisions/workTurnDecisions";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { mkdirSync, rmSync } from "node:fs";
@@ -2305,7 +2308,10 @@ export function wireWork(deps: WorkDependencies) {
           completed: updated.status === "completed",
         };
       },
-      latestReportTurnId: (threadId) => finishedReceipts.latest(threadId)?.receipt.turnId,
+      latestReportTurnId: (threadId) => {
+        const latest = finishedReceipts.latest(threadId);
+        return latest === undefined || latest.stale ? undefined : latest.receipt.turnId;
+      },
       enabled: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings())
           .putAwayThreadsWhenDone,
@@ -2317,17 +2323,15 @@ export function wireWork(deps: WorkDependencies) {
         if (workTurnDecision(thread, workTurnProjection.listForThread(id)) !== undefined) {
           return { status: "skipped", reason: "decision-pending" };
         }
-        // A child's result the lead has not read yet keeps the thread in view,
-        // as it keeps the board card's count; the service sees only live children.
-        const unreadChildResult = persistence.agentRunProjection
-          .parentSummary(decodeAgentRunParentThreadId(String(id)))
-          .some(
-            (run) =>
-              (run.lifecycleStatus === "completed" || run.lifecycleStatus === "failed") &&
-              run.resultAcknowledgement.required &&
-              !run.resultAcknowledgement.acknowledged,
-          );
-        if (unreadChildResult) return { status: "skipped", reason: "child-work" };
+        // A child still going, or one whose result the lead has not read, keeps
+        // the thread in view, as it keeps the board card's count.
+        if (
+          managedChildWorkPending(
+            persistence.agentRunProjection.parentSummary(decodeAgentRunParentThreadId(String(id))),
+          )
+        ) {
+          return { status: "skipped", reason: "child-work" };
+        }
         return workThreadService.settleFinishedThread(id);
       },
       onError: (message, error) => console.error(`[work-settle] ${message}`, error),

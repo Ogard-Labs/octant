@@ -2358,7 +2358,7 @@ interface SectionProps {
 const COMPLETED_THREAD_ARCHIVE_CHOICES: ReadonlyArray<number> = [1, 3, 7, 14, 30, 90];
 
 /**
- * The window before a put-away thread is archived, as a short list of
+ * The window before a settled thread is archived, as a short list of
  * choices plus Never. A value chosen elsewhere that the list lacks is still
  * shown as itself rather than snapping to the nearest choice.
  */
@@ -2752,7 +2752,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
           <SettingRow
-            description="A put-away thread rests in its shelf, then moves to the archive. Archiving keeps everything."
+            description="A settled thread rests under Settled, then moves to the archive. Archiving keeps everything."
             focused={focusedSetting === settingId("completed-thread-archive")}
             label="Archive settled threads"
             scope="host"

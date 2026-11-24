@@ -390,7 +390,9 @@ most 40% of the sidebar's height and scrolls inside itself beyond that, with a
 hairline above it. A running thread is listed only there, with its live
 "Working 4m"; one waiting on an approval or an answer is not working and stays
 at the top under Needs you, with its state in words. A pinned thread and a
-coordinator keep their place among the pins. Settled rows are the compact
+coordinator keep their place among the pins, and in the Activity feed a thread
+waiting on an approval or an answer sits under Priority whatever its read
+state. Settled rows are the compact
 shelf rows, each with how long ago it settled. With no threads above it, the
 foot alone is the sidebar's list. The Project tree keeps both shelves below
 its Project groups (maintainer request, 2026-11-24). A running thread changes
@@ -674,11 +676,14 @@ lead's `octant_report_finished` passes, the host settles the thread, as the
 `system` actor, once the turn that filed the report completes, since a thread
 cannot settle while its turn runs. It acts once, on that completion, and only
 when the completed turn is the one the thread's latest finished report names
-(the Work turn id or the Code operation id), so a person who un-settles the
+(the Work turn id or the Code operation id) and that report is still fresh (a
+later file change leaves its checks unproven), so a person who un-settles the
 thread keeps it: nothing re-reads an old report. A turn that failed, was
 cancelled or stopped to wait settles nothing. The host retries for a few
 seconds while the runtime still reports the just-completed turn as live, and
-leaves alone a coordinator, a thread with child work still running or unread,
+stops once a newer turn starts, the report goes stale or the switch is turned
+off. It leaves alone a coordinator, a thread with child work still running or
+unread (the provider's own children and Octant-managed helpers alike),
 and one whose finished turn left a decision for the person. A person's **Mark
 done** on a Work or Code thread also settles it in the same journaled update;
 **Un-settle** (the reopen command) brings it back, as does a new message (a

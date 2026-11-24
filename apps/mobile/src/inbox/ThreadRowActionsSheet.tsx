@@ -20,7 +20,7 @@ import { mobileThreadShelf } from "./threadArrangement";
 
 const REFUSAL: Readonly<Record<string, string>> = {
   archived: "This thread is archived.",
-  executing: "A turn is running. Put it away when it finishes.",
+  executing: "A turn is running. Settle it when it finishes.",
   "awaiting-input": "The agent is waiting on you. Answer it first.",
   "wake-time-not-in-future": "Pick a later time.",
 };

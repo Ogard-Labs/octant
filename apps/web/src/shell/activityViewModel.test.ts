@@ -44,6 +44,24 @@ function thread(
 }
 
 describe("buildSidebarActivityView", () => {
+  it("lifts a thread waiting on an approval above the days, even with no unread mark", () => {
+    const view = buildSidebarActivityView({
+      now: new Date("2026-08-14T12:00:00.000Z"),
+      projects: [{ id: projectId, name: "Octant" }],
+      threads: [
+        thread({ threadId: "new", title: "New", updatedAt: "2026-08-14T10:00:00.000Z" }),
+        thread({
+          threadId: "asks",
+          title: "Asks",
+          activity: "attention",
+          awaitingKind: "approval",
+          updatedAt: "2026-07-01T10:00:00.000Z",
+        }),
+      ],
+    });
+    expect(view.groups[0]).toMatchObject({ id: "priority", threads: [{ threadId: "asks" }] });
+  });
+
   it("puts unread and follow-up threads in Priority, then groups the rest by recency", () => {
     const now = new Date("2026-08-14T15:00:00.000Z");
     const view = buildSidebarActivityView({

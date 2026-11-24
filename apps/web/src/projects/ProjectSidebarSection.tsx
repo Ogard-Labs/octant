@@ -714,6 +714,11 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
 
   const rowPropertyView: SidebarRowPropertyView = activityView ? "activity" : "projects";
 
+  const showLiveDock =
+    onSelectThread !== undefined &&
+    nestThreads &&
+    activityView &&
+    (activity.working.length > 0 || completedThreads.length > 0);
   const snoozedShelf = { key: "snoozed", label: "Snoozed", threads: snoozedThreads } as const;
   const settledShelf = { key: "completed", label: "Settled", threads: completedThreads } as const;
   function renderShelf(shelf: typeof snoozedShelf | typeof settledShelf) {
@@ -819,7 +824,13 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     ) : undefined;
   return (
     <SidebarRowPropertiesContext.Provider value={rowProperties.projects}>
-      <nav aria-label="Projects" className="project-nav window-no-drag">
+      <nav
+        aria-label="Projects"
+        className="project-nav window-no-drag"
+        // A column only while the foot shows, so its auto top margin can hold
+        // it at the bottom of a short list; the Project tree keeps block flow.
+        style={showLiveDock ? { display: "flex", flexDirection: "column" } : undefined}
+      >
         {/* Views sort and filter Projects; with none yet the row only said
             "All Projects" over a heading that said "Projects" again. The
             Projects/Activity switch shares the row so the list's two
@@ -982,15 +993,19 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             ))}
           </OctantCollapsible>
         ) : null}
-        {onSelectThread !== undefined &&
-        nestThreads &&
-        activityView &&
-        (activity.working.length > 0 || completedThreads.length > 0) ? (
+        {showLiveDock ? (
           // Running and settled threads sit at the foot of Status and the
           // Activity feed, where they stay in sight however far the list
           // above scrolls, and do not move its rows as their turns start and
           // end. Each thread is listed once: here, or in the list above.
-          <div aria-label="Working and settled" className="sidebar-live-dock" role="group">
+          <div
+            aria-label="Working and settled"
+            className="sidebar-live-dock"
+            role="group"
+            // It scrolls inside itself, so as a column child it could shrink
+            // to nothing under a long list; its own cap bounds it instead.
+            style={{ flexShrink: 0 }}
+          >
             {activity.working.length === 0 ? null : (
               <SidebarRowPropertiesContext.Provider value={rowProperties.activity}>
                 <ActivityThreadList
