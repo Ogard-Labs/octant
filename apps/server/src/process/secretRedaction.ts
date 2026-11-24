@@ -82,7 +82,8 @@ function secretForms(value: string): ReadonlyArray<string> {
     JSON.stringify(value).slice(1, -1),
   ]);
   forms.add(value.trim());
-  for (const line of value.split(/\r?\n/u)) if (line.length >= MINIMUM_LINE_LENGTH) forms.add(line);
+  for (const line of value.split(/\r?\n/u))
+    if (line.length >= MINIMUM_LINE_LENGTH && !isKeyFraming(line)) forms.add(line);
   for (const alignment of [0, 1, 2]) {
     const encoded = Buffer.concat([Buffer.alloc(alignment), bytes])
       .toString("base64")
@@ -96,6 +97,11 @@ function secretForms(value: string): ReadonlyArray<string> {
     forms.add(inner.replaceAll("+", "-").replaceAll("/", "_"));
   }
   return [...forms].filter(isHoldableSecretValue);
+}
+
+/** The lines every key of a format shares, which hide nothing of this one. */
+function isKeyFraming(line: string): boolean {
+  return line.startsWith("-----") || line.startsWith("PuTTY-User-Key-File-");
 }
 
 /** A key's own line is long; a short line of a multi-line value is ordinary text. */

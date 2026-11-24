@@ -37,7 +37,13 @@ const REDACTED_KINDS: ReadonlySet<ProviderRuntimeEvent["kind"]> = new Set([
 ]);
 
 export function redactProviderRuntimeEvent(event: ProviderRuntimeEvent): ProviderRuntimeEvent {
-  return REDACTED_KINDS.has(event.kind) ? redactHostSecretsInValue(event) : event;
+  if (!REDACTED_KINDS.has(event.kind)) return event;
+  const redacted = redactHostSecretsInValue(event);
+  // A password can be a word Octant uses ("tool-failure"). What says which
+  // event this is stays; anything else that carries it is replaced.
+  return redacted.kind === event.kind
+    ? redacted
+    : ({ ...redacted, kind: event.kind } as ProviderRuntimeEvent);
 }
 
 export function redactProviderRuntimeSecrets(driver: ProviderDriver): ProviderDriver {

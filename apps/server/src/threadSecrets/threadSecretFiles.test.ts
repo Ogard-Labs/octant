@@ -3,10 +3,12 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -74,6 +76,55 @@ describe("a thread secret's file", () => {
     expect(existsSync(join(elsewhere, "TOKEN.partial"))).toBe(false);
   });
 
+  it("gives the earlier file back when it is discarded after it was put in place", () => {
+    const files = createThreadSecretFiles({ root });
+    const first = files.prepare(THREAD, "TOKEN", "first");
+    first.commit();
+    first.settle();
+    const second = files.prepare(THREAD, "TOKEN", "second");
+    second.commit();
+    second.discard();
+    expect(readFileSync(join(root, THREAD, "TOKEN"), "utf8")).toBe("first");
+    expect(readdirSync(join(root, THREAD))).toEqual(["TOKEN"]);
+  });
+
+  it("keeps nothing of the earlier file once the new one is settled", () => {
+    const files = createThreadSecretFiles({ root });
+    files.prepare(THREAD, "TOKEN", "first").commit();
+    const second = files.prepare(THREAD, "TOKEN", "second");
+    second.commit();
+    second.settle();
+    expect(readdirSync(join(root, THREAD))).toEqual(["TOKEN"]);
+  });
+
+  it("is not stopped by a folder left where its file belongs", () => {
+    for (const name of ["TOKEN", "TOKEN.partial", "TOKEN.previous"])
+      mkdirSync(join(root, THREAD, name, "inside"), { recursive: true });
+    const prepared = createThreadSecretFiles({ root }).prepare(THREAD, "TOKEN", "value");
+    prepared.commit();
+    prepared.settle();
+    expect(readFileSync(prepared.path, "utf8")).toBe("value");
+    expect(readdirSync(join(root, THREAD))).toEqual(["TOKEN"]);
+  });
+
+  it.runIf(process.platform !== "win32")("neither writes nor removes through a link", () => {
+    const elsewhere = join(base, "elsewhere");
+    mkdirSync(join(elsewhere, THREAD), { recursive: true });
+    writeFileSync(join(elsewhere, "TOKEN"), "kept");
+    mkdirSync(root);
+    symlinkSync(elsewhere, join(root, THREAD));
+    const files = createThreadSecretFiles({ root });
+    expect(() => files.remove(THREAD, "TOKEN")).toThrow();
+    files.sweep();
+    expect(readFileSync(join(elsewhere, "TOKEN"), "utf8")).toBe("kept");
+    const shared = join(base, "thread-secrets");
+    rmSync(shared, { recursive: true });
+    symlinkSync(elsewhere, shared);
+    const hostRoot = createThreadSecretFiles({ root: join(shared, "host") });
+    expect(() => hostRoot.prepare(THREAD, "TOKEN", "value")).toThrow();
+    expect(() => hostRoot.sweep()).toThrow();
+  });
+
   it("removes one secret, or every thread's", () => {
     const files = createThreadSecretFiles({ root });
     files.prepare(THREAD, "ONE", "1").commit();
@@ -83,6 +134,7 @@ describe("a thread secret's file", () => {
     expect(existsSync(join(root, THREAD, "ONE"))).toBe(false);
     expect(existsSync(join(root, THREAD, "TWO"))).toBe(true);
     files.sweep();
-    expect(existsSync(root)).toBe(false);
+    // The folder itself stays, for a sandbox to cover.
+    expect(readdirSync(root)).toEqual([]);
   });
 });

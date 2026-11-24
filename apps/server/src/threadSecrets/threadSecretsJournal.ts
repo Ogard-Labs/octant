@@ -4,6 +4,7 @@ import {
   THREAD_SECRET_AGGREGATE_TYPE,
   THREAD_SECRET_EVENT_NAME,
   type ThreadSecretJournalRecord,
+  type ThreadSecretKind,
   type ThreadSecretLifetime,
 } from "@octant/contracts/thread-secrets";
 import { Schema } from "effect";
@@ -22,10 +23,18 @@ export interface ThreadSecretsJournal {
   /** Appends every record or none; throws when it cannot, so nothing is granted unrecorded. */
   readonly record: (threadId: string, records: ReadonlyArray<ThreadSecretJournalRecord>) => void;
   /** What an earlier host left: the secrets it never ended, and the last lifetime per name. */
-  readonly history: () => {
-    readonly open: ReadonlyArray<ThreadSecretJournalRecord>;
-    readonly lastLifetimes: ReadonlyMap<string, ThreadSecretLifetime>;
-  };
+  readonly history: () => ThreadSecretsHistory;
+}
+
+export interface ThreadSecretsHistory {
+  readonly open: ReadonlyArray<ThreadSecretJournalRecord>;
+  /** Keyed by {@link lifetimeKey}. */
+  readonly lastLifetimes: ReadonlyMap<string, ThreadSecretLifetime>;
+}
+
+/** A name asked for as a token says nothing about the same name as an account password. */
+export function lifetimeKey(kind: ThreadSecretKind, secretName: string): string {
+  return `${kind}/${secretName}`;
 }
 
 /**
@@ -74,17 +83,27 @@ export function threadSecretsJournal(options: {
           limit: REPLAY_PAGE,
         });
         for (const event of page) {
-          const record = decodeThreadSecretJournalRecord(event.payload);
+          afterSequence = event.globalSequence;
+          const record = readable(event.payload);
+          if (record === undefined) continue;
           if (record.name === "thread-secret.granted") {
             open.set(record.secretId, record);
-            lastLifetimes.set(record.secretName, record.lifetime);
+            lastLifetimes.set(lifetimeKey(record.kind, record.secretName), record.lifetime);
           } else if (record.name !== "thread-secret.used") {
             open.delete(record.secretId);
           }
-          afterSequence = event.globalSequence;
         }
         if (page.length < REPLAY_PAGE) return { open: [...open.values()], lastLifetimes };
       }
     },
   };
+}
+
+/** One record this host cannot read keeps the others from nothing. */
+function readable(payload: unknown): ThreadSecretJournalRecord | undefined {
+  try {
+    return decodeThreadSecretJournalRecord(payload);
+  } catch {
+    return undefined;
+  }
 }

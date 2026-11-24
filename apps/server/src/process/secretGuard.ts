@@ -9,6 +9,7 @@
  * later launch, which is why it is held here once rather than threaded through
  * each launcher's options.
  */
+import { THREAD_SECRETS_FOLDER } from "../threadSecrets/threadSecretFiles";
 import { BuiltInProtectedFilesId } from "@octant/contracts/protected-files";
 import {
   NO_PROTECTED_FILES_CHANGES,
@@ -164,6 +165,48 @@ export function secretGuardEntries(input: {
       }),
     );
   return [...entries, ...sshKeys];
+}
+
+/**
+ * The folders of the secrets people gave threads, denied to every launch
+ * Octant confines. Apart from the protected list on purpose: that list is the
+ * person's to change, and a launch may carry only its sign-in rules.
+ */
+export function threadSecretGuardEntries(
+  platform: NodeJS.Platform,
+): ReadonlyArray<ResolvedProtectedEntry> {
+  const windows = platform === "win32";
+  return [state.runtimeDirectory, state.dataDirectory].flatMap((base) => {
+    if (base === undefined) return [];
+    const path = windows
+      ? windowsGuardPath(win32.join(base, THREAD_SECRETS_FOLDER))
+      : join(base, THREAD_SECRETS_FOLDER);
+    if (path === undefined) return [];
+    return [
+      {
+        ruleId: "octant-credentials" as const,
+        label: "Thread secrets",
+        channel: "credential-broker" as const,
+        ownAccountExempt: false,
+        ...(windows ? { foldCase: true as const } : {}),
+        kind: "path" as const,
+        path,
+      },
+    ];
+  });
+}
+
+/**
+ * Seatbelt judges a path by its name, so moving a folder above a denied one
+ * moves it out of the denial. Only the folder itself is named: what is created
+ * or removed inside it is judged by its own path.
+ */
+export function threadSecretSeatbeltRules(): ReadonlyArray<string> {
+  const { runtimeDirectory } = state;
+  if (runtimeDirectory === undefined) return [];
+  return [runtimeDirectory, join(runtimeDirectory, THREAD_SECRETS_FOLDER)]
+    .flatMap((path) => pathForms(path))
+    .map((path) => `(deny file-write* (literal "${escapeSeatbeltString(path)}"))`);
 }
 
 /** Native command sandboxes that cannot carry a required protected-file rule

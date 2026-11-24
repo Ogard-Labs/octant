@@ -25,7 +25,7 @@ import {
 } from "@octant/domain/thread-secret-policy";
 import { whileAwaitingToolApproval } from "../toolEffects/toolEffectLedger";
 import type { PreparedThreadSecretFile, ThreadSecretFiles } from "./threadSecretFiles";
-import type { ThreadSecretsJournal } from "./threadSecretsJournal";
+import { lifetimeKey, type ThreadSecretsJournal } from "./threadSecretsJournal";
 
 /** Where the asking thread stands right now. Read again before every side effect. */
 export interface ThreadSecretAuthority {
@@ -53,7 +53,16 @@ export interface ThreadSecretConsumer {
 }
 
 export type ThreadSecretRedemption =
-  | { readonly status: "redeemed"; readonly label: string; readonly value: string }
+  | {
+      readonly status: "redeemed";
+      readonly label: string;
+      readonly value: string;
+      /**
+       * Says the consumer is finished with the value. Until then, or until the
+       * turn ends, it stays redacted, though its secret may have ended.
+       */
+      readonly done: () => void;
+    }
   | { readonly status: "refused"; readonly failure: ThreadSecretFailure };
 
 export interface ThreadSecretServiceOptions {
@@ -104,7 +113,26 @@ interface ActiveSecret {
   readonly value: string;
   readonly path: string | undefined;
   readonly endsAt: number | undefined;
+  /** Stops redacting the value that was granted. */
   readonly release: () => void;
+  /** Stops redacting the latest value its item was rotated to. */
+  readonly releaseRotated: (() => void) | undefined;
+}
+
+/** A redeemed value its consumer may still print. */
+interface Lease {
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly release: () => void;
+}
+
+interface RetriedAnswer {
+  /** What was asked. The same key with anything else is not a retry. */
+  readonly asked: string;
+  readonly answer: Promise<ThreadSecretRequestResult>;
+  /** The secrets a saved answer names, once there is one. */
+  secretIds: ReadonlyArray<string> | undefined;
+  settled: boolean;
 }
 
 interface PendingRequest {
@@ -118,6 +146,10 @@ interface PendingRequest {
   failure: ThreadSecretFailure | undefined;
 }
 
+type EndCause =
+  | "expired"
+  | Extract<ThreadSecretJournalRecord, { name: "thread-secret.revoked" }>["cause"];
+
 interface AnsweredField {
   readonly value: string;
   readonly source: ThreadSecretSource;
@@ -125,8 +157,9 @@ interface AnsweredField {
 }
 
 /** A request held for a person costs memory and a place in Needs you. */
-const MAX_PENDING_REQUESTS = 32;
-const MAX_PENDING_PER_THREAD = 8;
+const MAX_PENDING_REQUESTS = 256;
+/** Few enough that no thread's cards can keep another thread's from opening. */
+const MAX_PENDING_PER_THREAD = 2;
 const MAX_ACTIVE_PER_THREAD = 64;
 /** A handle the agent never uses is not kept past this many newer ones. */
 const MAX_HANDLES_PER_SECRET = 8;
@@ -184,17 +217,20 @@ export class ThreadSecretService {
   readonly #handles = new Map<string, string>();
   readonly #consumers = new Map<string, ThreadSecretConsumer>();
   /** Retry key to its one answer, per thread. */
-  readonly #answers = new Map<string, Map<string, Promise<ThreadSecretRequestResult>>>();
+  readonly #answers = new Map<string, Map<string, RetriedAnswer>>();
+  readonly #leases = new Set<Lease>();
   readonly #lastLifetimes = new Map<string, ThreadSecretLifetime>();
   /** Files whose removal failed, tried again until they are gone. */
   readonly #leftover = new Map<string, { readonly threadId: string; readonly name: string }>();
   readonly #timer: ReturnType<typeof setInterval>;
   #closed = false;
+  /** No file is written while an earlier host's may still be there. */
+  #swept = false;
 
   constructor(options: ThreadSecretServiceOptions) {
     this.#options = options;
     // An earlier host's values died with it; its files and its open records did not.
-    this.#attempt(() => options.files?.sweep());
+    this.#clearEarlierFiles();
     this.#attempt(() => {
       const { open, lastLifetimes } = options.journal.history();
       for (const [name, lifetime] of lastLifetimes) this.#lastLifetimes.set(name, lifetime);
@@ -219,25 +255,28 @@ export class ThreadSecretService {
     const refused = this.#refusesCaller(caller, input);
     if (refused !== undefined) return Promise.resolve(refused);
     if (input.clientRequestId === undefined) return this.#ask(caller, input, signal);
-    const answers =
-      this.#answers.get(caller.threadId) ?? new Map<string, Promise<ThreadSecretRequestResult>>();
+    const answers = this.#answers.get(caller.threadId) ?? new Map<string, RetriedAnswer>();
     this.#answers.delete(caller.threadId);
     this.#answers.set(caller.threadId, answers);
-    if (this.#answers.size > MAX_RETRY_THREADS) {
-      const oldest = this.#answers.keys().next().value;
-      if (oldest !== undefined) this.#answers.delete(oldest);
-    }
-    const earlier = answers.get(input.clientRequestId);
-    if (earlier !== undefined) return earlier;
-    if (answers.size >= MAX_RETRY_KEYS_PER_THREAD) {
-      const oldest = answers.keys().next().value;
-      if (oldest !== undefined) answers.delete(oldest);
-    }
-    const answer = this.#ask(caller, input, signal);
     const key = input.clientRequestId;
-    answers.set(key, answer);
-    // A call the journal refused gave no answer to keep.
-    answer.catch(() => answers.delete(key));
+    const asked = JSON.stringify(input);
+    const earlier = answers.get(key);
+    if (earlier !== undefined) return this.#replay(earlier, asked);
+    this.#dropOldAnswers(answers);
+    const answer = this.#ask(caller, input, signal);
+    const kept: RetriedAnswer = { asked, answer, secretIds: undefined, settled: false };
+    answers.set(key, kept);
+    answer.then(
+      (result) => {
+        kept.settled = true;
+        if (result.status !== "saved") return;
+        kept.secretIds = deliveriesOf(input).map(
+          ({ secretName }) => this.#named(caller.threadId, secretName)?.id ?? "",
+        );
+      },
+      // A call the journal refused gave no answer to keep.
+      () => answers.delete(key),
+    );
     return answer;
   }
 
@@ -342,48 +381,71 @@ export class ThreadSecretService {
   /** Hands a handle's value to its consumer, once. */
   async redeem(input: {
     readonly consumerId: string;
-    readonly threadId: string;
+    readonly caller: ThreadSecretCaller;
     readonly handle: string;
     readonly signal: AbortSignal;
   }): Promise<ThreadSecretRedemption> {
+    const { caller } = input;
     this.sweep();
-    if (!this.#consumers.has(input.consumerId))
-      return { status: "refused", failure: "unavailable" };
+    const consumer = this.#consumers.get(input.consumerId);
+    if (consumer === undefined) return { status: "refused", failure: "unavailable" };
     const secretId = this.#handles.get(input.handle);
     const secret = secretId === undefined ? undefined : this.#active.get(secretId);
-    if (secret === undefined || secret.threadId !== input.threadId)
+    if (secret === undefined || secret.threadId !== caller.threadId)
       return { status: "refused", failure: "expired" };
+    const before = this.#refusesUse(caller, secret, input.signal);
+    if (before !== undefined) return { status: "refused", failure: before };
     // Spent before the value is read: two redeemers never both get it.
     this.#handles.delete(input.handle);
-    let value = secret.value;
-    let release: (() => void) | undefined;
+    let { value } = secret;
     if (secret.reference !== undefined) {
       const read = await this.#read(secret.reference, input.signal);
       if (typeof read !== "string") return { status: "refused", failure: read.failure };
       value = read;
-      // A rotated item has a value the grant never held.
-      if (value !== secret.value) release = this.#options.hold(value);
     }
-    // Another handle's read may have renewed it meanwhile; only its end refuses this one.
+    // Everything that admitted the use may have ended while the item was read.
+    this.sweep();
     const current = this.#active.get(secret.id);
-    if (current === undefined) {
-      release?.();
-      return { status: "refused", failure: "revoked" };
-    }
+    if (current === undefined) return { status: "refused", failure: "revoked" };
+    if (this.#consumers.get(input.consumerId) !== consumer)
+      return { status: "refused", failure: "unavailable" };
+    const after = this.#refusesUse(caller, current, input.signal);
+    if (after !== undefined) return { status: "refused", failure: after };
+    const rotated = value === current.value ? undefined : value;
+    let lease: Lease | undefined;
+    let releaseRotated: (() => void) | undefined;
     try {
+      lease = {
+        threadId: secret.threadId,
+        turnId: caller.turnId,
+        release: this.#options.hold(value),
+      };
+      if (rotated !== undefined) releaseRotated = this.#options.hold(rotated);
       this.#options.journal.record(secret.threadId, [
-        { name: "thread-secret.used", ...journaled(secret), use: "handle" },
+        { name: "thread-secret.used", ...journaled(current), use: "handle" },
       ]);
     } catch {
-      release?.();
+      this.#attempt(() => lease?.release());
+      this.#attempt(() => releaseRotated?.());
       return { status: "refused", failure: "unavailable" };
     }
-    if (release !== undefined)
-      this.#active.set(secret.id, { ...current, value, release: both(current.release, release) });
-    const held = this.#active.get(secret.id);
-    if (secret.lifetime === "this-command" && held !== undefined)
-      this.#end([held], "command-ended");
-    return { status: "redeemed", label: secret.label, value };
+    const taken = lease;
+    this.#leases.add(taken);
+    let held = current;
+    if (rotated !== undefined) {
+      held = { ...current, value: rotated, releaseRotated };
+      // The value before this one is the store's old one; only the granted
+      // value, which the agent may have been told of, stays held beside it.
+      this.#attempt(() => current.releaseRotated?.());
+      this.#active.set(secret.id, held);
+    }
+    if (held.lifetime === "this-command") this.#end([held], "command-ended");
+    return {
+      status: "redeemed",
+      label: secret.label,
+      value,
+      done: () => this.#endLease(taken),
+    };
   }
 
   /** Ends what the turn alone was given, and the cards it left open. */
@@ -400,6 +462,7 @@ export class ThreadSecretService {
       ),
       "turn-ended",
     );
+    this.#endLeases((lease) => lease.threadId === threadId && lease.turnId === turnId);
   }
 
   /** The thread was archived or deleted. */
@@ -410,6 +473,7 @@ export class ThreadSecretService {
       [...this.#active.values()].filter((secret) => secret.threadId === threadId),
       "thread-archived",
     );
+    this.#endLeases((lease) => lease.threadId === threadId);
     this.#answers.delete(threadId);
   }
 
@@ -424,6 +488,7 @@ export class ThreadSecretService {
     clearInterval(this.#timer);
     for (const pending of this.#pending.values()) this.#cancel(pending);
     this.#end([...this.#active.values()], "host-stopped");
+    this.#endLeases(() => true);
     this.#attempt(() => this.#options.files?.sweep());
     this.#answers.clear();
     this.#handles.clear();
@@ -441,6 +506,7 @@ export class ThreadSecretService {
     for (const pending of this.#pending.values())
       if (pending.state === "pending" && this.#authority(pending.caller) === undefined)
         this.#cancel(pending);
+    this.#clearEarlierFiles();
     for (const [key, file] of this.#leftover)
       if (this.#attempt(() => this.#options.files?.remove(file.threadId, file.name)))
         this.#leftover.delete(key);
@@ -474,7 +540,9 @@ export class ThreadSecretService {
     const offer = resolveThreadSecretOffer({
       ...authority,
       kind: input.kind,
-      lastLifetime: this.#lastLifetimes.get(names[0]?.secretName ?? input.name),
+      lastLifetime: this.#lastLifetimes.get(
+        lifetimeKey(input.kind, names[0]?.secretName ?? input.name),
+      ),
     });
     if (offer.status !== "offered") return Promise.resolve(refusal(offer.status));
     const waiting = [...this.#pending.values()];
@@ -492,7 +560,8 @@ export class ThreadSecretService {
       label: input.label,
       kind: input.kind,
       reason: input.reason,
-      ...(input.url === undefined ? {} : { url: input.url }),
+      // As the browser will open it: a look-alike host shows in its encoded form.
+      ...(input.url === undefined ? {} : { url: new URL(input.url).href }),
       delivery: input.delivery ?? "handle",
       fields:
         input.fields === undefined
@@ -571,8 +640,9 @@ export class ThreadSecretService {
         secret.kind !== input.kind ||
         secret.field !== field ||
         secret.requestName !== input.name ||
-        // One command's secret is spent on that command.
+        // One command's secret is spent on that command, and one turn's on that turn.
         secret.lifetime === "this-command" ||
+        (secret.lifetime === "this-turn" && secret.turnId !== caller.turnId) ||
         decideThreadSecretLifetime({ ...authority, kind: secret.kind }, secret.lifetime).status !==
           "allowed"
       )
@@ -687,14 +757,15 @@ export class ThreadSecretService {
       commandsConfined: authority.commandsConfined,
       freshEachUse: false,
     });
-    const files = wanted === "file-and-environment" ? this.#options.files : undefined;
+    const files =
+      wanted === "file-and-environment" && this.#swept ? this.#options.files : undefined;
     const delivery =
       wanted === "file-and-environment" && files === undefined ? "environment" : wanted;
     const prepared: PreparedThreadSecretFile[] = [];
     const secrets: ActiveSecret[] = [];
     const undo = () => {
-      for (const file of prepared) this.#attempt(() => file.discard());
-      for (const secret of secrets) secret.release();
+      for (const file of [...prepared].reverse()) this.#attempt(() => file.discard());
+      for (const secret of secrets) this.#attempt(secret.release);
     };
     const replaced: ActiveSecret[] = [];
     try {
@@ -705,7 +776,11 @@ export class ThreadSecretService {
           undo();
           return "unavailable";
         }
-        const release = shown.secret ? this.#options.hold(value.value) : () => undefined;
+        // "Shown as typed" is the agent's word. It spares an email address the
+        // person typed and saw; it never spares an account's own password, or
+        // a stored value nobody looked at.
+        const plain = !shown.secret && value.source === "pasted" && input.kind === "token";
+        const release = plain ? () => undefined : this.#options.hold(value.value);
         const secret: ActiveSecret = {
           id: this.#options.uuid(),
           threadId: caller.threadId,
@@ -725,6 +800,7 @@ export class ThreadSecretService {
           path: undefined,
           endsAt: endOf(lifetime, this.#options.now()),
           release,
+          releaseRotated: undefined,
         };
         // Held from here, so a failure below still lets it go.
         secrets.push(secret);
@@ -743,15 +819,9 @@ export class ThreadSecretService {
         undo();
         return "unavailable";
       }
-      this.#options.journal.record(caller.threadId, [
-        ...replaced.map(
-          (secret): ThreadSecretJournalRecord => ({
-            name: "thread-secret.revoked",
-            ...journaled(secret),
-            cause: "replaced",
-          }),
-        ),
-        ...secrets.map(
+      this.#options.journal.record(
+        caller.threadId,
+        secrets.map(
           (secret): ThreadSecretJournalRecord => ({
             name: "thread-secret.granted",
             ...journaled(secret),
@@ -760,33 +830,42 @@ export class ThreadSecretService {
             delivery: secret.delivery,
           }),
         ),
-      ]);
+      );
     } catch {
       undo();
       return "unavailable";
     }
-    // Recorded as replaced already; only a file the new one will not replace goes.
+    try {
+      for (const file of prepared) file.commit();
+    } catch {
+      // The earlier secret of this name, if any, is untouched and still the one in use.
+      undo();
+      this.#recordEnd(secrets, "delivery-failed");
+      return "unavailable";
+    }
     for (const secret of replaced)
       this.#forget(
         secret,
         secrets.some((next) => next.path !== undefined && next.path === secret.path),
       );
-    for (const secret of secrets) this.#active.set(secret.id, secret);
-    try {
-      for (const file of prepared) file.commit();
-    } catch {
-      for (const file of prepared) this.#attempt(() => file.discard());
-      this.#end(secrets, "delivery-failed");
-      return "unavailable";
-    }
+    for (const file of prepared) this.#attempt(() => file.settle());
+    this.#recordEnd(replaced, "replaced");
     for (const secret of secrets) {
-      this.#lastLifetimes.set(secret.secretName, lifetime);
+      this.#active.set(secret.id, secret);
+      this.#lastLifetimes.set(lifetimeKey(secret.kind, secret.secretName), lifetime);
       // Its name is in use again: an earlier file's owed removal would take this one.
       if (secret.path !== undefined)
         this.#leftover.delete(`${secret.threadId}/${secret.secretName}`);
     }
-    this.#changed();
-    return this.#savedResult(input, secrets, delivery);
+    try {
+      return this.#savedResult(input, secrets, delivery);
+    } catch {
+      // The agent was told of nothing, so it holds nothing.
+      this.#end(secrets, "delivery-failed");
+      return "unavailable";
+    } finally {
+      this.#changed();
+    }
   }
 
   #savedResult(
@@ -845,16 +924,16 @@ export class ThreadSecretService {
   }
 
   /** Nothing can use an ended secret, whether or not the journal takes the record. */
-  #end(
-    secrets: ReadonlyArray<ActiveSecret>,
-    cause:
-      | "expired"
-      | Extract<ThreadSecretJournalRecord, { name: "thread-secret.revoked" }>["cause"],
-  ): void {
+  #end(secrets: ReadonlyArray<ActiveSecret>, cause: EndCause): void {
     if (secrets.length === 0) return;
-    for (const secret of secrets) {
-      this.#forget(secret, false);
-      // A refused record leaves the grant open, and the next start ends it there.
+    for (const secret of secrets) this.#forget(secret, false);
+    this.#recordEnd(secrets, cause);
+    this.#changed();
+  }
+
+  /** A refused record leaves the grant open, and the next start ends it there. */
+  #recordEnd(secrets: ReadonlyArray<ActiveSecret>, cause: EndCause): void {
+    for (const secret of secrets)
       this.#attempt(() =>
         this.#options.journal.record(secret.threadId, [
           cause === "expired"
@@ -862,8 +941,6 @@ export class ThreadSecretService {
             : { name: "thread-secret.revoked", ...journaled(secret), cause },
         ]),
       );
-    }
-    this.#changed();
   }
 
   #forget(secret: ActiveSecret, fileReplaced: boolean): void {
@@ -879,7 +956,71 @@ export class ThreadSecretService {
         threadId: secret.threadId,
         name: secret.secretName,
       });
-    secret.release();
+    this.#attempt(secret.release);
+    this.#attempt(() => secret.releaseRotated?.());
+  }
+
+  #endLease(lease: Lease): void {
+    if (this.#leases.delete(lease)) this.#attempt(lease.release);
+  }
+
+  #endLeases(which: (lease: Lease) => boolean): void {
+    for (const lease of this.#leases) if (which(lease)) this.#endLease(lease);
+  }
+
+  #clearEarlierFiles(): void {
+    this.#swept ||= this.#attempt(() => this.#options.files?.sweep());
+  }
+
+  /** Why this thread may not use a secret it holds, read as it uses it. */
+  #refusesUse(
+    caller: ThreadSecretCaller,
+    secret: ActiveSecret,
+    signal: AbortSignal,
+  ): ThreadSecretFailure | undefined {
+    if (signal.aborted || caller.signal.aborted) return "unavailable";
+    if (secret.lifetime === "this-turn" && secret.turnId !== caller.turnId) return "expired";
+    const authority = this.#authority(caller);
+    if (authority === undefined) return "unavailable";
+    const decision = decideThreadSecretLifetime(
+      { ...authority, kind: secret.kind },
+      secret.lifetime,
+    );
+    return decision.status === "refused" ? decision.failure : undefined;
+  }
+
+  /** The first answer again, while it still says something true. */
+  async #replay(earlier: RetriedAnswer, asked: string): Promise<ThreadSecretRequestResult> {
+    if (earlier.asked !== asked)
+      return {
+        status: "refused",
+        failure: "unavailable",
+        note: "That clientRequestId was used for another request. Use a new one.",
+      };
+    const result = await earlier.answer;
+    if (result.status !== "saved") return result;
+    return earlier.secretIds?.every((id) => this.#active.has(id)) === true
+      ? result
+      : refusal("expired");
+  }
+
+  /** Makes room for one retry key. A key still waiting for its answer is never dropped. */
+  #dropOldAnswers(answers: Map<string, RetriedAnswer>): void {
+    const dropSettled = (kept: Map<string, RetriedAnswer>): void => {
+      for (const [key, answer] of kept) {
+        if (!answer.settled) continue;
+        kept.delete(key);
+        return;
+      }
+    };
+    if (answers.size >= MAX_RETRY_KEYS_PER_THREAD) dropSettled(answers);
+    if (this.#answers.size <= MAX_RETRY_THREADS) return;
+    for (const [threadId, kept] of this.#answers) {
+      if ([...kept.values()].some((answer) => !answer.settled)) continue;
+      if (kept === answers) continue;
+      this.#answers.delete(threadId);
+      return;
+    }
   }
 
   /** Anything that cannot be read admits nothing. */
@@ -929,12 +1070,5 @@ function journaled(secret: ActiveSecret): JournaledCommon {
     mode: secret.mode,
     secretName: secret.secretName,
     kind: secret.kind,
-  };
-}
-
-function both(first: () => void, second: () => void): () => void {
-  return () => {
-    first();
-    second();
   };
 }

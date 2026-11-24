@@ -51,7 +51,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 18        | 10      | 7            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 10        | 6       | 4            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 14        | 6       | 8            | 0                   |
-| [Credentials and sign-in](#credentials-and-sign-in)                                   | 7         | 4       | 3            | 0                   |
+| [Credentials and sign-in](#credentials-and-sign-in)                                   | 8         | 4       | 4            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 20        | 15      | 5            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **300**   | **181** | **115**      | **4**               |
+| **All areas**                                                                         | **301**   | **181** | **116**      | **4**               |
 
 ## Principles and hard lines
 
@@ -2817,6 +2817,21 @@ A local person can enter a token or select a linked 1Password field reference in
 - Command approval IDs are one-use and never restored. Preparation replay is memory-scoped; a newly prepared request always needs fresh approval and cannot establish that an earlier process stopped. Below Full access the recipient's OS and per-command network rules remain enforced; vendor output concealment is not protection from disclosure to allowed destinations. See the owning linked-store rules for custody, invalidation and cancellation limits.
 
 Status: Partly built. Since: 2026-11-03. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
+
+### Thread secrets
+
+An agent in a Code or Work thread can ask the person for a secret its work needs, in a private card, kept as long as the person chooses (maintainer decisions, 2026-11-24).
+
+- Built: the host service, its contracts, policy, routes and records. Not built yet: the tool operation, the card and the active list, Remember, Fresh each use, `run-with-secret`, a secret already pasted in chat, the 1Password picker, phones and Needs you. No agent is offered it until those exist.
+- Code and Work only; Chat is refused. The card never expires and follows the Unattended work rule.
+- The person chooses the lifetime: this command, this turn, one hour, 24 hours, until archived, or Remember. Strict offers neither 24 hours nor Remember; an account password never offers Remember.
+- A handle is used once by a registered consumer and never by a command; authority is read before and after the value is. A file is written only where the thread's own commands run outside an Octant sandbox, on macOS, Linux and Windows, and every confined launch is denied the folder by a rule the person cannot remove.
+- Nothing is usable before its journal record, which holds no value and no free text. Expiry, revocation, the turn, archive, the host's stop and the next start each remove the file and the value.
+- Active values are redacted with their common encodings. The specification lists what redaction and isolation do not cover.
+- The card will have a compact anatomy: title and reason, an optional setup-page button, one row with the source, the input and the primary action, then a privacy line, the lifetime and Decline; several fields stack (maintainer decision, 2026-11-24). Not built yet.
+- Computer use filling a password prompt from a handle is a separate, later decision.
+
+Status: Partly built. Since: 2026-11-24. Detail: [Architecture: Thread secrets](../architecture.md#thread-secrets).
 
 ### Account usage reads
 

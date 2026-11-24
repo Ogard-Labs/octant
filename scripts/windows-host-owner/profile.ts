@@ -1,5 +1,9 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import {
+  createThreadSecretFiles,
+  THREAD_SECRETS_FOLDER,
+} from "../../apps/server/src/threadSecrets/threadSecretFiles";
 import { createWindowsHostStartup } from "../../packages/host-runtime/src/windowsHostStartup";
 import { attachWindowsHostRuntimeOwner } from "../../packages/host-runtime/src/windowsHostOwner";
 import { lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -225,6 +229,18 @@ try {
     const proof = win32.join(paths.dataDirectory, "proof");
     const file = win32.join(proof, "written.txt");
     await mkdir(proof, { recursive: true });
+    // The fixture inspects these too: a secret's folder and file take their
+    // access from the data folder alone, since Windows has no owner-only mode.
+    const secrets = createThreadSecretFiles({
+      root: win32.join(paths.dataDirectory, THREAD_SECRETS_FOLDER),
+    });
+    const prepared = secrets.prepare("thread-fixture", "TOKEN", "fixture-private-value");
+    prepared.commit();
+    prepared.settle();
+    check(
+      (await readFile(prepared.path, "utf8")) === "fixture-private-value",
+      "a thread secret's file is written in the profile's data folder",
+    );
     let previous: string | undefined;
     try {
       previous = await readFile(file, "utf8");

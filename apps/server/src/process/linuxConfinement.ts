@@ -17,7 +17,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
-import { protectedAtLevel, secretGuardEntries, secretGuardLinuxPaths } from "./secretGuard";
+import {
+  protectedAtLevel,
+  secretGuardEntries,
+  secretGuardLinuxPaths,
+  threadSecretGuardEntries,
+} from "./secretGuard";
 import {
   confinedExecutableExecPaths,
   ownAccountRoots,
@@ -701,10 +706,12 @@ export function buildBubblewrapLaunch(
     }),
   );
   for (const path of secretGuardLinuxPaths({
-    entries:
-      input.protectedFiles === "provider-sign-ins"
+    entries: [
+      ...(input.protectedFiles === "provider-sign-ins"
         ? protectedAtLevel(listedGuardEntries, true)
-        : listedGuardEntries,
+        : listedGuardEntries),
+      ...threadSecretGuardEntries("linux"),
+    ],
     ownAccountPaths: ownAccountRoots(
       input,
       input.readRoots ?? [],

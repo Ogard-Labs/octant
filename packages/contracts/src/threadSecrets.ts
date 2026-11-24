@@ -20,8 +20,16 @@ export const MAX_THREAD_SECRET_FIELDS = 8;
 /** The variable a command reads a secret from is this and the secret's name. */
 export const THREAD_SECRET_ENVIRONMENT_PREFIX = "OCTANT_SECRET_";
 
+/** Names Windows gives its devices: a file of that name is the device. */
+const WINDOWS_DEVICE = /^(?:CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$/;
+
 /** Becomes a file name and part of a variable name, so it holds nothing a path could use. */
-export const ThreadSecretName = Schema.String.pipe(Schema.pattern(/^[A-Z][A-Z0-9_]{0,63}$/));
+export const ThreadSecretName = Schema.String.pipe(
+  Schema.pattern(/^[A-Z][A-Z0-9_]{0,63}$/),
+  Schema.filter((value) => !WINDOWS_DEVICE.test(value), {
+    message: () => "That name is reserved by Windows.",
+  }),
+);
 /**
  * Shorter than a secret's own name: prefix, name and field together stay within
  * the 128 characters Octant's command launches accept for a variable.
@@ -78,9 +86,27 @@ export const ThreadSecretFailure = Schema.Literal(
 );
 export type ThreadSecretFailure = typeof ThreadSecretFailure.Type;
 
-const Label = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(80));
-const Reason = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(500));
-const Placeholder = Schema.String.pipe(Schema.maxLength(80));
+/** Letters and symbols that draw nothing: Hangul fillers, the Braille blank, odd spaces. */
+const BLANK = /[\u115f\u1160\u3164\uffa0\u2800\u00a0\u1680\u2000-\u200a\u202f\u205f]/u;
+
+/**
+ * One line a person can read as it is. The agent writes it and the person
+ * decides by it, so it holds nothing invisible, nothing that reorders the text
+ * around it, and no second line that could pass for Octant's own words.
+ */
+const readable = (value: string): boolean =>
+  !/[\p{C}\p{Zl}\p{Zp}]/u.test(value) && !BLANK.test(value);
+const readableText = { message: () => "Use one line of visible text." };
+const visible = (value: string): boolean => readable(value) && /[\p{L}\p{N}]/u.test(value);
+const Label = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(80),
+  Schema.filter(visible, readableText),
+);
+const Reason = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(500),
+  Schema.filter(visible, readableText),
+);
+const Placeholder = Schema.String.pipe(Schema.maxLength(80), Schema.filter(readable, readableText));
 const Note = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(500));
 const ThreadId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
 
@@ -92,6 +118,9 @@ export const ThreadSecretSetupUrl = Schema.String.pipe(
   Schema.maxLength(2048),
   Schema.filter(
     (value) => {
+      // A browser drops a tab and reads a backslash as a slash, so what the
+      // person reads would not be where the button goes.
+      if (!readable(value) || /[\s\\]/u.test(value)) return false;
       try {
         const url = new URL(value);
         return (
@@ -207,7 +236,10 @@ export const ThreadSecretRequestCard = Schema.Struct({
   label: Label,
   kind: ThreadSecretKind,
   reason: Reason,
-  url: Schema.optional(ThreadSecretSetupUrl),
+  /** As the browser will open it, so a look-alike host shows in its encoded form. */
+  url: Schema.optional(
+    ThreadSecretSetupUrl.pipe(Schema.filter((value) => new URL(value).href === value)),
+  ),
   delivery: ThreadSecretRequestedDelivery,
   /** Always at least one: a request with no named fields has one, under its own name. */
   fields: Schema.Array(

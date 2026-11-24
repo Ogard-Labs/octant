@@ -64,6 +64,7 @@ function host(
     readonly files?: ThreadSecretFiles | "none";
     readonly journalFails?: () => boolean;
     readonly read?: (reference: string) => Promise<CredentialRequestResolution>;
+    readonly hold?: (value: string) => () => void;
   } = {},
 ) {
   const state = {
@@ -93,7 +94,7 @@ function host(
     journal: audited,
     files:
       options.files === "none" ? undefined : (options.files ?? createThreadSecretFiles({ root })),
-    hold: holdSecretValue,
+    hold: options.hold ?? holdSecretValue,
     ...(read === undefined ? {} : { readReference: (reference) => read(reference.reference) }),
     onAsked: (ask) => state.asked.push(ask),
   });
@@ -258,7 +259,7 @@ describe("a secret a thread's commands may read", () => {
       ],
     ] as const)
       expect(await save(context.service, { fields })).toMatchObject({ status: "refused" });
-    expect(existsSync(root)).toBe(false);
+    expect(existsSync(join(root, THREAD))).toBe(false);
   });
 
   it.each([
@@ -274,7 +275,7 @@ describe("a secret a thread's commands may read", () => {
       name: "DEPLOY_TOKEN",
       env: "OCTANT_SECRET_DEPLOY_TOKEN",
     });
-    expect(existsSync(root)).toBe(false);
+    expect(existsSync(join(root, THREAD))).toBe(false);
   });
 
   it("is a variable on a host with nowhere private for a file", async () => {
@@ -497,7 +498,7 @@ describe("a 1Password answer", () => {
     expect(
       await context.service.redeem({
         consumerId: CONSUMER.id,
-        threadId: THREAD,
+        caller: context.caller,
         handle: result.handle,
         signal: new AbortController().signal,
       }),
@@ -514,13 +515,21 @@ describe("a one-use handle", () => {
   const redeem = (
     context: ReturnType<typeof host>,
     handle: string,
-    over: { readonly consumerId?: string; readonly threadId?: string } = {},
+    over: {
+      readonly threadId?: string;
+      readonly turnId?: string;
+      readonly signal?: AbortSignal;
+    } = {},
   ) =>
     context.service.redeem({
-      consumerId: over.consumerId ?? CONSUMER.id,
-      threadId: over.threadId ?? THREAD,
+      consumerId: CONSUMER.id,
+      caller: {
+        ...context.caller,
+        threadId: over.threadId ?? THREAD,
+        turnId: over.turnId ?? "turn",
+      },
       handle,
-      signal: new AbortController().signal,
+      signal: over.signal ?? new AbortController().signal,
     });
   const handleOf = (result: ThreadSecretRequestResult): string => {
     if (result.status !== "saved" || !("handle" in result)) throw new Error("No handle.");
@@ -530,7 +539,7 @@ describe("a one-use handle", () => {
   it("is redeemed once, by a registered consumer, for its own thread", async () => {
     const context = host();
     const handle = handleOf(await grant(context, request({ delivery: "handle" })));
-    expect(existsSync(root)).toBe(false);
+    expect(existsSync(join(root, THREAD))).toBe(false);
     expect(await redeem(context, handle)).toMatchObject({ status: "refused" });
     const leave = context.service.registerConsumer(CONSUMER);
     expect(() => context.service.registerConsumer(CONSUMER)).toThrow();
@@ -623,6 +632,291 @@ describe("a one-use handle", () => {
       cause: "command-ended",
     });
   });
+
+  it.each(["done", "turn", "thread", "close"] as const)(
+    "stays redacted until its consumer is finished, or its %s",
+    async (end) => {
+      const context = host();
+      context.service.registerConsumer(CONSUMER);
+      const handle = handleOf(
+        await grant(context, request({ delivery: "handle" }), { lifetime: "this-command" }),
+      );
+      const redeemed = await redeem(context, handle);
+      expect(redactHostSecrets(`error: ${VALUE}`)).toBe("error: [redacted secret]");
+      if (redeemed.status !== "redeemed") throw new Error("Not redeemed.");
+      if (end === "done") redeemed.done();
+      else if (end === "turn") context.service.turnEnded(THREAD, "turn");
+      else if (end === "thread") context.service.withdrawThread(THREAD);
+      else context.service.close();
+      redeemed.done();
+      expect(redactHostSecrets(VALUE)).toBe(VALUE);
+    },
+  );
+
+  it("is refused once Strict refuses its lifetime, or the thread no longer admits the tool", async () => {
+    const context = host();
+    context.service.registerConsumer(CONSUMER);
+    const input = request({ delivery: "handle" });
+    const handle = handleOf(await grant(context, input));
+    context.state.authority = { mode: "code", strict: true, commandsConfined: true };
+    expect(await redeem(context, handle)).toEqual({
+      status: "refused",
+      failure: "refused-by-strict",
+    });
+    context.state.authority = undefined;
+    expect(await redeem(context, handle)).toEqual({ status: "refused", failure: "unavailable" });
+  });
+
+  it.each([
+    ["its consumer leaves", (c: ReturnType<typeof host>, leave: () => void) => leave()],
+    ["its time runs out", (c: ReturnType<typeof host>) => (c.state.now += 2 * 60 * 60_000)],
+    [
+      "Strict comes on",
+      (c: ReturnType<typeof host>) => {
+        c.state.authority = { mode: "chat", strict: true, commandsConfined: true };
+      },
+    ],
+    ["the turn stops", (c: ReturnType<typeof host>) => c.stop.abort()],
+    [
+      "the person revokes it",
+      (c: ReturnType<typeof host>) => {
+        const [secret] = c.service.active(THREAD);
+        c.service.revoke(THREAD, secret?.id ?? "");
+      },
+    ],
+  ] as const)("hands nothing over when %s while the item is read", async (_name, happen) => {
+    let finish: ((value: CredentialRequestResolution) => void) | undefined;
+    let reads = 0;
+    const context = host({
+      read: () =>
+        (reads += 1) === 1
+          ? Promise.resolve({ status: "read", value: VALUE })
+          : new Promise((resolve) => (finish = resolve)),
+    });
+    const leave = context.service.registerConsumer(CONSUMER);
+    const handle = handleOf(
+      await grant(context, request({ delivery: "handle" }), {
+        lifetime: "1-hour",
+        fields: [
+          {
+            name: "DEPLOY_TOKEN",
+            source: "onepassword",
+            store: "onepassword",
+            reference: "op://Private/Deploy/credential",
+            freshEachUse: false,
+          },
+        ],
+      }),
+    );
+    const redeemed = redeem(context, handle);
+    happen(context, leave);
+    finish?.({ status: "read", value: "rotated-Value-9" });
+    expect(await redeemed).toMatchObject({ status: "refused" });
+    expect(records().some((record) => record.name === "thread-secret.used")).toBe(false);
+  });
+
+  it("serves one turn's secret to no other turn", async () => {
+    const context = host();
+    context.service.registerConsumer(CONSUMER);
+    const input = request({ delivery: "handle" });
+    const handle = handleOf(await grant(context, input, { lifetime: "this-turn" }));
+    expect(await redeem(context, handle, { turnId: "next" })).toEqual({
+      status: "refused",
+      failure: "expired",
+    });
+    void context.service.request({ ...context.caller, turnId: "next" }, input);
+    expect(context.service.view(WINDOW, THREAD).requests).toHaveLength(1);
+  });
+
+  it("holds only the granted value and the latest one of an item that keeps rotating", async () => {
+    let count = 0;
+    const holds = { live: 0 };
+    const context = host({
+      read: async () => ({ status: "read", value: `rotating-Value-${(count += 1)}` }),
+      hold: () => {
+        holds.live += 1;
+        return () => (holds.live -= 1);
+      },
+    });
+    context.service.registerConsumer(CONSUMER);
+    const input = request({ delivery: "handle" });
+    let result = await grant(context, input, {
+      fields: [
+        {
+          name: "DEPLOY_TOKEN",
+          source: "onepassword",
+          store: "onepassword",
+          reference: "op://Private/Deploy/credential",
+          freshEachUse: false,
+        },
+      ],
+    });
+    for (let round = 0; round < 20; round += 1) {
+      const redeemed = await redeem(context, handleOf(result));
+      if (redeemed.status === "redeemed") redeemed.done();
+      result = await context.service.request(context.caller, input);
+    }
+    expect(holds.live).toBe(2);
+    context.service.close();
+    expect(holds.live).toBe(0);
+  });
+});
+
+describe("what an agent cannot arrange", () => {
+  it("keeps a value redacted although the agent marked its field not secret", async () => {
+    const context = host({ read: async () => ({ status: "read", value: VALUE }) });
+    const fields = [{ name: "PASSWORD", label: "Password", secret: false }];
+    await grant(context, request({ kind: "account-password", fields }), { lifetime: "1-hour" });
+    expect(redactHostSecrets(VALUE)).toBe("[redacted secret]");
+    context.service.withdrawThread(THREAD);
+    await grant(context, request({ fields }), {
+      fields: [
+        {
+          name: "PASSWORD",
+          source: "onepassword",
+          store: "onepassword",
+          reference: "op://Private/Deploy/credential",
+          freshEachUse: false,
+        },
+      ],
+    });
+    expect(redactHostSecrets(VALUE)).toBe("[redacted secret]");
+  });
+
+  it("shows a link as the browser will open it", () => {
+    const context = host();
+    void context.service.request(context.caller, request({ url: "https://\u0430pple.com/a" }));
+    expect(card(context.service).url).toBe("https://xn--pple-43d.com/a");
+  });
+
+  it("keeps other threads able to ask however many cards one opens", async () => {
+    const context = host();
+    for (let index = 0; index < 20; index += 1)
+      void context.service.request(context.caller, request({ name: `TOKEN_${index}` }));
+    expect(context.service.view(WINDOW, THREAD).requests).toHaveLength(2);
+    void context.service.request({ ...context.caller, threadId: OTHER_THREAD }, request());
+    expect(context.service.view(WINDOW, OTHER_THREAD).requests).toHaveLength(1);
+  });
+
+  it("gets no earlier answer for another request under the same retry key", async () => {
+    const context = host();
+    await grant(context, request({ clientRequestId: "key" }));
+    expect(
+      await context.service.request(
+        context.caller,
+        request({ clientRequestId: "key", name: "OTHER", kind: "account-password" }),
+      ),
+    ).toMatchObject({ status: "refused" });
+  });
+
+  it("is not told a secret is saved after it ended", async () => {
+    const context = host();
+    const input = request({ clientRequestId: "key" });
+    await grant(context, input, { lifetime: "1-hour" });
+    context.state.now += 60 * 60_000;
+    expect(await context.service.request(context.caller, input)).toMatchObject({
+      status: "refused",
+      failure: "expired",
+    });
+  });
+
+  it("does not inherit a token's lifetime for an account password of the same name", async () => {
+    const context = host();
+    await grant(context, request(), { lifetime: "until-archived" });
+    void context.service.request(
+      context.caller,
+      request({ kind: "account-password", delivery: "handle" }),
+    );
+    expect(card(context.service).defaultLifetime).toBe("24-hours");
+  });
+});
+
+describe("a host with trouble", () => {
+  it("writes no file until what an earlier host left is gone, and keeps trying", async () => {
+    const real = createThreadSecretFiles({ root });
+    let stuck = true;
+    const context = host({
+      files: {
+        ...real,
+        sweep: () => {
+          if (stuck) throw new Error("A file is in use.");
+          real.sweep();
+        },
+      },
+    });
+    expect(await grant(context)).toMatchObject({ delivery: "environment" });
+    stuck = false;
+    context.service.sweep();
+    context.service.withdrawThread(THREAD);
+    expect(await grant(context)).toMatchObject({ delivery: "file-and-environment" });
+  });
+
+  it("ends every secret although stopping one value's redaction fails", async () => {
+    const context = host({
+      hold: () => () => {
+        throw new Error("Not released.");
+      },
+    });
+    await grant(context, request({ name: "ONE" }));
+    await grant(context, request({ name: "TWO" }));
+    context.service.withdrawThread(THREAD);
+    expect(context.service.active()).toEqual([]);
+    expect(records().filter((record) => record.name === "thread-secret.revoked")).toHaveLength(2);
+  });
+
+  it("refuses a use it cannot redact, and records none", async () => {
+    let fails = false;
+    const context = host({
+      hold: () => {
+        if (fails) throw new Error("Not held.");
+        return () => undefined;
+      },
+    });
+    context.service.registerConsumer(CONSUMER);
+    const result = await grant(context, request({ delivery: "handle" }));
+    if (result.status !== "saved" || !("handle" in result)) throw new Error("No handle.");
+    fails = true;
+    expect(
+      await context.service.redeem({
+        consumerId: CONSUMER.id,
+        caller: context.caller,
+        handle: result.handle,
+        signal: new AbortController().signal,
+      }),
+    ).toEqual({ status: "refused", failure: "unavailable" });
+    expect(records().some((record) => record.name === "thread-secret.used")).toBe(false);
+  });
+
+  it("keeps the earlier secret and its file when the new file cannot be put in place", async () => {
+    const real = createThreadSecretFiles({ root });
+    let full = false;
+    const context = host({
+      files: {
+        ...real,
+        prepare: (...input) => {
+          const prepared = real.prepare(...input);
+          return {
+            ...prepared,
+            commit: () => {
+              prepared.commit();
+              if (full) throw new Error("The disk is full.");
+            },
+          };
+        },
+      },
+    });
+    await grant(context);
+    const [before] = context.service.active();
+    full = true;
+    void context.service.request(context.caller, request({ kind: "account-password" }));
+    expect(await save(context.service, { value: "second-Value-1" })).toMatchObject({
+      status: "refused",
+    });
+    expect(context.service.active()).toMatchObject([{ id: before?.id }]);
+    expect(readFileSync(join(root, THREAD, "DEPLOY_TOKEN"), "utf8")).toBe(VALUE);
+    expect(redactHostSecrets(`${VALUE} second-Value-1`)).toBe("[redacted secret] second-Value-1");
+    expect(records().at(-1)).toMatchObject({ cause: "delivery-failed" });
+  });
 });
 
 describe("the end of a secret", () => {
@@ -693,8 +987,8 @@ describe("the end of a secret", () => {
     expect(redactHostSecrets(VALUE)).toBe(VALUE);
     expect(records()).toMatchObject([
       { name: "thread-secret.granted" },
-      { name: "thread-secret.revoked", cause: "replaced" },
       { name: "thread-secret.granted" },
+      { name: "thread-secret.revoked", cause: "replaced" },
     ]);
   });
 

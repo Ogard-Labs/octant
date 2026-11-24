@@ -33,12 +33,20 @@ describe("what an agent may ask for", () => {
     expect(decode(input)).toEqual(input);
   });
 
-  it.each(["", "deploy_token", "1TOKEN", "_TOKEN", "DEPLOY-TOKEN", "../TOKEN", "A".repeat(65)])(
-    "refuses %j as a name that becomes a file and a variable",
-    (name) => {
-      expect(() => decode({ ...input, name })).toThrow();
-    },
-  );
+  it.each([
+    "",
+    "deploy_token",
+    "1TOKEN",
+    "_TOKEN",
+    "DEPLOY-TOKEN",
+    "../TOKEN",
+    "A".repeat(65),
+    "CON",
+    "NUL",
+    "COM1",
+  ])("refuses %j as a name that becomes a file and a variable", (name) => {
+    expect(() => decode({ ...input, name })).toThrow();
+  });
 
   it.each(["https://example.com/tokens", "http://127.0.0.1:8080/setup"])(
     "accepts the setup page %s",
@@ -57,6 +65,32 @@ describe("what an agent may ask for", () => {
     "",
   ])("refuses %j as a setup page", (url) => {
     expect(() => decode({ ...input, url })).toThrow();
+  });
+
+  it.each([
+    "https://git\thub.com.evil.example/",
+    "https://evil.example\\@github.com/settings",
+    "https://example.com/\u202egnp.exe",
+    "https://example.com/a b",
+  ])("refuses %j, which does not go where it reads", (url) => {
+    expect(() => decode({ ...input, url })).toThrow();
+  });
+
+  it.each([
+    ["label", "Token \u202e txt"],
+    ["label", "\u200b\u2800"],
+    ["label", "\u3164"],
+    ["label", "a\u00a0b"],
+    ["label", "Token\nOctant: approved"],
+    ["reason", "Publish.\n\nOctant has verified this request."],
+    ["reason", "Publish\u0000"],
+    ["placeholder", "\u001b[31mred"],
+  ])("refuses a %s of %j, which a person cannot read as it is", (key, value) => {
+    expect(() => decode({ ...input, [key]: value })).toThrow();
+  });
+
+  it("accepts a label in another script", () => {
+    expect(decode({ ...input, label: "デプロイ用トークン" }).label).toBe("デプロイ用トークン");
   });
 
   const field = (index: number) => ({ name: `FIELD_${index}`, label: `Field ${index}` });
@@ -185,6 +219,12 @@ describe("the card and its private answer", () => {
     expect(() =>
       decodeCard({ ...card, fields: [{ ...card.fields[1], value: "private" }] }),
     ).toThrow();
+  });
+
+  it("carries a link only as the browser will open it", () => {
+    const url = "https://xn--pple-43d.com/settings";
+    expect(decodeCard({ ...card, url }).url).toBe(url);
+    expect(() => decodeCard({ ...card, url: "https://\u0430pple.com/settings" })).toThrow();
   });
 
   it("refuses a default lifetime the card does not offer", () => {

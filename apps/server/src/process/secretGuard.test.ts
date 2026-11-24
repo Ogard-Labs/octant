@@ -1,5 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { NO_PROTECTED_FILES_CHANGES } from "@octant/domain/secret-guard-policy";
@@ -15,6 +23,7 @@ import {
   secretGuardLinuxPaths,
   secretGuardRefusal,
   secretGuardSearchRefusal,
+  threadSecretGuardEntries,
 } from "./secretGuard";
 import { buildDenyDefaultSeatbeltProfile, makeProcessConfinementLive } from "./seatbeltProfile";
 
@@ -102,6 +111,57 @@ describe("secret guard below Full access", () => {
       expect(read(".ssh/config").status).toBe(0);
       expect(read("Library/Keychains/login.keychain-db").status).toBe(0);
       expect(read("Library/Keychains/other.keychain-db").status).not.toBe(0);
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin").each([
+    ["the whole list", undefined, []],
+    ["only the sign-in rules", "provider-sign-ins", []],
+    ["the group removed in Settings", undefined, ["octant-credentials"]],
+  ] as const)(
+    "keeps a thread's secrets from a confined launch that may write around them, with %s",
+    (_name, protectedFiles, removed) => {
+      const home = fakeHome();
+      const runtime = join(home, "project", "runtime");
+      const folder = join(runtime, "thread-secrets");
+      const file = join(folder, "host", "thread", "TOKEN");
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, "private-value");
+      configureSecretGuardLocations({
+        dataDirectory: join(home, "data"),
+        runtimeDirectory: runtime,
+      });
+      applyProtectedFilesChoice({ added: [], removed });
+      const profile = buildDenyDefaultSeatbeltProfile({
+        boundRoot: join(home, "project"),
+        temporaryDirectory: join(home, "project"),
+        networkEgress: "none",
+        allowFileReadStar: true,
+        homeDirectory: home,
+        usersDirectory: dirname(home),
+        privateHomeAllowPaths: [],
+        ...(protectedFiles === undefined ? {} : { protectedFiles }),
+      });
+      const run = (script: string) =>
+        spawnSync("/usr/bin/sandbox-exec", ["-p", profile, "/bin/sh", "-c", script], {
+          encoding: "utf8",
+          cwd: home,
+        });
+      // The launch can write beside it: what stops it is the guard alone.
+      expect(run(`echo x > '${join(runtime, "beside")}'`).status).toBe(0);
+      const moved = join(home, "project", "moved");
+      for (const script of [
+        `cat '${file}'`,
+        `mv '${runtime}' '${moved}' && cat '${moved}/thread-secrets/host/thread/TOKEN'`,
+        `mv '${folder}' '${moved}' && cat '${moved}/host/thread/TOKEN'`,
+        `rm -f '${file}'`,
+        `ln '${file}' '${join(home, "project", "linked")}' && cat '${join(home, "project", "linked")}'`,
+      ]) {
+        const result = run(script);
+        expect(result.status).not.toBe(0);
+        expect(result.stdout).not.toContain("private-value");
+      }
+      expect(readFileSync(file, "utf8")).toBe("private-value");
     },
   );
 
@@ -308,6 +368,25 @@ describe("secret guard on Linux", () => {
     expect(paths).not.toContain(join(home, ".ssh/id_test.pub"));
     expect(paths).not.toContain(join(home, ".codex/auth.json"));
     expect(paths).not.toContain(join(home, ".kube/config"));
+  });
+
+  it("covers the threads' secrets folder whatever the list keeps, empty or not", () => {
+    const home = fakeHome();
+    const runtime = join(home, "runtime");
+    mkdirSync(join(runtime, "thread-secrets"), { recursive: true });
+    configureSecretGuardLocations({ dataDirectory: join(home, "data"), runtimeDirectory: runtime });
+    applyProtectedFilesChoice({ added: [], removed: ["octant-credentials"] });
+    expect(
+      secretGuardLinuxPaths({ entries: threadSecretGuardEntries("linux"), ownAccountPaths: [] }),
+    ).toEqual([join(runtime, "thread-secrets")]);
+  });
+
+  it("names the threads' secrets folder the way Windows paths are compared", () => {
+    configureSecretGuardLocations({ dataDirectory: "C:\\Users\\Person\\Octant\\data" });
+    const paths = threadSecretGuardEntries("win32").flatMap((entry) =>
+      entry.kind === "path" ? [entry.path] : [],
+    );
+    expect(paths).toContain("/c:/users/person/octant/data/thread-secrets");
   });
 
   it("covers every other account home and keeps the runtime's own one visible", () => {

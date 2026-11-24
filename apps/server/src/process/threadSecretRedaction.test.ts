@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { holdSecretValue, redactHostSecrets, redactHostSecretsInValue } from "./secretRedaction";
+import type { ProviderRuntimeEvent } from "@octant/contracts";
+import { redactProviderRuntimeEvent } from "../providers/secretRedactingDriver";
+import {
+  holdSecretValue,
+  noteIssuedSecret,
+  redactHostSecrets,
+  redactHostSecretsInValue,
+} from "./secretRedaction";
 
 const releases: Array<() => void> = [];
 const hold = (value: string) => {
@@ -59,12 +66,48 @@ describe("a value a person gave a thread", () => {
     expect(() => hold("broken-\ud800-value")).not.toThrow();
   });
 
-  it("does not break an event when it is a word the event's kind also uses", () => {
-    hold("tool-failure");
-    expect(redactHostSecretsInValue({ kind: "tool-failure", message: "tool-failure" })).toEqual({
-      kind: "tool-failure",
-      message: "[redacted secret]",
+  it("is removed at every depth and from keys, and leaves what says which event this is", () => {
+    hold("correct-horse-battery");
+    expect(
+      redactHostSecretsInValue({
+        input: { status: "correct-horse-battery", deep: [{ type: "correct-horse-battery" }] },
+        "correct-horse-battery": 1,
+      }),
+    ).toEqual({
+      input: { status: "[redacted secret]", deep: [{ type: "[redacted secret]" }] },
+      "[redacted secret]": 1,
     });
+    hold("tool-failure");
+    expect(
+      redactProviderRuntimeEvent({
+        kind: "tool-failure",
+        message: "tool-failure",
+      } as unknown as ProviderRuntimeEvent),
+    ).toEqual({ kind: "tool-failure", message: "[redacted secret]" });
+  });
+
+  const body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7";
+  const pem = (middle: string) =>
+    `-----BEGIN PRIVATE KEY-----\n${middle}\n-----END PRIVATE KEY-----`;
+
+  it("does not stop another private key from being removed whole", () => {
+    hold(pem(body));
+    expect(redactHostSecrets(pem("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo="))).toBe(
+      "[redacted secret]",
+    );
+  });
+
+  it("is removed whole where one occurrence begins inside another", () => {
+    hold("abcXYZab");
+    expect(redactHostSecrets("<abcXYZabcXYZab>")).toBe("<[redacted secret]>");
+  });
+
+  it("does not leave the rest of a longer secret it begins", () => {
+    hold("ghp_abcd");
+    noteIssuedSecret("issued-value-and-more");
+    hold("issued-value");
+    expect(redactHostSecrets("ghp_abcdefghijklmnopqrstuvwxyz0123")).toBe("[redacted secret]");
+    expect(redactHostSecrets("issued-value-and-more")).toBe("[redacted secret]");
   });
 
   it("is removed when a command prints a passphrase of plain words and nothing else", () => {

@@ -33,7 +33,7 @@ import {
   sandboxNetworkLimitsOn,
   sandboxNetworkSnapshot,
 } from "./sandboxRuntimePolicy";
-import { secretGuardEntries } from "./secretGuard";
+import { secretGuardEntries, threadSecretGuardEntries } from "./secretGuard";
 import {
   type ConfinedProcessLaunch,
   ProcessConfinementError,
@@ -162,7 +162,10 @@ export function buildWindowsConfinedLaunch(
     network,
     processCreation:
       input.allowProcessFork === false || input.allowProcessExec === false ? "denied" : "allowed",
-    protectedEntries: secretGuardEntries({ platform: "win32", homeDirectory }),
+    protectedEntries: [
+      ...secretGuardEntries({ platform: "win32", homeDirectory }),
+      ...threadSecretGuardEntries("win32"),
+    ],
     ownAccountPaths,
   });
   if (decision.status === "refused") {
