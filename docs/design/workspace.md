@@ -637,8 +637,9 @@ modes, Work and Code, each with its own set of saved views.
 
 A Chat, Work, or Code thread has two resting states beside archive, both fields
 on the thread aggregate rather than lifecycle values: **completed**, which
-every client and the user guide call **Put away** (`completedAt`, manual only,
-refused by each mode's service while a turn runs or the thread waits on the
+every client and the user guide call **Put away** (`completedAt`, set by a
+person, by Mark done, or by the host when a Code thread's pull request merges,
+and refused by each mode's service while a turn runs or the thread waits on the
 person) and **snoozed** (`snooze.until`, an overlay
 that hides the row until the wake time and wakes it early when the agent needs
 the person or a turn that was running at snooze time ends). The sidebar files
@@ -650,6 +651,24 @@ completed threads of every mode once their completion is older than the
 `completedThreadArchiveAfterDays` shell setting (default seven days, `null`
 for never), re-deciding against each mode's authoritative record and
 journaling the ordinary thread update as the `system` actor. It archives only.
+
+**Put away when done** (Settings › General › Threads, **Put away threads when
+they're done**, `putAwayThreadsWhenDone`, on by default; maintainer request,
+2026-11-24) files a thread in the Put away shelf once it is done, so finished
+work leaves the sidebar without a second click. A person's **Mark done** on a
+Work or Code thread also puts it away in the same journaled update. A Code
+thread is also put away by the host, journaled as the `system` actor, once its
+linked pull request merged on its delivery branch and its delivery target reads
+Done, from the same cached evidence the board reads (no extra GitHub call). An
+opened pull request, a finished investigation and a local commit are Done on
+the board but are not put away: a merge is the only evidence that the work is
+over. The host checks every two minutes, never a coordinator, and records the
+pull request on the thread (`putAwayForPullRequest`) so a thread a person
+brings back with Reopen or a new message stays out of the shelf until another
+pull request merges. A thread whose turn runs or waits on the person keeps its
+row: Mark done still marks it, and the host tries again on its next pass.
+Putting away never marks a thread Done; with the setting off nothing is put
+away on its own and the host reads nothing for it.
 
 **Put away** is the only name people see for this state, beside the board's
 Done: the sidebar shelf, the row-menu action, the Review page action, the
@@ -2128,7 +2147,10 @@ thread rows, the dock overview, the planner board read, the sibling-thread
 tools and side tasks read the same projections. Turning the plugin on again
 brings the boards back with no migration. A person marks a Work thread Done with **Mark done** in the
 add menu under attach, with no confirmation, and the card moves to Done and
-stays there until **Reopen** undoes it in one click; a Code thread reaches Done by its objectively satisfied
+stays there until **Reopen** undoes it in one click (with **Put away threads
+when they're done** on, the default, the thread is also put away and leaves the
+board, as [Thread visibility and completion](#thread-visibility-and-completion)
+describes); a Code thread reaches Done by its objectively satisfied
 delivery target, or when a person marks it Done whatever that target says,
 which is recorded as the person's override. An agent never marks a thread Done
 (maintainer request, 2026-11-12). While a Work task is marked, its composer

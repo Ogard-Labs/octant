@@ -455,6 +455,17 @@ export const CodeThread = Schema.Struct({
    * the journal. Absent on every thread nobody marked.
    */
   markedDoneAt: Schema.optional(UtcTimestamp),
+  /**
+   * The merged pull request the host last put this thread away for. Recorded
+   * so a thread a person takes back out of the Put away shelf stays out until
+   * another pull request merges. Absent until a merge put the thread away.
+   */
+  putAwayForPullRequest: Schema.optional(
+    Schema.Struct({
+      baseRepository: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+      number: Schema.Int.pipe(Schema.positive()),
+    }).annotations(strict),
+  ),
   /** Fresh finished receipt recorded as completion evidence when a person marked the thread Done. */
   completionReceiptId: Schema.optional(FinishedReceiptId),
   lifecycle: CodeThreadLifecycle,

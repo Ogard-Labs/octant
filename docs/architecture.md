@@ -3434,6 +3434,12 @@ mark. Marking a Work or Code thread Done while a fresh receipt stands attaches
 that receipt (`completionReceiptId`) as the thread's completion evidence, and
 Reopen clears it. Reporting finished never marks a thread Done.
 
+With **Put away threads when they're done** on (the default), Mark done on a
+Work or Code thread also puts it away, and the host puts a Code thread away
+once its linked pull request merged and its delivery target reads Done; neither
+marks a thread Done, and Reopen or a new message brings it back
+([Workspace: thread visibility and completion](design/workspace.md#thread-visibility-and-completion)).
+
 Each recorded `thread.finished-receipt-recorded@1` receipt also feeds a
 rebuildable projection of replayable run cases (maintainer decision,
 2026-11-19): the thread's initial request, Project (id and latest name), mode

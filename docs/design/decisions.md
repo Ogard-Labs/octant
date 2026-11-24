@@ -3104,11 +3104,12 @@ Status: Partly built. Since: 2026-10-28. Detail: [Workspace: Continuing after a 
 
 ### Putting away and snoozing threads
 
-A thread can be put away (completed, manual only) or snoozed. Both are overlays on the thread, not lifecycle values.
+A thread can be put away (completed) or snoozed. Both are overlays on the thread, not lifecycle values.
 
 - Put away is refused while a turn runs or the thread waits on the person. A host sweep archives only put-away threads after a configurable delay (default seven days).
 - A running thread may be snoozed, a thread waiting on the person may not, and the wake time must be ahead. Putting a thread away drops its pin and any snooze. _Here only._
 - A snooze wakes early when the agent needs the person. A person sending a turn reopens the thread.
+- A thread is put away once it is done, under the Settings switch **Put away threads when they're done** (on by default; maintainer request, 2026-11-24): a person's Mark done on a Work or Code thread puts it away in the same update, and the host, as the `system` actor, puts a Code thread away once its linked pull request merged on its delivery branch and its delivery target reads Done, from the board's cached evidence. No other Done evidence puts a thread away, nor does anything for a coordinator. The host records the merged pull request on the thread so Reopen or a new message keeps it out of the shelf until another one merges, skips a thread whose turn runs or waits on the person until a later pass, and never marks a thread Done.
 - Answerable pending questions have a separate attention deferral in Home, Inbox and Review. The condensed row remains discoverable, can return early, and never changes the thread, draft, answer or execution authority. Approvals and find-only questions are excluded.
 
 Status: Built. Since: —. Detail: [Workspace: Thread visibility and completion](workspace.md#thread-visibility-and-completion).

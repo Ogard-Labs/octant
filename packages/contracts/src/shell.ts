@@ -925,6 +925,14 @@ export const ShellSettings = Schema.Struct({
     { default: () => DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS },
   ),
   /**
+   * Whether a thread is put away once it is done: a Work or Code thread when
+   * a person marks it Done, and a Code thread when its pull request merges.
+   * Putting away only files the row in the Put away shelf; Reopen or a new
+   * message brings it back. On by default, including for a store persisted
+   * before the choice existed.
+   */
+  putAwayThreadsWhenDone: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /**
    * Compact a thread once its window is this full, for threads Octant keeps
    * the conversation of: Octant Harness, and Chat and Work on a direct
    * endpoint. Near a full window these otherwise only drop older exchanges

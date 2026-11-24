@@ -521,6 +521,9 @@ export function wireWork(deps: WorkDependencies) {
     const workThreadService = new WorkThreadService({
       moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "work", threadId }),
       readLatestFinishedReceipt: (threadId) => finishedReceipts.latest(threadId),
+      putAwayWhenDone: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+          .putAwayThreadsWhenDone,
       persistence,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       projects: projectService,

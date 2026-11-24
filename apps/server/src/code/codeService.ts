@@ -740,6 +740,8 @@ export interface CodeServiceOptions {
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
   /** Reads the thread's latest finished receipt so Done attaches fresh proof. */
   readonly readLatestFinishedReceipt?: (threadId: string) => ThreadFinishedReceipt | undefined;
+  /** The person's Settings choice to put a thread away once it is done; absent is off. */
+  readonly putAwayWhenDone?: () => boolean;
   readonly gitHistory?: Pick<GitHistoryPort, "read">;
   /**
    * The history of a thread in a server Project, read by Git on its server,
@@ -996,6 +998,14 @@ const CODE_MOVE_REFUSALS = {
     "This thread's checkout would not stay valid in that Project. A Code thread can only move to a Project bound to the same repository folder.",
 } as const;
 
+/** What putting a thread away for its merged pull request did. */
+export type MergedThreadPutAwayOutcome =
+  | { readonly status: "put-away" | "recorded" }
+  | {
+      readonly status: "skipped";
+      readonly reason: "not-found" | "not-active" | "already-put-away" | "busy";
+    };
+
 const COMPLETE_REFUSALS = {
   archived: "An archived thread cannot be put away.",
   executing: "Wait for the running turn to finish before putting this thread away.",
@@ -1107,6 +1117,7 @@ export class CodeService {
   readonly #readLatestFinishedReceipt:
     | ((threadId: string) => ThreadFinishedReceipt | undefined)
     | undefined;
+  readonly #putAwayWhenDone: () => boolean;
   readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #awaitsHarnessApproval: ((threadId: string) => boolean) | undefined;
   readonly #issueContext?: GithubIssueContextPort;
@@ -1175,6 +1186,7 @@ export class CodeService {
     this.#liveTurns = options.liveTurns;
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     this.#readLatestFinishedReceipt = options.readLatestFinishedReceipt;
+    this.#putAwayWhenDone = options.putAwayWhenDone ?? (() => false);
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
     }
@@ -2877,6 +2889,7 @@ export class CodeService {
       // moment ago — whether hiding it would hide work in flight.
       const restSignals =
         command.kind === "complete-code-thread" ||
+        command.kind === "mark-code-thread-done" ||
         command.kind === "snooze-code-thread" ||
         command.kind === "snooze-code-thread-at-usage-reset"
           ? boardRuntimeActivityFromWorks(this.#persistence.readCodeRuntimeWorks(current.id))
@@ -3114,8 +3127,24 @@ export class CodeService {
                                       const completionReceiptId = selectCompletionReceiptId(
                                         this.#readLatestFinishedReceipt?.(String(current.id)),
                                       );
+                                      // Marking Done also puts the thread away when Settings
+                                      // says so, unless a turn is still running or waits on
+                                      // the person: then the mark stands and the row stays.
+                                      const putAway =
+                                        this.#putAwayWhenDone() &&
+                                        restSignals !== undefined &&
+                                        decideCompleteThread({
+                                          lifecycle: current.lifecycle,
+                                          executing: restSignals.executing,
+                                          awaitingInput: restSignals.awaitingInput,
+                                        }).status !== "refused";
                                       return {
-                                        ...current,
+                                        ...(putAway
+                                          ? {
+                                              ...withoutPinned(withoutRest(current)),
+                                              completedAt: updatedAt,
+                                            }
+                                          : current),
                                         markedDoneAt: updatedAt,
                                         ...(completionReceiptId === undefined
                                           ? {}
@@ -3306,6 +3335,66 @@ export class CodeService {
     this.#sessionAuthority.revokeThreadEverywhere(current.id);
     this.#onThreadArchived?.(current.id);
     return { status: "archived" };
+  }
+
+  /**
+   * Put a thread away on the host's behalf because its pull request merged.
+   * Re-reads the thread and decides from the authoritative record: a thread
+   * already put away for this pull request is left alone, so one a person
+   * took back out of the shelf stays out until another pull request merges.
+   * A thread with a turn running or waiting on the person is skipped and
+   * nothing is recorded, so the next pass tries again. A thread the person
+   * already put away only records the pull request.
+   */
+  putAwayMergedThread(
+    threadId: CodeThreadId,
+    pullRequest: { readonly baseRepository: string; readonly number: number },
+  ): MergedThreadPutAwayOutcome {
+    const current = this.#persistence.readCodeThread(threadId);
+    if (current === undefined) return { status: "skipped", reason: "not-found" };
+    if (current.lifecycle !== "active") return { status: "skipped", reason: "not-active" };
+    const recorded = current.putAwayForPullRequest;
+    if (
+      recorded !== undefined &&
+      recorded.number === pullRequest.number &&
+      recorded.baseRepository === pullRequest.baseRepository
+    ) {
+      return { status: "skipped", reason: "already-put-away" };
+    }
+    const alreadyPutAway = current.completedAt !== undefined;
+    if (!alreadyPutAway) {
+      const signals = boardRuntimeActivityFromWorks(
+        this.#persistence.readCodeRuntimeWorks(current.id),
+      );
+      const decision = decideCompleteThread({
+        lifecycle: current.lifecycle,
+        executing: signals.executing || this.#liveTurns?.read(String(current.id)) !== undefined,
+        awaitingInput:
+          signals.awaitingInput || this.#awaitsHarnessApproval?.(String(current.id)) === true,
+      });
+      if (decision.status === "refused") return { status: "skipped", reason: "busy" };
+    }
+    const updatedAt = decodeTimestamp(this.#clock());
+    const next = decodeCodeThread({
+      ...(alreadyPutAway
+        ? current
+        : { ...withoutPinned(withoutRest(current)), completedAt: updatedAt }),
+      putAwayForPullRequest: {
+        baseRepository: pullRequest.baseRepository,
+        number: pullRequest.number,
+      },
+      version: current.version + 1,
+      updatedAt,
+    });
+    this.#append(
+      "code-thread",
+      current.id,
+      current.version,
+      "code.thread-updated@1",
+      { kind: "thread-updated", thread: next },
+      "system",
+    );
+    return alreadyPutAway ? { status: "recorded" } : { status: "put-away" };
   }
 
   async *subscribe(
