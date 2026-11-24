@@ -12,9 +12,15 @@ export interface CodeProjectLinkedThreadFact {
   readonly title: string;
   readonly repository: CodeProjectPullRequestRepositoryIdentity;
   readonly deliveryBranch?: string;
+  /**
+   * Pull requests the thread's journal proves it touched. An entry without a
+   * repository is in the thread's own repository; a tool call names the
+   * repository of what it wrote to, which may be another of the Project's.
+   */
   readonly pullRequestNumbers?: ReadonlyArray<{
     readonly number: number;
     readonly observedAt: string;
+    readonly repository?: CodeProjectPullRequestRepositoryIdentity;
   }>;
 }
 
@@ -32,9 +38,10 @@ export interface CodeProjectLinkedThreadEvidence {
 }
 
 /**
- * Exact linked-thread evidence only: authorized repository plus the delivery
- * branch or a recorded pull-request number. Title text and loose branch
- * fragments never match.
+ * Exact linked-thread evidence only: the delivery branch in the thread's own
+ * repository, or a recorded pull-request number in the repository it was
+ * recorded for (the thread's own, or the one a tool call named). Title text
+ * and loose branch fragments never match.
  */
 export function matchLinkedThreadsToPullRequest(input: {
   readonly pullRequest: CodeProjectPullRequestMatchTarget;
@@ -43,12 +50,19 @@ export function matchLinkedThreadsToPullRequest(input: {
   const matches: CodeProjectLinkedThreadEvidence[] = [];
   for (const thread of input.threads) {
     if (thread.projectId !== input.pullRequest.projectId) continue;
-    if (!sameRepository(thread.repository, input.pullRequest.repository)) continue;
+    const ownRepository = sameRepository(thread.repository, input.pullRequest.repository);
     const byBranch =
-      thread.deliveryBranch !== undefined && thread.deliveryBranch === input.pullRequest.headBranch;
+      ownRepository &&
+      thread.deliveryBranch !== undefined &&
+      thread.deliveryBranch === input.pullRequest.headBranch;
     const byIdentity =
-      thread.pullRequestNumbers?.some((entry) => entry.number === input.pullRequest.number) ===
-      true;
+      thread.pullRequestNumbers?.some(
+        (entry) =>
+          entry.number === input.pullRequest.number &&
+          (entry.repository === undefined
+            ? ownRepository
+            : sameRepository(entry.repository, input.pullRequest.repository)),
+      ) === true;
     if (!byBranch && !byIdentity) continue;
     matches.push({ threadId: thread.threadId, title: thread.title });
   }
@@ -93,9 +107,13 @@ export function dropPrivatePullRequestFacts(input: {
   return { number: input.number };
 }
 
+/** GitHub owner and repository names are case-insensitive. */
 function sameRepository(
   left: CodeProjectPullRequestRepositoryIdentity,
   right: CodeProjectPullRequestRepositoryIdentity,
 ): boolean {
-  return left.owner === right.owner && left.name === right.name;
+  return (
+    left.owner.toLowerCase() === right.owner.toLowerCase() &&
+    left.name.toLowerCase() === right.name.toLowerCase()
+  );
 }

@@ -56,7 +56,11 @@ import {
   CodeService,
 } from "../code/codeService";
 import type { CompletedThreadArchiveInput } from "../completedThreadArchiveSweep";
-import { pullRequestIdentitiesFromHistory } from "../code/codeThreadMetadataService";
+import {
+  pullRequestIdentitiesFromHistory,
+  touchedIssuesFromHistory,
+  type CodeThreadKnownPullRequest,
+} from "../code/codeThreadMetadataService";
 import {
   type CodeProjectPullRequestDetailPort,
   type CodeProjectPullRequestListPort,
@@ -624,6 +628,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     IntegrationsWiring,
     | "cacheStats"
     | "githubIssueContextService"
+    | "linearConnected"
     | "linearIssueContextService"
     | "onGithubPullRequestsUnreadable"
     | "terminalSessionImports"
@@ -674,6 +679,7 @@ export function wireCode(deps: CodeDependencies) {
     githubIssueContextService,
     gitObservationPort,
     isProjectPolicyTargetAllowed,
+    linearConnected,
     linearIssueContextService,
     liveTurns,
     machineChangeFeed,
@@ -1140,6 +1146,11 @@ export function wireCode(deps: CodeDependencies) {
           pullRequests: {
             snapshot: (windowId) => projectPullRequestService.navigationSnapshot(windowId),
           },
+          touchedIssues: {
+            issuesFor: (threadId) =>
+              touchedIssuesFromHistory(codeBoardEventStore.summaryForThread(threadId)),
+            linearConnected,
+          },
         });
       // Revocation is wired at construction, before any window can hold a watch.
       onWindowRevoked((windowId) => codeService.revokeWindow?.(windowId));
@@ -1169,10 +1180,7 @@ export function wireCode(deps: CodeDependencies) {
         readonly title: string;
         readonly repository: { readonly owner: string; readonly name: string };
         readonly deliveryBranch: string;
-        readonly pullRequestNumbers: ReadonlyArray<{
-          readonly number: number;
-          readonly observedAt: string;
-        }>;
+        readonly pullRequestNumbers: ReadonlyArray<CodeThreadKnownPullRequest>;
       }> = [];
       for (const thread of persistence.readCodeThreads()) {
         const repository = thread.deliveryTarget.proposedBaseRepository;

@@ -168,6 +168,12 @@ describe("KeybindingSettings", () => {
     expect(screen.getByRole("note")).toHaveTextContent(/Shares .* with another action/);
   });
 
+  it("shows no warning when a Review-page key shares a chord with a global action", () => {
+    renderSettings(memoryStore('{"review-next":"Mod+Shift+M"}'));
+
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+  });
+
   it("reports an override it could not apply instead of silently using the default", () => {
     renderSettings(memoryStore('{"code-file-search":"p"}'));
 

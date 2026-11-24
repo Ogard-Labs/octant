@@ -194,8 +194,8 @@ export function createCoordinatorThreadDoneEvaluator(
           const history = await ports.history.read(threadId);
           for (const historical of pullRequestIdentitiesFromHistory(history)) {
             pushCandidate({
-              owner: targetRepo.owner,
-              name: targetRepo.name,
+              owner: historical.repository?.owner ?? targetRepo.owner,
+              name: historical.repository?.name ?? targetRepo.name,
               number: historical.number,
             });
           }

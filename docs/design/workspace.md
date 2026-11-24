@@ -659,10 +659,15 @@ work leaves the sidebar without a second click. A person's **Mark done** on a
 Work or Code thread also puts it away in the same journaled update; **Reopen**
 brings it back (a Work thread marked Done takes no message until reopened). A
 Code thread is also put away by the host, journaled as the `system` actor, once
-a pull request linked to it merged: on its delivery branch by the thread's own
-evidence, or as the Pull requests refresh cache records it, since a merge made
-outside Octant reaches that cache and not the thread's history. Both are cached
-reads; the host makes no GitHub call for this. An opened pull request, a
+a pull request it delivers merged: one Octant's own pull-request operations
+recorded for it, or one on its delivery branch in its delivery repository (for a
+server thread, whose target is a placeholder, the repository those operations
+ran in). The merge counts from the thread's own evidence, or as the Pull requests refresh
+cache records it, since a merge made outside Octant reaches that cache and not
+the thread's history. A pull request a tool call of the thread only touched
+(reviewed, commented on, or merged for another thread) is linked to the thread,
+but its merge delivers nothing here and does not put the thread away. Both are
+cached reads; the host makes no GitHub call for this. An opened pull request, a
 finished investigation and a local commit are Done on the board but are not put
 away: a merge is the only evidence that the work is over. The host checks every
 two minutes and leaves alone a coordinator, a thread whose child work is still
@@ -2843,8 +2848,12 @@ under one Pull requests submenu of the right-click menu, while the flat
 overflow menu keeps the first three. A pull request the thread's tool calls
 created, merged or reviewed links the thread as its own branch does, and every
 GitHub and Linear issue those calls touched is listed in the thread's
-Environment tool and, at most five with the rest counted, in the card; both are
-designed, not built (maintainer decisions, 2026-11-23). Thread rows
+Environment tool and, at most five with the rest counted, in the card, as
+facts there rather than links (maintainer decisions, 2026-11-23). Only a write
+counts (created, merged, reviewed, commented on, edited, closed, reopened),
+never a read, and only an exact identity the call itself gave; the Claude and
+Codex adapters report them, and an adapter that cannot see a call's command and
+result reports none. Thread rows
 are not indented under their Project, so every row's fill sits the same
 distance from both edges of the sidebar. In Code, a Project whose threads run
 in two or more checkouts nests them under one heading per checkout, primary
@@ -3660,6 +3669,19 @@ list says as "N more not shown". A thread with no pull request shows no caption
 and no row, and the folded Changes summary adds the count ("Clean · 1 PR").
 The Project's own open pull requests stay under Delivery (maintainer request,
 2026-11-16).
+**The thread's issues.** Under its pull requests, a small "Issues" caption lists
+every GitHub and Linear issue the thread's tool calls created, commented on,
+edited, closed or reopened, open ones first, then finished ones (closed, done,
+canceled), each newest first, in the same row recipe: an open or finished mark,
+the title, then the repository or "Linear", the reference (#3, ENG-991) and the
+state the latest call reported. Past ten the rest fold behind "Show more (n)".
+A row opens the issue's page outside Octant: a GitHub address is built from the
+repository and number, and a Linear one is the address the call's result gave,
+so a Linear issue without one is a plain row. The host lists a GitHub issue only
+in the thread's own repository or one the window's pull-request reading already
+covers and only while GitHub is not revoked, and a Linear issue only while
+Linear is switched on and connected on this host, which it reads locally; the
+list reaches no forge (maintainer decisions, 2026-11-23 and 2026-11-24).
 Chat's fact list leaves out a fact whose value is none.
 
 On the phone, a thread's header button (Views and panes) is the one way to
@@ -4169,6 +4191,17 @@ keeps the theme's roles. The measurements are in
 `apps/web/src/code/scrollbarTreatment.ts`; the two rules that shape the
 thumb where no option exists are in `styles/code.css` and name the library
 classes they hold on.
+
+### Keybinding conflicts
+
+Settings › Keybindings says an action "Shares … with another action and will not
+run" only where that is true. Two actions on one chord conflict when they answer
+in the same place: two global actions, two commands of the same page, or two
+terminal commands. A terminal command also conflicts with a global action listed
+ahead of it, because the terminal yields that chord. The action listed first
+keeps the chord. A page's command never conflicts with a global or a terminal
+action, and a terminal command listed ahead of a global action keeps the chord
+in the terminal while the global action runs everywhere else.
 
 ### Terminal keyboard exit
 

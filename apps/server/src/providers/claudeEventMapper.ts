@@ -7,6 +7,7 @@ import type {
   ProviderSessionId,
   UtcTimestamp,
   ProviderLevelChangeRequest,
+  ThreadForgeReference,
 } from "@octant/contracts";
 import {
   MAX_PROVIDER_PLAN_CHARACTERS,
@@ -14,6 +15,7 @@ import {
   decodeProviderModelId,
 } from "@octant/contracts";
 import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
+import { forgeReferencesFromToolCall } from "@octant/provider-sdk/forge-references";
 import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
@@ -133,6 +135,12 @@ export interface ClaudeToolState {
   fileChange?: ClaudeFileChange;
   /** A task tool call's input, applied with its result once that arrives. */
   taskInput?: { readonly [key: string]: ClaudeJsonValue };
+  /**
+   * A shell, GitHub or Linear call's input, kept until its result arrives so
+   * the pull requests and issues it wrote to can be read from both. It never
+   * leaves the adapter; only the references derived from it do.
+   */
+  forgeInput?: { readonly [key: string]: ClaudeJsonValue };
   /** The start's journaled notice, once one went out. */
   noticed?: true;
   /**
@@ -314,6 +322,30 @@ const CLAUDE_COMMAND_TOOLS: ReadonlySet<string> = new Set(["Bash", "Monitor"]);
 const OCTANT_TOOL_PREFIX = "mcp__octant__";
 
 /** A tool disabled in Plan ran nothing, so it has nothing to record. */
+/** A call whose result can name a pull request or issue it wrote to. */
+function mayTouchForge(toolName: string): boolean {
+  const lower = toolName.toLowerCase();
+  return CLAUDE_COMMAND_TOOLS.has(toolName) || lower.includes("github") || lower.includes("linear");
+}
+
+/** The pull requests and issues a finished call wrote to, by the shared SDK rules. */
+function forgeReferencesOf(
+  state: ClaudeToolState,
+  output: string | undefined,
+): ReadonlyArray<ThreadForgeReference> | undefined {
+  const input = state.forgeInput;
+  if (input === undefined) return undefined;
+  const command = CLAUDE_COMMAND_TOOLS.has(state.toolName)
+    ? jsonString(input, "command")
+    : undefined;
+  if (CLAUDE_COMMAND_TOOLS.has(state.toolName) && command === undefined) return undefined;
+  return forgeReferencesFromToolCall({
+    toolName: state.toolName,
+    ...(command === undefined ? { input } : { command }),
+    ...(output === undefined ? {} : { output }),
+  });
+}
+
 function reportsToolCallContent(state: ClaudeToolState): boolean {
   return (
     state.emitsActivity && state.disabled !== true && !state.toolName.startsWith(OCTANT_TOOL_PREFIX)
@@ -720,6 +752,9 @@ function mapToolUse(
   }
   if (authoritativeInput && isClaudeTaskTool(content.toolName)) {
     resolved.state.taskInput = content.input;
+  }
+  if (authoritativeInput && mayTouchForge(content.toolName)) {
+    resolved.state.forgeInput = content.input;
   }
   // A streamed call's start carried no input; its whole message does. Octant
   // records a tool it runs itself from the request, so only the runtime's own
@@ -1186,10 +1221,12 @@ function mapToolResults(
       continue;
     }
     const published = state.toolName === "Artifact" ? pair.result.publishedPage : undefined;
+    const forgeReferences = forgeReferencesOf(state, pair.result.text);
     results.push(
       event(context, {
         kind: "tool-success",
         toolCallId: state.toolCallId,
+        ...(forgeReferences === undefined ? {} : { forgeReferences }),
         summary:
           published !== undefined
             ? "Published to claude.ai."
