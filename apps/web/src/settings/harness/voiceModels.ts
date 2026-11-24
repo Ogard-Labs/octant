@@ -54,6 +54,16 @@ export function isSpeechUsable(instance: ProviderInstance): boolean {
   return instance.enabled && isSpeechEligibleInstance(instance);
 }
 
+/**
+ * The voice models a preset knows, found by the address the endpoint actually
+ * saved, not the preset it started from: an OpenAI preset whose address was
+ * replaced with another server must not be offered OpenAI's models.
+ */
+export function presetVoiceHintFor(instance: ProviderInstance): VoiceModelHint | undefined {
+  if (!isSpeechEligibleInstance(instance)) return undefined;
+  return endpointPresetForUrl(instance.configuration.baseUrl)?.voice;
+}
+
 /** One endpoint and the transcription model Voice could use on it. */
 export interface TranscriptionChoice {
   readonly instanceId: ProviderInstanceId;
@@ -76,10 +86,7 @@ export function transcriptionChoices(
     const observed = observedStates.find(
       (state) => String(state.instanceId) === String(instance.id),
     );
-    const { transcription } = voiceModelsOf(
-      observed?.models,
-      endpointPresetForUrl(instance.configuration.baseUrl)?.voice,
-    );
+    const { transcription } = voiceModelsOf(observed?.models, presetVoiceHintFor(instance));
     if (transcription === undefined) continue;
     choices.push({
       instanceId: instance.id,
