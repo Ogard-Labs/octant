@@ -140,6 +140,52 @@ describe("mobile fork and rewind", () => {
     ]);
   });
 
+  it("keeps Sees images descriptions and citation snippets out of visible Chat messages", () => {
+    const viewWithAuxiliaryContents = {
+      thread: chatView.thread,
+      turns: [
+        {
+          id: uuid(1),
+          sequence: 1,
+          userMessageRef: ref(11),
+          attempts: [
+            {
+              id: uuid(501),
+              outcome: "completed",
+              describedImages: [
+                {
+                  attachmentId: uuid(701),
+                  name: "login.png",
+                  describedBy: { provider: "Local Vision", model: "Vision" },
+                  description: ref(15),
+                },
+              ],
+              responseRefs: [ref(12)],
+            },
+          ],
+        },
+        turn(2, 21, 22),
+      ],
+      citations: [{ citationId: uuid(801), snippetRef: ref(16) }],
+      contents: [
+        content(11, "user", "What is on this screen?"),
+        content(12, "assistant", "It is a sign-in form."),
+        content(15, "user", "Generated description of login.png"),
+        content(16, "assistant", "Citation snippet text"),
+        content(21, "user", "Unrelated follow-up"),
+        content(22, "assistant", "Follow-up reply"),
+      ],
+    };
+
+    const messages = mobileChatMessages(viewWithAuxiliaryContents as never);
+    expect(messages.map((message) => message.content.body)).toEqual([
+      "What is on this screen?",
+      "It is a sign-in form.",
+      "Unrelated follow-up",
+      "Follow-up reply",
+    ]);
+  });
+
   it("returns the removed message above a draft already in the composer", () => {
     expect(composerAfterRewind("old message", "")).toBe("old message");
     expect(composerAfterRewind("old message", "half typed")).toBe("old message\n\nhalf typed");

@@ -13,6 +13,7 @@ import {
   type MobileTurnTargets,
 } from "@octant/client-runtime";
 import type { ChatAttachment, ReplyDetailLevel, WorkTurnState } from "@octant/contracts";
+import { activeChatTurns } from "@octant/domain";
 import { MOBILE_COPY } from "../../copy";
 import { mobileSpacing, mobileTypography } from "../../theme/tokens";
 import { useTheme } from "../../../design-system";
@@ -157,6 +158,56 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
         : mobileChatHandoffPlacements(view, modelOptions, providerDirectory),
     [modelOptions, providerDirectory, view],
   );
+  // Attribution notes for images described by Sees images stay attached to the
+  // owning attempt rather than appearing as detached message bubbles.
+  const chatDescribedImages = useMemo(() => {
+    const beforeContentId = new Map<string, string[]>();
+    const afterContentId = new Map<string, string[]>();
+    const trailing: string[] = [];
+    if (view === undefined) return { beforeContentId, afterContentId, trailing };
+    const shownIds = new Set(messages.map((entry) => String(entry.content.contentId)));
+    const appendNote = (map: Map<string, string[]>, key: string, note: string) => {
+      const existing = map.get(key);
+      if (existing === undefined) {
+        map.set(key, [note]);
+      } else {
+        existing.push(note);
+      }
+    };
+    for (const turn of activeChatTurns(view.turns)) {
+      const userId = String(turn.userMessageRef.contentId);
+      let lastVisibleAnchor: string | undefined = shownIds.has(userId) ? userId : undefined;
+      for (const attempt of turn.attempts) {
+        const firstVisibleReply = attempt.responseRefs
+          .map((ref) => String(ref.contentId))
+          .find((id) => shownIds.has(id));
+        if (attempt.describedImages !== undefined && attempt.describedImages.length > 0) {
+          const note = attempt.describedImages
+            .map(
+              (image) =>
+                `${image.name} described by ${image.describedBy.model} (${image.describedBy.provider})`,
+            )
+            .join(" · ");
+          if (firstVisibleReply !== undefined) {
+            appendNote(beforeContentId, firstVisibleReply, note);
+          } else if (lastVisibleAnchor !== undefined) {
+            appendNote(afterContentId, lastVisibleAnchor, note);
+          } else {
+            trailing.push(note);
+          }
+        }
+        for (const ref of attempt.responseRefs) {
+          const id = String(ref.contentId);
+          if (shownIds.has(id)) lastVisibleAnchor = id;
+        }
+        if (attempt.researchRef !== undefined) {
+          const researchId = String(attempt.researchRef.contentId);
+          if (shownIds.has(researchId)) lastVisibleAnchor = researchId;
+        }
+      }
+    }
+    return { beforeContentId, afterContentId, trailing };
+  }, [messages, view]);
   const workHandoffs = useMemo(() => {
     const map = new Map<string, MobileTranscriptHandoffEntry>();
     if (workTurns === undefined) return map;
@@ -487,6 +538,10 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                 chatHandoffs.beforeContentId.get(String(content.contentId)) ?? [];
               const handoffsAfter =
                 chatHandoffs.afterContentId.get(String(content.contentId)) ?? [];
+              const describedBefore =
+                chatDescribedImages.beforeContentId.get(String(content.contentId)) ?? [];
+              const describedAfter =
+                chatDescribedImages.afterContentId.get(String(content.contentId)) ?? [];
               return (
                 <View
                   key={content.contentId}
@@ -507,6 +562,15 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                       key={`before-${String(content.contentId)}-${String(handoffIndex)}`}
                       testID={`mobile-chat-handoff-${String(content.contentId)}`}
                     />
+                  ))}
+                  {describedBefore.map((note, noteIndex) => (
+                    <Text
+                      key={`described-before-${String(content.contentId)}-${String(noteIndex)}`}
+                      style={styles.metaText}
+                      testID={`mobile-chat-described-images-${String(content.contentId)}-${String(noteIndex)}`}
+                    >
+                      {note}
+                    </Text>
                   ))}
                   <MessageBubble
                     replyDetail={props.replyDetail}
@@ -537,6 +601,15 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                       testID={`mobile-chat-handoff-after-${String(content.contentId)}-${String(handoffIndex)}`}
                     />
                   ))}
+                  {describedAfter.map((note, noteIndex) => (
+                    <Text
+                      key={`described-after-${String(content.contentId)}-${String(noteIndex)}`}
+                      style={styles.metaText}
+                      testID={`mobile-chat-described-images-after-${String(content.contentId)}-${String(noteIndex)}`}
+                    >
+                      {note}
+                    </Text>
+                  ))}
                 </View>
               );
             })
@@ -547,6 +620,15 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
               key={`trailing-${String(handoffIndex)}`}
               testID={`mobile-chat-handoff-trailing-${String(handoffIndex)}`}
             />
+          ))}
+          {chatDescribedImages.trailing.map((note, noteIndex) => (
+            <Text
+              key={`described-trailing-${String(noteIndex)}`}
+              style={styles.metaText}
+              testID={`mobile-chat-described-images-trailing-${String(noteIndex)}`}
+            >
+              {note}
+            </Text>
           ))}
         </View>
       ) : null}

@@ -2,13 +2,10 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  mobileChatMessages,
-  type MobileModelOption,
-  type MobileProviderDirectoryEntry,
-} from "@octant/client-runtime";
-import { decodeChatThreadView } from "@octant/contracts/chat";
+import { type MobileModelOption, type MobileProviderDirectoryEntry } from "@octant/client-runtime";
+import { decodeChatThreadView, type ChatThreadView } from "@octant/contracts/chat";
 import { ThemeProvider } from "../../design-system/theme";
+import { ThreadTranscript, type ThreadTranscriptProps } from "../inbox/thread/ThreadTranscript";
 import { TranscriptHandoffDivider } from "./TranscriptHandoffDivider";
 import {
   mobileChatHandoffPlacements,
@@ -18,6 +15,7 @@ import {
 
 vi.mock("react-native", () => vi.importActual("react-native-web"));
 vi.mock("expo-blur", () => ({ BlurView: () => null }));
+vi.mock("expo-clipboard", () => ({ setStringAsync: vi.fn(async () => true) }));
 vi.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 vi.mock("../../design-system", async () => ({
   ...(await import("../../design-system/theme")),
@@ -86,6 +84,50 @@ function renderDivider(entry: MobileTranscriptHandoffEntry): HTMLElement {
   act(() =>
     root.render(
       createElement(ThemeProvider, null, createElement(TranscriptHandoffDivider, { entry })),
+    ),
+  );
+  return host;
+}
+
+function renderChatTranscript(view: ChatThreadView): HTMLElement {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  roots.push(root);
+  const chat: ThreadTranscriptProps["chat"] = {
+    view,
+    activeAttempt: undefined,
+    retryableAttempt: undefined,
+    pendingPrompt: undefined,
+    pendingFailure: undefined,
+    pendingAttachments: [],
+    modelOptionId: undefined,
+    setModelOptionId: vi.fn(),
+    reconnecting: false,
+    refresh: vi.fn(async () => {}),
+    attach: vi.fn(async () => {}),
+    send: vi.fn(async () => {}),
+    stop: vi.fn(async () => {}),
+    retry: vi.fn(async () => {}),
+    completeWorkItem: vi.fn(),
+    cancelWorkItem: vi.fn(),
+    completeFollowUp: vi.fn(),
+  };
+  act(() =>
+    root.render(
+      createElement(
+        ThemeProvider,
+        null,
+        createElement(ThreadTranscript, {
+          workTurns: undefined,
+          codeConversation: undefined,
+          chat,
+          allowProductMutations: false,
+          turnActionsFor: () => [],
+          replyDetail: "low",
+          modelOptions,
+        }),
+      ),
     ),
   );
   return host;
@@ -603,28 +645,151 @@ describe("TranscriptHandoffDivider on the phone", () => {
       followUpVersion: 0,
     });
 
-    const messages = mobileChatMessages(view);
-    const placements = mobileChatHandoffPlacements(view, modelOptions);
-    const renderedSequence: string[] = [];
-    for (const { content } of messages) {
-      const id = String(content.contentId);
-      for (const entry of placements.beforeContentId.get(id) ?? []) {
-        renderedSequence.push(`divider:${entry.heading}:${entry.route?.to.label ?? ""}`);
-      }
-      renderedSequence.push(`message:${content.body}`);
-      for (const entry of placements.afterContentId.get(id) ?? []) {
-        renderedSequence.push(`divider:${entry.heading}:${entry.route?.to.label ?? ""}`);
-      }
-    }
-    for (const entry of placements.trailing) {
-      renderedSequence.push(`divider:${entry.heading}:${entry.route?.to.label ?? ""}`);
-    }
+    const host = renderChatTranscript(view);
+    const renderedIds = Array.from(host.querySelectorAll("[data-testid]"))
+      .map((element) => element.getAttribute("data-testid") ?? "")
+      .filter(
+        (id) =>
+          /^mobile-message-[0-9a-f-]{36}$/.test(id) ||
+          /^mobile-chat-handoff-(?:after-)?[0-9a-f-]{36}(?:-\d+)?$/.test(id),
+      );
 
-    expect(renderedSequence).toEqual([
-      "message:Try again",
-      "divider:Context handoff:Sonnet 4",
-      "divider:Model switch:Opus 4",
-      "message:Recovered on Opus 4",
+    expect(renderedIds).toEqual([
+      `mobile-message-${userId}`,
+      `mobile-chat-handoff-after-${userId}-0`,
+      `mobile-chat-handoff-${replyId}`,
+      `mobile-message-${replyId}`,
     ]);
+    const text = host.textContent ?? "";
+    expect(text.indexOf("Try again")).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf("Context handoff")).toBeGreaterThan(text.indexOf("Try again"));
+    expect(text.indexOf("Model switch")).toBeGreaterThan(text.indexOf("Context handoff"));
+    expect(text.indexOf("Recovered on Opus 4")).toBeGreaterThan(text.indexOf("Model switch"));
+  });
+
+  it("keeps Sees images attribution on its owning turn instead of rendering the description after later turns", () => {
+    const now = "2026-11-24T12:00:00.000Z";
+    const threadId = "00000000-0000-4000-8000-000000000971";
+    const turn1Id = "00000000-0000-4000-8000-000000000972";
+    const turn2Id = "00000000-0000-4000-8000-000000000973";
+    const user1Id = "00000000-0000-4000-8000-000000000974";
+    const reply1Id = "00000000-0000-4000-8000-000000000975";
+    const descriptionId = "00000000-0000-4000-8000-000000000976";
+    const user2Id = "00000000-0000-4000-8000-000000000977";
+    const reply2Id = "00000000-0000-4000-8000-000000000978";
+    const attachmentId = "00000000-0000-4000-8000-000000000979";
+    const ref = (contentId: string) => ({ contentId, digest: "d".repeat(64), byteLength: 10 });
+    const body = (contentId: string, role: "user" | "assistant", text: string) => ({
+      contentId,
+      role,
+      body: text,
+      byteLength: text.length,
+      digest: "d".repeat(64),
+    });
+    const view = decodeChatThreadView({
+      thread: {
+        id: threadId,
+        title: "Described image",
+        lifecycle: "active",
+        providerInstanceId: claudeId,
+        modelId: "claude-sonnet-4",
+        researchEnabled: false,
+        researchRouting: "automatic",
+        personalityInstructions: "Be calm.",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+      lastSequence: 2,
+      turns: [
+        {
+          id: turn1Id,
+          threadId,
+          sequence: 1,
+          userMessageRef: ref(user1Id),
+          attachmentIds: [attachmentId],
+          attempts: [
+            {
+              id: "10000000-0000-4000-8000-000000000981",
+              turnId: turn1Id,
+              threadId,
+              providerInstanceId: claudeId,
+              providerSessionId: "20000000-0000-4000-8000-000000000981",
+              modelId: "claude-sonnet-4",
+              contextManifestId: "30000000-0000-4000-8000-000000000981",
+              describedImages: [
+                {
+                  attachmentId,
+                  name: "login.png",
+                  describedBy: { provider: "Local Vision", model: "Vision" },
+                  description: ref(descriptionId),
+                },
+              ],
+              outcome: "completed",
+              responseRefs: [ref(reply1Id)],
+              citationIds: [],
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+          createdAt: now,
+        },
+        {
+          id: turn2Id,
+          threadId,
+          sequence: 2,
+          userMessageRef: ref(user2Id),
+          attachmentIds: [],
+          attempts: [
+            {
+              id: "10000000-0000-4000-8000-000000000982",
+              turnId: turn2Id,
+              threadId,
+              providerInstanceId: claudeId,
+              providerSessionId: "20000000-0000-4000-8000-000000000981",
+              modelId: "claude-sonnet-4",
+              contextManifestId: "30000000-0000-4000-8000-000000000982",
+              outcome: "completed",
+              responseRefs: [ref(reply2Id)],
+              citationIds: [],
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+          createdAt: now,
+        },
+      ],
+      contents: [
+        body(user1Id, "user", "What is on login.png?"),
+        body(reply1Id, "assistant", "A sign-in form with email and password."),
+        body(descriptionId, "user", "INTERNAL SEES IMAGES TEXT"),
+        body(user2Id, "user", "Unrelated follow-up"),
+        body(reply2Id, "assistant", "Follow-up answer"),
+      ],
+      attachments: [],
+      citations: [],
+      workItems: [],
+      workListVersion: 0,
+      followUpVersion: 0,
+    });
+
+    const host = renderChatTranscript(view);
+    const renderedIds = Array.from(host.querySelectorAll("[data-testid]"))
+      .map((element) => element.getAttribute("data-testid") ?? "")
+      .filter(
+        (id) =>
+          /^mobile-message-[0-9a-f-]{36}$/.test(id) ||
+          id.startsWith("mobile-chat-described-images-"),
+      );
+
+    expect(renderedIds).toEqual([
+      `mobile-message-${user1Id}`,
+      `mobile-chat-described-images-${reply1Id}-0`,
+      `mobile-message-${reply1Id}`,
+      `mobile-message-${user2Id}`,
+      `mobile-message-${reply2Id}`,
+    ]);
+    expect(host.textContent).toContain("login.png described by Vision (Local Vision)");
+    expect(host.textContent).not.toContain("INTERNAL SEES IMAGES TEXT");
   });
 });
