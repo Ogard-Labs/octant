@@ -16,13 +16,17 @@ import {
   decodeWorkThreadId,
   type DesktopPreviewRequest,
   type DesktopPreviewAnswer,
+  type ShellSettings,
   type WorkAccess,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { DesktopLeaseCaller } from "../computerUse/desktopLeaseService";
 import { createMachineChangeRouteHandler } from "../machineChangeRoutes";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
-import { createComputerUseRuntime } from "../computerUse/computerUseRuntime";
+import {
+  createComputerUseRuntime,
+  type ComputerUseApprovalApprover,
+} from "../computerUse/computerUseRuntime";
 import { createNodeComputerUseProcessPort } from "../computerUse/nodeComputerUseProcessPort";
 import { createComputerUseValidationEvidenceRecorder } from "../computerUse/computerUseValidationEvidence";
 import { createComputerUseRouteHandler } from "../computerUseRoutes";
@@ -45,6 +49,7 @@ import {
   browserToolTransport,
   computerUseAppRemembered,
   defaultShellSettings,
+  desktopFileTransferRemembered,
   workThreadAccessOf,
   type AppToolThreadLevel,
 } from "@octant/domain";
@@ -417,7 +422,59 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
   // The tool service exists wherever a send can bind a destination: this
   // Mac's screen, or a desktop a Linux host can lease.
   const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
-  let shellServiceRef: Pick<ShellService, "rememberComputerUseApp"> | undefined;
+  let shellServiceRef:
+    | Pick<ShellService, "rememberComputerUseApp" | "rememberDesktopFileTransfer">
+    | undefined;
+  /**
+   * Journals one "Remember for this Project" answer with whoever gave it,
+   * unless `remembered` says it already stands, retrying once if another
+   * settings write landed first.
+   */
+  const rememberForProject = (
+    approver: ComputerUseApprovalApprover,
+    remembered: (settings: ShellSettings) => boolean,
+    remember: (
+      service: NonNullable<typeof shellServiceRef>,
+      input: {
+        readonly approver: Parameters<ShellService["rememberComputerUseApp"]>[0]["approver"];
+        readonly expectedVersion: AggregateVersion;
+      },
+    ) => void,
+  ) => {
+    if (shellServiceRef === undefined) {
+      throw new Error("Shell service is not ready to persist Computer use approvals.");
+    }
+    const resolvedApprover =
+      approver.kind === "window"
+        ? approver
+        : {
+            kind: "paired-device" as const,
+            actor: decodeEventActor({
+              kind: "remote-device",
+              actorId: approver.deviceId,
+              deviceId: approver.deviceId,
+            }),
+          };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const stored = persistence.readShellSettings();
+      if (remembered(stored?.settings ?? defaultShellSettings())) return;
+      try {
+        remember(shellServiceRef, {
+          approver: resolvedApprover,
+          expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
+        });
+        machineChangeFeed.publish(["computer-use"]);
+        return;
+      } catch (error) {
+        if (
+          !(error instanceof ShellServiceError && error.failure.category === "conflict") ||
+          attempt === 1
+        ) {
+          throw error;
+        }
+      }
+    }
+  };
   const leasingOffered = desktopProviders().some((entry) => entry.effective);
   const computerUseTools =
     computerUseDesktop === undefined && !leasingOffered
@@ -499,46 +556,26 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
               projectId,
               appId,
             ),
-          rememberProjectApp: ({ projectId, appId, approver }) => {
-            if (shellServiceRef === undefined) {
-              throw new Error("Shell service is not ready to persist Computer use approvals.");
-            }
-            const resolvedApprover =
-              approver.kind === "window"
-                ? approver
-                : {
-                    kind: "paired-device" as const,
-                    actor: decodeEventActor({
-                      kind: "remote-device",
-                      actorId: approver.deviceId,
-                      deviceId: approver.deviceId,
-                    }),
-                  };
-            for (let attempt = 0; attempt < 2; attempt += 1) {
-              const stored = persistence.readShellSettings();
-              const current = stored?.settings ?? defaultShellSettings();
-              if (computerUseAppRemembered(current.rememberedComputerUseApps, projectId, appId)) {
-                return;
-              }
-              try {
-                shellServiceRef.rememberComputerUseApp({
-                  approver: resolvedApprover,
-                  expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
-                  projectId,
-                  appId,
-                });
-                machineChangeFeed.publish(["computer-use"]);
-                return;
-              } catch (error) {
-                if (
-                  !(error instanceof ShellServiceError && error.failure.category === "conflict") ||
-                  attempt === 1
-                ) {
-                  throw error;
-                }
-              }
-            }
-          },
+          rememberProjectApp: ({ projectId, appId, approver }) =>
+            rememberForProject(
+              approver,
+              (settings) =>
+                computerUseAppRemembered(settings.rememberedComputerUseApps, projectId, appId),
+              (service, input) => service.rememberComputerUseApp({ ...input, projectId, appId }),
+            ),
+          projectFileTransferRemembered: (projectId) =>
+            desktopFileTransferRemembered(
+              (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                .rememberedDesktopFileTransfers,
+              projectId,
+            ),
+          rememberProjectFileTransfer: ({ projectId, approver }) =>
+            rememberForProject(
+              approver,
+              (settings) =>
+                desktopFileTransferRemembered(settings.rememberedDesktopFileTransfers, projectId),
+              (service, input) => service.rememberDesktopFileTransfer({ ...input, projectId }),
+            ),
           threadTitle: (owner) =>
             (owner.mode === "chat"
               ? persistence.readChatThread(decodeChatThreadId(owner.threadId))?.title
@@ -710,7 +747,9 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     installDesktopPreviewRequest: (request: NonNullable<typeof previewRequest>) => {
       previewRequest = request;
     },
-    installRememberComputerUseApp: (shellService: Pick<ShellService, "rememberComputerUseApp">) => {
+    installRememberComputerUseApp: (
+      shellService: Pick<ShellService, "rememberComputerUseApp" | "rememberDesktopFileTransfer">,
+    ) => {
       shellServiceRef = shellService;
     },
     /** Where a Project's desktop recipe keeps the key a cloud provider reads. */

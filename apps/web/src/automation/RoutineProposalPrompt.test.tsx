@@ -3,6 +3,7 @@ import type {
   RoutineAgentRequest,
   RoutineChangeRequest,
   RoutineProposal,
+  RoutineProposalDecisionResult,
 } from "@octant/contracts/automation";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -49,7 +50,11 @@ function changeRequest(overrides: Partial<RoutineChangeRequest> = {}): RoutineCh
 function client(proposals: ReadonlyArray<RoutineAgentRequest>) {
   const fake = {
     listProposals: vi.fn(async () => proposals),
-    decideProposal: vi.fn(async () => ({ kind: "routine-proposal-declined" as const })),
+    decideProposal: vi.fn(
+      async (): Promise<RoutineProposalDecisionResult> => ({
+        kind: "routine-proposal-declined",
+      }),
+    ),
   };
   return fake as unknown as AutomationClient & typeof fake;
 }
@@ -139,6 +144,51 @@ describe("RoutineProposalPrompt", () => {
     ).toHaveTextContent("will not be sent");
     await userEvent.click(screen.getByRole("button", { name: "Keep Friday digest" }));
     expect(fake.decideProposal).toHaveBeenCalledWith({ proposalId, decision: "decline" });
+  });
+
+  it("keeps the card answerable when the host could not record the answer, and a retry submits", async () => {
+    const fake = client([proposal()]);
+    fake.decideProposal
+      .mockResolvedValueOnce({
+        kind: "routine-proposal-answer-unrecorded",
+        message: "The answer could not be saved; nothing was changed. Try again.",
+      })
+      .mockResolvedValueOnce({ kind: "routine-proposal-gone" });
+    renderPrompt(fake);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Create routine" }));
+    expect(await screen.findByRole("article", { name: "Routine proposal" })).toBeInTheDocument();
+    expect(
+      screen.getByText("The answer could not be saved; nothing was changed. Try again."),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Create routine" }));
+    expect(fake.decideProposal).toHaveBeenCalledTimes(2);
+    await waitFor(() =>
+      expect(screen.queryByRole("article", { name: "Routine proposal" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("says why an answer the host refused failed, above the still-answerable card", async () => {
+    const fake = client([proposal()]);
+    fake.decideProposal
+      .mockResolvedValueOnce({
+        kind: "automation-command-failed",
+        reason: "blocked",
+        message: "The routine could not be created.",
+      })
+      .mockResolvedValueOnce({ kind: "routine-proposal-gone" });
+    renderPrompt(fake);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Create routine" }));
+    expect(await screen.findByRole("article", { name: "Routine proposal" })).toBeInTheDocument();
+    expect(screen.getByText("The routine could not be created.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Create routine" }));
+    expect(fake.decideProposal).toHaveBeenCalledTimes(2);
+    await waitFor(() =>
+      expect(screen.queryByRole("article", { name: "Routine proposal" })).not.toBeInTheDocument(),
+    );
   });
 
   it("shows nothing for another thread's proposal", async () => {

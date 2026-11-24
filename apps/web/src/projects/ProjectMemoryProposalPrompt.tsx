@@ -8,6 +8,7 @@ import {
 } from "../polling/ThreadActivityRevisions";
 import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { OctantButton } from "../ui/base/OctantButton";
 
@@ -69,20 +70,34 @@ export function ProjectMemoryProposalPrompt(props: {
   );
 
   const pending = proposals[0];
-  if (pending === undefined || client === undefined) return null;
+  if (client === undefined) return null;
+  // With the card gone the failure still says why where the card was.
+  if (pending === undefined) {
+    return message === undefined ? null : (
+      <OctantAlert className={props.className} tone="danger">
+        {message}
+      </OctantAlert>
+    );
+  }
 
   async function decide(decision: "confirm" | "decline") {
     if (pending === undefined || client === undefined || busy) return;
     setBusy(true);
     setMessage(undefined);
     try {
-      // Every answer takes the proposal off the host's list, whatever came of
-      // it; the agent's tool result says what happened, including a confirmed
-      // change the memory command refused.
-      await client.decideMemoryProposal({ proposalId: pending.proposalId, decision });
+      const outcome = await client.decideMemoryProposal({
+        proposalId: pending.proposalId,
+        decision,
+      });
+      // Every answer takes the proposal off the host's list, whatever came
+      // of it; the agent's tool result says what happened. A confirmed
+      // change the memory command refused still says so where the card was.
       setProposals((current) =>
         current.filter((proposal) => proposal.proposalId !== pending.proposalId),
       );
+      if (outcome.kind === "project-memory-proposal-not-applied") {
+        setMessage(outcome.message);
+      }
     } catch {
       setMessage("Your answer could not be sent. The change is still waiting; try again.");
     } finally {

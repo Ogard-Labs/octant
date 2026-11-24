@@ -11,6 +11,7 @@ import type { BrowserUploadPermissions } from "./browserUploadPermissions";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
 import { browserAgentAvailability, browserProfileFromChoice } from "@octant/domain";
 import { browserSignInOriginRefusal } from "./browserRecoveryMessages";
+import { beginBrowserOperation, inBrowserOperationSequence } from "./browserToolApprovalService";
 import { browserToolImage } from "./browserToolImage";
 import { admitBrowserUpload } from "./browserUploadFiles";
 import { askBrowserTransfer } from "./browserTransferAsk";
@@ -302,6 +303,7 @@ export function createBrowserAppManagedTools(
     // rather than taking the page back, as a flow's own call would.
     replaying = false,
   ): Promise<BrowserToolAnswer> => {
+    beginBrowserOperation();
     const reclaims = replaying ? {} : options.browser;
     // Only a port that may take the page back asks the service to.
     const takesBack = !replaying && options.browser.takeBack !== undefined;
@@ -1005,13 +1007,22 @@ export function createBrowserAppManagedTools(
         return stopped.isError ? stopped : failure("plan-mode-read-only");
       };
       if (isBrowserToolFlowInput(input)) {
-        return input.operation === "flow-run" && input.record === true
-          ? runRecordedBrowserCall(() => runFlow(input, signal), record)
+        // A flow's steps are one sequence, recording starts and stops
+        // included, so an approval after an earlier step ran is not marked
+        // replay-safe for the whole call.
+        return input.operation === "flow-run"
+          ? input.record === true
+            ? inBrowserOperationSequence(() =>
+                runRecordedBrowserCall(() => runFlow(input, signal), record),
+              )
+            : inBrowserOperationSequence(() => runFlow(input, signal))
           : runFlow(input, signal);
       }
       if (input.operation === "steps") {
         const batch = () => runBrowserToolSteps(input.steps, (step) => runRecorded(step, signal));
-        return input.record === true ? runRecordedBrowserCall(batch, record) : batch();
+        return input.record === true
+          ? inBrowserOperationSequence(() => runRecordedBrowserCall(batch, record))
+          : inBrowserOperationSequence(batch);
       }
       return runRecorded(input, signal);
     },

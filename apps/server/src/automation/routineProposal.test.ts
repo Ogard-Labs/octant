@@ -29,6 +29,7 @@ import type {
   RecordExternalContentIngestionInput,
 } from "../context/externalContentIngestionStore";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { registerToolEffectEvents, ToolEffectLedger } from "../toolEffects/toolEffectLedger";
 import { AutomationCommandService } from "./automationCommandService";
 import { AutomationEventStore, registerAutomationEvents } from "./automationEventStore";
 import { AutomationProjection, hydrateAutomationProjection } from "./automationProjection";
@@ -87,7 +88,7 @@ function harness(options: { readonly mode?: "chat" | "work" | "code" } = {}) {
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
   applyMigrations(connection, MIGRATIONS, () => NOW);
-  const registry = registerAutomationEvents(new EventRegistry());
+  const registry = registerToolEffectEvents(registerAutomationEvents(new EventRegistry()));
   const projection = new AutomationProjection();
   const journal = new Journal({
     connection,
@@ -1355,5 +1356,38 @@ describe("results a routine's run reports", () => {
         result: { reason: "invalid-input" },
       });
     }
+  });
+
+  it("keeps the proposal and reports the failure when an answer cannot be recorded", async () => {
+    const h = harness();
+    const effects = new ToolEffectLedger({
+      journal: h.journal,
+      uuid,
+      actor: Schema.decodeUnknownSync(EventActor)({ kind: "local-user", actorId: ACTOR }),
+      clock: () => NOW,
+    });
+    const recorded = effects.forTurn({ threadId: THREAD, turnId: uuid() }).tools(h.tools());
+    const call = recorded.execute({
+      name: "octant_propose_routine",
+      inputJson: weeklyInput,
+    });
+    const cards = await cardAppears(h.handler);
+    const proposalId = String(cards[0]?.proposalId);
+    // The journal refuses the frame that puts the answer on record.
+    vi.spyOn(h.journal, "append").mockImplementationOnce(() => {
+      throw new Error("The journal refused the frame.");
+    });
+    expect(await decide(h.handler, proposalId, "confirm")).toMatchObject({
+      kind: "routine-proposal-answer-unrecorded",
+    });
+    // Nothing acted and the card stays waiting, so a later answer can record it.
+    expect(await listed(h.handler)).toHaveLength(1);
+    expect(
+      h.projection.listSummaries({ hostId: "local" as never, mode: "all", limit: 10 }).items,
+    ).toEqual([]);
+    expect(await decide(h.handler, proposalId, "confirm")).toMatchObject({
+      kind: "routine-proposal-confirmed",
+    });
+    await call;
   });
 });

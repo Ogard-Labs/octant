@@ -79,8 +79,11 @@ export class AutomationFileSources {
     readonly signal: AbortSignal;
   }): Promise<AutomationFileSourceRearmPreparation> {
     const { command } = input;
-    if (command.principal.kind !== "local-window")
-      throw new AutomationFileSourceReviewError("File re-arm requires the current local window.");
+    const { principal } = command;
+    if (principal.kind === "remote-device" && principal.admittedBy !== "host-person")
+      throw new AutomationFileSourceReviewError(
+        "File re-arm requires a window on this host or a device its person paired.",
+      );
     const definition = this.#options.projection.getDefinition(command.automationId);
     const checkpoint = this.#options.projection.getFileSource(command.automationId);
     let source = this.#sources.get(command.automationId);
@@ -186,8 +189,12 @@ export class AutomationFileSources {
         previousObservationRevision: command.observationRevision,
         previousBatchDigest: command.batchDigest,
         disposition: command.disposition,
-        reviewedWindowId: command.principal.windowId,
-        reviewedCapabilityGeneration: command.principal.capabilityGeneration,
+        ...(principal.kind === "local-window"
+          ? {
+              reviewedWindowId: principal.windowId,
+              reviewedCapabilityGeneration: principal.capabilityGeneration,
+            }
+          : { reviewedDevice: principal }),
         reviewedAt: this.#options.now(),
       };
       const next: AutomationFileSourceCheckpoint = {

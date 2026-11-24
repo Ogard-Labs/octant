@@ -233,6 +233,10 @@ export const MOBILE_COPY = {
   approvalDeny: "Deny",
   approvalSendFailed: "Couldn't send that. Check the connection and try again.",
   approvalReconnecting: "Reconnecting…",
+  proposalAnswerOnComputer: "Answer this on the computer.",
+  proposalNotSaved: (reason: string) =>
+    `Not saved: ${reason.replace(/[.\s]+$/, "")}. Nothing was changed.`,
+  proposalFailureDismiss: "Dismiss",
   approvalBiometricUnavailable: "Set up Face ID, Touch ID or a passcode to allow from this phone.",
   approvalBiometricDenied:
     "Allow cancelled. Confirm with Face ID, Touch ID or your passcode to allow.",

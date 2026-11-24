@@ -1196,6 +1196,7 @@ function ActiveSectionContent({
           <ComputerUseSettingsView
             settings={props.settings.computerUse}
             rememberedApps={props.settings.rememberedComputerUseApps}
+            rememberedDesktopFiles={props.settings.rememberedDesktopFileTransfers}
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             onSettingsChange={props.onSettingsChange}
             {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
@@ -2736,6 +2737,21 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       </SettingsSection>
       <SettingsSection title="Threads">
         <div className="setgroup">
+          <SettingRow
+            description="Marking a Work or Code thread Done puts it away, and so does a Code thread's pull request merging. Reopen brings it back."
+            focused={focusedSetting === settingId("put-away-when-done")}
+            label="Put away threads when they're done"
+            scope="host"
+            settingId="put-away-when-done"
+          >
+            <OctantSwitch
+              checked={props.settings.putAwayThreadsWhenDone}
+              label="Put away threads when they're done"
+              onCheckedChange={(checked) =>
+                props.onSettingsChange({ putAwayThreadsWhenDone: checked })
+              }
+            />
+          </SettingRow>
           <SettingRow
             description="A put-away thread rests in its shelf, then moves to the archive. Archiving keeps everything."
             focused={focusedSetting === settingId("completed-thread-archive")}

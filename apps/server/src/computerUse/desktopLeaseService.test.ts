@@ -1764,6 +1764,40 @@ describe.runIf(process.platform === "linux")("desktop artifact transfer", () => 
     expect(asked).toEqual([false, false, true]);
   });
 
+  it("sends unasked under a Project's remembered answer and records nothing for the thread", async () => {
+    const { service, state, checkout } = host({ executionPolicy: "approval-gated" });
+    writeFileSync(join(checkout, "app.bin"), "built app");
+    const leaseId = await acquired(service, threadA);
+    const asked: Array<boolean> = [];
+    const fromAgent = (answeredForProject: boolean) => ({
+      owner: code(threadA),
+      actor: agentOf(threadA),
+      leaseId,
+      path: "app.bin",
+      turn: {
+        executionPolicy: "approval-gated" as const,
+        externalContentIngested: false,
+        answeredForProject,
+      },
+      confirm: async () => {
+        asked.push(answeredForProject);
+        return "declined" as const;
+      },
+    });
+
+    await expect(service.transfer(fromAgent(true))).resolves.toMatchObject({
+      status: "delivered",
+    });
+    expect(asked).toEqual([]);
+    expect(state.transferAnswers).toEqual([]);
+    // Once the Project's answer is forgotten, the thread is asked again.
+    await expect(service.transfer(fromAgent(false))).resolves.toMatchObject({
+      status: "refused",
+      reason: "declined",
+    });
+    expect(asked).toEqual([false]);
+  });
+
   it("asks an agent's transfer on a Full access thread only when its turn runs lower, outside content or not", async () => {
     const { service, checkout, connection } = host({ executionPolicy: "full-access" });
     writeFileSync(join(checkout, "app.bin"), "built app");
@@ -1856,6 +1890,42 @@ describe.runIf(process.platform === "linux")("desktop artifact transfer", () => 
       await expect(send(actor)).resolves.toEqual({ status: "refused", reason: "plan-mode" });
     }
     expect(state.askedTransfers).toHaveLength(1);
+  });
+
+  it("asks before an agent sends a file to a cloud desktop under a Project's remembered answer, with the confirmation off", async () => {
+    const cloud = createFakeDesktopProvider({
+      id: "cloud.example",
+      locality: "cloud",
+      billed: true,
+    });
+    const { service, state, checkout } = host({
+      providers: [cloud],
+      executionPolicy: "approval-gated",
+    });
+    writeFileSync(join(checkout, "app.bin"), "built app");
+    const leaseId = await acquired(service, threadA);
+    service.setLeaseSettings({ actor: person, change: { confirmBilledDesktops: false } });
+    const asked: Array<string> = [];
+
+    await expect(
+      service.transfer({
+        owner: code(threadA),
+        actor: agentOf(threadA),
+        leaseId,
+        path: "app.bin",
+        turn: {
+          executionPolicy: "approval-gated",
+          externalContentIngested: false,
+          answeredForProject: true,
+        },
+        confirm: async (request) => {
+          asked.push(request.asks);
+          return "declined";
+        },
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "declined" });
+    expect(asked).toEqual(["in-thread"]);
+    expect(cloud.backend.calls()).not.toContain("deliver");
   });
 
   it("refuses a send nobody was asked about when the person turns the confirmation back on meanwhile", async () => {

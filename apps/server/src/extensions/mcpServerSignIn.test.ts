@@ -12,6 +12,7 @@ import { createHostOAuthRuntime, type CredentialStore } from "@octant/host-runti
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHostOAuthService, type HostOAuthService } from "../providers/oauth/hostOAuthService";
 import { makeHostOAuthBrokerClient } from "../providers/oauth/hostOAuthBrokerClient";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { makeConnectorLinkedSecrets } from "../secretStores/connectorLinkedSecrets";
 import type { SecretStoreBrokerClient } from "../secretStores/secretStoreBrokerClient";
 import type { LinkedSecretPointers } from "./userAddedMcpServers";
@@ -2482,6 +2483,59 @@ describe("connector sign-in finished from a paired device", () => {
             entry.actor?.actorId === device.deviceId,
         ),
       ).toBe(true);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("journals a waiting sign-in cancelled by removing its server as whoever removed it, not whoever began it", async () => {
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === SERVER) return new Response("", { status: 401 });
+      if (url === "https://mcp.example/.well-known/oauth-protected-resource/mcp") {
+        return json({ resource: SERVER, authorization_servers: [ISSUER] });
+      }
+      if (url === `${ISSUER}/.well-known/oauth-authorization-server`) {
+        return json({
+          issuer: ISSUER,
+          authorization_endpoint: `${ISSUER}/authorize`,
+          token_endpoint: `${ISSUER}/token`,
+          registration_endpoint: `${ISSUER}/register`,
+          code_challenge_methods_supported: ["S256"],
+        });
+      }
+      if (url === `${ISSUER}/register`) return json({ client_id: "removal-client" }, 201);
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+    const localActor = eventActorForPrincipal({ kind: "local-window" });
+
+    const { runtime, oauth, journal } = makeRealStack(fetchImpl);
+    try {
+      const { service } = await signIn({
+        fetchImpl,
+        oauth,
+        access: (ref) => runtime.access(ref),
+      });
+      const cancellers = async () =>
+        journal
+          .filter((entry) => entry.record.name === "host-oauth.sign-in-cancelled")
+          .map((entry) => entry.actor);
+
+      // The device began the attempt and the device removes the server.
+      expect(
+        (await service.begin(EXTENSION, COMPONENT, "person-paired-device", deviceActor, device))
+          .kind,
+      ).toBe("awaiting-consent");
+      (await service.preparePackageRemoval(EXTENSION, deviceActor))();
+      expect(await cancellers()).toEqual([deviceActor]);
+
+      // The device began the attempt, but a window here removes the server.
+      expect(
+        (await service.begin(EXTENSION, COMPONENT, "person-paired-device", deviceActor, device))
+          .kind,
+      ).toBe("awaiting-consent");
+      (await service.preparePackageRemoval(EXTENSION, localActor))();
+      expect(await cancellers()).toEqual([deviceActor, localActor]);
     } finally {
       await runtime.close();
     }

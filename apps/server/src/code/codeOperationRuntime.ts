@@ -132,6 +132,7 @@ import {
   CodeOperationEventStore,
   MAX_CODE_OPERATION_REPLAY_LIMIT,
   type CodeConversationWindowRead,
+  type CodeOperationEventAuthor,
 } from "./codeOperationEventStore";
 import { chooseCodeForkPoint, codeThreadTurns } from "./codeForkPoint";
 import {
@@ -188,6 +189,7 @@ import {
   type CodeOperationScaffoldPort,
   type CodeOperationServiceOptions,
   type CodeOperationTurnPort,
+  type CodeToolAskAnswer,
   type CodeTurnPendingRequest,
 } from "./codeOperationService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
@@ -410,10 +412,15 @@ export interface CodeOperationRuntimeOptions {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
     readonly destination?: ComputerUseDestinationSelection;
+    /**
+     * Asks in the thread. `offer` adds "Remember for this Project" to the
+     * card; only then can the answer be `remembered-for-project`.
+     */
     readonly ask: (
       summary: string,
       signal?: AbortSignal,
-    ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
+      offer?: { readonly canRememberForProject: true },
+    ) => Promise<CodeToolAskAnswer>;
   }) => AppManagedToolSet | undefined;
   readonly persistence: RuntimePersistence;
   /**
@@ -3399,7 +3406,9 @@ interface ActiveTurn {
     string,
     {
       readonly origin?: string;
-      readonly finish: (outcome: "approved" | "denied" | "cancelled" | "expired") => void;
+      /** The ask offered "Remember for this Project". */
+      readonly canRememberForProject?: true;
+      readonly finish: (outcome: CodeToolAskAnswer) => void;
     }
   >;
   /**
@@ -5417,6 +5426,19 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     origin: string | undefined,
     signal?: AbortSignal,
   ): Promise<"approved" | "denied" | "cancelled" | "expired"> {
+    // Without an offer the person cannot answer for the Project.
+    return this.#askInThread(active, summary, origin, signal).then((answer) =>
+      typeof answer === "object" ? "approved" : answer,
+    );
+  }
+
+  #askInThread(
+    active: ActiveTurn,
+    summary: string,
+    origin: string | undefined,
+    signal?: AbortSignal,
+    offer?: { readonly canRememberForProject: true },
+  ): Promise<CodeToolAskAnswer> {
     if (signal?.aborted || active.abort.signal.aborted || active.toolApprovals.size >= 4)
       return Promise.resolve("cancelled");
     const approvalId = CodeApprovalId.make(this.#options.uuid());
@@ -5427,7 +5449,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return whileApprovalWaited(
       () =>
         new Promise((resolve) => {
-          const finish = (outcome: "approved" | "denied" | "cancelled" | "expired") => {
+          const finish = (outcome: CodeToolAskAnswer) => {
             if (!active.toolApprovals.delete(String(approvalId))) return;
             active.approvalPostures.delete(String(approvalId));
             signal?.removeEventListener("abort", abort);
@@ -5451,6 +5473,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           const abort = () => finish("cancelled");
           active.toolApprovals.set(String(approvalId), {
             ...(origin === undefined ? {} : { origin }),
+            ...(offer === undefined ? {} : { canRememberForProject: true }),
             finish,
           });
           active.approvalPostures.set(String(approvalId), this.#approvalPosture(active));
@@ -5467,6 +5490,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 action: "provider-tool",
                 summary,
                 ...(callingTool === undefined ? {} : { toolCallId: callingTool }),
+                ...(offer === undefined ? {} : { canRememberForProject: true }),
               },
             });
             active.cursor = frame.cursor;
@@ -5626,9 +5650,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         approvalId: input.approvalId,
         occurredAt: this.#options.clock(),
       });
-      toolApproval.finish(input.decision === "approved" ? "approved" : "denied");
-      if (ownerCurrent === undefined)
-        this.#recordApprovalAnswered(active, input.approvalId, input.decision);
+      // "Remember for this Project" stands only on an ask that offered it.
+      const rememberedBy =
+        toolApproval.canRememberForProject === true ? input.rememberedForProjectBy : undefined;
+      toolApproval.finish(
+        input.decision !== "approved"
+          ? "denied"
+          : rememberedBy === undefined
+            ? "approved"
+            : { kind: "remembered-for-project", approver: rememberedBy },
+      );
+      if (ownerCurrent === undefined) this.#recordApprovalAnswered(active, input, input.decision);
       return answeredTurnState(active.state);
     }
     if (active === undefined || providerRequestId === undefined)
@@ -5694,8 +5726,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return turnState("failed", { category: "failed", message: refused.message });
     }
     // An owner's answer journals `owner-approval-settled` instead.
-    if (ownerCurrent === undefined)
-      this.#recordApprovalAnswered(active, input.approvalId, input.decision);
+    if (ownerCurrent === undefined) this.#recordApprovalAnswered(active, input, input.decision);
     // A denial goes back to the model, which adjusts, as on the provider's
     // own: no count of denials ends the turn (Architecture: "Octant adds no
     // restrictions of its own unless Strict is on", in Strict too).
@@ -5707,10 +5738,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * A re-read of the turn's stream otherwise offers the ask again, and its
    * Approve is refused because nothing waits for it. The answer was already
    * delivered, so a journal that refuses the row leaves the result as it is.
+   * The row names whoever answered, which need not be whoever started the turn.
    */
   #recordApprovalAnswered(
     active: ActiveTurn,
-    approvalId: string,
+    answer: Pick<
+      Parameters<CodeOperationTurnPort["answerApproval"]>[0],
+      "approvalId" | "answeredAs"
+    >,
     decision: "approved" | "denied",
     levelChangeApplied?: "in-place" | "next-turn",
   ): void {
@@ -5718,10 +5753,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       const frame = this.#appendTurnEvent(active, {
         event: {
           kind: "approval-answered",
-          approvalId: CodeApprovalId.make(approvalId),
+          approvalId: CodeApprovalId.make(answer.approvalId),
           decision,
           ...(levelChangeApplied === undefined ? {} : { levelChangeApplied }),
         },
+        journaledAs: answer.answeredAs,
       });
       active.cursor = frame.cursor;
     } catch {
@@ -5809,12 +5845,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         )
       ).status === "applied";
     await answer(true);
-    this.#recordApprovalAnswered(
-      active,
-      input.approvalId,
-      "approved",
-      inPlace ? "in-place" : "next-turn",
-    );
+    this.#recordApprovalAnswered(active, input, "approved", inPlace ? "in-place" : "next-turn");
     if (inPlace) {
       this.#revokeBrowserGrants(active);
       return answeredTurnState(active.state);
@@ -5953,6 +5984,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         operationId: owner.operationId,
         expectedCursor: owner.cursor,
         event: { kind: "operation-state", state: "interrupted", failure },
+        // The restart, not the turn's starter, ended it.
+        journaledAs: "host",
       });
     } catch {
       return false;
@@ -5973,11 +6006,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * that follows reads as their cancellation and not a cut-off. A lost marker
    * must never hold back the Stop itself.
    */
-  #journalTurnStopRequested(active: ActiveTurn, requestedBy: "person" | undefined): void {
+  #journalTurnStopRequested(
+    active: ActiveTurn,
+    requestedBy: "person" | undefined,
+    requestedAs: CodeOperationEventAuthor | undefined,
+  ): void {
     if (requestedBy !== "person") return;
     try {
       const frame = this.#appendTurnEvent(active, {
         event: { kind: "conversation-turn-stop-requested" },
+        journaledAs: requestedAs,
       });
       active.cursor = frame.cursor;
     } catch {
@@ -5990,6 +6028,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     readonly checkoutRoot: string;
     readonly turnOperationId: CodeOperationId;
     readonly stopRequestedBy?: "person";
+    readonly stopRequestedAs?: CodeOperationEventAuthor;
   }) {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (
@@ -6003,7 +6042,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         message:
           "Only this host's exact stopped attempt on a supported runtime can be force-stopped.",
       });
-    this.#journalTurnStopRequested(active, input.stopRequestedBy);
+    this.#journalTurnStopRequested(active, input.stopRequestedBy, input.stopRequestedAs);
     const connection = active.connection;
     const kill = connection.forceStop;
     if (kill === undefined) return turnState("failed");
@@ -6046,7 +6085,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         category: "failed",
         message: "That turn has already ended, so Stop left the turn running now alone.",
       });
-    this.#journalTurnStopRequested(active, input.stopRequestedBy);
+    this.#journalTurnStopRequested(active, input.stopRequestedBy, input.stopRequestedAs);
     const lostText = this.#flushBeforeStop(active);
     if (lostText !== undefined) {
       active.interruptMessage =
@@ -6179,11 +6218,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(active.computerUseDestination === undefined
             ? {}
             : { destination: active.computerUseDestination }),
-          ask: (summary, signal) => {
+          ask: (summary, signal, offer) => {
             const bounded = boundProviderSummary(summary);
             return bounded === undefined
               ? Promise.resolve("cancelled")
-              : this.#askToolApproval(active, bounded, undefined, signal);
+              : this.#askInThread(active, bounded, undefined, signal, offer);
           },
         }),
         createCodeAppManagedTools({
@@ -7324,7 +7363,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   /** The one way a turn's events reach the journal, behind any open burst. */
-  #appendTurnEvent(active: ActiveTurn, input: { readonly event: CodeOperationEvent }) {
+  #appendTurnEvent(
+    active: ActiveTurn,
+    input: {
+      readonly event: CodeOperationEvent;
+      /** Set for a person's action on the turn; streamed events name the turn's starter. */
+      readonly journaledAs?: CodeOperationEventAuthor | undefined;
+    },
+  ) {
     // Only an instant the host itself observed bounds a reasoning span at
     // write time: a person-facing ask or answer, and a terminal or forced
     // stop. Normalized provider events already closed it at their own stamp —
@@ -7351,6 +7397,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       operationId: active.operationId,
       expectedCursor: active.cursor,
       event: input.event,
+      ...(input.journaledAs === undefined ? {} : { journaledAs: input.journaledAs }),
     });
     // Ask and answer are person-facing instants: their frame stamps are the
     // wait's bounds. An automated review journals neither kind, so it can
