@@ -1,8 +1,10 @@
 import type { EventActor, WindowId } from "@octant/contracts";
 import type { ImageOfferAnswer } from "../image/imageGenerationOfferService";
+import type { VideoOfferOutcome } from "../video/videoOfferDecisionRules";
 
 export type ServiceOfferAnswer =
   | ImageOfferAnswer
+  | Exclude<VideoOfferOutcome, { readonly status: "cancelled" }>
   | { readonly status: "transcribe"; readonly rememberForThread: boolean }
   | { readonly status: "narrate"; readonly rememberForThread: boolean };
 

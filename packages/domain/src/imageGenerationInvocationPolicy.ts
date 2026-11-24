@@ -194,7 +194,10 @@ export function listEligibleImageProfiles(
  * Plan is refused before this is reached.
  */
 export function imageGenerationWithoutAsking(input: {
-  readonly profiles: ReadonlyArray<ImageGenerationProfileView>;
+  /** Video profiles pass the same three facts, so both media skip the card by one rule. */
+  readonly profiles: ReadonlyArray<
+    Pick<ImageGenerationProfileView, "instanceId" | "modelAllowlist" | "defaultModel">
+  >;
   readonly kept: ProjectImageGenerationChoice | undefined;
   readonly fullAccess: boolean;
   /** The person chose Ask again, so the card comes back at Full access too. */

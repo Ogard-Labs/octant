@@ -5,8 +5,12 @@ import type {
   ThreadBoardPullRequestRelationship,
   ThreadBoardPullRequestState,
   ThreadBoardPullRequestSummaries,
+  ThreadBoardPullRequestSummary,
 } from "@octant/contracts";
-import { MAX_THREAD_BOARD_PULL_REQUEST_DISPLAY } from "@octant/contracts";
+import {
+  MAX_THREAD_BOARD_PULL_REQUEST_DISPLAY,
+  MAX_THREAD_NAVIGATION_PULL_REQUEST_DISPLAY,
+} from "@octant/contracts";
 
 export interface ThreadBoardPullRequestJoinRow {
   readonly row: CodeProjectPullRequestRow;
@@ -70,49 +74,103 @@ export function matchPullRequestRowsToCodeThread(input: {
   return matches;
 }
 
-export function composeThreadBoardPullRequestSummaries(
+function summarizePullRequest(
+  match: ThreadBoardPullRequestJoinRow,
+  freshness: ThreadBoardPullRequestFreshness,
+): ThreadBoardPullRequestSummary {
+  const { row, relationship } = match;
+  const state = deriveThreadBoardPullRequestState({ state: row.state, draft: row.draft });
+  return {
+    identity: {
+      projectId: row.projectId,
+      repositoryOwner: row.repositoryOwner,
+      repositoryName: row.repositoryName,
+      number: row.number,
+    },
+    title: row.title,
+    state,
+    checks: row.checks,
+    review: row.review,
+    mergeability: row.mergeability,
+    freshness,
+    readyToMerge: deriveConservativeReadyToMerge({
+      state,
+      checks: row.checks,
+      review: row.review,
+      mergeability: row.mergeability,
+      freshness,
+    }),
+    ...(relationship === undefined ? {} : { relationship }),
+    ...(row.additions === undefined ? {} : { additions: row.additions }),
+    ...(row.deletions === undefined ? {} : { deletions: row.deletions }),
+    ...(row.checkCounts === undefined ? {} : { checkCounts: row.checkCounts }),
+    ...(row.merging === undefined ? {} : { merging: row.merging }),
+  };
+}
+
+function byMostRecentlyUpdated(
+  left: ThreadBoardPullRequestJoinRow,
+  right: ThreadBoardPullRequestJoinRow,
+): number {
+  return right.row.updatedAt.localeCompare(left.row.updatedAt);
+}
+
+function boundSummaries(
   input: ThreadBoardPullRequestJoinInput & {
     readonly matches: ReadonlyArray<ThreadBoardPullRequestJoinRow>;
   },
+  order: (left: ThreadBoardPullRequestJoinRow, right: ThreadBoardPullRequestJoinRow) => number,
+  limit: number,
 ): ThreadBoardPullRequestSummaries {
   if (input.githubRevoked || input.rows.length === 0) {
     return { items: [], hiddenCount: 0 };
   }
   const freshness = summaryFreshness(input.snapshotFreshness);
-  const sorted = [...input.matches].sort((left, right) =>
-    right.row.updatedAt.localeCompare(left.row.updatedAt),
+  const sorted = [...input.matches].sort(order);
+  return {
+    items: sorted.slice(0, limit).map((match) => summarizePullRequest(match, freshness)),
+    hiddenCount: Math.max(0, sorted.length - limit),
+  };
+}
+
+/** A board card's few pull requests: the most recently updated first. */
+export function composeThreadBoardPullRequestSummaries(
+  input: ThreadBoardPullRequestJoinInput & {
+    readonly matches: ReadonlyArray<ThreadBoardPullRequestJoinRow>;
+  },
+): ThreadBoardPullRequestSummaries {
+  return boundSummaries(input, byMostRecentlyUpdated, MAX_THREAD_BOARD_PULL_REQUEST_DISPLAY);
+}
+
+/**
+ * Where a pull request sorts in a thread's own list: work still in flight
+ * (open, draft, or a restart-recovered identity whose state is not yet known)
+ * before work that landed, and landed work before work that was abandoned.
+ */
+function lifecycleRank(match: ThreadBoardPullRequestJoinRow): number {
+  const state = deriveThreadBoardPullRequestState({
+    state: match.row.state,
+    draft: match.row.draft,
+  });
+  if (state === "merged") return 1;
+  if (state === "closed") return 2;
+  return 0;
+}
+
+/**
+ * Every pull request a Code thread worked on, as its navigation entry carries
+ * them for the sidebar's hover card and the Environment tool: in-flight first,
+ * then merged, then closed, each group most recently updated first.
+ */
+export function composeThreadNavigationPullRequestSummaries(
+  input: ThreadBoardPullRequestJoinInput & {
+    readonly matches: ReadonlyArray<ThreadBoardPullRequestJoinRow>;
+  },
+): ThreadBoardPullRequestSummaries {
+  return boundSummaries(
+    input,
+    (left, right) =>
+      lifecycleRank(left) - lifecycleRank(right) || byMostRecentlyUpdated(left, right),
+    MAX_THREAD_NAVIGATION_PULL_REQUEST_DISPLAY,
   );
-  const hiddenCount = Math.max(0, sorted.length - MAX_THREAD_BOARD_PULL_REQUEST_DISPLAY);
-  const items = sorted
-    .slice(0, MAX_THREAD_BOARD_PULL_REQUEST_DISPLAY)
-    .map(({ row, relationship }) => {
-      const state = deriveThreadBoardPullRequestState({ state: row.state, draft: row.draft });
-      return {
-        identity: {
-          projectId: row.projectId,
-          repositoryOwner: row.repositoryOwner,
-          repositoryName: row.repositoryName,
-          number: row.number,
-        },
-        title: row.title,
-        state,
-        checks: row.checks,
-        review: row.review,
-        mergeability: row.mergeability,
-        freshness,
-        readyToMerge: deriveConservativeReadyToMerge({
-          state,
-          checks: row.checks,
-          review: row.review,
-          mergeability: row.mergeability,
-          freshness,
-        }),
-        ...(relationship === undefined ? {} : { relationship }),
-        ...(row.additions === undefined ? {} : { additions: row.additions }),
-        ...(row.deletions === undefined ? {} : { deletions: row.deletions }),
-        ...(row.checkCounts === undefined ? {} : { checkCounts: row.checkCounts }),
-        ...(row.merging === undefined ? {} : { merging: row.merging }),
-      };
-    });
-  return { items, hiddenCount };
 }

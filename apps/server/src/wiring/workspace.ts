@@ -65,6 +65,7 @@ export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence">
     AuthorityWiring,
     | "bindingReceiptStore"
     | "imageGenerationOffers"
+    | "videoOffers"
     | "isPairedDeviceScope"
     | "isRestrictedDeviceScope"
     | "machineChangeFeed"
@@ -97,6 +98,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     githubExtensionSnapshot,
     githubIntegrationIsEffective,
     imageGenerationOffers,
+    videoOffers,
     isPairedDeviceScope,
     isRestrictedDeviceScope,
     machineChangeFeed,
@@ -438,16 +440,32 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     // journals the choice on the Project with the answering person's actor.
     const keptImageChoices = createKeptImageGenerationChoices({
       threadChoices: imageGenerationOffers,
-      projectOf: ({ threadKind, scopeId }) => {
-        const threadId = String(scopeId);
-        if (threadKind === "chat-thread") {
-          return persistence.readChatThread(decodeChatThreadId(threadId))?.projectId;
-        }
-        if (threadKind === "work-thread") {
-          return workThreadProjection.read(decodeWorkThreadId(threadId))?.projectId;
-        }
-        return persistence.readCodeThread(decodeCodeThreadId(threadId))?.projectId;
+      projectOf: projectOfThread,
+      readProject: (projectId) => persistence.readProject(projectId),
+      changeProject: async (command, actor) => {
+        await projectService.executeProject(ROUTINE_HOST_SCOPE_ID, command, actor);
       },
+    });
+    function projectOfThread({
+      threadKind,
+      scopeId,
+    }: {
+      readonly threadKind: string;
+      readonly scopeId: string;
+    }) {
+      const threadId = String(scopeId);
+      if (threadKind === "chat-thread") {
+        return persistence.readChatThread(decodeChatThreadId(threadId))?.projectId;
+      }
+      if (threadKind === "work-thread") {
+        return workThreadProjection.read(decodeWorkThreadId(threadId))?.projectId;
+      }
+      return persistence.readCodeThread(decodeCodeThreadId(threadId))?.projectId;
+    }
+    const keptVideoChoices = createKeptImageGenerationChoices({
+      media: "video",
+      threadChoices: videoOffers,
+      projectOf: projectOfThread,
       readProject: (projectId) => persistence.readProject(projectId),
       changeProject: async (command, actor) => {
         await projectService.executeProject(ROUTINE_HOST_SCOPE_ID, command, actor);
@@ -464,6 +482,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       goalRoutes,
       goalService,
       keptImageChoices,
+      keptVideoChoices,
       managedCloneProcessPort,
       managedCloneService,
       planRoutes,

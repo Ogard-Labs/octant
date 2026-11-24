@@ -138,7 +138,8 @@
   },
   "dependencies": {
     "@octant/contracts": "workspace:*",
-    "@octant/domain": "workspace:*"
+    "@octant/domain": "workspace:*",
+    "@octant/provider-sdk": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "catalog:",

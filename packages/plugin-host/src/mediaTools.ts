@@ -17,12 +17,16 @@ import {
   decodeProviderModelId,
   decodeSpeechSynthesisFormat,
   decodeSpeechTranscriptionLanguage,
+  decodeVideoClipId,
+  decodeVideoJobId,
   MAX_IMAGE_PROMPT_CHARACTERS,
   MAX_IMAGE_REFERENCE_LABEL_LENGTH,
   MAX_IMAGE_REFERENCES,
   MAX_IMAGE_VARIANTS,
   MAX_LOOK_QUESTION_CHARACTERS,
   MAX_PROVIDER_TOOL_RESULT_BYTES,
+  MAX_VIDEO_PROMPT_CHARACTERS,
+  MAX_VIDEO_REFERENCES,
   SPEECH_SYNTHESIS_FORMATS,
   SPEECH_SYNTHESIS_MAX_TEXT_CHARACTERS,
   type CodeRelativePath,
@@ -43,21 +47,25 @@ import {
   type MediaToolPluginDefinition,
   type MediaToolResult,
   type MediaToolSet,
+  type MediaVideoGenerateRequest,
+  type MediaVideoSaveRequest,
 } from "@octant/plugin-api/media-tools";
 
 export const TRANSCRIBE_TOOL_NAME = "octant_transcribe" as const;
 export const NARRATE_TOOL_NAME = "octant_narrate" as const;
 export const LOOK_TOOL_NAME = "octant_look" as const;
 export const CREATE_IMAGE_TOOL_NAME = "octant_create_image" as const;
+export const CREATE_VIDEO_TOOL_NAME = "octant_create_video" as const;
 
 export const BUILTIN_MEDIA_TOOL_NAMES = [
   TRANSCRIBE_TOOL_NAME,
   NARRATE_TOOL_NAME,
   LOOK_TOOL_NAME,
   CREATE_IMAGE_TOOL_NAME,
+  CREATE_VIDEO_TOOL_NAME,
 ] as const;
 
-/** Host guide lines for the four built-in media tools, 40 tokens or fewer each. */
+/** Host guide lines for the built-in media tools, 40 tokens or fewer each. */
 export const TRANSCRIBE_TOOL_HOST_LINE =
   "Transcribe a recording from this thread's folder with octant_transcribe instead of installing speech models; page long transcripts with nextOffset.";
 
@@ -70,8 +78,12 @@ export const LOOK_TOOL_HOST_LINE =
 export const CREATE_IMAGE_TOOL_HOST_LINE =
   "Call octant_create_image when the person asks for a picture instead of drawing it as SVG or HTML. To restyle photos or screenshots, use references, which always need confirmation. Keep SVG for logos, icons, and diagrams.";
 
+export const CREATE_VIDEO_TOOL_HOST_LINE =
+  "Use octant_create_video only when asked for a video clip; clips are billed.";
+
 export const MEDIA_TOOL_HOST_LINES: Readonly<Record<string, string>> = {
   [CREATE_IMAGE_TOOL_NAME]: CREATE_IMAGE_TOOL_HOST_LINE,
+  [CREATE_VIDEO_TOOL_NAME]: CREATE_VIDEO_TOOL_HOST_LINE,
   [LOOK_TOOL_NAME]: LOOK_TOOL_HOST_LINE,
   [NARRATE_TOOL_NAME]: NARRATE_TOOL_HOST_LINE,
   [TRANSCRIBE_TOOL_NAME]: TRANSCRIBE_TOOL_HOST_LINE,
@@ -168,6 +180,7 @@ const IMAGE_INPUT_SCHEMA = {
         type: "object",
         properties: {
           kind: { enum: ["attachment", "browser-capture", "file", "generated-image"] },
+          name: { type: "string" },
           captureId: { type: "string" },
           relativePath: { type: "string" },
           attachmentId: { type: "string" },
@@ -711,9 +724,10 @@ function canonicalizeRelativeReferencePath(raw: string): string | undefined {
 
 function parseImageReferenceInputs(
   value: unknown,
+  max: number = MAX_IMAGE_REFERENCES,
 ): ReadonlyArray<MediaImageReferenceInput> | { readonly error: string } {
-  if (!Array.isArray(value) || value.length > MAX_IMAGE_REFERENCES) {
-    return { error: "Use at most four image references." };
+  if (!Array.isArray(value) || value.length > max) {
+    return { error: `Use at most ${String(max)} image references.` };
   }
   const requests: MediaImageReferenceInput[] = [];
   for (const item of value) {
@@ -722,6 +736,14 @@ function parseImageReferenceInputs(
     try {
       if (kind === "attachment" && Object.keys(fields).length === 0) {
         requests.push({ kind });
+      } else if (
+        kind === "attachment" &&
+        Object.keys(fields).length === 1 &&
+        typeof fields["name"] === "string" &&
+        fields["name"].trim().length > 0 &&
+        fields["name"].length <= MAX_IMAGE_REFERENCE_LABEL_LENGTH
+      ) {
+        requests.push({ kind, name: fields["name"].trim() });
       } else if (kind === "browser-capture" && Object.keys(fields).length === 1) {
         requests.push({ kind, captureId: decodeBrowserCaptureId(fields["captureId"]) });
       } else if (kind === "generated-image" && Object.keys(fields).length === 1) {
@@ -1074,11 +1096,276 @@ export const CREATE_IMAGE_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
   },
 };
 
+const VIDEO_DESCRIPTION =
+  "Generate a short video clip with a video model the person set up in Octant. Call it only when the person asks for a video, instead of writing an animation by hand. Octant shows the person a card in this thread with the price, where they confirm, because each clip is billed to their video provider; nothing runs until they answer, unless they already said not to ask again or the thread runs at Full access. Describe the clip in prompt. durationSeconds, resolution, aspectRatio and audio are optional and must be ones the model declares; absent ones take the model's defaults. Use firstFrame, lastFrame and references (the same reference forms as octant_create_image; an attachment may also carry name to pick one upload, which a frame requires) where the model takes them; images always require confirmation. The result says what happened: completed with a clipId (the clip is shown in this thread), generating with a jobId when it takes longer than the call waits (it appears when done; do not start another), failed with the reason, or cancelled (do not ask again unless they do). In a Work or Code thread, operation save with a clipId or jobId from this thread and a relativePath ending in .mp4 stores the clip as a new file in the folder you work in: it never overwrites a file, Plan refuses it, and at Ask first the person confirms the path. Never invent a video URL.";
+
+const VIDEO_REFERENCE_SCHEMA = {
+  type: "object",
+  properties: {
+    kind: { enum: ["attachment", "browser-capture", "file", "generated-image"] },
+    name: { type: "string" },
+    captureId: { type: "string" },
+    relativePath: { type: "string" },
+    attachmentId: { type: "string" },
+  },
+  required: ["kind"],
+  additionalProperties: false,
+} as const;
+
+const VIDEO_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    operation: { type: "string", enum: ["generate", "save"] },
+    prompt: { type: "string" },
+    profileInstanceId: { type: "string" },
+    modelId: { type: "string" },
+    durationSeconds: { type: "number" },
+    resolution: { type: "string" },
+    aspectRatio: { type: "string" },
+    audio: { type: "boolean" },
+    firstFrame: VIDEO_REFERENCE_SCHEMA,
+    lastFrame: VIDEO_REFERENCE_SCHEMA,
+    references: { type: "array", maxItems: MAX_VIDEO_REFERENCES, items: VIDEO_REFERENCE_SCHEMA },
+    clipId: { type: "string" },
+    jobId: { type: "string" },
+    relativePath: { type: "string" },
+  },
+} as const;
+
+type ParsedVideoInput =
+  | ({ readonly operation: "generate" } & Omit<MediaVideoGenerateRequest, "signal">)
+  | ({ readonly operation: "save" } & MediaVideoSaveRequest)
+  | { readonly error: string };
+
+function parseOneVideoReference(
+  value: unknown,
+): MediaImageReferenceInput | undefined | { readonly error: string } {
+  if (value === undefined) return undefined;
+  const parsed = parseImageReferenceInputs([value]);
+  if ("error" in parsed) return parsed;
+  return parsed[0];
+}
+
+function parseVideoToolInput(inputJson: string): ParsedVideoInput {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(inputJson);
+  } catch {
+    return { error: "The tool input is not valid JSON." };
+  }
+  if (!isPlainObject(raw)) return { error: "The tool input must be an object." };
+  for (const key of FORBIDDEN_IMAGE_INPUT_KEYS) {
+    if (key in raw)
+      return { error: "Do not pass credentials, endpoints, or paths outside the folder." };
+  }
+  const operation = raw["operation"] ?? "generate";
+  if (operation === "save") {
+    const relativePath = raw["relativePath"];
+    if (
+      typeof relativePath !== "string" ||
+      relativePath.length > MAX_SAVE_PATH_CHARACTERS ||
+      !relativePath.toLowerCase().endsWith(".mp4")
+    ) {
+      return { error: "Name a relativePath ending in .mp4 inside the folder you work in." };
+    }
+    const canonical = canonicalizeRelativeReferencePath(relativePath);
+    if (canonical === undefined)
+      return { error: "The path must be inside the folder you work in." };
+    const clipId = raw["clipId"];
+    const jobId = raw["jobId"];
+    if ((clipId === undefined) === (jobId === undefined))
+      return { error: "Pass exactly one clipId or jobId from this thread." };
+    try {
+      return {
+        operation: "save",
+        relativePath: canonical,
+        ...(clipId === undefined
+          ? { jobId: decodeVideoJobId(jobId) }
+          : { clipId: decodeVideoClipId(clipId) }),
+      };
+    } catch {
+      return { error: "Pass a valid clipId or jobId from this thread." };
+    }
+  }
+  if (operation !== "generate") return { error: "The operation must be generate or save." };
+  const promptInput = raw["prompt"];
+  const prompt = typeof promptInput === "string" ? promptInput.trim() : "";
+  if (prompt.length === 0) {
+    return { error: "Describe the clip in prompt." };
+  }
+  if (prompt.length > MAX_VIDEO_PROMPT_CHARACTERS) {
+    return { error: "The video prompt exceeded the length limit." };
+  }
+  const references =
+    raw["references"] === undefined
+      ? []
+      : parseImageReferenceInputs(raw["references"], MAX_VIDEO_REFERENCES);
+  if ("error" in references) return references;
+  const firstFrame = parseOneVideoReference(raw["firstFrame"]);
+  if (firstFrame !== undefined && "error" in firstFrame) return firstFrame;
+  const lastFrame = parseOneVideoReference(raw["lastFrame"]);
+  if (lastFrame !== undefined && "error" in lastFrame) return lastFrame;
+  const durationSeconds = raw["durationSeconds"];
+  if (
+    durationSeconds !== undefined &&
+    (typeof durationSeconds !== "number" ||
+      !Number.isInteger(durationSeconds) ||
+      durationSeconds <= 0)
+  ) {
+    return { error: "durationSeconds must be a whole number of seconds." };
+  }
+  for (const key of ["resolution", "aspectRatio", "profileInstanceId", "modelId"] as const) {
+    const value = raw[key];
+    if (value !== undefined && (typeof value !== "string" || value.length > 128)) {
+      return { error: `${key} must be a short string.` };
+    }
+  }
+  const audio = raw["audio"];
+  if (audio !== undefined && typeof audio !== "boolean")
+    return { error: "audio must be true or false." };
+  const profileInstanceId = raw["profileInstanceId"];
+  const modelId = raw["modelId"];
+  const resolution = raw["resolution"];
+  const aspectRatio = raw["aspectRatio"];
+  try {
+    return {
+      operation: "generate",
+      prompt,
+      references,
+      ...(firstFrame === undefined ? {} : { firstFrame }),
+      ...(lastFrame === undefined ? {} : { lastFrame }),
+      ...(typeof durationSeconds === "number" ? { durationSeconds } : {}),
+      ...(typeof resolution === "string" ? { resolution } : {}),
+      ...(typeof aspectRatio === "string" ? { aspectRatio } : {}),
+      ...(typeof audio === "boolean" ? { audio } : {}),
+      ...(typeof profileInstanceId === "string"
+        ? { profileInstanceId: decodeProviderInstanceId(profileInstanceId) }
+        : {}),
+      ...(typeof modelId === "string" ? { modelId: decodeProviderModelId(modelId) } : {}),
+    };
+  } catch {
+    return { error: "One of the video generation identifiers is invalid." };
+  }
+}
+
+/**
+ * Built-in video generation media tool plugin (`octant_create_video`),
+ * composed strictly over `MediaToolHostPort.videoGeneration`. The host owns
+ * the card, the price, spend, credentials, storage and the access level.
+ */
+export const CREATE_VIDEO_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
+  kind: MEDIA_TOOL_CONTRIBUTION_KIND,
+  id: "create-video",
+  modes: ["chat", "work", "code"],
+  createTools: (port) => {
+    const videoGeneration = port.videoGeneration;
+    if (
+      videoGeneration === undefined ||
+      !CREATE_VIDEO_MEDIA_TOOL_PLUGIN.modes.includes(port.turn.mode) ||
+      !videoGeneration.isAvailable()
+    ) {
+      return undefined;
+    }
+    const stopped = new AbortController();
+    return {
+      definitions: [
+        {
+          name: CREATE_VIDEO_TOOL_NAME,
+          description: `${VIDEO_DESCRIPTION} Ready models: ${videoGeneration.describeModels()}`,
+          inputSchema: VIDEO_INPUT_SCHEMA,
+        },
+      ],
+      taintPolicy: "none",
+      close: async () => {
+        stopped.abort();
+      },
+      execute: async (call) => {
+        const signal = combineSignals(stopped.signal, call.signal);
+        if (call.name !== CREATE_VIDEO_TOOL_NAME || !port.turn.allowed()) {
+          return errorResult("tool-unavailable");
+        }
+        const refusal = videoGeneration.refusal?.();
+        if (refusal !== undefined) return errorResult(refusal);
+        const parsed = parseVideoToolInput(call.inputJson);
+        if ("error" in parsed) return errorResult(parsed.error);
+        if (parsed.operation === "save") {
+          if (videoGeneration.save === undefined) {
+            return errorResult(
+              "This thread has no folder to save into. Chat clips stay in the thread.",
+            );
+          }
+          const saved = await videoGeneration.save({
+            ...("clipId" in parsed ? { clipId: parsed.clipId } : { jobId: parsed.jobId }),
+            relativePath: parsed.relativePath,
+            signal,
+          });
+          switch (saved.status) {
+            case "saved":
+              return { result: { status: "saved", relativePath: saved.relativePath } };
+            case "not-saved":
+              return {
+                result: {
+                  status: "not-saved",
+                  message: "The person did not save the clip. Do not ask again unless they do.",
+                },
+              };
+            case "refused":
+              return errorResult(saved.error);
+          }
+        }
+        const { operation: _operation, ...request } = parsed;
+        const outcome = await videoGeneration.generate({ ...request, signal });
+        switch (outcome.status) {
+          case "completed":
+            return {
+              result: {
+                status: "completed",
+                jobId: outcome.jobId,
+                clipId: outcome.clipId,
+                modelId: outcome.modelId,
+                profileInstanceId: outcome.profileInstanceId,
+                durationSeconds: outcome.durationSeconds,
+                resolution: outcome.resolution,
+                sizeBytes: outcome.sizeBytes,
+                message: "The clip is shown in this thread.",
+              },
+            };
+          case "generating":
+            return {
+              result: {
+                status: "generating",
+                jobId: outcome.jobId,
+                message:
+                  "The clip is still being made and appears in this thread when done. To save it in Work or Code, use this jobId after it finishes. Do not start another.",
+              },
+            };
+          case "cancelled":
+            return {
+              result: {
+                status: "cancelled",
+                ...(outcome.jobId === undefined ? {} : { jobId: outcome.jobId }),
+                message: "No clip was made. Do not ask again unless the person does.",
+              },
+            };
+          case "failed":
+            return {
+              result: { status: "failed", jobId: outcome.jobId, error: outcome.message },
+              isError: true,
+            };
+          case "refused":
+            return errorResult(outcome.error);
+        }
+      },
+    };
+  },
+};
+
 export const BUILTIN_MEDIA_TOOL_PLUGINS: ReadonlyArray<MediaToolPluginDefinition> = [
   TRANSCRIBE_MEDIA_TOOL_PLUGIN,
   NARRATE_MEDIA_TOOL_PLUGIN,
   LOOK_MEDIA_TOOL_PLUGIN,
   CREATE_IMAGE_MEDIA_TOOL_PLUGIN,
+  CREATE_VIDEO_MEDIA_TOOL_PLUGIN,
 ];
 
 function isValidContributedDefinition(definition: ProviderToolDefinition): boolean {

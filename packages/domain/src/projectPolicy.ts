@@ -688,8 +688,9 @@ export function changeProjectImageGenerationChoice(
   project: Project,
   choice: ProjectImageGenerationChoice | undefined,
   updatedAt: UtcTimestamp,
+  media: "image" | "video" = "image",
 ): Project {
-  const current = project.imageGenerationChoice;
+  const current = media === "image" ? project.imageGenerationChoice : project.videoGenerationChoice;
   const unchanged =
     choice === undefined
       ? current === undefined
@@ -697,7 +698,18 @@ export function changeProjectImageGenerationChoice(
         String(current.profileInstanceId) === String(choice.profileInstanceId) &&
         String(current.modelId) === String(choice.modelId);
   if (unchanged) {
-    reject("invalid-lifecycle", "Project image generation choice is already selected");
+    reject("invalid-lifecycle", `Project ${media} generation choice is already selected`);
+  }
+  if (media === "video") {
+    const { videoGenerationChoice: _dropped, videoGenerationAskAgain: _asked, ...rest } = project;
+    return {
+      ...rest,
+      ...(choice === undefined
+        ? { videoGenerationAskAgain: true as const }
+        : { videoGenerationChoice: choice }),
+      version: nextVersion(project),
+      updatedAt,
+    };
   }
   const { imageGenerationChoice: _dropped, imageGenerationAskAgain: _asked, ...rest } = project;
   return {
