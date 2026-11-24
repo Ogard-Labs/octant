@@ -1769,15 +1769,17 @@ describe("video jobs", () => {
   );
 
   it.each([
-    { status: 429, endRead: "the HTTP deadline", terminal: "failed", charged: false },
-    { status: 429, endRead: "Stop", terminal: "cancelled", charged: false },
-    { status: 521, endRead: "the HTTP deadline", terminal: "failed", charged: false },
-    { status: 523, endRead: "the HTTP deadline", terminal: "failed", charged: false },
-    { status: 524, endRead: "the HTTP deadline", terminal: "failed", charged: true },
-    { status: 525, endRead: "the HTTP deadline", terminal: "failed", charged: false },
-    { status: 526, endRead: "the HTTP deadline", terminal: "failed", charged: false },
-    { status: 526, endRead: "Stop", terminal: "cancelled", charged: false },
-  ] as const)("accounts for a start with HTTP $status before $endRead", async (scenario) => {
+    { status: 429, source: "bare", endRead: "deadline", terminal: "failed", charged: false },
+    { status: 429, source: "bare", endRead: "Stop", terminal: "cancelled", charged: false },
+    { status: 521, source: "edge", endRead: "deadline", terminal: "failed", charged: false },
+    { status: 523, source: "edge", endRead: "deadline", terminal: "failed", charged: false },
+    { status: 524, source: "edge", endRead: "deadline", terminal: "failed", charged: true },
+    { status: 525, source: "edge", endRead: "deadline", terminal: "failed", charged: false },
+    { status: 525, source: "bare", endRead: "deadline", terminal: "failed", charged: true },
+    { status: 526, source: "edge", endRead: "deadline", terminal: "failed", charged: false },
+    { status: 526, source: "edge", endRead: "Stop", terminal: "cancelled", charged: false },
+    { status: 526, source: "bare", endRead: "Stop", terminal: "cancelled", charged: true },
+  ] as const)("settles $source HTTP $status after $endRead", async (scenario) => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const reading = Promise.withResolvers<void>();
     const cancelled = vi.fn();
@@ -1791,7 +1793,15 @@ describe("video jobs", () => {
               highWaterMark: 0,
             },
           ),
-          { status: scenario.status, headers: { "retry-after": "60" } },
+          {
+            status: scenario.status,
+            headers: {
+              "retry-after": "60",
+              ...(scenario.source === "edge"
+                ? { "cf-error-type": "52x", "cf-error-origin": "fixture" }
+                : {}),
+            },
+          },
         ),
       start: async (ports, request) => {
         try {
@@ -1816,10 +1826,10 @@ describe("video jobs", () => {
       const done = await service.whenTerminal(queued.id);
       expect(done?.status).toBe(scenario.terminal);
       if (scenario.charged) {
-        expect(done).toMatchObject({
-          failure: { category: "interrupted" },
-          settledCostUsdMicros: 695_040,
-        });
+        expect(done?.settledCostUsdMicros).toBe(695_040);
+        if (scenario.terminal === "failed") {
+          expect(done?.failure).toMatchObject({ category: "interrupted" });
+        }
         expect(spend.settle).toHaveBeenCalledOnce();
         expect(spend.abandon).not.toHaveBeenCalled();
       } else {

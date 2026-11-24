@@ -322,12 +322,14 @@ which the person sets, like any turn.
   driver computes from the usage the provider reports (Gemini's token count),
   or to the estimate when the provider reports none.
   - A confirmed failure before output releases its reservation when there
-    is no charged usage. A rate limit or a gateway response that confirms
-    the connection to the origin failed still confirms refusal if Stop or
-    a deadline interrupts the error body. An unconfirmed start after a
-    gateway timeout settles at the estimate. A confirmed
-    completion with invalid output still settles to reported usage or to
-    the estimate when no usage was reported.
+    is no charged usage. Rate limits and confirmed origin connection or TLS
+    failures still release the reservation if Stop or a deadline interrupts
+    the error body. The start recognises Cloudflare 521, 523, 525 and 526 when
+    both [error diagnostic headers](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-error-headers/)
+    identify a gateway-generated error. A bare 52x or a gateway timeout leaves
+    delivery uncertain, and the start settles at the estimate. A confirmed
+    completion with invalid output still settles to reported usage or to the
+    estimate when no usage was reported.
   - A cancelled job settles at the reported usage, or at the estimate when
     none is reported, because a provider may bill a job it had already
     started. Stop releases the reservation after a confirmed rejection

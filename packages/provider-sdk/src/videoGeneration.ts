@@ -233,15 +233,23 @@ export function refuseOutsideDeclaration(
 }
 
 /** The gateway could not reach the origin, or the submission was rate limited. */
-export function isVideoStartRejection(status: number): boolean {
-  return status === 429 || status === 521 || status === 523 || status === 525 || status === 526;
+export function isVideoStartRejection(response: Response): boolean {
+  const { status, headers } = response;
+  if (status === 429) return true;
+  // Cloudflare adds both diagnostic headers to its own errors. A forwarded
+  // 52x status alone cannot establish whether the start reached the provider.
+  return (
+    (status === 521 || status === 523 || status === 525 || status === 526) &&
+    headers.get("cf-error-type") === "52x" &&
+    Boolean(headers.get("cf-error-origin"))
+  );
 }
 
 export function classifyVideoStartHttpFailure(response: Response): VideoAdapterStart {
   return {
     status: "failed",
     providerFailure: classifyVideoHttpFailure(response),
-    ...(isVideoStartRejection(response.status) ? { notStarted: true } : {}),
+    ...(isVideoStartRejection(response) ? { notStarted: true } : {}),
   };
 }
 
