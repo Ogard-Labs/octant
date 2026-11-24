@@ -455,9 +455,9 @@ entry is at most 1,610,022 B (1,572 KiB), the initial CSS at most 665,705 B
 level 6. A change that grows any measure past its budget fails. A change that
 shrinks one lowers the recorded budget. Raising a budget is a maintainer
 decision; the editable composer prompt that holds inline `@model` chips raised
-it (maintainer decision, 2026-11-23), its picker and chip loading on first use,
-and so did refusing saved shortcuts on text editing chords, which are checked at
-startup (maintainer decision, 2026-11-24). The budgets are exact bytes with no headroom, because the same
+it once (maintainer decision, 2026-11-23), its picker and chip loading on first
+use. Refusing saved shortcuts on text editing chords, which are checked at
+startup, was approved to add up to 124 B (maintainer decision, 2026-11-24). The budgets are exact bytes with no headroom, because the same
 source measures identically on macOS and Linux with Bun 1.4.4.
 
 The window build marks every `Schema` call pure and treats every workspace
