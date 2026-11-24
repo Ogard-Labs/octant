@@ -1,4 +1,5 @@
 import { DEVICE_ACCESS_LEVEL_REFUSED_REASON } from "@octant/contracts/remote-access";
+import { THREAD_SECRETS_PATH } from "./threadSecrets/threadSecretRoutes";
 import { authorizePrincipalAction } from "@octant/domain";
 import { removeImageMetadata } from "./attachments/imageMetadataRemoval";
 import { NEW_DEVICE_ALERTS_PATH } from "./hub/newDeviceAlertRoutes";
@@ -102,7 +103,7 @@ export function classifyProductAction(request: Request): string | undefined {
   const path = url.pathname;
 
   // Private credential entry is host-local and is never a forwarded product action.
-  if (path === "/api/credential-requests") return undefined;
+  if (path === "/api/credential-requests" || path === THREAD_SECRETS_PATH) return undefined;
 
   const harnessSession =
     /^\/api\/native-harness\/sessions\/[^/]+(?:\/(approvals|questions))?$/.exec(path);

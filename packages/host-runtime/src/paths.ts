@@ -55,6 +55,12 @@ export interface HostRuntimePaths {
   readonly windowsSocketPath: string;
   /** Linux only: the AppImage Octant last launched from, for a host-only start. */
   readonly launcherRecordPath: string;
+  /**
+   * Where this host writes the secrets a person gives a thread. Named for the
+   * data directory like the sockets beside it: every host of one user shares
+   * the runtime folder, and each removes its own secrets as it starts.
+   */
+  readonly threadSecretsDirectory: string;
   readonly bridgeSecretPath: string;
   readonly hostInfoPath: string;
   readonly servicePolicyPath: string;
@@ -167,6 +173,7 @@ export function resolveHostRuntimePaths(
     controlSecretPath: join(runtimeDirectory, `${identity}.secret`),
     windowsSocketPath,
     launcherRecordPath: join(runtimeDirectory, `${identity}.launcher.json`),
+    threadSecretsDirectory: join(runtimeDirectory, "thread-secrets", identity),
     bridgeSecretPath: join(dataDirectory, "octant-bridge-secret"),
     hostInfoPath: join(dataDirectory, "octant-host.json"),
     servicePolicyPath: join(configDirectory, "service-policy.json"),

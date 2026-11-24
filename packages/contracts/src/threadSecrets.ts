@@ -146,6 +146,7 @@ export const ThreadSecretRequestInput = Schema.Struct({
 export type ThreadSecretRequestInput = typeof ThreadSecretRequestInput.Type;
 
 const saved = { status: Schema.Literal("saved"), name: ThreadSecretName } as const;
+const FieldHandles = Schema.Record({ key: ThreadSecretFieldName, value: Schema.UUID });
 const FieldPaths = Schema.Record({ key: ThreadSecretFieldName, value: Schema.NonEmptyString });
 const FieldVariables = Schema.Record({ key: ThreadSecretFieldName, value: EnvironmentName });
 
@@ -155,6 +156,12 @@ export const ThreadSecretRequestResult = Schema.Union(
     ...saved,
     delivery: Schema.Literal("handle"),
     handle: Schema.UUID,
+  }).annotations(strict),
+  Schema.Struct({
+    ...saved,
+    delivery: Schema.Literal("handle"),
+    /** One per field, so a consumer is never handed the wrong one. */
+    handles: FieldHandles,
   }).annotations(strict),
   Schema.Struct({
     ...saved,
@@ -281,6 +288,39 @@ export const ActiveThreadSecret = Schema.Struct({
 }).annotations(strict);
 export type ActiveThreadSecret = typeof ActiveThreadSecret.Type;
 
+/** What one window may see of one thread: its waiting cards and its active secrets. */
+export const ThreadSecretsView = Schema.Struct({
+  requests: Schema.Array(ThreadSecretRequestCard).pipe(Schema.maxItems(8)),
+  active: Schema.Array(ActiveThreadSecret).pipe(Schema.maxItems(64)),
+}).annotations(strict);
+export type ThreadSecretsView = typeof ThreadSecretsView.Type;
+
+/** Private submission only, like the answer it carries. */
+export const ThreadSecretCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("answer"),
+    threadId: ThreadId,
+    answer: ThreadSecretAnswer,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("revoke"),
+    threadId: ThreadId,
+    secretId: Schema.UUID,
+  }).annotations(strict),
+);
+export type ThreadSecretCommand = typeof ThreadSecretCommand.Type;
+
+export const ThreadSecretCommandResult = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("accepted") }).annotations(strict),
+  /** The card stays open and shows why, so the person can try again. */
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    failure: ThreadSecretFailure,
+  }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("gone") }).annotations(strict),
+);
+export type ThreadSecretCommandResult = typeof ThreadSecretCommandResult.Type;
+
 export const THREAD_SECRET_EVENT_NAME = "thread-secret.recorded@1";
 export const THREAD_SECRET_AGGREGATE_TYPE = "thread-secret";
 
@@ -324,11 +364,14 @@ export const ThreadSecretJournalRecord = Schema.Union(
       "turn-ended",
       "thread-archived",
       "host-stopped",
+      "delivery-failed",
     ),
   }).annotations(strict),
 );
 export type ThreadSecretJournalRecord = typeof ThreadSecretJournalRecord.Type;
 
 export const decodeThreadSecretRequestInput = Schema.decodeUnknownEither(ThreadSecretRequestInput);
-export const decodeThreadSecretAnswer = Schema.decodeUnknownEither(ThreadSecretAnswer);
+export const decodeThreadSecretCommand = Schema.decodeUnknownEither(ThreadSecretCommand);
 export const decodeThreadSecretJournalRecord = Schema.decodeUnknownSync(ThreadSecretJournalRecord);
+export const decodeThreadSecretsView = Schema.decodeUnknownSync(ThreadSecretsView);
+export const decodeThreadSecretCommandResult = Schema.decodeUnknownSync(ThreadSecretCommandResult);

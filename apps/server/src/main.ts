@@ -229,6 +229,7 @@ try {
             instanceId,
             hostId,
             controlEndpoint: paths.socketPath,
+            threadSecretsDirectory: paths.threadSecretsDirectory,
             serviceMode: launchConfig.hostServiceMode,
             platformCapabilities: availablePlatformCapabilityNames(platformCapabilityReport).map(
               (name) => `platform:${name}`,

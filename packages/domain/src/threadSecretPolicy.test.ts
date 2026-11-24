@@ -90,25 +90,35 @@ describe("the lifetime an answer asks for", () => {
 });
 
 describe("how a saved secret reaches its use", () => {
-  it("writes a file and a variable only outside Strict", () => {
-    const file = { requested: "file", freshEachUse: false } as const;
-    expect(resolveThreadSecretDelivery({ ...file, strict: false })).toBe("file-and-environment");
+  const file = {
+    requested: "file",
+    lifetime: "24-hours",
+    strict: false,
+    commandsConfined: false,
+    freshEachUse: false,
+  } as const;
+
+  it("writes a file only where the thread's own commands run outside a sandbox", () => {
+    expect(resolveThreadSecretDelivery(file)).toBe("file-and-environment");
     expect(resolveThreadSecretDelivery({ ...file, strict: true })).toBe("environment");
+    expect(resolveThreadSecretDelivery({ ...file, commandsConfined: true })).toBe("environment");
+  });
+
+  it("writes no file for a secret that lasts one command", () => {
+    expect(resolveThreadSecretDelivery({ ...file, lifetime: "this-command" })).toBe("environment");
   });
 
   it("writes no file when every use reads the item again", () => {
     for (const strict of [true, false])
-      expect(resolveThreadSecretDelivery({ requested: "file", freshEachUse: true, strict })).toBe(
-        "op-run",
-      );
+      expect(resolveThreadSecretDelivery({ ...file, freshEachUse: true, strict })).toBe("op-run");
   });
 
   it("keeps a handle a handle, away from the agent's shell", () => {
     for (const strict of [true, false])
       for (const freshEachUse of [true, false])
-        expect(resolveThreadSecretDelivery({ requested: "handle", freshEachUse, strict })).toBe(
-          "handle",
-        );
+        expect(
+          resolveThreadSecretDelivery({ ...file, requested: "handle", freshEachUse, strict }),
+        ).toBe("handle");
   });
 
   it("gives each field its own file name and variable", () => {

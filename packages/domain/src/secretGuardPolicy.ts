@@ -273,6 +273,10 @@ function builtInRules(platform: SecretGuardPlatform): ReadonlyArray<ProtectedFil
         { kind: "path", base: "data", path: "integrations" },
         { kind: "path", base: "data", path: "harness/cloud-cli" },
         names("", "[^/]*\\.secret", 1, { base: "runtime" }),
+        // Secrets a person gave a thread: the runtime directory, or the data
+        // directory on Windows, which has no runtime directory.
+        { kind: "path", base: "runtime", path: "thread-secrets" },
+        { kind: "path", base: "data", path: "thread-secrets" },
       ],
     },
     {
@@ -672,8 +676,12 @@ export interface SecretRedaction {
 export function redactSecrets(
   text: string,
   issuedValues: ReadonlyArray<string> = [],
+  /** Values a person gave a thread, replaced whatever their length. */
+  heldValues: ReadonlyArray<string> = [],
 ): SecretRedaction {
   let output = text;
+  for (const value of [...heldValues].sort((a, b) => b.length - a.length))
+    if (value.length > 0) output = output.split(value).join(SECRET_REDACTION);
   for (const value of [...issuedValues].sort((a, b) => b.length - a.length)) {
     if (value.length < MINIMUM_ISSUED_VALUE_LENGTH) continue;
     output = output.split(value).join(SECRET_REDACTION);
@@ -714,12 +722,16 @@ function withoutTrailingSlashes(path: string): string {
 }
 
 /** Redacts every string inside a JSON-shaped value, keys left as they are. */
-export function redactSecretsInValue<T>(value: T, issuedValues: ReadonlyArray<string> = []): T {
-  if (typeof value === "string") return redactSecrets(value, issuedValues).text as T;
+export function redactSecretsInValue<T>(
+  value: T,
+  issuedValues: ReadonlyArray<string> = [],
+  heldValues: ReadonlyArray<string> = [],
+): T {
+  if (typeof value === "string") return redactSecrets(value, issuedValues, heldValues).text as T;
   if (Array.isArray(value)) {
     let changed = false;
     const next = value.map((item: unknown) => {
-      const redacted = redactSecretsInValue(item, issuedValues);
+      const redacted = redactSecretsInValue(item, issuedValues, heldValues);
       if (redacted !== item) changed = true;
       return redacted;
     });
@@ -729,12 +741,27 @@ export function redactSecretsInValue<T>(value: T, issuedValues: ReadonlyArray<st
   let changed = false;
   const next: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    const redacted = redactSecretsInValue(item, issuedValues);
+    // A password can be a word Octant itself uses ("tool-failure"). Replacing
+    // what says which event this is would break the event, not hide the password.
+    const held = DISCRIMINANT_KEYS.has(key)
+      ? heldValues.filter((entry) => entry !== item || !PLAIN_WORD.test(entry))
+      : heldValues;
+    const redacted = redactSecretsInValue(item, issuedValues, held);
     if (redacted !== item) changed = true;
     next[key] = redacted;
   }
   return (changed ? next : value) as T;
 }
+
+const DISCRIMINANT_KEYS: ReadonlySet<string> = new Set([
+  "kind",
+  "status",
+  "state",
+  "type",
+  "category",
+  "stopReason",
+]);
+const PLAIN_WORD = /^[a-z][a-z-]*$/u;
 
 export function joinPosix(base: string, relative: string): string {
   if (relative === "") return base;

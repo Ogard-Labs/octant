@@ -93,16 +93,25 @@ export function decideThreadSecretLifetime(
 
 /**
  * How a saved secret reaches its use. A handle never reaches the agent's shell,
- * so Strict has no file to keep out of it.
+ * so nothing has to be kept out of it. A file is written only where the
+ * thread's own commands run outside a sandbox: a sandboxed command is denied
+ * every secret's folder, and reads the variable from a command Octant runs.
+ * Octant cannot see which of a provider's own commands read a file, so a secret
+ * for one command has none.
  */
 export function resolveThreadSecretDelivery(input: {
   readonly requested: ThreadSecretRequestedDelivery;
+  readonly lifetime: ThreadSecretLifetime;
   readonly strict: boolean;
+  /** The thread's own commands run inside a sandbox Octant holds. */
+  readonly commandsConfined: boolean;
   readonly freshEachUse: boolean;
 }): ThreadSecretDelivery {
   if (input.requested === "handle") return "handle";
   if (input.freshEachUse) return "op-run";
-  return input.strict ? "environment" : "file-and-environment";
+  return input.strict || input.commandsConfined || input.lifetime === "this-command"
+    ? "environment"
+    : "file-and-environment";
 }
 
 /** The file and variable names a request's fields become, in the order it named them. */

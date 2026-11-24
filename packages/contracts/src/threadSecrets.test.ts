@@ -100,6 +100,12 @@ describe("what the agent gets back", () => {
     { status: "saved", delivery: "handle", name: "DEPLOY_TOKEN", handle: ID },
     {
       status: "saved",
+      delivery: "handle",
+      name: "SERVICE",
+      handles: { EMAIL: ID, TOKEN: OTHER_ID },
+    },
+    {
+      status: "saved",
       delivery: "file-and-environment",
       name: "DEPLOY_TOKEN",
       file: "/private/tmp/runtime/thread-secrets/thread/DEPLOY_TOKEN",
