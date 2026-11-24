@@ -9,6 +9,7 @@ import {
 } from "@octant/provider-sdk/video-generation-conformance";
 import { describe, expect, it, vi } from "vitest";
 import { falPrice, falVideoDriver } from "./falVideoAdapter";
+import { makeVideoGenerationPorts } from "./videoHttp";
 
 const veo = decodeProviderModelId("fal-ai/veo3.1");
 const veoImage = decodeProviderModelId("fal-ai/veo3.1/image-to-video");
@@ -104,6 +105,60 @@ function ports(respond: (request: VideoHttpRequest) => Response): {
 }
 
 describe("fal video driver", () => {
+  it("interrupts discovery while a pooled key's rate-limit body is stalled", async () => {
+    const controller = new AbortController();
+    const reading = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const cancelled = vi.fn(() => release.resolve());
+    const reportRejected = vi.fn();
+    const adapter = falVideoDriver.create({
+      profile: { ...profile, modelIds: [veo] },
+      ports: makeVideoGenerationPorts({
+        instanceId: String(profile.instanceId),
+        providerHosts: ["api.fal.ai", "fal.ai"],
+        credentialResolver: {
+          has: async () => true,
+          resolve: async () => "fixture-key",
+          lease: async () => ({ credential: "fixture-key", reportRejected }),
+        },
+        fetch: async (input) => {
+          if (new URL(String(input)).hostname === "fal.ai")
+            return Response.json(schema(String(veo), false));
+          return new Response(
+            new ReadableStream(
+              {
+                pull(stream) {
+                  reading.resolve();
+                  return release.promise.then(() => {
+                    if (cancelled.mock.calls.length === 0) stream.close();
+                  });
+                },
+                cancel: cancelled,
+              },
+              { highWaterMark: 0 },
+            ),
+            { status: 429, headers: { "retry-after": "60" } },
+          );
+        },
+      }),
+    });
+    const settled = vi.fn();
+    const pending = adapter.models(controller.signal).then(
+      () => settled("answered"),
+      () => settled("interrupted"),
+    );
+    try {
+      await reading.promise;
+      controller.abort();
+      await vi.waitFor(() => expect(settled).toHaveBeenCalledWith("interrupted"));
+      await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
+      expect(reportRejected).toHaveBeenCalledWith({ status: 429, retryAfterSeconds: 60, body: "" });
+    } finally {
+      release.resolve();
+      await pending;
+    }
+  });
+
   it("forwards the discovery signal through pricing and a stalled schema request", async () => {
     const control = new AbortController();
     const sent: Array<VideoHttpRequest> = [];
