@@ -56,6 +56,7 @@ const auxiliary = (value: typeof desktop) => [
   value.pushPlatformCredentials,
   value.sshKeys,
   value.webSearchCredentials,
+  value.threadSecretCredentials,
 ];
 const auxiliaryStores = auxiliary(desktop);
 const otherAuxiliary = auxiliary(await backend(randomUUID()));

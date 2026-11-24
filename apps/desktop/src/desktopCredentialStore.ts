@@ -33,6 +33,8 @@ export type DesktopCredentialBackend =
       readonly sshKeys: CredentialStore;
       /** Web search backends' API keys, in their own Keychain service. */
       readonly webSearchCredentials: CredentialStore;
+      /** Secrets a person asked Octant to remember for threads, in their own Keychain service. */
+      readonly threadSecretCredentials: CredentialStore;
     }
   | {
       readonly kind: "secret-service";
@@ -54,6 +56,8 @@ export type DesktopCredentialBackend =
       readonly sshKeys: CredentialStore;
       /** Web search backends' API keys, under their own attribute. */
       readonly webSearchCredentials: CredentialStore;
+      /** Secrets a person asked Octant to remember for threads, under their own attribute. */
+      readonly threadSecretCredentials: CredentialStore;
     }
   | {
       readonly kind: "credential-manager";
@@ -67,6 +71,7 @@ export type DesktopCredentialBackend =
       readonly pushPlatformCredentials: CredentialStore;
       readonly sshKeys: CredentialStore;
       readonly webSearchCredentials: CredentialStore;
+      readonly threadSecretCredentials: CredentialStore;
     }
   | {
       readonly kind: "unavailable";
@@ -80,6 +85,7 @@ export type DesktopCredentialBackend =
       readonly pushPlatformCredentials?: undefined;
       readonly sshKeys?: undefined;
       readonly webSearchCredentials?: undefined;
+      readonly threadSecretCredentials?: undefined;
     };
 
 /**
@@ -140,6 +146,10 @@ export async function resolveDesktopCredentialBackend(options: {
         ...keychain,
         namespace: "web-search-credential",
       }),
+      threadSecretCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
+        ...keychain,
+        namespace: "thread-secret-credential",
+      }),
     };
   }
   if (options.platform === "linux") {
@@ -158,6 +168,7 @@ export async function resolveDesktopCredentialBackend(options: {
       pushPlatformCredentials: store("push-platform-credential"),
       sshKeys: store("ssh-key"),
       webSearchCredentials: store("web-search-credential"),
+      threadSecretCredentials: store("thread-secret-credential"),
     };
   }
   if (options.platform === "win32" && options.windowsCredentialHelperPath !== undefined) {
@@ -180,6 +191,7 @@ export async function resolveDesktopCredentialBackend(options: {
       pushPlatformCredentials: store("push-platform-credential"),
       sshKeys: store("ssh-key"),
       webSearchCredentials: store("web-search-credential"),
+      threadSecretCredentials: store("thread-secret-credential"),
     };
   }
   return { kind: "unavailable" };

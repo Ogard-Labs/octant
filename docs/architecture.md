@@ -19707,6 +19707,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
     active secret returns a new handle per field with no card, never a wider
     delivery, and never another turn's secret when it was given for one turn. The
     same retry key returns the same answer while it is still true.
+  - **Remembered secrets.** A secret a person chose to have Octant remember lives
+    only in the credential broker's `/v1/thread-secret-credentials/*` namespace
+    (Keychain service `thread-secret-credentials.v1`, Secret Service attribute
+    `octant.thread-secret-credentials.v1`, a Credential Manager purpose of its
+    own), keyed by an opaque secret id. It is served only on those routes, so no
+    provider, connector, search key or other secret with the same UUID can read,
+    replace or delete one.
   - **Files.** `<runtime>/thread-secrets/<host>/<thread>/<NAME>` on macOS and
     Linux, folder 0700 and file 0600, where `<host>` names the data directory:
     every host of one user shares the runtime folder, and each clears its own as
