@@ -8,7 +8,6 @@ import { ThemeProvider } from "../../design-system/theme";
 import { ThreadTranscript, type ThreadTranscriptProps } from "../inbox/thread/ThreadTranscript";
 import { TranscriptHandoffDivider } from "./TranscriptHandoffDivider";
 import {
-  mobileChatHandoffPlacements,
   resolveMobileTranscriptHandoff,
   type MobileTranscriptHandoffEntry,
 } from "./transcriptHandoffPresentation";
@@ -323,14 +322,31 @@ describe("TranscriptHandoffDivider on the phone", () => {
       followUpVersion: 0,
     });
 
-    const placements = mobileChatHandoffPlacements(view, modelOptions);
-    expect(placements.beforeContentId.get(user1Id)).toBeUndefined();
-    expect(placements.beforeContentId.get(reply1bId)?.[0]?.kind).toBe("context-handoff");
-    expect(placements.beforeContentId.get(reply1bId)?.[0]?.route?.from.label).toBe("GPT-5.3");
-    expect(placements.beforeContentId.get(reply1bId)?.[0]?.route?.to.label).toBe("Sonnet 4");
-    expect(placements.beforeContentId.get(user2Id)?.[0]?.kind).toBe("model-switch");
-    expect(placements.beforeContentId.get(user2Id)?.[0]?.route?.from.label).toBe("Sonnet 4");
-    expect(placements.beforeContentId.get(user2Id)?.[0]?.route?.to.label).toBe("Opus 4");
+    const host = renderChatTranscript(view);
+    const renderedIds = Array.from(host.querySelectorAll("[data-testid]"))
+      .map((element) => element.getAttribute("data-testid") ?? "")
+      .filter(
+        (id) =>
+          /^mobile-message-[0-9a-f-]{36}$/.test(id) ||
+          /^mobile-chat-handoff-(?:after-)?[0-9a-f-]{36}(?:-\d+)?$/.test(id),
+      );
+    expect(renderedIds).toEqual([
+      `mobile-message-${user1Id}`,
+      `mobile-message-${reply1aId}`,
+      `mobile-chat-handoff-${reply1bId}`,
+      `mobile-message-${reply1bId}`,
+      `mobile-chat-handoff-${user2Id}`,
+      `mobile-message-${user2Id}`,
+      `mobile-message-${reply2Id}`,
+    ]);
+    const retryDivider = host.querySelector(`[data-testid="mobile-chat-handoff-${reply1bId}"]`);
+    expect(retryDivider?.textContent).toContain("Context handoff");
+    expect(retryDivider?.textContent).toContain("GPT-5.3");
+    expect(retryDivider?.textContent).toContain("Sonnet 4");
+    const turnDivider = host.querySelector(`[data-testid="mobile-chat-handoff-${user2Id}"]`);
+    expect(turnDivider?.textContent).toContain("Model switch");
+    expect(turnDivider?.textContent).toContain("Sonnet 4");
+    expect(turnDivider?.textContent).toContain("Opus 4");
   });
 
   it("prefers the recorded handoff source when a stopped handoff repeats on the destination provider", () => {
@@ -525,14 +541,30 @@ describe("TranscriptHandoffDivider on the phone", () => {
       followUpVersion: 0,
     });
 
-    const placements = mobileChatHandoffPlacements(view, modelOptions);
-    const afterUser = placements.afterContentId.get(userId);
-    expect(afterUser).toHaveLength(2);
-    expect(afterUser?.[0]?.route?.from.label).toBe("GPT-5.3");
-    expect(afterUser?.[0]?.route?.to.label).toBe("Sonnet 4");
-    expect(afterUser?.[0]?.disclosure).toContain("Handed over 4 recent messages");
-    expect(afterUser?.[1]?.route?.from.label).toBe("GPT-5.3");
-    expect(afterUser?.[1]?.route?.to.label).toBe("Sonnet 4");
+    const host = renderChatTranscript(view);
+    const renderedIds = Array.from(host.querySelectorAll("[data-testid]"))
+      .map((element) => element.getAttribute("data-testid") ?? "")
+      .filter(
+        (id) =>
+          /^mobile-message-[0-9a-f-]{36}$/.test(id) ||
+          /^mobile-chat-handoff-(?:after-)?[0-9a-f-]{36}(?:-\d+)?$/.test(id),
+      );
+    expect(renderedIds).toEqual([
+      `mobile-message-${userId}`,
+      `mobile-chat-handoff-after-${userId}-0`,
+      `mobile-chat-handoff-after-${userId}-1`,
+    ]);
+    const firstDivider = host.querySelector(
+      `[data-testid="mobile-chat-handoff-after-${userId}-0"]`,
+    );
+    const secondDivider = host.querySelector(
+      `[data-testid="mobile-chat-handoff-after-${userId}-1"]`,
+    );
+    expect(firstDivider?.textContent).toContain("GPT-5.3");
+    expect(firstDivider?.textContent).toContain("Sonnet 4");
+    expect(firstDivider?.textContent).toContain("Handed over 4 recent messages");
+    expect(secondDivider?.textContent).toContain("GPT-5.3");
+    expect(secondDivider?.textContent).toContain("Sonnet 4");
   });
 
   it("keeps a replyless retry handoff ahead of a later retry reply even when reply ids sort before prompt ids", () => {

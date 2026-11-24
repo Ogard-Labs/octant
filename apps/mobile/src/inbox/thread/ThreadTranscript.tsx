@@ -13,7 +13,6 @@ import {
   type MobileTurnTargets,
 } from "@octant/client-runtime";
 import type { ChatAttachment, ReplyDetailLevel, WorkTurnState } from "@octant/contracts";
-import { activeChatTurns } from "@octant/domain";
 import { MOBILE_COPY } from "../../copy";
 import { mobileSpacing, mobileTypography } from "../../theme/tokens";
 import { useTheme } from "../../../design-system";
@@ -22,7 +21,9 @@ import { MessageBubble } from "../../ui/MessageBubble";
 import { RoutineReceiptCard } from "../../ui/RoutineReceiptCard";
 import { TranscriptHandoffDivider } from "../../ui/TranscriptHandoffDivider";
 import {
+  mobileChatTranscriptAnnotations,
   resolveMobileTranscriptHandoff,
+  type MobileChatTranscriptAnnotations,
   type MobileTranscriptHandoffEntry,
 } from "../../ui/transcriptHandoffPresentation";
 import type { MessageActionItem } from "../../ui/MessageActions";
@@ -145,103 +146,12 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
   const codeTurns = codeConversation?.turns;
   const view = chat.view;
   const messages = useMemo(() => (view === undefined ? [] : mobileChatMessages(view)), [view]);
-  // Interleave handoff dividers and Sees images attribution in strict attempt
-  // order so an earlier replyless attempt's image note never crosses a later
-  // retry's handoff boundary.
-  const chatAnnotations = useMemo(() => {
-    type Annotation =
-      | { readonly kind: "handoff"; readonly entry: MobileTranscriptHandoffEntry }
-      | { readonly kind: "described-images"; readonly text: string };
-    const beforeContentId = new Map<string, Annotation[]>();
-    const afterContentId = new Map<string, Annotation[]>();
-    const trailing: Annotation[] = [];
-    if (view === undefined) return { beforeContentId, afterContentId, trailing };
-    const shownIds = new Set(messages.map((entry) => String(entry.content.contentId)));
-    const append = (map: Map<string, Annotation[]>, key: string, item: Annotation) => {
-      const existing = map.get(key);
-      if (existing === undefined) {
-        map.set(key, [item]);
-      } else {
-        existing.push(item);
-      }
-    };
-    const placeForAttempt = (
-      firstVisibleReply: string | undefined,
-      lastVisibleAnchor: string | undefined,
-      item: Annotation,
-    ) => {
-      if (firstVisibleReply !== undefined) {
-        append(beforeContentId, firstVisibleReply, item);
-      } else if (lastVisibleAnchor !== undefined) {
-        append(afterContentId, lastVisibleAnchor, item);
-      } else {
-        trailing.push(item);
-      }
-    };
-    const describedImagesText = (
-      describedImages: NonNullable<
-        NonNullable<typeof view>["turns"][number]["attempts"][number]["describedImages"]
-      >,
-    ) =>
-      describedImages
-        .map(
-          (image) =>
-            `${image.name} described by ${image.describedBy.model} (${image.describedBy.provider})`,
-        )
-        .join(" · ");
-
-    let previousTurnAttempt:
-      | NonNullable<typeof view>["turns"][number]["attempts"][number]
-      | undefined;
-    for (const turn of activeChatTurns(view.turns)) {
-      const userId = String(turn.userMessageRef.contentId);
-      let lastVisibleAnchor: string | undefined = shownIds.has(userId) ? userId : undefined;
-      for (let index = 0; index < turn.attempts.length; index += 1) {
-        const attempt = turn.attempts[index];
-        if (attempt === undefined) continue;
-        const firstVisibleReply = attempt.responseRefs
-          .map((ref) => String(ref.contentId))
-          .find((id) => shownIds.has(id));
-        const handoffEntry = resolveMobileTranscriptHandoff({
-          previous: index === 0 ? previousTurnAttempt : turn.attempts[index - 1],
-          current: attempt,
-          handoff: attempt.handoff,
-          modelOptions,
-          providerDirectory,
-        });
-        if (handoffEntry !== undefined) {
-          if (index === 0) {
-            if (shownIds.has(userId)) {
-              append(beforeContentId, userId, { kind: "handoff", entry: handoffEntry });
-            } else {
-              trailing.push({ kind: "handoff", entry: handoffEntry });
-            }
-          } else {
-            placeForAttempt(firstVisibleReply, lastVisibleAnchor, {
-              kind: "handoff",
-              entry: handoffEntry,
-            });
-          }
-        }
-        if (attempt.describedImages !== undefined && attempt.describedImages.length > 0) {
-          placeForAttempt(firstVisibleReply, lastVisibleAnchor, {
-            kind: "described-images",
-            text: describedImagesText(attempt.describedImages),
-          });
-        }
-        for (const ref of attempt.responseRefs) {
-          const id = String(ref.contentId);
-          if (shownIds.has(id)) lastVisibleAnchor = id;
-        }
-        if (attempt.researchRef !== undefined) {
-          const researchId = String(attempt.researchRef.contentId);
-          if (shownIds.has(researchId)) lastVisibleAnchor = researchId;
-        }
-      }
-      const latest = turn.attempts.at(-1);
-      if (latest !== undefined) previousTurnAttempt = latest;
+  const chatAnnotations = useMemo<MobileChatTranscriptAnnotations>(() => {
+    if (view === undefined) {
+      return { beforeContentId: new Map(), afterContentId: new Map(), trailing: [] };
     }
-    return { beforeContentId, afterContentId, trailing };
+    const shownIds = new Set(messages.map((entry) => String(entry.content.contentId)));
+    return mobileChatTranscriptAnnotations(view, modelOptions, providerDirectory, shownIds);
   }, [messages, modelOptions, providerDirectory, view]);
   const workHandoffs = useMemo(() => {
     const map = new Map<string, MobileTranscriptHandoffEntry>();

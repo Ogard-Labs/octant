@@ -1026,7 +1026,7 @@ describe("WorkThreadWorkspace", () => {
     expect(document.querySelector("[data-compaction-divider]")).toBeNull();
     const transcript = screen.getByRole("region", { name: "Task workspace" });
     expect(transcript.textContent).toMatch(
-      /Here is the confined summary\.[\s\S]*Turn one canvas[\s\S]*Context handoff[\s\S]*Model One[\s\S]*Model Two[\s\S]*Continue on the remote provider/,
+      /Summarize the brief[\s\S]*Turn one canvas[\s\S]*Here is the confined summary\.[\s\S]*Context handoff[\s\S]*Model One[\s\S]*Model Two[\s\S]*Continue on the remote provider/,
     );
   });
 

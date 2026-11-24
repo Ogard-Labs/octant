@@ -44,10 +44,14 @@ export type MobileRecordedHandoff =
   | WorkTurnHandoff
   | CodeConversationTurnHandoff;
 
-export interface MobileChatHandoffPlacements {
-  readonly beforeContentId: ReadonlyMap<string, ReadonlyArray<MobileTranscriptHandoffEntry>>;
-  readonly afterContentId: ReadonlyMap<string, ReadonlyArray<MobileTranscriptHandoffEntry>>;
-  readonly trailing: ReadonlyArray<MobileTranscriptHandoffEntry>;
+export type MobileChatTranscriptAnnotation =
+  | { readonly kind: "handoff"; readonly entry: MobileTranscriptHandoffEntry }
+  | { readonly kind: "described-images"; readonly text: string };
+
+export interface MobileChatTranscriptAnnotations {
+  readonly beforeContentId: ReadonlyMap<string, ReadonlyArray<MobileChatTranscriptAnnotation>>;
+  readonly afterContentId: ReadonlyMap<string, ReadonlyArray<MobileChatTranscriptAnnotation>>;
+  readonly trailing: ReadonlyArray<MobileChatTranscriptAnnotation>;
 }
 
 const HEADING_FOR_KIND: Readonly<Record<MobileTranscriptHandoffKind, string>> = {
@@ -361,99 +365,108 @@ export function resolveMobileTranscriptHandoff(input: {
   };
 }
 
-function appendEntry(
-  map: Map<string, MobileTranscriptHandoffEntry[]>,
+function appendAnnotation(
+  map: Map<string, MobileChatTranscriptAnnotation[]>,
   key: string,
-  entry: MobileTranscriptHandoffEntry,
+  annotation: MobileChatTranscriptAnnotation,
 ): void {
   const existing = map.get(key);
   if (existing === undefined) {
-    map.set(key, [entry]);
+    map.set(key, [annotation]);
     return;
   }
-  existing.push(entry);
+  existing.push(annotation);
 }
 
 /**
- * Places each Chat handoff or switch boundary in attempt order: turn-to-turn
- * transitions ahead of the turn's user message, reply-bearing retries ahead of
- * that attempt's first reply, and replyless retries immediately after the
- * preceding visible message in the same turn so their disclosures are never lost.
+ * Places each Chat handoff divider and Sees images attribution note in strict
+ * attempt order: turn-to-turn transitions ahead of the turn's user message,
+ * reply-bearing retries and image notes ahead of that attempt's first reply,
+ * and replyless attempts immediately after the preceding visible message in the
+ * same turn so earlier image attributions never cross a later retry's handoff.
  */
-export function mobileChatHandoffPlacements(
+export function mobileChatTranscriptAnnotations(
   view: ChatThreadView,
   modelOptions: ReadonlyArray<MobileModelOption>,
   providerDirectory: ReadonlyArray<MobileProviderDirectoryEntry> = [],
-): MobileChatHandoffPlacements {
-  const beforeContentId = new Map<string, MobileTranscriptHandoffEntry[]>();
-  const afterContentId = new Map<string, MobileTranscriptHandoffEntry[]>();
-  const trailing: MobileTranscriptHandoffEntry[] = [];
-  const storedContentIds = new Set(view.contents.map((content) => String(content.contentId)));
+  shownContentIds?: ReadonlySet<string>,
+): MobileChatTranscriptAnnotations {
+  const beforeContentId = new Map<string, MobileChatTranscriptAnnotation[]>();
+  const afterContentId = new Map<string, MobileChatTranscriptAnnotation[]>();
+  const trailing: MobileChatTranscriptAnnotation[] = [];
+  const visibleIds =
+    shownContentIds ?? new Set(view.contents.map((content) => String(content.contentId)));
+  const placeForAttempt = (
+    firstVisibleReply: string | undefined,
+    lastVisibleAnchor: string | undefined,
+    item: MobileChatTranscriptAnnotation,
+  ) => {
+    if (firstVisibleReply !== undefined) {
+      appendAnnotation(beforeContentId, firstVisibleReply, item);
+    } else if (lastVisibleAnchor !== undefined) {
+      appendAnnotation(afterContentId, lastVisibleAnchor, item);
+    } else {
+      trailing.push(item);
+    }
+  };
   const turns = activeChatTurns(view.turns);
   let previousTurnAttempt: ChatThreadView["turns"][number]["attempts"][number] | undefined;
 
   for (const turn of turns) {
     const userContentId = String(turn.userMessageRef.contentId);
-    let lastVisibleAnchor: string | undefined = storedContentIds.has(userContentId)
+    let lastVisibleAnchor: string | undefined = visibleIds.has(userContentId)
       ? userContentId
       : undefined;
 
-    const firstAttempt = turn.attempts[0];
-    if (firstAttempt !== undefined) {
-      const turnEntry = resolveMobileTranscriptHandoff({
-        previous: previousTurnAttempt,
-        current: firstAttempt,
-        handoff: firstAttempt.handoff,
-        modelOptions,
-        providerDirectory,
-      });
-      if (turnEntry !== undefined) {
-        if (storedContentIds.has(userContentId)) {
-          appendEntry(beforeContentId, userContentId, turnEntry);
-        } else {
-          trailing.push(turnEntry);
-        }
-      }
-      for (const ref of firstAttempt.responseRefs) {
-        const id = String(ref.contentId);
-        if (storedContentIds.has(id)) lastVisibleAnchor = id;
-      }
-      if (firstAttempt.researchRef !== undefined) {
-        const researchId = String(firstAttempt.researchRef.contentId);
-        if (storedContentIds.has(researchId)) lastVisibleAnchor = researchId;
-      }
-    }
-
-    for (let index = 1; index < turn.attempts.length; index += 1) {
-      const previousAttempt = turn.attempts[index - 1];
+    for (let index = 0; index < turn.attempts.length; index += 1) {
       const attempt = turn.attempts[index];
-      if (previousAttempt === undefined || attempt === undefined) continue;
-      const attemptEntry = resolveMobileTranscriptHandoff({
-        previous: previousAttempt,
+      if (attempt === undefined) continue;
+      const firstVisibleReply = attempt.responseRefs
+        .map((ref) => String(ref.contentId))
+        .find((id) => visibleIds.has(id));
+      const handoffEntry = resolveMobileTranscriptHandoff({
+        previous: index === 0 ? previousTurnAttempt : turn.attempts[index - 1],
         current: attempt,
         handoff: attempt.handoff,
         modelOptions,
         providerDirectory,
       });
-      const firstVisibleReply = attempt.responseRefs
-        .map((ref) => String(ref.contentId))
-        .find((id) => storedContentIds.has(id));
-      if (attemptEntry !== undefined) {
-        if (firstVisibleReply !== undefined) {
-          appendEntry(beforeContentId, firstVisibleReply, attemptEntry);
-        } else if (lastVisibleAnchor !== undefined) {
-          appendEntry(afterContentId, lastVisibleAnchor, attemptEntry);
+      if (handoffEntry !== undefined) {
+        if (index === 0) {
+          if (visibleIds.has(userContentId)) {
+            appendAnnotation(beforeContentId, userContentId, {
+              kind: "handoff",
+              entry: handoffEntry,
+            });
+          } else {
+            trailing.push({ kind: "handoff", entry: handoffEntry });
+          }
         } else {
-          trailing.push(attemptEntry);
+          placeForAttempt(firstVisibleReply, lastVisibleAnchor, {
+            kind: "handoff",
+            entry: handoffEntry,
+          });
         }
+      }
+      if (attempt.describedImages !== undefined && attempt.describedImages.length > 0) {
+        const text = attempt.describedImages
+          .map(
+            (image) =>
+              `${image.name} described by ${image.describedBy.model} (${image.describedBy.provider})`,
+          )
+          .join(" · ");
+        placeForAttempt(firstVisibleReply, lastVisibleAnchor, {
+          kind: "described-images",
+          text,
+        });
       }
       for (const ref of attempt.responseRefs) {
         const id = String(ref.contentId);
-        if (storedContentIds.has(id)) lastVisibleAnchor = id;
+        if (visibleIds.has(id)) lastVisibleAnchor = id;
       }
       if (attempt.researchRef !== undefined) {
         const researchId = String(attempt.researchRef.contentId);
-        if (storedContentIds.has(researchId)) lastVisibleAnchor = researchId;
+        if (visibleIds.has(researchId)) lastVisibleAnchor = researchId;
       }
     }
 
