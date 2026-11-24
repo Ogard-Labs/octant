@@ -84,6 +84,7 @@ import { resolveAvailableTools } from "../scaffold/scaffoldFilesystem";
 import { hydrateAgentMessageProjectionFromJournal } from "../agentMessage/agentMessageProjection";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { defaultShellSettings, findWorkspacePresetTarget } from "@octant/domain";
+import { CREATE_VIDEO_TOOL_NAME } from "@octant/plugin-host/media-tools";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import type { AppManagedToolSet } from "../chat/chatTurnRunner";
@@ -201,6 +202,17 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     FoundationsWiring,
     "providerRuntimeRegistry" | "conversationInputTransfer" | "resolveThreadStrict"
   >;
+
+function chatToolResultTaintsThread(call: { readonly name: string }, result: unknown): boolean {
+  // A pending or cancelled video call only returns a status from this host.
+  return (
+    call.name !== CREATE_VIDEO_TOOL_NAME ||
+    (typeof result === "object" &&
+      result !== null &&
+      "status" in result &&
+      result.status === "completed")
+  );
+}
 
 export function wireChat(deps: ChatDependencies) {
   const imageDescriber = deps.imageDescriber;
@@ -556,6 +568,7 @@ export function wireChat(deps: ChatDependencies) {
                     threadId: thread.id,
                     recordExternalContentIngestion: (input) =>
                       externalContentIngestionStore.record(input),
+                    resultTaintsThread: chatToolResultTaintsThread,
                     uuid: randomUUID,
                   }),
             );
@@ -719,6 +732,7 @@ export function wireChat(deps: ChatDependencies) {
             ),
             threadId: thread.id,
             recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+            resultTaintsThread: chatToolResultTaintsThread,
             uuid: randomUUID,
           }),
           withheldFromSideChat({
