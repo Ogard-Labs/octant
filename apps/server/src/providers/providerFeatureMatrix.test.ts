@@ -6,7 +6,7 @@ import {
   ProviderCapabilities,
   ProviderDriverKind,
 } from "@octant/contracts";
-import { isImageProfileDriverKind, providerCatalogCapabilities } from "@octant/domain";
+import { isMediaProfileDriverKind, providerCatalogCapabilities } from "@octant/domain";
 import { unsupportedChatCapabilities } from "@octant/provider-sdk/chat-conformance";
 import { describe, expect, it } from "vitest";
 
@@ -279,12 +279,12 @@ describe("provider capability matrix", () => {
     expect(disagreements).toEqual([]);
   });
 
-  it("places every non-image driver kind in exactly one column and no image kind", () => {
+  it("places every turn driver kind in exactly one column and no image or video kind", () => {
     const listed = columnRows.flatMap((row) =>
       (row[1] ?? "").split(",").map((kind) => kind.replace(/`/g, "").trim()),
     );
     const turnDrivers = ProviderDriverKind.literals.filter(
-      (kind) => !isImageProfileDriverKind(kind),
+      (kind) => !isMediaProfileDriverKind(kind),
     );
     expect([...listed].sort()).toEqual([...turnDrivers].sort());
   });

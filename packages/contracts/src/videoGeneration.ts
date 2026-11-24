@@ -1,7 +1,11 @@
 import { Schema } from "effect";
-import { ProviderModelId } from "./providers";
+import { AggregateVersion, UtcTimestamp } from "./events";
+import { ImageGenerationScopeId } from "./imageGeneration";
+import { ProviderFailure, ProviderInstanceId, ProviderModelId } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
+const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const ContentDigest = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
 const PositiveInt = Schema.Int.pipe(Schema.positive());
 const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
 /** A provider's own label for an option, such as "720p" or "16:9". */
@@ -118,6 +122,8 @@ export const VideoModelCapabilities = Schema.Struct({
   inputs: Schema.Struct({
     firstFrame: Schema.Boolean,
     lastFrame: Schema.Boolean,
+    /** A lower duration ceiling when both frames are supplied. */
+    maxDurationSecondsWithBothFrames: Schema.optional(PositiveInt),
     /** 0 when the model takes no reference images. */
     maxReferenceImages: NonNegativeInt,
   }).annotations(strict),
@@ -144,4 +150,120 @@ export const MAX_QUEUED_VIDEO_JOBS = 16;
 /** The clip length the default leans toward when a model declares none. */
 export const VIDEO_PREFERRED_DURATION_SECONDS = 8;
 
+export const VideoJobId = brandedUuid("VideoJobId");
+export type VideoJobId = typeof VideoJobId.Type;
+export const VideoClipId = brandedUuid("VideoClipId");
+export type VideoClipId = typeof VideoClipId.Type;
+
+export const VIDEO_JOB_AGGREGATE_TYPE = "video-job";
+export const VIDEO_JOB_QUEUED = "video.job-queued@1";
+export const VIDEO_JOB_STATUS_CHANGED = "video.job-status-changed@1";
+export const VIDEO_JOB_PROVIDER_COPY_CHANGED = "video.job-provider-copy-changed@1";
+/** Running jobs at once per host, as for image jobs. */
+export const VIDEO_JOB_HOST_CONCURRENCY = 2;
+export const MAX_VIDEO_PROMPT_CHARACTERS = 32_000;
+/** Bounds a provider job id before it reaches the journal; drivers check their own shape. */
+const RemoteJobId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512));
+
+export const VIDEO_JOB_STATUSES = [
+  "queued",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+] as const;
+export const VideoJobStatus = Schema.Literal(...VIDEO_JOB_STATUSES);
+export type VideoJobStatus = typeof VideoJobStatus.Type;
+
+export const VideoJobThreadKind = Schema.Literal("chat-thread", "work-thread", "code-thread");
+export type VideoJobThreadKind = typeof VideoJobThreadKind.Type;
+
+/**
+ * Whether the provider still holds its own copy of the job (prompt, images
+ * and clip). `held` is a cleanup the host still owes; it survives a restart
+ * and a thread delete, so the retry reaches the profile's key either way.
+ */
+export const VideoProviderCopy = Schema.Literal("none", "held", "removed", "expires");
+export type VideoProviderCopy = typeof VideoProviderCopy.Type;
+
+export const VideoClipRecord = Schema.Struct({
+  clipId: VideoClipId,
+  hash: ContentDigest,
+  size: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(MAX_VIDEO_CLIP_BYTES)),
+  durationSeconds: PositiveInt,
+  resolution: OptionLabel,
+  aspectRatio: OptionLabel,
+}).annotations(strict);
+export type VideoClipRecord = typeof VideoClipRecord.Type;
+
+/** An estimate in micro-dollars, or `unknown` for a model that publishes no price. */
+export const VideoCostEstimateUsdMicros = Schema.Union(NonNegativeInt, Schema.Literal("unknown"));
+export type VideoCostEstimateUsdMicros = typeof VideoCostEstimateUsdMicros.Type;
+
+/**
+ * One video job as the journal records it. It never holds prompt text, image
+ * bytes, clip bytes or a provider download URL: only a prompt hash, the
+ * provider's opaque job id, and the stored clip's reference.
+ */
+export const VideoJob = Schema.Struct({
+  id: VideoJobId,
+  status: VideoJobStatus,
+  threadKind: VideoJobThreadKind,
+  scopeId: ImageGenerationScopeId,
+  profileInstanceId: ProviderInstanceId,
+  driverKind: VideoDriverKind,
+  modelId: ProviderModelId,
+  promptHash: ContentDigest,
+  options: VideoClipOptions,
+  imageCount: NonNegativeInt,
+  estimatedCostUsdMicros: VideoCostEstimateUsdMicros,
+  remoteId: Schema.optional(RemoteJobId),
+  startedAt: Schema.optional(UtcTimestamp),
+  clip: Schema.optional(VideoClipRecord),
+  safetyRefusal: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
+  failure: Schema.optional(ProviderFailure),
+  providerCopy: VideoProviderCopy,
+  settledCostUsdMicros: Schema.optional(NonNegativeInt),
+  version: AggregateVersion,
+  createdAt: UtcTimestamp,
+  updatedAt: UtcTimestamp,
+}).annotations(strict);
+export type VideoJob = typeof VideoJob.Type;
+
+export const VideoJobQueued = Schema.Struct({ job: VideoJob }).annotations(strict);
+export type VideoJobQueued = typeof VideoJobQueued.Type;
+
+export const VideoJobStatusChanged = Schema.Struct({
+  jobId: VideoJobId,
+  fromStatus: VideoJobStatus,
+  toStatus: VideoJobStatus,
+  version: AggregateVersion,
+  updatedAt: UtcTimestamp,
+  remoteId: Schema.optional(RemoteJobId),
+  startedAt: Schema.optional(UtcTimestamp),
+  clip: Schema.optional(VideoClipRecord),
+  safetyRefusal: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
+  failure: Schema.optional(ProviderFailure),
+  providerCopy: Schema.optional(VideoProviderCopy),
+  settledCostUsdMicros: Schema.optional(NonNegativeInt),
+}).annotations(strict);
+export type VideoJobStatusChanged = typeof VideoJobStatusChanged.Type;
+
+export const VideoJobProviderCopyChanged = Schema.Struct({
+  jobId: VideoJobId,
+  version: AggregateVersion,
+  updatedAt: UtcTimestamp,
+  providerCopy: VideoProviderCopy,
+}).annotations(strict);
+export type VideoJobProviderCopyChanged = typeof VideoJobProviderCopyChanged.Type;
+
 export const decodeVideoModelCapabilities = Schema.decodeUnknownSync(VideoModelCapabilities);
+export const decodeVideoJobId = Schema.decodeUnknownSync(VideoJobId);
+export const decodeVideoClipId = Schema.decodeUnknownSync(VideoClipId);
+export const decodeVideoJob = Schema.decodeUnknownSync(VideoJob);
+export const decodeVideoJobQueued = Schema.decodeUnknownSync(VideoJobQueued);
+export const decodeVideoJobStatusChanged = Schema.decodeUnknownSync(VideoJobStatusChanged);
+export const decodeVideoJobProviderCopyChanged = Schema.decodeUnknownSync(
+  VideoJobProviderCopyChanged,
+);
+export const decodeVideoClipOptions = Schema.decodeUnknownSync(VideoClipOptions);
