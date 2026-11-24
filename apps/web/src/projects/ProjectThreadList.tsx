@@ -257,20 +257,34 @@ interface ThreadRowInfoCardProps {
   readonly thread: ChatThreadNavigationItem;
 }
 
+interface LoadedThreadRowInfoCard {
+  readonly default: ComponentType<ThreadRowInfoCardProps>;
+}
+
 /**
  * The card and its styles load on the first approach to a row, not with the
  * window: a row is drawn at startup, its card only when someone asks for it.
  * A card that cannot load (a tab left open across an update asks for a file
  * the host no longer has) names the thread instead: thrown out of render, the
  * failure would take the whole window down for a hover.
+ *
+ * Awaited in a try rather than given a rejection handler: the window build
+ * moves a `.then` on an import inside its own stylesheet wait, where the
+ * handler never sees a stylesheet that failed.
  */
-const loadThreadRowInfoCard = (): Promise<{
-  readonly default: ComponentType<ThreadRowInfoCardProps>;
-}> =>
-  import("./ThreadRowInfoCard").then(
-    (module) => ({ default: module.ThreadRowInfoCard }),
-    () => ({ default: ({ thread }) => <span>{thread.title}</span> }),
-  );
+async function importThreadRowInfoCard(): Promise<LoadedThreadRowInfoCard> {
+  try {
+    const module = await import("./ThreadRowInfoCard");
+    return { default: module.ThreadRowInfoCard };
+  } catch {
+    return { default: ({ thread }) => <span>{thread.title}</span> };
+  }
+}
+
+// Shared by the approach and the card: a second import would not wait for a
+// stylesheet the first is still loading, and would draw the card unstyled.
+let threadRowInfoCard: Promise<LoadedThreadRowInfoCard> | undefined;
+const loadThreadRowInfoCard = () => (threadRowInfoCard ??= importThreadRowInfoCard());
 const ThreadRowInfoCard = lazy(loadThreadRowInfoCard);
 
 /**
