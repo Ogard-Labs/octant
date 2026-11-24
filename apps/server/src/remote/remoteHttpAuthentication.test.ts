@@ -30,6 +30,7 @@ import {
 } from "../remoteRoutePolicy";
 import { canonicalDeviceKeyFacts } from "./deviceKeyFacts";
 import { createRemoteRequestRegistry, type RemoteRequestRegistry } from "./remoteRequestRegistry";
+import { RemoteServerProxySessions } from "./remoteServerProxySessions";
 import {
   createRemoteHttpAuthentication,
   REMOTE_SESSION_COOKIE,
@@ -471,6 +472,66 @@ function productRequest(
 }
 
 describe("remote HTTP authentication boundary", () => {
+  it("checks the pause again before issuing a proxy session", async () => {
+    const { service, connection } = setup();
+    const sessions = new RemoteServerProxySessions({
+      proofs: service,
+      onSessionEnded: () => undefined,
+    });
+    const issue = vi.spyOn(sessions, "issue");
+    let paused = false;
+    const auth = createRemoteHttpAuthentication({
+      proofService: service,
+      signNegotiationMetadata: vi.fn(),
+      remoteAccessPaused: () => paused,
+      serverProxy: {
+        sessions,
+        grants: { open: vi.fn(), relay: vi.fn(), relayUpgrade: vi.fn() },
+      },
+    });
+    const route: RemoteRouteDefinition = {
+      ...sessionRoute,
+      id: "remote-auth-server-proxy-session",
+      match: { kind: "exact", path: "/api/remote/auth/server-proxy-session" },
+    };
+    const post = jsonPost("/api/remote/auth/server-proxy-session", {
+      challengeId: "88888888-8888-4888-8888-888888888888",
+      hostId,
+      deviceId,
+      credentialGeneration: 1,
+      nonce: "n".repeat(43),
+      issuedAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + 60_000).toISOString(),
+      signature: "s".repeat(86),
+    });
+    const payload = await post.text();
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          paused = true;
+          controller.enqueue(new TextEncoder().encode(payload));
+          controller.close();
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const request = new Request(post.url, {
+      method: post.method,
+      headers: post.headers,
+      body,
+      duplex: "half",
+    } as RequestInit);
+    try {
+      const response = await auth.handlePreAuthRoute(request, route, transport);
+      expect(response?.status).toBe(403);
+      expect(await response?.json()).toMatchObject({ reasonCode: "remote-access-paused" });
+      expect(response?.headers.get("set-cookie")).toBeNull();
+      expect(issue).not.toHaveBeenCalled();
+    } finally {
+      connection.close();
+    }
+  });
+
   it("issues challenges and sessions over exact routes with an HttpOnly cookie and a wire-safe body", async () => {
     const { auth, privateKey, connection } = setup();
     const { challengeResponse, sessionResponse, session, body, setCookie } =

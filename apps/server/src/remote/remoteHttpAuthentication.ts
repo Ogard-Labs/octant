@@ -510,6 +510,7 @@ export function createRemoteHttpAuthentication(
       if (proxy === undefined) throw new RemoteHttpAuthFailure(503, "unavailable");
       if (options.remoteAccessPaused?.() === true) throw pausedFailure();
       const body = decodeBounded(decodeRemoteSessionRequestV1, await readJsonBody(request));
+      if (options.remoteAccessPaused?.() === true) throw pausedFailure();
       release = options.admission?.acquire({
         bucket: "auth",
         deviceId: body.deviceId,
