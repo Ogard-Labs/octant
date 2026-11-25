@@ -6330,34 +6330,53 @@ flowchart LR
   thread's Browser pane in a Work or Code thread (maintainer decision,
   2026-11-25). The host journals its start as `browser.page-opened@1` and its
   end as `browser.page-closed@1`, one aggregate per page, so a start with no end
-  when the host next starts is what a restart or crash took. A record names the
-  page id, the thread, the window, the mode, the profile kind (Private,
-  Project, Personal, or a named account with its id) and the thread's Project,
-  and never an address, a title, or page content. Every ordinary ending writes
-  the end: the person closing the page, the agent stopping its Browser, the
-  thread's authority ending (archived, deleted, its Project archived), a cleared
-  or removed profile, the page expiring, and the Browser runtime being lost. A
-  window revoked, which a Quit also does, and the host shutting down write none,
-  because a page a Quit or a restart ended must be offered back; the next start
-  settles what is left, ending a page whose thread can no longer open a Browser
-  and keeping only the newest page of each thread. A routine, a subagent's
-  delivered result, a terminal grant, a page the host runs for its own owner,
-  and a page opened for one Open of its own are never recorded, and Chat has no
-  Browser. The projection holds only the pages open now, ended pages' events are
-  swept from the journal (so a page opened and closed a thousand times leaves a
-  bounded handful), a thread purge takes a thread's records and a Project erase
-  takes a Project's, and no export, replica sync, or diagnostics bundle carries
-  them beyond the kind-name count in Journal growth. The thread's Browser read
-  carries the offer for the host's person only: a local window, or a device the
-  person paired at Full; a device paired below Full, a restricted device, and a
-  hub-introduced device see no offer and cannot claim or dismiss one, checked on
-  the host before any record is read. One claim wins: it is the page's end
-  appended at the version its start left, so two windows cannot both reopen. A
-  claim, a dismissal, an archive, a delete and a purge end the offer, and the
-  next start does not offer it again. Reopening never restores the page: it
-  names the profile, the start page preselects it, and the person's address goes
-  through the ordinary open with its site approval. A profile that no longer
-  exists is said so instead of offered. Detail is in
+  when the host next starts is what a restart, a crash or a Quit took. A record
+  names the page id, the thread, the window, the mode, the profile kind
+  (Private, Project, Personal, or a named account by its stored profile id,
+  never a site account or an email) and the thread's Project, and never an
+  address, a title, or page content. Only the person's own open route records a
+  page: it says the person opened it, and an agent, a subagent, a routine, a
+  saved flow, a terminal grant and a page the host runs for its own owner open
+  pages in the same context without saying so, so none is recorded, nor is a
+  page opened for one Open of its own, and Chat has no Browser. Every ordinary
+  ending writes the end, with the actor of the request that caused it (the
+  device at any access level, the local person for a window): the person closing
+  the page, the agent stopping its Browser, the window closing, a remote
+  device's session ending, the thread's authority ending, a cleared or removed
+  profile, the page expiring, and the Browser runtime being lost. Only a Quit and
+  the host's own shutdown keep the record open. The desktop reports a person's
+  Quit to the host (the same report restart recovery uses) after the quit is
+  accepted and before it revokes its windows, and the host holds its pages'
+  records from that report on. A quit the system asked for (a restart, a
+  shutdown, a signal) sends no report, so the windows it revokes write the end
+  and that page is not offered back, which loses one offer rather than offering
+  a page the person had closed; a crash or a power loss revokes nothing and
+  offers the page. The start settles what is left: a page whose thread is
+  archived or deleted is ended, a page whose thread is live but cannot open a
+  Browser now (its mode switched off, its Project archived) is held and not
+  shown until it can, only the newest page of each thread stays, and no more
+  than 25 pages stay in all. The projection holds only the pages open now. A run
+  deletes nothing from the journal: the persistence start removes the events of
+  ended pages before it records the journal verification watermark, as it does
+  for superseded checkout observations, and counts the removal so that start
+  leaves the watermark to the next one. A thread purge takes a thread's records
+  and a Project erase takes a Project's, and no export, replica sync, usage or
+  activity view, or support bundle carries them beyond the event name in the
+  bundle's recent-event list and the kind-name count in Journal growth. The
+  thread's Browser read carries the offer for the host's person only: a local
+  window, or a device the person paired at Full; a device paired below Full, a
+  restricted device, and a hub-introduced device see no offer and cannot claim,
+  release or dismiss one, checked on the host before any record is read. A claim
+  is a short exclusive reservation in memory for one window or device: of two
+  windows only one holds the page, and it is given back when the open it was for
+  fails or is declined, when the window goes away, or after two minutes. The
+  offer ends only when the reserved open succeeds, which ends the old record as
+  reopened, or on dismiss, archive, delete or purge, and the next start does not
+  offer it again. Reopening never restores the page: it names the profile, the
+  start page preselects it, and the person's address goes through the ordinary
+  open with its site approval. A profile that no longer exists is said so
+  instead of offered; a profile list that cannot be read now keeps the offer and
+  says it could not be checked. Detail is in
   [Browser profiles: Reopening a page a restart took](design/browser-profiles.md#reopening-a-page-a-restart-took).
 - **Browser flows.** An agent's Browser run can be saved as a named flow in the
   thread's Work or Code Project and replayed by name with no model turn between

@@ -173,19 +173,31 @@ open in a thread's Browser pane. The pane offers it back (maintainer decision,
 - The thread's Browser pane shows, in place of a page, a line that Octant
   restarted and closed the page the person had open, with **Reopen page** and
   **Dismiss**. If the profile that page was in no longer exists (a named account
-  that was removed), the line says so and offers only Dismiss.
-- Reopen page claims the offer once, then shows the start page with that page's
-  profile preselected. It opens no page and restores nothing: the person enters
-  an address, and the page opens through the ordinary open, which asks for the
-  site in that profile as always. The preselection is this page's choice and
-  never changes the task's saved default or the per-Project preference.
+  that was removed), the line says so and offers only Dismiss. If the host
+  cannot read the profile list just now, the line says the profile could not be
+  checked and keeps both controls; the open itself then finds out.
+- Reopen page reserves the page for this window or device, moves focus to the
+  address field, and shows the start page with that page's profile preselected.
+  It opens no page and restores nothing: the person enters an address, and the
+  page opens through the ordinary open, which asks for the site in that profile
+  as always. The preselection is this thread's choice, kept if the person
+  switches threads and back, and never shown in another thread. It never
+  changes the task's saved default or the per-Project preference.
+- Nothing ends until the reserved open succeeds. A declined approval, a failed
+  open or a reload gives the page back, the line says the open failed and the
+  offer is still there, and Reopen page reserves it again. The page opened by the
+  reserved open ends the old record as reopened.
+- Dismiss ends the offer and moves focus to the address field, the start page's
+  first control.
 - The offer exists only while the thread has no page open. A local window and a
   device the host's own person paired at Full see it; a device paired below
   Full, a restricted device, and a hub-introduced device see no offer and get no
   action. The phone and paired browser add no control of their own.
-- Reopen page and Dismiss end the offer for every window, and archiving or
-  deleting the thread ends it too. A restart that follows does not offer it
-  again.
+- Reopen page reserves the page for one window or device at a time and Dismiss
+  ends the offer for every window; archiving or deleting the thread ends it
+  too. A thread whose mode is switched off or whose Project is archived keeps
+  its offer, unseen, until it can open a Browser again. A restart that follows
+  an ended offer does not offer it again.
 
 ### Signing out and clearing
 

@@ -1940,7 +1940,9 @@ which the computer's windows share like a browser's history, and never sent
 to the host; a running server's address is not repeated there, and choosing a row
 opens it. With neither, the start page invites an address. After a restart or crash that
 took the page the person had open, a line above it offers **Reopen page**, which
-preselects that page's profile for the next address, and **Dismiss**
+reserves that page for this window, moves focus to the address field and
+preselects the page's profile for the next address, and **Dismiss**, which
+moves focus to the address field too
 ([Browser profiles](browser-profiles.md#reopening-a-page-a-restart-took)). **Browser profiles.**
 A page is Private unless the person picks the Project or Personal profile from
 the profile icon after the address field, which names a signed-in profile beside
