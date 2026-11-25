@@ -27,6 +27,58 @@ function fixture() {
 
 // Each case starts real child processes, which are slow on a busy machine.
 describe("linked secret stores", { timeout: 30_000 }, () => {
+  it("lists names only while the store is linked and open", async () => {
+    const { op, stores } = fixture();
+    const vaultId = "v".repeat(26);
+    op.addList(
+      ["vault", "list", "--format", "json"],
+      JSON.stringify([{ id: vaultId, name: "Work" }]),
+    );
+    const list = () => stores.browse?.("onepassword", { kind: "vaults" });
+    expect(await list()).toEqual({ status: "not-linked" });
+    await stores.link("onepassword");
+    expect(await list()).toEqual({
+      status: "listed",
+      truncated: false,
+      entries: [{ id: vaultId, label: "Work" }],
+    });
+    expect(op.calls().at(-1)).toBe("vault list --format json|octant=0");
+    expect(await stores.browse?.("onepassword", { kind: "items", vaultId })).toEqual({
+      status: "missing",
+    });
+    op.setMode("locked");
+    expect(await list()).toEqual({ status: "locked" });
+    op.setMode("broken");
+    expect(await list()).toEqual({ status: "unavailable" });
+  });
+
+  it("shows no names listed while the store was unlinked and linked again", async () => {
+    const listed = Promise.withResolvers<void>();
+    const stores = makeLinkedSecretStores({
+      statePath: join(mkdtempSync(join(tmpdir(), "octant-browse-")), "state.json"),
+      now: () => "2026-11-25T10:00:00.000Z",
+      adapters: [
+        {
+          kind: "onepassword",
+          label: "Fixture",
+          probe: async () => "ready",
+          isValidReference: () => true,
+          read: async () => ({ status: "missing" }),
+          browse: async () => {
+            await listed.promise;
+            return { status: "listed", entries: [], truncated: false };
+          },
+        },
+      ],
+    });
+    await stores.link("onepassword");
+    const pending = stores.browse?.("onepassword", { kind: "vaults" });
+    await stores.unlink("onepassword");
+    await stores.link("onepassword");
+    listed.resolve();
+    expect(await pending).toEqual({ status: "changed" });
+  });
+
   it("never consumes a credential from an item read that overlapped unlink and same-time relink", async () => {
     const item = {
       store: "onepassword" as const,

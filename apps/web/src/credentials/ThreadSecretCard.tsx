@@ -10,12 +10,12 @@ import {
 import type {
   ThreadSecretAnswer,
   ThreadSecretAnswerField,
-  ThreadSecretCommandResult,
   ThreadSecretFailure,
   ThreadSecretLifetime,
   ThreadSecretRequestCard,
   ThreadSecretSource,
 } from "@octant/contracts/thread-secrets";
+import type { ThreadSecretReply } from "@octant/client-runtime/thread-secrets-client";
 import { isHoldableSecretValue } from "@octant/domain/secret-guard-policy";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { octantButtonClassName, OctantButton, OctantIconButton } from "../ui/base/OctantButton";
@@ -23,6 +23,7 @@ import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { Check, ExternalLink, Eye, EyeOff, Minus, ShieldCheck, X } from "../ui/icons";
+import { OnePasswordItemPicker, type BrowseSecretItems } from "./OnePasswordItemPicker";
 import "./threadSecrets.css";
 
 type Card = ThreadSecretRequestCard;
@@ -79,9 +80,6 @@ const TOO_LONG = "That is longer than 4,096 characters, so none of it was pasted
 const UNKNOWN_OUTCOME =
   "The result is not known. What you entered was cleared and is not sent again.";
 
-/** The host's answer, or that it refused the request with nothing read from it. */
-export type ThreadSecretReply = ThreadSecretCommandResult | { readonly status: "not-taken" };
-
 /**
  * Asks the person for a secret. What is typed stays in this card until it is
  * sent to the host, and is in no state, storage or message but that one.
@@ -89,6 +87,8 @@ export type ThreadSecretReply = ThreadSecretCommandResult | { readonly status: "
 export function ThreadSecretCard(props: {
   readonly card: Card;
   readonly answer: (answer: ThreadSecretAnswer) => Promise<ThreadSecretReply>;
+  /** Absent where this window cannot list the linked store. */
+  readonly browse?: BrowseSecretItems | undefined;
 }) {
   const { card } = props;
   if (card.state === "pending" || card.state === "saving")
@@ -105,7 +105,7 @@ export function ThreadSecretCard(props: {
   );
 }
 
-function PendingCard({ card, answer }: Parameters<typeof ThreadSecretCard>[0]) {
+function PendingCard({ card, answer, browse }: Parameters<typeof ThreadSecretCard>[0]) {
   const id = useId();
   const multiple = card.fields.length > 1 || card.fields[0]?.name !== card.name;
   const [drafts, setDrafts] = useState<Readonly<Record<string, Draft>>>({});
@@ -179,7 +179,8 @@ function PendingCard({ card, answer }: Parameters<typeof ThreadSecretCard>[0]) {
   // On click, not pointer down: the press that follows would take focus back.
   // A click that ends a selection leaves it, so the reason can be copied.
   const onClick = (event: MouseEvent<HTMLFormElement>) => {
-    if (!(event.target instanceof Element)) return;
+    // A popup's clicks reach this card through React, though it is drawn elsewhere.
+    if (!(event.target instanceof Element) || !event.currentTarget.contains(event.target)) return;
     if (event.target.closest("input, button, a, label, [role='combobox'], [role='option']")) return;
     if (window.getSelection()?.isCollapsed === false) return;
     const empty = card.fields.findIndex((field) => !isComplete(draftOf(field), card, field));
@@ -198,6 +199,7 @@ function PendingCard({ card, answer }: Parameters<typeof ThreadSecretCard>[0]) {
       disabled={busy}
       invalid={shownError !== undefined}
       describedBy={describedBy}
+      browse={browse}
       onChange={(next) => set(field, next)}
       onProblem={setError}
       action={
@@ -309,6 +311,7 @@ function SecretField(props: {
   readonly disabled: boolean;
   readonly invalid: boolean;
   readonly describedBy: string;
+  readonly browse: BrowseSecretItems | undefined;
   readonly onChange: (next: Partial<Draft>) => void;
   readonly onProblem: (problem: string) => void;
   readonly action: React.ReactNode;
@@ -398,6 +401,7 @@ function SecretField(props: {
               data-lpignore="true"
               data-bwignore=""
               data-mono={typed ? undefined : ""}
+              data-action={!typed && props.browse !== undefined ? "" : undefined}
               placeholder={typed ? field.placeholder : "op://vault/item/field"}
               maxLength={typed ? MAX_VALUE_LENGTH : 512}
               readOnly={lines > 1}
@@ -436,6 +440,14 @@ function SecretField(props: {
               >
                 {revealed ? <EyeOff size={12} /> : <Eye size={12} />}
               </OctantIconButton>
+            ) : null}
+            {draft.source === "onepassword" && props.browse !== undefined ? (
+              <OnePasswordItemPicker
+                browse={props.browse}
+                disabled={props.disabled}
+                label={`Pick a 1Password item for ${field.label}`}
+                onPick={(reference) => props.onChange({ text: reference })}
+              />
             ) : null}
           </div>
         )}

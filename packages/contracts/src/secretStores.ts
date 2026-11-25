@@ -37,6 +37,44 @@ export const SecretStoreItemReference = Schema.String.pipe(
 );
 export type SecretStoreItemReference = typeof SecretStoreItemReference.Type;
 
+export const MAX_SECRET_STORE_BROWSE_ENTRIES = 1_000;
+
+const StoreItemId = Schema.String.pipe(Schema.pattern(/^[a-z0-9]{26}$/i));
+
+/** One step into a linked store: its vaults, a vault's items, an item's fields. */
+export const SecretStoreBrowseStep = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("vaults") }),
+  Schema.Struct({ kind: Schema.Literal("items"), vaultId: StoreItemId }),
+  Schema.Struct({ kind: Schema.Literal("fields"), vaultId: StoreItemId, itemId: StoreItemId }),
+).annotations({ parseOptions: { onExcessProperty: "error" } });
+export type SecretStoreBrowseStep = typeof SecretStoreBrowseStep.Type;
+
+/** A name, and for a field its address. Never anything a field holds. */
+export const SecretStoreBrowseEntry = Schema.Struct({
+  id: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(160)),
+  label: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(300)),
+  reference: Schema.optional(SecretStoreItemReference),
+}).annotations({ parseOptions: { onExcessProperty: "error" } });
+export type SecretStoreBrowseEntry = typeof SecretStoreBrowseEntry.Type;
+
+export const SecretStoreBrowseResult = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("listed"),
+    entries: Schema.Array(SecretStoreBrowseEntry).pipe(
+      Schema.maxItems(MAX_SECRET_STORE_BROWSE_ENTRIES),
+    ),
+    /** More were there than are listed. */
+    truncated: Schema.Boolean,
+  }).annotations({ parseOptions: { onExcessProperty: "error" } }),
+  Schema.Struct({
+    status: Schema.Literal("locked", "missing", "unavailable", "not-linked", "changed"),
+  }).annotations({ parseOptions: { onExcessProperty: "error" } }),
+);
+export type SecretStoreBrowseResult = typeof SecretStoreBrowseResult.Type;
+
+export const decodeSecretStoreBrowseStep = Schema.decodeUnknownSync(SecretStoreBrowseStep);
+export const decodeSecretStoreBrowseResult = Schema.decodeUnknownSync(SecretStoreBrowseResult);
+
 /** Whether the tool is installed and the store is open to it right now. */
 export const SecretStoreToolState = Schema.Literal(
   "ready",

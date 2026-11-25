@@ -93,6 +93,7 @@
     "./replica-membership-client": "./src/replicaMembershipClient.ts",
     "./replica-store-settings-client": "./src/replicaStoreSettingsClient.ts",
     "./secret-stores-client": "./src/secretStoresClient.ts",
+    "./thread-secrets-client": "./src/threadSecretsClient.ts",
     "./replica-sync-status-client": "./src/replicaSyncStatusClient.ts",
     "./provider-client": "./src/providerClient.ts",
     "./paired-device-administration-client": "./src/pairedDeviceAdministrationClient.ts",

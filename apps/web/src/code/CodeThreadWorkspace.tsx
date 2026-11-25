@@ -18,7 +18,7 @@ import { useContinuationInputPolicy } from "../continuity/useContinuationInputPo
 import { ConversationInputs } from "../continuity/ConversationInputs";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import { sideChatDraftNotice } from "../composer/sideChatDraftNotice";
-import { ThreadSecrets } from "../credentials/threadSecretSurfaces";
+import { ActiveThreadSecrets, ThreadSecrets } from "../credentials/threadSecretSurfaces";
 import { CommandCredentialRequests } from "../credentials/CommandCredentialRequests";
 import { CredentialRequests } from "../credentials/CredentialRequests";
 import { threadCompactionSubject } from "../context/CompactionDivider";
@@ -2984,6 +2984,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               <CommandCredentialRequests
                 threadId={String(props.threadId)}
                 projectId={String(thread.projectId)}
+                serverUrl={props.serverUrl}
+                windowCapability={props.windowCapability}
+              />
+              <ActiveThreadSecrets
+                threadId={String(props.threadId)}
                 serverUrl={props.serverUrl}
                 windowCapability={props.windowCapability}
               />

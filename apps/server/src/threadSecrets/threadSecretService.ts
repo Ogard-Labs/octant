@@ -3,6 +3,14 @@ import type {
   CredentialRequestResolution,
 } from "@octant/contracts/credential-request";
 import type {
+  SecretStoreBrowseResult,
+  SecretStoreBrowseStep,
+} from "@octant/contracts/secret-stores";
+import {
+  MAX_THREAD_SECRETS_LISTED,
+  type ThreadSecretsHostView,
+} from "@octant/contracts/thread-secrets";
+import type {
   ActiveThreadSecret,
   ThreadSecretAnswer,
   ThreadSecretAnswerField,
@@ -83,6 +91,12 @@ export interface ThreadSecretServiceOptions {
     | undefined;
   /** Absent on a host with no credential store, which offers to remember nothing. */
   readonly remembered?: RememberedThreadSecrets | undefined;
+  /** Lists names in the store linked on this computer, and never anything an item holds. */
+  readonly browse?:
+    | ((step: SecretStoreBrowseStep, signal: AbortSignal) => Promise<SecretStoreBrowseResult>)
+    | undefined;
+  /** Names a thread for the person's list of active secrets. */
+  readonly threadTitle?: ((threadId: string) => string | undefined) | undefined;
   /** The waiting cards or the active list changed. */
   readonly onChanged?: (() => void) | undefined;
   /** A card began to wait. Names the thread and the card and nothing of its content. */
@@ -414,6 +428,64 @@ export class ThreadSecretService {
     return [...this.#active.values()].some(
       (secret) => secret.threadId === threadId && secret.path === path,
     );
+  }
+
+  /**
+   * Names in the linked store, while one of this window's cards waits for a
+   * 1Password answer: nothing else has a reason to see them.
+   */
+  async browse(
+    windowId: string,
+    threadId: string,
+    requestId: string,
+    step: SecretStoreBrowseStep,
+  ): Promise<SecretStoreBrowseResult> {
+    this.sweep();
+    const waiting = (): PendingRequest | undefined => {
+      const pending = this.#pending.get(requestId);
+      return pending !== undefined &&
+        pending.state === "pending" &&
+        pending.caller.windowId === windowId &&
+        pending.caller.threadId === threadId &&
+        pending.card.sources.includes("onepassword") &&
+        this.#authority(pending.caller) !== undefined
+        ? pending
+        : undefined;
+    };
+    const pending = waiting();
+    if (pending === undefined) return { status: "unavailable" };
+    if (this.#options.browse === undefined) return { status: "not-linked" };
+    const result = await this.#options
+      .browse(
+        step,
+        AbortSignal.any([pending.lookup.signal, AbortSignal.timeout(LOOKUP_TIMEOUT_MS)]),
+      )
+      .catch(() => ({ status: "unavailable" as const }));
+    return waiting() === pending ? result : { status: "unavailable" };
+  }
+
+  /** Everything the person may end: the newest active secrets and all that is remembered. */
+  hostView(): ThreadSecretsHostView {
+    this.sweep();
+    return {
+      active: this.active()
+        .slice(-MAX_THREAD_SECRETS_LISTED)
+        .map((secret) => {
+          const threadTitle = this.#options.threadTitle?.(secret.threadId);
+          return { ...secret, ...(threadTitle === undefined ? {} : { threadTitle }) };
+        }),
+      remembered: this.#options.remembered?.list() ?? [],
+    };
+  }
+
+  /** Removes a remembered secret; a thread it was given to keeps it for its own time. */
+  async forget(id: string): Promise<ThreadSecretCommandResult> {
+    const { remembered } = this.#options;
+    if (remembered === undefined || !remembered.list().some((entry) => entry.id === id))
+      return { status: "gone" };
+    return (await remembered.forget(id))
+      ? { status: "accepted" }
+      : { status: "refused", failure: "unavailable" };
   }
 
   revoke(threadId: string, secretId: string): ThreadSecretCommandResult {

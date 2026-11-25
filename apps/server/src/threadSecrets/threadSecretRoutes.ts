@@ -53,6 +53,7 @@ export function createThreadSecretRoutes(
     }
     if (windowId === undefined) return reply({ status: "refused" }, 403);
     if (request.method === "GET") {
+      if (url.search === "") return reply(service.hostView());
       const threadId = url.searchParams.get("threadId");
       if (
         !threadId ||
@@ -84,11 +85,18 @@ export function createThreadSecretRoutes(
       return reply({ status: "refused" }, 401);
     }
     const { right } = command;
-    return reply(
-      right.kind === "revoke"
-        ? service.revoke(right.threadId, right.secretId)
-        : await service.answer(windowId, right.threadId, right.answer, { paired: false }),
-    );
+    switch (right.kind) {
+      case "revoke":
+        return reply(service.revoke(right.threadId, right.secretId));
+      case "browse":
+        return reply(await service.browse(windowId, right.threadId, right.requestId, right.step));
+      case "forget":
+        return reply(await service.forget(right.id));
+      case "answer":
+        return reply(
+          await service.answer(windowId, right.threadId, right.answer, { paired: false }),
+        );
+    }
   };
 }
 
