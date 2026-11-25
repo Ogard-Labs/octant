@@ -3460,6 +3460,63 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("re-reads the open managed worktree thread's cleanup standing, whether it is cleaned up or restored", async () => {
+    const managed = {
+      ...checkout(),
+      kind: "managed-worktree" as const,
+      ownershipReceiptId: "81000000-0000-4000-8000-000000000004" as never,
+    } as unknown as CodeThreadView["checkout"];
+    let standing: CodeThreadView["worktreeCleanup"];
+    const threadRead = vi.fn(async () => ({
+      ...view(1),
+      checkout: managed,
+      ...(standing === undefined ? {} : { worktreeCleanup: standing }),
+    }));
+    const client = fakeClient({
+      thread: threadRead,
+      bootstrap: vi.fn(async () => ({ ...bootstrap(), checkouts: [managed] })),
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        navigationRefreshMs: 10,
+        worktreeStandingRefreshMs: 20,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.activeView?.checkout.kind).toBe("managed-worktree"));
+    expect(result.current.activeView?.worktreeCleanup).toBeUndefined();
+
+    // Cleaned up while the thread stays open.
+    standing = "cleaned-up";
+    await waitFor(() => expect(result.current.activeView?.worktreeCleanup).toBe("cleaned-up"));
+
+    // Restored from another window.
+    standing = undefined;
+    await waitFor(() => expect(result.current.activeView?.worktreeCleanup).toBeUndefined());
+    unmount();
+  });
+
+  it("does not re-read the thread for a checkout that is not a managed worktree", async () => {
+    const threadRead = vi.fn(async () => view(1));
+    const client = fakeClient({ thread: threadRead });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        navigationRefreshMs: 10,
+        worktreeStandingRefreshMs: 20,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.activeView).toBeDefined());
+    const reads = threadRead.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(threadRead.mock.calls.length).toBe(reads);
+    unmount();
+  });
+
   it("pauses navigation polling while the document is hidden", async () => {
     const originalVisibility = document.visibilityState;
     Object.defineProperty(document, "visibilityState", {
