@@ -24,11 +24,8 @@ import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
 import { ThreadBoardFinishedMark } from "./finishedReceipt";
 import { DescribedImageName, DescribedTurnImages, ImageDescribedBy } from "./imageDescription";
 import { Schema } from "effect";
-import {
-  AgentResultsSteeredIntoTurn,
-  AgentRunResultDeliveryMark,
-  MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
-} from "./agentRun";
+import { AgentResultsSteeredIntoTurn, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
+import { ThreadDeliveryMark } from "./sideTasks";
 import { ThreadMessagesSteeredIntoTurn } from "./threadMessageSteering";
 import { ExtensionSelection } from "./extensions";
 import { ComputerUseDestinationSelection } from "./desktopLease";
@@ -1157,12 +1154,13 @@ const StartProviderTurn = Schema.Struct({
    */
   executionPolicy: Schema.optional(ProviderExecutionPolicy),
   /**
-   * Set only by the host's own delivery of a finished subagent run's result:
-   * the turn carries the run's reply into this thread and the mark is
-   * verified against the journaled run before the turn is admitted, so a
-   * caller cannot claim a delivery the journal does not record.
+   * Set only by the host's own delivery of owed reports — a finished
+   * subagent run's result or a side task's report: the turn carries them
+   * into this thread and the mark is verified against the journaled records
+   * before the turn is admitted, so a caller cannot claim a delivery the
+   * journal does not record.
    */
-  delivery: Schema.optional(AgentRunResultDeliveryMark),
+  delivery: Schema.optional(ThreadDeliveryMark),
 }).annotations(strict);
 /** The longest secret answer the host passes on; the same bound on every surface. */
 export const MAX_CODE_SECRET_ANSWER_LENGTH = MAX_SECRET_ANSWER_LENGTH;
@@ -1732,7 +1730,7 @@ const ProviderTurnResult = Schema.Struct({
   state: Schema.Literal("running", "waiting", "completed", "interrupted", "failed"),
   evidence: Schema.optional(CodeEvidenceReference),
   /** The journaled delivery actually covered, including a prior turn found on replay. */
-  delivery: Schema.optional(AgentRunResultDeliveryMark),
+  delivery: Schema.optional(ThreadDeliveryMark),
   /**
    * Why a turn was refused or failed, when the host can name it. A start that
    * is refused before the provider is reached carries the host's own sentence
@@ -1933,11 +1931,12 @@ const ConversationTurnStartedEvent = Schema.Struct({
    */
   executionPolicy: Schema.optional(ProviderExecutionPolicy),
   /**
-   * Set only on a turn the host started to deliver a finished subagent run's
-   * result; journaled with the turn's start so replay keeps the mark and a
-   * re-delivered result can never mint a second turn.
+   * Set only on a turn the host started to deliver owed reports — a finished
+   * subagent run's result or a side task's report — journaled with the
+   * turn's start so replay keeps the mark and a re-delivered report can
+   * never mint a second turn.
    */
-  delivery: Schema.optional(AgentRunResultDeliveryMark),
+  delivery: Schema.optional(ThreadDeliveryMark),
 }).annotations(strict);
 const ContentEvent = Schema.Struct({
   kind: Schema.Literal("provider-content"),
@@ -2763,6 +2762,12 @@ export const CodeConversationTurn = Schema.Struct({
    * arrival order. Absent on a turn that took none.
    */
   steeredMessages: Schema.optional(ThreadMessagesSteeredIntoTurn),
+  /**
+   * Set only on a turn the host started to deliver owed reports, journaled
+   * with the turn's start so replay keeps the mark and the transcript can
+   * attribute the message to the report rather than to the person.
+   */
+  delivery: Schema.optional(ThreadDeliveryMark),
   status: Schema.Literal("waiting", "completed", "interrupted", "failed", "incomplete"),
   /**
    * Why a failed turn failed, or the usage limit a waiting turn stopped at, as

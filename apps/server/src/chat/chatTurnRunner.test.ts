@@ -5204,6 +5204,7 @@ describe("ChatTurnRunner", () => {
 
   it("keeps a visible Chat reply completed when Codex still interrupts after a declined web lookup", async () => {
     const updates: ChatAttempt[] = [];
+    const completions: string[] = [];
     const answers: Array<{ readonly requestId: string; readonly approved: boolean }> = [];
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
@@ -5270,6 +5271,9 @@ describe("ChatTurnRunner", () => {
             updates.push(next);
             return Effect.void;
           },
+          onTurnCompleted: async (completed) => {
+            completions.push(completed.text);
+          },
           persistAppendedResponse: (next) => {
             updates.push(next);
             return Effect.void;
@@ -5288,6 +5292,9 @@ describe("ChatTurnRunner", () => {
     expect(answers).toEqual([{ requestId: "approval-web-1", approved: false }]);
     expect(updates.at(-1)?.outcome).toBe("completed");
     expect(updates.some((entry) => entry.outcome === "interrupted")).toBe(false);
+    // The kept reply completed the turn, so whoever waits on a completion (a
+    // side task's offering thread among them) hears of it once.
+    expect(completions).toEqual(["Jeg sjekker lokal tid i Norge nå."]);
   });
 
   it("still persists Interrupted when a visible Chat reply is interrupted without a Codex approval", async () => {

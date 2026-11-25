@@ -1,3 +1,4 @@
+import { isAgentRunActiveStatus } from "@octant/domain";
 import {
   DEFAULT_HOST_RESOURCE_POLICY,
   decodeAgentRunParentThreadId,
@@ -115,6 +116,16 @@ import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore";
 import { ThreadFollowUpSuggestionStore } from "../followUps/threadFollowUpSuggestionStore";
 import { SideTaskStore } from "../sideTasks/sideTaskStore";
+import { SideTaskReportStore } from "../sideTasks/sideTaskReportStore";
+import {
+  createThreadUnfinishedWork,
+  type ThreadUnfinishedWorkPorts,
+} from "../sideTasks/threadUnfinishedWork";
+import { runningProviderChild } from "../code/codeThreadMetadataService";
+import {
+  recordSideTaskReportIngestion,
+  type SideTaskReportAdmission,
+} from "../sideTasks/sideTaskReports";
 import { ThreadFinishedReceiptStore } from "../finishedReceipts/finishedReceiptStore";
 import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
@@ -735,6 +746,42 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     clock: () => new Date().toISOString(),
   });
+  // What every side-task child owes its offering thread, rebuilt from the
+  // journal so a restart loses no report.
+  const sideTaskReports = new SideTaskReportStore({
+    journal: persistence.journal,
+    uuid: randomUUID,
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    clock: () => new Date().toISOString(),
+  });
+  // The work a thread started that is not done. Every mode's settle asks it;
+  // the thread services and the report delivery it reads are built after this
+  // wiring, so they bind their side here.
+  const threadUnfinishedWorkHost: {
+    childStanding?: ThreadUnfinishedWorkPorts["childStanding"];
+    reportsHeld?: ThreadUnfinishedWorkPorts["reportsHeld"];
+  } = {};
+  const hostStartedAt = new Date().toISOString();
+  const threadUnfinishedWork = createThreadUnfinishedWork({
+    sideTasks,
+    reports: sideTaskReports,
+    childStanding: (child) => threadUnfinishedWorkHost.childStanding?.(child) ?? "quiet",
+    reportsHeld: (parentThreadId) =>
+      threadUnfinishedWorkHost.reportsHeld?.(parentThreadId) ?? false,
+    runningChildRun: (parentThreadId) => {
+      const managed = persistence.agentRunProjection
+        .parentSummary(decodeAgentRunParentThreadId(parentThreadId))
+        .find((run) => isAgentRunActiveStatus(run.lifecycleStatus));
+      if (managed !== undefined) return managed.task;
+      // Octant-managed helpers live apart from the provider's own child
+      // events, which only a Code thread's history keeps. The whole history:
+      // its summary drops the ends of turns a later completion supersedes.
+      const history = codeBoardEventStore.historyForThread(decodeCodeThreadId(parentThreadId));
+      return history.status === "ok"
+        ? runningProviderChild(history.frames, hostStartedAt)
+        : undefined;
+    },
+  });
   const finishedReceipts = new ThreadFinishedReceiptStore({
     journal: persistence.journal,
     uuid: randomUUID,
@@ -821,6 +868,16 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     clock: () => new Date().toISOString(),
     actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
   });
+  const sideTaskReportAdmission: SideTaskReportAdmission = {
+    reportsForParent: (parentThreadId) => sideTaskReports.reportsForParent(parentThreadId),
+    recordIngestion: (parentThreadId, reports) =>
+      recordSideTaskReportIngestion(
+        (input) => externalContentIngestionStore.record(input),
+        parentThreadId,
+        reports,
+        randomUUID,
+      ),
+  };
   const threadStandingAnswers = new ThreadStandingAnswerStore({
     journal: persistence.journal,
     connection: persistence.connection,
@@ -1778,6 +1835,10 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     remoteDelegationHolder,
     runtimeOutsideContentMarks,
     sideTasks,
+    sideTaskReports,
+    sideTaskReportAdmission,
+    threadUnfinishedWork,
+    threadUnfinishedWorkHost,
     finishedReceipts,
     spendCeiling,
     spendCeilingHolder,

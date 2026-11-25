@@ -101,6 +101,11 @@ export interface CodeConversationMessage {
    */
   readonly executionPolicy?: ProviderExecutionPolicy;
   /**
+   * Set only on a turn the host journaled as a report delivery, so the
+   * transcript attributes the message to the report rather than the person.
+   */
+  readonly delivery?: CodeConversationTurn["delivery"];
+  /**
    * What changed in the checkout while this turn ran. Present on an assistant
    * message whose turn the host observed; absent means "not observed", which
    * is not the same as "nothing changed".
@@ -583,6 +588,7 @@ async function projectConversationTurns(
       ...(turn.describedImages === undefined ? {} : { describedImages: turn.describedImages }),
       ...(turn.checkpoint === undefined ? {} : { checkpoint: turn.checkpoint }),
       ...(turn.executionPolicy === undefined ? {} : { executionPolicy: turn.executionPolicy }),
+      ...(turn.delivery === undefined ? {} : { delivery: turn.delivery }),
     });
     const parts: string[] = [];
     for (const reference of turn.assistant) {

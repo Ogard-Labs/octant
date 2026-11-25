@@ -60,6 +60,7 @@ import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { SentMessageText } from "../transcript/SentMessageText";
 import { followSelectionWithin } from "../transcript/selectionOwner";
 import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
+import { SideTaskReportCards } from "../agents/SideTaskReportCards";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import {
   LoadEarlierMessages,
@@ -483,9 +484,14 @@ export function ChatTranscript(props: ChatTranscriptProps) {
         const userContent = resolvedContent(contentById, turn.userMessageRef, "user");
         const attachments = turn.attachmentIds.map((id) => attachmentById.get(String(id)));
         // The host wrote a delivered turn, not the person: it is a subagent's
-        // result and reads as one, and there is no message of theirs to return
-        // to the composer.
-        const delivery = turn.delivery !== undefined ? userContent : undefined;
+        // result or a side task's report and reads as one, and there is no
+        // message of theirs to return to the composer. The mark alone decides
+        // that, so a body the content store cannot serve still renders as the
+        // delivery it journaled rather than as the person's own message.
+        const delivery =
+          turn.delivery !== undefined
+            ? { body: userContent?.body ?? "The delivered report's text is unavailable." }
+            : undefined;
         const checkpoints = props.checkpoints;
         const marked = checkpoints?.byTurnId.get(String(turn.id));
         const routeDecision = routeDecisionByTurn.get(String(turn.id));
@@ -644,7 +650,9 @@ export function ChatTranscript(props: ChatTranscriptProps) {
               <article
                 aria-label={
                   delivery !== undefined
-                    ? "Subagent results"
+                    ? turn.delivery?.kind === "side-task-report"
+                      ? "Report from side task"
+                      : "Subagent results"
                     : sentBy === undefined
                       ? "Your message"
                       : `Message from ${sentBy}`
@@ -652,7 +660,11 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 className={delivery === undefined ? "turn-user" : "turn-child-result"}
               >
                 {delivery !== undefined ? (
-                  <ChildResultCards providerGroups={props.providerGroups} text={delivery.body} />
+                  turn.delivery?.kind === "side-task-report" ? (
+                    <SideTaskReportCards text={delivery.body} />
+                  ) : (
+                    <ChildResultCards providerGroups={props.providerGroups} text={delivery.body} />
+                  )
                 ) : (
                   <>
                     <div className="bubble">

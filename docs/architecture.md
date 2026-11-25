@@ -3928,7 +3928,8 @@ With **Settle threads when they're done** on (the default), Mark done on a
 Work or Code thread also settles it, the host settles a Work or Code thread
 once the turn that filed its passing finished report completes, and the host
 settles a Code thread once a pull request it delivers merged, read from
-cached evidence only; none of them marks a thread Done, and Un-settle brings it
+cached evidence only; none of them settles a thread whose side tasks or child
+runs are not done, none marks a thread Done, and Un-settle brings it
 back
 ([Workspace: thread visibility and completion](design/workspace.md#thread-visibility-and-completion)).
 
@@ -12458,6 +12459,48 @@ person's confirmation:
 These are the only places a prompt is sent for the person, and only on their
 click. If a new thread's first message does not go out, the thread stays and
 the prompt waits in its composer.
+
+A thread started from a side task reports back. The `thread-side-task-reports`
+aggregate, keyed by the child thread, records every turn that ends there as a
+`side-task-report-owed` event: detection in the harness's turn hooks owes a
+completion report carrying the reply (bounded and marked truncated when cut)
+and owes a failure or cancellation its outcome alone, and a completed turn is
+never owed twice at its end. `SideTaskReportStore`
+hydrates the aggregate so owed reports survive a restart, and the person's
+Stop/Resume control on the receipt journals `side-task-reporting-stopped` /
+`-resumed` on the same record; a stopped child owes nothing. A
+`SideTaskReportDeliveryService` watches the journal for owed events and armed
+parents, coalesces owed reports per offering thread (bounded per delivery),
+and asks the mode's port to begin a turn carrying the `side-task-report`
+delivery mark — Chat through `deliver-chat-side-task-report`, Work and Code
+through their ordinary start commands. Delivery admission in each mode service
+verifies every named report is still owed to that thread, so a forged or
+replayed mark cannot mint a delivery, and records the batch as outside content
+as its last step before journaling the turn: a parent that is still busy is
+never marked for a report it has not taken, the provider never reads one
+unmarked, and a mark that cannot be recorded refuses the turn. Only the
+parent's latest turn can hold a report back; one that stopped at a usage limit
+stops counting once a newer turn takes over. A turn that already carries the
+mark settles its reports without a second dispatch. A refused dispatch is tried
+again when the parent commits (a Work turn's end among them) and on a timer,
+because every refusal but one names a standing a person can change: busy,
+archived, marked Done, paused, the mode off, or a sign-in that runs only turns
+a person sends. A parent that no longer exists is the exception: its reports
+settle as `side-task-report-refused` with the reason journaled. Purging either
+thread erases the child's report aggregate and drops whatever was still owed;
+deleting a Chat child settles its owed reports as refused.
+
+The parent's rest follows the report only once it is admitted, in the same step
+that records the outside-content mark: a settled parent comes back, a person's
+snooze stays (`restAfterReport`), and a refused retry changes neither.
+`SideTaskReportFailureWake` reads each mode's journaled turn end and drops that
+snooze when the turn a report started failed. Every settle asks
+`createThreadUnfinishedWork` first: the host's own read of the started children
+(the facts the receipt shows, past the bounds a window's list keeps), the
+reports still owed, and the running child runs. The delivery service tells it
+which reports the parent's own state keeps out (`heldFor`), so they hold no
+settle; the rule is in
+[Workspace: thread visibility and completion](design/workspace.md#thread-visibility-and-completion).
 
 **Work fork.** `fork-work-thread` creates a Work thread in the source's
 Project on the source's provider and model, with a `forkedFrom` origin naming

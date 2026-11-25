@@ -15,6 +15,7 @@ import {
   CodeThreadMetadataService,
   MAX_CODE_THREAD_KNOWN_PULL_REQUESTS,
   pullRequestIdentitiesFromHistory,
+  runningProviderChild,
   touchedIssuesFromHistory,
   type CodeGitWorktreeObservation,
   type CodeGithubMetadataObservation,
@@ -71,6 +72,73 @@ describe("Code thread known pull-request identities", () => {
     expect(identities[0]).toEqual({ number: 1, observedAt: "2026-07-21T23:00:00.000Z" });
     expect(new Set(identities.map((identity) => identity.number)).size).toBe(identities.length);
     expect(pullRequestIdentitiesFromHistory({ status: "rebuild-required" })).toEqual([]);
+  });
+});
+
+describe("A provider's own child that still runs", () => {
+  const started = "2026-07-20T10:00:00.000Z";
+  const child = (childId: string, state: string, occurredAt: string, cursor: number) =>
+    frame(
+      { kind: "child-activity", childId, state, summary: `Child ${childId}` } as never,
+      occurredAt,
+      cursor,
+    );
+
+  it("is one whose last report since this host started says so", () => {
+    expect(
+      runningProviderChild(
+        [
+          child("a", "running", "2026-07-20T10:01:00.000Z", 1),
+          child("a", "completed", "2026-07-20T10:02:00.000Z", 2),
+          child("b", "waiting", "2026-07-20T10:03:00.000Z", 3),
+        ],
+        started,
+      ),
+    ).toBe("Child b");
+  });
+
+  it("is never one the previous host left running without saying how it ended", () => {
+    expect(
+      runningProviderChild([child("a", "running", "2026-07-20T09:00:00.000Z", 1)], started),
+    ).toBeUndefined();
+  });
+
+  it("is never one whose parent turn was stopped or failed before the child said how it ended", () => {
+    for (const end of [
+      { kind: "operation-state", state: "interrupted" },
+      { kind: "operation-state", state: "failed" },
+    ]) {
+      expect(
+        runningProviderChild(
+          [
+            child("a", "running", "2026-07-20T10:01:00.000Z", 1),
+            frame(end as never, "2026-07-20T10:02:00.000Z", 2),
+          ],
+          started,
+        ),
+      ).toBeUndefined();
+    }
+  });
+
+  it("names the child's task when the provider reported one, not its latest activity line", () => {
+    expect(
+      runningProviderChild(
+        [
+          frame(
+            {
+              kind: "child-activity",
+              childId: "a",
+              state: "running",
+              summary: "The subagent is using Bash.",
+              observation: { task: "Compare the two exports" },
+            } as never,
+            "2026-07-20T10:01:00.000Z",
+            1,
+          ),
+        ],
+        started,
+      ),
+    ).toBe("Compare the two exports");
   });
 });
 

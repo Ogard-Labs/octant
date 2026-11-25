@@ -96,6 +96,10 @@ import {
 import {
   completedThreadArchiveDue,
   decideCompleteThread,
+  restAfterReport,
+  restAfterReportFailure,
+  unfinishedWorkRefusal,
+  type ThreadUnfinishedWork,
   decideSnoozeThread,
 } from "@octant/domain/thread-completion-policy";
 import {
@@ -283,6 +287,8 @@ export interface WorkThreadServiceDependencies {
   readonly readLatestFinishedReceipt?: (threadId: string) => ThreadFinishedReceipt | undefined;
   /** The person's Settings choice to put a thread away once it is marked Done; absent is off. */
   readonly putAwayWhenDone?: () => boolean;
+  /** A side task or child run the thread started that is not done, which holds every settle. */
+  readonly unfinishedWork?: (threadId: string) => ThreadUnfinishedWork | undefined;
 }
 
 /**
@@ -348,11 +354,13 @@ export class WorkThreadService {
     | ((threadId: string) => ThreadFinishedReceipt | undefined)
     | undefined;
   readonly #putAwayWhenDone: () => boolean;
+  readonly #unfinishedWork: WorkThreadServiceDependencies["unfinishedWork"];
 
   constructor(dependencies: WorkThreadServiceDependencies) {
     this.#moveHold = dependencies.moveHold;
     this.#readLatestFinishedReceipt = dependencies.readLatestFinishedReceipt;
     this.#putAwayWhenDone = dependencies.putAwayWhenDone ?? (() => false);
+    this.#unfinishedWork = dependencies.unfinishedWork;
     this.#persistence = dependencies.persistence;
     this.#projects = dependencies.projects;
     this.#projection = dependencies.projection;
@@ -788,8 +796,14 @@ export class WorkThreadService {
     const decision = decideCompleteThread({
       lifecycle: current.lifecycle,
       ...(await this.#restSignals(current.id)),
+      unfinishedWork: this.#unfinishedWork?.(String(current.id)),
     });
-    if (decision.status === "refused") return { status: "skipped", reason: "busy" };
+    if (decision.status === "refused") {
+      return {
+        status: "skipped",
+        reason: decision.reason === "unfinished-work" ? "child-work" : "busy",
+      };
+    }
     // The read above awaited the runtime; a person's change meanwhile wins.
     const latest = this.#projection.read(threadId);
     if (latest === undefined || latest.version !== current.version) {
@@ -1175,13 +1189,15 @@ export class WorkThreadService {
           this.#readLatestFinishedReceipt?.(String(current.id)),
         );
         // Marking Done also puts the thread away when Settings says so, unless
-        // a turn still runs or waits on the person: the mark stands either way.
+        // a turn still runs or waits on the person, or a side task or child run
+        // is not done: the mark stands either way.
         const markedAt = decodeTimestamp(this.#clock());
         const putAway =
           this.#putAwayWhenDone() &&
           decideCompleteThread({
             lifecycle: current.lifecycle,
             ...(await this.#restSignals(current.id)),
+            unfinishedWork: this.#unfinishedWork?.(String(current.id)),
           }).status !== "refused";
         const confirmed = decodeWorkThread({
           ...(putAway ? { ...withoutThreadRest(current), completedAt: markedAt } : current),
@@ -1603,9 +1619,18 @@ export class WorkThreadService {
           : undefined;
       const updatedAt = decodeTimestamp(this.#clock());
       if (command.kind === "complete-work-thread" && restSignals !== undefined) {
-        const decision = decideCompleteThread({ lifecycle: current.lifecycle, ...restSignals });
+        const decision = decideCompleteThread({
+          lifecycle: current.lifecycle,
+          ...restSignals,
+          unfinishedWork: this.#unfinishedWork?.(String(current.id)),
+        });
         if (decision.status === "refused") {
-          throw this.#failure("invalid", WORK_COMPLETE_REFUSALS[decision.reason]);
+          throw this.#failure(
+            "invalid",
+            decision.reason === "unfinished-work"
+              ? unfinishedWorkRefusal(decision.work)
+              : WORK_COMPLETE_REFUSALS[decision.reason],
+          );
         }
       }
       // The wake time of a limit-owned snooze comes from the journaled limit
@@ -2197,6 +2222,45 @@ export class WorkThreadService {
       kind: "thread-updated",
       thread: updated,
     });
+    this.#projection.apply({ kind: "thread-updated", thread: updated });
+  }
+
+  /**
+   * A side task's report is about to start a turn here. The thread is not
+   * settled any more; a snooze the person set keeps holding.
+   */
+  noteReportAdmitted(threadId: WorkThreadId): void {
+    this.#changeRestAsHost(threadId, (thread) => restAfterReport(thread));
+  }
+
+  /** The turn a side task's report started here failed, so a person's snooze ends. */
+  noteReportTurnFailed(threadId: WorkThreadId): void {
+    this.#changeRestAsHost(threadId, (thread) => restAfterReportFailure(thread));
+  }
+
+  #changeRestAsHost(
+    threadId: WorkThreadId,
+    rested: (
+      thread: WorkThread,
+    ) => Omit<WorkThread, "completedAt" | "snooze"> &
+      Pick<Partial<WorkThread>, "completedAt" | "snooze">,
+  ): void {
+    const current = this.#projection.read(threadId);
+    if (current === undefined) return;
+    const rest = rested(current);
+    if (rest.completedAt === current.completedAt && rest.snooze === current.snooze) return;
+    const updated = decodeWorkThread({
+      ...rest,
+      version: current.version + 1,
+      updatedAt: decodeTimestamp(this.#clock()),
+    });
+    this.#append(
+      current.id,
+      current.version,
+      "work.thread-updated@1",
+      { kind: "thread-updated", thread: updated },
+      "system",
+    );
     this.#projection.apply({ kind: "thread-updated", thread: updated });
   }
 
