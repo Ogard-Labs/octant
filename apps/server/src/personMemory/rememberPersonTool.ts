@@ -10,7 +10,7 @@ import {
   REMEMBER_PERSON_TOOL_DEFINITION,
   type PersonMemorySource,
 } from "@octant/contracts/person-memory";
-import { quotedFromPersonMessages } from "@octant/domain/person-memory-policy";
+import { personQuotationsIn, type PersonQuotation } from "@octant/domain/person-memory-policy";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { PersonMemoryStore } from "./personMemoryStore";
 import { keptTitle, redactForPersonMemory } from "./personMemorySweep";
@@ -70,12 +70,14 @@ export function createRememberPersonTools(input: {
           }),
         )
         .map((message) => message.text);
-      const quoted = quotedFromPersonMessages(request.text, typed);
-      if (quoted === undefined) return refuse(NOT_THE_PERSONS_WORDS);
-      // Redacted after the quotation is proven, so a secret the person typed is
-      // never stored, and a model cannot use redaction to alter the words.
-      const text = redactForPersonMemory(quoted).trim();
-      if (text.length === 0) return refuse(NOT_THE_PERSONS_WORDS);
+      // The quotation is judged with the message around it: a redaction or a
+      // protected path that its edge would cut through is refused, so the value
+      // of a credential cannot be stored by quoting it without its label.
+      const text = personQuotationsIn(request.text, typed)
+        .filter((quotation) => !cutsThrough(quotation, input.namesProtectedPath))
+        .map((quotation) => redactForPersonMemory(quotation.quoted).trim())
+        .find((candidate) => candidate.length > 0);
+      if (text === undefined) return refuse(NOT_THE_PERSONS_WORDS);
       if (text.length > PERSON_MEMORY_ENTRY_MAX_CHARACTERS) {
         return refuse(
           `Only ${String(PERSON_MEMORY_ENTRY_MAX_CHARACTERS)} characters can be remembered at once. Quote a shorter part of the person's message.`,
@@ -102,6 +104,37 @@ export function createRememberPersonTools(input: {
       };
     },
   };
+}
+
+/**
+ * Whether an edge of the quotation falls inside what the message would have
+ * redacted, or inside a protected path. Redacting the three parts alone must
+ * give what redacting the message gives, and the edge must not split a
+ * whitespace-free run that names a protected path.
+ */
+function cutsThrough(
+  { before, quoted, after }: PersonQuotation,
+  namesProtectedPath: (text: string) => boolean,
+): boolean {
+  const whole = `${before}${quoted}${after}`;
+  if (
+    redactForPersonMemory(whole) !==
+    `${redactForPersonMemory(before)}${redactForPersonMemory(quoted)}${redactForPersonMemory(after)}`
+  ) {
+    return true;
+  }
+  const runAt = (edge: number): string => {
+    let start = edge;
+    let end = edge;
+    while (start > 0 && !/\s/u.test(whole.charAt(start - 1))) start -= 1;
+    while (end < whole.length && !/\s/u.test(whole.charAt(end))) end += 1;
+    return whole.slice(start, end);
+  };
+  return [before.length, before.length + quoted.length].some((edge) => {
+    const inside =
+      edge > 0 && edge < whole.length && !/\s/u.test(whole.charAt(edge - 1) + whole.charAt(edge));
+    return inside && namesProtectedPath(runAt(edge));
+  });
 }
 
 function refusalText(reason: "memory-off" | "project-kept-out" | "leaves-no-trace"): string {

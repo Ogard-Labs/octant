@@ -11,7 +11,7 @@ import {
   PERSON_MEMORY_BLOCK_PREAMBLE,
   personMemoryBlockText,
   personMemoryDistillPrompt,
-  quotedFromPersonMessages,
+  personQuotationsIn,
   searchPastThreads,
 } from "./personMemoryPolicy";
 
@@ -201,18 +201,17 @@ describe("searching past threads", () => {
 });
 
 describe("quoting the person's own words", () => {
-  it("returns the person's own stretch when the text matches without regard to whitespace or case", () => {
+  it("returns the person's own stretch with its surroundings when the text matches without regard to whitespace or case", () => {
     expect(
-      quotedFromPersonMessages("i prefer\n  SHORT answers", [
-        "Hello. I prefer short   answers, thanks.",
-      ]),
-    ).toBe("I prefer short answers");
+      personQuotationsIn("i prefer\n  SHORT answers", ["Hello. I prefer short   answers, thanks."]),
+    ).toEqual([{ before: "Hello. ", quoted: "I prefer short answers", after: ", thanks." }]);
   });
 
-  it("returns nothing for reworded, invented, or empty text", () => {
-    const messages = ["I prefer short answers."];
-    expect(quotedFromPersonMessages("I like short answers", messages)).toBeUndefined();
-    expect(quotedFromPersonMessages("   ", messages)).toBeUndefined();
-    expect(quotedFromPersonMessages("I prefer short answers", [])).toBeUndefined();
+  it("returns every place a text appears, and nothing for reworded, invented, or empty text", () => {
+    const messages = ["I prefer short answers. I prefer short answers."];
+    expect(personQuotationsIn("I prefer short answers", messages)).toHaveLength(2);
+    expect(personQuotationsIn("I like short answers", messages)).toEqual([]);
+    expect(personQuotationsIn("   ", messages)).toEqual([]);
+    expect(personQuotationsIn("I prefer short answers", [])).toEqual([]);
   });
 });

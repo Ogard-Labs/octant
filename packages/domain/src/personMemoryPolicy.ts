@@ -131,32 +131,39 @@ export function parsePersonMemoryDistillation(reply: string): DistilledThread {
   return { status: "parsed", summary, entries };
 }
 
+/** A quotation as it sits in a message: the person's own stretch and what surrounds it. */
+export interface PersonQuotation {
+  readonly before: string;
+  readonly quoted: string;
+  readonly after: string;
+}
+
 /**
- * The person's own words that `text` quotes, or `undefined` when no message
- * holds it. Whitespace and letter case do not matter, so a model may rewrap or
- * recase a quotation, but it may not reword one. The result is the stretch of
- * the message itself (whitespace collapsed), never the model's copy, so what is
- * stored is always what the person typed.
+ * Every place `text` appears in the messages (whitespace and case ignored), each
+ * with the message text around it, so a caller can judge the stretch in its
+ * context: a credential's value quoted without its label looks harmless alone.
  */
-export function quotedFromPersonMessages(
+export function personQuotationsIn(
   text: string,
   messages: ReadonlyArray<string>,
-): string | undefined {
-  const wanted = collapseWhitespace(text);
-  if (wanted.length === 0) return undefined;
+): ReadonlyArray<PersonQuotation> {
+  const wanted = collapseWhitespace(text).toLowerCase();
+  if (wanted.length === 0) return [];
+  const found: PersonQuotation[] = [];
   for (const message of messages) {
     const collapsed = collapseWhitespace(message);
-    const wantedLower = wanted.toLowerCase();
-    const at = collapsed.toLowerCase().indexOf(wantedLower);
-    if (at < 0) continue;
-    // Lowercasing can change a string's length (some letters become two), which
-    // would shift the match; the model's copy then equals the message modulo
-    // case and is the best text left.
-    return collapsed.toLowerCase().length === collapsed.length
-      ? collapsed.slice(at, at + wantedLower.length)
-      : wanted;
+    const lower = collapsed.toLowerCase();
+    // A letter that lowercases to two cannot be aligned; such a message is no source.
+    if (lower.length !== collapsed.length) continue;
+    for (let at = lower.indexOf(wanted); at >= 0; at = lower.indexOf(wanted, at + 1)) {
+      found.push({
+        before: collapsed.slice(0, at),
+        quoted: collapsed.slice(at, at + wanted.length),
+        after: collapsed.slice(at + wanted.length),
+      });
+    }
   }
-  return undefined;
+  return found;
 }
 
 function collapseWhitespace(value: string): string {

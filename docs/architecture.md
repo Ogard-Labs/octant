@@ -2279,9 +2279,13 @@ except where a bullet says otherwise.
   side task's text, a delivered result, or the agent's own words are not the
   person's and are refused with a reason the model can read, so outside
   content cannot create an entry by this route. The
-  text is redacted as above before storage, and refused when it is over 400
-  characters or names a protected path; the caps run through the same merge as
-  the sweep. A routine's run, another turn the host starts as itself, and a
+  text is redacted as above before storage, judged with the message around it:
+  a quotation whose start or end falls inside a stretch the redaction would
+  replace (a credential's value quoted without its label, half a token, a
+  password after its label) or inside a path that names a protected file is
+  refused, so quoting part of a secret cannot store it. It is also refused when
+  it is over 400 characters or names a protected path; the caps run through the
+  same merge as the sweep. A routine's run, another turn the host starts as itself, and a
   subagent are not offered the tool at all: they read person memory but carry no
   words of the person's own. The entry names the open thread as its source, with
   the moment the person said it as the source's end time (an open thread has not

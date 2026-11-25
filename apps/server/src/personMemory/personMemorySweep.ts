@@ -186,8 +186,11 @@ type Settle = "no" | "idle" | "refused";
 
 /** Secret-shaped text and private-key blocks, replaced before a model sees them and before storage. */
 export function redactForPersonMemory(text: string): string {
-  return redactSecretsAndPrivateKeys(text);
+  return redactSecretsAndPrivateKeys(text).replaceAll(LABELLED_PASSWORD, "[redacted]");
 }
+
+/** A password or secret given after its label, which the shared secret shapes do not name. */
+const LABELLED_PASSWORD = /\b(?:password|passwd|passphrase|pwd|secret)\s*[=:]\s*\S+/gi;
 
 /**
  * Learns from threads in two ways. A thread the person put away is learned

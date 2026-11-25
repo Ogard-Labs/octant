@@ -1394,6 +1394,54 @@ describe("saving what the person asks to be remembered, at once", () => {
     expect(h.store.view().entries).toHaveLength(1);
   });
 
+  it("refuses a quotation that takes only part of a credential, however the secret is labelled or split", async () => {
+    const shapes: ReadonlyArray<readonly [string, string]> = [
+      ["Remember my token: Zq81xLmNpQrStUvWxYz0123 for deploys", "Zq81xLmNpQrStUvWxYz0123"],
+      ["Remember my api_key=Zq81xLmNpQrStUvWxYz0123 for deploys", "Zq81xLmNpQrStUvWxYz0123"],
+      ["I deploy with sk-abcdefghijklmnopqrstuvwx on Fridays.", "abcdefghijklmnopqrstuvwx on Fridays."],
+      ["I deploy with sk-abcdefghijklmnopqrstuvwx on Fridays.", "I deploy with sk-abcdefghij"],
+      ["I deploy with sk-abcdefghijklmnopqrstuvwx on Fridays.", "klmnopqrstuvwx"],
+      ["My password: hunter2hunter2 stays", "hunter2hunter2"],
+      ["My PASSWORD:   hunter2hunter2 stays", "hunter2hunter2 stays"],
+      ["Authorization: Basic dXNlcjpwYXNzd29yZA==\nI like short answers", "Basic dXNlcjpwYXNzd29yZA=="],
+      ["Keep this: token:\nZq81xLmNpQrStUvWxYz0123", "ZQ81XLMNPQRSTUVWXYZ0123"],
+      ["Bearer abcdefghijklmnopqrstuvwxyz0123 is mine", "abcdefghijklmnopqrstuvwxyz0123"],
+      [
+        "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----\nI prefer tabs",
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC",
+      ],
+      ["My keys are in ~/.ssh/id_ed25519, remember that.", "id_ed25519, remember that."],
+    ];
+    for (const [message, quote] of shapes) {
+      const { h, latestMessages, remember } = saving();
+      latestMessages.push(message);
+
+      const outcome = await remember({ text: quote });
+
+      expect({ message, quote, refused: outcome?.isError === true }).toEqual({
+        message,
+        quote,
+        refused: true,
+      });
+      expect(h.store.view().entries).toEqual([]);
+    }
+  });
+
+  it("stores a quotation that holds a whole credential redacted, and one beside it untouched", async () => {
+    const { h, latestMessages, remember } = saving();
+    latestMessages.push("Remember I use token: Zq81xLmNpQrStUvWxYz0123 and I prefer tabs.");
+
+    const whole = await remember({ text: "I use token: Zq81xLmNpQrStUvWxYz0123 and" });
+    const beside = await remember({ text: "I prefer tabs." });
+
+    expect(whole?.isError).not.toBe(true);
+    expect(beside?.isError).not.toBe(true);
+    expect(h.journalText()).not.toContain("Zq81xLmNpQrStUvWxYz0123");
+    expect(h.store.view().entries.map((entry) => entry.content)).toEqual(
+      expect.arrayContaining(["I use [redacted] and", "I prefer tabs."]),
+    );
+  });
+
   it("keeps the 200-entry cap, dropping the oldest entry the person never edited", async () => {
     const { h, latestMessages, remember } = saving();
     for (let index = 0; index < 201; index += 1) {
