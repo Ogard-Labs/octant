@@ -944,9 +944,10 @@ describe("Journal", () => {
       .filter((sql) => sql.includes("'$.threadId'") && !sql.includes("'$.event."));
     prepare.mockRestore();
 
-    // The batched replay and the size-and-newest-row read that tells a reader
-    // whether its remembered history is still the thread's.
-    expect(wholeThreadReads).toHaveLength(2);
+    // The batched replay, the size-and-newest-row read that tells a reader
+    // whether its remembered history is still the thread's, and the newest rows
+    // of the slice read from its other end.
+    expect(wholeThreadReads).toHaveLength(3);
     for (const sql of wholeThreadReads) {
       const parameters = Array.from({ length: sql.split("?").length - 1 }, () => "fixture");
       const plan = JSON.stringify(
@@ -990,8 +991,9 @@ describe("Journal", () => {
       sql.includes("ORDER BY aggregate_version ASC\n      LIMIT 1"),
     );
 
-    // The newest events of a kind and the newest results of a kind.
-    expect(newest).toHaveLength(2);
+    // The newest events of a kind, the newest results of a kind, and the
+    // newest rows of a whole thread slice.
+    expect(newest).toHaveLength(3);
     expect(first).toHaveLength(1);
     for (const sql of [...newest, ...first]) {
       const parameters = Array.from({ length: sql.split("?").length - 1 }, () => "fixture");
