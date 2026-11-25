@@ -27,6 +27,8 @@ export interface VideoUsage {
   readonly inputTokens?: number;
   readonly outputTokens?: number;
   readonly billedSeconds?: number;
+  /** The amount the provider says it charged, in US micro-dollars, where it reports one. */
+  readonly costUsdMicros?: number;
 }
 
 /** Every whole second the model accepts for these frames, ascending. */
@@ -293,7 +295,9 @@ function perSecondCostUsdMicros(
   seconds: number,
   imageCount: number,
 ): number {
-  return usdMicrosPerSecond * seconds + (price.inputUsdMicrosPerImage ?? 0) * imageCount;
+  // A fractional second rate times a fractional clip length bills a whole
+  // micro-dollar, rounded up so the estimate and the settle never undercharge.
+  return Math.ceil(usdMicrosPerSecond * seconds + (price.inputUsdMicrosPerImage ?? 0) * imageCount);
 }
 
 /**
@@ -311,6 +315,24 @@ export function settleVideoCostUsdMicros(
   input: { readonly imageCount: number },
 ): number {
   if (usage === undefined) return estimateUsdMicros;
+  // A cost the provider reports is what the person was billed.
+  if (usage.costUsdMicros !== undefined) return Math.max(0, Math.round(usage.costUsdMicros));
+  if (price.kind === "per-second" && usage.billedSeconds !== undefined) {
+    const rate = price.rates[0];
+    // Only a single-rate model can be settled from seconds alone; otherwise
+    // the rate for the clip's own options is the estimate's.
+    if (price.rates.length === 1 && rate !== undefined) {
+      return Math.min(
+        estimateUsdMicros,
+        perSecondCostUsdMicros(
+          price,
+          rate.usdMicrosPerSecond,
+          usage.billedSeconds,
+          input.imageCount,
+        ),
+      );
+    }
+  }
   if (price.kind === "per-token" && usage.outputTokens !== undefined) {
     return tokenCost(price, {
       outputTokens: usage.outputTokens,

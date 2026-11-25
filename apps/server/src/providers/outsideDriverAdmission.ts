@@ -3,7 +3,10 @@ import {
   decodeProviderFailure,
   decodeProviderSessionId,
   OutsideProviderDriverListing,
+  type OutsideDriverProviderInstance,
   type OutsideHarnessEndpointProviderInstance,
+  type OutsideImageProviderInstance,
+  isOutsideDriverProviderInstance,
   OutsideProviderDriverReference,
   type ProviderFailure,
   type ProviderFailureCategory,
@@ -13,10 +16,14 @@ import {
 import type { ExtensionEffectiveState, ExtensionPackageState } from "@octant/contracts/extensions";
 import {
   outsideDriverHostLaunch,
+  outsideImageDriverModels,
   resolveOutsideDriverActivation,
   resolveOutsideDriverRebind,
+  resolveOutsideImageDriverActivation,
+  type OutsideDriverActivationTarget,
 } from "@octant/plugin-host/activation";
 import type { HarnessEndpointDriver } from "@octant/provider-sdk/harness-endpoint";
+import type { ImageGenerationAdapter } from "@octant/provider-sdk/image-generation";
 import { Effect, Schema } from "effect";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import {
@@ -36,6 +43,10 @@ import {
   type OutsideDriverFetch,
   type OutsideDriverLimits,
 } from "./outsideHarnessEndpointProxy";
+import {
+  makeOutsideImageGenerationProxy,
+  type OutsideImageJobPorts,
+} from "./outsideImageGenerationProxy";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 
 /**
@@ -73,6 +84,8 @@ export interface OutsideDriverAdmissionOptions {
   readonly fetch?: OutsideDriverFetch;
   readonly limits?: Partial<OutsideDriverLimits>;
   readonly clock?: () => string;
+  /** Resolves an image address's host name; the system resolver by default. */
+  readonly resolve?: (hostname: string) => Promise<ReadonlyArray<string>>;
   /**
    * The host's Strict, read at each admission: Strict as a Settings default
    * in Code or Work, the reading a host-scope use with no thread takes. An
@@ -134,12 +147,20 @@ function asFailure(error: unknown): ProviderFailure {
   }
 }
 
+/** What the host runs over one driver process, by the family of its instance. */
+type RunningProxy =
+  | { readonly family: "harness-endpoint"; readonly driver: HarnessEndpointDriver }
+  | {
+      readonly family: "image";
+      readonly adapter: ReturnType<typeof makeOutsideImageGenerationProxy>;
+    };
+
 interface RunningDriver {
   readonly instanceId: ProviderInstanceId;
   readonly extensionId: string;
   /** The configuration the process was started for; any other is a new process. */
   readonly binding: string;
-  proxy: Promise<HarnessEndpointDriver> | undefined;
+  proxy: Promise<RunningProxy> | undefined;
   live: HarnessEndpointDriver | undefined;
   channel: OutsideDriverChannel | undefined;
   /** Tells the proxy the channel closed, which fails its calls in flight. */
@@ -162,6 +183,7 @@ export class OutsideDriverAdmission {
   readonly #fetch: OutsideDriverFetch | undefined;
   readonly #limits: Partial<OutsideDriverLimits> | undefined;
   readonly #clock: (() => string) | undefined;
+  readonly #resolve: OutsideDriverAdmissionOptions["resolve"];
   readonly #strict: () => boolean;
   readonly #running = new Map<string, RunningDriver>();
 
@@ -176,32 +198,53 @@ export class OutsideDriverAdmission {
     this.#fetch = options.fetch;
     this.#limits = options.limits;
     this.#clock = options.clock;
+    this.#resolve = options.resolve;
     this.#strict = options.strict ?? (() => true);
   }
 
-  /** Where the instance's driver stands on the activation ladder, at its bound digest. */
-  activation(instance: OutsideHarnessEndpointProviderInstance): ExtensionEffectiveState {
-    const driver = instance.configuration.driver;
-    const packageState = this.#packages().find(
-      (candidate) => String(candidate.extensionId) === String(driver.extensionId),
-    );
-    return resolveOutsideDriverActivation({
+  /**
+   * Where the instance's driver stands on the activation ladder, at its bound
+   * digest. An image profile's driver must also still declare image
+   * generation there, so neither family can run the other's package.
+   */
+  activation(instance: OutsideDriverProviderInstance): ExtensionEffectiveState {
+    const packageState = this.#packageOf(instance.configuration.driver);
+    const input = {
       platform: this.#platform,
       packageState,
       compatible: packageState === undefined || this.#isCompatible(packageState),
       strict: this.#strict(),
-      driver: {
-        extensionId: String(driver.extensionId),
-        packageId: String(driver.packageId),
-        componentId: String(driver.componentId),
-        version: String(driver.version),
-        digest: String(driver.digest),
-      },
+      driver: activationTarget(instance.configuration.driver),
+    };
+    if (instance.driverKind === "outside-image") return resolveOutsideImageDriverActivation(input);
+    const state = resolveOutsideDriverActivation(input);
+    // A package that generates images speaks no harness endpoint protocol.
+    return state.kind === "effective" && outsideImageDriverModels(input) !== undefined
+      ? { kind: "blocked", reason: "incompatible" }
+      : state;
+  }
+
+  isAdmitted(instance: OutsideDriverProviderInstance): boolean {
+    return this.activation(instance).kind === "effective";
+  }
+
+  /**
+   * The models and published prices an image driver's package declares at
+   * exactly the digest named, or nothing. Reading them starts nothing.
+   */
+  imageDriverModels(
+    driver: OutsideProviderDriverReference,
+  ): ReturnType<typeof outsideImageDriverModels> {
+    return outsideImageDriverModels({
+      packageState: this.#packageOf(driver),
+      driver: activationTarget(driver),
     });
   }
 
-  isAdmitted(instance: OutsideHarnessEndpointProviderInstance): boolean {
-    return this.activation(instance).kind === "effective";
+  #packageOf(driver: OutsideProviderDriverReference): ExtensionPackageState | undefined {
+    return this.#packages().find(
+      (candidate) => String(candidate.extensionId) === String(driver.extensionId),
+    );
   }
 
   /**
@@ -209,20 +252,12 @@ export class OutsideDriverAdmission {
    * selection of the same driver, or nothing. Reading it starts nothing.
    */
   rebindTarget(
-    instance: OutsideHarnessEndpointProviderInstance,
+    instance: OutsideDriverProviderInstance,
   ): OutsideProviderDriverReference | undefined {
     const driver = instance.configuration.driver;
     const target = resolveOutsideDriverRebind({
-      packageState: this.#packages().find(
-        (candidate) => String(candidate.extensionId) === String(driver.extensionId),
-      ),
-      driver: {
-        extensionId: String(driver.extensionId),
-        packageId: String(driver.packageId),
-        componentId: String(driver.componentId),
-        version: String(driver.version),
-        digest: String(driver.digest),
-      },
+      packageState: this.#packageOf(driver),
+      driver: activationTarget(driver),
     });
     if (target === undefined) return undefined;
     const decoded = decodeReference(target);
@@ -246,19 +281,18 @@ export class OutsideDriverAdmission {
           version: packageState.version,
           digest: packageState.digest,
         };
-        const state = resolveOutsideDriverActivation({
+        const input = {
           platform: this.#platform,
           packageState,
           compatible: this.#isCompatible(packageState),
           strict: this.#strict(),
-          driver: {
-            extensionId: String(driver.extensionId),
-            packageId: String(driver.packageId),
-            componentId: String(driver.componentId),
-            version: String(driver.version),
-            digest: String(driver.digest),
-          },
-        });
+          driver: activationTarget(driver),
+        };
+        const imageModels = outsideImageDriverModels(input);
+        const state =
+          imageModels === undefined
+            ? resolveOutsideDriverActivation(input)
+            : resolveOutsideImageDriverActivation(input);
         if (state.kind !== "effective") return [];
         // A listing that does not decode is left out rather than breaking the registry.
         const listing = decodeListing({
@@ -276,6 +310,7 @@ export class OutsideDriverAdmission {
           ...(outsideDriverHostLaunch(this.#platform) === "unconfined"
             ? { hostConfinement: "unconfined" }
             : {}),
+          ...(imageModels === undefined ? {} : { imageGeneration: { models: imageModels } }),
         });
         return listing._tag === "Right" ? [listing.right] : [];
       }),
@@ -288,7 +323,11 @@ export class OutsideDriverAdmission {
    */
   endpoint(instance: OutsideHarnessEndpointProviderInstance): HarnessEndpointDriver {
     const instanceId = instance.id;
-    const ensure = () => this.#ensure(instance);
+    const ensure = async () => {
+      const running = await this.#ensure(instance);
+      if (running.family !== "harness-endpoint") throw notAdmitted();
+      return running.driver;
+    };
     const mismatch = () =>
       Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."));
     return {
@@ -351,6 +390,42 @@ export class OutsideDriverAdmission {
     };
   }
 
+  /**
+   * The adapter the image job service runs for one outside image profile. Its
+   * process starts at the profile's first job, never before, and admission is
+   * decided again at that start; a profile whose driver is not admitted fails
+   * its job as `driver-not-admitted` before any process exists.
+   */
+  imageAdapter(
+    instance: OutsideImageProviderInstance,
+    ports: OutsideImageJobPorts,
+    onProviderResponse: () => void,
+  ): ImageGenerationAdapter {
+    return {
+      generate: async (request) => {
+        if (String(request.instanceId) !== String(instance.id)) {
+          return {
+            status: "failed",
+            providerFailure: failure(
+              "invalid-configuration",
+              "Provider instance does not match driver.",
+            ),
+          };
+        }
+        let running: RunningProxy;
+        try {
+          running = await this.#ensure(instance);
+        } catch (error) {
+          return { status: "failed", providerFailure: asFailure(error) };
+        }
+        if (running.family !== "image") {
+          return { status: "failed", providerFailure: notAdmitted() };
+        }
+        return running.adapter.generate(request, ports, onProviderResponse);
+      },
+    };
+  }
+
   /** Stops one instance's driver process, if it has one, and removes its temporary folder. */
   async stop(instanceId: ProviderInstanceId): Promise<void> {
     const key = String(instanceId);
@@ -370,7 +445,7 @@ export class OutsideDriverAdmission {
       const instance = byId.get(String(running.instanceId));
       return !(
         instance !== undefined &&
-        instance.driverKind === "outside-harness-endpoint" &&
+        isOutsideDriverProviderInstance(instance) &&
         instance.enabled &&
         JSON.stringify(instance.configuration) === running.binding &&
         this.isAdmitted(instance)
@@ -393,7 +468,7 @@ export class OutsideDriverAdmission {
     );
   }
 
-  #ensure(instance: OutsideHarnessEndpointProviderInstance): Promise<HarnessEndpointDriver> {
+  #ensure(instance: OutsideDriverProviderInstance): Promise<RunningProxy> {
     const key = String(instance.id);
     const binding = JSON.stringify(instance.configuration);
     const existing = this.#running.get(key);
@@ -430,9 +505,9 @@ export class OutsideDriverAdmission {
   }
 
   async #start(
-    instance: OutsideHarnessEndpointProviderInstance,
+    instance: OutsideDriverProviderInstance,
     running: RunningDriver,
-  ): Promise<HarnessEndpointDriver> {
+  ): Promise<RunningProxy> {
     // Decided again before any folder or process exists.
     if (!this.isAdmitted(instance)) throw notAdmitted();
     const driver = instance.configuration.driver;
@@ -482,21 +557,37 @@ export class OutsideDriverAdmission {
       owned.stop();
       throw refusalFailure("start-failed");
     }
-    const proxy = makeOutsideHarnessEndpointProxy({
+    const shared = {
       instanceId: instance.id,
       channel: owned,
       baseUrl: instance.configuration.baseUrl,
       key: instance.configuration.key,
-      modelIds: instance.configuration.modelIds,
-      runtimeRegistry: this.#registry,
       ...(this.#credentialResolver === undefined
         ? {}
         : { credentialResolver: this.#credentialResolver }),
       ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
       ...(this.#limits === undefined ? {} : { limits: this.#limits }),
-      ...(this.#clock === undefined ? {} : { clock: this.#clock }),
-    });
-    running.live = proxy;
+    };
+    let proxy: RunningProxy;
+    if (instance.driverKind === "outside-image") {
+      proxy = {
+        family: "image",
+        adapter: makeOutsideImageGenerationProxy({
+          ...shared,
+          modelIds: instance.configuration.modelAllowlist,
+          ...(this.#resolve === undefined ? {} : { resolve: this.#resolve }),
+        }),
+      };
+    } else {
+      const driver = makeOutsideHarnessEndpointProxy({
+        ...shared,
+        modelIds: instance.configuration.modelIds,
+        runtimeRegistry: this.#registry,
+        ...(this.#clock === undefined ? {} : { clock: this.#clock }),
+      });
+      running.live = driver;
+      proxy = { family: "harness-endpoint", driver };
+    }
     // Turning the instance off or removing it invalidates its runtime, which
     // drains this process. The registry has just cleared the observation, and
     // a driver that was stopped on purpose leaves none of its own.
@@ -519,4 +610,14 @@ export class OutsideDriverAdmission {
     running.unsubscribe?.();
     running.unsubscribe = undefined;
   }
+}
+
+function activationTarget(driver: OutsideProviderDriverReference): OutsideDriverActivationTarget {
+  return {
+    extensionId: String(driver.extensionId),
+    packageId: String(driver.packageId),
+    componentId: String(driver.componentId),
+    version: String(driver.version),
+    digest: String(driver.digest),
+  };
 }

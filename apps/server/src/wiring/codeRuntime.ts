@@ -2,6 +2,10 @@ import { decodeBrowserThreadId } from "@octant/contracts";
 import { ownPullRequestsFromHistory } from "../code/codeThreadMetadataService";
 import { splitRepositoryName } from "../code/pullRequestLinkService";
 import { MergedThreadPutAway, threadDeliversPullRequest } from "../code/mergedThreadPutAway";
+import {
+  FinishedReportSettle,
+  managedChildWorkPending,
+} from "../finishedReceipts/finishedReportSettle";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { designSystemTurnContext } from "../designSystems/designSystemContext";
 import {
@@ -20,12 +24,14 @@ import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
+  decodeAgentRunParentThreadId,
   decodeCodeEvidenceContentId,
   decodeCodeFailure,
   decodeCodeOperationId,
   decodeProviderSessionId,
   RUNTIME_STARTED_TURN_PROMPT,
   decodeCodeRelativePath,
+  decodeCodeOperationEventFrame,
   decodeCodeThreadId,
   type CodeThreadId,
   decodeContextSubjectRef,
@@ -848,6 +854,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         kept: keptImageChoices,
         fullAccess: () => level() === "full-access",
         jobs: imageJobService,
+        admitsOutsideImageDriver: (instance) => imageJobService.admitsOutsideDriver(instance),
         imageSources: codeImageSources,
         listInstances: () => persistence.readProviderInstances(),
         readImageGenerationCustomSources: () =>
@@ -2654,6 +2661,74 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     const unsubscribeCoordinator = persistence.journal.subscribeCommitted((append) =>
       coordinatorService.onCommittedEvents(append.events),
     );
+    // A Code turn that filed a finished report settles its thread once it
+    // completes, under the same rules the merge sweep keeps: never a
+    // coordinator, child work still running or unread, or a pending decision.
+    // Only the in-process service can act as the host.
+    const finishedReportSettle =
+      hostCodeService === undefined
+        ? undefined
+        : new FinishedReportSettle({
+            turnUpdate: (event) => {
+              if (event.eventName !== "code.operation-event-recorded@1") return undefined;
+              const frame = decodeCodeOperationEventFrame(event.payload);
+              // A command that is not a turn can wait for approval under its
+              // own operation id, so only a run starting or completing marks
+              // a new turn.
+              return frame.event.kind === "operation-state" &&
+                (frame.event.state === "running" || frame.event.state === "completed")
+                ? {
+                    threadId: String(frame.threadId),
+                    turnId: String(frame.operationId),
+                    completed: frame.event.state === "completed",
+                  }
+                : undefined;
+            },
+            latestReportTurnId: (threadId) => {
+              const latest = finishedReceipts.latest(threadId);
+              return latest === undefined || latest.stale ? undefined : latest.receipt.turnId;
+            },
+            enabled: () =>
+              (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                .putAwayThreadsWhenDone,
+            settle: async (threadId) => {
+              const id = decodeCodeThreadId(threadId);
+              const thread = persistence.readCodeThread(id);
+              if (thread === undefined) return { status: "skipped", reason: "not-found" };
+              if (thread.coordinator === true) return { status: "skipped", reason: "coordinator" };
+              if (codeTurnDecisions.forThread(thread) !== undefined) {
+                return { status: "skipped", reason: "decision-pending" };
+              }
+              const view = await codeThreadMetadataService.project([
+                {
+                  thread,
+                  projectProjectionPresent: persistence.readProject(thread.projectId) !== undefined,
+                },
+              ]);
+              const children = view.threads[0]?.childAgents;
+              if (
+                (children !== undefined &&
+                  (children.active > 0 || children.unacknowledgedResults > 0)) ||
+                // Octant-managed helpers live apart from the provider's own
+                // child events, so they are read from their projection.
+                managedChildWorkPending(
+                  persistence.agentRunProjection.parentSummary(
+                    decodeAgentRunParentThreadId(String(id)),
+                  ),
+                )
+              ) {
+                return { status: "skipped", reason: "child-work" };
+              }
+              return hostCodeService.settleFinishedThread(id);
+            },
+            onError: (message, error) => console.error(`[code-settle] ${message}`, error),
+          });
+    const unsubscribeFinishedReportSettle =
+      finishedReportSettle === undefined
+        ? () => undefined
+        : persistence.journal.subscribeCommitted((append) =>
+            finishedReportSettle.onCommittedEvents(append.events),
+          );
     coordinatorWorkersHolder.read = (threadId) => coordinatorService.workersOf(threadId);
     continueWorkerOnFallback.current = (threadId, availability, stopped) =>
       coordinatorService.continueOnFallback(String(threadId), availability, stopped);
@@ -2661,6 +2736,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         unsubscribeCoordinator();
+        unsubscribeFinishedReportSettle();
         coordinatorDoneWhenAbort.abort();
         coordinatorService.stop();
       }),

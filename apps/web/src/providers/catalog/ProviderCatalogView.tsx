@@ -2,6 +2,7 @@ import type {
   DiscoveryCandidate,
   DiscoverySnapshot,
   OutsideHarnessEndpointProviderConfiguration,
+  OutsideImageProviderConfiguration,
   OutsideProviderDriverListing,
   ProviderDriverKind,
   ProviderInstance,
@@ -87,7 +88,7 @@ export interface ProviderCatalogViewProps {
   /** Adds a provider from an outside driver; the host creates it off. */
   readonly onAddOutsideProvider?: (
     displayName: string,
-    configuration: OutsideHarnessEndpointProviderConfiguration,
+    configuration: OutsideHarnessEndpointProviderConfiguration | OutsideImageProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
 }
@@ -123,7 +124,12 @@ function bindsOutsideDriver(
   instance: ProviderInstance,
   listing: OutsideProviderDriverListing,
 ): boolean {
-  if (instance.driverKind !== "outside-harness-endpoint") return false;
+  if (
+    instance.driverKind !== "outside-harness-endpoint" &&
+    instance.driverKind !== "outside-image"
+  ) {
+    return false;
+  }
   const driver = instance.configuration.driver;
   return (
     String(driver.extensionId) === String(listing.driver.extensionId) &&
@@ -171,15 +177,17 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
     );
     // The host lists only the outside drivers it admits; each continues the
     // providers bound to its own package and digest.
-    const outside = (outsideDrivers ?? []).map(
-      (listing): CatalogEntry => ({
+    const outside = (outsideDrivers ?? []).map((listing): CatalogEntry => {
+      const driverKind =
+        listing.imageGeneration === undefined ? "outside-harness-endpoint" : "outside-image";
+      return {
         key: outsideEntryKey(listing),
-        driverKind: "outside-harness-endpoint",
+        driverKind,
         source: { kind: "outside", listing },
         name: listing.displayName,
         state: resolveProviderCatalogState(
           {
-            driverKind: "outside-harness-endpoint",
+            driverKind,
             installed: listing.installed,
             trusted: listing.trusted,
             available: true,
@@ -189,8 +197,8 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
             instances: props.instances.filter((instance) => bindsOutsideDriver(instance, listing)),
           },
         ),
-      }),
-    );
+      };
+    });
     return [...bundled, ...outside];
   }, [
     listings,
@@ -319,7 +327,8 @@ function CatalogState(props: { readonly status: ProviderCatalogStatus }) {
   );
 }
 
-function kindLabel(state: ProviderCatalogState): string {
+function kindLabel(state: ProviderCatalogState, driverKind: ProviderDriverKind): string {
+  if (driverKind === "outside-image") return "Image generation";
   return state.setup === "endpoint" ? "Model endpoint" : "Agent runtime";
 }
 
@@ -357,7 +366,7 @@ function CatalogRow(props: { readonly entry: CatalogEntry; readonly onOpen: () =
         <span className="endpoint-row__text">
           <span className="endpoint-row__name">{entry.name}</span>
           <span className="endpoint-row__sub">
-            {kindLabel(entry.state)} · {originLabel(entry)}
+            {kindLabel(entry.state, entry.driverKind)} · {originLabel(entry)}
             {configured}
           </span>
         </span>
@@ -425,7 +434,7 @@ function ProviderCatalogDetail(
           </h1>
           <p className="endpoint-detail__state">
             <CatalogState status={status} />
-            <span>· {kindLabel(state)}</span>
+            <span>· {kindLabel(state, entry.driverKind)}</span>
           </p>
         </div>
       </header>
@@ -795,7 +804,10 @@ function CurrentStep(
       if (entry.source.kind === "outside") {
         const listing = entry.source.listing;
         const onAdd = props.onAddOutsideProvider;
-        sentence = `Add a provider from ${name}: give the address of the service it speaks to and the models to offer. It is added off; its process starts only when you check the connection.`;
+        sentence =
+          listing.imageGeneration === undefined
+            ? `Add a provider from ${name}: give the address of the service it speaks to and the models to offer. It is added off; its process starts only when you check the connection.`
+            : `Add an image provider from ${name}: give the address of the service it speaks to and choose its models. It is added off; once on, its process starts at the first image, which asks you first and is held to your spend limits like any other.`;
         action =
           onAdd === undefined ? null : (
             <OutsideDriverAddForm

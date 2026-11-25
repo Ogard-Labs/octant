@@ -28,6 +28,8 @@ import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
 import "./composer-plan-usage.css";
 import { ComposerMenuActionProvider } from "./ComposerMenuActions";
 import { OctantButton } from "../ui/base/OctantButton";
+import { ComposerStashControls } from "./ComposerStashControls";
+import type { ComposerStashBinding } from "./useComposerStash";
 import {
   focusComposerThreadDrop,
   useActiveComposerThreadDropKey,
@@ -207,6 +209,7 @@ export interface ThreadComposerProps {
    * instead of opening a pane. The key matches the registered composer.
    */
   readonly threadDropKey?: string;
+  readonly stash?: ComposerStashBinding | undefined;
 }
 
 /**
@@ -364,9 +367,12 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
       {props.queue}
       {props.chips}
       <div className="composer-field">
+        {props.stash === undefined ? null : (
+          <ComposerStashControls binding={props.stash} surface={surfaceRef} />
+        )}
         {props.row.attach !== undefined ? (
           <div className="composer-field__attach">{props.row.attach}</div>
-        ) : props.startContext === undefined ? null : (
+        ) : props.startContext === undefined || props.stash !== undefined ? null : (
           // A start surface that cannot attach (Chat) keeps the button's cell,
           // so choosing a folder does not shift the prompt sideways.
           <div aria-hidden="true" className="composer-field__attach composer-field__attach--held" />

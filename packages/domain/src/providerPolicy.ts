@@ -4,6 +4,11 @@ import {
   acpAgentCreateCommandKind,
   CLAUDE_ACCOUNT_ACCENTS,
 } from "@octant/contracts/providers";
+import type {
+  ChangeAcpAgentConfigurationCommand,
+  CreateAcpAgentProviderCommand,
+  ProviderRegistryCommand,
+} from "@octant/contracts/provider-commands";
 import {
   assignedProviderAccountDirectory,
   CLAUDE_ACCOUNT_PROFILE,
@@ -36,9 +41,6 @@ import type {
   AcpAgentProviderInstance,
   AddedAcpAgentConfiguration,
   AddedAcpAgentProviderInstance,
-  ChangeAcpAgentConfigurationCommand,
-  CreateAcpAgentProviderCommand,
-  ProviderRegistryCommand,
   AnthropicCompatibleProviderConfiguration,
   AnthropicCompatibleProviderInstance,
   AzureFoundryProviderConfiguration,
@@ -59,6 +61,10 @@ import type {
   GeminiImageProviderInstance,
   GeminiVideoProviderConfiguration,
   GeminiVideoProviderInstance,
+  RunwayVideoProviderConfiguration,
+  RunwayVideoProviderInstance,
+  FalVideoProviderConfiguration,
+  FalVideoProviderInstance,
   GeminiImageResolution,
   IdeogramImageProviderConfiguration,
   IdeogramImageProviderInstance,
@@ -85,6 +91,9 @@ import type {
   OpenCodeProviderInstance,
   OutsideHarnessEndpointProviderConfiguration,
   OutsideHarnessEndpointProviderInstance,
+  OutsideDriverProviderInstance,
+  OutsideImageProviderConfiguration,
+  OutsideImageProviderInstance,
   OutsideProviderDriverReference,
 } from "@octant/contracts/providers";
 
@@ -121,12 +130,18 @@ function reject(code: ProviderPolicyRejectionCode, message: string): never {
 
 export function isImageProfileDriverKind(
   driverKind: ProviderDriverKind,
-): driverKind is "openai-image" | "gemini-native-image" | "bfl-image" | "ideogram-image" {
+): driverKind is
+  | "openai-image"
+  | "gemini-native-image"
+  | "bfl-image"
+  | "ideogram-image"
+  | "outside-image" {
   return (
     driverKind === "openai-image" ||
     driverKind === "gemini-native-image" ||
     driverKind === "bfl-image" ||
-    driverKind === "ideogram-image"
+    driverKind === "ideogram-image" ||
+    driverKind === "outside-image"
   );
 }
 
@@ -136,8 +151,10 @@ export function isImageProfileDriverKind(
  */
 export function isVideoProfileDriverKind(
   driverKind: ProviderDriverKind,
-): driverKind is "gemini-video" {
-  return driverKind === "gemini-video";
+): driverKind is "gemini-video" | "runway-video" | "fal-video" {
+  return (
+    driverKind === "gemini-video" || driverKind === "runway-video" || driverKind === "fal-video"
+  );
 }
 
 /** A media profile, image or video: one that generates media and cannot start a turn. */
@@ -1472,6 +1489,94 @@ export function changeOutsideHarnessEndpointConfiguration(
   };
 }
 
+interface CreateOutsideImageProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: OutsideImageProviderConfiguration;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+}
+
+/**
+ * An image profile from an admitted outside image driver. Like an outside
+ * harness endpoint it is created off, under the same address and key rules;
+ * the host checks separately that every listed model is one the package
+ * declares, since only a declared model has a price the host can reserve.
+ */
+export function createOutsideImageProvider(
+  input: CreateOutsideImageProviderInput,
+): OutsideImageProviderInstance {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "outside-image",
+    configuration: normalizeOutsideImageConfiguration(input.configuration),
+    enabled: false,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+function normalizeOutsideImageConfiguration(
+  configuration: OutsideImageProviderConfiguration,
+): OutsideImageProviderConfiguration {
+  const baseUrl = normalizeOpenAiCompatibleBaseUrl(configuration.baseUrl);
+  if (configuration.key === undefined && !isLoopbackHostname(new URL(baseUrl).hostname)) {
+    reject("invalid-authentication", "Unauthenticated providers must use a loopback endpoint.");
+  }
+  const modelAllowlist = normalizeManualModelIds(configuration.modelAllowlist);
+  if (!modelAllowlist.some((id) => String(id) === String(configuration.defaultModel))) {
+    reject("invalid-configuration", "The default image model must be one of the listed models.");
+  }
+  return {
+    kind: "outside-image",
+    driver: configuration.driver,
+    baseUrl,
+    ...(configuration.key === undefined ? {} : { key: configuration.key }),
+    modelAllowlist: modelAllowlist as OutsideImageProviderConfiguration["modelAllowlist"],
+    defaultModel: configuration.defaultModel,
+  };
+}
+
+/**
+ * Changes an outside image profile's address, key placement, or models. As
+ * for a harness endpoint, the driver it binds is never part of the change.
+ */
+export function changeOutsideImageConfiguration(
+  provider: OutsideImageProviderInstance,
+  configuration: OutsideImageProviderConfiguration,
+  updatedAt: UtcTimestamp,
+): OutsideImageProviderInstance {
+  if (!isSameOutsideDriver(provider.configuration.driver, configuration.driver)) {
+    reject(
+      "invalid-configuration",
+      "A provider keeps the driver it was added with; add a new provider to use another.",
+    );
+  }
+  return {
+    ...provider,
+    configuration: normalizeOutsideImageConfiguration(configuration),
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+function isSameOutsideDriver(
+  bound: OutsideProviderDriverReference,
+  named: OutsideProviderDriverReference,
+): boolean {
+  return (
+    String(bound.extensionId) === String(named.extensionId) &&
+    String(bound.packageId) === String(named.packageId) &&
+    String(bound.componentId) === String(named.componentId) &&
+    String(bound.version) === String(named.version) &&
+    String(bound.digest) === String(named.digest)
+  );
+}
+
 /**
  * Moves a provider to the digest its person trusted for the same driver. The
  * host makes it only once the person has trusted the new selection; the
@@ -1480,11 +1585,11 @@ export function changeOutsideHarnessEndpointConfiguration(
  * reference to another package or component is refused: that is a different
  * driver, which takes a new provider.
  */
-export function rebindOutsideHarnessEndpointDriver(
-  provider: OutsideHarnessEndpointProviderInstance,
+export function rebindOutsideProviderDriver(
+  provider: OutsideDriverProviderInstance,
   driver: OutsideProviderDriverReference,
   updatedAt: UtcTimestamp,
-): OutsideHarnessEndpointProviderInstance {
+): OutsideDriverProviderInstance {
   const bound = provider.configuration.driver;
   if (
     String(bound.extensionId) !== String(driver.extensionId) ||
@@ -1495,16 +1600,19 @@ export function rebindOutsideHarnessEndpointDriver(
   }
   // A crash-limit hold belongs to the bytes that crashed: it stays while the
   // provider binds that digest and is left behind when it binds another.
-  const { driverQuarantine, ...rest } = provider;
-  return {
-    ...rest,
-    configuration: { ...provider.configuration, driver },
-    ...(driverQuarantine !== undefined && String(driverQuarantine.digest) === String(driver.digest)
-      ? { driverQuarantine }
-      : {}),
-    version: nextVersion(provider.version),
-    updatedAt,
-  };
+  const held =
+    provider.driverQuarantine !== undefined &&
+    String(provider.driverQuarantine.digest) === String(driver.digest)
+      ? { driverQuarantine: provider.driverQuarantine }
+      : {};
+  const moved = { version: nextVersion(provider.version), updatedAt, ...held };
+  // Rebuilt per family so the compiler keeps each configuration with its own kind.
+  if (provider.driverKind === "outside-image") {
+    const { driverQuarantine: _left, ...rest } = provider;
+    return { ...rest, configuration: { ...provider.configuration, driver }, ...moved };
+  }
+  const { driverQuarantine: _left, ...rest } = provider;
+  return { ...rest, configuration: { ...provider.configuration, driver }, ...moved };
 }
 
 /**
@@ -1512,10 +1620,10 @@ export function rebindOutsideHarnessEndpointDriver(
  * its limit. Returns the provider unchanged when it is already held there, so
  * a second report of the same crash loop journals nothing.
  */
-export function quarantineOutsideHarnessEndpointDriver(
-  provider: OutsideHarnessEndpointProviderInstance,
+export function quarantineOutsideProviderDriver(
+  provider: OutsideDriverProviderInstance,
   quarantinedAt: UtcTimestamp,
-): OutsideHarnessEndpointProviderInstance {
+): OutsideDriverProviderInstance {
   if (isOutsideDriverQuarantined(provider)) return provider;
   return {
     ...provider,
@@ -1530,9 +1638,7 @@ export function quarantineOutsideHarnessEndpointDriver(
 }
 
 /** Whether the provider's driver is held at the digest the provider binds now. */
-export function isOutsideDriverQuarantined(
-  provider: OutsideHarnessEndpointProviderInstance,
-): boolean {
+export function isOutsideDriverQuarantined(provider: OutsideDriverProviderInstance): boolean {
   return (
     provider.driverQuarantine !== undefined &&
     String(provider.driverQuarantine.digest) === String(provider.configuration.driver.digest)
@@ -1919,6 +2025,94 @@ export function createGeminiVideoProvider(
     version: nextVersion(input.expectedVersion),
     createdAt: input.createdAt,
     updatedAt: input.createdAt,
+  };
+}
+
+/** A Runway or fal video profile's settings: its models and the one it starts with. */
+export interface VideoModelSelectionInput {
+  readonly modelAllowlist: ReadonlyArray<string>;
+  readonly defaultModel: string;
+}
+
+interface CreateVideoProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: VideoModelSelectionInput;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+function newVideoInstance(input: CreateVideoProviderInput) {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host" as const,
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+function runwayVideoConfiguration(
+  input: VideoModelSelectionInput,
+): RunwayVideoProviderConfiguration {
+  return {
+    kind: "runway-video-http",
+    ...normalizeImageModelSelection(input.modelAllowlist, input.defaultModel),
+  };
+}
+
+function falVideoConfiguration(input: VideoModelSelectionInput): FalVideoProviderConfiguration {
+  return {
+    kind: "fal-video-http",
+    ...normalizeImageModelSelection(input.modelAllowlist, input.defaultModel),
+  };
+}
+
+export function createRunwayVideoProvider(
+  input: CreateVideoProviderInput,
+): RunwayVideoProviderInstance {
+  return {
+    ...newVideoInstance(input),
+    driverKind: "runway-video",
+    configuration: runwayVideoConfiguration(input.configuration),
+  };
+}
+
+export function createFalVideoProvider(input: CreateVideoProviderInput): FalVideoProviderInstance {
+  return {
+    ...newVideoInstance(input),
+    driverKind: "fal-video",
+    configuration: falVideoConfiguration(input.configuration),
+  };
+}
+
+export function changeRunwayVideoConfiguration(
+  current: RunwayVideoProviderInstance,
+  input: VideoModelSelectionInput,
+  updatedAt: UtcTimestamp,
+): RunwayVideoProviderInstance {
+  return {
+    ...current,
+    configuration: runwayVideoConfiguration(input),
+    version: nextVersion(current.version),
+    updatedAt,
+  };
+}
+
+export function changeFalVideoConfiguration(
+  current: FalVideoProviderInstance,
+  input: VideoModelSelectionInput,
+  updatedAt: UtcTimestamp,
+): FalVideoProviderInstance {
+  return {
+    ...current,
+    configuration: falVideoConfiguration(input),
+    version: nextVersion(current.version),
+    updatedAt,
   };
 }
 

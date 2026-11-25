@@ -10,6 +10,11 @@ import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
 import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStore";
 import { WorkMessageWake } from "../work/workMessageWake";
+import {
+  FinishedReportSettle,
+  managedChildWorkPending,
+} from "../finishedReceipts/finishedReportSettle";
+import { workTurnDecision } from "../turnDecisions/workTurnDecisions";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { mkdirSync, rmSync } from "node:fs";
 import { lstat } from "node:fs/promises";
@@ -27,6 +32,7 @@ import {
   decodeWindowId,
   decodeWorkThreadId,
   decodeWorkTurnId,
+  decodeWorkTurnUpdated,
   decodeWorkTurnRequestId,
   LOCAL_HOST_ID,
   type AutomationRunReference,
@@ -1022,6 +1028,7 @@ export function wireWork(deps: WorkDependencies) {
               fullAccess: () =>
                 runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
               jobs: imageJobService,
+              admitsOutsideImageDriver: (instance) => imageJobService.admitsOutsideDriver(instance),
               imageSources: workImageSources,
               listInstances: () => persistence.readProviderInstances(),
               readImageGenerationCustomSources: () =>
@@ -2339,6 +2346,49 @@ export function wireWork(deps: WorkDependencies) {
     const unsubscribeWorkMessageWake = persistence.journal.subscribeCommitted((append) =>
       workMessageWake.onCommittedEvents(append.events),
     );
+    // A turn that filed a finished report settles its thread once it completes.
+    const finishedReportSettle = new FinishedReportSettle({
+      turnUpdate: (event) => {
+        if (event.eventName !== "work.turn-updated@1") return undefined;
+        const updated = decodeWorkTurnUpdated(event.payload);
+        return {
+          threadId: String(updated.threadId),
+          turnId: String(updated.turnId),
+          completed: updated.status === "completed",
+        };
+      },
+      latestReportTurnId: (threadId) => {
+        const latest = finishedReceipts.latest(threadId);
+        return latest === undefined || latest.stale ? undefined : latest.receipt.turnId;
+      },
+      enabled: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+          .putAwayThreadsWhenDone,
+      settle: async (threadId) => {
+        const id = decodeWorkThreadId(threadId);
+        const thread = workThreadProjection.read(id);
+        if (thread === undefined) return { status: "skipped", reason: "not-found" };
+        // A finished turn that left the person a decision keeps the thread in view.
+        if (workTurnDecision(thread, workTurnProjection.listForThread(id)) !== undefined) {
+          return { status: "skipped", reason: "decision-pending" };
+        }
+        // A child still going, or one whose result the lead has not read, keeps
+        // the thread in view, as it keeps the board card's count.
+        if (
+          managedChildWorkPending(
+            persistence.agentRunProjection.parentSummary(decodeAgentRunParentThreadId(String(id))),
+          )
+        ) {
+          return { status: "skipped", reason: "child-work" };
+        }
+        return workThreadService.settleFinishedThread(id);
+      },
+      onError: (message, error) => console.error(`[work-settle] ${message}`, error),
+    });
+    const unsubscribeFinishedReportSettle = persistence.journal.subscribeCommitted((append) =>
+      finishedReportSettle.onCommittedEvents(append.events),
+    );
+    yield* Effect.addFinalizer(() => Effect.sync(() => unsubscribeFinishedReportSettle()));
     yield* Effect.addFinalizer(() => Effect.sync(() => unsubscribeWorkMessageWake()));
     const messageQueueTimer = setInterval(advanceMessageQueue, 1000);
     const stopEventLoopLagDetector = startEventLoopLagDetector();

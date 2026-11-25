@@ -258,6 +258,34 @@ describe("video generation policy", () => {
     );
   });
 
+  it("rounds a fractional billed-second cost up to a whole micro-dollar", () => {
+    const fractional = {
+      kind: "per-second" as const,
+      rates: [{ resolution: "720p", usdMicrosPerSecond: 3 }] as const,
+    };
+    const options = { resolution: "720p", audio: false };
+    expect(settleVideoCostUsdMicros(fractional, 6, { billedSeconds: 1.5 }, options, noImages)).toBe(
+      5,
+    );
+  });
+
+  it("settles at a cost the provider reports, and a single-rate clip from its billed seconds", () => {
+    const perSecond = {
+      kind: "per-second" as const,
+      rates: [{ resolution: "720p", usdMicrosPerSecond: 120_000 }] as const,
+    };
+    const options = { resolution: "720p", audio: false };
+    expect(
+      settleVideoCostUsdMicros(perSecond, 600_000, { costUsdMicros: 480_000 }, options, noImages),
+    ).toBe(480_000);
+    expect(
+      settleVideoCostUsdMicros(perSecond, 600_000, { billedSeconds: 4 }, options, noImages),
+    ).toBe(480_000);
+    expect(
+      settleVideoCostUsdMicros(omni.price, 696_540, { costUsdMicros: 100 }, options, noImages),
+    ).toBe(100);
+  });
+
   it("treats an unpublished price as unknown spend", () => {
     expect(
       estimateVideoCost(

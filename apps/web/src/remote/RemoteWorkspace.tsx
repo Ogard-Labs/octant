@@ -29,6 +29,10 @@ import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import type { RemoteProductClients } from "./remoteProductClients";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import {
+  ComposerStashScopeContext,
+  type ComposerStashScope,
+} from "../composer/ComposerStashControls";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ReplyDetailClient } from "@octant/client-runtime/reply-detail-client";
 import type { ReplyDetailLevel, ReplyDetailReading } from "@octant/contracts/shell";
@@ -47,6 +51,7 @@ export interface RemoteWorkspaceProps {
   readonly initialThread?: { readonly mode: OctantMode; readonly threadId: string };
   readonly clients: RemoteProductClients;
   readonly mode: OctantMode;
+  readonly stashScope?: ComposerStashScope;
   /** False while the session is stale: reads stay visible, sends are refused. */
   readonly connected: boolean;
   /**
@@ -89,7 +94,9 @@ export function RemoteWorkspace(props: RemoteWorkspaceProps) {
       <ConversationInputClientContext.Provider value={props.clients.conversationInputs}>
         <ReplyDetailSourceContext.Provider value={replyDetail}>
           <ReplyDetailContext.Provider value={replyDetail.reading.defaultLevel}>
-            <RemoteModeSurface {...props} />
+            <ComposerStashScopeContext.Provider value={props.stashScope}>
+              <RemoteModeSurface {...props} />
+            </ComposerStashScopeContext.Provider>
           </ReplyDetailContext.Provider>
         </ReplyDetailSourceContext.Provider>
       </ConversationInputClientContext.Provider>
@@ -540,6 +547,11 @@ export interface RemoteCodeSurfaceProps extends Omit<RemoteSurfaceProps, "client
     thread: CodeThread,
     checkout: CodeCheckoutIdentity | undefined,
   ) => ReactNode;
+  readonly onCloneFromThisComputer?: () => void;
+  readonly selectProjectRequest?: Readonly<{
+    readonly projectId: string;
+    readonly sequence: number;
+  }>;
 }
 
 /**
@@ -600,6 +612,12 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
             {...(props.actsAsHostPerson && props.clients.folderBrowse !== undefined
               ? { folderBrowse: props.clients.folderBrowse }
               : {})}
+            {...(props.actsAsHostPerson && props.onCloneFromThisComputer !== undefined
+              ? { onCloneFromThisComputer: props.onCloneFromThisComputer }
+              : {})}
+            {...(props.selectProjectRequest === undefined
+              ? {}
+              : { selectProjectRequest: props.selectProjectRequest })}
             onCreated={(thread) => {
               props.onNavigate();
               setActiveThreadId(thread.id);

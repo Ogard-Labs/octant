@@ -90,11 +90,11 @@ function VideoProviderCreateForm(props: { readonly controller: ProviderControlle
   const controller = props.controller;
   return (
     <ProviderCreateForm
-      allowedProviderTypes={["gemini-video"]}
+      allowedProviderTypes={["gemini-video", "runway-video", "fal-video"]}
       busy={controller.busy}
       credentialManagementAvailable={controller.credentialManagementAvailable}
       heading="Connect a video provider"
-      hint="Use a Gemini API key for Gemini Omni Flash. Keys stay in the host's secure store."
+      hint="Use a Gemini, Runway, or fal API key. Keys stay in the host's secure store."
       initialProviderType="gemini-video"
       onCreate={controller.create}
       onCreateAnthropicCompatible={controller.createAnthropicCompatible}
@@ -103,7 +103,7 @@ function VideoProviderCreateForm(props: { readonly controller: ProviderControlle
       onCreateAcpAgent={controller.createAcpAgent}
       onCreateClaude={controller.createClaude}
       onCreateGeminiImage={controller.createGeminiImage}
-      onCreateGeminiVideo={controller.createGeminiVideo}
+      onCreateVideo={controller.createVideo}
       onCreateIdeogramImage={controller.createIdeogramImage}
       onCreateOllama={controller.createOllama}
       onCreateOpenAiCompatible={controller.createOpenAiCompatible}

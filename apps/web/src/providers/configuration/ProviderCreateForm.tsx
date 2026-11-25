@@ -36,14 +36,14 @@ import {
   foundryConfigurationFrom,
   openAiImageConfigurationFrom,
   geminiImageConfigurationFrom,
-  geminiVideoConfigurationFrom,
+  videoConfigurationFrom,
   bflImageConfigurationFrom,
   ideogramImageConfigurationFrom,
 } from "./configurationValues";
 import {
   BflImageFields,
   GeminiImageFields,
-  GeminiVideoFields,
+  VideoProfileFields,
   IdeogramImageFields,
   OpenAiImageFields,
 } from "./ImageConfigurationForms";
@@ -59,7 +59,7 @@ export type ProviderCreateFormProps = Pick<
   | "onCreateAzureFoundry"
   | "onCreateOpenAiImage"
   | "onCreateGeminiImage"
-  | "onCreateGeminiVideo"
+  | "onCreateVideo"
   | "onCreateBflImage"
   | "onCreateIdeogramImage"
   | "onCreateClaude"
@@ -82,7 +82,23 @@ export type ProviderCreateProviderType =
   | "gemini-native-image"
   | "bfl-image"
   | "ideogram-image"
-  | "gemini-video";
+  | VideoProviderType;
+
+/** The video profile kinds the create form offers, each one configuration shape. */
+type VideoProviderType = "gemini-video" | "runway-video" | "fal-video";
+const VIDEO_CONFIGURATION_KINDS = {
+  "gemini-video": "gemini-video-http",
+  "runway-video": "runway-video-http",
+  "fal-video": "fal-video-http",
+} as const satisfies Record<VideoProviderType, string>;
+const VIDEO_PROFILE_LABELS: Record<VideoProviderType, string> = {
+  "gemini-video": "Gemini video",
+  "runway-video": "Runway video",
+  "fal-video": "fal video",
+};
+function isVideoProviderType(value: string): value is VideoProviderType {
+  return value in VIDEO_CONFIGURATION_KINDS;
+}
 
 /**
  * Optional presentation limits for embedded creation flows. Settings can
@@ -161,7 +177,7 @@ export function ProviderCreateForm(
     providerType === "gemini-native-image" ||
     providerType === "bfl-image" ||
     providerType === "ideogram-image" ||
-    providerType === "gemini-video" ||
+    isVideoProviderType(providerType) ||
     acpAuthentication === "api-key"
       ? "required"
       : providerType === "openai-compatible" || providerType === "anthropic-compatible"
@@ -230,8 +246,8 @@ export function ProviderCreateForm(
                           ? "Add Black Forest Labs image profile"
                           : providerType === "ideogram-image"
                             ? "Add Ideogram image profile"
-                            : providerType === "gemini-video"
-                              ? "Add Gemini video profile"
+                            : isVideoProviderType(providerType)
+                              ? `Add ${VIDEO_PROFILE_LABELS[providerType]} profile`
                               : providerType === "ollama"
                                 ? "Add Ollama provider"
                                 : providerType === "claude"
@@ -372,10 +388,13 @@ export function ProviderCreateForm(
                   configuration,
                   enteredCredential,
                 );
-              } else if (providerType === "gemini-video") {
-                const configuration = geminiVideoConfigurationFrom(data);
+              } else if (isVideoProviderType(providerType)) {
+                const configuration = videoConfigurationFrom(
+                  data,
+                  VIDEO_CONFIGURATION_KINDS[providerType],
+                );
                 const enteredCredential = transientCredential(credentialInput.current);
-                operation = props.onCreateGeminiVideo(
+                operation = props.onCreateVideo(
                   String(data.get("displayName") ?? ""),
                   configuration,
                   enteredCredential,
@@ -456,6 +475,8 @@ export function ProviderCreateForm(
                   },
                   { id: "ideogram-image", group: "Image generation", label: "Ideogram Image" },
                   { id: "gemini-video", group: "Video generation", label: "Gemini Video" },
+                  { id: "runway-video", group: "Video generation", label: "Runway Video" },
+                  { id: "fal-video", group: "Video generation", label: "fal Video" },
                 ].filter(
                   (option) =>
                     allowedProviderTypes === undefined ||
@@ -484,7 +505,7 @@ export function ProviderCreateForm(
             providerType !== "gemini-native-image" &&
             providerType !== "bfl-image" &&
             providerType !== "ideogram-image" &&
-            providerType !== "gemini-video" &&
+            !isVideoProviderType(providerType) &&
             providerType !== "ollama" ? (
               <label>
                 <span>{selectedDriverLabel} binary</span>
@@ -691,8 +712,10 @@ export function ProviderCreateForm(
                 credentialInput={credentialInput}
                 credentialManagementAvailable={props.credentialManagementAvailable}
               />
-            ) : providerType === "gemini-video" ? (
-              <GeminiVideoFields
+            ) : isVideoProviderType(providerType) ? (
+              <VideoProfileFields
+                key={providerType}
+                driverKind={providerType}
                 credentialInput={credentialInput}
                 credentialManagementAvailable={props.credentialManagementAvailable}
               />
@@ -829,7 +852,7 @@ export function ProviderCreateForm(
                   providerType === "gemini-native-image" ||
                   providerType === "bfl-image" ||
                   providerType === "ideogram-image" ||
-                  providerType === "gemini-video") &&
+                  isVideoProviderType(providerType)) &&
                   !props.credentialManagementAvailable)
               }
               type="submit"
@@ -852,8 +875,8 @@ export function ProviderCreateForm(
                               ? "Add Black Forest Labs image profile"
                               : providerType === "ideogram-image"
                                 ? "Add Ideogram image profile"
-                                : providerType === "gemini-video"
-                                  ? "Add Gemini video profile"
+                                : isVideoProviderType(providerType)
+                                  ? `Add ${VIDEO_PROFILE_LABELS[providerType]} profile`
                                   : `Add ${selectedDriverLabel}`}
             </OctantButton>
           </form>

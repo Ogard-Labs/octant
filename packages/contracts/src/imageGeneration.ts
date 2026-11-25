@@ -242,6 +242,7 @@ export const ImageGenerationProfileView = Schema.Struct({
     "openai-compatible-image",
     "bfl-image",
     "ideogram-image",
+    "outside-image",
   ),
   modelAllowlist: Schema.Array(ProviderModelId).pipe(Schema.minItems(1)),
   defaultModel: ProviderModelId,

@@ -1,0 +1,19 @@
+.composer-stash-list {
+  display: grid;
+  gap: var(--oct-space-2);
+  max-height: min(50vh, 24rem);
+  overflow: auto;
+  margin-block: var(--oct-space-3);
+  padding: 0;
+  list-style: none;
+}
+.composer-stash-list__entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+  overflow-wrap: anywhere;
+}
+.composer-stash-list__entry :is(small, p) {
+  color: var(--oct-meta);
+}

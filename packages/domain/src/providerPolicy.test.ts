@@ -49,9 +49,9 @@ import {
   createOpenCodeProvider,
   changeOutsideHarnessEndpointConfiguration,
   createOutsideHarnessEndpointProvider,
-  rebindOutsideHarnessEndpointDriver,
+  rebindOutsideProviderDriver,
   isOutsideDriverQuarantined,
-  quarantineOutsideHarnessEndpointDriver,
+  quarantineOutsideProviderDriver,
   isImageProfileDriverKind,
   removeProvider,
   renameProvider,
@@ -2972,7 +2972,7 @@ describe("outside driver provider policy", () => {
   it("moves a provider to its driver's newly trusted digest and keeps everything else the person set", () => {
     const instance = { ...create({}), enabled: true };
     const newer = { ...driver, version: "0.2.0", digest: `sha256:${"d".repeat(64)}` };
-    const rebound = rebindOutsideHarnessEndpointDriver(instance, newer as never, reboundAt);
+    const rebound = rebindOutsideProviderDriver(instance, newer as never, reboundAt);
     expect(decodeProviderInstance(rebound)).toEqual(rebound);
     expect(rebound).toEqual({
       ...instance,
@@ -2985,14 +2985,14 @@ describe("outside driver provider policy", () => {
   it("refuses to move a provider to another package or another component", () => {
     const instance = create({});
     expect(() =>
-      rebindOutsideHarnessEndpointDriver(
+      rebindOutsideProviderDriver(
         instance,
         { ...driver, packageId: "00000000-0000-4000-8000-000000000914" } as never,
         reboundAt,
       ),
     ).toThrow(ProviderPolicyRejected);
     expect(() =>
-      rebindOutsideHarnessEndpointDriver(
+      rebindOutsideProviderDriver(
         instance,
         { ...driver, componentId: "other-driver" } as never,
         reboundAt,
@@ -3003,7 +3003,7 @@ describe("outside driver provider policy", () => {
   it("holds a crash-looping driver at the digest the provider binds, once", () => {
     const instance = { ...create({}), enabled: true };
     expect(isOutsideDriverQuarantined(instance)).toBe(false);
-    const held = quarantineOutsideHarnessEndpointDriver(instance, reboundAt);
+    const held = quarantineOutsideProviderDriver(instance, reboundAt);
     expect(decodeProviderInstance(held)).toEqual(held);
     expect(held).toEqual({
       ...instance,
@@ -3013,13 +3013,13 @@ describe("outside driver provider policy", () => {
     });
     expect(isOutsideDriverQuarantined(held)).toBe(true);
     // Already held at this digest: nothing changes, so nothing is journaled again.
-    expect(quarantineOutsideHarnessEndpointDriver(held, createdAt)).toBe(held);
+    expect(quarantineOutsideProviderDriver(held, createdAt)).toBe(held);
   });
 
   it("leaves the hold behind only when the provider moves to another digest", () => {
-    const held = quarantineOutsideHarnessEndpointDriver(create({}), reboundAt);
+    const held = quarantineOutsideProviderDriver(create({}), reboundAt);
     const newer = { ...driver, version: "0.2.0", digest: `sha256:${"d".repeat(64)}` };
-    const moved = rebindOutsideHarnessEndpointDriver(held, newer as never, reboundAt);
+    const moved = rebindOutsideProviderDriver(held, newer as never, reboundAt);
     expect(moved.driverQuarantine).toBeUndefined();
     expect(isOutsideDriverQuarantined(moved)).toBe(false);
     // A hold recorded for a digest the provider no longer binds holds nothing.
@@ -3027,7 +3027,7 @@ describe("outside driver provider policy", () => {
       isOutsideDriverQuarantined({ ...moved, driverQuarantine: held.driverQuarantine } as never),
     ).toBe(false);
     // A new version label over the same bytes is the same driver, still held.
-    const relabelled = rebindOutsideHarnessEndpointDriver(
+    const relabelled = rebindOutsideProviderDriver(
       held,
       { ...driver, version: "0.1.1" } as never,
       reboundAt,

@@ -23,6 +23,7 @@ export type OctantKeybindingActionId =
   | "next-waiting-thread"
   | "reply-detail-cycle"
   | "dictate"
+  | "composer-stash"
   | "zen-next-space"
   | "zen-previous-space"
   | "review-next"
@@ -48,12 +49,11 @@ export interface OctantKeybindingAction {
    */
   readonly page?: "review";
   /**
-   * An action that answers only while a terminal holds the keyboard. The
-   * terminal sends every other key to its shell, so the chord must hold Mod
-   * or Alt, and may name Escape: held with a modifier it is not the Escape a
-   * shell or editor reads, which is why it can be the way out.
+   * An action that answers only while a terminal or composer holds focus.
+   * A terminal chord must hold Mod or Alt, and may name Escape with a modifier
+   * so ordinary Escape can still reach the shell.
    */
-  readonly scope?: "terminal";
+  readonly scope?: "terminal" | "composer";
 }
 
 /**
@@ -74,7 +74,6 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     area: "Shell",
     defaultChord: "Mod+Shift+U",
   },
-  { id: "zen-mode", label: "Toggle Zen mode", area: "Shell", defaultChord: "Mod+Shift+Z" },
   {
     id: "toggle-sidebar",
     label: "Show or hide the sidebar",
@@ -145,7 +144,7 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
   },
   {
     id: "review-complete",
-    label: "Put the thread away",
+    label: "Settle the thread",
     area: "Review",
     defaultChord: "C",
     page: "review",
@@ -191,10 +190,26 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     area: "Shell",
     // M for microphone. The desktop menu holds Mod+M (Minimize) but not this,
     // and no other default does. It answers in a text field, which is where
-    // dictation goes. Last in the table because it arrived last: a chord a
-    // person saved for an older action before this default existed keeps
-    // working, since the earlier action wins a shared chord.
+    // dictation goes. Earlier actions keep priority for a shared chord, so a
+    // person who already saved that chord for another action keeps it.
     defaultChord: "Mod+Shift+M",
+  },
+  {
+    id: "zen-mode",
+    label: "Toggle Zen mode",
+    area: "Shell",
+    // E for enter. Held by no other default and no desktop menu item. Its first
+    // default, Mod+Shift+Z, is Redo in a text field. It follows existing
+    // actions so their saved chords keep priority.
+    defaultChord: "Mod+Shift+E",
+  },
+  {
+    id: "composer-stash",
+    label: "Stash or restore a draft in the composer",
+    area: "Shell",
+    scope: "composer",
+    // Keep existing custom chords ahead of the newly introduced default.
+    defaultChord: "Mod+S",
   },
 ];
 
@@ -224,6 +239,24 @@ const PAGE_RESERVED_KEYS = new Set(["tab", "escape", " "]);
  * reserved: the shell types them.
  */
 const TERMINAL_RESERVED_KEYS = new Set(["enter", " "]);
+
+/**
+ * Chords a text field, the message editor or the desktop Edit menu already
+ * answers. The message editor undoes and redoes on keydown, and the window
+ * listeners act on the same event: a shortcut on Mod+Z undid the text and ran
+ * as well, and one on Mod+C ran instead of copying. The editor redoes on Mod+Y
+ * whether or not Shift is held, so both are here.
+ */
+const TEXT_EDITING_CHORDS: ReadonlyMap<string, string> = new Map([
+  ["Mod+Z", "Undo"],
+  ["Mod+Shift+Z", "Redo"],
+  ["Mod+Y", "Redo"],
+  ["Mod+Shift+Y", "Redo"],
+  ["Mod+X", "Cut"],
+  ["Mod+C", "Copy"],
+  ["Mod+V", "Paste"],
+  ["Mod+A", "Select All"],
+]);
 
 export type OctantChordParse =
   | { readonly status: "ok"; readonly chord: OctantChord }
@@ -283,7 +316,15 @@ export function parseChord(
       reason: "A chord must hold Mod or Alt, so it cannot swallow ordinary typing.",
     };
   }
-  return { status: "ok", chord: { mod, shift, alt, key } };
+  const chord = { mod, shift, alt, key };
+  if (options.page !== true && options.terminal !== true) {
+    const written = formatChord(chord);
+    const command = TEXT_EDITING_CHORDS.get(written);
+    if (command !== undefined) {
+      return { status: "invalid", reason: `${written} is ${command} in text fields.` };
+    }
+  }
+  return { status: "ok", chord };
 }
 
 /** How a chord for this action is read: pages allow bare keys, terminals allow Escape. */

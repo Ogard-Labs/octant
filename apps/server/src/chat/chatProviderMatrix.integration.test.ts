@@ -44,7 +44,10 @@ const REGISTERED_PROVIDER_DRIVER_KINDS = {
   "bfl-image": true,
   "ideogram-image": true,
   "gemini-video": true,
+  "runway-video": true,
+  "fal-video": true,
   "outside-harness-endpoint": true,
+  "outside-image": true,
   "acp-agent": true,
 } as const satisfies Readonly<Record<RegisteredProviderDriverKind, true>>;
 
@@ -83,8 +86,12 @@ const CHAT_OUTCOMES = {
   "bfl-image": "unavailable",
   "ideogram-image": "unavailable",
   "gemini-video": "unavailable",
+  "runway-video": "unavailable",
+  "fal-video": "unavailable",
   // Nothing admits an outside driver package yet, so no outside instance runs a turn.
   "outside-harness-endpoint": "unavailable",
+  // An outside image driver generates images; it runs no turn.
+  "outside-image": "unavailable",
   // An added agent claims nothing a conformance run would show: what it can do
   // is what its own `initialize` reports when the person runs it.
   "acp-agent": "unavailable",
@@ -92,7 +99,7 @@ const CHAT_OUTCOMES = {
 
 describe("Chat provider matrix", () => {
   it("consumes Chat conformance evidence for every registered provider kind", () => {
-    expect(new Set(registeredProviderDriverKinds).size).toBe(30);
+    expect(new Set(registeredProviderDriverKinds).size).toBe(33);
 
     for (const driverKind of registeredProviderDriverKinds) {
       if (CHAT_OUTCOMES[driverKind] === "unavailable") continue;

@@ -1,4 +1,5 @@
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
+import { settledThreadNotice } from "../composer/settledThreadNotice";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   ProjectMemoryProposalPrompt,
@@ -108,6 +109,14 @@ import {
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
 import type { HostId } from "@octant/contracts/host";
+import { MAX_CHAT_TURN_ATTACHMENTS } from "@octant/contracts/chat";
+import { MAX_COMPOSER_ATTACHMENT_BYTES } from "./composerAttachmentCapability";
+import { prepareComposerStashFiles } from "../composer/prepareComposerStashFiles";
+import {
+  composerStashContextValues,
+  recoveredComposerThreadDraft,
+} from "../composer/composerStashDraft";
+import type { ComposerStashBinding, ComposerStashSubmission } from "../composer/useComposerStash";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { MoveToProjectChoice } from "./MoveToProjectDialog";
 import { activeChatTurns } from "@octant/domain/chat-policy";
@@ -205,6 +214,7 @@ type AttachmentStatus =
 interface PendingAttachment {
   readonly id: ChatAttachmentId;
   readonly displayName: string;
+  readonly file: File;
 }
 
 interface ChatSendContext {
@@ -351,6 +361,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const pendingPreviewRef = useRef<ReadonlyArray<PreviewContextSelection>>([]);
   const pendingQuotesRef = useRef<ReadonlyArray<TranscriptQuoteChip>>([]);
   const discardAttachmentRef = useRef(props.controller.discard);
+  const stashSubmission = useRef<ComposerStashSubmission>(undefined);
   const markDraftStagedDroppedRef = useRef(props.controller.markDraftStagedDropped);
   const mountedRef = useRef(true);
   const activeThreadIdRef = useRef<string | undefined>(
@@ -663,7 +674,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           await discardAttachmentRef.current({ threadId, attachmentId }).catch(() => undefined);
           return;
         }
-        appendPendingAttachment({ id: attachmentId, displayName });
+        appendPendingAttachment({ id: attachmentId, displayName, file });
       } catch {
         await discardAttachmentRef.current({ threadId, attachmentId }).catch(() => undefined);
         if (mountedRef.current && activeThreadIdRef.current === String(threadId)) {
@@ -757,6 +768,143 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       : uploadingAttachments.length === 1
         ? `Uploading ${firstUpload.displayName}.`
         : `Uploading ${uploadingAttachments.length} attachments.`;
+
+  const canvasCanMove =
+    props.pendingCanvasSelections === undefined ||
+    (props.onClearCanvasSelections !== undefined && props.onAttachCanvasContext !== undefined);
+  const stash: ComposerStashBinding = {
+    submission: stashSubmission,
+    target: {
+      location: {
+        host: props.hostId ?? "local",
+        extensionScope: extensionDraft.scopeKey,
+        mode: "chat",
+        projectId: thread.projectId ?? null,
+        composerId: thread.id,
+        threadId: thread.id,
+      },
+      attachmentLimit: MAX_CHAT_TURN_ATTACHMENTS,
+      attachmentByteLimit: MAX_COMPOSER_ATTACHMENT_BYTES,
+      readsImages: imageAttachmentCapability.kind === "supported",
+      context: [
+        "quote",
+        "preview",
+        "thread",
+        "side-chat",
+        "continuation",
+        ...(canvasCanMove ? ["canvas" as const] : []),
+        ...(props.pendingExtensionSelections === undefined ? ["extension" as const] : []),
+      ],
+    },
+    draft: {
+      text: props.controller.pendingDraft,
+      caret: props.controller.pendingDraftCaret ?? props.controller.pendingDraft.length,
+      files: pendingAttachments.map((attachment) => attachment.file),
+      context: [
+        ...pendingQuotes.map((value) => ({ kind: "quote" as const, value })),
+        ...pendingPreviewSelections.map((value) => ({ kind: "preview" as const, value })),
+        ...pendingCanvasSelections.map((value) => ({ kind: "canvas" as const, value })),
+        ...threadMentions.chips.map((value) => ({ kind: "thread" as const, value })),
+        ...pendingExtensionSelections.map((value) => ({ kind: "extension" as const, value })),
+        ...(props.controller.draftSideChatReturns ?? []).map((value) => ({
+          kind: "side-chat" as const,
+          value,
+        })),
+        ...(props.controller.draftSideChatReturnsInvalid
+          ? [{ kind: "side-chat" as const, value: null }]
+          : []),
+        ...(continuation.policy === "text-only"
+          ? [{ kind: "continuation" as const, value: continuation.policy }]
+          : []),
+      ],
+    },
+    unavailable:
+      uploadingMessage !== undefined ||
+      attachmentStatus.kind === "removing" ||
+      messageQueue.busy ||
+      messageQueue.uncertain
+        ? "Wait for the current attachment or queue action to finish."
+        : undefined,
+    prepare: async (next) => {
+      const canvas = composerStashContextValues(next, "canvas");
+      const extensions = composerStashContextValues(next, "extension");
+      if (!canvasCanMove || props.pendingExtensionSelections !== undefined) {
+        return {
+          kind: "refused",
+          reason: "Some selected context is still owned by another panel.",
+        };
+      }
+      const files = await prepareComposerStashFiles({
+        current: pendingAttachmentsRef.current,
+        files: next.files,
+        stage: async (file) => {
+          const id = decodeChatAttachmentId(crypto.randomUUID());
+          const displayName = pastedImageName(file);
+          const mediaType = attachmentMediaType(file);
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          if (!isImageAttachment(file)) {
+            const refusal = chatFileRefusal(
+              providerState.observation,
+              thread.modelId,
+              { type: mediaType },
+              bytes,
+              displayName,
+            );
+            if (refusal !== undefined) return { kind: "refused", reason: refusal };
+          } else if (imageAttachmentCapability.kind !== "supported") {
+            return { kind: "refused", reason: "This model cannot read images." };
+          }
+          try {
+            await props.controller.upload({
+              threadId: thread.id,
+              attachmentId: id,
+              displayName,
+              mediaType,
+              bytes,
+            });
+          } catch (error) {
+            await discardAttachmentRef
+              .current({ threadId: thread.id, attachmentId: id })
+              .catch(() => undefined);
+            throw error;
+          }
+          return { kind: "staged", entry: { id, displayName, file } };
+        },
+        discard: (attachment) => {
+          void discardAttachmentRef
+            .current({ threadId: thread.id, attachmentId: attachment.id })
+            .catch(() => undefined);
+        },
+        apply: (attachments) => {
+          pendingAttachmentsRef.current = attachments;
+          setPendingAttachments(attachments);
+        },
+      });
+      if (files.kind === "refused") return files;
+      return {
+        ...files,
+        apply: () => {
+          files.apply();
+          setPendingQuotes(composerStashContextValues(next, "quote"));
+          setPendingPreviewSelections(composerStashContextValues(next, "preview"));
+          if (props.pendingCanvasSelections === undefined) setLocalCanvasSelections(canvas);
+          else {
+            props.onClearCanvasSelections?.();
+            for (const selection of canvas) props.onAttachCanvasContext?.(selection);
+          }
+          threadMentions.restore(composerStashContextValues(next, "thread"));
+          extensionDraft.restore(extensions);
+          continuation.change(composerStashContextValues(next, "continuation")[0] ?? "preserve");
+          draftEditRevisionRef.current += 1;
+          if (props.controller.restoreComposerDraft === undefined) {
+            props.controller.setPendingDraft(next.text, next.caret);
+          } else {
+            props.controller.restoreComposerDraft(thread.id, recoveredComposerThreadDraft(next));
+          }
+        },
+      };
+    },
+  };
 
   /**
    * Run one thread command after every command already queued.
@@ -1023,6 +1171,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       return false;
     }
     const sideChatReturns = props.controller.draftSideChatReturns ?? [];
+    const retireStashRecovery = stashSubmission.current?.();
     const sendingDraftRevision = props.controller.draftRevision;
     const extensionReceiptsForSend = pendingExtensionRef.current;
     setSendNotice(undefined);
@@ -1075,9 +1224,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         ];
         if (previous !== undefined && previous.threadId === String(thread.id))
           args[6] = previous.version;
-        if (sendingDraftRevision !== undefined || continuation.policy === "text-only")
+        if (
+          sendingDraftRevision !== undefined ||
+          continuation.policy === "text-only" ||
+          retireStashRecovery !== undefined
+        )
           args[7] = {
-            composerDraft: "consume",
+            composerDraft: retireStashRecovery === undefined ? "consume" : "consume-on-acceptance",
             ...(continuation.policy === "text-only"
               ? { contextInputPolicy: continuation.policy }
               : {}),
@@ -1100,6 +1253,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       throw error;
     }
     if (sent) {
+      retireStashRecovery?.();
       continuation.reset();
       consumeContext(context);
     } else {
@@ -1676,9 +1830,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             />
           )}
           <ChatComposer
+            stash={stash}
             readOnly={readOnly}
             benchmarkProjectId={view.thread.projectId}
-            notices={sideChatNotice === undefined ? [] : [sideChatNotice]}
+            notices={[
+              settledThreadNotice({
+                settledAt: thread.completedAt,
+                onUnsettle: readOnly
+                  ? undefined
+                  : () => void props.controller.reopenThread(thread.id),
+              }),
+              sideChatNotice,
+            ].filter((notice) => notice !== undefined)}
             key={String(thread.id)}
             info={
               <ThreadInfo
@@ -1815,7 +1978,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               // sibling upload's failure in this batch is set after this point and
               // therefore survives until the batch drains.
               setAttachmentStatus({ kind: "idle" });
-              setUploadingAttachments((current) => [...current, { id: attachmentId, displayName }]);
+              setUploadingAttachments((current) => [
+                ...current,
+                { id: attachmentId, displayName, file },
+              ]);
               const settleUpload = () =>
                 setUploadingAttachments((current) =>
                   current.filter((upload) => upload.id !== attachmentId),
@@ -1872,7 +2038,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                       .catch(() => undefined);
                     return;
                   }
-                  appendPendingAttachment({ id: attachmentId, displayName });
+                  appendPendingAttachment({ id: attachmentId, displayName, file });
                   settleUpload();
                 } catch {
                   settleUpload();
@@ -1940,6 +2106,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               if (!queueFollowUp) return await submitTurn(draft);
               if (!messageQueue.available || messageQueue.busy || messageQueue.uncertain)
                 return false;
+              const retireStashRecovery = stashSubmission.current?.();
               const revision = props.controller.draftRevision ?? draftEditRevisionRef.current;
               const origin = String(view.thread.id);
               const claimed = [...pendingAttachmentsRef.current];
@@ -1995,6 +2162,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     ...(sideChatReturns.length === 0 ? {} : { sideChatReturns }),
                   },
                   () => {
+                    retireStashRecovery?.();
                     releaseClaim();
                     continuation.reset();
                     if (!mountedRef.current || activeThreadIdRef.current !== origin) return;

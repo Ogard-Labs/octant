@@ -41,7 +41,7 @@ describe("video card description", () => {
     expect(describeVideoOffer(pending, pending.options)).toEqual({
       price: "About $0.70 for 10 s at 720p, billed by Example.",
       stop: "Stop ends the wait; Example may still finish and bill the clip.",
-      retention: "Example receives the prompt and keeps them for 24 hours.",
+      retention: "Example receives the prompt and keeps them for up to 24 hours.",
       approvable: true,
     });
   });

@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import { Schema } from "effect";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type {
   HostControlStatus,
   HostBackupOutcome,
@@ -878,12 +879,14 @@ function ThreadRetentionPanel({
                 .then(async (result) => {
                   setOutcome(result);
                   if (!("kind" in result)) {
-                    const purgedIds = [
-                      ...result.purged.map((thread) => String(thread.threadId)),
-                      ...result.alreadyPurged.map((thread) => String(thread.threadId)),
-                    ];
-                    purgeComposerThreadDrafts(purgedIds);
-                    const failedIds = [...result.purged, ...result.alreadyPurged]
+                    const purged = [...result.purged, ...result.alreadyPurged];
+                    purgeComposerThreadDrafts(purged.map((thread) => String(thread.threadId)));
+                    await import("../composer/composerStashStore")
+                      .then(({ removePurgedComposerDrafts }) =>
+                        removePurgedComposerDrafts(LOCAL_HOST_ID, purged),
+                      )
+                      .catch(() => undefined);
+                    const failedIds = purged
                       .filter((thread) => thread.mode === "code")
                       .map((thread) => String(thread.threadId))
                       .filter((id) => !breakpointStore.purgeThread(id));

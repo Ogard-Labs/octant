@@ -1111,6 +1111,57 @@ describe("useProviderController", () => {
     expect(host.clearProviderCredential).toHaveBeenCalledWith(createdId);
   });
 
+  it("creates a Runway or fal video profile with its own command, chosen by the configuration", async () => {
+    const created = geminiVideoProvider();
+    const api = client();
+    const kinds: string[] = [];
+    vi.mocked(api.execute).mockImplementation(async (command) => {
+      kinds.push(command.kind);
+      if (
+        command.kind === "create-runway-video-provider" ||
+        command.kind === "create-fal-video-provider"
+      ) {
+        return {
+          kind: "provider-created",
+          instance: {
+            ...created,
+            id: command.instanceId,
+            driverKind:
+              command.kind === "create-runway-video-provider" ? "runway-video" : "fal-video",
+            configuration: command.configuration,
+          } as ProviderInstance,
+        };
+      }
+      throw new Error(`unexpected provider command ${command.kind}`);
+    });
+    const host = credentialHost();
+    const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      await result.current.createVideo(
+        "Runway",
+        {
+          kind: "runway-video-http",
+          modelAllowlist: ["gen4.5" as never],
+          defaultModel: "gen4.5" as never,
+        },
+        transientCredential("runway-secret", []),
+      );
+    });
+    await act(async () => {
+      await result.current.createVideo(
+        "fal",
+        {
+          kind: "fal-video-http",
+          modelAllowlist: ["fal-ai/veo3.1" as never],
+          defaultModel: "fal-ai/veo3.1" as never,
+        },
+        transientCredential("fal-secret", []),
+      );
+    });
+    expect(kinds).toEqual(["create-runway-video-provider", "create-fal-video-provider"]);
+  });
+
   it("creates a Gemini video profile before storing its write-only credential and reconfigures its models", async () => {
     const calls: string[] = [];
     const created = geminiVideoProvider();
@@ -1140,7 +1191,7 @@ describe("useProviderController", () => {
 
     await act(async () => {
       await expect(
-        result.current.createGeminiVideo(
+        result.current.createVideo(
           "Omni",
           created.configuration,
           transientCredential("video-secret", calls),
@@ -1165,7 +1216,7 @@ describe("useProviderController", () => {
 
     await act(async () => {
       await expect(
-        result.current.changeGeminiVideoConfiguration(
+        result.current.changeVideoConfiguration(
           createdId,
           created.configuration,
           transientCredential("", calls),

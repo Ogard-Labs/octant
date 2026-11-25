@@ -155,11 +155,12 @@ function runtimeSandbox(driverKind: ProviderDriverKind): ProviderCatalogSandbox 
 }
 
 export function providerCatalogSetupKind(driverKind: ProviderDriverKind): ProviderCatalogSetupKind {
-  // An outside driver is a harness endpoint added with its address, never a
+  // An outside driver, of either family, is added with its address, never a
   // runtime found on the host.
   return requiresManualEndpoint(driverKind) ||
     driverKind === "ollama" ||
-    driverKind === "outside-harness-endpoint"
+    driverKind === "outside-harness-endpoint" ||
+    driverKind === "outside-image"
     ? "endpoint"
     : "runtime";
 }
@@ -213,7 +214,10 @@ function chooseInstance(
 
 function takesNoCredential(instance: ProviderInstance): boolean {
   if (instance.driverKind === "ollama") return true;
-  if (instance.driverKind === "outside-harness-endpoint") {
+  if (
+    instance.driverKind === "outside-harness-endpoint" ||
+    instance.driverKind === "outside-image"
+  ) {
     return instance.configuration.key === undefined;
   }
   return (
@@ -311,6 +315,10 @@ function nextStep(
   const instanceId = instance.id;
   if (!available) return { kind: "unavailable" };
   if (!instance.enabled) return { kind: "turn-on", instanceId };
+  // An outside image profile has nothing to probe: its driver starts at the
+  // first image, which the host admits and asks about then, so once it is on
+  // there is no connection step to offer.
+  if (instance.driverKind === "outside-image") return { kind: "done", instanceId };
   if (state.ready === "yes") return { kind: "done", instanceId };
   if (state.authenticated === "no") return { kind: "sign-in", instanceId };
   const readiness = observed?.readiness;

@@ -124,7 +124,6 @@ import type { ChatThread, ChatThreadId, ChatTurnId } from "@octant/contracts/cha
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useChatController } from "../chat/useChatController";
 import type { ChatController, ChatReadCursorStore } from "../chat/useChatController";
-import { ChatWelcome } from "../chat/ChatWelcome";
 import type { CodeController } from "../code/useCodeController";
 import { useCodeThreadController, type CodeThreadControllers } from "../code/codeThreadControllers";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
@@ -184,12 +183,26 @@ import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import type { WorkPromotionController } from "../work/useWorkPromotionController";
 import type { CodeThreadProviderChoice } from "../code/codeThreadCreate";
-import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
-import type { DraftRecentThread } from "./DraftThreadWorkspace";
+import type { DraftRecentThread, DraftThreadWorkspaceProps } from "./DraftThreadWorkspace";
+import { SurfaceLoading } from "../surface/SurfaceLoading";
 import type { OctantMode } from "@octant/contracts/modes";
 import { ThreadActivityPictureInPicture } from "../threadActivity/ThreadActivityPictureInPicture";
 import { threadHasBrowserSurface } from "./browserActivityReveal";
 import type { ThreadProviderIdentity } from "./navigationModel";
+
+const DraftThread = lazy(() =>
+  import("./DraftThreadWorkspace").then(({ DraftThreadWorkspace }) => ({
+    default: DraftThreadWorkspace,
+  })),
+);
+
+function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
+  return (
+    <Suspense fallback={<SurfaceLoading label="Opening composer" />}>
+      <DraftThread {...props} />
+    </Suspense>
+  );
+}
 
 const CoordinatorProposalCards = lazy(() =>
   import("../code/CoordinatorProposalCards").then((module) => ({
@@ -198,6 +211,9 @@ const CoordinatorProposalCards = lazy(() =>
 );
 const ChatWorkspace = lazy(() =>
   import("../chat/ChatWorkspace").then((module) => ({ default: module.ChatWorkspace })),
+);
+const ChatWelcome = lazy(() =>
+  import("../chat/ChatWelcome").then((module) => ({ default: module.ChatWelcome })),
 );
 const WorkThreadWorkspace = lazy(() =>
   import("../work/WorkThreadWorkspace").then((module) => ({
@@ -449,7 +465,9 @@ export interface WorkspaceViewProps {
   readonly draftPendingPrompt?: string;
   readonly onDraftPendingPromptConsumed?: () => void;
   /** The to-do the draft was started from; see DraftThreadWorkspace. */
-  readonly draftTodoSource?: { readonly title: string; readonly onRemove: () => void };
+  readonly draftTodoSource?: import("../composer/useNewTaskComposerStash").ComposerStashTodoSource & {
+    readonly draft: string;
+  };
   readonly onDockResearch?: (request: {
     readonly threadId: string;
     readonly mode: "work" | "code";
@@ -2228,7 +2246,9 @@ function renderNonCodeTab(
           {...(props.draftPendingPrompt === undefined
             ? {}
             : { pendingPrompt: props.draftPendingPrompt })}
-          {...(props.draftTodoSource === undefined ? {} : { todoSource: props.draftTodoSource })}
+          {...(props.draftTodoSource?.draft === `${String(paneId)}:${String(tab.id)}`
+            ? { todoSource: props.draftTodoSource }
+            : {})}
           {...(props.onDraftPendingPromptConsumed === undefined
             ? {}
             : { onPendingPromptConsumed: props.onDraftPendingPromptConsumed })}
@@ -2397,6 +2417,7 @@ function renderNonCodeTab(
         {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
         key={tab.threadId}
         onClearCanvasSelections={canvasContext.clearCanvasSelections}
+        onAttachCanvasContext={canvasContext.onAttachCanvasContext}
         onRemoveCanvasSelection={canvasContext.onRemoveCanvasSelection}
         pendingCanvasSelections={canvasContext.pendingCanvasSelections}
         projects={props.projects}
@@ -3145,62 +3166,66 @@ function renderNonCodeTab(
   const recentThreads = draftRecentThreads("chat", props);
   return (
     <NewTaskDraftScopeContext.Provider value={`chat-welcome:${String(paneId)}`}>
-      <ChatWelcome
-        {...(recentThreads.length === 0 ? {} : { recentThreads })}
-        {...(props.homeStart === undefined
-          ? {}
-          : { homeStart: withoutCodeActivity(props.homeStart) })}
-        {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-        {...(props.selectedCreateHostId === undefined
-          ? {}
-          : { selectedHostId: props.selectedCreateHostId })}
-        {...(props.lastSelectedHealthyHostId === undefined
-          ? {}
-          : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-        {...(props.createHostViewScope === undefined
-          ? {}
-          : { viewScope: props.createHostViewScope })}
-        {...(props.onSelectCreateHost === undefined
-          ? {}
-          : { onSelectHost: props.onSelectCreateHost })}
-        {...(props.chatWelcomeError === undefined
-          ? props.chatController.errorMessage === undefined
+      <Suspense fallback={<SurfaceLoading label="Opening composer" />}>
+        <ChatWelcome
+          {...(recentThreads.length === 0 ? {} : { recentThreads })}
+          {...(props.homeStart === undefined
             ? {}
-            : { errorMessage: props.chatController.errorMessage }
-          : { errorMessage: props.chatWelcomeError })}
-        {...(props.chatWelcomeCreating === undefined
-          ? {}
-          : { creating: props.chatWelcomeCreating })}
-        {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
-        onCreateChat={(prompt, modelOptionValues, extensionSelections, attachments) => {
-          if (attachments !== undefined) {
-            return props.onCreateChat(
-              prompt,
-              modelOptionValues,
-              paneId,
-              extensionSelections,
-              attachments,
-            );
-          } else if (extensionSelections === undefined) {
-            props.onCreateChat(prompt, modelOptionValues, paneId);
-          } else {
-            props.onCreateChat(prompt, modelOptionValues, paneId, extensionSelections);
-          }
-        }}
-        providerGroups={props.draftProviderGroups ?? []}
-        {...(props.draftSelectedProviderInstanceId === undefined
-          ? {}
-          : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
-        {...(props.draftSelectedModelId === undefined
-          ? {}
-          : { selectedModelId: props.draftSelectedModelId })}
-        {...(props.onDraftSelectProvider === undefined
-          ? {}
-          : { onSelectProvider: props.onDraftSelectProvider })}
-        {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
-        onRetry={props.chatController.retry}
-        status={props.chatController.status}
-      />
+            : { homeStart: withoutCodeActivity(props.homeStart) })}
+          {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+          {...(props.selectedCreateHostId === undefined
+            ? {}
+            : { selectedHostId: props.selectedCreateHostId })}
+          {...(props.lastSelectedHealthyHostId === undefined
+            ? {}
+            : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+          {...(props.createHostViewScope === undefined
+            ? {}
+            : { viewScope: props.createHostViewScope })}
+          {...(props.onSelectCreateHost === undefined
+            ? {}
+            : { onSelectHost: props.onSelectCreateHost })}
+          {...(props.chatWelcomeError === undefined
+            ? props.chatController.errorMessage === undefined
+              ? {}
+              : { errorMessage: props.chatController.errorMessage }
+            : { errorMessage: props.chatWelcomeError })}
+          {...(props.chatWelcomeCreating === undefined
+            ? {}
+            : { creating: props.chatWelcomeCreating })}
+          {...(props.extensionClient === undefined
+            ? {}
+            : { extensionClient: props.extensionClient })}
+          onCreateChat={(prompt, modelOptionValues, extensionSelections, attachments) => {
+            if (attachments !== undefined) {
+              return props.onCreateChat(
+                prompt,
+                modelOptionValues,
+                paneId,
+                extensionSelections,
+                attachments,
+              );
+            } else if (extensionSelections === undefined) {
+              props.onCreateChat(prompt, modelOptionValues, paneId);
+            } else {
+              props.onCreateChat(prompt, modelOptionValues, paneId, extensionSelections);
+            }
+          }}
+          providerGroups={props.draftProviderGroups ?? []}
+          {...(props.draftSelectedProviderInstanceId === undefined
+            ? {}
+            : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
+          {...(props.draftSelectedModelId === undefined
+            ? {}
+            : { selectedModelId: props.draftSelectedModelId })}
+          {...(props.onDraftSelectProvider === undefined
+            ? {}
+            : { onSelectProvider: props.onDraftSelectProvider })}
+          {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
+          onRetry={props.chatController.retry}
+          status={props.chatController.status}
+        />
+      </Suspense>
     </NewTaskDraftScopeContext.Provider>
   );
 }
@@ -3487,6 +3512,7 @@ function ChatThreadWorkspace(props: {
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly onOpenSettings?: () => void;
   readonly onClearCanvasSelections: () => void;
+  readonly onAttachCanvasContext: (selection: CanvasContextSelection) => void;
   readonly onRemoveCanvasSelection: (selectionId: CanvasContextSelectionId) => void;
   readonly pendingCanvasSelections: ReadonlyArray<CanvasContextSelection>;
   readonly projectServerUrl?: string;
@@ -3595,6 +3621,7 @@ function ChatThreadWorkspace(props: {
               ? {}
               : { onOpenSettings: props.onOpenSettings })}
             onClearCanvasSelections={props.onClearCanvasSelections}
+            onAttachCanvasContext={props.onAttachCanvasContext}
             onRemoveCanvasSelection={props.onRemoveCanvasSelection}
             pendingCanvasSelections={props.pendingCanvasSelections}
             {...(props.extensionClient === undefined

@@ -12,6 +12,7 @@ import type { ShellSettings } from "@octant/contracts/shell";
 import {
   isImageProfileDriverKind,
   listEligibleImageProfiles,
+  admitsListedOutsideImageDriver,
   listImageSourceEligibleInstances,
   resolveImageCustomSources,
 } from "@octant/domain";
@@ -66,7 +67,11 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
 
   const apply = (customSources: ReadonlyArray<ImageGenerationCustomSource>) =>
     props.onSettingsChange({ imageGeneration: { ...props.settings, customSources } });
-  const readyProfiles = listEligibleImageProfiles(instances, props.settings.customSources);
+  const readyProfiles = listEligibleImageProfiles(
+    instances,
+    props.settings.customSources,
+    admitsListedOutsideImageDriver(props.providerSnapshot?.outsideDrivers),
+  );
   const firstReady = readyProfiles[0]?.displayName;
 
   const imageProviderSettings =
@@ -286,7 +291,7 @@ export function MediaProviderSettings(props: {
         onChangeCodexConfiguration={controller.changeCodexConfiguration}
         onChangeAcpAgentConfiguration={controller.changeAcpAgentConfiguration}
         onChangeGeminiImageConfiguration={controller.changeGeminiImageConfiguration}
-        onChangeGeminiVideoConfiguration={controller.changeGeminiVideoConfiguration}
+        onChangeVideoConfiguration={controller.changeVideoConfiguration}
         onChangeIdeogramImageConfiguration={controller.changeIdeogramImageConfiguration}
         onChangeOhMyPiConfiguration={controller.changeOhMyPiConfiguration}
         onChangeOllamaConfiguration={controller.changeOllamaConfiguration}
@@ -338,7 +343,7 @@ function ImageProviderCreateForm(props: { readonly controller: ProviderControlle
       onCreateAcpAgent={controller.createAcpAgent}
       onCreateClaude={controller.createClaude}
       onCreateGeminiImage={controller.createGeminiImage}
-      onCreateGeminiVideo={controller.createGeminiVideo}
+      onCreateVideo={controller.createVideo}
       onCreateIdeogramImage={controller.createIdeogramImage}
       onCreateOllama={controller.createOllama}
       onCreateOpenAiCompatible={controller.createOpenAiCompatible}

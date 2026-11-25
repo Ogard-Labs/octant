@@ -38,7 +38,7 @@ function threadRowStates(thread: ChatThreadNavigationItem): ReadonlyArray<string
   if (thread.pinned === true) states.push("Pinned");
   if (thread.woke === true) states.push("Snooze ended");
   else if (thread.shelf === "snoozed") states.push("Snoozed");
-  if (thread.shelf === "completed") states.push("Put away");
+  if (thread.shelf === "completed") states.push("Settled");
   return states;
 }
 

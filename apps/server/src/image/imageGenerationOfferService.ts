@@ -48,6 +48,7 @@ export type ImageGenerationOfferRequest = ImageGenerationOffer extends infer Off
  */
 export class ImageGenerationOfferService {
   readonly #remembered = new Map<string, ImageGenerationChoice>();
+  readonly #referenceBytes = new Map<string, number>();
   readonly #offers: Pick<ServiceOfferService<ImageGenerationOffer, ServiceOfferAnswer>, "wait">;
 
   constructor(offers: Pick<ServiceOfferService<ImageGenerationOffer, ServiceOfferAnswer>, "wait">) {
@@ -57,27 +58,42 @@ export class ImageGenerationOfferService {
   async offer(input: {
     readonly windowId: WindowId;
     readonly offer: ImageGenerationOfferRequest;
+    readonly referenceBytes?: number;
     readonly signal?: AbortSignal;
   }): Promise<ImageGenerationOfferOutcome> {
-    // Every offer comes before what it offers (a generation, a save, an icon
-    // set's files), so while it waits the call's record says nothing ran.
-    const outcome = await whileAwaitingToolApproval(() =>
-      this.#offers.wait({
-        ...input,
-        stamp: (offerId, requestedAt) =>
-          decodeImageGenerationOffer({
-            ...input.offer,
-            offerId: decodeImageGenerationOfferId(offerId),
-            requestedAt,
-          }),
-      }),
-    );
-    return outcome.status === "generate" ||
-      outcome.status === "agent-draws" ||
-      outcome.status === "save" ||
-      outcome.status === "too-many-waiting"
-      ? outcome
-      : { status: "cancelled" };
+    let stampedOfferId: string | undefined;
+    try {
+      // Every offer comes before what it offers (a generation, a save, an icon
+      // set's files), so while it waits the call's record says nothing ran.
+      const outcome = await whileAwaitingToolApproval(() =>
+        this.#offers.wait({
+          ...input,
+          stamp: (offerId, requestedAt) => {
+            stampedOfferId = String(offerId);
+            if (input.referenceBytes !== undefined && input.referenceBytes > 0) {
+              this.#referenceBytes.set(stampedOfferId, input.referenceBytes);
+            }
+            return decodeImageGenerationOffer({
+              ...input.offer,
+              offerId: decodeImageGenerationOfferId(offerId),
+              requestedAt,
+            });
+          },
+        }),
+      );
+      return outcome.status === "generate" ||
+        outcome.status === "agent-draws" ||
+        outcome.status === "save" ||
+        outcome.status === "too-many-waiting"
+        ? outcome
+        : { status: "cancelled" };
+    } finally {
+      if (stampedOfferId !== undefined) this.#referenceBytes.delete(stampedOfferId);
+    }
+  }
+
+  referenceBytes(offerId: string): number | undefined {
+    return this.#referenceBytes.get(offerId);
   }
 
   remember(scope: ThreadScope, choice: ImageGenerationChoice): void {

@@ -142,6 +142,7 @@ export * from "./serverProjects";
 export * from "./cloudMachines";
 export * from "./acpAgentProfiles";
 export * from "./providers";
+export * from "./providerCommands";
 export * from "./hostOAuth";
 export * from "./providerDiscovery";
 export * from "./providerDriverCatalog";

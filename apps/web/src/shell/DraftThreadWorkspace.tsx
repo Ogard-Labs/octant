@@ -127,6 +127,10 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { ComposerStartTray } from "../composer/ComposerStartTray";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import {
+  useNewTaskComposerStash,
+  type ComposerStashTodoSource,
+} from "../composer/useNewTaskComposerStash";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import { HostSelector } from "./HostSelector";
@@ -306,7 +310,7 @@ export interface DraftThreadWorkspaceProps {
    * The to-do this draft was started from. Its thread is linked to the to-do
    * once it exists; removing the label leaves an ordinary draft.
    */
-  readonly todoSource?: { readonly title: string; readonly onRemove: () => void };
+  readonly todoSource?: ComposerStashTodoSource;
   readonly codeHome?: {
     readonly loadAssignedLinearIssues?: () => Promise<{
       readonly rows: ReadonlyArray<LinearIssueRow>;
@@ -558,14 +562,14 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     ) : null;
   const todoSource = props.todoSource;
   const todoSourceLabel =
-    todoSource === undefined ? null : (
+    todoSource?.current === undefined ? null : (
       <span className="draft-todo-source">
         <span className="oct-row-detail">From to-do</span>
-        <span className="draft-todo-source__title">{todoSource.title}</span>
+        <span className="draft-todo-source__title">{todoSource.current.title}</span>
         <OctantIconButton
           className="draft-todo-source__remove"
           label="Do not link this thread to the to-do"
-          onClick={todoSource.onRemove}
+          onClick={() => todoSource.change(undefined)}
           type="button"
         >
           <X aria-hidden="true" size={12} />
@@ -1092,7 +1096,13 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 },
               },
             })}
-        {...(sourceSlot === null ? {} : { createFromControl: sourceSlot })}
+        {...(sourceSlot === null
+          ? {}
+          : {
+              createFromControl: sourceSlot,
+              stashSource: { current: createFromSelection, change: setCreateFromSelection },
+            })}
+        {...(todoSource === undefined ? {} : { stashTodo: todoSource })}
         {...(props.codeExecute === undefined ? {} : { execute: props.codeExecute })}
         providerGroups={props.providerGroups}
         {...(props.selectedProviderInstanceId === undefined
@@ -1175,7 +1185,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               : { createFromControl: todoSourceLabel }
             : sourceSlot === null
               ? {}
-              : { createFromControl: sourceSlot })}
+              : {
+                  createFromControl: sourceSlot,
+                  stashSource: { current: createFromSelection, change: setCreateFromSelection },
+                })}
+          {...(todoSource === undefined || onServer ? {} : { stashTodo: todoSource })}
           providerGroups={
             onServer
               ? serverCodeThreadProviderGroups(props.providerGroups, "work")
@@ -1318,6 +1332,25 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   }, [promptRequest]);
   const trimmed = prompt.trim();
   const canSubmit = trimmed.length > 0 && !props.creating && !atMenu.resolving;
+  const stash = useNewTaskComposerStash({
+    mode: "chat",
+    host: props.fixedHostId ?? props.selectedHostId ?? props.hostId,
+    projectId: selectedProjectId,
+    prompt,
+    textarea: textareaRef,
+    setPrompt,
+    busy: props.creating === true || atMenu.resolving,
+    extensions: {
+      current: extensionDraft.stagedReceipts,
+      change: extensionDraft.restore,
+      scopeKey: extensionDraft.scopeKey,
+    },
+    source:
+      sourceSlot === null
+        ? undefined
+        : { current: createFromSelection, change: setCreateFromSelection },
+    todo: todoSource,
+  });
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
@@ -1413,6 +1446,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         </div>
         <div className="composer-stack">
           <ThreadComposer
+            stash={stash}
             notices={
               props.errorMessage === undefined
                 ? []

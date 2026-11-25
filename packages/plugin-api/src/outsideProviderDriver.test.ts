@@ -139,6 +139,109 @@ describe("outside provider driver entry", () => {
     ).toBe("not-one-provider-driver");
   });
 
+  describe("an image generation driver", () => {
+    const imageComponent = {
+      ...driverComponent,
+      displayName: "Example images",
+      mediaGeneration: {
+        media: "image",
+        models: [
+          { modelId: "example-image-1", usdMicrosPerImage: 40_000 },
+          { modelId: "example-image-draft" },
+        ],
+      },
+    };
+    const imageEntry = (overrides: Record<string, unknown> = {}) =>
+      entry({
+        driverKind: "outside-image",
+        protocolVersions: ["image-generation/1"],
+        manifest: manifest({ components: [imageComponent] }),
+        ...overrides,
+      });
+
+    it("declares its image models and their published prices as package data", () => {
+      const reading = readOutsideProviderDriverEntry(imageEntry());
+      expect(reading.status).toBe("accepted");
+      const accepted = decodeOutsideProviderDriverEntry(imageEntry());
+      expect(accepted.manifest.components[0]?.mediaGeneration).toEqual(
+        imageComponent.mediaGeneration,
+      );
+    });
+
+    it("refuses a protocol of the other family, either way round", () => {
+      expect(refusal(imageEntry({ protocolVersions: ["harness-endpoint/1"] }))).toBe(
+        "media-declaration-mismatch",
+      );
+      expect(refusal(entry({ protocolVersions: ["image-generation/1"] }))).toBe(
+        "media-declaration-mismatch",
+      );
+    });
+
+    it("refuses an image family without a media declaration, and a harness endpoint with one", () => {
+      expect(refusal(imageEntry({ manifest: manifest({ components: [driverComponent] }) }))).toBe(
+        "media-declaration-mismatch",
+      );
+      expect(refusal(entry({ manifest: manifest({ components: [imageComponent] }) }))).toBe(
+        "media-declaration-mismatch",
+      );
+    });
+
+    it("refuses a price that is not a positive whole number of micro-dollars within the cap", () => {
+      for (const usdMicrosPerImage of [0, -1, 1.5, 100_000_001]) {
+        expect(
+          refusal(
+            imageEntry({
+              manifest: manifest({
+                components: [
+                  {
+                    ...imageComponent,
+                    mediaGeneration: {
+                      media: "image",
+                      models: [{ modelId: "example-image-1", usdMicrosPerImage }],
+                    },
+                  },
+                ],
+              }),
+            }),
+          ),
+        ).toBe("entry-invalid");
+      }
+    });
+
+    it("refuses a model declared twice, so one model cannot carry two prices", () => {
+      expect(
+        refusal(
+          imageEntry({
+            manifest: manifest({
+              components: [
+                {
+                  ...imageComponent,
+                  mediaGeneration: {
+                    media: "image",
+                    models: [
+                      { modelId: "example-image-1", usdMicrosPerImage: 1 },
+                      { modelId: "example-image-1", usdMicrosPerImage: 2 },
+                    ],
+                  },
+                },
+              ],
+            }),
+          }),
+        ),
+      ).toBe("entry-invalid");
+    });
+
+    it("refuses a media declaration on any component that is not a provider driver", () => {
+      expect(
+        refusal(
+          imageEntry({
+            manifest: manifest({ components: [{ ...imageComponent, kind: "integration" }] }),
+          }),
+        ),
+      ).toBe("entry-invalid");
+    });
+  });
+
   it("refuses a package that says it is bundled with Octant", () => {
     expect(
       refusal(

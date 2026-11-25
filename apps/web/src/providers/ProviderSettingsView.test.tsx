@@ -2995,8 +2995,8 @@ describe("ProviderSettingsView", () => {
     await user.type(within(create).getByLabelText("API key"), "video-secret");
     await user.click(screen.getByRole("button", { name: "Add Gemini video profile" }));
 
-    expect(props.onCreateGeminiVideo).toHaveBeenCalledOnce();
-    const [name, configuration, credential] = vi.mocked(props.onCreateGeminiVideo).mock.calls[0]!;
+    expect(props.onCreateVideo).toHaveBeenCalledOnce();
+    const [name, configuration, credential] = vi.mocked(props.onCreateVideo).mock.calls[0]!;
     expect(name).toBe("Omni");
     expect(configuration).toEqual({
       kind: "gemini-video-http",
@@ -4534,6 +4534,43 @@ describe("ProviderSettingsView", () => {
     );
   });
 
+  it("classifies an outside image profile as a media profile without Check connection", () => {
+    const outsideImage: ProviderInstance = {
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000098"),
+      displayName: "Example Outside Studio",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1 as ProviderInstance["version"],
+      createdAt: "2026-07-26T20:00:00.000Z" as ProviderInstance["createdAt"],
+      updatedAt: "2026-07-26T20:00:00.000Z" as ProviderInstance["updatedAt"],
+      driverKind: "outside-image",
+      configuration: {
+        kind: "outside-image",
+        driver: {
+          extensionId: "80000000-0000-4000-8000-000000000099" as never,
+          packageId: "example.outside-image" as never,
+          componentId: "images" as never,
+          version: "1.0.0" as never,
+          digest: `sha256:${"a".repeat(64)}` as never,
+        },
+        baseUrl: "https://images.example.test",
+        modelAllowlist: ["example-image-1" as never],
+        defaultModel: "example-image-1" as never,
+      },
+    };
+    const onProviderCredentialStatus = vi.fn(async () => "missing" as const);
+    renderProviderListExpanded({
+      ...fixture({ instance: outsideImage }),
+      onProviderCredentialStatus,
+    });
+    const row = screen.getByRole("article", { name: "Example Outside Studio" });
+    expect(
+      within(row).queryByRole("button", { name: "Check connection for Example Outside Studio" }),
+    ).toBeNull();
+    expect(within(row).getByText("Outside image driver Image")).toBeVisible();
+    expect(onProviderCredentialStatus).not.toHaveBeenCalled();
+  });
+
   it("opens only the first provider that needs attention, and none when every provider is fine", () => {
     const second = {
       ...codexProvider(),
@@ -5791,7 +5828,7 @@ function ControllerBackedProviderSettings(props: {
       onChangeAmazonBedrockConfiguration={controller.changeAmazonBedrockConfiguration}
       onChangeOpenAiImageConfiguration={controller.changeOpenAiImageConfiguration}
       onChangeGeminiImageConfiguration={controller.changeGeminiImageConfiguration}
-      onChangeGeminiVideoConfiguration={controller.changeGeminiVideoConfiguration}
+      onChangeVideoConfiguration={controller.changeVideoConfiguration}
       onChangeBflImageConfiguration={controller.changeBflImageConfiguration}
       onChangeIdeogramImageConfiguration={controller.changeIdeogramImageConfiguration}
       onClearProviderCredential={controller.clearProviderCredential}
@@ -5807,7 +5844,7 @@ function ControllerBackedProviderSettings(props: {
       onCreateAmazonBedrock={controller.createAmazonBedrock}
       onCreateOpenAiImage={controller.createOpenAiImage}
       onCreateGeminiImage={controller.createGeminiImage}
-      onCreateGeminiVideo={controller.createGeminiVideo}
+      onCreateVideo={controller.createVideo}
       onCreateBflImage={controller.createBflImage}
       onCreateIdeogramImage={controller.createIdeogramImage}
       onPermissionPersistenceChange={controller.updatePermissionPersistence}
@@ -5940,7 +5977,7 @@ function fixture(
       credential.clear();
       return true;
     }),
-    onCreateGeminiVideo: vi.fn(async (_name, _configuration, credential) => {
+    onCreateVideo: vi.fn(async (_name, _configuration, credential) => {
       credential.clear();
       return true;
     }),
@@ -5994,7 +6031,7 @@ function fixture(
       credential.clear();
       return true;
     }),
-    onChangeGeminiVideoConfiguration: vi.fn(async (_id, _configuration, credential) => {
+    onChangeVideoConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();
       return true;
     }),

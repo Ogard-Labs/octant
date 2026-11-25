@@ -543,6 +543,54 @@ describe("ProviderCatalogView outside drivers", () => {
     expect(view.onSetEnabled).not.toHaveBeenCalled();
   });
 
+  it("adds an image profile from an outside image driver, offering only the models it declares with their prices", async () => {
+    const imageListing = {
+      ...listing,
+      displayName: "Example images",
+      imageGeneration: {
+        models: [
+          { modelId: "example-image-1", usdMicrosPerImage: 40_000 },
+          { modelId: "example-image-draft" },
+        ],
+      },
+    } as unknown as OutsideProviderDriverListing;
+    const onAddOutsideProvider = vi.fn(async () => true);
+    render(
+      <ProviderCatalogView
+        {...props({
+          outsideDrivers: [imageListing],
+          onAddOutsideProvider,
+          credentialManagementAvailable: true,
+        })}
+      />,
+    );
+    const outsideList = screen.getByRole("list", { name: "Outside drivers" });
+    const row = within(outsideList).getByRole("link", {
+      name: "Example images, not added. Open setup",
+    });
+    expect(row.textContent).toContain("Image generation · Outside driver");
+    openSetup(/^Example images, /);
+    const form = screen.getByRole("form", { name: "Add a provider from Example images" });
+    expect(within(form).queryByLabelText("Model IDs")).toBeNull();
+    expect(within(form).getByText("$0.04 per image")).toBeDefined();
+    expect(within(form).getByText("No published price")).toBeDefined();
+    fireEvent.change(within(form).getByLabelText("Address"), {
+      target: { value: "https://images.example.test" },
+    });
+    fireEvent.change(within(form).getByLabelText("API key"), { target: { value: "KEY-2" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Add provider" }));
+    await waitFor(() => expect(onAddOutsideProvider).toHaveBeenCalledTimes(1));
+    const [, configuration] = onAddOutsideProvider.mock.calls[0] as unknown as [string, unknown];
+    expect(configuration).toEqual({
+      kind: "outside-image",
+      driver: listing.driver,
+      baseUrl: "https://images.example.test",
+      key: { header: "authorization", scheme: "Bearer" },
+      modelAllowlist: ["example-image-1", "example-image-draft"],
+      defaultModel: "example-image-1",
+    });
+  });
+
   it("refuses a form with no models before it asks the host", () => {
     const onAddOutsideProvider = vi.fn(async () => true);
     render(<ProviderCatalogView {...props({ outsideDrivers: [listing], onAddOutsideProvider })} />);

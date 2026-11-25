@@ -697,7 +697,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             />
           </SettingRow>
           <SettingRow
-            description="How many workers one coordinator may have open. Done, put-away, and archived workers don't count."
+            description="How many workers one coordinator may have open. Done, settled, and archived workers don't count."
             focused={props.focusedSetting === "code-coordinator-open-workers"}
             label="Open workers per coordinator"
             scope="mode"

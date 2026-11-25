@@ -1,3 +1,4 @@
+import type { VideoProviderConfiguration } from "./configuration/configurationValues";
 import {
   acpAgentChangeCommandKind,
   acpAgentCreateCommandKind,
@@ -17,12 +18,12 @@ import {
   type CodexProviderConfiguration,
   type IdeogramImageProviderConfiguration,
   type GeminiImageProviderConfiguration,
-  type GeminiVideoProviderConfiguration,
   type OpenAiCompatibleProviderConfiguration,
   type OpenAiImageProviderConfiguration,
   type OllamaProviderConfiguration,
   type OhMyPiProviderConfiguration,
   type OutsideHarnessEndpointProviderConfiguration,
+  type OutsideImageProviderConfiguration,
   type PiProviderConfiguration,
   type PermissionPersistence,
   type ProviderDefaults,
@@ -49,6 +50,7 @@ import {
   claudeAccountUsesStoredKey,
   isAcpAgentInstance,
   providerLatestVersionNpmPackage,
+  isVideoProfileDriverKind,
 } from "@octant/domain";
 import { parseClaudeAccountAccent } from "./configuration/claudeAccountValues";
 import { runProviderOAuthCommand } from "./providerOAuthClient";
@@ -630,14 +632,17 @@ export function useProviderController(options: ProviderControllerOptions) {
     [client, hostBridge, install, recoverRegistryFailure],
   );
   /**
-   * Adds a provider from an admitted outside driver. The host creates it off;
-   * a key the person entered goes to the host's keychain right after, and only
+   * Adds a provider from an admitted outside driver, a harness endpoint or an
+   * image generator by the configuration's kind. The host creates it off; a
+   * key the person entered goes to the host's keychain right after, and only
    * for a provider that sends one.
    */
-  const createOutsideHarnessEndpoint = useCallback(
+  const createOutsideProvider = useCallback(
     (
       displayName: string,
-      configuration: OutsideHarnessEndpointProviderConfiguration,
+      configuration:
+        | OutsideHarnessEndpointProviderConfiguration
+        | OutsideImageProviderConfiguration,
       credential: TransientProviderCredential,
     ) => {
       const instanceId = decodeProviderInstanceId(crypto.randomUUID());
@@ -651,14 +656,17 @@ export function useProviderController(options: ProviderControllerOptions) {
           const current = authoritative.current;
           if (client === undefined || current === undefined) return false;
           try {
+            const common = {
+              instanceId,
+              expectedVersion: 0 as ProviderDefaults["version"],
+              displayName,
+            };
             applyResult(
-              await client.execute({
-                kind: "create-outside-harness-endpoint-provider",
-                instanceId,
-                expectedVersion: 0 as ProviderDefaults["version"],
-                displayName,
-                configuration,
-              }),
+              await client.execute(
+                configuration.kind === "outside-image"
+                  ? { kind: "create-outside-image-provider", ...common, configuration }
+                  : { kind: "create-outside-harness-endpoint-provider", ...common, configuration },
+              ),
               current,
               install,
             );
@@ -804,38 +812,31 @@ export function useProviderController(options: ProviderControllerOptions) {
     },
     [client, hostBridge, install, recoverRegistryFailure],
   );
-  const createOpenAiImage = useCallback(
+  const createKeyedImageProfile = useCallback(
     (
-      displayName: string,
-      configuration: OpenAiImageProviderConfiguration,
+      missingKeyMessage: string,
+      buildCommand: (
+        instanceId: ProviderInstanceId,
+        expectedVersion: ProviderDefaults["version"],
+      ) => ProviderRegistryCommand,
       credential: TransientProviderCredential,
     ) => {
       const instanceId = decodeProviderInstanceId(crypto.randomUUID());
       return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
         withTransientCredential(credential, async (credentialValue) => {
           if (hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
+            if (mounted.current) setMessage(BROWSER_CANNOT_SAVE_KEYS);
             return false;
           }
           if (credentialValue.length === 0) {
-            if (mounted.current) {
-              setMessage("Enter an OpenAI API key before creating this image profile.");
-            }
+            if (mounted.current) setMessage(missingKeyMessage);
             return false;
           }
           const current = authoritative.current;
           if (client === undefined || current === undefined) return false;
           try {
             applyResult(
-              await client.execute({
-                kind: "create-openai-image-provider",
-                instanceId,
-                expectedVersion: 0 as ProviderDefaults["version"],
-                displayName,
-                configuration,
-              }),
+              await client.execute(buildCommand(instanceId, 0 as ProviderDefaults["version"])),
               current,
               install,
             );
@@ -861,69 +862,49 @@ export function useProviderController(options: ProviderControllerOptions) {
       );
     },
     [client, hostBridge, install, recoverRegistryFailure],
+  );
+  const createOpenAiImage = useCallback(
+    (
+      displayName: string,
+      configuration: OpenAiImageProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) =>
+      createKeyedImageProfile(
+        "Enter an OpenAI API key before creating this image profile.",
+        (instanceId, expectedVersion) => ({
+          kind: "create-openai-image-provider",
+          instanceId,
+          expectedVersion,
+          displayName,
+          configuration,
+        }),
+        credential,
+      ),
+    [createKeyedImageProfile],
   );
   const createGeminiImage = useCallback(
     (
       displayName: string,
       configuration: GeminiImageProviderConfiguration,
       credential: TransientProviderCredential,
-    ) => {
-      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
-      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          if (hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          if (credentialValue.length === 0) {
-            if (mounted.current) {
-              setMessage("Enter a Gemini API key before creating this image profile.");
-            }
-            return false;
-          }
-          const current = authoritative.current;
-          if (client === undefined || current === undefined) return false;
-          try {
-            applyResult(
-              await client.execute({
-                kind: "create-gemini-native-image-provider",
-                instanceId,
-                expectedVersion: 0 as ProviderDefaults["version"],
-                displayName,
-                configuration,
-              }),
-              current,
-              install,
-            );
-          } catch (error) {
-            await recoverRegistryFailure(error, "Provider configuration could not be created.");
-            return false;
-          }
-          try {
-            await hostBridge.addProviderApiKey(instanceId, credentialValue);
-            return true;
-          } catch (storeError) {
-            if (mounted.current) {
-              setMessage(
-                storeFailureMessage(
-                  "The provider was created, but its credential could not be stored.",
-                  storeError,
-                ),
-              );
-            }
-            return false;
-          }
+    ) =>
+      createKeyedImageProfile(
+        "Enter a Gemini API key before creating this image profile.",
+        (instanceId, expectedVersion) => ({
+          kind: "create-gemini-native-image-provider",
+          instanceId,
+          expectedVersion,
+          displayName,
+          configuration,
         }),
-      );
-    },
-    [client, hostBridge, install, recoverRegistryFailure],
+        credential,
+      ),
+    [createKeyedImageProfile],
   );
-  const createGeminiVideo = useCallback(
+  const createVideo = useCallback(
     (
       displayName: string,
-      configuration: GeminiVideoProviderConfiguration,
+      configuration: VideoProviderConfiguration,
       credential: TransientProviderCredential,
     ) => {
       const instanceId = decodeProviderInstanceId(crypto.randomUUID());
@@ -937,7 +918,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (credentialValue.length === 0) {
             if (mounted.current) {
-              setMessage("Enter a Gemini API key before creating this video profile.");
+              setMessage("Enter an API key before creating this video profile.");
             }
             return false;
           }
@@ -945,13 +926,14 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (client === undefined || current === undefined) return false;
           try {
             applyResult(
-              await client.execute({
-                kind: "create-gemini-video-provider",
-                instanceId,
-                expectedVersion: 0 as ProviderDefaults["version"],
-                displayName,
-                configuration,
-              }),
+              await client.execute(
+                createVideoProviderCommand({
+                  instanceId,
+                  expectedVersion: 0 as ProviderDefaults["version"],
+                  displayName,
+                  configuration,
+                }),
+              ),
               current,
               install,
             );
@@ -983,116 +965,38 @@ export function useProviderController(options: ProviderControllerOptions) {
       displayName: string,
       configuration: BflImageProviderConfiguration,
       credential: TransientProviderCredential,
-    ) => {
-      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
-      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          if (hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          if (credentialValue.length === 0) {
-            if (mounted.current) {
-              setMessage("Enter a BFL API key before creating this image profile.");
-            }
-            return false;
-          }
-          const current = authoritative.current;
-          if (client === undefined || current === undefined) return false;
-          try {
-            applyResult(
-              await client.execute({
-                kind: "create-bfl-image-provider",
-                instanceId,
-                expectedVersion: 0 as ProviderDefaults["version"],
-                displayName,
-                configuration,
-              }),
-              current,
-              install,
-            );
-          } catch (error) {
-            await recoverRegistryFailure(error, "Provider configuration could not be created.");
-            return false;
-          }
-          try {
-            await hostBridge.addProviderApiKey(instanceId, credentialValue);
-            return true;
-          } catch (storeError) {
-            if (mounted.current) {
-              setMessage(
-                storeFailureMessage(
-                  "The provider was created, but its credential could not be stored.",
-                  storeError,
-                ),
-              );
-            }
-            return false;
-          }
+    ) =>
+      createKeyedImageProfile(
+        "Enter a BFL API key before creating this image profile.",
+        (instanceId, expectedVersion) => ({
+          kind: "create-bfl-image-provider",
+          instanceId,
+          expectedVersion,
+          displayName,
+          configuration,
         }),
-      );
-    },
-    [client, hostBridge, install, recoverRegistryFailure],
+        credential,
+      ),
+    [createKeyedImageProfile],
   );
   const createIdeogramImage = useCallback(
     (
       displayName: string,
       configuration: IdeogramImageProviderConfiguration,
       credential: TransientProviderCredential,
-    ) => {
-      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
-      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          if (hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          if (credentialValue.length === 0) {
-            if (mounted.current) {
-              setMessage("Enter an Ideogram API key before creating this image profile.");
-            }
-            return false;
-          }
-          const current = authoritative.current;
-          if (client === undefined || current === undefined) return false;
-          try {
-            applyResult(
-              await client.execute({
-                kind: "create-ideogram-image-provider",
-                instanceId,
-                expectedVersion: 0 as ProviderDefaults["version"],
-                displayName,
-                configuration,
-              }),
-              current,
-              install,
-            );
-          } catch (error) {
-            await recoverRegistryFailure(error, "Provider configuration could not be created.");
-            return false;
-          }
-          try {
-            await hostBridge.addProviderApiKey(instanceId, credentialValue);
-            return true;
-          } catch (storeError) {
-            if (mounted.current) {
-              setMessage(
-                storeFailureMessage(
-                  "The provider was created, but its credential could not be stored.",
-                  storeError,
-                ),
-              );
-            }
-            return false;
-          }
+    ) =>
+      createKeyedImageProfile(
+        "Enter an Ideogram API key before creating this image profile.",
+        (instanceId, expectedVersion) => ({
+          kind: "create-ideogram-image-provider",
+          instanceId,
+          expectedVersion,
+          displayName,
+          configuration,
         }),
-      );
-    },
-    [client, hostBridge, install, recoverRegistryFailure],
+        credential,
+      ),
+    [createKeyedImageProfile],
   );
   const createOllama = useCallback(
     (displayName: string, configuration: OllamaProviderConfiguration) =>
@@ -1797,10 +1701,11 @@ export function useProviderController(options: ProviderControllerOptions) {
       ),
     [client, hostBridge, install, recoverRegistryFailure],
   );
-  const changeOpenAiImageConfiguration = useCallback(
+  const changeKeyedImageConfiguration = useCallback(
     (
       instanceId: ProviderInstanceId,
-      configuration: OpenAiImageProviderConfiguration,
+      driverKind: ProviderInstance["driverKind"],
+      buildCommand: (expectedVersion: ProviderInstance["version"]) => ProviderRegistryCommand,
       credential: TransientProviderCredential,
     ) =>
       queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
@@ -1810,30 +1715,19 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (
             client === undefined ||
             current === undefined ||
-            instance?.driverKind !== "openai-image"
+            instance?.driverKind !== driverKind
           ) {
             return false;
           }
           try {
-            applyResult(
-              await client.execute({
-                kind: "change-openai-image-configuration",
-                instanceId,
-                expectedVersion: instance.version,
-                configuration,
-              }),
-              current,
-              install,
-            );
+            applyResult(await client.execute(buildCommand(instance.version)), current, install);
           } catch (error) {
             await recoverRegistryFailure(error, "Provider configuration could not be updated.");
             return false;
           }
           if (credentialValue.length === 0) return true;
           if (hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
+            if (mounted.current) setMessage(BROWSER_CANNOT_SAVE_KEYS);
             return false;
           }
           try {
@@ -1853,6 +1747,25 @@ export function useProviderController(options: ProviderControllerOptions) {
         }),
       ),
     [client, hostBridge, install, recoverRegistryFailure],
+  );
+  const changeOpenAiImageConfiguration = useCallback(
+    (
+      instanceId: ProviderInstanceId,
+      configuration: OpenAiImageProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) =>
+      changeKeyedImageConfiguration(
+        instanceId,
+        "openai-image",
+        (expectedVersion) => ({
+          kind: "change-openai-image-configuration",
+          instanceId,
+          expectedVersion,
+          configuration,
+        }),
+        credential,
+      ),
+    [changeKeyedImageConfiguration],
   );
   const changeGeminiImageConfiguration = useCallback(
     (
@@ -1860,61 +1773,23 @@ export function useProviderController(options: ProviderControllerOptions) {
       configuration: GeminiImageProviderConfiguration,
       credential: TransientProviderCredential,
     ) =>
-      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          const current = authoritative.current;
-          const instance = current === undefined ? undefined : findProvider(current, instanceId);
-          if (
-            client === undefined ||
-            current === undefined ||
-            instance?.driverKind !== "gemini-native-image"
-          ) {
-            return false;
-          }
-          try {
-            applyResult(
-              await client.execute({
-                kind: "change-gemini-native-image-configuration",
-                instanceId,
-                expectedVersion: instance.version,
-                configuration,
-              }),
-              current,
-              install,
-            );
-          } catch (error) {
-            await recoverRegistryFailure(error, "Provider configuration could not be updated.");
-            return false;
-          }
-          if (credentialValue.length === 0) return true;
-          if (hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          try {
-            await hostBridge.addProviderApiKey(instanceId, credentialValue);
-            return true;
-          } catch (storeError) {
-            if (mounted.current) {
-              setMessage(
-                storeFailureMessage(
-                  "Provider configuration was saved, but its credential could not be stored.",
-                  storeError,
-                ),
-              );
-            }
-            return false;
-          }
+      changeKeyedImageConfiguration(
+        instanceId,
+        "gemini-native-image",
+        (expectedVersion) => ({
+          kind: "change-gemini-native-image-configuration",
+          instanceId,
+          expectedVersion,
+          configuration,
         }),
+        credential,
       ),
-    [client, hostBridge, install, recoverRegistryFailure],
+    [changeKeyedImageConfiguration],
   );
-  const changeGeminiVideoConfiguration = useCallback(
+  const changeVideoConfiguration = useCallback(
     (
       instanceId: ProviderInstanceId,
-      configuration: GeminiVideoProviderConfiguration,
+      configuration: VideoProviderConfiguration,
       credential: TransientProviderCredential,
     ) =>
       queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
@@ -1924,18 +1799,20 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (
             client === undefined ||
             current === undefined ||
-            instance?.driverKind !== "gemini-video"
+            instance === undefined ||
+            !isVideoProfileDriverKind(instance.driverKind)
           ) {
             return false;
           }
           try {
             applyResult(
-              await client.execute({
-                kind: "change-gemini-video-configuration",
-                instanceId,
-                expectedVersion: instance.version,
-                configuration,
-              }),
+              await client.execute(
+                changeVideoConfigurationCommand({
+                  instanceId,
+                  expectedVersion: instance.version,
+                  configuration,
+                }),
+              ),
               current,
               install,
             );
@@ -1974,56 +1851,18 @@ export function useProviderController(options: ProviderControllerOptions) {
       configuration: BflImageProviderConfiguration,
       credential: TransientProviderCredential,
     ) =>
-      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          const current = authoritative.current;
-          const instance = current === undefined ? undefined : findProvider(current, instanceId);
-          if (
-            client === undefined ||
-            current === undefined ||
-            instance?.driverKind !== "bfl-image"
-          ) {
-            return false;
-          }
-          try {
-            applyResult(
-              await client.execute({
-                kind: "change-bfl-image-configuration",
-                instanceId,
-                expectedVersion: instance.version,
-                configuration,
-              }),
-              current,
-              install,
-            );
-          } catch (error) {
-            await recoverRegistryFailure(error, "Provider configuration could not be updated.");
-            return false;
-          }
-          if (credentialValue.length === 0) return true;
-          if (hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          try {
-            await hostBridge.addProviderApiKey(instanceId, credentialValue);
-            return true;
-          } catch (storeError) {
-            if (mounted.current) {
-              setMessage(
-                storeFailureMessage(
-                  "Provider configuration was saved, but its credential could not be stored.",
-                  storeError,
-                ),
-              );
-            }
-            return false;
-          }
+      changeKeyedImageConfiguration(
+        instanceId,
+        "bfl-image",
+        (expectedVersion) => ({
+          kind: "change-bfl-image-configuration",
+          instanceId,
+          expectedVersion,
+          configuration,
         }),
+        credential,
       ),
-    [client, hostBridge, install, recoverRegistryFailure],
+    [changeKeyedImageConfiguration],
   );
   const changeIdeogramImageConfiguration = useCallback(
     (
@@ -2031,56 +1870,18 @@ export function useProviderController(options: ProviderControllerOptions) {
       configuration: IdeogramImageProviderConfiguration,
       credential: TransientProviderCredential,
     ) =>
-      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
-        withTransientCredential(credential, async (credentialValue) => {
-          const current = authoritative.current;
-          const instance = current === undefined ? undefined : findProvider(current, instanceId);
-          if (
-            client === undefined ||
-            current === undefined ||
-            instance?.driverKind !== "ideogram-image"
-          ) {
-            return false;
-          }
-          try {
-            applyResult(
-              await client.execute({
-                kind: "change-ideogram-image-configuration",
-                instanceId,
-                expectedVersion: instance.version,
-                configuration,
-              }),
-              current,
-              install,
-            );
-          } catch (error) {
-            await recoverRegistryFailure(error, "Provider configuration could not be updated.");
-            return false;
-          }
-          if (credentialValue.length === 0) return true;
-          if (hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage(BROWSER_CANNOT_SAVE_KEYS);
-            }
-            return false;
-          }
-          try {
-            await hostBridge.addProviderApiKey(instanceId, credentialValue);
-            return true;
-          } catch (storeError) {
-            if (mounted.current) {
-              setMessage(
-                storeFailureMessage(
-                  "Provider configuration was saved, but its credential could not be stored.",
-                  storeError,
-                ),
-              );
-            }
-            return false;
-          }
+      changeKeyedImageConfiguration(
+        instanceId,
+        "ideogram-image",
+        (expectedVersion) => ({
+          kind: "change-ideogram-image-configuration",
+          instanceId,
+          expectedVersion,
+          configuration,
         }),
+        credential,
       ),
-    [client, hostBridge, install, recoverRegistryFailure],
+    [changeKeyedImageConfiguration],
   );
   const changeAnthropicCompatibleConfiguration = useCallback(
     (
@@ -2496,7 +2297,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           instance.driverKind === "azure-foundry" ||
           instance.driverKind === "openai-image" ||
           instance.driverKind === "gemini-native-image" ||
-          instance.driverKind === "gemini-video" ||
+          isVideoProfileDriverKind(instance.driverKind) ||
           instance.driverKind === "bfl-image" ||
           instance.driverKind === "ideogram-image" ||
           (instance.driverKind === "anthropic-compatible" &&
@@ -2841,13 +2642,13 @@ export function useProviderController(options: ProviderControllerOptions) {
     createClaude,
     createOllama,
     createOpenAiCompatible,
-    createOutsideHarnessEndpoint,
+    createOutsideProvider,
     createAnthropicCompatible,
     createAzureFoundry,
     createAmazonBedrock,
     createOpenAiImage,
     createGeminiImage,
-    createGeminiVideo,
+    createVideo,
     createBflImage,
     createIdeogramImage,
     rename,
@@ -2862,7 +2663,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     changeOpenAiCompatibleConfiguration,
     changeOpenAiImageConfiguration,
     changeGeminiImageConfiguration,
-    changeGeminiVideoConfiguration,
+    changeVideoConfiguration,
     changeBflImageConfiguration,
     changeIdeogramImageConfiguration,
     changeAnthropicCompatibleConfiguration,
@@ -3154,4 +2955,39 @@ function isInterruptedFailure(error: unknown): boolean {
     "category" in error &&
     error.category === "interrupted"
   );
+}
+
+/** The create command for a video profile, by the kind its configuration names. */
+function createVideoProviderCommand(input: {
+  readonly instanceId: ProviderInstanceId;
+  readonly expectedVersion: ProviderDefaults["version"];
+  readonly displayName: string;
+  readonly configuration: VideoProviderConfiguration;
+}) {
+  const { configuration, ...rest } = input;
+  switch (configuration.kind) {
+    case "gemini-video-http":
+      return { kind: "create-gemini-video-provider" as const, ...rest, configuration };
+    case "runway-video-http":
+      return { kind: "create-runway-video-provider" as const, ...rest, configuration };
+    case "fal-video-http":
+      return { kind: "create-fal-video-provider" as const, ...rest, configuration };
+  }
+}
+
+/** The change command for a video profile, by the kind its configuration names. */
+function changeVideoConfigurationCommand(input: {
+  readonly instanceId: ProviderInstanceId;
+  readonly expectedVersion: ProviderInstance["version"];
+  readonly configuration: VideoProviderConfiguration;
+}) {
+  const { configuration, ...rest } = input;
+  switch (configuration.kind) {
+    case "gemini-video-http":
+      return { kind: "change-gemini-video-configuration" as const, ...rest, configuration };
+    case "runway-video-http":
+      return { kind: "change-runway-video-configuration" as const, ...rest, configuration };
+    case "fal-video-http":
+      return { kind: "change-fal-video-configuration" as const, ...rest, configuration };
+  }
 }

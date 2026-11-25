@@ -450,15 +450,18 @@ Settings loads the full registry of controls and search terms when it opens.
 The renderer's first load has a byte budget, recorded in
 `scripts/initial-renderer-budget.json` and enforced by `bun run renderer:check`
 in CI. The budget counts the static graph Vite loads for `index.html`: the main
-entry is at most 1,613,707 B (1,576 KiB), the initial CSS at most 666,495 B
-(651 KiB), and the initial JavaScript and CSS at most 1,219,801 B after gzip
+entry is at most 1,581,020 B (1,544 KiB), the initial CSS at most 647,699 B
+(633 KiB), and the initial JavaScript and CSS at most 1,148,654 B after gzip
 level 6. A change that grows any measure past its budget fails. A change that
 shrinks one lowers the recorded budget. Raising a budget is a maintainer
 decision; the editable composer prompt that holds inline `@model` chips raised
 it once (maintainer decision, 2026-11-23), its picker and chip loading on first
 use. Before the workspace tree-shaking re-baseline, the maintainer also
 approved an increase for video offer schemas that the window decodes for
-Needs you (2026-11-22). Deferring that decoding is a follow-up. The budgets are exact bytes with no headroom, because the same
+Needs you (2026-11-22). Deferring that decoding is a follow-up. The question card docked above the composer, with its
+1-9 number keys, raised it again (maintainer decision, 2026-11-24), and the
+Settled thread state raised it by 1,592 B of main entry, 187 B of CSS and 358 B
+gzipped (maintainer decision, 2026-11-24). The budgets are exact bytes with no headroom, because the same
 source measures identically on macOS and Linux with Bun 1.4.4.
 
 The window build marks every `Schema` call pure and treats every workspace
@@ -2206,7 +2209,7 @@ except where a bullet says otherwise.
   sources in Settings › Memory, and Forget everything erases all entries and
   digests at once.
 - **When it is written.** After a thread ends: a Chat, Work, or Code thread
-  the person completed (put away) after memory was turned on. A sweep of the
+  the person completed (settled) after memory was turned on. A sweep of the
   three modes' completed threads runs five minutes after start and then
   hourly, and distills
   each such thread at most once, so a thread that was reopened and completed
@@ -3438,10 +3441,12 @@ mark. Marking a Work or Code thread Done while a fresh receipt stands attaches
 that receipt (`completionReceiptId`) as the thread's completion evidence, and
 Reopen clears it. Reporting finished never marks a thread Done.
 
-With **Put away threads when they're done** on (the default), Mark done on a
-Work or Code thread also puts it away, and the host puts a Code thread away
-once a pull request linked to it merged, read from cached evidence only;
-neither marks a thread Done, and Reopen brings it back
+With **Settle threads when they're done** on (the default), Mark done on a
+Work or Code thread also settles it, the host settles a Work or Code thread
+once the turn that filed its passing finished report completes, and the host
+settles a Code thread once a pull request it delivers merged, read from
+cached evidence only; none of them marks a thread Done, and Un-settle brings it
+back
 ([Workspace: thread visibility and completion](design/workspace.md#thread-visibility-and-completion)).
 
 Each recorded `thread.finished-receipt-recorded@1` receipt also feeds a
@@ -7159,6 +7164,26 @@ ls-remote` against the thread's remote and the GitHub reads they already
   them. Sending or clearing removes the draft; deleting or purging the thread
   removes it too.
 
+  **Saved drafts** in the desktop and web composer are private to the client
+  profile. A saved entry carries the source host, Project, composer and binding
+  and the full editable draft, including attachment bytes and typed context.
+  IndexedDB commits the stash and its cleared source, or the restored
+  destination and removal from the stash, as one move. A restored draft keeps
+  its recovery data there while it is editable. New-task recovery belongs to
+  its window and follows the live composer across Project changes. When the
+  window closes, its recovered new-task draft becomes available in Saved
+  drafts. The live composer changes only after the write commits, and a
+  competing restore can consume the entry only once. A failed move preserves
+  a recoverable copy. Ordinary attachment
+  staging assigns destination-owned references. Ordinary turn admission
+  rechecks authority, context references and model capabilities. A host's
+  retention tombstones remove that thread's saved and recovered drafts,
+  including threads purged while the client was closed. The client reads
+  the owning host's tombstones through its existing retention permissions,
+  which a device paired at Full has. Archiving a thread or Project keeps
+  its saved drafts. Recovery waits for host acceptance before clearing a
+  submitted draft.
+
 - **Accepted message queue.** Chat, Work, and Code share a host-owned ordered
   queue for messages the user submits while a turn runs. A successful enqueue
   acknowledges durable storage; the renderer then relinquishes the submitted
@@ -7901,7 +7926,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   disclose it. The walk only goes forward, so a worker moves through its list
   at most once and then pauses as before, and it never reaches a model outside
   the roles. A coordinator, a worker on a model a person picked or with the
-  person's own usage-limit hand-off, a thread put away, marked Done, snoozed
+  person's own usage-limit hand-off, a thread settled, marked Done, snoozed
   or archived, and a role with the box off are never moved, and a move never
   goes into or within a role that has **Ask before using**
   ([Coordinator threads: Running workers](design/coordinator-threads.md#running-workers)).
@@ -7943,7 +7968,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   install, trust and enable, with digest-bound trust, admission and
   confinement unchanged (maintainer request, 2026-11-12); the catalog lists effective outside drivers in their own group from
   the registry snapshot. Third-party provider-driver plugins are in scope for the
-  first preview under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
+  first preview under [Outside provider drivers](design/outside-provider-drivers.md),
+  as harness endpoints or as media generators: an outside image driver lists
+  its declared models and prices in the same group and adds an image profile
+  ([Outside media generation drivers](design/outside-provider-drivers.md#outside-media-generation-drivers)). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -8056,15 +8084,24 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   own result: the image is fetched exactly at the URL the provider's
   authenticated response named, without the credential, and a configured
   base URL neither rewrites that URL to the base URL's host nor approves
-  any other URL on that host.
+  any other URL on that host. That download connects only to an address it
+  has just checked (maintainer decision, 2026-11-22): the name is resolved
+  once, every answer must be publicly routable except on the profile's own
+  configured base URL origin, and the socket opens to that same answer, on a
+  fresh connection, with the original name kept as `Host` and as the TLS
+  server name the certificate is verified against. No redirect is followed,
+  so the first hop is the only one. This holds for bundled and outside image
+  drivers alike, and closes DNS rebinding between a check and the fetch.
   The **Image generator** surface (profile menu, host-wide `image-library`
   scope;
   any registered window may use the `image-library` scope, while thread scopes
   keep thread authority and the agent tool generates only into its own thread)
   and an app-managed `octant_create_image` tool invoke that job service
   through `/api/image/` when an enabled image profile exists (a dedicated
-  image provider, or a custom image source named in Settings › Voice &
-  images, which every renderer surface lists alongside them). The
+  image provider, a profile added from an outside image driver the host
+  admits ([Outside media generation drivers](design/outside-provider-drivers.md#outside-media-generation-drivers)),
+  or a custom image source named in Settings › Voice & images, which every
+  renderer surface lists alongside them). The
   composer of an open Chat, Work, or Code thread also carries a **Create
   image…** icon beside attach and dictate. It opens the same generation sheet,
   scoped to that thread, so the result lands there as a thread artifact.
@@ -17845,7 +17882,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | Oh My Pi                  | `oh-my-pi`                                                                                                                                   | `no`  | `no`              | `no`              | `none`           |
 
   The image profiles (`openai-image`, `gemini-native-image`, `bfl-image`,
-  `ideogram-image`) are not turn drivers and are not in the matrix.
+  `ideogram-image`, and an outside package's `outside-image`) are not turn
+  drivers and are not in the matrix.
 
   Where each provider is weaker than Claude Code and Codex:
 

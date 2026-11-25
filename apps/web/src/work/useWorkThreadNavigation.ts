@@ -73,7 +73,6 @@ export function useWorkThreadNavigation(
   const requestGeneration = useRef(0);
   const clientRef = useRef(client);
   clientRef.current = client;
-
   const refresh = useCallback(async () => {
     const request = ++requestGeneration.current;
     if (!bootstrapped.current) setStatus("loading");

@@ -1,4 +1,5 @@
 import "../styles/provider-settings.css";
+import type { VideoProviderConfiguration } from "./configuration/configurationValues";
 import {
   ACP_AGENT_KINDS,
   type AcpAgentConfiguration,
@@ -13,7 +14,6 @@ import {
   type DiscoverySnapshot,
   type IdeogramImageProviderConfiguration,
   type GeminiImageProviderConfiguration,
-  type GeminiVideoProviderConfiguration,
   type OpenAiCompatibleProviderConfiguration,
   type OpenAiImageProviderConfiguration,
   type OllamaProviderConfiguration,
@@ -121,9 +121,9 @@ export interface ProviderSettingsViewProps {
     configuration: GeminiImageProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
-  readonly onCreateGeminiVideo: (
+  readonly onCreateVideo: (
     displayName: string,
-    configuration: GeminiVideoProviderConfiguration,
+    configuration: VideoProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onCreateBflImage: (
@@ -190,9 +190,9 @@ export interface ProviderSettingsViewProps {
     configuration: GeminiImageProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
-  readonly onChangeGeminiVideoConfiguration: (
+  readonly onChangeVideoConfiguration: (
     instanceId: ProviderInstanceId,
-    configuration: GeminiVideoProviderConfiguration,
+    configuration: VideoProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onChangeBflImageConfiguration: (
@@ -497,7 +497,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeOpenAiCompatibleConfiguration={props.onChangeOpenAiCompatibleConfiguration}
         onChangeOpenAiImageConfiguration={props.onChangeOpenAiImageConfiguration}
         onChangeGeminiImageConfiguration={props.onChangeGeminiImageConfiguration}
-        onChangeGeminiVideoConfiguration={props.onChangeGeminiVideoConfiguration}
+        onChangeVideoConfiguration={props.onChangeVideoConfiguration}
         onChangeBflImageConfiguration={props.onChangeBflImageConfiguration}
         onChangeIdeogramImageConfiguration={props.onChangeIdeogramImageConfiguration}
         onChangePiConfiguration={props.onChangePiConfiguration}

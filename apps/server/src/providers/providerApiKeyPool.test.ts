@@ -223,6 +223,42 @@ describe("pool through the OpenAI-compatible endpoint", () => {
 });
 
 describe("reporting a refused response", () => {
+  it.each([400, 403])(
+    "cools a key when quota text arrives before cancelling an HTTP %i body",
+    async (status) => {
+      const pool = makeProviderApiKeyPool(twoKeyStore());
+      const lease = await pool.lease(instanceId);
+      const controller = new AbortController();
+      const readingTail = Promise.withResolvers<void>();
+      const releaseTail = Promise.withResolvers<void>();
+      const body = new ReadableStream(
+        {
+          start(stream) {
+            stream.enqueue(new TextEncoder().encode(SPEND_LIMIT_BODY));
+          },
+          pull() {
+            readingTail.resolve();
+            return releaseTail.promise;
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      const response = new Response(body, { status });
+      const reporting = reportKeyRejection(lease, response, controller.signal);
+      try {
+        await readingTail.promise;
+        // Let the first chunk reach the clone before stopping its tail read.
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        controller.abort();
+        await reporting;
+        expect(await pool.resolve(instanceId)).toBe(SECOND);
+      } finally {
+        releaseTail.resolve();
+        await response.body?.cancel();
+      }
+    },
+  );
+
   it("cools a key for a quota refusal whose words are near the start of a long body", async () => {
     const store = twoKeyStore();
     const pool = makeProviderApiKeyPool(store);

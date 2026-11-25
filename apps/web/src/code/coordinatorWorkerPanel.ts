@@ -22,7 +22,7 @@ export const COORDINATOR_WORKER_STATE_WORDS: Readonly<Record<CoordinatorWorkerSt
   idle: "Idle",
   "in-review": "In review",
   done: "Done",
-  "put-away": "Put away",
+  "put-away": "Settled",
 };
 
 /** The thread facts the panel reads; the window's Code thread list carries them. */
