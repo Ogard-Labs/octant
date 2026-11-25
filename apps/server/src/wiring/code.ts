@@ -56,6 +56,7 @@ import { RepositoryTestDiscoveryService } from "../code/repositoryTestDiscoveryS
 import {
   type CodeCheckoutObservationPort,
   type CodeFileRootAuthorityPort,
+  type CodeWorktreeBranchSuggestionPort,
   CodeService,
 } from "../code/codeService";
 import type { CompletedThreadArchiveInput } from "../completedThreadArchiveSweep";
@@ -664,6 +665,8 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "providerFolderDiscoveryPorts"
     | "refreshStandaloneSkills"
   > & {
+    /** The model call behind Suggest name in the Code composer. */
+    readonly worktreeBranchSuggestion: CodeWorktreeBranchSuggestionPort;
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
     /** The member's Act item, which bounds the Code Projects a hub-introduced device reads. */
@@ -1071,6 +1074,7 @@ export function wireCode(deps: CodeDependencies) {
             preview: (input, signal) => managedWorktreeSourcePreview(input, signal),
           },
           // A server Project's branches and worktrees are its server's.
+          worktreeBranchSuggestion: deps.worktreeBranchSuggestion,
           worktreeRefs: {
             list: async (input, signal) =>
               (await listServerWorktreeRefs(

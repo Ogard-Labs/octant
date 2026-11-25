@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  branchNameTaken,
   DEFAULT_BRANCH_PREFIX,
   deriveDeliveryBranch,
   isValidBranchName,
@@ -133,5 +134,15 @@ describe("isValidBranchPrefix", () => {
     ]) {
       expect(isValidBranchPrefix(bad), bad).toBe(false);
     }
+  });
+});
+
+describe("branchNameTaken", () => {
+  it("counts an existing branch, one above it and one below it, ignoring case", () => {
+    const existing = ["octant/Fix", "team/a/b"];
+    expect(branchNameTaken("octant/fix", existing)).toBe(true);
+    expect(branchNameTaken("team/a", existing)).toBe(true);
+    expect(branchNameTaken("team/a/b/c", existing)).toBe(true);
+    expect(branchNameTaken("octant/other", existing)).toBe(false);
   });
 });

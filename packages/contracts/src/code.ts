@@ -981,6 +981,18 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("list-code-worktree-refs"),
     projectId: ProjectId,
   }).annotations(strict),
+  /**
+   * The person asked a model for words to name a new worktree's branch. It
+   * carries the draft text and the model the composer has selected, and nothing
+   * else about the Project or the checkout.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("suggest-code-worktree-branch"),
+    projectId: ProjectId,
+    providerInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+    draft: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(8_000)),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("preview-code-worktree-source"),
     projectId: ProjectId,
@@ -1605,6 +1617,20 @@ export const CodeWorktreeRemoteFactsRetrieved = Schema.Struct({
   facts: CodeWorktreeRemoteFacts,
 }).annotations(strict);
 export type CodeWorktreeRemoteFactsRetrieved = typeof CodeWorktreeRemoteFactsRetrieved.Type;
+export const CodeWorktreeBranchSuggested = Schema.Struct({
+  kind: Schema.Literal("worktree-branch-suggested"),
+  projectId: ProjectId,
+  /** Lower-case words joined by dashes; the composer adds the prefix and checks collisions. */
+  words: Schema.String.pipe(Schema.pattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/), Schema.maxLength(40)),
+}).annotations(strict);
+export type CodeWorktreeBranchSuggested = typeof CodeWorktreeBranchSuggested.Type;
+export const CodeWorktreeBranchSuggestionDeclined = Schema.Struct({
+  kind: Schema.Literal("worktree-branch-suggestion-declined"),
+  projectId: ProjectId,
+  reason: Schema.Literal("provider-unavailable", "not-allowed", "spend-limited", "failed"),
+}).annotations(strict);
+export type CodeWorktreeBranchSuggestionDeclined =
+  typeof CodeWorktreeBranchSuggestionDeclined.Type;
 export const CodeWorktreeRefsListed = Schema.Struct({
   kind: Schema.Literal("worktree-refs-listed"),
   projectId: ProjectId,
@@ -1701,6 +1727,8 @@ export const CodeCommandResult = Schema.Union(
   CodeManagedThreadCreated,
   CodeWorktreeRemoteFactsRetrieved,
   CodeWorktreeRefsListed,
+  CodeWorktreeBranchSuggested,
+  CodeWorktreeBranchSuggestionDeclined,
   CodeThreadCheckoutRebound,
   CodeForkContextMerged,
 );

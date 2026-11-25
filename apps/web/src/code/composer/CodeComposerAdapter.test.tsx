@@ -516,6 +516,164 @@ describe("CodeComposerAdapter", () => {
     );
   });
 
+  describe("Suggest name", () => {
+    const provider = "00000000-0000-4000-8000-0000000000b1" as never;
+    const model = "model-a" as never;
+    function executeWith(reply: (command: { kind: string }) => unknown | Promise<unknown>) {
+      return vi.fn(async (command: { kind: string; projectId?: string }) =>
+        command.kind === "list-code-worktree-refs"
+          ? {
+              kind: "worktree-refs-listed",
+              projectId: command.projectId,
+              refs: [
+                { name: "development", kind: "local", isCurrent: true },
+                { name: "octant/fix-login", kind: "local" },
+              ],
+            }
+          : reply(command),
+      );
+    }
+    async function openOptions(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(whereChip());
+      await user.click(screen.getByRole("button", { name: /Worktree options/ }));
+    }
+    function renderComposer(execute: ReturnType<typeof executeWith>, onCreateThread = vi.fn()) {
+      render(
+        <CodeComposerAdapter
+          {...defaultProps}
+          execute={execute as never}
+          newThreadWorkspace="managed-worktree"
+          onCreateThread={onCreateThread}
+          selectedModelId={model}
+          selectedProviderInstanceId={provider}
+        />,
+      );
+      return onCreateThread;
+    }
+    const suggestCalls = (execute: ReturnType<typeof executeWith>) =>
+      execute.mock.calls.filter(([command]) => command.kind === "suggest-code-worktree-branch");
+
+    it("asks no model while the person types or sends, and shows the local name", async () => {
+      const user = userEvent.setup();
+      const execute = executeWith(() => undefined);
+      const onCreateThread = renderComposer(execute);
+      await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the login bug");
+      await openOptions(user);
+      expect(
+        (screen.getByRole("textbox", { name: "Branch name" }) as HTMLInputElement).value,
+      ).toMatch(/^octant\//);
+      await user.keyboard("{Escape}");
+      await user.click(screen.getByRole("button", { name: "Create thread" }));
+      await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+      expect(suggestCalls(execute)).toHaveLength(0);
+    });
+
+    it("sends only the draft and the selected model when asked, shows the proposal, and sends the edited name", async () => {
+      const user = userEvent.setup();
+      const execute = executeWith((command) =>
+        command.kind === "suggest-code-worktree-branch"
+          ? {
+              kind: "worktree-branch-suggested",
+              projectId: defaultProps.projectId,
+              words: "fix-login-redirect",
+            }
+          : undefined,
+      );
+      const onCreateThread = renderComposer(execute);
+      await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the login bug");
+      await openOptions(user);
+      await user.click(screen.getByRole("button", { name: "Suggest name" }));
+      const field = screen.getByRole("textbox", { name: "Branch name" });
+      await waitFor(() => expect(field).toHaveValue("octant/fix-login-redirect"));
+      expect(suggestCalls(execute)).toEqual([
+        [
+          {
+            kind: "suggest-code-worktree-branch",
+            projectId: defaultProps.projectId,
+            providerInstanceId: provider,
+            modelId: model,
+            draft: "Fix the login bug",
+          },
+        ],
+      ]);
+      await user.clear(field);
+      await user.type(field, "octant/fix-login-redirect-v2");
+      await user.tab();
+      await user.keyboard("{Escape}");
+      await user.click(screen.getByRole("button", { name: "Create thread" }));
+      await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+      expect(onCreateThread.mock.calls[0]?.[0].deliveryTarget.branchIntent).toBe(
+        "octant/fix-login-redirect-v2",
+      );
+    });
+
+    it("keeps the local name when the model declines, throws, or the message changed meanwhile", async () => {
+      const user = userEvent.setup();
+      let answer: ((value: unknown) => void) | undefined;
+      const replies: Array<() => Promise<unknown>> = [
+        async () => ({
+          kind: "worktree-branch-suggestion-declined",
+          projectId: defaultProps.projectId,
+          reason: "failed",
+        }),
+        async () => {
+          throw new Error("offline");
+        },
+        () => new Promise((resolve) => (answer = resolve)),
+      ];
+      const execute = executeWith((command) =>
+        command.kind === "suggest-code-worktree-branch" ? replies.shift()?.() : undefined,
+      );
+      renderComposer(execute);
+      await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the login bug");
+      await openOptions(user);
+      const field = screen.getByRole("textbox", { name: "Branch name" });
+      const local = (field as HTMLInputElement).value;
+      await user.click(screen.getByRole("button", { name: "Suggest name" }));
+      expect(await screen.findByText(/could not suggest a name/)).toBeVisible();
+      expect(field).toHaveValue(local);
+      await user.click(screen.getByRole("button", { name: "Suggest name" }));
+      await waitFor(() => expect(suggestCalls(execute)).toHaveLength(2));
+      expect(field).toHaveValue(local);
+
+      await user.click(screen.getByRole("button", { name: "Suggest name" }));
+      await user.keyboard("{Escape}");
+      await user.type(screen.getByRole("textbox", { name: "First message" }), " and logout");
+      await act(async () => {
+        answer?.({
+          kind: "worktree-branch-suggested",
+          projectId: defaultProps.projectId,
+          words: "stale-words",
+        });
+      });
+      await openOptions(user);
+      expect(screen.getByText(/changed while the model was answering/)).toBeVisible();
+      expect(screen.getByRole("textbox", { name: "Branch name" })).not.toHaveValue(
+        "octant/stale-words",
+      );
+    });
+
+    it("refuses a typed name Git would reject or a branch that exists, and returns to the derived name when cleared", async () => {
+      const user = userEvent.setup();
+      renderComposer(executeWith(() => undefined));
+      await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix it");
+      await openOptions(user);
+      const field = screen.getByRole("textbox", { name: "Branch name" });
+      const derived = (field as HTMLInputElement).value;
+      await user.clear(field);
+      await user.type(field, "has space");
+      await user.tab();
+      expect(screen.getByText(/Use letters, numbers/)).toBeVisible();
+      await user.clear(field);
+      await user.type(field, "octant/fix-login");
+      await user.tab();
+      expect(screen.getByText(/already exists/)).toBeVisible();
+      await user.clear(field);
+      await user.tab();
+      expect(field).toHaveValue(derived);
+    });
+  });
+
   it("keeps repository context on the context row above the composer", () => {
     const { container } = render(<CodeComposerAdapter {...defaultProps} />);
     const frame = container.querySelector(".composer");

@@ -50,7 +50,11 @@ import {
   type CreateHostViewScope,
   type PickerGroup,
 } from "@octant/domain";
-import { deriveDeliveryBranch } from "@octant/domain/code-worktree-naming";
+import {
+  branchNameTaken,
+  deriveDeliveryBranch,
+  isValidBranchName,
+} from "@octant/domain/code-worktree-naming";
 import {
   defaultStartFromOrigin,
   selectWorktreeRemote,
@@ -129,6 +133,7 @@ import type { OctantHostBridge } from "../../shell/hostBridge";
 import { boundsInsideViewport } from "../../browser/useNativeBrowserSurface";
 import { observeComposerPlacement } from "../codeWorkspaceApprovals";
 import { ComposerInput, type ComposerInputElement } from "../../composer/ComposerInput";
+import { CodeBranchNameField, type BranchSuggestionStatus } from "./CodeBranchNameField";
 
 export interface CodeComposerAdapterProps {
   /** Settings › Code › Worktrees: the prefix and naming a new worktree's branch follows. */
@@ -789,7 +794,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
 
   // The name shown before Send is the name sent: one derivation serves both,
   // from the branches the host listed, so a taken name is already numbered.
-  const worktreeBranch = useMemo(
+  const existingBranchNames = useMemo(
+    () => (worktreeRefs ?? []).flatMap((ref) => (ref.kind === "local" ? [ref.name] : [])),
+    [worktreeRefs],
+  );
+  const derivedBranch = useMemo(
     () =>
       deriveDeliveryBranch({
         baseBranch: submittedBaseBranch,
@@ -797,9 +806,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         prefix: props.worktreeSettings?.branchPrefix,
         naming: props.worktreeSettings?.branchNaming,
         prompt: trimmed,
-        existingBranches: (worktreeRefs ?? []).flatMap((ref) =>
-          ref.kind === "local" ? [ref.name] : [],
-        ),
+        existingBranches: existingBranchNames,
       }),
     [
       props.worktreeSettings?.branchPrefix,
@@ -807,9 +814,113 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       shortId,
       submittedBaseBranch,
       trimmed,
-      worktreeRefs,
+      existingBranchNames,
     ],
   );
+  // A name the person typed or asked a model for outranks the derived one, but
+  // only while it is still a usable branch name nobody has taken since.
+  const [branchChoice, setBranchChoice] = useState<{
+    readonly name: string;
+    readonly source: "edited" | "suggested";
+  }>();
+  const [branchSuggestion, setBranchSuggestion] = useState<BranchSuggestionStatus>("idle");
+  const suggestionFor = useRef({ generation: 0, draft: "", model: "" });
+  const worktreeBranch =
+    branchChoice !== undefined &&
+    isValidBranchName(branchChoice.name) &&
+    !branchNameTaken(branchChoice.name, [submittedBaseBranch, ...existingBranchNames])
+      ? branchChoice.name
+      : derivedBranch;
+  const editBranchName = useCallback(
+    (name: string): string | undefined => {
+      if (name === "") {
+        setBranchChoice(undefined);
+        return undefined;
+      }
+      if (!isValidBranchName(name)) {
+        return "Use letters, numbers, dots, dashes and slashes, without spaces or a trailing .lock.";
+      }
+      if (branchNameTaken(name, [submittedBaseBranch, ...existingBranchNames])) {
+        return "A branch with that name, or one inside it, already exists.";
+      }
+      // What the person typed outranks an answer still on its way.
+      suggestionFor.current = {
+        ...suggestionFor.current,
+        generation: suggestionFor.current.generation + 1,
+      };
+      setBranchSuggestion((current) => (current === "asking" ? "dropped" : current));
+      setBranchChoice(name === derivedBranch ? undefined : { name, source: "edited" });
+      return undefined;
+    },
+    [derivedBranch, existingBranchNames, submittedBaseBranch],
+  );
+  const suggestModel =
+    props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+      ? undefined
+      : { providerInstanceId: props.selectedProviderInstanceId, modelId: props.selectedModelId };
+  const suggestModelKey =
+    suggestModel === undefined ? "" : `${suggestModel.providerInstanceId}/${suggestModel.modelId}`;
+  // Anything in flight is answering a question that no longer stands once the
+  // draft, the Project or the model changes; its answer is dropped on arrival.
+  const currentQuestion = `${props.projectId ?? ""}\0${suggestModelKey}\0${trimmed}`;
+  const suggestBranchName = useCallback(() => {
+    if (
+      props.execute === undefined ||
+      props.projectId === undefined ||
+      suggestModel === undefined ||
+      trimmed === ""
+    ) {
+      return;
+    }
+    const generation = suggestionFor.current.generation + 1;
+    suggestionFor.current = { generation, draft: currentQuestion, model: suggestModelKey };
+    setBranchSuggestion("asking");
+    void props
+      .execute({
+        kind: "suggest-code-worktree-branch",
+        projectId: props.projectId,
+        providerInstanceId: suggestModel.providerInstanceId,
+        modelId: suggestModel.modelId,
+        draft: trimmed,
+      })
+      .then(
+        (result) => result,
+        () => undefined,
+      )
+      .then((result) => {
+        if (suggestionFor.current.generation !== generation) return;
+        if (result?.kind !== "worktree-branch-suggested") {
+          setBranchSuggestion("declined");
+          return;
+        }
+        // The question is compared at arrival through the ref the render keeps.
+        if (latestQuestion.current !== suggestionFor.current.draft) {
+          setBranchSuggestion("dropped");
+          return;
+        }
+        const name = deriveDeliveryBranch({
+          baseBranch: submittedBaseBranch,
+          shortId,
+          prefix: props.worktreeSettings?.branchPrefix,
+          naming: "prompt",
+          prompt: result.words,
+          existingBranches: existingBranchNames,
+        });
+        setBranchChoice({ name, source: "suggested" });
+        setBranchSuggestion("idle");
+      });
+  }, [
+    currentQuestion,
+    existingBranchNames,
+    suggestModelKey,
+    props,
+    shortId,
+    submittedBaseBranch,
+    suggestModel,
+    trimmed,
+  ]);
+  const latestQuestion = useRef(currentQuestion);
+  latestQuestion.current = currentQuestion;
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
@@ -1001,6 +1112,19 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         branch={resolvedBaseBranch ?? "Default branch"}
         onWorkspaceChange={setWorkspaceOverride}
         worktreeBranch={worktreeBranch}
+        branchNameControl={
+          <CodeBranchNameField
+            chosen={branchChoice !== undefined && worktreeBranch === branchChoice.name}
+            {...(props.creating === true ? { disabled: true } : {})}
+            onEdit={editBranchName}
+            {...(props.execute === undefined || suggestModel === undefined
+              ? {}
+              : { onSuggest: suggestBranchName })}
+            suggestDisabled={trimmed === ""}
+            suggestion={branchSuggestion}
+            value={worktreeBranch}
+          />
+        }
         workspace={workspace}
         {...(props.creating === true ? { disabled: true } : {})}
         {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
@@ -1307,7 +1431,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                           Object.entries(modelOptionValues).filter(([key]) => key !== id),
                         );
                         setModelChoice({
-                          key: modelKey,
+                          key: suggestModelKey,
                           values: value === undefined ? remaining : { ...remaining, [id]: value },
                         });
                       }}

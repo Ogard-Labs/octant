@@ -72,6 +72,7 @@ import {
 import { terminalShellFor } from "../code/terminalShell";
 import { createNativeHarnessRoutingRouteHandler } from "../harness/nativeHarnessRoutingRoutes";
 import { createHostImageDescriber, modelLabelOf, windowSeesProject } from "./imageDescriber";
+import { createHostWorktreeBranchSuggester } from "./worktreeBranchSuggester";
 import {
   createFollowUp,
   type FollowUpCreationDependencies,
@@ -627,6 +628,14 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessRoutingStore,
     providerAvailabilityMarks: deps.providerAvailabilityMarks,
     providerUsageLimitsService,
+    isProjectPolicyTargetAllowed: deps.isProjectPolicyTargetAllowed,
+    configuredDriverOptions: () => configuredDriverOptions,
+    providerDataDirectory,
+    spendCeiling,
+  });
+  const worktreeBranchSuggestion = createHostWorktreeBranchSuggester({
+    persistence,
+    providerRuntimeRegistry,
     isProjectPolicyTargetAllowed: deps.isProjectPolicyTargetAllowed,
     configuredDriverOptions: () => configuredDriverOptions,
     providerDataDirectory,
@@ -1443,6 +1452,7 @@ export function wireHarness(deps: HarnessDependencies) {
     decisionReviewModelPort,
     runtimeForgeChanges,
     followUpCreation,
+    worktreeBranchSuggestion,
     restartContinuation,
     liftRestartRecovery,
     followUpSuggestionRoutes,

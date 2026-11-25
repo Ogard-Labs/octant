@@ -4,6 +4,8 @@ import {
   decodeHostAnswer,
   decodeCodeOperationId,
   decodeProjectWorkingFolderId,
+  decodeProviderInstanceId,
+  decodeProviderModelId,
 } from "@octant/contracts";
 import type { CodeTranscriptSearchRows } from "../persistence/codeTranscriptSearchProjection";
 import {
@@ -78,6 +80,7 @@ import {
   codeNavigationCheckoutChip,
   type CodeServiceOptions,
   type CodePersistencePort,
+  type CodeWorktreeBranchSuggestionPort,
   type CodeWorktreeRefsPort,
   type CodeWorktreeSourcePreviewPort,
   type ManagedCodeThreadCreationPort,
@@ -4700,6 +4703,77 @@ describe("CodeService managed thread creation", () => {
     ).resolves.toMatchObject({ kind: "worktree-refs-listed", refs: [] });
   });
 
+  it("asks the model the person selected for branch words only on request, and keeps the local name when it declines or throws", async () => {
+    const request = {
+      kind: "suggest-code-worktree-branch",
+      projectId: ids.project,
+      providerInstanceId: decodeProviderInstanceId(ids.provider),
+      modelId: decodeProviderModelId("model-a"),
+      draft: "Fix the login redirect",
+    } as const;
+    const suggest = vi.fn(async () => ({
+      status: "suggested" as const,
+      words: "fix-login-redirect",
+    }));
+    const fixture = serviceFixture({ threads: [], worktreeBranchSuggestion: { suggest } });
+    await expect(fixture.service.execute(ids.window, request)).resolves.toEqual({
+      kind: "worktree-branch-suggested",
+      projectId: ids.project,
+      words: "fix-login-redirect",
+    });
+    expect(suggest).toHaveBeenCalledWith({
+      projectId: ids.project,
+      providerInstanceId: request.providerInstanceId,
+      modelId: request.modelId,
+      draft: "Fix the login redirect",
+    });
+
+    const refusing = serviceFixture({
+      threads: [],
+      worktreeBranchSuggestion: {
+        suggest: vi.fn(async () => ({
+          status: "refused" as const,
+          reason: "spend-limited" as const,
+        })),
+      },
+    });
+    await expect(refusing.service.execute(ids.window, request)).resolves.toMatchObject({
+      kind: "worktree-branch-suggestion-declined",
+      reason: "spend-limited",
+    });
+    const throwing = serviceFixture({
+      threads: [],
+      worktreeBranchSuggestion: {
+        suggest: vi.fn(async () => {
+          throw new Error("provider down");
+        }),
+      },
+    });
+    await expect(throwing.service.execute(ids.window, request)).resolves.toMatchObject({
+      kind: "worktree-branch-suggestion-declined",
+      reason: "failed",
+    });
+    const absent = serviceFixture({ threads: [] });
+    await expect(absent.service.execute(ids.window, request)).resolves.toMatchObject({
+      reason: "provider-unavailable",
+    });
+  });
+
+  it("refuses a branch suggestion for a Project the window may not act on, without calling the model", async () => {
+    const suggest = vi.fn();
+    const fixture = serviceFixture({ threads: [], worktreeBranchSuggestion: { suggest } });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "suggest-code-worktree-branch",
+        projectId: ids.unauthorizedProject,
+        providerInstanceId: decodeProviderInstanceId(ids.provider),
+        modelId: decodeProviderModelId("model-a"),
+        draft: "Fix it",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(suggest).not.toHaveBeenCalled();
+  });
+
   it("F3: appends a compensating checkout-removed when thread journal fails after checkout journal succeeds", async () => {
     const port = mockCreationPort();
     const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
@@ -6651,6 +6725,7 @@ function serviceFixture(
     readonly sessionAuthority?: CodeSessionAuthorityStore;
     readonly worktreeSourcePreview?: CodeWorktreeSourcePreviewPort;
     readonly worktreeRefs?: CodeWorktreeRefsPort;
+    readonly worktreeBranchSuggestion?: CodeWorktreeBranchSuggestionPort;
     readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
     readonly worktreeRemoteFacts?: CodeWorktreeRemoteFacts;
     readonly probeProvider?: CodeServiceOptions["probeProvider"];
@@ -6786,6 +6861,9 @@ function serviceFixture(
       ? {}
       : { worktreeSourcePreview: options.worktreeSourcePreview }),
     ...(options.worktreeRefs === undefined ? {} : { worktreeRefs: options.worktreeRefs }),
+    ...(options.worktreeBranchSuggestion === undefined
+      ? {}
+      : { worktreeBranchSuggestion: options.worktreeBranchSuggestion }),
     ...(options.managedThreadCreation === undefined
       ? {}
       : { managedThreadCreation: options.managedThreadCreation }),
