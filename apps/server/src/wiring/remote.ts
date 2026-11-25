@@ -121,6 +121,7 @@ import {
 import { readEventLoopLagCounters } from "../eventLoopLag";
 import { slowStatementTally } from "../persistence/slowStatementLog";
 import { desktopCredentialStore } from "../hostDataMap";
+import { appleSpeechOffered } from "../speech/appleSpeechEngine";
 import { HostMemoryLimitsService } from "../hostMemoryLimitsService";
 import { ThreadRetentionService } from "../threadRetentionService";
 import { createLiveHostExportService } from "../hostExportService";
@@ -3101,7 +3102,12 @@ export function wireRemote(deps: RemoteDependencies) {
                   ),
                 }
               : {}),
-            speechModelDownloads: options.speechHelperPath !== undefined,
+            // Only where Settings can offer the Download button at all.
+            speechModelDownloads: appleSpeechOffered(
+              options.speechHelperPath === undefined
+                ? {}
+                : { helperPath: options.speechHelperPath },
+            ),
             listProjects: () =>
               persistence.readProjects().map((project) => ({
                 id: String(project.id),

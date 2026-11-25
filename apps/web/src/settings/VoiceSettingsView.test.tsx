@@ -412,6 +412,28 @@ describe("Apple Speech in Voice settings", () => {
     ).not.toContain("Apple Speech on this Mac");
   });
 
+  it("says it is checking until the host answers, not that it failed", async () => {
+    const onSettingsChange = vi.fn();
+    const client = {
+      ...fakeSpeechClient().client,
+      status: () => new Promise<never>(() => undefined),
+      localEngine: () => new Promise<never>(() => undefined),
+    };
+    render(
+      <SpeechCapabilityProvider
+        client={client}
+        instances={[]}
+        settings={{ transcriptionEngine: "apple-speech" }}
+      >
+        <VoiceSettingsView
+          onSettingsChange={onSettingsChange}
+          settings={{ transcriptionEngine: "apple-speech" }}
+        />
+      </SpeechCapabilityProvider>,
+    );
+    expect(said()).toBe("Checking Apple Speech on this Mac…");
+  });
+
   it("says why it cannot run where settings already name it", async () => {
     await show(
       { transcriptionEngine: "apple-speech" },

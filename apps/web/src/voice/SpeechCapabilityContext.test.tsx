@@ -94,6 +94,16 @@ describe("speech capability", () => {
     expect(toLocalClip).toHaveBeenCalledWith(recorded);
   });
 
+  it("keeps the microphone when a read on focus comes back without an answer", async () => {
+    const status = hostStatus({ status: "ready", engine: "apple-speech" });
+    show(status, true);
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("ready"));
+    status.mockResolvedValue({ ...(await status()), transcription: unavailable } as never);
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(status.mock.calls.length).toBeGreaterThan(2));
+    expect(screen.getByRole("status")).toHaveTextContent("ready");
+  });
+
   it("asks the host again when the model may have arrived", async () => {
     const status = hostStatus(unavailable);
     show(status, true);

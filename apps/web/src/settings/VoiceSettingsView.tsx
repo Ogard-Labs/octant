@@ -19,6 +19,7 @@ import type { ShellSettings } from "@octant/contracts/shell";
 import {
   addVoiceDictionaryTerms,
   listSpeechEligibleInstances,
+  LOCAL_SPEECH_PAIRED_REASON,
   localSpeechProblem,
   resolveSpeechEndpoint,
   type SpeechEndpointResolution,
@@ -439,7 +440,10 @@ function TranscriptionMenu(props: TranscriptionMenuProps) {
       ) : props.localChosen ? (
         <LocalEngineState
           fallback={
-            speech.status.transcription.status === "unavailable"
+            // Only the host's own answer is worth repeating here; before it
+            // answers the status holds a placeholder, not a fact.
+            speech.status.transcription.status === "unavailable" &&
+            speech.status.transcription.reason === LOCAL_SPEECH_PAIRED_REASON
               ? speech.status.transcription.reason
               : undefined
           }

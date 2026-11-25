@@ -1,7 +1,11 @@
 import { EventEmitter } from "node:events";
 import { SPEECH_TRANSCRIPT_MAX_CHARACTERS } from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAppleSpeechEngine, type SpeechHelperChild } from "./appleSpeechEngine";
+import {
+  appleSpeechOffered,
+  createAppleSpeechEngine,
+  type SpeechHelperChild,
+} from "./appleSpeechEngine";
 
 interface SentRequest {
   readonly header: Record<string, unknown>;
@@ -76,6 +80,14 @@ describe("on-device speech engine", () => {
     expect((await engine.download("en")).status).toBe("unsupported");
     expect((await engine.transcribe({ pcm })).status).toBe("unavailable");
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("is offered, and its download named, only with the helper on macOS 26 or later", () => {
+    const helperPath = "/Applications/Octant.app/Contents/Resources/native/octant-speech-helper";
+    expect(appleSpeechOffered({ helperPath, platform: "darwin", release: "25.0.0" })).toBe(true);
+    expect(appleSpeechOffered({ helperPath, platform: "darwin", release: "24.6.0" })).toBe(false);
+    expect(appleSpeechOffered({ helperPath, platform: "linux", release: "26.0.0" })).toBe(false);
+    expect(appleSpeechOffered({ platform: "darwin", release: "26.0.0" })).toBe(false);
   });
 
   it("is unsupported on a Mac host that was not started by the desktop app", async () => {

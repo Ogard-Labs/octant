@@ -68,21 +68,25 @@ export function SpeechCapabilityProvider(props: SpeechCapabilityProviderProps) {
       return undefined;
     }
     let live = true;
-    const read = () => {
-      // A failed read keeps the last answer: losing focus to a dropped
-      // request must not stop a dictation that is under way.
+    const read = (upgradeOnly: boolean) => {
+      // A read on focus only ever turns the microphone on. A slow or busy
+      // helper must not take it away mid-dictation; a model that is gone is
+      // said by the host when the clip is sent.
       client.status().then(
         (status) => {
-          if (live) setHostTranscription(status.transcription);
+          if (!live) return;
+          if (upgradeOnly && status.transcription.status !== "ready") return;
+          setHostTranscription(status.transcription);
         },
         () => undefined,
       );
     };
-    read();
-    window.addEventListener("focus", read);
+    const onFocus = () => read(true);
+    read(false);
+    window.addEventListener("focus", onFocus);
     return () => {
       live = false;
-      window.removeEventListener("focus", read);
+      window.removeEventListener("focus", onFocus);
     };
   }, [client, local, props.settings.language, asked]);
 

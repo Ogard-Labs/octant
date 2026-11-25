@@ -90,6 +90,17 @@ interface Download {
  * fails that one request. It exits when its standard input closes, so one
  * cannot outlive a host that stopped or crashed.
  */
+/** Whether this host can run the engine at all: the desktop app's helper on macOS 26 or later. */
+export function appleSpeechOffered(
+  options: Pick<AppleSpeechEngineOptions, "helperPath" | "platform" | "release">,
+): boolean {
+  return (
+    (options.platform ?? process.platform) === "darwin" &&
+    Number((options.release ?? osRelease()).split(".")[0]) >= FIRST_SUPPORTED_DARWIN &&
+    options.helperPath !== undefined
+  );
+}
+
 export function createAppleSpeechEngine(options: AppleSpeechEngineOptions = {}): AppleSpeechEngine {
   const platform = options.platform ?? process.platform;
   const release = options.release ?? osRelease();
