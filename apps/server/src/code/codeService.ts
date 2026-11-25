@@ -288,6 +288,15 @@ const MANAGED_CREATION_REFUSAL_MESSAGES: Record<string, string> = {
     "Plan changes nothing on a server, so it cannot start a thread in a new worktree there. Choose another level or Current checkout.",
 };
 
+/**
+ * What the host answers with: the worktree choices are always present, empty
+ * for the defaults, so a window can tell a host that has them from an earlier
+ * one that never answers with them. Storage keeps an empty choice as none.
+ */
+function answeredSettings(settings: CodeSettings): CodeSettings {
+  return { ...settings, worktrees: settings.worktrees ?? {} };
+}
+
 /** An empty choice is the defaults, so it is stored as none. */
 function worktreeSettingsField(worktrees: CodeWorktreeSettings | undefined): {
   readonly worktrees?: CodeWorktreeSettings;
@@ -1502,7 +1511,9 @@ export class CodeService {
       }
     }
     return {
-      settings: this.#persistence.readCodeSettings()?.settings ?? this.#defaultSettings(),
+      settings: answeredSettings(
+        this.#persistence.readCodeSettings()?.settings ?? this.#defaultSettings(),
+      ),
       threads,
       checkouts: this.#persistence
         .readCodeCheckouts()
@@ -2417,7 +2428,7 @@ export class CodeService {
             actor,
           );
         });
-        return { kind: "settings-updated", settings };
+        return { kind: "settings-updated", settings: answeredSettings(settings) };
       }
       if (command.kind === "create-code-thread") {
         await this.#authorizeThread(authenticatedWindowId, command.thread);

@@ -665,6 +665,9 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
               ? {}
               : { extensionClient: props.extensionClient })}
             pairedDevice
+            {...(props.clients.worktrees === undefined
+              ? {}
+              : { worktreeClient: props.clients.worktrees })}
             readOnly={props.readOnly === true}
             threadId={activeThreadId}
             providerGroups={props.providerGroups}

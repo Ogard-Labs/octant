@@ -34,6 +34,17 @@ describe("remote product clients", () => {
     expect(clients.code.threadEvents).toBe("poll");
   });
 
+  it("restores a cleaned-up worktree over the session, with no window capability to send", async () => {
+    const sent: URL[] = [];
+    const bridge = await readyPairedBridge(sent);
+    const thread = decodeCodeThreadId("a1b2c3d4-0000-4000-8000-000000000001");
+    await createRemoteProductClients(bridge)
+      .worktrees?.restore(thread)
+      .catch(() => undefined);
+    const restore = sent.find((url) => url.pathname === "/api/code/cleaned-up-worktrees/restore");
+    expect(restore?.origin).toBe(ORIGIN);
+  });
+
   it("offers a paired browser a server Project's preview but no port forward onto the host's loopback", () => {
     const bridge = createRemoteSessionBridge({
       fetch: vi.fn(),

@@ -1,7 +1,10 @@
 import "../styles/code-thread.css";
 import { settledThreadNotice } from "../composer/settledThreadNotice";
 import { cleanedUpWorktreeNotice } from "../composer/cleanedUpWorktreeNotice";
-import { createArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
+import {
+  createArchivedWorktreesClient,
+  type ArchivedWorktreesClient,
+} from "@octant/client-runtime/archived-worktrees-client";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
@@ -398,6 +401,8 @@ export interface CodeThreadWorkspaceProps {
   readonly coordinatorWorkers?: CoordinatorWorkersSource;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
+  /** Restores the thread's cleaned-up worktree where there is no window capability, over a device's session. */
+  readonly worktreeClient?: ArchivedWorktreesClient;
   readonly messageQueueClient?: ThreadMessageQueueClient;
   /** The thread's wake-ups; absent builds one from the server address. */
   readonly wakeupClient?: ThreadWakeupClient;
@@ -443,34 +448,51 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // branch, takes no turn, and offers Restore to a window or a device the
   // host's own person paired. A device the hub introduced, or a restricted
   // one, reads the sentence and nothing more.
-  const worktreeCleanup = view?.worktreeCleanup;
+  const hostWorktreeCleanup = view?.worktreeCleanup;
   const mayRestoreWorktree = props.pairedDevice !== true || props.actsAsHostPerson === true;
+  const { worktreeClient: sessionWorktreeClient } = props;
   const worktreeClient = useMemo(
     () =>
-      props.serverUrl === undefined || props.windowCapability === undefined
+      sessionWorktreeClient ??
+      (props.serverUrl === undefined || props.windowCapability === undefined
         ? undefined
         : createArchivedWorktreesClient({
             baseUrl: props.serverUrl,
             fetch: globalThis.fetch,
             windowCapability: props.windowCapability,
-          }),
-    [props.serverUrl, props.windowCapability],
+          })),
+    [sessionWorktreeClient, props.serverUrl, props.windowCapability],
   );
   const [restoringWorktree, setRestoringWorktree] = useState(false);
   const [restoreProblem, setRestoreProblem] = useState<string>();
+  // The host said the worktree is back. The notice goes with that answer, not
+  // with the view read that follows, which may fail and is read again by the
+  // next refresh; the flag clears once the view itself no longer names it.
+  const [worktreeRestored, setWorktreeRestored] = useState(false);
+  useEffect(() => {
+    if (hostWorktreeCleanup === undefined) setWorktreeRestored(false);
+  }, [hostWorktreeCleanup]);
+  const worktreeCleanup = worktreeRestored ? undefined : hostWorktreeCleanup;
   async function restoreWorktree(): Promise<void> {
     if (worktreeClient === undefined || restoringWorktree) return;
     setRestoringWorktree(true);
     setRestoreProblem(undefined);
     try {
       const result = await worktreeClient.restore(props.threadId);
-      if (result.kind === "cleaned-up-worktree-refused") setRestoreProblem(result.message);
+      // Another window may have restored it first: it is back all the same.
+      if (result.kind === "cleaned-up-worktree-restored" || result.reason === "not-cleaned-up") {
+        setWorktreeRestored(true);
+      } else {
+        setRestoreProblem(result.message);
+      }
     } catch {
       setRestoreProblem("The worktree could not be restored.");
     } finally {
-      await props.controller.reloadThreadView(props.threadId);
       setRestoringWorktree(false);
     }
+    // A view that does not load now is read again by the next refresh; the
+    // notice is already gone with the host's answer.
+    await props.controller.reloadThreadView(props.threadId).catch(() => undefined);
   }
   const revealOperationId = props.revealOperationId;
   // The turn's first own row (its prompt) is where the reader lands; a fork's

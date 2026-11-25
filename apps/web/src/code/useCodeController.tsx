@@ -2585,18 +2585,9 @@ export function useCodeController(options: CodeControllerOptions) {
   );
 
   /**
-   * Move a thread onto the checkout its Project binds now, because the user
-   * asked from the fail-closed banner.
-   *
-   * Never inferred: a thread whose Project was rebound keeps the authority it
-   * was created with until someone deliberately moves it, which is the whole
-   * point of binding a checkout in the first place. The host decides whether
-   * the move is admissible and answers with a refusal reason this renderer
-   * shows rather than a failure it swallows.
-   */
-  /**
    * Reads the open thread's view from the host again, for a fact that changes
    * with no journal event of its own, such as its worktree being restored.
+   * A read that fails is read again by the next navigation refresh.
    */
   const reloadThreadView = useCallback(
     async (threadId: CodeThreadId): Promise<void> => {
@@ -2611,6 +2602,16 @@ export function useCodeController(options: CodeControllerOptions) {
     [client, installView],
   );
 
+  /**
+   * Move a thread onto the checkout its Project binds now, because the user
+   * asked from the fail-closed banner.
+   *
+   * Never inferred: a thread whose Project was rebound keeps the authority it
+   * was created with until someone deliberately moves it, which is the whole
+   * point of binding a checkout in the first place. The host decides whether
+   * the move is admissible and answers with a refusal reason this renderer
+   * shows rather than a failure it swallows.
+   */
   const rebindThreadCheckout = useCallback(
     async (threadId: CodeThreadId): Promise<CodeThreadCheckoutRebindOutcome | undefined> => {
       const thread = bootstrapRef.current?.threads.find(
