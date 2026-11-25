@@ -257,6 +257,11 @@ interface OwnedContext {
   /** The page's start is in the journal and its end is not yet. */
   pageRecorded: boolean;
   /**
+   * A reserved reopen records its page only once its first navigation succeeds,
+   * so an open that fails before any address loads leaves the offer it was for.
+   */
+  recordPage?: () => void;
+  /**
    * A context created for one Open of its own rather than as the thread's
    * shared Browser context. It is deliberately invisible to
    * `#current`, so the Browser surface still reattaches to the thread's own
@@ -1975,6 +1980,7 @@ export class BrowserAutomationService {
         owned.evidence.splice(0, owned.evidence.length - MAX_RETAINED_BROWSER_EVIDENCE);
       }
       if (meaningful && !this.#renewActivity(owned, activityBy !== "agent")) return snapshot(owned);
+      if (input.request.kind === "navigate") owned.recordPage?.();
       owned.failure = undefined;
       owned.status = "running";
       return snapshot(owned);
@@ -4034,21 +4040,27 @@ export class BrowserAutomationService {
       })
     )
       return;
-    this.#pageSessions.opened(
-      {
-        pageId: owned.record.contextId,
-        threadId: owned.threadId,
-        windowId: owned.windowId,
-        mode: authority.mode,
-        projectId: authority.projectId,
-        ...browserPageProfileFacts(owned.record.policy.profile),
-      },
-      {
-        ...(input.actor === undefined ? {} : { actor: input.actor }),
-        ...(input.reopensPageId === undefined ? {} : { reopens: input.reopensPageId }),
-      },
-    );
-    owned.pageRecorded = true;
+    const sessions = this.#pageSessions;
+    const record = (): void => {
+      owned.recordPage = undefined;
+      sessions.opened(
+        {
+          pageId: owned.record.contextId,
+          threadId: owned.threadId,
+          windowId: owned.windowId,
+          mode: authority.mode,
+          projectId: authority.projectId,
+          ...browserPageProfileFacts(owned.record.policy.profile),
+        },
+        {
+          ...(input.actor === undefined ? {} : { actor: input.actor }),
+          ...(input.reopensPageId === undefined ? {} : { reopens: input.reopensPageId }),
+        },
+      );
+      owned.pageRecorded = true;
+    };
+    if (input.reopensPageId === undefined) record();
+    else owned.recordPage = record;
   }
 
   #notePageEnded(

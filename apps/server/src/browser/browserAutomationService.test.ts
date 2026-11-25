@@ -4447,6 +4447,37 @@ describe("Browser session recording", () => {
     await f.service.close();
   });
 
+  it("records a reserved open only once its first navigation succeeds, and keeps the old offer until then", async () => {
+    const pageSessions = recorder();
+    const f = harness({ pageSessions });
+    const reopened = await open(f, { reopensPageId: "old-page" });
+    expect(reopened.context?.state).toBe("active");
+    // A page with no address yet has taken nothing from the offer.
+    expect(pageSessions.opened).not.toHaveBeenCalled();
+    vi.mocked(f.runtime.act).mockRejectedValueOnce(new Error("net::ERR_NAME_NOT_RESOLVED"));
+    const failed = await f.service.act({ windowId, request: request(), startedBy: "person" });
+    expect(failed.failure).toBeDefined();
+    expect(pageSessions.opened).not.toHaveBeenCalled();
+    const moved = await f.service.act({ windowId, request: request(), startedBy: "person" });
+    expect(moved.failure).toBeUndefined();
+    expect(pageSessions.opened).toHaveBeenCalledOnce();
+    expect(pageSessions.opened.mock.calls[0]?.[1]).toMatchObject({ reopens: "old-page" });
+    // A later navigation records nothing more.
+    await f.service.act({ windowId, request: request(), startedBy: "person" });
+    expect(pageSessions.opened).toHaveBeenCalledOnce();
+    await f.service.close();
+  });
+
+  it("writes nothing for a reserved page that ends before any navigation succeeded", async () => {
+    const pageSessions = recorder();
+    const f = harness({ pageSessions });
+    await open(f, { reopensPageId: "old-page" });
+    await f.service.stop(windowId, threadOne, contextOne, "person");
+    expect(pageSessions.opened).not.toHaveBeenCalled();
+    expect(pageSessions.ended).not.toHaveBeenCalled();
+    await f.service.close();
+  });
+
   it("records a stored profile's kind and an account's id and nothing else", async () => {
     const pageSessions = recorder();
     const f = harness({ pageSessions });
