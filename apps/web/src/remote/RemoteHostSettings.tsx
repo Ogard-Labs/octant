@@ -101,7 +101,7 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
       {open === "agents" ? (
         <RemoteAgentAccess client={props.agentGrants} projectClient={props.projectClient} />
       ) : null}
-      {open === "diagnostics" ? (
+      {open === "diagnostics" && props.reachable.has("diagnostics") ? (
         <Suspense fallback={null}>
           <RemoteDiagnostics client={props.diagnosticsClient} />
         </Suspense>

@@ -240,6 +240,6 @@ export function browserApprovalNote(
     case "terminal":
       return `The terminal's request to open ${view.site} ${ended}, so nothing was let through.`;
     default:
-      return `The request for ${view.site} ${ended}, by another device or window or because it ran out.`;
+      return `The request for ${view.site} ${ended}.`;
   }
 }

@@ -1,6 +1,10 @@
 import { decodeWindowId } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import { createHostPersonScopes, createPersonProjectReach } from "./hostPersonScope";
+import {
+  createHostPersonScopes,
+  createPersonProjectReach,
+  createRestrictedDeviceScope,
+} from "./hostPersonScope";
 
 const windowId = decodeWindowId("10000000-0000-4000-8000-000000000001");
 const personPaired = decodeWindowId("20000000-0000-4000-8000-000000000001");
@@ -48,6 +52,18 @@ describe("the scopes that act as the host's own person", () => {
     expect(deviceActor(windowId)).toBeUndefined();
     expect(deviceActor(hubIntroduced)).toBeUndefined();
     expect(deviceActor(revoked)).toBeUndefined();
+  });
+
+  it("restricts every paired device but one the person paired at Full, and never a window", () => {
+    const isRestricted = createRestrictedDeviceScope({
+      isPairedDeviceScope: (scopeId) => String(scopeId) !== String(windowId),
+      approvedByPerson: (deviceId) => deviceId !== String(hubIntroduced),
+      hasFullAccess: (deviceId) => deviceId !== String(belowFull),
+    });
+    expect(isRestricted(belowFull)).toBe(true);
+    expect(isRestricted(hubIntroduced)).toBe(true);
+    expect(isRestricted(personPaired)).toBe(false);
+    expect(isRestricted(windowId)).toBe(false);
   });
 
   it("lets a person-paired device review every active Project, though no workspace on the host is bound for it", () => {

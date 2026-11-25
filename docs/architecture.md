@@ -2298,11 +2298,11 @@ except where a bullet says otherwise.
   setting. Entries were redacted before storage, so the export adds nothing
   beyond what Settings › Memory shows.
 - **Who may read it.**
-  - A local window or a paired device the host's own person approved: read and
+  - A local window or a device the host's own person paired at Full: read and
     change everything in Settings › Memory, and a turn either sends gets the
     block and `octant_past_threads` under the thread's own participation rules
     (memory on, Project not kept out, thread not Leave no trace). A device known
-    only through a hub's roster (and any subagent it spawns), a peer-delegated
+    only through a hub's roster or paired below Full (and any subagent it spawns), a peer-delegated
     Work turn (and any subagent it spawns), and a turn with no scope (such as a
     benchmark runner's Chat turn) get neither.
   - A routine's run or another turn the host starts as itself (a delivered child
@@ -7246,10 +7246,10 @@ ls-remote` against the thread's remote and the GitHub reads they already
   authenticated windows share the queue, and a paired device may queue
   (maintainer request, 2026-11-12). Built: a paired device reads a thread's
   queue, queues a message, and edits or removes a message it queued. A device
-  the host's own person paired also pauses, resumes and reorders the queue and
-  edits or removes another's message, as a local window does (maintainer
-  decision, 2026-11-13); a hub-introduced or restricted device is refused
-  those. A device's queue change is journaled with the device as its actor. The message
+  the host's own person paired at Full also pauses, resumes and reorders the
+  queue and edits or removes another's message, as a local window does
+  (maintainer decision, 2026-11-13); a hub-introduced, below-Full or otherwise
+  restricted device is refused those. A device's queue change is journaled with the device as its actor. The message
   waits under the device's own scope, so its turn keeps every limit a turn
   the device sends directly has. Each mutation and each dispatch asks again
   that the device is still paired, its current access level allows the mode's

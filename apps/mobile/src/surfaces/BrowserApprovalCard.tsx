@@ -153,7 +153,9 @@ export function BrowserApprovalCard(props: BrowserApprovalCardProps) {
         // A script or a page tool's arguments is approved only as seen, so it is
         // shown whole: scrolled when long, never cut off.
         <ScrollView
+          accessibilityLabel="Full text of what would run"
           nestedScrollEnabled
+          persistentScrollbar
           style={[styles.context, { borderColor: colors.border }]}
           testID="mobile-browser-approval-context-scroll"
         >

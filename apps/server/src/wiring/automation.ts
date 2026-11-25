@@ -1124,13 +1124,13 @@ export function wireAutomation(deps: AutomationDependencies) {
     historyAvailable: () => automationHistoryAvailable,
     personPairedDeviceCurrent: (scopeId) =>
       createHostPersonScopes({
-        localWindows: () => windowAuthorityStore.listWindowIds(),
+        localWindows: () => [],
         devices: () => readDeviceRegistrations(persistence.connection),
         approvedByPerson: (deviceId) =>
           readDeviceApprovedByPerson(persistence.connection, deviceId),
         hasFullAccess: (deviceId) =>
           readDeviceAccessLevel(persistence.connection, deviceId) === "full",
-      }).deviceActor(scopeId) !== undefined,
+      }).actsAsHostPerson(scopeId),
     prepareFileRearm: (input) => automationFileSources.prepareRearm(input),
     prepareFileSource: async ({ command, current, signal }) => {
       const previous = persistence.automationProjection.getDefinition(command.automationId);

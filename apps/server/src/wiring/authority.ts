@@ -286,7 +286,9 @@ export function wireAuthority(deps: AuthorityDependencies) {
       registration === undefined ||
       !isDeviceRegistrationCurrent(registration, Date.now()) ||
       registration.credentialGeneration !== credentialGeneration ||
-      !readDeviceApprovedByPerson(persistence.connection, deviceId)
+      !readDeviceApprovedByPerson(persistence.connection, deviceId) ||
+      // Lowered below Full while its request waited: no longer the person.
+      readDeviceAccessLevel(persistence.connection, deviceId) !== "full"
     ) {
       return false;
     }
