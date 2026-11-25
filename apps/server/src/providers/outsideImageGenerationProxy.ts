@@ -307,7 +307,7 @@ export function makeOutsideImageGenerationProxy(options: OutsideImageGenerationP
       if (settledAddresses.has(url)) return true;
       for (const parts of inFlightResponses.values()) {
         const live = new Set<string>();
-        extractReturnedAddresses(parts.join(""), live);
+        extractReturnedAddresses(parts.join(""), live, false);
         if (live.has(url)) return true;
       }
       return false;
@@ -315,17 +315,18 @@ export function makeOutsideImageGenerationProxy(options: OutsideImageGenerationP
     let oversized = false;
     const call = link.call(OUTSIDE_DRIVER_METHODS.imageGenerate, params, {
       timeoutMs: limits.sendTimeoutMs,
+      closeBrokeredOnSettle: true,
       onProviderResponse,
       onRelayedResponseChunk: (httpId, text) => {
         const parts = inFlightResponses.get(httpId);
         if (parts === undefined) inFlightResponses.set(httpId, [text]);
         else parts.push(text);
       },
-      onRelayedResponseEnd: (httpId) => {
+      onRelayedResponseEnd: (httpId, completedNormally) => {
         const parts = inFlightResponses.get(httpId);
         if (parts === undefined) return;
         inFlightResponses.delete(httpId);
-        extractReturnedAddresses(parts.join(""), settledAddresses);
+        extractReturnedAddresses(parts.join(""), settledAddresses, completedNormally);
       },
       onImageChunk: (image, data) => {
         if (oversized) return;
@@ -394,25 +395,27 @@ export function makeOutsideImageGenerationProxy(options: OutsideImageGenerationP
 
 /**
  * Extracts every complete address from one provider response into `out`,
- * capped at `MAX_RELAYED_ADDRESSES_PER_JOB`. JSON responses are parsed so
- * exact decoded keys and values stay intact (including apostrophes and
- * delimited links like `<https://...>`), while non-JSON or partial streaming
- * responses fall back to whole-token scanning. The driver's address must equal
- * one of them, so a prefix or a longer address that merely contains it
- * (`https://images.example.test.attacker.invalid/…`) authorizes nothing.
+ * capped at `MAX_RELAYED_ADDRESSES_PER_JOB`. Completed JSON responses are
+ * parsed so exact decoded keys and values stay intact (including apostrophes,
+ * pipes, and delimited links like `<https://...>`), while non-JSON or partial
+ * streaming responses scan only complete delimited tokens so a truncated
+ * chunk cannot authorize a URL prefix and an embedded query parameter cannot
+ * authorize an inner URL.
  */
-function extractReturnedAddresses(responseText: string, out: Set<string>): void {
+function extractReturnedAddresses(responseText: string, out: Set<string>, complete: boolean): void {
   const add = (candidate: string) => {
     if (out.size >= MAX_RELAYED_ADDRESSES_PER_JOB) return;
     if (candidate.length <= MAX_RELAYED_ADDRESS_LENGTH) out.add(candidate);
   };
-  const trimmed = responseText.trim();
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-    try {
-      collectJsonAddresses(JSON.parse(trimmed), add);
-      return;
-    } catch {
-      // Non-JSON or partial/multi-document body (e.g. SSE); scan tokens below.
+  if (complete) {
+    const trimmed = responseText.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        collectJsonAddresses(JSON.parse(trimmed), add);
+        return;
+      } catch {
+        // Non-JSON or multi-document body (e.g. SSE); scan delimited tokens below.
+      }
     }
   }
   const text = responseText
@@ -420,26 +423,34 @@ function extractReturnedAddresses(responseText: string, out: Set<string>): void 
       String.fromCharCode(Number.parseInt(hex, 16)),
     )
     .replaceAll("\\/", "/");
-  for (const match of text.match(/https?:\/\/[^\s"'<>\\`{}|^]+/g) ?? []) {
-    add(match);
-  }
-  // Double-quoted JSON strings in partial/SSE chunks may hold apostrophes.
-  for (const match of text.matchAll(/"(https?:\/\/[^"\\\s<>`{}|^]+)"/g)) {
+  // Complete double-quoted strings (e.g. JSON inside SSE chunks) may contain
+  // apostrophes or pipes; requiring both unescaped quotes ensures truncated
+  // chunks never match a partial URL.
+  for (const match of text.matchAll(/(?<!\\)"(https?:\/\/[^"\\\s<>`{}^]+)(?<!\\)"/g)) {
     if (match[1] !== undefined) add(match[1]);
   }
-  for (const match of text.matchAll(/<(https?:\/\/[^\s"<>\\`{}|^]+)>/g)) {
+  for (const match of text.matchAll(/(?:^|\s)<(https?:\/\/[^\s"<>\\`{}^]+)>/g)) {
+    if (match[1] !== undefined) add(match[1]);
+  }
+  const bare = complete
+    ? /(?:^|[\s(\[{])(https?:\/\/[^\s"<>\\`{}^)\]}]+)(?=$|[\s"<>\\`{}^)\]}])/g
+    : /(?:^|[\s(\[{])(https?:\/\/[^\s"<>\\`{}^)\]}]+)(?=[\s"<>\\`{}^)\]}])/g;
+  for (const match of text.matchAll(bare)) {
     if (match[1] !== undefined) add(match[1]);
   }
 }
 
 function collectJsonStringAddresses(text: string, add: (candidate: string) => void): void {
-  if ((text.startsWith("http://") || text.startsWith("https://")) && !/[\s"<>\\`{}|^]/.test(text)) {
+  if ((text.startsWith("http://") || text.startsWith("https://")) && !/[\s"<>\\`{}^]/.test(text)) {
     add(text);
+    return;
   }
-  for (const match of text.match(/https?:\/\/[^\s"'<>\\`{}|^]+/g) ?? []) {
-    add(match);
+  for (const match of text.matchAll(/(?:^|\s)<(https?:\/\/[^\s"<>\\`{}^]+)>/g)) {
+    if (match[1] !== undefined) add(match[1]);
   }
-  for (const match of text.matchAll(/<(https?:\/\/[^\s"<>\\`{}|^]+)>/g)) {
+  for (const match of text.matchAll(
+    /(?:^|[\s"(\[{])(https?:\/\/[^\s"<>\\`{}^)\]}]+)(?=$|[\s"<>\\`{}^)\]}])/g,
+  )) {
     if (match[1] !== undefined) add(match[1]);
   }
 }

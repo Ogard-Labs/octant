@@ -619,7 +619,8 @@ describe("an outside image driver's later fixes", () => {
 
   it("streams an image larger than the 4 MiB channel frame limit as chunks and assembles it", async () => {
     // 3.2 MiB raw (~4.47M base64 chars) exceeds the 4 MiB one-line frame cap.
-    const largePng = Buffer.concat([png, Buffer.alloc(3_355_443)]);
+    const pattern = Uint8Array.from({ length: 3_355_443 }, (_v, i) => (i * 31 + 17) & 0xff);
+    const largePng = Buffer.concat([png, pattern]);
     const largeBase64 = largePng.toString("base64");
     expect(largeBase64.length).toBeGreaterThan(4_194_304);
     const chunkSize = 900_000;
@@ -647,21 +648,27 @@ describe("an outside image driver's later fixes", () => {
     const job = await service.whenTerminal((await enqueue({})).id);
     expect(job.status).toBe("completed");
     expect(job.artifacts).toHaveLength(1);
-    expect(job.artifacts[0]?.size).toBe(largePng.byteLength);
+    const artifact = job.artifacts[0];
+    expect(artifact?.size).toBe(largePng.byteLength);
+    const stored =
+      artifact === undefined
+        ? undefined
+        : await service.readArtifact(job.id, artifact.attachmentId);
+    expect(stored?.bytes).toEqual(Uint8Array.from(largePng));
   });
 
   it("assembles more than 1,024 small independently padded chunks into fixed blocks", async () => {
-    const extra = Buffer.alloc(1_200, 0x42);
+    const extra = Uint8Array.from({ length: 1_200 }, (_v, i) => (i * 19 + 5) & 0xff);
     const raw = Buffer.concat([png, extra]);
     const { enqueue, service } = harness({
       handlers: {
         ...imageHandlers,
         "image/generate": (_params, context) => {
           // Send PNG header as one independently padded chunk (includes `=`),
-          // followed by 1,200 one-byte padded chunks (`Qg==`).
+          // followed by 1,200 one-byte padded chunks.
           const pieces: Array<Buffer> = [Buffer.from(png)];
           for (let i = 0; i < extra.byteLength; i += 1) {
-            pieces.push(extra.subarray(i, i + 1));
+            pieces.push(Buffer.from(extra.subarray(i, i + 1)));
           }
           for (const piece of pieces) {
             context.writeRaw(
@@ -679,11 +686,18 @@ describe("an outside image driver's later fixes", () => {
     const job = await service.whenTerminal((await enqueue({})).id);
     expect(job.status).toBe("completed");
     expect(job.artifacts).toHaveLength(1);
-    expect(job.artifacts[0]?.size).toBe(raw.byteLength);
+    const artifact = job.artifacts[0];
+    expect(artifact?.size).toBe(raw.byteLength);
+    const stored =
+      artifact === undefined
+        ? undefined
+        : await service.readArtifact(job.id, artifact.attachmentId);
+    expect(stored?.bytes).toEqual(Uint8Array.from(raw));
   });
 
   it("refuses reference images over the 2.5 MiB outside-driver ceiling before reserving spend", async () => {
     const run = harness({ handlers: imageHandlers });
+    run.setCeiling(100);
     await expect(
       run.enqueue({
         references: [{ mediaType: "image/png", bytes: new Uint8Array(2_621_441) }],
@@ -691,6 +705,8 @@ describe("an outside image driver's later fixes", () => {
     ).rejects.toThrow(
       "Reference images for an outside image driver cannot exceed 2.5 MiB combined.",
     );
+    expect(run.used()).toBe(0);
+    expect(run.drivers).toHaveLength(0);
   });
 
   it("refuses a chunk for an image index past the variants it asked for", async () => {
@@ -739,12 +755,14 @@ describe("an outside image driver's later fixes", () => {
     expect(imageFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("matches a JSON image address containing an apostrophe, as a key, or delimited in text", async () => {
+  it("matches a JSON image address containing an apostrophe, a pipe, as a key, or delimited in text", async () => {
     const apostropheUrl = "https://cdn.images.example.test/out/artist's-preview.png";
+    const pipeUrl = "https://cdn.images.example.test/out/img.png?size=1024|768";
     const keyUrl = "https://cdn.images.example.test/out/key-image.png";
     const delimitedUrl = "https://cdn.images.example.test/out/wrapped.png";
     for (const [named, providerBody] of [
       [apostropheUrl, JSON.stringify({ url: apostropheUrl })],
+      [pipeUrl, JSON.stringify({ url: pipeUrl })],
       [keyUrl, JSON.stringify({ [keyUrl]: { ready: true } })],
       [delimitedUrl, JSON.stringify({ output: `<${delimitedUrl}>` })],
     ] as const) {
@@ -771,10 +789,54 @@ describe("an outside image driver's later fixes", () => {
     }
   });
 
-  it("accepts a provider URL returned from a streamed chunk before http/end completes", async () => {
+  it("refuses an inner URL embedded inside a provider URL's query string", async () => {
+    const imageFetch = vi.fn(() => new Response(png, { status: 200 }));
+    for (const [providerBody, named] of [
+      [
+        JSON.stringify({
+          url: "https://cdn.images.example.test/proxy?next=https://evil.example.test/x",
+        }),
+        "https://evil.example.test/x",
+      ],
+      [
+        JSON.stringify({
+          url: "https://cdn.images.example.test/proxy?next='https://evil.example.test/x'",
+        }),
+        "https://evil.example.test/x",
+      ],
+      [
+        JSON.stringify({
+          text: "See https://cdn.images.example.test/proxy?next=https://evil.example.test/x done",
+        }),
+        "https://evil.example.test/x",
+      ],
+    ] as const) {
+      const run = harness({
+        handlers: {
+          ...imageHandlers,
+          "image/generate": async (_params, context) => {
+            await context.http({
+              requestId: context.id,
+              url: "https://images.example.test/v1/generate",
+              method: "POST",
+              auth: { header: "authorization", scheme: "Bearer" },
+            });
+            return { status: "completed", images: [{ url: named }] };
+          },
+        },
+        providerBody,
+        imageFetch,
+      });
+      const job = await run.service.whenTerminal((await run.enqueue({})).id);
+      expect(job.status === "failed" ? job.failure?.category : undefined).toBe("unauthorized");
+    }
+    expect(imageFetch).not.toHaveBeenCalled();
+  });
+
+  it("accepts a provider URL returned from a streamed chunk before http/end completes and closes the stream", async () => {
     const named = "https://cdn.images.example.test/out/live-sse.png";
     const imageFetch = vi.fn(() => new Response(png, { status: 200 }));
-    let closeStream: (() => void) | undefined;
+    let streamCancelled = false;
     let resolveChunkSeen: (() => void) | undefined;
     const chunkSeen = new Promise<void>((resolve) => {
       resolveChunkSeen = resolve;
@@ -801,20 +863,58 @@ describe("an outside image driver's later fixes", () => {
           new ReadableStream<Uint8Array>({
             start(controller) {
               controller.enqueue(new TextEncoder().encode(`data: {"url":"${named}"}\n\n`));
-              closeStream = () => controller.close();
+            },
+            cancel() {
+              streamCancelled = true;
             },
           }),
           { status: 200, headers: { "content-type": "text/event-stream" } },
         ),
       imageFetch,
     });
-    try {
-      const job = await run.service.whenTerminal((await run.enqueue({})).id);
-      expect(job.status).toBe("completed");
-      expect(imageFetch).toHaveBeenCalledTimes(1);
-    } finally {
-      closeStream?.();
-    }
+    const job = await run.service.whenTerminal((await run.enqueue({})).id);
+    expect(job.status).toBe("completed");
+    expect(imageFetch).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(streamCancelled).toBe(true));
+  });
+
+  it("refuses a URL prefix that has not yet been delimited in an open stream", async () => {
+    const prefix = "https://cdn.images.example.test/out/part";
+    const imageFetch = vi.fn(() => new Response(png, { status: 200 }));
+    let resolveChunkSeen: (() => void) | undefined;
+    const chunkSeen = new Promise<void>((resolve) => {
+      resolveChunkSeen = resolve;
+    });
+    const run = harness({
+      handlers: {
+        ...imageHandlers,
+        "image/generate": async (_params, context) => {
+          void context.http({
+            requestId: context.id,
+            url: "https://images.example.test/v1/stream",
+            method: "POST",
+            auth: { header: "authorization", scheme: "Bearer" },
+          });
+          await chunkSeen;
+          return { status: "completed", images: [{ url: prefix }] };
+        },
+      },
+      onHttpChunk: () => resolveChunkSeen?.(),
+      providerResponse: () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              // No closing quote or whitespace yet — URL is still incomplete.
+              controller.enqueue(new TextEncoder().encode(`data: {"url":"${prefix}`));
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+      imageFetch,
+    });
+    const job = await run.service.whenTerminal((await run.enqueue({})).id);
+    expect(job.status === "failed" ? job.failure?.category : undefined).toBe("unauthorized");
+    expect(imageFetch).not.toHaveBeenCalled();
   });
 
   it("refuses an image address whose name resolves to a private network", async () => {

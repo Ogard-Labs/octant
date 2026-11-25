@@ -221,10 +221,12 @@ interface PendingCall {
    * when that response's body finishes.
    */
   readonly onRelayedResponseChunk: ((httpId: number, text: string) => void) | undefined;
-  readonly onRelayedResponseEnd: ((httpId: number) => void) | undefined;
+  readonly onRelayedResponseEnd: ((httpId: number, completedNormally: boolean) => void) | undefined;
   /** Receives each `image/chunk` the driver streams for this call; absent refuses them. */
   readonly onImageChunk: ((image: number, data: string) => void) | undefined;
   readonly onProviderResponse: (() => void) | undefined;
+  /** Whether to abort any still-open brokered HTTP streams when the call settles normally. */
+  readonly closeBrokeredOnSettle: boolean;
 }
 
 type BrokeredRequest = (
@@ -283,9 +285,10 @@ class OutsideDriverLink {
       readonly onEvent?: (event: OutsideDriverStreamEvent) => void;
       readonly cloudPorts?: CloudSessionPorts;
       readonly onRelayedResponseChunk?: (httpId: number, text: string) => void;
-      readonly onRelayedResponseEnd?: (httpId: number) => void;
+      readonly onRelayedResponseEnd?: (httpId: number, completedNormally: boolean) => void;
       readonly onImageChunk?: (image: number, data: string) => void;
       readonly onProviderResponse?: () => void;
+      readonly closeBrokeredOnSettle?: boolean;
     },
   ): {
     readonly id: number;
@@ -330,6 +333,7 @@ class OutsideDriverLink {
         onRelayedResponseEnd: options.onRelayedResponseEnd,
         onImageChunk: options.onImageChunk,
         onProviderResponse: options.onProviderResponse,
+        closeBrokeredOnSettle: options.closeBrokeredOnSettle === true,
       });
       this.#write({ jsonrpc: "2.0", id, method, params });
     });
@@ -398,6 +402,7 @@ class OutsideDriverLink {
       if (pending === undefined) return;
       this.#pending.delete(message.id);
       clearTimeout(pending.timer);
+      if (pending.closeBrokeredOnSettle) closeBrokered(pending);
       if ("result" in message) pending.resolve(message.result);
       else pending.reject(failureFromDriver(message.error.data));
       return;
@@ -515,6 +520,7 @@ class OutsideDriverLink {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let bytes = 0;
+    let completedNormally = false;
     const chunkCharacters = Math.max(1, Math.floor(this.#limits.messageBytes / 8));
     try {
       for (;;) {
@@ -542,13 +548,14 @@ class OutsideDriverLink {
       if (rest.length > 0) owner?.onRelayedResponseChunk?.(httpId, rest);
       if (signal.aborted) return interrupted();
       if (rest.length > 0) this.notify(OUTSIDE_DRIVER_METHODS.httpChunk, { httpId, data: rest });
+      completedNormally = true;
       return undefined;
     } catch {
       // An aborted fetch errors its body before the abort listener answers.
       if (signal.aborted) return interrupted();
       return failure("unavailable", "The provider response could not be read.");
     } finally {
-      owner?.onRelayedResponseEnd?.(httpId);
+      owner?.onRelayedResponseEnd?.(httpId, completedNormally);
       reader.cancel().catch(() => undefined);
     }
   }

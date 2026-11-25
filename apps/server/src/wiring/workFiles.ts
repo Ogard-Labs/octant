@@ -64,6 +64,7 @@ import { createServerWorkFileListing } from "../serverProjects/serverWorkFiles";
 export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     AuthorityWiring,
+    | "imageGenerationOffers"
     | "isAuthenticatedPairedDeviceSessionCurrent"
     | "onWindowRevoked"
     | "serviceOffers"
@@ -89,6 +90,7 @@ export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence">
 export function wireWorkFiles(deps: WorkFilesDependencies) {
   const {
     credentialResolver,
+    imageGenerationOffers,
     serviceOffers,
     imageJobService,
     videoJobService,
@@ -210,7 +212,11 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
   const serviceOfferRoutes = createServiceOfferRouteHandler({
     offers: serviceOffers,
     rules: {
-      ...imageOfferDecisionRules({ ...imageProfiles, kept: keptImageChoices }),
+      ...imageOfferDecisionRules({
+        ...imageProfiles,
+        referenceBytesForOffer: (offerId) => imageGenerationOffers.referenceBytes(offerId),
+        kept: keptImageChoices,
+      }),
       ...videoOfferDecisionRules({ kept: keptVideoChoices }),
       transcribe: transcriptionDecision,
       narrate: narrationDecision,

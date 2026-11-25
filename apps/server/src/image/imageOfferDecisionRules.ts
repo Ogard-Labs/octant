@@ -7,6 +7,7 @@ import type {
   ServiceOfferDecision,
   OutsideImageProviderInstance,
 } from "@octant/contracts";
+import { OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES } from "@octant/contracts/outside-driver-protocol";
 import { imageProfileSupportsReferences, listEligibleImageProfiles } from "@octant/domain";
 import type { ServiceOfferRules } from "../offers/serviceOfferDecision";
 import type { ImageGenerationOfferOutcome } from "./imageGenerationOfferService";
@@ -30,6 +31,7 @@ export function imageOfferDecisionRules(input: {
   /** Whether the host admits an outside image profile's driver now; absent admits none. */
   readonly admitsOutsideImageDriver?: (instance: OutsideImageProviderInstance) => boolean;
   readonly readImageGenerationSettings: () => ImageGenerationSettings;
+  readonly referenceBytesForOffer?: (offerId: string) => number | undefined;
   readonly kept?: Pick<KeptImageGenerationChoices, "remember">;
 }): ServiceOfferRules<
   ImageGenerationOffer,
@@ -60,6 +62,16 @@ export function imageOfferDecisionRules(input: {
         if (decision.referenceImagesConfirmed !== true) {
           return { reason: "Open this offer in a client that shows which images will be sent." };
         }
+      }
+      const referenceBytes = input.referenceBytesForOffer?.(String(offer.offerId)) ?? 0;
+      if (
+        eligible?.driverKind === "outside-image" &&
+        referenceBytes > OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES
+      ) {
+        return {
+          reason:
+            "Outside image drivers accept at most 2.5 MiB of reference images combined. Choose another model.",
+        };
       }
       const choice = { profileInstanceId: decision.profileInstanceId, modelId: decision.modelId };
       const kept = input.kept;
