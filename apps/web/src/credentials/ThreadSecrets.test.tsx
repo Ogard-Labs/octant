@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ThreadSecrets } from "./threadSecretSurfaces";
 
 const card = {
@@ -19,6 +19,10 @@ const card = {
   state: "pending",
 };
 
+// Its first load on a busy runner takes longer than a query waits.
+beforeAll(async () => {
+  await import("./ThreadSecrets");
+});
 afterEach(() => vi.unstubAllGlobals());
 
 function host(reply: (init: RequestInit | undefined) => unknown) {
