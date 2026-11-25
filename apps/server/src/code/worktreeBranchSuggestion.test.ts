@@ -1,4 +1,6 @@
+import { decodeProjectId } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import { Effect, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import {
   suggestWorktreeBranchWords,
@@ -7,7 +9,7 @@ import {
 
 const driver = {} as ProviderDriver;
 const request = {
-  projectId: "project-1",
+  projectId: decodeProjectId("00000000-0000-4000-8000-0000000000a1"),
   providerInstanceId: "00000000-0000-4000-8000-000000000001" as never,
   modelId: "model-a" as never,
   draft: "Fix the login redirect after the session expires",
@@ -22,9 +24,9 @@ function ports(overrides: Partial<WorktreeBranchSuggestionPorts> = {}) {
       modelId: string;
       instructions?: string;
       signal?: AbortSignal;
-      onSend?: () => void;
+      onSend?: (sent: boolean) => void;
     }) => {
-      input.onSend?.();
+      input.onSend?.(true);
       return { status: "completed" as const, text: "Fix login redirect on session expiry" };
     },
   );
@@ -41,8 +43,8 @@ function ports(overrides: Partial<WorktreeBranchSuggestionPorts> = {}) {
 
 /** A model call whose prompt was handed to the provider before this came back. */
 function answering(outcome: object): never {
-  return (async (input: { onSend?: () => void }) => {
-    input.onSend?.();
+  return (async (input: { onSend?: (sent: boolean) => void }) => {
+    input.onSend?.(true);
     return outcome;
   }) as never;
 }
@@ -60,7 +62,7 @@ describe("suggestWorktreeBranchWords", () => {
     expect(sent.modelId).toBe("model-a");
     expect(sent.prompt).not.toContain("hunter2");
     expect(sent.prompt).not.toContain("sk-abc");
-    expect(sent.prompt).not.toContain("project-1");
+    expect(sent.prompt).not.toContain("0000000000a1");
     expect(settle).toHaveBeenCalledTimes(1);
   });
 
@@ -134,6 +136,58 @@ describe("suggestWorktreeBranchWords", () => {
     });
     expect(unsent.settle).not.toHaveBeenCalled();
     expect(unsent.abandon).toHaveBeenCalledTimes(1);
+  });
+
+  it("records nothing for a request the provider's own checks refused before sending it", async () => {
+    const { value, settle, abandon } = ports({
+      open: () => ({
+        status: "ready",
+        driver: {
+          acquire: () =>
+            Effect.succeed({
+              start: () => Effect.void,
+              stop: () => Effect.void,
+              subscribe: Effect.succeed(Stream.never),
+              send: () =>
+                Effect.fail({
+                  category: "invalid-configuration",
+                  message: "The provider request exceeded the configured size limit.",
+                }),
+            }),
+        } as never,
+      }),
+    });
+    const { complete: _mocked, ...real } = value;
+    await expect(suggestWorktreeBranchWords(real, request)).resolves.toEqual({ status: "failed" });
+    expect(settle).not.toHaveBeenCalled();
+    expect(abandon).toHaveBeenCalledTimes(1);
+  });
+
+  it("records a request the provider failed after sending it, whatever the failure says", async () => {
+    const { value, settle, abandon } = ports({
+      open: () => ({
+        status: "ready",
+        driver: {
+          acquire: () =>
+            Effect.succeed({
+              start: () => Effect.void,
+              stop: () => Effect.void,
+              subscribe: Effect.succeed(
+                Stream.make({
+                  kind: "failed",
+                  sessionId: "00000000-0000-4000-8000-0000000000aa",
+                  failure: { category: "invalid-configuration", message: "Redirected." },
+                }),
+              ),
+              send: () => Effect.void,
+            }),
+        } as never,
+      }),
+    });
+    const { complete: _mocked, ...real } = value;
+    await expect(suggestWorktreeBranchWords(real, request)).resolves.toEqual({ status: "failed" });
+    expect(settle).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(abandon).not.toHaveBeenCalled();
   });
 
   it("sends only the words a branch name may carry, and nothing from a clause about a secret", async () => {

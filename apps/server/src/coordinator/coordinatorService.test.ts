@@ -88,6 +88,7 @@ function openCountStore(path: string) {
 }
 
 interface Harness {
+  readonly branchNames: string[];
   readonly service: CoordinatorService;
   /** A new service over the same threads and host store, as after a restart. */
   readonly restart: () => CoordinatorService;
@@ -122,6 +123,7 @@ function harness(): Harness {
   const states = new Map<string, "working" | "waiting-for-person" | "idle">();
   const marked = new Set<string>();
   const executed: Harness["executed"] = [];
+  const branchNames: string[] = [];
   const hostTurns: Harness["hostTurns"] = [];
   const proposals: Harness["proposals"] = [];
   const planners = new Set<string>();
@@ -163,6 +165,9 @@ function harness(): Harness {
           }),
         );
         return { kind: "managed-thread-created" } as never;
+      }
+      if (command.kind === "list-code-worktree-branch-names") {
+        return { kind: "worktree-branch-names-listed", names: branchNames } as never;
       }
       throw new Error("unexpected command");
     },
@@ -223,6 +228,7 @@ function harness(): Harness {
     states,
     marked,
     executed,
+    branchNames,
     hostTurns,
     proposals,
     planners,
@@ -337,6 +343,19 @@ describe("starting workers", () => {
     );
     expect(creation?.command).toMatchObject({
       deliveryTarget: { branchIntent: expect.stringMatching(/^henrik\/[a-z0-9]+$/) },
+    });
+  });
+
+  it("starts a worker beside a branch named like the person's prefix", async () => {
+    const h = harness();
+    h.settings = { worktrees: { branchPrefix: "henrik/" } } as unknown as CodeSettings;
+    h.branchNames.push("main", "henrik");
+    await h.service.start(startCall({}));
+    const creation = h.executed.find(
+      (entry) => entry.command.kind === "create-managed-code-thread",
+    );
+    expect(creation?.command).toMatchObject({
+      deliveryTarget: { branchIntent: expect.stringMatching(/^henrik-[a-z0-9]+$/) },
     });
   });
 

@@ -1133,6 +1133,22 @@ export class CoordinatorService {
         return refusedAnswer("unavailable", "The Project's checkout could not be prepared.");
       }
       const threadId = this.#ports.uuid();
+      const prefix = this.#ports.readSettings()?.worktrees?.branchPrefix;
+      // A branch or tag named like the person's prefix blocks every name below
+      // it, so a chosen prefix is checked against the names that exist.
+      const names =
+        prefix === undefined
+          ? undefined
+          : await this.#ports
+              .executeCode(
+                windowId,
+                decodeCodeCommand({
+                  kind: "list-code-worktree-branch-names",
+                  projectId: caller.projectId,
+                }),
+                {},
+              )
+              .catch(() => undefined);
       // A worker starts from the base branch on a branch of its own, like any
       // new worktree task; the coordinator's own open outcome proposal stays
       // with the coordinator.
@@ -1156,7 +1172,9 @@ export class CoordinatorService {
           branchIntent: deriveDeliveryBranch({
             baseBranch: deliveryTarget.proposedBaseBranch,
             shortId: threadId.replace(/-/g, "").slice(0, 12),
-            prefix: this.#ports.readSettings()?.worktrees?.branchPrefix,
+            prefix,
+            existingBranches:
+              names?.kind === "worktree-branch-names-listed" ? names.names : undefined,
           }),
           confirmedAt: new Date(this.#ports.now()).toISOString(),
         },

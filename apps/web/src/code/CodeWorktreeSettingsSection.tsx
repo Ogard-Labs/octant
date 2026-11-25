@@ -1,6 +1,7 @@
 import type { CodeSettings, CodeWorktreeSettings } from "@octant/contracts/code";
 import { DEFAULT_BRANCH_PREFIX, isValidBranchPrefix } from "@octant/domain/code-worktree-naming";
 import { useState } from "react";
+import type { SettingsSettingId } from "@octant/contracts";
 import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -28,6 +29,7 @@ function branchNamingOf(worktrees: CodeWorktreeSettings | undefined) {
  * them, so its window shows no controls rather than ones that cannot save.
  */
 export function CodeWorktreeSettingsSection(props: {
+  readonly focusedSetting?: SettingsSettingId | undefined;
   readonly settings: CodeSettings;
   readonly onUpdate: (input: CodeSettingsUpdate) => Promise<boolean>;
 }) {
@@ -103,6 +105,7 @@ function WorktreeSettingsControls(props: {
       <div className="setgroup">
         <SettingRow
           description={`New worktrees get a branch that starts with this. The default is ${DEFAULT_BRANCH_PREFIX}`}
+          focused={props.focusedSetting === "code-worktree-branch-prefix"}
           label="Branch prefix"
           scope="app"
           settingId="code-worktree-branch-prefix"
@@ -119,6 +122,7 @@ function WorktreeSettingsControls(props: {
         </SettingRow>
         <SettingRow
           description="Words come from your own prompt on this computer, with secrets and file paths left out. A model writes a name only when you ask for one in the worktree options."
+          focused={props.focusedSetting === "code-worktree-branch-naming"}
           label="Branch name"
           scope="app"
           settingId="code-worktree-branch-naming"

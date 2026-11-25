@@ -11,12 +11,15 @@ import type { DiagnosticEvidencePacket, DiagnosticFailureDomain } from "@octant/
 
 /**
  * Every kind of caller the diagnostics export command could ever be reached
- * by. Only a local authenticated user (`local-window`) may generate an
- * evidence packet — a remote device, a provider process, an automation/agent
- * run, and an extension must all fail closed.
+ * by. Only a local authenticated user (`local-window`) or a device the host's
+ * own person paired and that acts as that person (`person-paired-device`;
+ * maintainer decision, 2026-11-12) may generate an evidence packet. Any other
+ * remote device (restricted, hub-introduced, an agent grant), a provider
+ * process, an automation/agent run, and an extension must all fail closed.
  */
 export type DiagnosticsExportActorKind =
   | "local-window"
+  | "person-paired-device"
   | "remote-device"
   | "provider"
   | "automation"
@@ -35,7 +38,7 @@ export type DiagnosticsExportAuthorization =
 export function authorizeDiagnosticsExportActor(
   actorKind: DiagnosticsExportActorKind,
 ): DiagnosticsExportAuthorization {
-  return actorKind === "local-window"
+  return actorKind === "local-window" || actorKind === "person-paired-device"
     ? { kind: "allowed" }
     : { kind: "denied", reason: "actor-not-local-host" };
 }

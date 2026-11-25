@@ -24,6 +24,7 @@ import { requireJournalHydration } from "../persistence/journalHydration";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { createHostPersonScopes } from "../hostPersonScope";
 import {
+  readDeviceAccessLevel,
   readDeviceApprovedByPerson,
   readDeviceRegistrations,
 } from "../persistence/remoteAccessProjection";
@@ -183,6 +184,7 @@ export function wireFoundations(deps: FoundationsDependencies) {
     localWindows: () => [],
     devices: () => readDeviceRegistrations(persistence.connection),
     approvedByPerson: (deviceId) => readDeviceApprovedByPerson(persistence.connection, deviceId),
+    hasFullAccess: (deviceId) => readDeviceAccessLevel(persistence.connection, deviceId) === "full",
   });
   const browserAuthority = new ServerBrowserAuthorityResolver({
     hostId: deriveToolHostId(persistence.dataDirectory),

@@ -216,10 +216,9 @@ The attacks this class still names are a replayed or expired session, an
 unauthenticated or revoked caller, a hub-introduced device, a hub, peer or
 agent-grant principal passing as a person-paired device, a device laundering its
 principal into a local window, and identity supplied in a payload. For those
-sessions the closed action sets in the table below still hold. Not built yet:
-the journal does not name the device for every change (adopting a session
-started outside Octant journals its records as the system;
-[Architecture: Remote clients](../architecture.md#security-and-authority)).
+sessions the closed action sets in the table below still hold. The journal
+names the device for its changes, adopting a session started outside Octant
+included ([Architecture: Remote clients](../architecture.md#security-and-authority)).
 What the private listener forwards to no device (the listener's own controls,
 the desktop bridge, secret stores, the whole host's export)
 stays out of a stolen device's reach.

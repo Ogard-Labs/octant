@@ -114,7 +114,10 @@ import {
 } from "../remote/localDeviceAdministrationRoutes";
 import { createHostControlRouteHandler } from "../hostControlRoutes";
 import { createPersonQuitRouteHandler } from "../personQuit";
-import { createSupportBundleRouteHandler } from "../supportBundleRoutes";
+import {
+  createLoopbackSupportBundleRouteHandler,
+  createSupportBundleRouteHandler,
+} from "../supportBundleRoutes";
 import { readEventLoopLagCounters } from "../eventLoopLag";
 import { slowStatementTally } from "../persistence/slowStatementLog";
 import { desktopCredentialStore } from "../hostDataMap";
@@ -3015,9 +3018,11 @@ export function wireRemote(deps: RemoteDependencies) {
     // a lowered limit acts at once instead of at the next scheduled reading.
     onChanged: () => void hostMemoryGuard.sample().catch(() => undefined),
   });
-  // Loopback administration chain only, beside host control: the bundle holds
-  // host-wide facts, so no remote device ever reaches it.
-  const supportBundleRoutes = createSupportBundleRouteHandler({
+  // The bundle holds host-wide facts: the loopback chain serves a window and
+  // the CLI, and the paired-device slot below serves a device the host's own
+  // person paired. The route itself refuses every other device. The desktop
+  // save writes to a path on this computer and stays on the loopback chain.
+  const supportBundleDependencies = {
     windowAuthorityStore,
     ...(options.desktopBridgeSecret === undefined
       ? {}
@@ -3050,7 +3055,10 @@ export function wireRemote(deps: RemoteDependencies) {
         };
       },
     }),
-  });
+  };
+  const supportBundleDeviceRoutes = createSupportBundleRouteHandler(supportBundleDependencies);
+  const supportBundleRoutes = createLoopbackSupportBundleRouteHandler(supportBundleDependencies);
+
   const personQuitRoutes = createPersonQuitRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     dataDirectory: persistence.dataDirectory,
@@ -3160,6 +3168,7 @@ export function wireRemote(deps: RemoteDependencies) {
     localDeviceAdministrationRoutes,
     hostControlRoutes,
     externalContentRoutes,
+    supportBundleDeviceRoutes,
     memberInstallRoutes,
     // Paired browsers and hub guests reach this chain, not the loopback
     // listener's own handlers, so the alert read must be bound here too.

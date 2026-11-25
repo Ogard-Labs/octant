@@ -5,6 +5,7 @@ import {
   WORKTREE_BRANCH_SUGGESTION_USAGE_AGGREGATE_TYPE,
   decodeSpendCeilingReservationId,
   type Project,
+  type ProjectId,
   type ProviderInstance,
   type ProviderModel,
   type TurnUsage,
@@ -45,7 +46,7 @@ export function createHostWorktreeBranchSuggester(deps: {
     scratchRoot: join(deps.providerDataDirectory, "harness", "work"),
     uuid: randomUUID,
     open: (input: {
-      readonly projectId: string;
+      readonly projectId: ProjectId;
       readonly providerInstanceId: ProviderInstance["id"];
       readonly modelId: ProviderModel["id"];
     }) => {
@@ -61,7 +62,7 @@ export function createHostWorktreeBranchSuggester(deps: {
       ) {
         return { status: "refused" as const, reason: "provider-unavailable" as const };
       }
-      const project = persistence.readProject(input.projectId as never);
+      const project = persistence.readProject(input.projectId);
       if (
         project?.type !== "code" ||
         project.lifecycle !== "active" ||
@@ -79,7 +80,7 @@ export function createHostWorktreeBranchSuggester(deps: {
       }
     },
     admit: (input: {
-      readonly projectId: string;
+      readonly projectId: ProjectId;
       readonly providerInstanceId: ProviderInstance["id"];
       readonly modelId: ProviderModel["id"];
     }) => {
@@ -89,7 +90,7 @@ export function createHostWorktreeBranchSuggester(deps: {
         // A draft has no thread yet, so only the Project's ceilings can apply.
         threadId: reservationId,
         threadType: "code-thread",
-        projectId: input.projectId,
+        projectId: String(input.projectId),
         turnUpperBoundTokens: SUGGESTION_TOKEN_BOUND,
         // The selected gateway can set its own prices for any model ID.
         estimatedCostUsdMicros: "unknown",
@@ -112,7 +113,7 @@ export function createHostWorktreeBranchSuggester(deps: {
               },
               {
                 aggregateType: WORKTREE_BRANCH_SUGGESTION_USAGE_AGGREGATE_TYPE,
-                aggregateId: input.projectId,
+                aggregateId: String(input.projectId),
                 requestShape: WORKTREE_BRANCH_SUGGESTION_REQUEST_SHAPE,
                 providerInstanceId: input.providerInstanceId,
                 modelId: input.modelId,
@@ -136,7 +137,7 @@ export function createHostWorktreeBranchSuggester(deps: {
   return {
     suggest: (input) =>
       suggestWorktreeBranchWords(ports, {
-        projectId: String(input.projectId),
+        projectId: input.projectId,
         providerInstanceId: input.providerInstanceId,
         modelId: input.modelId,
         draft: input.draft,

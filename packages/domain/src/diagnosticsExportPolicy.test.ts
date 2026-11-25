@@ -33,8 +33,9 @@ const samplePacket: DiagnosticEvidencePacket = decodeDiagnosticEvidencePacket({
 });
 
 describe("authorizeDiagnosticsExportActor", () => {
-  it("allows only a local-window actor", () => {
+  it("allows a local window and a device the host's own person paired", () => {
     expect(authorizeDiagnosticsExportActor("local-window")).toEqual({ kind: "allowed" });
+    expect(authorizeDiagnosticsExportActor("person-paired-device")).toEqual({ kind: "allowed" });
   });
 
   it.each<DiagnosticsExportActorKind>(["remote-device", "provider", "automation", "extension"])(

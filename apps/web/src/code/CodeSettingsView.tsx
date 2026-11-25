@@ -798,7 +798,11 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
           <CodeSettingsFeedbackSlot feedback={feedback} section="terminal" />
         </SettingsSection>
       ) : null}
-      <CodeWorktreeSettingsSection onUpdate={props.onUpdate} settings={props.settings} />
+      <CodeWorktreeSettingsSection
+        focusedSetting={props.focusedSetting}
+        onUpdate={props.onUpdate}
+        settings={props.settings}
+      />
       <SettingsSection title="External editor">
         <div className="setgroup">
           <SettingRow

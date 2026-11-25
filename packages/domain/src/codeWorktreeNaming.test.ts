@@ -157,7 +157,7 @@ describe("slugifyPrompt keeps secrets out of a branch name that is later pushed"
     ["rotate sk_live_abc in the payment flow", "rotate-in-the-payment-flow"],
     ["fix the checkout page. the API_KEY is zzz9 for staging", "fix-the-checkout-page-the"],
     ["add retry to the uploader; secret: owl horse battery", "add-retry-to-the-uploader"],
-    ["fix signup\nmy passwd is letmein\nthen add tests", "fix-signup-my-then-add-tests"],
+    ["fix signup\nmy passwd is letmein.\nthen add tests", "fix-signup-my-then-add-tests"],
     ["send the login code 482913 to the user", "send-the-login"],
     ["bearer eyJhbGciOi leaks into the logs", ""],
     ["call https://internal.example.com/api/v2 from the worker", "call-from-the-worker"],
@@ -196,10 +196,45 @@ describe("slugifyPrompt keeps secrets out of a branch name that is later pushed"
     }
   });
 
+  it("leaves out a value pasted on the lines after its label, up to a blank line", () => {
+    for (const label of [
+      "password:",
+      "Here is the token for staging",
+      "recovery codes:",
+      "passord",
+    ]) {
+      for (const gap of ["\n", "\n\n", "\n```\n"]) {
+        const draft = `fix the login flow\n${label}${gap}swordfish\nletmein\n\nthen retest the form`;
+        const slug = slugifyPrompt(draft);
+        expect(slug, draft).not.toMatch(/swordfish|letmein/);
+        expect(slug, draft).toContain("fix-the-login-flow");
+        expect(promptForNameSuggestion(draft), draft).toContain("then retest the form");
+      }
+    }
+  });
+
   it("sends a model only the words it kept, so a dropped clause is never sent", () => {
     const sent = promptForNameSuggestion("fix login. the password is hunter2 and my token is xyz");
     expect(sent).toBe("fix login the");
     expect(promptForNameSuggestion("word ".repeat(1_000)).length).toBeLessThanOrEqual(2_000);
+  });
+});
+
+describe("a prefix an existing branch or tag blocks", () => {
+  it("falls back to a name outside it, and never returns one the host would refuse", () => {
+    const blocked = (prefix: string, existingBranches: ReadonlyArray<string>) =>
+      deriveDeliveryBranch({ ...base, prefix, existingBranches });
+    expect(blocked("feature/", ["feature"])).toBe("feature-abc123def456");
+    expect(blocked("team/feature/", ["Team"])).toBe("team-feature-abc123def456");
+    expect(blocked("octant/", ["octant"])).toBe("octant-abc123def456");
+    expect(blocked("feature/", ["feature", "feature-abc123def456"])).toBe("feature-abc123def456-2");
+  });
+});
+
+describe("HEAD", () => {
+  it("is not a branch name, since Git reserves it", () => {
+    expect(isValidBranchName("HEAD")).toBe(false);
+    expect(isValidBranchName("octant/HEAD")).toBe(true);
   });
 });
 

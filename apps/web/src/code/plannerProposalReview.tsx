@@ -227,6 +227,7 @@ export function PlannerProposalReviewDialog(
   const bootstrap = props.controller.bootstrap;
   if (bootstrap === undefined) return null;
   const current = planner.current;
+  const branchPrefix = props.controller.bootstrap?.settings.worktrees?.branchPrefix;
   const disabled = !current || planner.busy || props.creating === true;
   const providerSelection =
     props.selectedProviderInstanceId !== undefined && props.selectedModelId !== undefined
@@ -326,6 +327,9 @@ export function PlannerProposalReviewDialog(
           {...(props.errorMessage === undefined ? {} : { errorMessage: props.errorMessage })}
           {...(props.pendingMessage === undefined ? {} : { pendingMessage: props.pendingMessage })}
           execute={props.controller.execute}
+          // The prefix is the person's; the words are the coordinator's, so the
+          // name keeps its id.
+          worktreeSettings={branchPrefix === undefined ? {} : { branchPrefix }}
           onCancel={props.onClose}
           onCreateThread={async (input) => {
             if (!current || !reviewCurrent || reviewAttempt.status !== "none" || !providerReady)

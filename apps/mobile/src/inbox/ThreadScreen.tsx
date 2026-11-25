@@ -24,6 +24,7 @@ import { ApprovalDeferralSheet } from "../approvals/ApprovalDeferralSheet";
 import { MemoryProposalCard, RoutineProposalCard } from "../surfaces/AgentProposalCards";
 import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
+import { BrowserApprovalCard } from "../surfaces/BrowserApprovalCard";
 import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard";
 import { ThreadSecretCards } from "../surfaces/ThreadSecretCard";
 import { ServiceOfferCard } from "../surfaces/ServiceOfferCard";
@@ -576,6 +577,19 @@ export function ThreadScreen(props: ThreadScreenProps) {
           ) : connectionStatus.kind === "offline" ? (
             <Text style={styles.connectionStatus}>Waiting for the network.</Text>
           ) : null}
+          {/* One card, also above the full Browser view: handing a page back there
+              answers no prompt, so its Continue has to be in reach. */}
+          {offlineDemo ||
+          transport === undefined ||
+          (fullView && activeSurface !== "browser") ? null : (
+            <BrowserApprovalCard
+              actsAsHostPerson={standing.actsAsHostPerson}
+              threadId={selected.threadId}
+              threadTitle={title}
+              transport={transport}
+              watchingOnly={watchingOnly}
+            />
+          )}
           {!offlineDemo && fullView && activeSurface === "browser" && transport !== undefined ? (
             <BrowserSurfacePanel
               actsAsHostPerson={standing.actsAsHostPerson}

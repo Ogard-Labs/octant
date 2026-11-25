@@ -4,7 +4,7 @@ import { basename, isAbsolute } from "node:path";
 import { decodeSupportBundleExportRequest, type SupportBundleSaveOutcome } from "@octant/contracts";
 import { authorizeDiagnosticsExportActor, buildSupportBundleZip } from "@octant/domain";
 import { admitDesktopBroker } from "./desktopBrokerAdmission";
-import { isAllowedOrigin } from "./diagnosticsExportRoutes";
+import { diagnosticsExportCaller, isAllowedOrigin } from "./diagnosticsExportRoutes";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import {
@@ -16,13 +16,15 @@ import {
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
 /**
- * The support bundle's routes: a read of what a bundle would hold, the export
- * that hands the files to the caller, and the desktop app's save, where the
- * host writes the file at the path the native dialog chose. All are
- * loopback-only and sit on the local administration chain beside host control,
- * never in the product dispatch the remote gateway shares, so a paired device
- * cannot reach them even if route policy regressed. The first two need a local
- * window; the save needs the desktop secret and refuses any browser origin.
+ * The support bundle's routes: a read of what a bundle would hold and the
+ * export that hands the files to the caller, both in the authenticated product
+ * dispatch and the remote forward list, and the desktop app's save, where the
+ * host writes the file at the path the native dialog chose. A local window and
+ * a device the host's own person paired take a bundle (maintainer decision,
+ * 2026-11-12); a restricted or hub-introduced device and an agent grant are
+ * refused. The save stays on the loopback administration chain beside host
+ * control: it needs the desktop secret, refuses any browser origin, and writes
+ * to a path on this computer, so no device reaches it.
  */
 
 const PREVIEW_PATH = "/api/diagnostics/bundle/preview";
@@ -103,7 +105,10 @@ function pathExists(path: string): boolean {
   }
 }
 
-export function createSupportBundleRouteHandler(dependencies: SupportBundleRouteDependencies) {
+/**
+ * The desktop app's save route, on the loopback administration chain only.
+ */
+export function createSupportBundleSaveRouteHandler(dependencies: SupportBundleRouteDependencies) {
   const now = dependencies.now ?? Date.now;
 
   // The desktop main process, not the renderer, names the path: it comes from
@@ -167,8 +172,20 @@ export function createSupportBundleRouteHandler(dependencies: SupportBundleRoute
 
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
+    return url.pathname === SAVE_PATH ? saveToChosenPath(request, url) : undefined;
+  };
+}
+
+/**
+ * The preview and export routes, admitted to a local window and a device the
+ * host's own person paired.
+ */
+export function createSupportBundleRouteHandler(dependencies: SupportBundleRouteDependencies) {
+  const now = dependencies.now ?? Date.now;
+
+  return async (request: Request): Promise<Response | undefined> => {
+    const url = new URL(request.url);
     const isPreview = url.pathname === PREVIEW_PATH;
-    if (url.pathname === SAVE_PATH) return saveToChosenPath(request, url);
     if (!isPreview && url.pathname !== EXPORT_PATH) return undefined;
 
     const origin = request.headers.get("origin");
@@ -186,19 +203,21 @@ export function createSupportBundleRouteHandler(dependencies: SupportBundleRoute
       return json({ error: "Method not allowed." }, 405, origin);
     }
 
-    let actorKind: "local-window" | "remote-device";
+    let caller: ReturnType<typeof diagnosticsExportCaller>;
     try {
-      actorKind = authenticateRoutePrincipal({
-        request,
-        store: dependencies.windowAuthorityStore,
-        now: now(),
-      }).principal.kind;
+      caller = diagnosticsExportCaller(
+        authenticateRoutePrincipal({
+          request,
+          store: dependencies.windowAuthorityStore,
+          now: now(),
+        }),
+      );
     } catch (error) {
       return error instanceof WindowAuthorityError
         ? json({ error: "Support bundle is unauthorized." }, 401, origin)
         : json({ error: "Support bundle request is invalid." }, 400, origin);
     }
-    if (authorizeDiagnosticsExportActor(actorKind).kind === "denied") {
+    if (authorizeDiagnosticsExportActor(caller.actorKind).kind === "denied") {
       return json({ error: "Support bundle is unauthorized." }, 403, origin);
     }
 
@@ -220,10 +239,30 @@ export function createSupportBundleRouteHandler(dependencies: SupportBundleRoute
       return json({ error: "Support bundle request is invalid." }, 400, origin);
     }
     try {
-      const outcome = await exportSupportBundle(exportRequest, dependencies.sources());
+      const outcome = await exportSupportBundle(
+        exportRequest,
+        dependencies.sources(),
+        undefined,
+        caller.actor,
+        request.signal,
+      );
       return json(outcome, outcome.kind === "exported" ? 200 : 422, origin);
     } catch {
       return json({ error: "The support bundle could not be built." }, 500, origin);
     }
   };
+}
+
+/**
+ * The loopback administration chain's bundle routes: the desktop save first,
+ * then the preview and export a window and the `octant diagnostics` command
+ * (which registers its own window) take.
+ */
+export function createLoopbackSupportBundleRouteHandler(
+  dependencies: SupportBundleRouteDependencies,
+) {
+  const save = createSupportBundleSaveRouteHandler(dependencies);
+  const bundle = createSupportBundleRouteHandler(dependencies);
+  return async (request: Request): Promise<Response | undefined> =>
+    (await save(request)) ?? (await bundle(request));
 }

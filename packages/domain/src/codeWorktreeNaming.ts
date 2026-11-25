@@ -33,7 +33,8 @@ function isValidSegment(segment: string): boolean {
 
 /** The `git check-ref-format --branch` rules, narrowed to the characters Octant generates. */
 export function isValidBranchName(name: string): boolean {
-  if (name.length === 0 || name.length > MAX_BRANCH_LENGTH) return false;
+  // Git reserves HEAD as a branch name of its own.
+  if (name.length === 0 || name.length > MAX_BRANCH_LENGTH || name === "HEAD") return false;
   return name.split("/").every(isValidSegment);
 }
 
@@ -116,7 +117,7 @@ function wordsOf(token: string): string[] {
 
 function isSensitiveWord(word: string, previous: string | undefined): boolean {
   if (SENSITIVE_WHOLE.has(word) || SENSITIVE_STEM.test(word)) return true;
-  return word === "code" && previous !== undefined && CODE_QUALIFIER.has(previous);
+  return /^codes?$/.test(word) && previous !== undefined && CODE_QUALIFIER.has(previous);
 }
 
 /** Letters and digits in a short ordinary shape: v2, utf8, h264, oauth2, k8s, i18n, 2fa, 4k. */
@@ -157,29 +158,50 @@ function keepWord(word: string, token: string): boolean {
  * `login code`, Norwegian `passord`, `nøkkel`, `kode`) the rest of that clause is
  * dropped, and so is every URL, path, email, host, `name=value` setting, word
  * mixing letters and digits in an unusual shape, long number and protected file
- * name. A clause ends at a sentence stop or a line end. The text is redacted
+ * name. A clause ends at a sentence stop or a line end; when a line ends inside
+ * a clause that named a secret, the lines after it are left out too, up to a
+ * blank line, since the value is often pasted there. The text is redacted
  * first, so a token shaped like a known key never gets this far.
  */
 export function reducePromptForNaming(prompt: string): ReadonlyArray<string> {
   const redacted = redactSecretsAndPrivateKeys(prompt);
   const kept: string[] = [];
-  for (const clause of redacted.split(/\r?\n|(?<=[.!?;])(?=\s|$)/)) {
-    let previous: string | undefined;
-    for (const token of clause.split(/\s+/).filter((entry) => entry.length > 0)) {
-      // The redactor found a secret here, so what follows it is not safe either.
-      if (token.includes("[redacted]")) break;
-      // A path or address is left out alone; a `name=value` setting also tells
-      // what its name is, so it is read for a sensitive word first.
-      if (isLocator(token) && !token.includes("=")) continue;
-      const parts = wordsOf(token);
-      if (parts.some((word, index) => isSensitiveWord(word, parts[index - 1] ?? previous))) break;
-      previous = parts[parts.length - 1] ?? previous;
-      if (isLocator(token) || PROTECTED_NAMES.test(token.replace(/[:=,.]+$/, ""))) continue;
-      if (parts.some((word) => !keepWord(word, token))) continue;
-      kept.push(...parts);
+  // Set once a line ends inside a clause that says a secret follows: the value
+  // may be on the lines after it.
+  let value: "expected" | "passing" | undefined;
+  for (const line of redacted.split(/\r?\n/)) {
+    if (value !== undefined) {
+      if (wordsOf(line).length > 0) value = "passing";
+      else if (line.trim() === "" && value === "passing") value = undefined;
+      continue;
+    }
+    for (const clause of line.split(/(?<=[.!?;])(?=\s|$)/)) {
+      const withheld = keepClause(clause, kept);
+      value = withheld && !/[.!?;]$/.test(clause) ? "expected" : undefined;
     }
   }
   return kept;
+}
+
+/** Adds the clause's safe words to `kept`; true when it named a secret and the rest was left out. */
+function keepClause(clause: string, kept: string[]): boolean {
+  let previous: string | undefined;
+  for (const token of clause.split(/\s+/).filter((entry) => entry.length > 0)) {
+    // The redactor found a secret here, so what follows it is not safe either.
+    if (token.includes("[redacted]")) return true;
+    // A path or address is left out alone; a `name=value` setting also tells
+    // what its name is, so it is read for a sensitive word first.
+    if (isLocator(token) && !token.includes("=")) continue;
+    const parts = wordsOf(token);
+    if (parts.some((word, index) => isSensitiveWord(word, parts[index - 1] ?? previous))) {
+      return true;
+    }
+    previous = parts[parts.length - 1] ?? previous;
+    if (isLocator(token) || PROTECTED_NAMES.test(token.replace(/[:=,.]+$/, ""))) continue;
+    if (parts.some((word) => !keepWord(word, token))) continue;
+    kept.push(...parts);
+  }
+  return false;
 }
 
 /** At least this many words, or the id name is used: a lone word says too little. */
@@ -248,15 +270,23 @@ export function deriveDeliveryBranch(input: DeliveryBranchInput): string {
     .trim()
     .replace(/[^a-zA-Z0-9_-]/g, "")
     .slice(0, 12);
-  const idName = `${prefix}${safeId.length > 0 ? safeId : "new"}`;
+  const id = safeId.length > 0 ? safeId : "new";
   const slug = input.naming === "prompt" ? slugifyPrompt(input.prompt ?? "") : "";
-  const stem = slug.length > 0 ? `${prefix}${slug}` : idName;
+  const leaves = slug.length > 0 ? [slug, id] : [id];
   const taken = new Set(
     [input.baseBranch.trim(), ...(input.existingBranches ?? [])].map((name) => name.toLowerCase()),
   );
-  let candidate = stem;
-  for (let attempt = 2; conflicts(candidate, taken) && attempt < 100; attempt += 1) {
-    candidate = `${stem}-${attempt}`;
+  // A branch or tag named like the prefix blocks every name below it, whatever
+  // the number, so the prefix is then joined with a dash instead.
+  for (const leaf of leaves) {
+    for (const start of [prefix, prefix.replaceAll("/", "-")]) {
+      for (let attempt = 1; attempt < 100; attempt += 1) {
+        const candidate = attempt === 1 ? `${start}${leaf}` : `${start}${leaf}-${attempt}`;
+        if (conflicts(candidate, taken)) continue;
+        if (isValidBranchName(candidate)) return candidate;
+        break;
+      }
+    }
   }
-  return isValidBranchName(candidate) && !conflicts(candidate, taken) ? candidate : idName;
+  return `${prefix}${id}`;
 }

@@ -15,6 +15,7 @@ import {
   CodeOperationEventFrame,
   CodeThreadView,
   ProjectBootstrap,
+  decodeProjectId,
   decodeHostAnswer,
 } from "@octant/contracts";
 import {
@@ -22,6 +23,7 @@ import {
   resolveCodeNewThreadWorkspace,
   suggestCodeDeliveryOutcome,
 } from "@octant/domain";
+import { takenBranchNames } from "./takenBranchNames";
 import {
   MobileInboxFailure,
   type MobileInboxRow,
@@ -363,6 +365,15 @@ export async function createMobileCodeFromPrompt(input: {
           "The host did not provide a repository remote.",
         );
       }
+      const prefix = bootstrap.settings.worktrees?.branchPrefix;
+      const existingBranches =
+        workspace === "managed-worktree"
+          ? await takenBranchNames(
+              (command) => executeCodeCommand(input.transport, { ...command }),
+              decodeProjectId(input.project.projectId),
+              prefix,
+            )
+          : [];
       const proposal: MobileCodeDeliveryTargetProposal = {
         // The prefix is the person's choice on the host; the phone's own words stay in the id.
         branchIntent:
@@ -370,7 +381,8 @@ export async function createMobileCodeFromPrompt(input: {
             ? deriveDeliveryBranch({
                 baseBranch: checkoutBranch,
                 shortId: `mobile-${threadId.slice(0, 8)}`,
-                prefix: bootstrap.settings.worktrees?.branchPrefix,
+                prefix,
+                existingBranches,
               })
             : checkoutBranch,
         remoteName: remoteName ?? "origin",
