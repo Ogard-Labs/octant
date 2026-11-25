@@ -654,8 +654,8 @@ export function wireWork(deps: WorkDependencies) {
         agentMessageService.confirmDelivered(messageIds),
       // A Work thread started from a provider session begun outside Octant
       // is journaled on the thread, marked as carrying outside content first.
-      recordAdoptedSession: (thread, adopted, history) =>
-        workThreadService.recordAdoptedSession(thread, adopted, history),
+      recordAdoptedSession: (thread, adopted, history, actor) =>
+        workThreadService.recordAdoptedSession(thread, adopted, history, actor),
       readImportedSessionHistory: (threadId) =>
         readJournaledSessionHistory(persistence.journal, String(threadId), "work"),
       // A compaction stops the session kept past the thread's last turn.
@@ -2276,8 +2276,8 @@ export function wireWork(deps: WorkDependencies) {
       stopLiveTasks: (threadId) => outlivingWorkSessions.stopThread(workSessionKey(threadId)),
       isPerson: (windowId) => !isRoutineHostScope(windowId) && !isRestrictedDeviceScope(windowId),
       nativeSessions: (windowId, threadId) => workTurnService.nativeSessions(windowId, threadId),
-      adoptNativeSession: (windowId, threadId, nativeSessionId) =>
-        workTurnService.adoptNativeSession(windowId, threadId, nativeSessionId),
+      adoptNativeSession: (windowId, threadId, nativeSessionId, actor) =>
+        workTurnService.adoptNativeSession(windowId, threadId, nativeSessionId, actor),
     });
     // A message wakes a Work thread whose switch is on, as it wakes a Code
     // thread, counted in the store Code's wakes use so a restart keeps the

@@ -18771,8 +18771,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     settles by itself after a restart (a turn the restart cut off) are the
     system's. Cancelling a connector sign-in that is still waiting, by
     signing out or by removing the server, names whoever cancelled it, never
-    whoever began the attempt. Not built yet: adopting a session started
-    outside Octant journals its records as the system.
+    whoever began the attempt. Adopting a session started outside Octant
+    journals the adoption, the imported earlier conversation and (in Code)
+    the thread's session-ready record as whoever adopted it, the local person
+    or the paired device that asked; the payloads are unchanged.
 
   A hub acting on its spoke, or a spoke
   delegating to another spoke, is such a remote principal on the receiving

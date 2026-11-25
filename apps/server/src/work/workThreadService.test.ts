@@ -2034,6 +2034,46 @@ describe("WorkThreadService", () => {
     expect(refused.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("journals an adopted session and its imported history as the paired device that asked, and as the local person when none is named", () => {
+    const device = decodeEventActor({
+      kind: "remote-device",
+      actorId: "90000000-0000-4000-8000-0000000000e3",
+      deviceId: "90000000-0000-4000-8000-0000000000e3",
+    });
+    const adopted = {
+      nativeSessionId: "outside-1",
+      providerSessionId: "11111111-1111-4111-8111-111111111111" as never,
+      resumeCursor: { driverKind: "claude", value: "outside-cursor" } as never,
+      providerInstanceId: ids.provider as never,
+      modelId: "model-a" as never,
+      bindingRevisionId: ids.binding as never,
+      workingDirectory: "." as never,
+    };
+    const history = {
+      status: "imported" as const,
+      messages: [{ role: "person" as const, text: "Summarize the board notes" }],
+    };
+    for (const asked of [device, undefined]) {
+      const fixture = serviceFixture({
+        threads: [thread()],
+        recordExternalContentIngestion: () => ({
+          kind: "recorded",
+          taint: { externalContentIngested: true, ingestedSources: [] },
+        }),
+      });
+      expect(fixture.service.recordAdoptedSession(thread(), adopted, history, asked).status).toBe(
+        "recorded",
+      );
+      const actors = fixture.persistence.journal.append.mock.calls.flatMap(([input]) =>
+        input.events.map((event: { readonly actor: unknown }) => event.actor),
+      );
+      // The thread's adoption and the imported conversation.
+      expect(actors).toHaveLength(2);
+      for (const named of actors)
+        expect(named).toEqual(asked ?? { kind: "local-user", actorId: expect.any(String) });
+    }
+  });
+
   it("commits an adopted provider session and its imported history to a real journal together", () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-work-adopt-"));
     const connection = openSqlite(join(directory, "events.sqlite3"));
