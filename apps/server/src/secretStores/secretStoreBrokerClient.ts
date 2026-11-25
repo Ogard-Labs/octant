@@ -19,6 +19,8 @@ import {
 import type {
   AwsCliKeyReference,
   GoogleCliAccountReference,
+  SecretStoreBrowseResult,
+  SecretStoreBrowseStep,
   SecretStoreKind,
   SecretStoreToolState,
 } from "@octant/contracts/secret-stores";
@@ -27,6 +29,7 @@ import { decodeUtcTimestamp, type UtcTimestamp } from "@octant/contracts";
 import {
   decodeGoogleCliAccountReference,
   decodeGoogleCliAccountIdentity,
+  decodeSecretStoreBrowseResult,
 } from "@octant/contracts/secret-stores";
 import {
   decodeBrowserCredentialMetadata,
@@ -49,6 +52,8 @@ export type BrowserMetadataAnswer =
         | "uncertain"
         | "changed";
     };
+
+const MAX_BROWSE_REPLY_BYTES = 2 * 1024 * 1024;
 
 export type SecretStoreNamespace = "provider" | "mcp-server";
 export type SecretStoreBrokerDown = { readonly status: "broker-unavailable" };
@@ -129,6 +134,11 @@ export interface SecretStoreBrokerClient {
     reference: CredentialRequestReference,
     signal: AbortSignal,
   ) => Promise<CredentialRequestResolution>;
+  /** Names in a linked store, for a person picking an item on a card. */
+  readonly browse?: (
+    step: SecretStoreBrowseStep,
+    signal: AbortSignal,
+  ) => Promise<SecretStoreBrowseResult>;
   readonly googleCliReference?: (
     signal?: AbortSignal,
   ) => Promise<GoogleCliReferenceAnswer | SecretStoreBrokerDown>;
@@ -339,6 +349,15 @@ export function makeSecretStoreBrokerClient(
       try {
         return Schema.decodeUnknownSync(CredentialRequestResolution)(
           await post("request-card-read", reference, signal, 32_768),
+        );
+      } catch {
+        return { status: "unavailable" };
+      }
+    },
+    browse: async (step, signal) => {
+      try {
+        return decodeSecretStoreBrowseResult(
+          await post("browse", { store: "onepassword", step }, signal, MAX_BROWSE_REPLY_BYTES),
         );
       } catch {
         return { status: "unavailable" };

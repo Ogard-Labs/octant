@@ -28,6 +28,10 @@ import {
   createDiagnosticsExportClient,
   type DiagnosticsExportClient,
 } from "@octant/client-runtime/diagnostics-export-client";
+import {
+  createBrowserAutomationClient,
+  type BrowserAutomationClient,
+} from "@octant/client-runtime/browser-automation-client";
 import { createChatClient, type ChatClient } from "@octant/client-runtime/chat-client";
 import {
   createThreadImageResults,
@@ -96,6 +100,56 @@ import { platformPasskeys } from "../host/ownerPasskey";
 import { runProviderOAuthCommand } from "../providers/providerOAuthClient";
 import type { ProviderOAuthCommand } from "../providers/ProviderOAuthSignIn";
 
+/**
+ * What the host takes on a Canvas only from its own person, at a window or on
+ * a device that person paired: the network switch, public link review, export
+ * approval, comments and the Project design-system switch. The folder picker
+ * is the host's own native dialog, so a browser is never offered it.
+ */
+const PERSON_CANVAS_CONTROLS = [
+  "networkAccess",
+  "setNetworkAccess",
+  "renewNetworkPage",
+  "exportOffers",
+  "prepareExport",
+  "decideExport",
+  "dismissExportNotice",
+  "revokePublicShare",
+  "publicLinkSettings",
+  "setPublicLinkSettings",
+  "comments",
+  "comment",
+  "listDesignSystems",
+  "applyDesignSystem",
+] as const;
+
+export type PersonPairedCanvasControls = Pick<
+  CanvasClient,
+  (typeof PERSON_CANVAS_CONTROLS)[number]
+>;
+
+function pickPersonCanvasControls(canvas: CanvasClient): PersonPairedCanvasControls {
+  return Object.fromEntries(
+    PERSON_CANVAS_CONTROLS.flatMap((key) => {
+      const method = canvas[key];
+      return method === undefined ? [] : [[key, method]];
+    }),
+  ) as PersonPairedCanvasControls;
+}
+
+/**
+ * The Canvas client a session is offered: the whitelist every paired browser
+ * reads, and the host person's controls only when the host says this browser
+ * acts as that person. The host refuses them to any other session regardless.
+ */
+export function canvasClientFor(
+  clients: Pick<RemoteProductClients, "canvas" | "canvasHostPerson">,
+  actsAsHostPerson: boolean,
+): RemoteProductClients["canvas"] {
+  if (!actsAsHostPerson) return clients.canvas;
+  return { ...clients.canvas, ...clients.canvasHostPerson };
+}
+
 export interface RemoteProductClients {
   readonly conversationInputs?: ConversationInputClient;
   readonly serviceOffers?: ServiceOfferClient;
@@ -122,6 +176,17 @@ export interface RemoteProductClients {
    * a device its own person paired; the shell offers it to no other session.
    */
   readonly canvasImportHtml: NonNullable<CanvasClient["importHtml"]>;
+  /**
+   * The rest of what the host takes on a Canvas from its own person; the
+   * shell offers it to no other session, and the host refuses it to them.
+   */
+  readonly canvasHostPerson: PersonPairedCanvasControls;
+  /**
+   * Browser captures and the Browser prompts a thread waits on, for a thread's
+   * surfaces. The shell hands it only to a session that acts as the host's
+   * person; there is no live Browser pane over the session.
+   */
+  readonly browserAutomation?: BrowserAutomationClient;
   /** The device's own shell in a local or server Project; the host refuses any other session. */
   readonly projectTerminal: ProjectTerminalClient;
   /** The device's own Private page for a Project; a profile page stays at a window. */
@@ -135,8 +200,23 @@ export interface RemoteProductClients {
 // remote session no capability is attached and the connection owns the
 // destination, so the base URL only shapes the path; see
 // `createRemoteProductFetch`.
+export interface RemoteProductPort {
+  readonly baseUrl: string;
+  readonly fetch: ReturnType<typeof createRemoteProductFetch>;
+  readonly windowCapability: string;
+}
+
 const REMOTE_CLIENT_BASE_URL = "http://127.0.0.1";
 const NO_WINDOW_CAPABILITY = "";
+
+/** What a product client needs to send over the session, for one built where it is used. */
+export function remoteProductPort(bridge: RemoteSessionBridge): RemoteProductPort {
+  return {
+    baseUrl: REMOTE_CLIENT_BASE_URL,
+    fetch: createRemoteProductFetch({ bridge }),
+    windowCapability: NO_WINDOW_CAPABILITY,
+  };
+}
 
 /**
  * The extension client over the session: a thread's waiting tool prompts and
@@ -298,6 +378,8 @@ export function createRemoteProductClients(
     syncStatus: createReplicaSyncStatusClient(port),
     canvasImportHtml: (request) =>
       canvas.importHtml?.(request) ?? Promise.reject(new Error("Import is unavailable.")),
+    canvasHostPerson: pickPersonCanvasControls(canvas),
+    browserAutomation: createBrowserAutomationClient(port),
     projectTerminal: createProjectTerminalClient(port),
     projectBrowser: createProjectBrowserClient(port),
     // Listing what a server serves is a window-on-this-computer read the remote

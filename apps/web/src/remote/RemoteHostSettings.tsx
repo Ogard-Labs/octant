@@ -20,21 +20,42 @@ import { providerSettingsViewProps } from "../providers/providerSettingsViewProp
 import { useProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { RemotePairedDevices } from "./RemotePairedDevices";
-
-type HostSettingsSection = "extensions" | "providers" | "devices" | "agents" | "diagnostics";
+import type { RemoteProductPort } from "./remoteProductClients";
 
 const RemoteDiagnostics = lazy(() => import("./RemoteDiagnostics"));
+
+// Loaded when the Claude and Codex tab is opened, from the desktop Settings view it is made of.
+const LazyProviderTooling = lazy(async () => ({
+  default: (await import("../shell/SettingsView")).RemoteProviderTooling,
+}));
+
+// Loaded when the section is opened, from the desktop Settings view it is made of.
+const LazyRemoteHostPermissions = lazy(async () => ({
+  default: (await import("../shell/SettingsView")).RemoteHostPermissions,
+}));
+
+type HostSettingsSection =
+  | "extensions"
+  | "providers"
+  | "devices"
+  | "agents"
+  | "permissions"
+  | "diagnostics";
 
 const SECTIONS: ReadonlyArray<{
   readonly id: HostSettingsSection;
   readonly label: string;
-  /** The matrix surface whose routes the section sends to. */
-  readonly surface: RemoteShellSurfaceKind;
+  /**
+   * The matrix surface whose routes the section sends to. Absent where the
+   * section stands on what the shell hands it.
+   */
+  readonly surface?: RemoteShellSurfaceKind;
 }> = [
   { id: "extensions", label: "Extensions", surface: "extension-install" },
   { id: "providers", label: "Providers", surface: "provider-setup" },
   { id: "devices", label: "Paired devices", surface: "device-management" },
   { id: "agents", label: "Agent access", surface: "agent-access" },
+  { id: "permissions", label: "Permissions" },
   { id: "diagnostics", label: "Diagnostics", surface: "diagnostics" },
 ];
 
@@ -58,6 +79,13 @@ export interface RemoteHostSettingsProps {
   readonly providerOAuth: (
     command: ProviderOAuthCommand,
   ) => Promise<ProviderOAuthCommandResult | undefined>;
+  /**
+   * The session, given only for a browser the host's own person paired: it
+   * offers the Claude and Codex tab and the Permissions section, which build
+   * their own clients over it when opened. Absent, neither is offered and the
+   * host refuses the routes anyway.
+   */
+  readonly personPort?: RemoteProductPort;
   /** Opts supported endpoints in or out of provider cloud jobs over the session. */
   readonly providerCloudSessionClient?: ProviderCloudSessionClient;
 }
@@ -74,7 +102,11 @@ export interface RemoteHostSettingsProps {
  * the host's credential store and is never read back.
  */
 export function RemoteHostSettings(props: RemoteHostSettingsProps) {
-  const sections = SECTIONS.filter((section) => props.reachable.has(section.surface));
+  const sections = SECTIONS.filter((section) =>
+    section.id === "permissions"
+      ? props.personPort !== undefined
+      : section.surface !== undefined && props.reachable.has(section.surface),
+  );
   const [open, setOpen] = useState<HostSettingsSection>();
   if (sections.length === 0) return null;
   return (
@@ -94,7 +126,14 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
           </OctantButton>
         ))}
       </div>
-      {open === "extensions" ? <ExtensionsSettingsView client={props.extensionClient} /> : null}
+      {open === "extensions" ? (
+        <RemoteExtensions
+          client={props.extensionClient}
+          providerClient={props.providerClient}
+          personPort={props.personPort}
+          onOpenProviders={() => setOpen("providers")}
+        />
+      ) : null}
       {open === "devices" ? (
         <RemotePairedDevices client={props.pairedDevices} origin={props.origin} />
       ) : null}
@@ -104,6 +143,11 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
       {open === "diagnostics" && props.reachable.has("diagnostics") ? (
         <Suspense fallback={null}>
           <RemoteDiagnostics client={props.diagnosticsClient} />
+        </Suspense>
+      ) : null}
+      {open === "permissions" && props.personPort !== undefined ? (
+        <Suspense fallback={null}>
+          <LazyRemoteHostPermissions port={props.personPort} projectClient={props.projectClient} />
         </Suspense>
       ) : null}
       {open === "providers" ? (
@@ -117,6 +161,64 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
         />
       ) : null}
     </section>
+  );
+}
+
+/**
+ * Skills & Extensions, with the Claude and Codex tab where the host's own
+ * person paired this browser: the host's accounts come from its provider list,
+ * and the commands run on the host through the session.
+ */
+function RemoteExtensions(props: {
+  readonly client: ExtensionClient;
+  readonly providerClient: ProviderClient;
+  readonly personPort: RemoteProductPort | undefined;
+  readonly onOpenProviders: () => void;
+}) {
+  const { personPort } = props;
+  if (personPort === undefined) return <ExtensionsSettingsView client={props.client} />;
+  return (
+    <RemoteExtensionsWithAccountTools
+      client={props.client}
+      onOpenProviders={props.onOpenProviders}
+      providerClient={props.providerClient}
+      port={personPort}
+    />
+  );
+}
+
+function RemoteExtensionsWithAccountTools(props: {
+  readonly client: ExtensionClient;
+  readonly providerClient: ProviderClient;
+  readonly port: RemoteProductPort;
+  readonly onOpenProviders: () => void;
+}) {
+  const controller = useProviderController({ client: props.providerClient });
+  const accounts = controller.instances.flatMap((instance) =>
+    instance.driverKind === "claude" || instance.driverKind === "codex"
+      ? [
+          {
+            id: String(instance.id),
+            displayName: instance.displayName,
+            driverKind: instance.driverKind,
+            nativeSetup: instance.nativeSetup !== false,
+          },
+        ]
+      : [],
+  );
+  return (
+    <ExtensionsSettingsView
+      accountTools={
+        <Suspense fallback={null}>
+          <LazyProviderTooling
+            accounts={accounts}
+            port={props.port}
+            onOpenRunAsItself={props.onOpenProviders}
+          />
+        </Suspense>
+      }
+      client={props.client}
+    />
   );
 }
 

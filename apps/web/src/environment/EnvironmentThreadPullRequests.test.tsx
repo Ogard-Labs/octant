@@ -214,6 +214,57 @@ describe("EnvironmentThreadPullRequests", () => {
     ).toBeNull();
   });
 
+  it("says each layer's place in its stack and joins only layers that are really based on each other", () => {
+    render(
+      <EnvironmentThreadPullRequests
+        onOpen={vi.fn()}
+        summaries={summaries([
+          summary(1, { stack: { position: 1, size: 4 } }),
+          summary(2, { stack: { position: 2, size: 4, parent: 1 } }),
+          // The thread never touched layer three.
+          summary(4, { stack: { position: 4, size: 4, parent: 3 } }),
+        ])}
+      />,
+    );
+    expect(screen.getByText("2 of 4")).toBeVisible();
+    expect(
+      screen.getByRole("button", {
+        name: "Pull request 2, Change 2, open, layer 2 of 4 of a stack, on #1",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", {
+        name: "Pull request 1, Change 1, open, layer 1 of 4 of a stack, the bottom",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getAllByRole("listitem").map((item) => item.getAttribute("data-stack-join")),
+    ).toEqual(["next", "previous", null]);
+  });
+
+  it("offers Merge on a stack's bottom layer alone, and Fix on any of them", () => {
+    const ready = {
+      checks: "passing",
+      review: "approved",
+      mergeability: "mergeable",
+      readyToMerge: true,
+    };
+    render(
+      <EnvironmentThreadPullRequests
+        onOpen={vi.fn()}
+        onOpenExternal={vi.fn()}
+        summaries={summaries([
+          summary(1, { ...ready, stack: { position: 1, size: 3 } }),
+          summary(2, { ...ready, stack: { position: 2, size: 3, parent: 1 } }),
+          summary(3, { checks: "failing", stack: { position: 3, size: 3, parent: 2 } }),
+        ])}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Merge pull request #1" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Merge pull request #2" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Fix pull request #3 on GitHub" })).toBeVisible();
+  });
+
   it("offers no Merge for a pull request already in the merge queue", () => {
     render(
       <EnvironmentThreadPullRequests

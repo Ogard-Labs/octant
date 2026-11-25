@@ -235,6 +235,7 @@ describe("wireWorkRequests service offers", () => {
             agentRunInteractions: { mayAnswerFromDevice: () => false },
             extensionToolApprovalService: { list: emptyList },
             routineProposalService: { list: emptyList },
+            threadSecrets: { waiting: emptyList },
             browserToolApprovalService: { list: emptyList },
             workRequestService: {
               interruptProject: () => undefined,

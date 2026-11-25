@@ -83,6 +83,10 @@ function setup(
     onServer: over.onServer ?? false,
   });
   const grant = async (lifetime: ThreadSecretLifetime = "this-turn", delivery = "file") => {
+    const leave =
+      delivery === "handle"
+        ? service.registerConsumer({ id: "computer", label: "Computer use" })
+        : undefined;
     const asked = operations.requestSecret({
       operation: "request-secret",
       name: "DEPLOY_TOKEN",
@@ -91,7 +95,8 @@ function setup(
       reason: "Publish the preview build.",
       delivery,
     });
-    const id = service.view("window", THREAD).requests[0]?.id ?? "";
+    const id =
+      service.view("window", THREAD).requests.find(({ state }) => state === "pending")?.id ?? "";
     await service.answer(
       "window",
       THREAD,
@@ -104,6 +109,7 @@ function setup(
       { paired: false },
     );
     const reply = await asked;
+    leave?.();
     state.events.length = 0;
     return reply;
   };
@@ -325,6 +331,30 @@ describe("a command run with a secret", () => {
     h.stop.abort();
     expect(await h.run()).toMatchObject({ result: { status: "refused" } });
   });
+
+  it.each([{}, { delivery: "handle" }])(
+    "asks nobody for a handle while nothing here can use one (%o)",
+    async (over) => {
+      const h = setup();
+      const ask = () =>
+        h.operations.requestSecret({
+          operation: "request-secret",
+          name: "TOKEN",
+          label: "Token",
+          kind: "token",
+          reason: "Publish.",
+          ...over,
+        });
+      expect(await ask()).toMatchObject({
+        isError: true,
+        result: { status: "refused", note: expect.stringContaining("delivery file") },
+      });
+      expect(h.service.view("window", THREAD).requests).toEqual([]);
+      h.service.registerConsumer({ id: "computer", label: "Computer use" });
+      void ask();
+      expect(h.service.view("window", THREAD).requests).toMatchObject([{ delivery: "handle" }]);
+    },
+  );
 
   it("refuses an input that is not the operation's", async () => {
     const h = setup();

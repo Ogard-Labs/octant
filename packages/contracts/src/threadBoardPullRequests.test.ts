@@ -69,6 +69,14 @@ describe("thread board pull-request contracts", () => {
         hiddenCount: 0,
       }),
     ).toThrow();
+    const stacked = (stack: unknown) =>
+      decodeThreadBoardPullRequestSummaries({ items: [{ ...base, stack }], hiddenCount: 0 });
+    expect(stacked({ position: 2, size: 4, parent: 11 }).items[0]?.stack?.parent).toBe(11);
+    expect(stacked({ position: 1, size: 4 }).items[0]?.stack?.parent).toBe(undefined);
+    // A layer above the bottom names the one below it, and no place is past the top.
+    expect(() => stacked({ position: 2, size: 4 })).toThrow();
+    expect(() => stacked({ position: 1, size: 4, parent: 11 })).toThrow();
+    expect(() => stacked({ position: 5, size: 4, parent: 11 })).toThrow();
     expect(() =>
       decodeThreadBoardPullRequestSummaries({
         items: [{ ...base, additions: -5 }],

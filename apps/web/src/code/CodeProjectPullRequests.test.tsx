@@ -670,6 +670,74 @@ describe("CodeProjectPullRequests", () => {
     expect(titlesInOrder()).toEqual(["Middle in aurora", "Newest in octant", "Oldest in octant"]);
   });
 
+  it("keeps a stack together, bottom first, under any sort, and keeps its places when a filter hides a layer", async () => {
+    const user = userEvent.setup();
+    const base = {
+      projectId: projectA,
+      projectName: "Octant",
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      draft: false,
+      state: "open",
+      mergeability: "mergeable",
+      author: "octocat",
+      checks: "passing",
+      review: "approved",
+      linkedThreads: [],
+    };
+    const row = (
+      number: number,
+      title: string,
+      headBranch: string,
+      baseBranch: string,
+      day: number,
+      overrides: RowOverrides = {},
+    ) => ({
+      ...base,
+      number,
+      title,
+      headBranch,
+      baseBranch,
+      updatedAt: `2026-08-${String(day)}T07:00:00.000Z`,
+      ...overrides,
+    });
+    renderWorkspace({
+      load: async () =>
+        view({
+          rows: [
+            row(4, "Alone", "x", "main", 22),
+            row(3, "Top", "c", "b", 21),
+            row(2, "Middle", "b", "a", 18, { draft: true }),
+            row(1, "Bottom", "a", "main", 19),
+            row(5, "Old", "y", "main", 17),
+          ],
+        }),
+    });
+    await screen.findByText("Alone");
+    expect(titlesInOrder()).toEqual(["Alone", "Bottom", "Middle", "Top", "Old"]);
+    const joins = () =>
+      screen.getAllByRole("listitem").map((item) => item.getAttribute("data-stack-join"));
+    expect(joins()).toEqual([null, "next", "both", "previous", null]);
+    expect(screen.getByRole("button", { name: /Middle/ })).toHaveAccessibleName(
+      /b → a\. Layer 2 of 3 of a stack, on #1\./,
+    );
+
+    await openMenu(user, "Sort pull requests");
+    await user.click(await screen.findByRole("menuitemradio", { name: "Least recently updated" }));
+    expect(titlesInOrder()).toEqual(["Old", "Bottom", "Middle", "Top", "Alone"]);
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await user.click(
+      within(screen.getByRole("group", { name: "Narrow by status" })).getByRole("button", {
+        name: /^Open/,
+      }),
+    );
+    expect(titlesInOrder()).toEqual(["Old", "Bottom", "Top", "Alone"]);
+    // No line is drawn over the hidden layer, and the top is still the third.
+    expect(joins()).toEqual([null, null, null, null]);
+    expect(screen.getByRole("button", { name: /Top/ })).toHaveTextContent("3 of 3");
+  });
+
   it("orders the list by when each pull request was opened, with an unknown opening time last", async () => {
     const user = userEvent.setup();
     renderWorkspace({

@@ -15,12 +15,18 @@ import type {
   CodeProjectPullRequestMergeMethod,
   CodeProjectPullRequestMergeOutcome,
   CodeProjectPullRequestMergeWhenReadyCommand,
+  CodeProjectPullRequestQuery,
+  CodeProjectPullRequestRow,
+  CodeProjectPullRequestStackMergeCommand,
+  CodeProjectPullRequestStackMergeOutcome,
   CodeProjectPullRequestSwitchOutcome,
   CodeProjectPullRequestSwitchTarget,
   CodeProjectPullRequestSwitchesView,
+  CodeProjectPullRequestView,
   CodePullRequestLineNotesSource,
   CodeThreadId,
 } from "@octant/contracts";
+import { derivePullRequestStacks } from "@octant/domain/pull-request-stack-policy";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CodeLineNotesSendResult } from "../code/CodeLineNotes";
 import type { CodeThreadRestOutcome } from "../code/useCodeController";
@@ -45,6 +51,13 @@ export interface DockProjectPullRequestReviewToolProps {
     method: CodeProjectPullRequestMergeMethod,
     headSha: string,
   ) => Promise<CodeProjectPullRequestMergeOutcome | OwnerUnlockNotGiven>;
+  /** The cached snapshot the stack is read from; it asks the forge for nothing. */
+  readonly loadPullRequests?: (
+    query: CodeProjectPullRequestQuery,
+  ) => Promise<CodeProjectPullRequestView>;
+  readonly mergeStack?: (
+    command: CodeProjectPullRequestStackMergeCommand,
+  ) => Promise<CodeProjectPullRequestStackMergeOutcome | OwnerUnlockNotGiven>;
   readonly loadActionContext?: (
     query: CodeProjectPullRequestActionContextQuery,
   ) => Promise<CodeProjectPullRequestActionContext>;
@@ -86,9 +99,33 @@ type DetailState =
       readonly view?: CodeProjectPullRequestDetailView;
     };
 
+/**
+ * The stack the snapshot puts this pull request in, while its own fresh reading
+ * still agrees: a layer that landed, or was pointed at another base since the
+ * snapshot, is shown alone rather than in a stack it left.
+ */
+function stackOf(
+  rows: ReadonlyArray<CodeProjectPullRequestRow>,
+  query: CodeProjectPullRequestDetailQuery,
+  detail: CodeProjectPullRequestDetailObserved,
+): ReadonlyArray<CodeProjectPullRequestRow> | undefined {
+  if (detail.pullRequestState !== "open" && detail.pullRequestState !== "draft") return undefined;
+  const repository = `${query.repositoryOwner}/${query.repositoryName}`.toLowerCase();
+  const isThis = (row: CodeProjectPullRequestRow) =>
+    row.number === query.number &&
+    String(row.projectId) === String(query.projectId) &&
+    `${row.repositoryOwner}/${row.repositoryName}`.toLowerCase() === repository;
+  const stack = derivePullRequestStacks(rows).find((layers) => layers.some(isThis));
+  const row = stack?.find(isThis);
+  return row?.baseBranch === detail.baseBranch && row.headBranch === detail.headBranch
+    ? stack
+    : undefined;
+}
+
 export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestReviewToolProps) {
   const [workspace, setWorkspace] = useState<DetailState>({ status: "loading" });
   const [switches, setSwitches] = useState<CodeProjectPullRequestSwitchesView>();
+  const [snapshot, setSnapshot] = useState<CodeProjectPullRequestView>();
   const refreshRef = useRef(props.refresh);
   const loadSwitchesRef = useRef(props.loadSwitches);
   useEffect(() => {
@@ -147,6 +184,28 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
     props.query.repositoryName,
     props.query.repositoryOwner,
   ]);
+
+  // Read again whenever the detail is, so the stack follows a refresh.
+  const loadPullRequestsRef = useRef(props.loadPullRequests);
+  useEffect(() => {
+    loadPullRequestsRef.current = props.loadPullRequests;
+  });
+  const detailView = workspace.status === "ready" ? workspace.view : undefined;
+  useEffect(() => {
+    const load = loadPullRequestsRef.current;
+    if (load === undefined || detailView === undefined) return;
+    let active = true;
+    load({ version: 1 }).then(
+      (view) => {
+        if (active) setSnapshot(view);
+      },
+      // Without the snapshot the pull request reads alone, as it did.
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [detailView]);
 
   async function applySwitch(
     run: () => Promise<CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven>,
@@ -291,6 +350,9 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
     );
   }
 
+  const layers = stackOf(snapshot?.rows ?? [], props.query, view.detail);
+  const mergeStack = props.mergeStack;
+
   return (
     <>
       {workspace.status === "error" ? (
@@ -313,6 +375,50 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
             })}
         {...(props.layout === undefined ? {} : { layout: props.layout })}
         {...(props.updatedAt === undefined ? {} : { updatedAt: props.updatedAt })}
+        {...(layers === undefined
+          ? {}
+          : {
+              stack: {
+                layers,
+                partial: snapshot?.pullRequestsTruncated === true,
+                readLayer: (layer: CodeProjectPullRequestRow) =>
+                  props.refresh({
+                    projectId,
+                    repositoryOwner: layer.repositoryOwner,
+                    repositoryName: layer.repositoryName,
+                    number: layer.number,
+                  }),
+                ...(mergeStack === undefined
+                  ? {}
+                  : {
+                      // The Confirm stack merge click is the person's
+                      // confirmation of these heads and the branch they land
+                      // on; the host checks both.
+                      onMergeStack: (
+                        method: CodeProjectPullRequestMergeMethod,
+                        reviewed: {
+                          readonly layers: ReadonlyArray<{
+                            readonly number: number;
+                            readonly headSha: string;
+                          }>;
+                          readonly destination: string;
+                        },
+                      ) =>
+                        mergeStack({
+                          projectId,
+                          repositoryOwner,
+                          repositoryName,
+                          method,
+                          confirmed: true,
+                          baseBranch: reviewed.destination,
+                          items: reviewed.layers.map(({ number: layer, headSha }) => ({
+                            number: layer,
+                            headSha,
+                          })),
+                        }),
+                    }),
+              },
+            })}
         {...(props.onUnlinkFromThread === undefined
           ? {}
           : { onUnlinkFromThread: props.onUnlinkFromThread })}

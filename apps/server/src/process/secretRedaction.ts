@@ -1,7 +1,7 @@
 import {
+  isHoldableSecretValue,
   redactSecrets,
   redactSecretsInValue,
-  SECRET_REDACTION,
 } from "@octant/domain/secret-guard-policy";
 
 /**
@@ -29,22 +29,6 @@ export function noteIssuedSecret(value: string): void {
  * Counted, since two threads may hold the same value.
  */
 const held = new Map<string, number>();
-
-/** Below this a value occurs in too much ordinary text to replace. */
-const MINIMUM_HELD_LENGTH = 8;
-/** Shorter than that, only a value no ordinary word or number looks like. */
-const MINIMUM_MIXED_LENGTH = 6;
-
-/**
- * Whether a value can be replaced wherever it occurs: long enough, or short
- * and mixed, and not part of the replacement, which every later pass would
- * grow again.
- */
-export function isHoldableSecretValue(value: string): boolean {
-  if (SECRET_REDACTION.includes(value.trim())) return false;
-  if (value.length >= MINIMUM_HELD_LENGTH) return true;
-  return value.length >= MINIMUM_MIXED_LENGTH && !/^(?:\p{L}+|\p{N}+)$/u.test(value);
-}
 
 /**
  * Redacts a value, and the forms a command most often prints it in, until the

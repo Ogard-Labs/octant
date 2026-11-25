@@ -1938,9 +1938,9 @@ routine; while it is on, a running page of that Canvas may ask the host to
 fetch public addresses for it through the host's filtering proxy, which
 refuses loopback, private ranges, link-local addresses and the host's own
 listeners, and nothing else about its sandbox changes
-([Allow network](#allow-network); maintainer decision, 2026-11-12). Not built
-yet: a paired device is not offered the switch, and today only a local window
-sets it. Declared
+([Allow network](#allow-network); maintainer decision, 2026-11-12). A browser
+the host's own person paired offers the switch; the phone does not yet.
+Declared
 images are resolved under the version's provenance and written in as `data:`
 images: every image once, and a repeated reference only while the page's
 images stay within the design's 5 MiB as base64, after which it draws a
@@ -2330,8 +2330,9 @@ handler once the policy was removed; and a `fetch` from a fresh frame reached
 nothing. Not measured: the packaged macOS app.
 
 **Where it works today.** In a browser on the host's own machine and in the
-desktop app. A paired device's browser is not offered the switch and its pages
-are served without a token; a Nightly client window does not run prototypes.
+desktop app. A browser the host's own person paired offers the switch, which
+changes what pages on the host may reach; its own pages are served without a
+token, and its shell runs no prototype yet. A Nightly client window does not run prototypes.
 
 Rationale: a looser page policy (`connect-src https:`) was rejected because a
 browser would then connect from the person's machine, with its address, to

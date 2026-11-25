@@ -26,6 +26,7 @@ import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
 import { BrowserApprovalCard } from "../surfaces/BrowserApprovalCard";
 import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard";
+import { ThreadSecretCards } from "../surfaces/ThreadSecretCard";
 import { ServiceOfferCard } from "../surfaces/ServiceOfferCard";
 import { ThreadVideoClips } from "../surfaces/ThreadVideoClips";
 import { WorkRequestCards } from "../surfaces/WorkRequestCards";
@@ -606,6 +607,16 @@ export function ThreadScreen(props: ThreadScreenProps) {
                   threadId={selected.threadId}
                   transport={transport}
                   watchingOnly={watchingOnly}
+                />
+              )}
+              {offlineDemo ||
+              transport === undefined ||
+              !standing.actsAsHostPerson ||
+              selected.mode === "chat" ? null : (
+                <ThreadSecretCards
+                  key={`secrets:${selected.hostId}:${selected.threadId}`}
+                  threadId={selected.threadId}
+                  transport={transport}
                 />
               )}
               {offlineDemo || transport === undefined ? null : (

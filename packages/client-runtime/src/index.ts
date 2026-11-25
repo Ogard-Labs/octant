@@ -123,6 +123,7 @@ export * from "./mobileWorkClient";
 export * from "./mobileProjectToolsClient";
 export * from "./mobileExtensionToolApprovalClient";
 export * from "./mobileBrowserApprovalClient";
+export * from "./mobileThreadSecretsClient";
 export * from "./mobileAgentProposalClient";
 export * from "./mobileConnectorSignInClient";
 export * from "./zenClient";

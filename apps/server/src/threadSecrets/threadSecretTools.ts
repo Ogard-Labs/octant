@@ -70,6 +70,12 @@ export function threadSecretOperations(options: {
       const decoded = decodeThreadSecretRequestInput(input);
       if (Either.isLeft(decoded)) return invalid;
       if (options.planning()) return replyRefused("plan", "Plan takes no secrets.");
+      // Nobody is asked for what nothing could use.
+      if ((decoded.right.delivery ?? "handle") === "handle" && !service.hasConsumer())
+        return replyRefused(
+          "unavailable",
+          "Nothing here can use a handle. Ask again with delivery file, and use run-with-secret.",
+        );
       const result = await service.request(caller, decoded.right, signalOf(signal));
       return requested(result);
     },

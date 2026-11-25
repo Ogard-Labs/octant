@@ -48,7 +48,11 @@ import {
   createCodexProvider,
   createOpenCodeProvider,
   changeOutsideHarnessEndpointConfiguration,
+  changeOutsideVideoConfiguration,
   createOutsideHarnessEndpointProvider,
+  createOutsideVideoProvider,
+  isMediaProfileDriverKind,
+  isVideoProfileDriverKind,
   rebindOutsideProviderDriver,
   isOutsideDriverQuarantined,
   quarantineOutsideProviderDriver,
@@ -2832,6 +2836,97 @@ describe("provider instance policy", () => {
     expect(() => removeProvider(provider(), { activeSessionCount: 1 })).toThrow(
       "Stop active sessions before removing this provider.",
     );
+  });
+});
+
+describe("outside video profile policy", () => {
+  const createdAt = "2026-11-25T12:00:00.000Z" as UtcTimestamp;
+  const changedAt = "2026-11-25T13:00:00.000Z" as UtcTimestamp;
+  const driver = {
+    extensionId: "00000000-0000-4000-8000-000000000941",
+    packageId: "00000000-0000-4000-8000-000000000942",
+    componentId: "video",
+    version: "0.1.0",
+    digest: `sha256:${"c".repeat(64)}`,
+  } as const;
+  const model = decodeProviderModelId("example-video-1");
+  const create = (configuration: Record<string, unknown> = {}) =>
+    createOutsideVideoProvider({
+      id: decodeProviderInstanceId("00000000-0000-4000-8000-000000000943"),
+      displayName: " Team video ",
+      configuration: {
+        kind: "outside-video",
+        driver,
+        baseUrl: "https://video.example.test/v1",
+        key: { header: "authorization", scheme: "Bearer" },
+        modelAllowlist: [model],
+        defaultModel: model,
+        ...configuration,
+      } as never,
+      existingInstances: [],
+      expectedVersion: 0 as AggregateVersion,
+      createdAt,
+    });
+
+  it("adds the profile off, bound to the exact package, as a video profile that starts no turn", () => {
+    const instance = create();
+    expect(decodeProviderInstance(instance)).toEqual(instance);
+    expect(instance).toMatchObject({
+      displayName: "Team video",
+      driverKind: "outside-video",
+      enabled: false,
+      configuration: { driver, baseUrl: "https://video.example.test/v1/" },
+    });
+    expect(isVideoProfileDriverKind(instance.driverKind)).toBe(true);
+    expect(isMediaProfileDriverKind(instance.driverKind)).toBe(true);
+  });
+
+  it("refuses an insecure address, a keyless address off loopback, and an unlisted default", () => {
+    expect(() => create({ baseUrl: "http://video.example.test/" })).toThrow(ProviderPolicyRejected);
+    expect(() => create({ key: undefined })).toThrow(
+      "Unauthenticated providers must use a loopback endpoint.",
+    );
+    expect(() => create({ defaultModel: "another" })).toThrow(
+      "The default video model must be one of the listed models.",
+    );
+  });
+
+  it("keeps the driver it was added with when its address changes", () => {
+    const instance = create();
+    expect(
+      changeOutsideVideoConfiguration(
+        instance,
+        { ...instance.configuration, baseUrl: "https://other.example.test/" },
+        changedAt,
+      ).configuration,
+    ).toMatchObject({ driver, baseUrl: "https://other.example.test/" });
+    expect(() =>
+      changeOutsideVideoConfiguration(
+        instance,
+        {
+          ...instance.configuration,
+          driver: { ...driver, digest: `sha256:${"d".repeat(64)}` },
+        } as never,
+        changedAt,
+      ),
+    ).toThrow(ProviderPolicyRejected);
+  });
+
+  it("moves to a newly trusted digest and leaves a crash hold of the old one behind", () => {
+    const held = quarantineOutsideProviderDriver(create(), changedAt);
+    const digest = `sha256:${"d".repeat(64)}`;
+    const moved = rebindOutsideProviderDriver(
+      held,
+      { ...driver, version: "0.2.0", digest } as never,
+      changedAt,
+    );
+    expect(moved.driverKind).toBe("outside-video");
+    expect(moved.driverQuarantine).toBeUndefined();
+    expect(moved.configuration).toMatchObject({
+      kind: "outside-video",
+      driver: { digest },
+      modelAllowlist: [model],
+    });
   });
 });
 
