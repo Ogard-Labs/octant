@@ -206,6 +206,21 @@ describe("useThreadMentions", () => {
     await waitFor(() => expect(screen.getByLabelText("chips")).toHaveTextContent(""));
   });
 
+  it("brings a chip back when its text comes back, as an undo or a paste does", async () => {
+    const user = userEvent.setup();
+    render(<Harness client={stubClient()} initialDraft="#[Release notes] ok" />);
+    await user.click(screen.getByRole("button", { name: "pick" }));
+
+    await user.clear(screen.getByLabelText("draft"));
+    await waitFor(() => expect(screen.getByLabelText("chips")).toHaveTextContent(""));
+    await user.click(screen.getByLabelText("draft"));
+    await user.paste("again #[Release notes]");
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("chips")).toHaveTextContent("Release notes|Launch|ok"),
+    );
+  });
+
   it("does not add the same thread twice", async () => {
     const user = userEvent.setup();
     render(<Harness client={stubClient()} initialDraft="#[Release notes]" />);

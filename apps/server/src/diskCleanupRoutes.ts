@@ -36,7 +36,8 @@ const PATHS = new Set([
 
 const REFUSALS: Record<HostWorktreeRefusalReason, string> = {
   malformed: "That worktree request is not valid.",
-  unauthorized: "Only a window on this computer can see or remove its worktrees and build data.",
+  unauthorized:
+    "Only you can see or remove this computer's worktrees and build data, from a window on it or a device you paired.",
   "not-found": "That worktree is already gone.",
   "main-worktree": "That is the repository's own checkout, not a worktree.",
   bare: "That is a bare repository, not a worktree.",

@@ -56,8 +56,8 @@ import {
 } from "../transcript/turnActivity";
 import { useToolCallRecordsReader } from "../transcript/toolCallRecordsReader";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
-import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
+import { SentMessageText } from "../transcript/SentMessageText";
 import { followSelectionWithin } from "../transcript/selectionOwner";
 import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
 import { SideTaskReportCards } from "../agents/SideTaskReportCards";
@@ -671,6 +671,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                       <MessageBody
                         content={userContent}
                         missing="Message content is unavailable."
+                        threadMentionIds={turn.threadMentionIds}
                       />
                       {attachmentList}
                     </div>
@@ -1465,11 +1466,12 @@ function SupportCorrelationControl({ correlationId }: { readonly correlationId: 
 function MessageBody(props: {
   readonly content: ChatContentBody | undefined;
   readonly missing: string;
+  readonly threadMentionIds?: ReadonlyArray<string> | undefined;
 }) {
   if (props.content === undefined) {
     return <OctantAlert tone="warning">{props.missing}</OctantAlert>;
   }
-  return <TrackerReferenceText asParagraph text={props.content.body} />;
+  return <SentMessageText text={props.content.body} threadMentionIds={props.threadMentionIds} />;
 }
 
 function CitationList(props: { readonly citations: ChatThreadView["citations"] }) {

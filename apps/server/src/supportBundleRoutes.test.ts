@@ -3,13 +3,18 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { AGENT_ACCESS_ORIGIN, createRemoteDevicePrincipal } from "./clientPrincipal";
 import { Journal } from "./persistence/journal";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { openSqlite } from "./persistence/sqlitePort";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
-import { createSupportBundleRouteHandler } from "./supportBundleRoutes";
+import {
+  createLoopbackSupportBundleRouteHandler,
+  createSupportBundleRouteHandler,
+  createSupportBundleSaveRouteHandler,
+} from "./supportBundleRoutes";
+import { categorizeSupportBundleDestination } from "@octant/domain";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const NOW = "2026-10-31T10:00:00.000Z";
@@ -25,7 +30,7 @@ afterEach(() => {
   }
 });
 
-function setup() {
+function setup(options: { readonly whileGathering?: () => void } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "octant-support-bundle-routes-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "octant.sqlite3"));
@@ -40,7 +45,7 @@ function setup() {
   const windowAuthorityStore = new WindowAuthorityStore();
   windowAuthorityStore.register({ windowId: windowId as never, capability, now: nowMs });
   let built = 0;
-  const handler = createSupportBundleRouteHandler({
+  const dependencies = {
     windowAuthorityStore,
     desktopBridgeSecret: BRIDGE_SECRET,
     now: () => nowMs,
@@ -52,6 +57,10 @@ function setup() {
         octantVersion: "0.9.0-test",
         clock: () => NOW,
         providers: () => ({ instances: [], observed: [] }),
+        readCrashRecords: async () => {
+          options.whileGathering?.();
+          return [];
+        },
         codeSettings: () => undefined,
         codeThreadPolicies: () => [],
         platformCapabilities: [],
@@ -72,8 +81,20 @@ function setup() {
         }),
       };
     },
-  });
-  return { handler, connection, directory, windowAuthorityStore, builds: () => built };
+  };
+  // The loopback chain is the host's own composition of the two.
+  const deviceRoutes = createSupportBundleRouteHandler(dependencies);
+  const saveRoutes = createSupportBundleSaveRouteHandler(dependencies);
+  const handler = createLoopbackSupportBundleRouteHandler(dependencies);
+  return {
+    handler,
+    deviceRoutes,
+    saveRoutes,
+    connection,
+    directory,
+    windowAuthorityStore,
+    builds: () => built,
+  };
 }
 
 function call(
@@ -141,6 +162,25 @@ describe("support bundle routes", () => {
     expect(JSON.parse(row.payload).receipt.destinationCategory).toBe("desktop");
   });
 
+  it("still serves `octant diagnostics export` on the loopback chain: the list, then the files under the category it names for its target", async () => {
+    const { handler, connection } = setup();
+    const listing = await handler(
+      call("/api/diagnostics/bundle/preview", { method: "GET", capability }),
+    );
+    expect(listing?.status).toBe(200);
+    const target = join(tmpdir(), "support", "bundle.zip");
+    const category = categorizeSupportBundleDestination(target, "/Users/someone-else");
+    const exported = await handler(
+      call("/api/diagnostics/bundle", { capability, body: { destinationCategory: category } }),
+    );
+    expect(exported?.status).toBe(200);
+    expect(((await exported!.json()) as { kind: string }).kind).toBe("exported");
+    const row = connection
+      .prepare("SELECT payload_json AS payload FROM event_journal WHERE event_name = ?")
+      .get("diagnostics.support-bundle-exported@1") as { payload: string };
+    expect(JSON.parse(row.payload).receipt.destinationCategory).toBe(category);
+  });
+
   it("refuses a destination that is a path rather than a category", async () => {
     const { handler, builds } = setup();
     const response = await handler(
@@ -153,22 +193,90 @@ describe("support bundle routes", () => {
     expect(builds()).toBe(0);
   });
 
-  it("refuses a paired device even on loopback", async () => {
-    const { handler, builds } = setup();
-    const request = call("/api/diagnostics/bundle/preview", { method: "GET" });
-    bindPrincipalRouteContext(request, {
-      principal: createRemoteDevicePrincipal({
-        hostId: "11111111-1111-4111-8111-111111111111" as never,
-        deviceId: "22222222-2222-4222-8222-222222222222" as never,
-        credentialGeneration: 1,
-        origin: "https://octant.example",
-        protocolVersion: 1,
-        capabilityDigest: "b".repeat(64),
-        sessionId: "33333333-3333-4333-8333-333333333333" as never,
-      }),
-      scopeId: windowId as never,
+  const deviceId = "22222222-2222-4222-8222-222222222222";
+  const devicePrincipal = (
+    extra: Partial<Parameters<typeof createRemoteDevicePrincipal>[0]> = {},
+  ) =>
+    createRemoteDevicePrincipal({
+      hostId: "11111111-1111-4111-8111-111111111111" as never,
+      deviceId: deviceId as never,
+      credentialGeneration: 1,
+      origin: "https://octant.example",
+      protocolVersion: 1,
+      capabilityDigest: "b".repeat(64),
+      sessionId: "33333333-3333-4333-8333-333333333333" as never,
+      ...extra,
     });
-    expect((await handler(request))?.status).toBe(403);
+  const asDevice = (request: Request, principal: ReturnType<typeof devicePrincipal>) => {
+    bindPrincipalRouteContext(request, { principal, scopeId: windowId as never });
+    return request;
+  };
+
+  it("hands a device the host's own person paired the list and the files, journaled as that device", async () => {
+    const { deviceRoutes, connection } = setup();
+    const person = devicePrincipal({ admittedBy: "host-person" });
+    const preview = await deviceRoutes(
+      asDevice(call("/api/diagnostics/bundle/preview", { method: "GET" }), person),
+    );
+    expect(preview?.status).toBe(200);
+    const response = await deviceRoutes(
+      asDevice(
+        call("/api/diagnostics/bundle", { body: { destinationCategory: "browser-download" } }),
+        person,
+      ),
+    );
+    expect(response?.status).toBe(200);
+    expect(((await response!.json()) as { kind: string }).kind).toBe("exported");
+    const row = connection
+      .prepare("SELECT actor_json AS actor FROM event_journal WHERE event_name = ?")
+      .get("diagnostics.support-bundle-exported@1") as { actor: string };
+    expect(JSON.parse(row.actor)).toMatchObject({ kind: "remote-device", deviceId });
+  });
+
+  it("journals no hand-over when the device's request ended while the bundle was built", async () => {
+    const ended = new AbortController();
+    // The gateway ends a device's open requests when its level is lowered.
+    const { deviceRoutes, connection } = setup({ whileGathering: () => ended.abort() });
+    const request = new Request(
+      call("/api/diagnostics/bundle", { body: { destinationCategory: "browser-download" } }),
+      { signal: ended.signal },
+    );
+    const answered = await deviceRoutes(
+      asDevice(request, devicePrincipal({ admittedBy: "host-person" })),
+    );
+    expect(answered?.status).toBe(422);
+    expect(
+      connection
+        .prepare("SELECT count(*) AS count FROM event_journal WHERE event_name = ?")
+        .get("diagnostics.support-bundle-exported@1"),
+    ).toMatchObject({ count: 0 });
+  });
+
+  it("refuses a restricted device, a hub-introduced device, a device below Full and an agent grant", async () => {
+    const { deviceRoutes, builds } = setup();
+    const refused = [
+      devicePrincipal(),
+      devicePrincipal({ admittedBy: "hub-roster" }),
+      devicePrincipal({ admittedBy: "host-person", accessLevel: "approve-and-steer" }),
+      devicePrincipal({ origin: AGENT_ACCESS_ORIGIN }),
+    ];
+    for (const principal of refused) {
+      for (const request of [
+        call("/api/diagnostics/bundle/preview", { method: "GET" }),
+        call("/api/diagnostics/bundle", { body: { destinationCategory: "browser-download" } }),
+      ]) {
+        expect((await deviceRoutes(asDevice(request, principal)))?.status).toBe(403);
+      }
+    }
+    expect(builds()).toBe(0);
+  });
+
+  it("never serves the desktop save to the routes a device reaches", async () => {
+    const { deviceRoutes, builds } = setup();
+    const request = call("/api/diagnostics/bundle/save", { body: { absolutePath: "/tmp/x.zip" } });
+    expect(
+      await deviceRoutes(asDevice(request, devicePrincipal({ admittedBy: "host-person" }))),
+    ).toBeUndefined();
     expect(builds()).toBe(0);
   });
 

@@ -478,6 +478,10 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         query={query}
         refresh={(command) => codeClient.refreshProjectPullRequestDetail(command)}
         updatedAt={row.updatedAt}
+        loadPullRequests={(next) => codeClient.queryProjectPullRequests(next)}
+        {...(codeClient.mergeProjectPullRequestStack === undefined
+          ? {}
+          : { mergeStack: codeClient.mergeProjectPullRequestStack.bind(codeClient) })}
         {...(codeClient.queryProjectPullRequestSwitches === undefined
           ? {}
           : { loadSwitches: codeClient.queryProjectPullRequestSwitches.bind(codeClient) })}

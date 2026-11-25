@@ -13,7 +13,12 @@ import {
 } from "../process/sandboxRuntimePolicy";
 import { holdSecretValue } from "../process/secretRedaction";
 import { ThreadSecretService, type ThreadSecretCaller } from "../threadSecrets/threadSecretService";
-import { codeThreadSecrets, workThreadSecrets, type ThreadSecretTurnFacts } from "./threadSecrets";
+import {
+  codeThreadSecrets,
+  threadSecretReach,
+  workThreadSecrets,
+  type ThreadSecretTurnFacts,
+} from "./threadSecrets";
 
 const now = "2026-11-24T12:00:00.000Z";
 const windowId = decodeWindowId("92000000-0000-4000-8000-000000000001");
@@ -205,4 +210,58 @@ describe("thread secrets in a Code or Work turn", () => {
       expect(await confined({})).toBe(true);
     },
   );
+});
+
+describe("where a secret's card may be answered", () => {
+  const window = decodeWindowId("92000000-0000-4000-8000-00000000000a");
+  const otherWindow = decodeWindowId("92000000-0000-4000-8000-00000000000b");
+  const phone = decodeWindowId("92000000-0000-4000-8000-00000000000c");
+  const narrowed = decodeWindowId("92000000-0000-4000-8000-00000000000f");
+  const restricted = decodeWindowId("92000000-0000-4000-8000-00000000000d");
+  const unknown = decodeWindowId("92000000-0000-4000-8000-00000000000e");
+  const reach = (canAccessWindow = true) =>
+    threadSecretReach({
+      isLocalWindow: (id) => id === window || id === otherWindow,
+      isPairedDeviceScope: (id) => id === phone || id === narrowed || id === restricted,
+      isRestrictedDeviceScope: (id) => id === restricted,
+      deviceAccessLevel: (id) => (id === narrowed ? "approve-and-steer" : "full"),
+      browserAuthority: { canAccessWindow: () => canAccessWindow } as never,
+    });
+  const raised = (by: typeof window) => ({
+    windowId: String(by),
+    threadId: base.id,
+    mode: "code" as const,
+  });
+  const at = (scope: typeof window, paired: boolean) => ({ scopeId: String(scope), paired });
+
+  it("offers the tool to a window here and to a device the person paired at Full, and to no other", () => {
+    const { scopeCurrent } = reach();
+    expect([window, phone, narrowed, restricted, unknown].map(scopeCurrent)).toEqual([
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("lets a device the person paired below Full answer no card", () => {
+    const { mayAnswer } = reach();
+    expect(mayAnswer(at(narrowed, true), raised(window))).toBe(false);
+    expect(mayAnswer(at(narrowed, true), raised(phone))).toBe(false);
+  });
+
+  it("lets the person's phone answer any of the host's cards, and a restricted or unknown device none", () => {
+    const { mayAnswer } = reach();
+    expect(mayAnswer(at(phone, true), raised(window))).toBe(true);
+    expect(mayAnswer(at(restricted, true), raised(window))).toBe(false);
+    expect(mayAnswer(at(unknown, true), raised(window))).toBe(false);
+    expect(mayAnswer(at(phone, false), raised(window))).toBe(false);
+  });
+
+  it("lets a window answer a phone's card for a thread it can drive, and never another window's", () => {
+    expect(reach().mayAnswer(at(window, false), raised(phone))).toBe(true);
+    expect(reach(false).mayAnswer(at(window, false), raised(phone))).toBe(false);
+    expect(reach().mayAnswer(at(window, false), raised(otherWindow))).toBe(false);
+  });
 });

@@ -2,6 +2,7 @@ import type {
   ThreadBoardPullRequestIdentity,
   ThreadBoardPullRequestSummaries as ThreadBoardPullRequestSummaryList,
 } from "@octant/contracts";
+import { stackPlaceSentence } from "../code/stackPlace";
 import { GitPullRequest } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 
@@ -78,6 +79,7 @@ export function describePullRequestSummary(
         ? "GitHub unavailable"
         : undefined,
     summary.readyToMerge ? "Ready to merge" : undefined,
+    summary.stack === undefined ? undefined : stackPlaceSentence(summary.stack),
     relationshipLabel(summary.relationship),
   ].filter((value): value is string => value !== undefined);
 }

@@ -99,7 +99,7 @@ export function createSpendCeilingRouteHandler(dependencies: SpendCeilingRouteDe
     if (url.pathname === COMMAND_PATH && request.method === "POST") {
       if (!principalActsAsHostPerson(principal)) {
         return failure(
-          "Setting a spend ceiling is a host owner command. Open this host locally to raise or clear it.",
+          "Only you can raise or clear a spend ceiling, from a window on this computer or a device you paired.",
           403,
           origin,
         );

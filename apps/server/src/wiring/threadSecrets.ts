@@ -1,11 +1,25 @@
 import { randomUUID } from "node:crypto";
-import type { CodeThread, WindowId, WorkThread } from "@octant/contracts";
+import {
+  decodeBrowserThreadId,
+  decodeCodeThreadId,
+  decodeWindowId,
+  decodeWorkThreadId,
+  type CodeThread,
+  type WindowId,
+  type WorkThread,
+} from "@octant/contracts";
 import type { CredentialRequestReference } from "@octant/contracts/credential-request";
 import type { CredentialRequestResolution } from "@octant/contracts/credential-request";
 import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
+import type {
+  SecretStoreBrowseResult,
+  SecretStoreBrowseStep,
+} from "@octant/contracts/secret-stores";
 import { isToolAllowedByAllowlist } from "@octant/domain";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
+import type { DeviceAccessLevel } from "@octant/contracts/remote-access";
 import type { NativeHarnessComposition } from "../harness/nativeHarnessComposition";
+import { readDeviceAccessLevel } from "../persistence/remoteAccessProjection";
 import { turnHoldsSandboxPolicy } from "../process/sandboxRuntimePolicy";
 import { holdSecretValue } from "../process/secretRedaction";
 import { makeThreadSecretCredentialBrokerClient } from "../providers/credentialBrokerClient";
@@ -14,10 +28,14 @@ import {
   threadSecretMemoryJournal,
 } from "../threadSecrets/rememberedThreadSecrets";
 import { createThreadSecretFiles } from "../threadSecrets/threadSecretFiles";
-import { createThreadSecretRoutes } from "../threadSecrets/threadSecretRoutes";
+import {
+  createPairedThreadSecretRoutes,
+  createThreadSecretRoutes,
+} from "../threadSecrets/threadSecretRoutes";
 import {
   ThreadSecretService,
   type ThreadSecretAuthority,
+  type ThreadSecretServiceOptions,
 } from "../threadSecrets/threadSecretService";
 import { threadSecretsJournal } from "../threadSecrets/threadSecretsJournal";
 import {
@@ -25,29 +43,43 @@ import {
   type ThreadSecretOperations,
 } from "../threadSecrets/threadSecretTools";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { ServerStart } from "./serverShape";
 
 export type ThreadSecretsDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     AuthorityWiring,
+    | "isPairedDeviceScope"
+    | "isPairedDeviceSessionCurrent"
+    | "isRestrictedDeviceScope"
     | "machineChangeFeed"
     | "onThreadArchived"
     | "onWaitingAsk"
     | "onWindowRevoked"
     | "processAuthorityTime"
     | "windowAuthorityStore"
-  > & {
+  > &
+  Pick<FoundationsWiring, "browserAuthority" | "workThreadProjection"> & {
     readonly readReference?:
       | ((
           reference: CredentialRequestReference,
           signal: AbortSignal,
         ) => Promise<CredentialRequestResolution>)
       | undefined;
+    readonly browse?:
+      | ((step: SecretStoreBrowseStep, signal: AbortSignal) => Promise<SecretStoreBrowseResult>)
+      | undefined;
   };
 
 /** The secrets people give threads: one service for the host, and its private routes. */
 export function wireThreadSecrets(deps: ThreadSecretsDependencies) {
   const { options, persistence } = deps;
+  const reach = threadSecretReach({
+    ...deps,
+    deviceAccessLevel: (id) => readDeviceAccessLevel(persistence.connection, String(id)),
+    isLocalWindow: (id) =>
+      deps.windowAuthorityStore.listWindowIds().some((window) => String(window) === String(id)),
+  });
   const now = () => new Date().toISOString();
   const journal = {
     journal: persistence.journal,
@@ -76,6 +108,11 @@ export function wireThreadSecrets(deps: ThreadSecretsDependencies) {
     hold: holdSecretValue,
     ...(remembered === undefined ? {} : { remembered }),
     ...(deps.readReference === undefined ? {} : { readReference: deps.readReference }),
+    ...(deps.browse === undefined ? {} : { browse: deps.browse }),
+    threadTitle: (threadId) =>
+      persistence.readCodeThread(decodeCodeThreadId(threadId))?.title ??
+      deps.workThreadProjection.read(decodeWorkThreadId(threadId))?.title,
+    mayAnswer: reach.mayAnswer,
     onAsked: deps.onWaitingAsk,
     onChanged: () => deps.machineChangeFeed.publish(["tool-approvals"]),
   });
@@ -84,6 +121,48 @@ export function wireThreadSecrets(deps: ThreadSecretsDependencies) {
   return {
     threadSecrets,
     threadSecretRoutes: createThreadSecretRoutes(threadSecrets, deps.windowAuthorityStore),
+    pairedThreadSecretRoutes: createPairedThreadSecretRoutes(threadSecrets, {
+      sessionCurrent: deps.isPairedDeviceSessionCurrent,
+    }),
+    threadSecretScopeCurrent: reach.scopeCurrent,
+  };
+}
+
+/** Where the person can be when a card waits: at a window here, or at a device they paired at Full. */
+export function threadSecretReach(
+  deps: Pick<AuthorityWiring, "isPairedDeviceScope" | "isRestrictedDeviceScope"> &
+    Pick<FoundationsWiring, "browserAuthority"> & {
+      readonly isLocalWindow: (windowId: WindowId) => boolean;
+      readonly deviceAccessLevel: (scopeId: WindowId) => DeviceAccessLevel;
+    },
+): {
+  readonly mayAnswer: NonNullable<ThreadSecretServiceOptions["mayAnswer"]>;
+  readonly scopeCurrent: (scopeId: WindowId) => boolean;
+} {
+  const scopeCurrent = (scopeId: WindowId): boolean =>
+    deps.isLocalWindow(scopeId) ||
+    (deps.isPairedDeviceScope(scopeId) &&
+      !deps.isRestrictedDeviceScope(scopeId) &&
+      // A device the person holds below Full is theirs, and still not them.
+      deps.deviceAccessLevel(scopeId) === "full");
+  return {
+    scopeCurrent,
+    mayAnswer: (reader, raised) => {
+      const scopeId = decodeWindowId(reader.scopeId);
+      if (!scopeCurrent(scopeId)) return false;
+      if (reader.paired) return !deps.isLocalWindow(scopeId);
+      // A window answers a paired device's card, never another window's, and
+      // only for a thread it could drive itself.
+      return (
+        deps.isLocalWindow(scopeId) &&
+        deps.isPairedDeviceScope(decodeWindowId(raised.windowId)) &&
+        deps.browserAuthority.canAccessWindow(
+          scopeId,
+          decodeBrowserThreadId(raised.threadId),
+          raised.mode,
+        )
+      );
+    },
   };
 }
 

@@ -1,11 +1,7 @@
-import type {
-  AgentRunCenterSummary,
-  CodeBoardCard,
-  OctantMode,
-  ThreadLiveStep,
-} from "@octant/contracts";
+import type { AgentRunCenterSummary, CodeBoardCard, OctantMode } from "@octant/contracts";
 import { isAgentRunActiveStatus } from "@octant/domain";
 import { isLoopbackHostname } from "../shell/capabilityTransport";
+import { liveStepLine } from "./liveStepLine";
 import type { ChatThreadNavigationItem, ThreadProviderIdentity } from "../shell/navigationModel";
 import { isRunningThread } from "../shell/runningNow";
 
@@ -111,23 +107,6 @@ export function threadProvider(
     thread.provider ??
     (thread.providerInstanceId === undefined ? undefined : providers.get(thread.providerInstanceId))
   );
-}
-
-/** A running turn's own step, in words a row can show. */
-export function liveStepLine(step: ThreadLiveStep): {
-  readonly text: string;
-  readonly kind: "tool" | "status";
-} {
-  if (step.kind === "waiting") {
-    return {
-      kind: "status",
-      text: step.reason === "approval" ? "Waiting for approval" : "Waiting for your answer",
-    };
-  }
-  return {
-    kind: "tool",
-    text: step.argument === undefined ? step.tool : `${step.tool}: ${step.argument}`,
-  };
 }
 
 function agentLine(run: AgentRunCenterSummary): string {

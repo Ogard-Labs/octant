@@ -429,6 +429,7 @@ describe("ServerBrowserAuthorityResolver", () => {
         { device_id: String(revokedDeviceId), state: "revoked" },
       ],
       approvedByPerson: (deviceId) => deviceId === String(personPairedDeviceId),
+      hasFullAccess: () => true,
     });
     const resolver = new ServerBrowserAuthorityResolver({
       hostId,

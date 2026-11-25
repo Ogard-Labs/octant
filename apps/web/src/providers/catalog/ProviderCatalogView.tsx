@@ -3,6 +3,7 @@ import type {
   DiscoverySnapshot,
   OutsideHarnessEndpointProviderConfiguration,
   OutsideImageProviderConfiguration,
+  OutsideVideoProviderConfiguration,
   OutsideProviderDriverListing,
   ProviderDriverKind,
   ProviderInstance,
@@ -88,7 +89,10 @@ export interface ProviderCatalogViewProps {
   /** Adds a provider from an outside driver; the host creates it off. */
   readonly onAddOutsideProvider?: (
     displayName: string,
-    configuration: OutsideHarnessEndpointProviderConfiguration | OutsideImageProviderConfiguration,
+    configuration:
+      | OutsideHarnessEndpointProviderConfiguration
+      | OutsideImageProviderConfiguration
+      | OutsideVideoProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
 }
@@ -126,7 +130,8 @@ function bindsOutsideDriver(
 ): boolean {
   if (
     instance.driverKind !== "outside-harness-endpoint" &&
-    instance.driverKind !== "outside-image"
+    instance.driverKind !== "outside-image" &&
+    instance.driverKind !== "outside-video"
   ) {
     return false;
   }
@@ -179,7 +184,11 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
     // providers bound to its own package and digest.
     const outside = (outsideDrivers ?? []).map((listing): CatalogEntry => {
       const driverKind =
-        listing.imageGeneration === undefined ? "outside-harness-endpoint" : "outside-image";
+        listing.imageGeneration !== undefined
+          ? "outside-image"
+          : listing.videoGeneration !== undefined
+            ? "outside-video"
+            : "outside-harness-endpoint";
       return {
         key: outsideEntryKey(listing),
         driverKind,
@@ -329,6 +338,7 @@ function CatalogState(props: { readonly status: ProviderCatalogStatus }) {
 
 function kindLabel(state: ProviderCatalogState, driverKind: ProviderDriverKind): string {
   if (driverKind === "outside-image") return "Image generation";
+  if (driverKind === "outside-video") return "Video generation";
   return state.setup === "endpoint" ? "Model endpoint" : "Agent runtime";
 }
 
@@ -805,9 +815,11 @@ function CurrentStep(
         const listing = entry.source.listing;
         const onAdd = props.onAddOutsideProvider;
         sentence =
-          listing.imageGeneration === undefined
-            ? `Add a provider from ${name}: give the address of the service it speaks to and the models to offer. It is added off; its process starts only when you check the connection.`
-            : `Add an image provider from ${name}: give the address of the service it speaks to and choose its models. It is added off; once on, its process starts at the first image, which asks you first and is held to your spend limits like any other.`;
+          listing.imageGeneration !== undefined
+            ? `Add an image provider from ${name}: give the address of the service it speaks to and choose its models. It is added off; once on, its process starts at the first image, which asks you first and is held to your spend limits like any other.`
+            : listing.videoGeneration !== undefined
+              ? `Add a video provider from ${name}: give the address of the service it speaks to and choose its models. It is added off; once on, its process starts at the first clip, which asks you first and is held to your spend limits like any other.`
+              : `Add a provider from ${name}: give the address of the service it speaks to and the models to offer. It is added off; its process starts only when you check the connection.`;
         action =
           onAdd === undefined ? null : (
             <OutsideDriverAddForm

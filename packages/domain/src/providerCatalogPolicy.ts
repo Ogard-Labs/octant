@@ -155,12 +155,13 @@ function runtimeSandbox(driverKind: ProviderDriverKind): ProviderCatalogSandbox 
 }
 
 export function providerCatalogSetupKind(driverKind: ProviderDriverKind): ProviderCatalogSetupKind {
-  // An outside driver, of either family, is added with its address, never a
+  // An outside driver, of any family, is added with its address, never a
   // runtime found on the host.
   return requiresManualEndpoint(driverKind) ||
     driverKind === "ollama" ||
     driverKind === "outside-harness-endpoint" ||
-    driverKind === "outside-image"
+    driverKind === "outside-image" ||
+    driverKind === "outside-video"
     ? "endpoint"
     : "runtime";
 }
@@ -216,7 +217,8 @@ function takesNoCredential(instance: ProviderInstance): boolean {
   if (instance.driverKind === "ollama") return true;
   if (
     instance.driverKind === "outside-harness-endpoint" ||
-    instance.driverKind === "outside-image"
+    instance.driverKind === "outside-image" ||
+    instance.driverKind === "outside-video"
   ) {
     return instance.configuration.key === undefined;
   }
@@ -315,10 +317,12 @@ function nextStep(
   const instanceId = instance.id;
   if (!available) return { kind: "unavailable" };
   if (!instance.enabled) return { kind: "turn-on", instanceId };
-  // An outside image profile has nothing to probe: its driver starts at the
-  // first image, which the host admits and asks about then, so once it is on
-  // there is no connection step to offer.
-  if (instance.driverKind === "outside-image") return { kind: "done", instanceId };
+  // An outside media profile has nothing to probe: its driver starts at the
+  // first image or clip, which the host admits and asks about then, so once it
+  // is on there is no connection step to offer.
+  if (instance.driverKind === "outside-image" || instance.driverKind === "outside-video") {
+    return { kind: "done", instanceId };
+  }
   if (state.ready === "yes") return { kind: "done", instanceId };
   if (state.authenticated === "no") return { kind: "sign-in", instanceId };
   const readiness = observed?.readiness;

@@ -14,6 +14,8 @@ import {
   type WaitingAskKind,
 } from "@octant/contracts/pending-requests";
 
+import type { WaitingThreadSecret } from "./threadSecrets/threadSecretService";
+
 /** What a row names an ask's thread by, as the reader's own lists hold it. */
 export interface WaitingAskThread {
   readonly mode: OctantMode;
@@ -33,6 +35,7 @@ export interface WaitingAskViews {
   readonly memoryProposals: ReadonlyArray<ProjectMemoryProposal>;
   readonly routineProposals: ReadonlyArray<RoutineAgentRequest>;
   readonly serviceOffers: ReadonlyArray<ServiceOffer>;
+  readonly threadSecrets: ReadonlyArray<WaitingThreadSecret>;
 }
 
 interface AskWords {
@@ -67,6 +70,7 @@ export function waitingAsksFrom(
     ...views.memoryProposals.map(memoryProposalWords),
     ...views.routineProposals.map(routineProposalWords),
     ...views.serviceOffers.map(serviceOfferWords),
+    ...views.threadSecrets.map(threadSecretWords),
   ];
   const asks: WaitingAsk[] = [];
   for (const ask of words) {
@@ -236,6 +240,21 @@ function routineProposalWords(request: RoutineAgentRequest): AskWords {
     return { ...base, text: `${verb} the routine ${request.displayName}?` };
   }
   return { ...base, text: `Create the routine ${request.displayName}?` };
+}
+
+/**
+ * A secret's card is a tool's ask like any other, so it takes that kind: a
+ * client built before it would refuse a list that held a kind of its own.
+ */
+function threadSecretWords(waiting: WaitingThreadSecret): AskWords {
+  return {
+    kind: "tool-approval",
+    askId: waiting.askId,
+    threadId: waiting.threadId,
+    requestedAt: waiting.requestedAt,
+    text: `Enter ${waiting.kind === "account-password" ? "an account password" : "a secret"}: ${waiting.label}`,
+    detail: waiting.reason,
+  };
 }
 
 function serviceOfferWords(offer: ServiceOffer): AskWords {

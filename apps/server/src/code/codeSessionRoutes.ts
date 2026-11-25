@@ -7,9 +7,11 @@ import {
   type CodeNativeSessionId,
   type CodeNativeSessions,
   type CodeThreadId,
+  type EventActor,
   type WindowId,
 } from "@octant/contracts";
-import { authenticateRouteWindowId } from "../principalRouteContext";
+import { authenticateRoutePrincipal, authenticateRouteWindowId } from "../principalRouteContext";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { LiveTasks } from "../providers/outlivingSessions";
@@ -45,6 +47,7 @@ export interface CodeSessionRouteDependencies {
           windowId: WindowId,
           threadId: CodeThreadId,
           nativeSessionId: CodeNativeSessionId,
+          actor: EventActor,
         ) => Promise<AdoptCodeNativeSessionResult>;
       }
     | undefined;
@@ -146,12 +149,15 @@ async function nativeSessionResponse(
   const adopt = request.method === "POST" && url.pathname === ADOPT_NATIVE_SESSION_PATH;
   if (!read && !adopt) return response({ error: "Session method is not supported." }, 405, origin);
   let windowId: WindowId;
+  let actor: EventActor;
   try {
-    windowId = authenticateRouteWindowId({
+    const context = authenticateRoutePrincipal({
       request,
       store: deps.windowAuthorityStore,
       now: (deps.now ?? Date.now)(),
     });
+    windowId = context.scopeId;
+    actor = eventActorForPrincipal(context.principal);
   } catch (error) {
     return response(
       { error: "Session request is unauthorized." },
@@ -185,7 +191,7 @@ async function nativeSessionResponse(
     return response({ error: "Session command is invalid." }, 400, origin);
   }
   return response(
-    await sessions.adopt(windowId, command.threadId, command.nativeSessionId),
+    await sessions.adopt(windowId, command.threadId, command.nativeSessionId, actor),
     200,
     origin,
   );

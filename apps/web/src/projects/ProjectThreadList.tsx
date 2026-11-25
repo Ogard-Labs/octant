@@ -17,9 +17,7 @@ import {
   Archive,
   BellRing,
   ChevronRight,
-  CircleAlert,
   CircleCheck,
-  LoaderCircle,
   Check,
   Clock,
   GitBranch,
@@ -30,21 +28,13 @@ import {
   RotateCcw,
   Undo2,
 } from "../ui/icons";
-import type { IconComponent } from "../ui/icons";
 import { resolveSnoozePresets } from "@octant/domain";
 import {
-  sidebarThreadStatusInput,
   threadRowActivity,
   threadRowStatusInput,
   type ChatThreadNavigationItem,
-  type ThreadRowActivity,
 } from "../shell/navigationModel";
-import {
-  resolveSidebarThreadStatus,
-  sidebarThreadStatuses,
-  SIDEBAR_THREAD_STATUS_LABEL,
-} from "@octant/domain/sidebar-thread-status-policy";
-import type { SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
+import { SIDEBAR_THREAD_STATUS_LABEL } from "@octant/domain/sidebar-thread-status-policy";
 import {
   morePullRequestsThanTheFirst,
   THREAD_ROW_MENU_INLINE_PULL_REQUESTS,
@@ -63,11 +53,8 @@ import {
 import { readFoldedCoordinators, writeFoldedCoordinators } from "../shell/activityViewModel";
 import { useMinuteClock } from "./minuteClock";
 import { FollowUpLineageContext } from "../followUps/followUpLineage";
-import {
-  SidebarThreadRowContent,
-  sidebarThreadRowLabel,
-  type SidebarThreadRowState,
-} from "./SidebarThreadRowContent";
+import { SidebarThreadRowContent, sidebarThreadRowLabel } from "./SidebarThreadRowContent";
+import { NO_THREAD_ROW_STATE, sidebarThreadStatusIcon, threadRowState } from "./threadRowState";
 import { ThreadRenameField } from "./ThreadRenameField";
 import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
 import {
@@ -120,75 +107,6 @@ export function ProjectThreadStatus(props: ProjectThreadStatusProps) {
       )}
     </div>
   );
-}
-
-/**
- * The mark one status wears. `unread` and `idle` have none: the stylesheet
- * draws unread as a dot and idle as nothing at all, so an icon here would be a
- * second, louder reading of the same state.
- */
-export function sidebarThreadStatusIcon(status: SidebarThreadStatus): IconComponent | undefined {
-  switch (status) {
-    case "working":
-      return LoaderCircle;
-    case "attention":
-      return CircleAlert;
-    case "woke":
-      return Clock;
-    default:
-      return undefined;
-  }
-}
-
-export interface ThreadRowStateReading {
-  readonly state?: SidebarThreadRowState;
-  readonly unread: boolean;
-  /** Every state the thread is in, for the row's one accessible name. */
-  readonly label?: string;
-}
-
-/** A row that hides its status says nothing of it. */
-export const NO_THREAD_ROW_STATE: ThreadRowStateReading = { unread: false };
-
-/**
- * What a row says of its thread's state, in words: how long a turn has run
- * ("Working 14m"), that the thread waits on the person ("Needs you"), or that a
- * snooze ended. A thread with none of those has no state to say, and its row
- * ends with how long ago it moved; new activity alone is a dot beside that
- * time. One state is shown, the strongest, as in the status policy.
- */
-export function threadRowState(props: {
-  readonly activity: ThreadRowActivity;
-  readonly unread: boolean;
-  readonly woke: boolean;
-  readonly followUp?: boolean;
-  readonly startedAt?: string | undefined;
-}): ThreadRowStateReading {
-  const facts = sidebarThreadStatusInput(props);
-  const status = resolveSidebarThreadStatus(facts);
-  if (status === undefined) return { unread: false };
-  const label = [
-    ...sidebarThreadStatuses(facts).map((each) => SIDEBAR_THREAD_STATUS_LABEL[each]),
-    ...(props.followUp === true ? ["Follow-up"] : []),
-  ].join(", ");
-  if (status === "unread") return { unread: true, label };
-  const elapsed =
-    status === "working" && props.startedAt !== undefined
-      ? threadRowShortAge(props.startedAt)
-      : undefined;
-  const text =
-    status === "working"
-      ? elapsed === undefined || elapsed === "now"
-        ? "Working"
-        : `Working ${elapsed}`
-      : status === "attention"
-        ? "Needs you"
-        : "Snooze ended";
-  return {
-    state: { status, text, icon: sidebarThreadStatusIcon(status) },
-    unread: false,
-    label,
-  };
 }
 
 /**
@@ -615,10 +533,10 @@ export interface ProjectThreadRowsProps {
    */
   readonly hideCheckoutFact?: boolean;
   /**
-   * Threads whose rows take one more step in. A worker's row already sits one
-   * step in, so a thread it started takes another.
+   * Whether a thread's row takes one more step in. A worker's row already sits
+   * one step in, so a thread it started takes another.
    */
-  readonly indentedThreadIds?: ReadonlySet<string>;
+  readonly indents?: ((thread: ChatThreadNavigationItem) => boolean) | undefined;
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
   /**
    * Rows shown before the list folds behind Show more. Absent shows every
@@ -944,7 +862,7 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
   }, [threads.length, virtualized]);
 
   const row = (thread: ChatThreadNavigationItem) => {
-    if (props.indentedThreadIds?.has(thread.threadId) !== true) return threadRow(thread);
+    if (props.indents?.(thread) !== true) return threadRow(thread);
     // Set here, not in the sidebar's stylesheet: that loads before first paint
     // and has no room under its budget.
     return (
@@ -1231,12 +1149,12 @@ function CoordinatorThreadSection(props: {
   }
   const rows = (
     threads: ReadonlyArray<ChatThreadNavigationItem>,
-    indentedThreadIds?: ReadonlySet<string>,
+    indents?: (thread: ChatThreadNavigationItem) => boolean,
   ) => (
     <ProjectThreadRows
       {...(props.actions === undefined ? {} : { actions: props.actions })}
       {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
-      {...(indentedThreadIds === undefined ? {} : { indentedThreadIds })}
+      indents={indents}
       {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
       {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
       {...(props.projectNameForThread === undefined
@@ -1303,17 +1221,8 @@ function CoordinatorThreadSection(props: {
             </div>
             {open && hasRows ? (
               <div className="project-coordinator__workers" id={listId}>
-                {childRows.length === 0 ? null : rows(childRows)}
-                {workerRows.length === 0
-                  ? null
-                  : rows(
-                      workerRows,
-                      new Set(
-                        workerRows
-                          .filter((thread) => !group.workers.includes(thread))
-                          .map((thread) => thread.threadId),
-                      ),
-                    )}
+                {rows(childRows)}
+                {rows(workerRows, (thread) => !group.workers.includes(thread))}
               </div>
             ) : null}
           </div>

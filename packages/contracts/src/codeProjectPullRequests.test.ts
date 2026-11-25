@@ -533,11 +533,19 @@ describe("pull-request action contracts", () => {
     for (const outcome of [
       { status: "merged", merged: [1, 2] },
       { status: "refused", reason: "not-a-chain" },
+      { status: "refused", reason: "base-changed" },
       {
         status: "stopped",
         merged: [1],
         stoppedAt: 2,
         outcome: { status: "refused", reason: "checks-not-passing" },
+      },
+      {
+        status: "stopped",
+        merged: [1],
+        stoppedAt: 2,
+        retargetedTo: "main",
+        outcome: { status: "not-landed" },
       },
     ]) {
       expect(decodeCodeProjectPullRequestStackMergeOutcome(outcome)).toEqual(outcome);

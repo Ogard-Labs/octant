@@ -983,7 +983,8 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             return failureResponse(
               {
                 category: "unauthorized",
-                message: "Coordinators and wake switches are set at a window on this computer.",
+                message:
+                  "Only you, from a window or a device you paired, can set coordinators and wake switches.",
               },
               403,
               origin,

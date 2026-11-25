@@ -33,7 +33,7 @@ import {
 } from "./providers";
 import { ThreadWorkingDirectory, ProjectWorkingFolderId } from "./workingDirectory";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
-import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
+import { ThreadMentionIds } from "./threadMentionIdentity";
 import { ThreadTaskProgressList } from "./threadTasks";
 import { ThreadToolStep, ThreadToolStepList } from "./threadToolStepList";
 import { ThreadWindowBoundsFields } from "./threadWindow";
@@ -346,6 +346,8 @@ export const WorkTurnState = Schema.Struct({
   steeredMessages: Schema.optional(ThreadMessagesSteeredIntoTurn),
   capabilities: WorkTurnCapabilityFacts,
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
+  /** The threads this turn's message mentioned; absent when it mentioned none. */
+  threadMentionIds: Schema.optional(ThreadMentionIds),
   version: AggregateVersion,
   acceptedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -381,9 +383,7 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
    * message.
    */
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
-  threadMentionIds: Schema.optional(
-    Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
-  ),
+  threadMentionIds: Schema.optional(ThreadMentionIds),
   /**
    * `@file` mentions this turn points at. Relative paths only: the host
    * classifies each path against the thread's bound Project root and reads
@@ -607,6 +607,8 @@ export const WorkTurnAccepted = Schema.Struct({
   handoff: Schema.optional(WorkTurnHandoff),
   carriedFrom: Schema.optional(WorkTurnCarriedFrom),
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
+  /** The threads this turn's message mentioned; absent when it mentioned none. */
+  threadMentionIds: Schema.optional(ThreadMentionIds),
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
   attachments: Schema.optional(
     Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),

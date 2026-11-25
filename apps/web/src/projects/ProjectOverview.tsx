@@ -1,3 +1,4 @@
+import { AGENT_MEMORY_WRITES_COPY, OWN_TOOLCHAIN_COPY } from "./projectAuthorityCopy";
 import "../styles/code-overview.css";
 import "../styles/project-overview.css";
 import type { KeyProviderDriverKinds, PermissionMode } from "@octant/contracts/providers";
@@ -1049,10 +1050,7 @@ function AgentMemoryWritesSetting(props: {
         <div>
           <h3>Agent memory writes</h3>
           {/* The limits stay on screen: they are what make the switch safe. */}
-          <p id={descriptionId}>
-            Below Full access, agents write memory without asking. Each entry is marked as written
-            by an agent. Full access never asks. Plan never writes.
-          </p>
+          <p id={descriptionId}>{AGENT_MEMORY_WRITES_COPY}</p>
         </div>
         <OctantSwitch
           checked={props.enabled}
@@ -1133,12 +1131,7 @@ function OwnToolchainSetting(props: {
       <div className="project-overview-inspector__row">
         <div>
           <h3>Language services toolchain</h3>
-          <p id={descriptionId}>
-            Type errors and go to definition use the TypeScript this Project installs instead of the
-            one bundled with Octant. That runs code from the repository, so each checkout asks you
-            to allow it first, it never runs in Plan, and it can write the checkout and reach the
-            hosts this Project's network rules allow. Only this computer can change this.
-          </p>
+          <p id={descriptionId}>{OWN_TOOLCHAIN_COPY}</p>
         </div>
         <OctantSwitch
           checked={props.enabled}

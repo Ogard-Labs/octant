@@ -1,0 +1,37 @@
+/* A chip in the prompt's text: a subagent model, or a mentioned thread. It is a
+   single unit for the caret and for deletion. Loaded by each chip's own chunk,
+   so the initial load carries none of it. */
+.composer-chip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  margin: 0 1px;
+  vertical-align: baseline;
+  user-select: all;
+}
+.composer-chip__button {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-2);
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface-warm);
+  box-shadow: inset 0 0 0 1px var(--oct-border);
+  color: var(--oct-fg);
+  font: inherit;
+  line-height: calc(var(--oct-composer-line, 20px) - 2px);
+  cursor: pointer;
+}
+.composer-chip__button[data-unavailable="true"] {
+  box-shadow: inset 0 0 0 1px var(--oct-danger);
+}
+.composer-chip__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-chip__meta {
+  color: var(--oct-meta);
+}

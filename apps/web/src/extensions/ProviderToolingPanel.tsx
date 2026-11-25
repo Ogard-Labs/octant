@@ -215,14 +215,18 @@ export function ProviderToolingPanel(props: ProviderToolingPanelProps) {
   }
   if (props.accounts.length === 0 || account === undefined) {
     return (
-      <SettingsSection
-        description="Add MCP servers and plugins to a Claude Code or Codex account through that program's own commands."
-        title="Claude and Codex"
-      >
-        <SettingsState kind="empty">
-          No Claude Code or Codex account is set up yet. Add one in Settings › Providers first.
-        </SettingsState>
-      </SettingsSection>
+      <>
+        <SettingsSection
+          description="Add MCP servers and plugins to a Claude Code or Codex account through that program's own commands."
+          title="Claude and Codex"
+        >
+          <SettingsState kind="empty">
+            No Claude Code or Codex account is set up yet. Add one in Settings › Providers first.
+          </SettingsState>
+        </SettingsSection>
+        {/* Plan's server marks cover other providers too, so they need no account here. */}
+        <McpPlanReadOnlySection client={client} />
+      </>
     );
   }
 

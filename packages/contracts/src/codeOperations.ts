@@ -77,7 +77,7 @@ import {
   ProviderResumeCursor,
 } from "./providers";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
-import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
+import { ThreadMentionIds } from "./threadMentionIdentity";
 import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
 import {
@@ -1130,9 +1130,7 @@ const StartProviderTurn = Schema.Struct({
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
   pullRequestLineNotesSource: Schema.optional(CodePullRequestLineNotesSource),
-  threadMentionIds: Schema.optional(
-    Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
-  ),
+  threadMentionIds: Schema.optional(ThreadMentionIds),
   /**
    * `@file` mentions this turn points at. Relative paths only: the host
    * classifies each path against the thread's bound checkout and reads the
@@ -1889,6 +1887,8 @@ const ConversationTurnStartedEvent = Schema.Struct({
   /** The host's actual checkout binding; legacy turns did not record it. */
   checkoutId: Schema.optional(CodeCheckoutId),
   reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
+  /** The threads this turn's message mentioned; absent when it mentioned none. */
+  threadMentionIds: Schema.optional(ThreadMentionIds),
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   /** Images sent with this turn. Absent when the turn attached none. */
   attachments: Schema.optional(
@@ -2678,6 +2678,8 @@ export const CodeConversationTurn = Schema.Struct({
   prompt: CodeEvidenceReference,
   checkoutId: Schema.optional(CodeCheckoutId),
   reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
+  /** The threads this turn's message mentioned; absent when it mentioned none. */
+  threadMentionIds: Schema.optional(ThreadMentionIds),
   reviewPreview: Schema.optional(CodeTurnReviewPreview),
   /** Images the user attached to this turn. Absent when it attached none. */
   attachments: Schema.optional(

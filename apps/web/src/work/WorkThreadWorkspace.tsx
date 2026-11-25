@@ -163,11 +163,7 @@ import {
 } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
-import {
-  ThreadMentionChips,
-  ThreadMentionTypeahead,
-  useThreadMentionTypeahead,
-} from "../chat/ThreadMentionPicker";
+import { ThreadMentionTypeahead, useThreadMentionTypeahead } from "../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../chat/useThreadMentions";
 import { useComposerThreadDropRegistration } from "../chat/composerThreadDrop";
 import { clipboardHasImage } from "../chat/composerImagePaste";
@@ -196,6 +192,7 @@ import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
+import { SentMessageText } from "../transcript/SentMessageText";
 import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
 import { SideTaskReportCards } from "../agents/SideTaskReportCards";
 import { SteeredMessages } from "../messageQueue/SteeredMessages";
@@ -206,7 +203,7 @@ import {
   waitUntilDocumentVisible,
 } from "../polling/documentVisibility";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
-import { ThreadSecrets } from "../credentials/threadSecretSurfaces";
+import { ActiveThreadSecrets, ThreadSecrets } from "../credentials/threadSecretSurfaces";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ImportedTerminalHistory } from "../terminalSessions/ImportedTerminalHistory";
 import {
@@ -3047,7 +3044,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         onAction={(value) => onTurnAction(value, "user", row.turn)}
                       >
                         <div className="bubble">
-                          <TrackerReferenceText asParagraph text={row.entry.text} />
+                          <SentMessageText
+                            text={row.entry.text}
+                            threadMentionIds={row.turn.threadMentionIds}
+                          />
                         </div>
                         {row.at === undefined ? null : (
                           <TurnTime at={row.at} copyValue={row.entry.text} />
@@ -3521,6 +3521,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       providerInstanceId={thread.providerInstanceId}
                       threadId={String(thread.id)}
                     />
+                    <ActiveThreadSecrets
+                      threadId={String(props.threadId)}
+                      serverUrl={props.serverUrl}
+                      windowCapability={props.windowCapability}
+                    />
                     <ContinueElsewhere
                       mode="work"
                       threadId={String(thread.id)}
@@ -3610,18 +3615,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   ))}
                 </ul>
               ) : null}
-              <ThreadMentionChips
-                chips={threadMentions.chips}
-                onRemove={(mentionedThreadId) =>
-                  threadMentions.composer?.onRemoveChip(mentionedThreadId)
-                }
-              />
               <TrackerReferenceComposerHints draft={prompt} />
               <WorkImageAttachmentChips images={images} withMessage={false} />
             </>
           }
           input={
             <ComposerInput
+              inlineChips={mention.inlineChips}
               renderModelChip={atMenu.renderModelChip}
               aria-label="Work prompt"
               aria-autocomplete="list"

@@ -1,5 +1,6 @@
 import { CommandCredentialBindingsSettings } from "./CommandCredentialBindingsSettings";
 import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-client";
+import { createThreadSecretsClient } from "@octant/client-runtime/thread-secrets-client";
 import type {
   AwsCliKeyReference,
   SecretStoreCheckOutcome,
@@ -8,12 +9,13 @@ import type {
   SecretStoresResult,
   SecretStoreToolState,
 } from "@octant/contracts/secret-stores";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { GoogleCliAccountSettings } from "./GoogleCliAccountSettings";
+import { ThreadSecretsSettings } from "./ThreadSecretsSettings";
 import { SettingRow, SettingsSection, SettingsState } from "./primitives";
 
 /** What each state of the tool means for the person, in plain words. */
@@ -50,6 +52,12 @@ export interface SecretStoresSettingsSectionProps {
  */
 export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionProps) {
   const { client } = props;
+  const threadSecretsHost = client?.threadSecretsHost;
+  const threadSecrets = useMemo(
+    () =>
+      threadSecretsHost === undefined ? undefined : createThreadSecretsClient(threadSecretsHost),
+    [threadSecretsHost],
+  );
   const [view, setView] = useState<Extract<SecretStoresResult, { kind: "secret-stores-view" }>>();
   const [problem, setProblem] = useState<string>();
   const [loadFailed, setLoadFailed] = useState(false);
@@ -406,6 +414,9 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
           </OctantConfirmDialog>
         )}
       </OctantDialogPresence>
+      {threadSecrets === undefined ? null : (
+        <ThreadSecretsSettings client={threadSecrets} focusedSetting={props.focusedSetting} />
+      )}
       <CommandCredentialBindingsSettings
         client={client.commandBindings}
         projectNames={props.projectNames ?? new Map()}

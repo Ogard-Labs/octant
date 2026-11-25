@@ -3281,6 +3281,9 @@ export class ChatService {
         ...(command.sideChatReturns === undefined
           ? {}
           : { sideChatReturns: command.sideChatReturns }),
+        ...(command.threadMentionIds === undefined
+          ? {}
+          : { threadMentionIds: command.threadMentionIds }),
         ...(attachmentIds !== undefined && attachmentIds.length > 0 ? { attachmentIds } : {}),
         ...(prepared.extensionSelections.length === 0
           ? {}
@@ -4002,6 +4005,9 @@ export class ChatService {
           ...(sourceTurn.submissionId === undefined
             ? {}
             : { submissionId: sourceTurn.submissionId }),
+          ...(sourceTurn.threadMentionIds === undefined
+            ? {}
+            : { threadMentionIds: sourceTurn.threadMentionIds }),
           attempts,
           createdAt: sourceTurn.createdAt,
         }),

@@ -351,6 +351,7 @@ describe("pending request route", () => {
             memoryProposals: [],
             routineProposals: [],
             serviceOffers: [],
+            threadSecrets: [],
           },
           (id) =>
             id === chatThreadId && chatThread?.lifecycle === "active"

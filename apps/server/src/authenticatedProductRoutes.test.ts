@@ -178,16 +178,18 @@ describe("authenticated product route dispatch", () => {
         }),
       ),
     ).toBeUndefined();
-    expect(
-      classifyProductAction(
-        new Request("https://octant.example/api/diagnostics/export", {
-          method: "POST",
-        }),
-      ),
-    ).toBe("diagnostics.export");
-    expect(
-      classifyProductAction(new Request("https://octant.example/api/diagnostics/export")),
-    ).toBeUndefined();
+    // Diagnostics have no action: a device the host's own person paired takes
+    // them as a window does and every other device session is denied.
+    for (const [path, method] of [
+      ["/api/diagnostics/export", "POST"],
+      ["/api/diagnostics/journal-growth", "GET"],
+      ["/api/diagnostics/bundle", "POST"],
+      ["/api/diagnostics/bundle/preview", "GET"],
+    ] as const) {
+      expect(
+        classifyProductAction(new Request(`https://octant.example${path}`, { method })),
+      ).toBeUndefined();
+    }
     expect(
       classifyProductAction(
         new Request("https://octant.example/api/threads/export", {
@@ -197,11 +199,17 @@ describe("authenticated product route dispatch", () => {
     ).toBe("project.overview.read");
   });
 
-  it("fails closed for a remote device attempting a diagnostics export before dispatch", async () => {
+  it("fails closed for a remote device attempting a diagnostics export or support bundle before dispatch", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const adapter = createAuthenticatedProductDispatch({ dispatch });
-    const response = await adapter(handoff("/api/diagnostics/export", "POST"));
-    expect(response?.status).toBe(403);
+    for (const [path, method] of [
+      ["/api/diagnostics/export", "POST"],
+      ["/api/diagnostics/journal-growth", "GET"],
+      ["/api/diagnostics/bundle", "POST"],
+      ["/api/diagnostics/bundle/preview", "GET"],
+    ] as const) {
+      expect((await adapter(handoff(path, method)))?.status).toBe(403);
+    }
     expect(dispatch).not.toHaveBeenCalled();
   });
 
@@ -224,10 +232,14 @@ describe("authenticated product route dispatch", () => {
     });
     const routes = [
       ["/api/diagnostics/export", "POST"],
+      ["/api/diagnostics/journal-growth", "GET"],
+      ["/api/diagnostics/bundle", "POST"],
+      ["/api/diagnostics/bundle/preview", "GET"],
       ["/api/providers/commands", "POST"],
       ["/api/code/project-terminals", "POST"],
       ["/api/context/commands", "POST"],
       ["/api/providers/credentials/set", "POST"],
+      ["/api/thread-secrets/paired", "POST"],
       ["/api/remote/devices/revoke", "POST"],
       ["/api/remote/pairing-requests/approve", "POST"],
       ["/api/host-control/lifecycle", "POST"],
@@ -242,6 +254,8 @@ describe("authenticated product route dispatch", () => {
       ["/api/replica-store/commands", "POST"],
       ["/api/replica-membership/commands", "POST"],
       ["/api/provider-tooling/list", "POST"],
+      ["/api/mcp-plan-read-only", "GET"],
+      ["/api/mcp-plan-read-only/commands", "POST"],
       ["/api/code-live-tasks", "GET"],
       ["/api/work-live-tasks", "GET"],
     ] as const;
@@ -272,9 +286,12 @@ describe("authenticated product route dispatch", () => {
 
     for (const [path, method] of [
       ["/api/diagnostics/export", "POST"],
+      ["/api/diagnostics/bundle", "POST"],
+      ["/api/diagnostics/bundle/preview", "GET"],
       ["/api/providers/commands", "POST"],
       ["/api/code/project-terminals", "POST"],
       ["/api/providers/credentials/set", "POST"],
+      ["/api/thread-secrets/paired", "POST"],
       ["/api/remote/devices/revoke", "POST"],
       ["/api/remote/pairing-requests/approve", "POST"],
       ["/api/host-control/lifecycle", "POST"],
@@ -291,6 +308,8 @@ describe("authenticated product route dispatch", () => {
       ["/api/replica-store/commands", "POST"],
       ["/api/replica-membership/commands", "POST"],
       ["/api/provider-tooling/list", "POST"],
+      ["/api/mcp-plan-read-only", "GET"],
+      ["/api/mcp-plan-read-only/commands", "POST"],
       ["/api/code-live-tasks", "GET"],
       ["/api/work-live-tasks", "GET"],
     ] as const) {

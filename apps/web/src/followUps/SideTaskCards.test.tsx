@@ -2,6 +2,8 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { SideTask } from "@octant/contracts";
+import { listsOf } from "../threadReferences/threadReferenceLists.test-support";
+import { ThreadReferencesContext } from "../threadReferences/ThreadReferences";
 import { SideTaskInline, SideTaskProvider } from "./SideTaskCards";
 
 const threadId = "00000000-0000-4000-8000-000000000020";
@@ -389,5 +391,46 @@ describe("SideTaskInline", () => {
     await act(async () => {});
 
     expect(sideTasks).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the started thread's card from its name on the receipt", async () => {
+    const full = {
+      sideTasks: vi.fn(async () => ({
+        threadId,
+        tasks: [
+          task({
+            status: "started",
+            startedThreadId: started.threadId as never,
+            startedWith: "fresh",
+          }),
+        ],
+      })),
+    };
+    render(
+      <ThreadReferencesContext.Provider
+        value={listsOf({
+          code: [
+            {
+              threadId: started.threadId,
+              title: "Fix stale install docs",
+              projectId: "project-1",
+              checkoutChip: { checkoutKind: "managed-worktree", label: "fix/install-docs" },
+            },
+          ],
+        })}
+      >
+        <SideTaskProvider client={full as never} onStarted={vi.fn()} threadId={threadId}>
+          <SideTaskInline last loadedTurnIds={new Set([turnId])} running={false} turnId={turnId} />
+        </SideTaskProvider>
+      </ThreadReferencesContext.Provider>,
+    );
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /^Thread: Fix stale install docs/ }),
+    );
+
+    const card = await screen.findByRole("dialog", { name: "Thread details" });
+    expect(card).toHaveTextContent("fix/install-docs");
+    expect(screen.getByRole("button", { name: "Open", hidden: true })).toBeInTheDocument();
   });
 });

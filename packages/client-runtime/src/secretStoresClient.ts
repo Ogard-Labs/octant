@@ -14,6 +14,8 @@ export interface SecretStoresClientOptions {
 
 export interface SecretStoresClient {
   readonly commandBindings?: CommandCredentialsClient;
+  /** This host, for the page that lists threads' secrets: its client loads with that page. */
+  readonly threadSecretsHost?: SecretStoresClientOptions;
   /** Which secret stores this host can link, and whether each is linked. */
   read(signal?: AbortSignal): Promise<SecretStoresResult>;
   /** Link or unlink a store, check an item reference, or point a provider's key at an item. */
@@ -73,6 +75,7 @@ export function createSecretStoresClient(options: SecretStoresClientOptions): Se
 
   return {
     commandBindings: createCommandCredentialsClient(options),
+    threadSecretsHost: options,
     async read(signal) {
       const body = await send(settingsUrl, {
         method: "GET",

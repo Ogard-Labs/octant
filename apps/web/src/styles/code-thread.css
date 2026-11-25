@@ -192,9 +192,8 @@
    `.thread-composer`, `.composer-row`, `.composer-notices`, as in Chat and
    Work); this block only pads the pieces the system does not know about. */
 
-/* Chips and attachments are frameless rows of the frame, so they take the
+/* Attachments are a frameless row of the frame, so they take the
    same gutter the system gives `.composer-chips`. */
-.code-thread-workspace__composer .thread-mention__chips,
 .code-thread-workspace__attachments {
   margin: 0;
   padding: var(--oct-space-3) var(--oct-composer-gutter) 0;
