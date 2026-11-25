@@ -491,14 +491,183 @@ function extractPayloadAddresses(
     return;
   }
   scanJsonStringLiterals(payload, add);
-  for (const match of payload.matchAll(/(?:^|\s)<(https?:\/\/[^\s"<>\\`{}^]+)>/g)) {
-    if (match[1] !== undefined) add(match[1]);
+  scanProseAddresses(payload, add, payloadComplete);
+}
+
+function isAsciiWhitespace(code: number): boolean {
+  return code === 32 || code === 9 || code === 10 || code === 13 || code === 12;
+}
+
+function isUrlForbiddenChar(code: number): boolean {
+  // `"`, `<`, `>`, `\`, `` ` ``, `{`, `}`, `^`
+  return (
+    code === 34 ||
+    code === 60 ||
+    code === 62 ||
+    code === 92 ||
+    code === 96 ||
+    code === 123 ||
+    code === 125 ||
+    code === 94
+  );
+}
+
+function skipToWhitespace(text: string, from: number): number {
+  let index = from;
+  while (index < text.length) {
+    const code = text.charCodeAt(index);
+    if (isAsciiWhitespace(code) || (code > 127 && /\s/.test(text[index] ?? ""))) break;
+    index += 1;
   }
-  const bare = payloadComplete
-    ? /(?:^|[\s(\[{])(https?:\/\/[^\s"<>\\`{}^)\]}]+)(?=$|[\s"<>`{}^)\]}])/g
-    : /(?:^|[\s(\[{])(https?:\/\/[^\s"<>\\`{}^)\]}]+)(?=[\s"<>`{}^)\]}])/g;
-  for (const match of payload.matchAll(bare)) {
-    if (match[1] !== undefined) add(match[1]);
+  return index;
+}
+
+function isValidProseUrlTerminator(
+  prev: string,
+  stopChar: string,
+  nextChar: string,
+  stoppedAtWhitespace: boolean,
+  complete: boolean,
+  openParens: number,
+  openBrackets: number,
+): boolean {
+  if (openParens !== 0 || openBrackets !== 0) return false;
+  if (prev === '"') return stopChar === '"' || stoppedAtWhitespace;
+  if (prev === "'") return stopChar === "'" || stoppedAtWhitespace;
+  if (prev === "`") return stopChar === "`" || stoppedAtWhitespace;
+  if (prev === "(") return stopChar === ")" || stoppedAtWhitespace;
+  if (prev === "[") return stopChar === "]" || stoppedAtWhitespace;
+  if (prev === "{") return stopChar === "}" || stoppedAtWhitespace;
+  if (stopChar === "") return complete;
+  if (stoppedAtWhitespace) return true;
+  if (stopChar === ")" || stopChar === "]" || stopChar === "}") {
+    return nextChar === "" || /[\s.,;:!?)\]}"']/.test(nextChar);
+  }
+  return false;
+}
+
+/**
+ * Linear, balanced-delimiter URL scanner for Markdown, prose, and plain-text
+ * payloads. Tracks nested `()` and `[]` so Markdown destinations such as
+ * `[View](https://cdn.example/a(1)/b.png)` authorize only the full URL and
+ * never an intermediate prefix ending before an inner `)` or `]`.
+ */
+function scanProseAddresses(
+  text: string,
+  add: (candidate: string) => void,
+  complete: boolean,
+): void {
+  let index = 0;
+  while (index < text.length) {
+    const httpIdx = text.indexOf("http://", index);
+    const httpsIdx = text.indexOf("https://", index);
+    const start =
+      httpIdx === -1 ? httpsIdx : httpsIdx === -1 ? httpIdx : Math.min(httpIdx, httpsIdx);
+    if (start === -1) break;
+    const schemeEnd = start + (start === httpsIdx ? 8 : 7);
+    const prev = start === 0 ? "" : (text[start - 1] ?? "");
+
+    if (prev === "<") {
+      const beforeAngle = start < 2 ? "" : (text[start - 2] ?? "");
+      if (beforeAngle === "" || /\s/.test(beforeAngle) || beforeAngle === "(") {
+        let end = schemeEnd;
+        while (end < text.length) {
+          const code = text.charCodeAt(end);
+          if (code === 62) break;
+          if (
+            isAsciiWhitespace(code) ||
+            (code > 127 && /\s/.test(text[end] ?? "")) ||
+            isUrlForbiddenChar(code)
+          ) {
+            break;
+          }
+          end += 1;
+        }
+        if (end > schemeEnd && end < text.length && text.charCodeAt(end) === 62) {
+          add(text.slice(start, end));
+          index = end + 1;
+          continue;
+        }
+        index = skipToWhitespace(text, end);
+        continue;
+      }
+      index = schemeEnd;
+      continue;
+    }
+
+    const validOpener =
+      prev === "" ||
+      /\s/.test(prev) ||
+      prev === "(" ||
+      prev === "[" ||
+      prev === "{" ||
+      prev === '"' ||
+      prev === "'" ||
+      prev === "`";
+    if (!validOpener) {
+      index = schemeEnd;
+      continue;
+    }
+
+    let end = schemeEnd;
+    let openParens = 0;
+    let openBrackets = 0;
+    while (end < text.length) {
+      const code = text.charCodeAt(end);
+      if (isAsciiWhitespace(code) || (code > 127 && /\s/.test(text[end] ?? ""))) break;
+      if (code === 40) {
+        openParens += 1;
+        end += 1;
+        continue;
+      }
+      if (code === 41) {
+        if (openParens > 0) {
+          openParens -= 1;
+          end += 1;
+          continue;
+        }
+        break;
+      }
+      if (code === 91) {
+        openBrackets += 1;
+        end += 1;
+        continue;
+      }
+      if (code === 93) {
+        if (openBrackets > 0) {
+          openBrackets -= 1;
+          end += 1;
+          continue;
+        }
+        break;
+      }
+      if (code === 39 && prev === "'") break;
+      if (isUrlForbiddenChar(code)) break;
+      end += 1;
+    }
+
+    const stopChar = end < text.length ? (text[end] ?? "") : "";
+    const nextChar = end + 1 < text.length ? (text[end + 1] ?? "") : "";
+    const stoppedAtWhitespace = stopChar !== "" && /\s/.test(stopChar);
+    if (
+      end > schemeEnd &&
+      isValidProseUrlTerminator(
+        prev,
+        stopChar,
+        nextChar,
+        stoppedAtWhitespace,
+        complete,
+        openParens,
+        openBrackets,
+      )
+    ) {
+      add(text.slice(start, end));
+      index = end < text.length ? end + 1 : end;
+    } else if (stopChar !== "" && !stoppedAtWhitespace && stopChar !== ")" && stopChar !== "]") {
+      index = skipToWhitespace(text, end + 1);
+    } else {
+      index = end < text.length ? end + 1 : end;
+    }
   }
 }
 
@@ -549,14 +718,7 @@ function collectJsonStringAddresses(text: string, add: (candidate: string) => vo
     if (!/["<>\\`{}^]/.test(text)) add(text);
     return;
   }
-  for (const match of text.matchAll(/(?:^|\s)<(https?:\/\/[^\s"<>\\`{}^]+)>/g)) {
-    if (match[1] !== undefined) add(match[1]);
-  }
-  for (const match of text.matchAll(
-    /(?:^|[\s"(\[{])(https?:\/\/[^\s"<>\\`{}^)\]}]+)(?=$|[\s"<>`{}^)\]}])/g,
-  )) {
-    if (match[1] !== undefined) add(match[1]);
-  }
+  scanProseAddresses(text, add, true);
 }
 
 function collectJsonAddresses(root: unknown, add: (candidate: string) => void): void {
