@@ -1,25 +1,28 @@
-import type {
-  ImageGenerationProfileView,
-  ServiceOffer,
-  ServiceOfferDecision,
+import {
+  decodeImageGenerationGenerateOffer,
+  decodeImageGenerationSaveOffer,
+  type ImageGenerationGenerateOffer,
+  type ImageGenerationSaveOffer,
 } from "@octant/contracts";
-import { imageOfferModelChoices } from "@octant/client-runtime/service-offer-client";
+import { imageOfferModelChoices } from "@octant/client-runtime/service-offer-choices";
 import { useId, useState } from "react";
 import { Image as ImageIcon, X } from "../ui/icons";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { strictOfferCard, type OfferCardProps } from "../offers/strictOfferCard";
 
-interface ImageOfferCardProps {
-  readonly offer: ServiceOffer;
-  readonly profiles: ReadonlyArray<ImageGenerationProfileView>;
-  readonly keptIn: "project" | "thread";
-  readonly busy: boolean;
-  readonly decide: (answer: ServiceOfferDecision) => void;
-}
+export const ImageGenerateOfferCard = strictOfferCard(
+  decodeImageGenerationGenerateOffer,
+  GenerateCard,
+);
+export const ImageSaveOfferCard = strictOfferCard(decodeImageGenerationSaveOffer, SaveCard);
 
-export function ImageSaveOfferCard({ offer: pending, busy, decide: answer }: ImageOfferCardProps) {
-  if (pending.kind !== "save") return null;
+function SaveCard({
+  offer: pending,
+  busy,
+  decide: answer,
+}: OfferCardProps<ImageGenerationSaveOffer>) {
   const decide = (decision: "save" | "cancel") => answer({ offerId: pending.offerId, decision });
   const iconSet = pending.fileCount;
   return (
@@ -81,12 +84,11 @@ export function ImageSaveOfferCard({ offer: pending, busy, decide: answer }: Ima
   );
 }
 
-export function ImageGenerateOfferCard(props: ImageOfferCardProps) {
+function GenerateCard(props: OfferCardProps<ImageGenerationGenerateOffer>) {
   const { offer: pending, busy } = props;
   const [selected, setSelected] = useState<string>();
   const [remember, setRemember] = useState(false);
   const rememberId = useId();
-  if (pending.kind !== "generate") return null;
   const references = pending.references;
   const choices = imageOfferModelChoices(
     props.profiles,

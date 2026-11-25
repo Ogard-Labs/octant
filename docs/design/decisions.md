@@ -158,7 +158,7 @@ The server decides every authority question, the event journal is the record, an
 - Startup verifies only journal rows after a disposable watermark (sequence plus a fingerprint of the exact server build, the registry's names and versions, and the schema head); the status inspection then checks only the rows after it and skips SQLite's integrity check; the first start of a new build, a source run, a migration, a suspicious tail, a refused start, or rewrite or delete of a journal row forces a full scan ([Architecture: Persistence](../architecture.md#persistence)).
 - Contracts are schema-only and domain code is pure; dependencies point inward and provider payloads stop at the adapter.
 - A provider's own program typed into in a terminal tab bypasses Octant's approvals and the journal, so it is offered only as a person-operated terminal whose activity the thread does not claim ([Provider terminals](#provider-terminals); maintainer decision, 2026-11-21, replacing the 2026-11-14 exclusion).
-- The host refuses unknown fields in everything it decodes; a client drops unknown fields in a host answer, except inside asks a person decides on, which stay strict.
+- The host refuses unknown fields in everything it decodes; a client drops unknown fields in a host answer, except inside asks a person decides on, which stay strict. Service offers list by envelope, and an offer's strict payload decode runs before its card shows or answers anything, so one refused or unknown offer does not hide a thread's others.
 
 Status: Built. Detail: [Architecture: Overview and principles](../architecture.md#overview-and-principles).
 

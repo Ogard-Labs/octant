@@ -1,4 +1,7 @@
-import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
+import {
+  createServiceOfferClient,
+  type ServiceOfferClient,
+} from "@octant/client-runtime/service-offer-client";
 import {
   decodeNarrationOffer,
   decodeTranscriptionOffer,
@@ -13,7 +16,7 @@ import type {
 import { decodeVideoGenerateOffer } from "@octant/contracts";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { ServiceOfferPrompt } from "./ServiceOfferPrompt";
 
 const scopeId = "cc000000-0000-4000-8000-000000000001" as ImageGenerationScopeId;
@@ -79,7 +82,158 @@ function renderPrompt(fake: ServiceOfferClient, keptIn: "project" | "thread" = "
   );
 }
 
+const narration = {
+  kind: "narrate",
+  threadKind: "code-thread",
+  scopeId,
+  offerId,
+  requestedAt: "2026-11-07T10:00:00.000Z",
+  excerpt: "Welcome to the product tour",
+  characters: 27,
+  relativePath: "narration/intro.mp3",
+  voice: "nova",
+  endpointName: "Studio",
+  modelId: "tts-1",
+  format: "mp3",
+};
+const recording = {
+  kind: "transcribe",
+  threadKind: "code-thread",
+  scopeId,
+  offerId,
+  requestedAt: "2026-11-07T10:00:00.000Z",
+  relativePath: "meetings/notes.m4a",
+  sizeBytes: 2048,
+  endpointName: "Studio",
+  modelId: "speech-model",
+};
+const videoSave = {
+  kind: "video-save",
+  threadKind: "code-thread",
+  scopeId,
+  offerId,
+  requestedAt: "2026-11-07T10:00:00.000Z",
+  jobId: "cc000000-0000-4000-8000-000000000030",
+  clipId: "cc000000-0000-4000-8000-000000000031",
+  relativePath: "clips/tour.mp4",
+  sizeBytes: 2_000_000,
+};
+const imageSave = {
+  kind: "save",
+  threadKind: "code-thread",
+  scopeId,
+  offerId,
+  requestedAt: "2026-11-07T10:00:00.000Z",
+  jobId: "cc000000-0000-4000-8000-000000000030",
+  attachmentId: "cc000000-0000-4000-8000-000000000031",
+  relativePath: "public/hero.png",
+};
+const videoGenerate = {
+  offerId,
+  kind: "video-generate",
+  threadKind: "code-thread",
+  scopeId,
+  prompt: "A paper boat drifting across a pond",
+  images: [],
+  profileInstanceId: openAi,
+  profileName: "Gemini Video",
+  providerName: "Google",
+  model: {
+    modelId: "gemini-omni-1.2-flash",
+    displayName: "Gemini Omni Flash",
+    durations: { kind: "range", min: 3, max: 15 },
+    resolutions: ["720p"],
+    aspectRatios: [{ ratio: "16:9" }],
+    audio: "always",
+    inputs: { firstFrame: true, lastFrame: false, maxReferenceImages: 2 },
+    price: { kind: "unpublished" },
+    job: { cancel: "running", removal: { kind: "delete" }, resumeWindowHours: 24 },
+  },
+  options: { durationSeconds: 8, resolution: "720p", aspectRatio: "16:9", audio: true },
+  canRemember: true,
+  requestedAt: "2026-11-07T10:00:00.000Z",
+};
+
+/** The host's own answer, read through the real client as a window reads it. */
+function wireClient(offers: ReadonlyArray<unknown>) {
+  const decided = vi.fn();
+  const client = createServiceOfferClient({
+    baseUrl: "http://127.0.0.1:4100",
+    windowCapability: "capability",
+    fetch: Object.assign(
+      async (_url: unknown, init?: RequestInit) => {
+        if (init?.method !== "POST") return Response.json({ offers });
+        decided(init.body);
+        return Response.json({ kind: "offer-answered" });
+      },
+      { preconnect: () => undefined },
+    ),
+  });
+  const listed = vi.spyOn(client, "offers");
+  return { client, decided, listed };
+}
+
+// Cards load on demand; their modules are in memory so a test waits on the offer alone.
+beforeAll(async () => {
+  await Promise.all([
+    import("../image/imageOfferCards"),
+    import("../video/videoOfferCards"),
+    import("./NarrationOfferCard"),
+    import("./TranscriptionOfferCard"),
+  ]);
+});
+
 describe("ServiceOfferPrompt", () => {
+  it.each([
+    ["generate", "Image generation request", { ...offer() }],
+    ["save", "Image save request", imageSave],
+    ["transcribe", "Transcription request", recording],
+    ["narrate", "Narration request", narration],
+    ["video-generate", "Video generation request", videoGenerate],
+    ["video-save", "Video save request", videoSave],
+  ])(
+    "shows nothing to answer for a %s offer with a field it does not know, and shows the next one",
+    async (_kind, name, payload) => {
+      const unknown = wireClient([
+        { ...payload, sendsTo: "somewhere-new" },
+        { ...payload, offerId: "cc000000-0000-4000-8000-000000000021" },
+      ]);
+      renderPrompt(unknown.client);
+      const card = await screen.findByRole("article", { name });
+      expect(screen.getAllByRole("article")).toEqual([card]);
+      const decline = screen.getByRole("button", {
+        name: /^(Let the agent draw it|Don't (save|transcribe|narrate|make it))$/,
+      });
+      await userEvent.click(decline);
+      expect(unknown.decided).toHaveBeenCalledOnce();
+      expect(JSON.parse(String(unknown.decided.mock.calls[0]?.[0]))).toMatchObject({
+        offerId: "cc000000-0000-4000-8000-000000000021",
+      });
+    },
+  );
+
+  it.each([
+    [
+      "an unknown field nested in its payload",
+      { ...videoGenerate, model: { ...videoGenerate.model, sendsTo: "x" } },
+    ],
+    ["a kind this build does not know", { ...narration, kind: "hologram" }],
+    ["a payload out of range", { ...recording, sizeBytes: -1 }],
+  ])("shows no card and takes no answer for an offer with %s", async (_, payload) => {
+    const { client, decided, listed } = wireClient([payload]);
+    renderPrompt(client);
+    await waitFor(() => expect(listed).toHaveBeenCalled());
+    await expect(listed.mock.results[0]?.value).resolves.toMatchObject({
+      offers: [{ scopeId, threadKind: "code-thread" }],
+    });
+    // The card's lazy chunk settles after the list does.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByRole("article")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Asked by the agent" })).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(decided).not.toHaveBeenCalled();
+  });
+
   it.each([true, false])(
     "discloses the recording and destination before answering: approve %s",
     async (approve) => {
