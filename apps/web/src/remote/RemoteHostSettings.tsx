@@ -3,7 +3,6 @@ import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { PairedDeviceAdministrationClient } from "@octant/client-runtime/paired-device-administration-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProviderClient } from "@octant/client-runtime/provider-client";
-import type { ProviderToolingClient } from "@octant/client-runtime/provider-tooling-client";
 import type { ProviderCloudSessionClient } from "@octant/client-runtime/provider-cloud-session-client";
 import type { RemoteShellSurfaceKind } from "@octant/client-runtime";
 import type { AgentAccessCommand } from "@octant/contracts";
@@ -20,16 +19,16 @@ import { providerSettingsViewProps } from "../providers/providerSettingsViewProp
 import { useProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { RemotePairedDevices } from "./RemotePairedDevices";
-import type { RemotePermissionClients } from "./remoteProductClients";
+import type { RemoteProductPort } from "./remoteProductClients";
 
-// Loaded when the Claude and Codex tab is opened, so the settings open without it.
-const LazyProviderToolingPanel = lazy(async () => ({
-  default: (await import("../extensions/ProviderToolingPanel")).ProviderToolingPanel,
+// Loaded when the Claude and Codex tab is opened, from the desktop Settings view it is made of.
+const LazyProviderTooling = lazy(async () => ({
+  default: (await import("../shell/SettingsView")).RemoteProviderTooling,
 }));
 
-// Loaded when the section is opened, so the settings open without its components.
+// Loaded when the section is opened, from the desktop Settings view it is made of.
 const LazyRemoteHostPermissions = lazy(async () => ({
-  default: (await import("./RemoteHostPermissions")).RemoteHostPermissions,
+  default: (await import("../shell/SettingsView")).RemoteHostPermissions,
 }));
 
 type HostSettingsSection = "extensions" | "providers" | "devices" | "agents" | "permissions";
@@ -69,17 +68,12 @@ export interface RemoteHostSettingsProps {
     command: ProviderOAuthCommand,
   ) => Promise<ProviderOAuthCommandResult | undefined>;
   /**
-   * Adds MCP servers and plugins to the host's Claude Code and Codex accounts.
-   * Given only for a browser the host's own person paired; absent, the tab is
-   * not offered and the host refuses the routes anyway.
+   * The session, given only for a browser the host's own person paired: it
+   * offers the Claude and Codex tab and the Permissions section, which build
+   * their own clients over it when opened. Absent, neither is offered and the
+   * host refuses the routes anyway.
    */
-  readonly providerToolingClient?: ProviderToolingClient;
-  /**
-   * The host's permission lists, cleanup and spend ceilings. Given only for a
-   * browser the host's own person paired; absent, the section is not offered
-   * and the host refuses the routes anyway.
-   */
-  readonly permissionClients?: RemotePermissionClients;
+  readonly personPort?: RemoteProductPort;
   /** Opts supported endpoints in or out of provider cloud jobs over the session. */
   readonly providerCloudSessionClient?: ProviderCloudSessionClient;
 }
@@ -98,7 +92,7 @@ export interface RemoteHostSettingsProps {
 export function RemoteHostSettings(props: RemoteHostSettingsProps) {
   const sections = SECTIONS.filter((section) =>
     section.id === "permissions"
-      ? props.permissionClients !== undefined
+      ? props.personPort !== undefined
       : section.surface !== undefined && props.reachable.has(section.surface),
   );
   const [open, setOpen] = useState<HostSettingsSection>();
@@ -124,7 +118,7 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
         <RemoteExtensions
           client={props.extensionClient}
           providerClient={props.providerClient}
-          providerToolingClient={props.providerToolingClient}
+          personPort={props.personPort}
           onOpenProviders={() => setOpen("providers")}
         />
       ) : null}
@@ -134,12 +128,9 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
       {open === "agents" ? (
         <RemoteAgentAccess client={props.agentGrants} projectClient={props.projectClient} />
       ) : null}
-      {open === "permissions" && props.permissionClients !== undefined ? (
+      {open === "permissions" && props.personPort !== undefined ? (
         <Suspense fallback={null}>
-          <LazyRemoteHostPermissions
-            clients={props.permissionClients}
-            projectClient={props.projectClient}
-          />
+          <LazyRemoteHostPermissions port={props.personPort} projectClient={props.projectClient} />
         </Suspense>
       ) : null}
       {open === "providers" ? (
@@ -164,17 +155,17 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
 function RemoteExtensions(props: {
   readonly client: ExtensionClient;
   readonly providerClient: ProviderClient;
-  readonly providerToolingClient: ProviderToolingClient | undefined;
+  readonly personPort: RemoteProductPort | undefined;
   readonly onOpenProviders: () => void;
 }) {
-  const toolingClient = props.providerToolingClient;
-  if (toolingClient === undefined) return <ExtensionsSettingsView client={props.client} />;
+  const { personPort } = props;
+  if (personPort === undefined) return <ExtensionsSettingsView client={props.client} />;
   return (
     <RemoteExtensionsWithAccountTools
       client={props.client}
       onOpenProviders={props.onOpenProviders}
       providerClient={props.providerClient}
-      toolingClient={toolingClient}
+      port={personPort}
     />
   );
 }
@@ -182,7 +173,7 @@ function RemoteExtensions(props: {
 function RemoteExtensionsWithAccountTools(props: {
   readonly client: ExtensionClient;
   readonly providerClient: ProviderClient;
-  readonly toolingClient: ProviderToolingClient;
+  readonly port: RemoteProductPort;
   readonly onOpenProviders: () => void;
 }) {
   const controller = useProviderController({ client: props.providerClient });
@@ -202,10 +193,9 @@ function RemoteExtensionsWithAccountTools(props: {
     <ExtensionsSettingsView
       accountTools={
         <Suspense fallback={null}>
-          <LazyProviderToolingPanel
+          <LazyProviderTooling
             accounts={accounts}
-            client={props.toolingClient}
-            localHost
+            port={props.port}
             onOpenRunAsItself={props.onOpenProviders}
           />
         </Suspense>

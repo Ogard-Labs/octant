@@ -25,34 +25,6 @@ import {
   type ExtensionClient,
 } from "@octant/client-runtime/extension-client";
 import {
-  createProviderToolingClient,
-  type ProviderToolingClient,
-} from "@octant/client-runtime/provider-tooling-client";
-import {
-  createProtectedFilesClient,
-  type ProtectedFilesClient,
-} from "@octant/client-runtime/protected-files-client";
-import {
-  createSafeNetworksClient,
-  type SafeNetworksClient,
-} from "@octant/client-runtime/safe-networks-client";
-import {
-  createShieldServersClient,
-  type ShieldServersClient,
-} from "@octant/client-runtime/shield-servers-client";
-import {
-  createArchivedWorktreesClient,
-  type ArchivedWorktreesClient,
-} from "@octant/client-runtime/archived-worktrees-client";
-import {
-  createDiskCleanupClient,
-  type DiskCleanupClient,
-} from "@octant/client-runtime/disk-cleanup-client";
-import {
-  createSpendCeilingClient,
-  type SpendCeilingClient,
-} from "@octant/client-runtime/spend-ceiling-client";
-import {
   createBrowserAutomationClient,
   type BrowserAutomationClient,
 } from "@octant/client-runtime/browser-automation-client";
@@ -224,8 +196,23 @@ export interface RemoteProductClients {
 // remote session no capability is attached and the connection owns the
 // destination, so the base URL only shapes the path; see
 // `createRemoteProductFetch`.
+export interface RemoteProductPort {
+  readonly baseUrl: string;
+  readonly fetch: ReturnType<typeof createRemoteProductFetch>;
+  readonly windowCapability: string;
+}
+
 const REMOTE_CLIENT_BASE_URL = "http://127.0.0.1";
 const NO_WINDOW_CAPABILITY = "";
+
+/** What a product client needs to send over the session, for one built where it is used. */
+export function remoteProductPort(bridge: RemoteSessionBridge): RemoteProductPort {
+  return {
+    baseUrl: REMOTE_CLIENT_BASE_URL,
+    fetch: createRemoteProductFetch({ bridge }),
+    windowCapability: NO_WINDOW_CAPABILITY,
+  };
+}
 
 /**
  * The extension client over the session: a thread's waiting tool prompts and
@@ -244,53 +231,6 @@ export function createRemoteExtensionClient(
     windowCapability: NO_WINDOW_CAPABILITY,
     session,
   });
-}
-
-/**
- * Claude Code and Codex tooling over the session. The host takes it only from
- * a device its own person paired, so the shell builds it for no other session.
- */
-export function createRemoteProviderToolingClient(
-  bridge: RemoteSessionBridge,
-): ProviderToolingClient {
-  return createProviderToolingClient({
-    baseUrl: REMOTE_CLIENT_BASE_URL,
-    fetch: createRemoteProductFetch({ bridge }),
-    windowCapability: NO_WINDOW_CAPABILITY,
-  });
-}
-
-/** What Settings › Permissions reads and changes on the host, over the session. */
-export interface RemotePermissionClients {
-  readonly protectedFiles: ProtectedFilesClient;
-  readonly safeNetworks: SafeNetworksClient;
-  readonly shieldServers: ShieldServersClient;
-  readonly archivedWorktrees: ArchivedWorktreesClient;
-  readonly diskCleanup: DiskCleanupClient;
-  readonly spendCeiling: SpendCeilingClient;
-}
-
-/**
- * The host's permission lists, worktree and build-data cleanup and spend
- * ceilings over the session. The host takes their changes only from a device
- * its own person paired, so the shell builds these for no other session.
- */
-export function createRemotePermissionClients(
-  bridge: RemoteSessionBridge,
-): RemotePermissionClients {
-  const port = {
-    baseUrl: REMOTE_CLIENT_BASE_URL,
-    fetch: createRemoteProductFetch({ bridge }),
-    windowCapability: NO_WINDOW_CAPABILITY,
-  };
-  return {
-    protectedFiles: createProtectedFilesClient(port),
-    safeNetworks: createSafeNetworksClient(port),
-    shieldServers: createShieldServersClient(port),
-    archivedWorktrees: createArchivedWorktreesClient(port),
-    diskCleanup: createDiskCleanupClient(port),
-    spendCeiling: createSpendCeilingClient(port),
-  };
 }
 
 /** The host's new-device alerts over the session, which every connected device reads. */

@@ -33,10 +33,9 @@ import {
   createRemoteNewDeviceAlertsClient,
   createRemotePairedDeviceAdministrationClient,
   createRemoteProductClients,
-  createRemotePermissionClients,
   createRemoteProviderCredentialClient,
-  createRemoteProviderToolingClient,
   createRemoteProviderOAuth,
+  remoteProductPort,
 } from "./remoteProductClients";
 import { NewDeviceAlerts } from "../host/NewDeviceAlerts";
 import { RemoteHostSettings } from "./RemoteHostSettings";
@@ -126,12 +125,8 @@ export function RemoteShellView(props: RemoteShellViewProps) {
     () => createRemoteProviderCredentialClient(props.bridge),
     [props.bridge],
   );
-  const providerTooling = useMemo(
-    () => (standing.actsAsHostPerson ? createRemoteProviderToolingClient(props.bridge) : undefined),
-    [props.bridge, standing.actsAsHostPerson],
-  );
-  const permissionClients = useMemo(
-    () => (standing.actsAsHostPerson ? createRemotePermissionClients(props.bridge) : undefined),
+  const personPort = useMemo(
+    () => (standing.actsAsHostPerson ? remoteProductPort(props.bridge) : undefined),
     [props.bridge, standing.actsAsHostPerson],
   );
   const providerOAuth = useMemo(() => createRemoteProviderOAuth(props.bridge), [props.bridge]);
@@ -276,8 +271,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           ? {}
           : { providerCloudSessionClient: clients.code.providerCloudSessions })}
         providerKeys={providerKeys}
-        {...(permissionClients === undefined ? {} : { permissionClients })}
-        {...(providerTooling === undefined ? {} : { providerToolingClient: providerTooling })}
+        {...(personPort === undefined ? {} : { personPort })}
         providerOAuth={providerOAuth}
         reachable={reachableSettings}
       />

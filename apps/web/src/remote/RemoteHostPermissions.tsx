@@ -1,5 +1,6 @@
 import type { ProjectClient } from "@octant/client-runtime/project-client";
-import { useEffect, useState } from "react";
+import type { RemoteProductPort } from "./remoteProductClients";
+import { useEffect, useMemo, useState } from "react";
 import { ArchivedWorktreesSettings } from "../settings/ArchivedWorktreesSettings";
 import { HostWorktreesSettings } from "../settings/HostWorktreesSettings";
 import { ProtectedFilesSettings } from "../settings/ProtectedFilesSettings";
@@ -9,10 +10,10 @@ import { XcodeBuildDataSettings } from "../settings/XcodeBuildDataSettings";
 import { SettingsSection } from "../settings/primitives";
 import { ProjectSpendCeilingSection } from "../usage/ProjectSpendCeilingSection";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import type { RemotePermissionClients } from "./remoteProductClients";
+import { createRemotePermissionClients } from "./remotePersonClients";
 
 export interface RemoteHostPermissionsProps {
-  readonly clients: RemotePermissionClients;
+  readonly port: RemoteProductPort;
   /** The host's Projects, which these lists and ceilings name. */
   readonly projectClient: Pick<ProjectClient, "bootstrap">;
 }
@@ -26,7 +27,8 @@ export interface RemoteHostPermissionsProps {
  * not offered here.
  */
 export function RemoteHostPermissions(props: RemoteHostPermissionsProps) {
-  const { clients, projectClient } = props;
+  const { port, projectClient } = props;
+  const clients = useMemo(() => createRemotePermissionClients(port), [port]);
   const [projects, setProjects] = useState<ReadonlyArray<{ id: string; name: string }>>([]);
   useEffect(() => {
     let current = true;
