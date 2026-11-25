@@ -5,7 +5,7 @@ import {
   type ThreadMentionCandidate,
   type ThreadMentionTranscriptEntry,
 } from "@octant/contracts";
-import { formatThreadMentionChip } from "./threadMentionChipText";
+import { formatThreadMentionChip, sideChatTitle } from "./threadMentionChipText";
 import {
   appendThreadMentionChip,
   applyThreadMentionChip,
@@ -17,7 +17,6 @@ import {
   formatThreadMentionContext,
   parseThreadMentionToken,
   rankThreadMentionCandidates,
-  sideChatTitle,
 } from "./threadMentionPolicy";
 
 function candidate(

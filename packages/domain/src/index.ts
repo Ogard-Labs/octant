@@ -184,7 +184,7 @@ export * from "./threadDraftPresentation";
 export * from "./threadWindow";
 export * from "./codeConversationUsage";
 export * from "./sentThreadMentions";
-export { formatThreadMentionChip } from "./threadMentionChipText";
+export * from "./threadMentionChipText";
 export * from "./threadMentionChips";
 export * from "./threadMentionPolicy";
 export * from "./sideChatPolicy";

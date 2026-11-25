@@ -8,7 +8,7 @@ import {
 } from "@octant/contracts";
 import { reconcileThreadMentionChips } from "@octant/domain";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { attachComposerThreadMention } from "./composerThreadDrop";
+import { attachComposerThreadMention } from "./attachComposerThreadMention";
 import type { ChatComposerThreadMentionChip, ChatComposerThreadMentions } from "./ChatComposer";
 
 export interface ThreadMentionsOptions {

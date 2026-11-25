@@ -7,7 +7,7 @@ import {
   type ThreadMentionCandidate,
   type ThreadMentionTranscriptEntry,
 } from "@octant/contracts";
-import { collapseChipTitle, formatThreadMentionChip } from "./threadMentionChipText";
+import { formatThreadMentionChip } from "./threadMentionChipText";
 
 /**
  * The active `#` token under the caret. `start`/`end` are draft offsets so the
@@ -290,16 +290,6 @@ export function appendThreadMentionChip(
   const separator = draft.length === 0 || /\s$/.test(draft) ? "" : " ";
   const next = `${draft}${separator}${chip}`;
   return { draft: next, caretIndex: next.length };
-}
-
-/**
- * Title a Side Chat sidecar as being *about* its source thread, so the sidecar
- * reads as a question lane rather than a duplicate of the source conversation.
- */
-export function sideChatTitle(sourceTitle: string): string {
-  const trimmed = collapseChipTitle(sourceTitle);
-  const title = `Side Chat about ${trimmed.length === 0 ? "this thread" : trimmed}`;
-  return title.length <= 400 ? title : `${title.slice(0, 399)}…`;
 }
 
 export type ThreadDialogueAskDecision =

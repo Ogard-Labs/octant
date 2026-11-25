@@ -13,11 +13,21 @@ export function formatThreadMentionChip(title: string): string {
  * Chip titles are single-line and length-capped: a chip is an inline token in a
  * textarea, so an embedded newline would break the draft it lives in.
  */
-export function collapseChipTitle(title: string): string {
+function collapseChipTitle(title: string): string {
   const collapsed = title
     .replace(/[\r\n\t]+/g, " ")
     .replace(/\s+/g, " ")
     .replace(/[[\]]/g, "")
     .trim();
   return collapsed.length <= 120 ? collapsed : `${collapsed.slice(0, 119)}…`;
+}
+
+/**
+ * Title a Side Chat sidecar as being *about* its source thread, so the sidecar
+ * reads as a question lane rather than a duplicate of the source conversation.
+ */
+export function sideChatTitle(sourceTitle: string): string {
+  const trimmed = collapseChipTitle(sourceTitle);
+  const title = `Side Chat about ${trimmed.length === 0 ? "this thread" : trimmed}`;
+  return title.length <= 400 ? title : `${title.slice(0, 399)}…`;
 }
