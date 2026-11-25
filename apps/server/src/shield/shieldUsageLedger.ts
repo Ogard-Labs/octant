@@ -64,6 +64,18 @@ export function recordOneShotUsage(
   ledger: OneShotUsageLedger,
   input: OneShotUsageInput & { readonly aggregateType: string; readonly requestShape: string },
 ): void {
+  recordUnplannedUsage(ledger, { ...input, aggregateId: input.threadId });
+}
+
+/** The same record on any aggregate: a call made for a Project has no thread. */
+export function recordUnplannedUsage(
+  ledger: OneShotUsageLedger,
+  input: Omit<OneShotUsageInput, "threadId"> & {
+    readonly aggregateType: string;
+    readonly aggregateId: string;
+    readonly requestShape: string;
+  },
+): void {
   const { usage } = input;
   const observedAt = decodeUtcTimestamp(ledger.clock());
   const cost = usage === undefined ? undefined : ledgerUsageCost(String(input.modelId), usage);
@@ -88,8 +100,12 @@ export function recordOneShotUsage(
     observedAt,
   });
   ledger.journal.append({
-    aggregate: { aggregateType: input.aggregateType, aggregateId: input.threadId },
-    expectedVersion: readAggregateVersion(ledger.connection, input.aggregateType, input.threadId),
+    aggregate: { aggregateType: input.aggregateType, aggregateId: input.aggregateId },
+    expectedVersion: readAggregateVersion(
+      ledger.connection,
+      input.aggregateType,
+      input.aggregateId,
+    ),
     events: [
       {
         eventId: decodeEventId(ledger.uuid()),

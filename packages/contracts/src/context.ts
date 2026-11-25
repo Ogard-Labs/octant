@@ -539,6 +539,13 @@ export const DECISION_REVIEW_USAGE_AGGREGATE_TYPE = "decision-review-usage";
 export const IMAGE_DESCRIPTION_REQUEST_SHAPE = "image-description";
 export const IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE = "image-description-usage";
 
+/**
+ * One branch name a person asked a model to suggest for a new worktree. No
+ * thread exists yet, so it is recorded under the Code Project it was for.
+ */
+export const WORKTREE_BRANCH_SUGGESTION_REQUEST_SHAPE = "worktree-branch-suggestion";
+export const WORKTREE_BRANCH_SUGGESTION_USAGE_AGGREGATE_TYPE = "worktree-branch-suggestion-usage";
+
 export const THREAD_TITLE_REQUEST_SHAPE = "thread-title";
 export const THREAD_TITLE_USAGE_AGGREGATE_TYPE = "thread-title-usage";
 
@@ -598,6 +605,7 @@ export const UsageReconciliation = Schema.Struct({
         reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE ||
         reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE ||
         reconciliation.requestShape === THREAD_TITLE_REQUEST_SHAPE ||
+        reconciliation.requestShape === WORKTREE_BRANCH_SUGGESTION_REQUEST_SHAPE ||
         reconciliation.requestShape === PULL_REQUEST_REVIEW_REQUEST_SHAPE ||
         // A video job has no context plan and counts no images.
         reconciliation.requestShape === VIDEO_GENERATION_REQUEST_SHAPE

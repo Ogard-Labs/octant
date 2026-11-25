@@ -32,7 +32,13 @@ export interface WorktreeBranchSuggestionPorts {
     | Readonly<{ status: "ready"; driver: ProviderDriver }>
     | Readonly<{ status: "refused"; reason: BranchSuggestionRefusal }>;
   /** Spend ceilings for one request that is not a turn. */
-  readonly admit: (input: Readonly<{ projectId: string }>) =>
+  readonly admit: (
+    input: Readonly<{
+      projectId: string;
+      providerInstanceId: ProviderInstanceId;
+      modelId: ProviderModelId;
+    }>,
+  ) =>
     | Readonly<{
         status: "admitted";
         settle: (usage: TurnUsage | undefined) => void;
@@ -72,9 +78,10 @@ export async function suggestWorktreeBranchWords(
   if (draft === "") return { status: "failed" };
   const opened = ports.open(input);
   if (opened.status === "refused") return opened;
-  const admission = ports.admit({ projectId: input.projectId });
+  const admission = ports.admit(input);
   if (admission.status === "refused") return { status: "refused", reason: "spend-limited" };
   const complete = ports.complete ?? completeOnceOutcome;
+  let sent = false;
   let outcome: Awaited<ReturnType<typeof completeOnceOutcome>>;
   try {
     outcome = await complete({
@@ -87,13 +94,19 @@ export async function suggestWorktreeBranchWords(
       instructions: INSTRUCTIONS,
       timeoutMs: TIMEOUT_MS,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
+      onSend: () => {
+        sent = true;
+      },
     });
   } catch {
+    outcome = { status: "unreached" };
+  }
+  if (!sent) {
     admission.abandon();
     return { status: "failed" };
   }
   // A request that was sent and got no answer may still have been paid for, so
-  // it is settled against the Project's ceilings, not released.
+  // it is recorded against the Project's ceilings, not released.
   admission.settle("usage" in outcome ? outcome.usage : undefined);
   if (outcome.status !== "completed") return { status: "failed" };
   // The reply is text a model wrote from text a person wrote: it gets the same

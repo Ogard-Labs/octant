@@ -63,6 +63,8 @@ export interface OneShotInput {
   readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
   /** Stops the request, and ends its connection, when the caller no longer wants the answer. */
   readonly signal?: AbortSignal;
+  /** Called as the prompt is handed to the provider: from here on it may be paid for. */
+  readonly onSend?: () => void;
 }
 
 export async function completeOnceOutcome(input: OneShotInput): Promise<OneShotOutcome> {
@@ -127,15 +129,18 @@ export async function completeOnceOutcome(input: OneShotInput): Promise<OneShotO
             }),
           ),
         ),
-      send: connection.send({
-        sessionId: input.sessionId,
-        prompt: input.prompt,
-        context:
-          input.instructions === undefined
-            ? []
-            : [{ kind: "instructions", text: input.instructions }],
-        attachments: [...(input.attachments ?? [])],
-        tools: [],
+      send: Effect.suspend(() => {
+        input.onSend?.();
+        return connection.send({
+          sessionId: input.sessionId,
+          prompt: input.prompt,
+          context:
+            input.instructions === undefined
+              ? []
+              : [{ kind: "instructions", text: input.instructions }],
+          attachments: [...(input.attachments ?? [])],
+          tools: [],
+        });
       }),
     });
     yield* Fiber.join(collected);

@@ -13,6 +13,8 @@ import {
   SHIELD_REVIEW_USAGE_AGGREGATE_TYPE,
   THREAD_TITLE_REQUEST_SHAPE,
   THREAD_TITLE_USAGE_AGGREGATE_TYPE,
+  WORKTREE_BRANCH_SUGGESTION_REQUEST_SHAPE,
+  WORKTREE_BRANCH_SUGGESTION_USAGE_AGGREGATE_TYPE,
   PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE,
   decodeCodeOperationEventFrame,
   decodeContextUsageReconciled,
@@ -43,6 +45,8 @@ export function deriveModeFromSubjectType(subjectType: string): string | undefin
     case "work-thread":
       return "work";
     case "code-thread":
+    // Spend of a Code Project that no thread made, such as a suggested branch name.
+    case "code-project":
       return "code";
     default:
       return undefined;
@@ -73,6 +77,7 @@ export class UsageProjection implements Projection {
       event.aggregateType !== DECISION_REVIEW_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== THREAD_TITLE_USAGE_AGGREGATE_TYPE &&
+      event.aggregateType !== WORKTREE_BRANCH_SUGGESTION_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE
     )
       return;
@@ -103,16 +108,18 @@ export class UsageProjection implements Projection {
         event.aggregateType === PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE ||
         event.aggregateType === PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE
           ? "code-thread"
-          : event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE
-            ? "agent-run"
-            : event.aggregateType === SHIELD_REVIEW_USAGE_AGGREGATE_TYPE
-              ? shieldReviewedThreadType(connection, event.aggregateId)
-              : event.aggregateType === PERSON_MEMORY_USAGE_AGGREGATE_TYPE ||
-                  event.aggregateType === DECISION_REVIEW_USAGE_AGGREGATE_TYPE ||
-                  event.aggregateType === IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE ||
-                  event.aggregateType === THREAD_TITLE_USAGE_AGGREGATE_TYPE
-                ? distilledThreadType(connection, event.aggregateId)
-                : event.aggregateType,
+          : event.aggregateType === WORKTREE_BRANCH_SUGGESTION_USAGE_AGGREGATE_TYPE
+            ? "code-project"
+            : event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE
+              ? "agent-run"
+              : event.aggregateType === SHIELD_REVIEW_USAGE_AGGREGATE_TYPE
+                ? shieldReviewedThreadType(connection, event.aggregateId)
+                : event.aggregateType === PERSON_MEMORY_USAGE_AGGREGATE_TYPE ||
+                    event.aggregateType === DECISION_REVIEW_USAGE_AGGREGATE_TYPE ||
+                    event.aggregateType === IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE ||
+                    event.aggregateType === THREAD_TITLE_USAGE_AGGREGATE_TYPE
+                  ? distilledThreadType(connection, event.aggregateId)
+                  : event.aggregateType,
       aggregateId: event.aggregateId,
     };
     // A reconciled request whose subject thread (or child run) was purged keeps
@@ -233,6 +240,7 @@ export class UsageProjection implements Projection {
           reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE ||
           reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE ||
           reconciliation.requestShape === THREAD_TITLE_REQUEST_SHAPE ||
+          reconciliation.requestShape === WORKTREE_BRANCH_SUGGESTION_REQUEST_SHAPE ||
           reconciliation.requestShape === PULL_REQUEST_REVIEW_REQUEST_SHAPE
           ? 0
           : 1,
@@ -484,6 +492,7 @@ function projectBearingSubjectTerms(
   includeImageJobs: boolean,
 ): Array<string> {
   return [
+    `(subject_type = 'code-project' AND ${match("subject_id")})`,
     ...PROJECT_THREADS.map(
       ({ subjectType, threads }) => `(subject_type = '${subjectType}'
     AND subject_id IN (${threads(match)}))`,
@@ -700,7 +709,7 @@ export function usageModeCondition(
   // its thread's mode for the dashboard only.
   const imageJobs = options.includeImageJobs === true;
   return {
-    sql: `(subject_type = ?${
+    sql: `(subject_type = ?${mode === "code" ? " OR subject_type = 'code-project'" : ""}${
       imageJobs
         ? `
     OR (subject_type IN ('image-job', 'video-job') AND subject_id IN (

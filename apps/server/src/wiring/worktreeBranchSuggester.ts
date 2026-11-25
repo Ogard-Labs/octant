@@ -1,15 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
+  WORKTREE_BRANCH_SUGGESTION_REQUEST_SHAPE,
+  WORKTREE_BRANCH_SUGGESTION_USAGE_AGGREGATE_TYPE,
   decodeSpendCeilingReservationId,
   type Project,
   type ProviderInstance,
   type ProviderModel,
+  type TurnUsage,
 } from "@octant/contracts";
 import type { CodeWorktreeBranchSuggestionPort } from "../code/codeService";
 import { suggestWorktreeBranchWords } from "../code/worktreeBranchSuggestion";
 import type { PersistenceService } from "../persistence/persistenceService";
 import type { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
+import { recordUnplannedUsage } from "../shield/shieldUsageLedger";
 import type { SpendCeilingService } from "../spendCeilingService";
 import { makeConfiguredProviderDriver, type ConfiguredProviderDriverOptions } from "./providers";
 
@@ -74,7 +78,11 @@ export function createHostWorktreeBranchSuggester(deps: {
         return { status: "refused" as const, reason: "provider-unavailable" as const };
       }
     },
-    admit: (input: { readonly projectId: string }) => {
+    admit: (input: {
+      readonly projectId: string;
+      readonly providerInstanceId: ProviderInstance["id"];
+      readonly modelId: ProviderModel["id"];
+    }) => {
       const reservationId = decodeSpendCeilingReservationId(randomUUID());
       const admission = deps.spendCeiling?.admit({
         reservationId,
@@ -91,15 +99,36 @@ export function createHostWorktreeBranchSuggester(deps: {
       if (admission?.status === "refused") return { status: "refused" as const };
       return {
         status: "admitted" as const,
-        settle: (
-          usage: { readonly inputTokens: number; readonly outputTokens: number } | undefined,
-        ) =>
+        // Recorded under the Project before the reservation goes: no thread
+        // exists for a ceiling to find the spend by.
+        settle: (usage: TurnUsage | undefined) => {
+          try {
+            recordUnplannedUsage(
+              {
+                connection: persistence.connection,
+                journal: persistence.journal,
+                clock: () => new Date().toISOString(),
+                uuid: randomUUID,
+              },
+              {
+                aggregateType: WORKTREE_BRANCH_SUGGESTION_USAGE_AGGREGATE_TYPE,
+                aggregateId: input.projectId,
+                requestShape: WORKTREE_BRANCH_SUGGESTION_REQUEST_SHAPE,
+                providerInstanceId: input.providerInstanceId,
+                modelId: input.modelId,
+                usage,
+              },
+            );
+          } catch {
+            // A ledger that refuses the record still releases the reservation.
+          }
           deps.spendCeiling?.settle({
             reservationId,
             ...(usage === undefined
               ? {}
               : { observedTokens: usage.inputTokens + usage.outputTokens }),
-          }),
+          });
+        },
         abandon: () => deps.spendCeiling?.abandon({ reservationId }),
       };
     },
