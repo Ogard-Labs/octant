@@ -2080,21 +2080,46 @@ describe("coordinators in a Project's thread list", () => {
       ...working,
       threadId: `worker-${String(index)}`,
     }));
-    const { container } = render(
-      <FollowUpLineageContext value={new Map([["worker-child", "worker-0"]])}>
-        <ProjectThreadList
-          groupCoordinators
-          onSelectThread={vi.fn()}
-          threads={[
-            coordinator,
-            ...workers,
-            { threadId: "worker-child", title: "Check the fixtures" },
-          ]}
-        />
-      </FollowUpLineageContext>,
-    );
-    expect(container.querySelectorAll(".project-threads__virtual-list")).toHaveLength(1);
-    expect(container.querySelectorAll("[data-thread-id^='worker-']").length).toBeLessThan(45);
+    const viewport = document.createElement("div");
+    viewport.style.overflowY = "auto";
+    document.body.append(viewport);
+    const offsetHeight = vi
+      .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this === viewport ? 160 : this.hasAttribute("data-index") ? 32 : 0;
+      });
+    try {
+      render(
+        <FollowUpLineageContext value={new Map([["worker-child", "worker-0"]])}>
+          <ProjectThreadList
+            groupCoordinators
+            onSelectThread={vi.fn()}
+            threads={[
+              coordinator,
+              ...workers,
+              { threadId: "worker-child", title: "Check the fixtures" },
+            ]}
+          />
+        </FollowUpLineageContext>,
+        { container: viewport },
+      );
+      expect(viewport.querySelectorAll(".project-threads__virtual-list")).toHaveLength(1);
+      const drawn = [...viewport.querySelectorAll<HTMLElement>("[data-index]")];
+      expect(drawn.length).toBeGreaterThan(2);
+      expect(drawn.length).toBeLessThan(workers.length);
+      // The side task rides in that list, right after the worker that started it.
+      const ids = drawn.map(
+        (row) => row.querySelector<HTMLElement>("[data-thread-id]")?.dataset.threadId,
+      );
+      expect(ids.slice(0, 3)).toEqual(["worker-0", "worker-child", "worker-1"]);
+      // Only its row takes the extra step in.
+      expect(
+        drawn.map((row) => row.querySelector("[style*='margin']") !== null).slice(0, 3),
+      ).toEqual([false, true, false]);
+    } finally {
+      offsetHeight.mockRestore();
+      viewport.remove();
+    }
     sessionStorage.clear();
   });
 });
