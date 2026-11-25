@@ -836,7 +836,8 @@ poll or read behind it, no pending approval or question, and no turn status. It
 marks nothing as read. Opening the thread again reads it from the journal, and
 until that read lands nothing treats what is drawn as the thread's current
 state. A thread the host no longer lists, or a change of host, lets it go. The
-first open of a thread in a window still loads.
+first open of a thread in a window still loads, and so does every open on a host
+that cannot read a thread's newest turns alone.
 
 Thread titles appear once in the title row, and the row shows the thread's
 current title: a pane stores the title the thread had when it opened, so the

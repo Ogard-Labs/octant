@@ -2135,6 +2135,7 @@ export function useCodeController(options: CodeControllerOptions) {
     // the read below joins the journal's newest turns onto it or replaces it.
     const keepsTranscript =
       keptTranscript.current &&
+      readsConversationWindow(client) &&
       kept?.client === client &&
       conversationThreadKey.current === String(options.activeThreadId);
     if (!keepsTranscript) {
@@ -2185,8 +2186,11 @@ export function useCodeController(options: CodeControllerOptions) {
     const held =
       shown.conversationHistory === "loaded" ||
       (shown.conversationHistory === "loading" && keptTranscript.current);
+    // A host without the window read is read again from its first page, which
+    // would replace the kept newest turns with the oldest ones while it loads.
     if (
       !held ||
+      !readsConversationWindow(client) ||
       view === undefined ||
       String(view.thread.id) !== threadKey ||
       conversationThreadKey.current !== threadKey ||

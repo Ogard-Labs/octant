@@ -607,7 +607,15 @@ describe("switching between Code threads the window has loaded", () => {
     return { frames, host, readCursorStore, registry, replies, show };
   }
 
-  it.each(["windowed", "whole"] as const)(
+  it("loads again, as at a first open, on a host that can only read a thread whole", async () => {
+    const opened = await openBoth("whole");
+    expect(opened.registry.shown(threadA)).toBeUndefined();
+    opened.show(threadA);
+    expect(screen.queryByText("Reply from the second thread")).toBeNull();
+    expect(await screen.findByText("Reply from the first thread")).toBeInTheDocument();
+  });
+
+  it.each(["windowed"] as const)(
     "draws the incoming conversation in the first frame while a %s host is still answering",
     async (kind) => {
       const opened = await openBoth(kind);
