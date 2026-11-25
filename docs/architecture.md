@@ -17387,8 +17387,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   on a forge is text an outsider may have written. A coordinator is derived
   without delivery evidence; a Chat thread is a row only while it runs or waits;
   a subagent is a row only under a thread already listed, In progress while
-  queued, starting, running or held by the host (on sibling runs, a free
-  request slot, or an eligible pool model) and Waiting on any other wait, and
+  queued, starting, running or held by the host (on sibling runs, room under the subagent limit, a free request slot, or an eligible pool model) and Waiting on any other wait, and
   its task is named only to a local window the
   AgentRun authorization admits, the same one the Agents center applies. A Chat
   thread's subagents are listed to such a window alone. The read takes a local

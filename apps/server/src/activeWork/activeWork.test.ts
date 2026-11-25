@@ -328,6 +328,7 @@ describe("a host's active work", () => {
       ).rows.find((row) => row.kind === "subagent")?.board;
     for (const automatic of [
       "waiting-on-dependencies",
+      "provider-capacity-saturated",
       "Waiting for a free request slot",
       "multi-model-pool-no-eligible-candidate",
     ]) {

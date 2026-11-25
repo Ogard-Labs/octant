@@ -428,6 +428,7 @@ describe("wireWorkRequests active work", () => {
           // A turn that moved after every thread record, as a running turn's
           // progress does, dates its thread as the board dates its card.
           const lastTurn = new Date(Date.parse(now) + 60_000).toISOString();
+          const lastGoal = new Date(Date.parse(now) + 120_000).toISOString();
           const titleOf = (threadId: unknown) =>
             threads.find((entry) => String(entry.id) === String(threadId))?.title;
           const windowId = decodeWindowId(randomUUID());
@@ -443,7 +444,14 @@ describe("wireWorkRequests active work", () => {
             agentRunPersistence: { listCenterCandidates: emptyList },
             decisionReviewModelPort: {},
             workRequestService: { listForThread: emptyList },
-            goalService: { read: () => ({ goal: null }) },
+            goalService: {
+              read: (threadId: string) => ({
+                goal:
+                  titleOf(threadId) === "Asking"
+                    ? { status: "active", objective: "Ship it", updatedAt: lastGoal }
+                    : null,
+              }),
+            },
             projectService: {
               onWorkProjectArchived: () => () => undefined,
               bootstrap: async () => ({
@@ -534,6 +542,7 @@ describe("wireWorkRequests active work", () => {
           const ready = answer.rows.filter((row) => row.board.status === "ready");
           expect(ready.map((row) => row.title)).toEqual(["Idle"]);
           expect(ready[0]?.updatedAt).toBe(lastTurn);
+          expect(answer.rows.find((row) => row.title === "Asking")?.updatedAt).toBe(lastGoal);
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory }))),
       ),
     );

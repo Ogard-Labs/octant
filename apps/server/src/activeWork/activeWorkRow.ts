@@ -13,6 +13,7 @@ import type { ProjectSummary } from "@octant/contracts/projects";
 import type { ThreadBoardDerivation } from "@octant/contracts/thread-board";
 import { deriveThreadBoardStatus } from "@octant/domain/thread-board-policy";
 import {
+  AGENT_RUN_CAPACITY_WAITING_REASON,
   AGENT_RUN_DEPENDENCY_WAITING_REASON,
   AGENT_RUN_POOL_WAITING_REASON,
   AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
@@ -193,10 +194,12 @@ export function chatActiveWork(
 }
 
 /**
- * Waits the host clears by itself: siblings to finish, a free request slot, or
- * an eligible model in the pool. Such a run is held like a queued one.
+ * Waits the host clears by itself: siblings to finish, room under the subagent
+ * limit, a free request slot, or an eligible model in the pool. Such a run is
+ * held like a queued one.
  */
 const AUTOMATIC_SUBAGENT_WAITS: ReadonlySet<string> = new Set([
+  AGENT_RUN_CAPACITY_WAITING_REASON,
   AGENT_RUN_DEPENDENCY_WAITING_REASON,
   AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
   AGENT_RUN_POOL_WAITING_REASON,

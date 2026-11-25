@@ -2242,8 +2242,7 @@ working as they do.
   ([Architecture: Active work read](../architecture.md#security-and-authority)). A
   subagent's task shows only where the Agents page's own rule lets the window
   read that run; elsewhere the row reads "Subagent" under its thread. A
-  subagent the host holds back on its own (for sibling runs, a free request
-  slot, or a model in its pool) is In progress, like a queued one; any other
+  subagent the host holds back on its own (for sibling runs, room under the subagent limit, a free request slot, or a model in its pool) is In progress, like a queued one; any other
   wait is Waiting.
 - **Opening** a row makes the choice the sidebar makes. A Code thread on a
   paired computer opens in that computer's Code start screen, as under "On your

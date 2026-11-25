@@ -17,6 +17,7 @@ import {
   isAgentRunTerminalStatus,
   AGENT_RUN_DEPENDENCY_WAITING_REASON,
   AGENT_RUN_PROVIDER_SLOT_WAIT_LIMIT_MS,
+  AGENT_RUN_CAPACITY_WAITING_REASON,
   AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
   agentRunProviderSlotWaitExpired,
   decideAgentRunDependencies,
@@ -1437,7 +1438,7 @@ export class AgentRunOrchestrationService {
       // A run parked on dependencies that all completed is waiting only for a
       // slot now, exactly like a capacity waiter — unless it is held.
       const waitsForSlot =
-        run.recoveryReason === "provider-capacity-saturated" ||
+        run.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON ||
         (decideAgentRunDependencies(run, (id) => this.#persistence.getById(id)).kind === "ready" &&
           !this.#dependencyStartHeld(run));
       if (
@@ -1621,7 +1622,7 @@ export function createInMemoryCapacityPort(
       if (scope !== undefined) {
         if (!queued.includes(String(runId))) queued.push(String(runId));
         onQueued?.();
-        return { status: "queued", reason: "provider-capacity-saturated", scope };
+        return { status: "queued", reason: AGENT_RUN_CAPACITY_WAITING_REASON, scope };
       }
       const reservationId = `res-${next++}`;
       reserved.set(reservationId, {

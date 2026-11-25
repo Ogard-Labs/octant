@@ -610,8 +610,8 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
               ),
           },
           evidence: {
-            // Turns and requests date the card as the board dates it; the
-            // rest of the evidence decides no state, and the rows show none.
+            // Turns, requests, the goal and child runs date the card as the
+            // board dates it; the rest decides no state, and the rows show none.
             forThread: (entry) =>
               composeWorkBoardEvidence({
                 turns: workTurnProjection.listForThread(entry.thread.id),
@@ -621,8 +621,10 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
                 ),
                 artifacts: [],
                 citations: [],
-                goal: null,
-                childRuns: [],
+                goal: goalService.read(String(entry.thread.id)).goal,
+                childRuns: persistence.agentRunProjection.parentSummary(
+                  decodeAgentRunParentThreadId(String(entry.thread.id)),
+                ),
               }),
           },
           runtime: { observe: observeWorkBoardRuntime },
