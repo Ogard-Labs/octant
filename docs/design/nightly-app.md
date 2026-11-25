@@ -311,11 +311,13 @@ the failure and closes Nightly. Ordinary first-launch refusal does not start
 this recovery loop. Instead, a first registration that Octant was too slow or
 too early to answer (a missed deadline, no window server yet, a host still
 starting) is asked again with the same backoff, always with a new native handle.
-No attempt starts after 15 seconds; one in flight keeps its own bound. A refused identity, a malformed receipt, and a failure
-after the window exists are never asked again. A launch that still fails logs
-the refusal's reason code, and says whether Octant did not answer in time or
-refused the window. A refused registration counts as cleaned up when the host
-answers that it holds no such window, or no host is listening.
+No attempt starts after 15 seconds; one in flight keeps its own bound. A refused
+identity, a malformed receipt, and a failure after the window exists are never
+asked again. A launch that still fails logs the refusal's reason code, and says
+whether Octant did not answer in time or refused the window. A refused registration counts as cleaned up when the host
+answers that it holds no such window, when no host is listening, or when Octant
+answers both the registration and its revocation as unavailable (it drops a
+registration it refuses that way). An unanswered registration stays unconfirmed.
 
 Every attempt registers a new native handle and obtains a fresh host instance,
 server-issued window identity, renderer identity and capability. The native

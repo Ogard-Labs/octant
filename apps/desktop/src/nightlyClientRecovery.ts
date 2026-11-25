@@ -58,7 +58,7 @@ export function createNightlyClientRecovery(options: {
       )
         return result;
       await pause(delay, lifetime.signal);
-      if (lifetime.signal.aborted) return result;
+      if (lifetime.signal.aborted || performance.now() >= deadline) return result;
       delay = Math.min(delay * 2, 2_000);
     }
   };

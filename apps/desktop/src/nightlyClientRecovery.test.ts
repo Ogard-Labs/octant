@@ -200,3 +200,24 @@ it("stops asking for its first window when the person quits", async () => {
   await vi.advanceTimersByTimeAsync(20_000);
   expect(open).toHaveBeenCalledOnce();
 });
+
+it("starts no attempt when its wait for the first window ends after the deadline", async () => {
+  vi.useFakeTimers();
+  const open = vi.fn(async () => ({
+    kind: "refused" as const,
+    reason: "unavailable",
+    retryable: true as const,
+  }));
+  const client = createNightlyClientRecovery({ open, exhausted: vi.fn() });
+  const started = client.start();
+  await vi.advanceTimersByTimeAsync(0);
+  // A Mac that slept through the backoff wakes with the deadline already gone.
+  const late = vi.spyOn(performance, "now").mockReturnValue(Number.MAX_SAFE_INTEGER);
+  try {
+    await vi.advanceTimersByTimeAsync(250);
+    expect((await started).kind).toBe("refused");
+    expect(open).toHaveBeenCalledOnce();
+  } finally {
+    late.mockRestore();
+  }
+});

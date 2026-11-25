@@ -54,18 +54,23 @@ export async function openNightlyClientWindow(options: {
     });
   const began = elapsedNow();
   const isClosing = () => options.isClosing?.() === true || options.signal?.aborted === true;
-  const revoke = async (registered = true) => {
+  const revoke = async (refusedRegistration?: string) => {
     const reply = await boundedDesktopPeerOperation(() =>
       options.native.revokeWindow(handle, generation),
     );
     if (typeof reply !== "object" || reply === null || !("kind" in reply)) return "failed" as const;
     if (reply.kind === "revoked") return "closed" as const;
     // A registration that was never granted leaves nothing to clean up once the
-    // host says it holds no such window, or no host is listening. Counting that
-    // as a failure would refuse this session's app update after a retry.
-    return !registered &&
+    // host says it holds no such window, or no host is listening. Only Octant
+    // answers `unavailable`, and a registration it answered that way is already
+    // dropped there; a revoke during the same host start gets that answer too.
+    // Counting these as failures would refuse this session's app update after a
+    // retry.
+    return refusedRegistration !== undefined &&
       "reason" in reply &&
-      (reply.reason === "expired" || reply.reason === "not-running")
+      (reply.reason === "expired" ||
+        reply.reason === "not-running" ||
+        (reply.reason === "unavailable" && refusedRegistration === "unavailable"))
       ? ("closed" as const)
       : ("failed" as const);
   };
@@ -78,7 +83,7 @@ export async function openNightlyClientWindow(options: {
   if (registration.kind === "refused") {
     // A missing receipt does not prove the peer failed to mint the lease.
     return {
-      ...refused(registration.reason, await revoke(false)),
+      ...refused(registration.reason, await revoke(registration.reason)),
       ...(RETRYABLE_REGISTRATION_REFUSALS.has(registration.reason)
         ? { retryable: true as const }
         : {}),
