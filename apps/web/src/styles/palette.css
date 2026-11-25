@@ -108,14 +108,6 @@
   font-size: var(--oct-text-xs);
 }
 
-.command-palette__close-hint kbd {
-  min-height: 20px;
-  padding: 1px var(--oct-space-2);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  font-family: var(--oct-font-mono);
-}
-
 /* The navigation group role, as a menu's group label draws it. */
 .command-palette__group-label {
   display: flex;
@@ -175,21 +167,13 @@
   font-size: var(--oct-text-xs);
 }
 
-.command-palette__result-hint,
-.command-palette__shortcut {
+.command-palette__result-hint {
   display: flex;
   align-items: center;
   gap: var(--oct-space-1);
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-}
-
-.command-palette__shortcut {
-  min-height: 20px;
-  padding: 0 var(--oct-space-2);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
 }
 
 .command-palette .command-palette__field > input:focus-visible,

@@ -1807,16 +1807,6 @@ input.switch:checked::after {
 .codeblock .ok {
   color: var(--oct-success-fg);
 }
-.kbd {
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  padding: var(--oct-space-1) var(--oct-space-2);
-  border: 1px solid var(--oct-border);
-  border-bottom-width: 2px;
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface-warm);
-  color: var(--oct-fg-2);
-}
 
 /* ─── segmented control ─────────────────────────────────────────────── */
 /* The one enclosed track: the same 28px track of 24px items that
@@ -2313,13 +2303,6 @@ html[data-octant-reduced-motion="true"] .octant-status-dot[data-live="true"] {
    not a second button. */
 .octant-tooltip__key {
   margin-inline-start: var(--oct-space-2);
-  padding: 0 var(--oct-space-1);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-muted);
-  font-family: inherit;
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
 }
 /* The rail's chip: one word, centred beside its button, as small as the
    label allows because it must lie over the sidebar. */
@@ -9176,9 +9159,6 @@ html[data-octant-native-host="true"]
 .keyrow .keyrow-gap {
   flex: 1;
   border-bottom: 1px dotted var(--oct-border);
-}
-.keyrow .kbd {
-  flex: 0 0 auto;
 }
 
 /* ─── compaction ──────────────────────────────────────────────────────

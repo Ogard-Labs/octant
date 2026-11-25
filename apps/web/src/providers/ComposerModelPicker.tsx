@@ -19,6 +19,7 @@ import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ChatOnlyVerify } from "./ChatOnlyVerify";
 import { readableModelId } from "./providerModelLabel";
+import { OctantKbd } from "../ui/base/OctantKbd";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -646,9 +647,9 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               {compactUnavailableLabel(picker.unavailableReason)}
             </OctantBadge>
           ) : shortcutIndex < 0 ? null : (
-            <kbd aria-hidden="true" className="composer-model-picker__hint">
+            <OctantKbd className="composer-model-picker__hint" decorative form="bare">
               {`⌘${shortcutIndex + 1}`}
-            </kbd>
+            </OctantKbd>
           )}
         </OctantButton>
         {offersToolVerification ? (
