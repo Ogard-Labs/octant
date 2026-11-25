@@ -640,7 +640,7 @@ its fills from the float (`--octant-float-control`, `-hover`, `-pressed`,
 | `--oct-dur-fast`         | 100ms                            | An overlay leaving                  |
 | `--oct-motion-panel`     | 300ms                            | The sidebar sliding open or closed  |
 | `--oct-motion-spin`      | 900ms                            | A spinner turn                      |
-| `--oct-motion-spin-slow` | 2s                               | A spinner turn under reduced motion |
+| `--oct-motion-crawl`     | 2s                               | A spinner turn under reduced motion |
 | `--oct-motion-pulse`     | 1.6s                             | A live dot                          |
 | `--oct-motion-flowing`   | 36s                              | The Flowing ground's CSS fallback   |
 | `--oct-motion-ground-in` | 1200ms                           | A drawn ground fading in            |
@@ -668,7 +668,7 @@ its fills from the float (`--octant-float-control`, `-hover`, `-pressed`,
 - **Reduced motion** (system or setting) removes every transition and holds
   every drawn ground on a still frame. Running state always has a word or shape
   as well as motion. A spinner is the one thing that keeps moving, one slow
-  turn per `--oct-motion-spin-slow`, because a frozen spinner reads as a hung
+  turn per `--oct-motion-crawl`, because a frozen spinner reads as a hung
   app; a live dot holds still.
 
 ### Focus
@@ -1307,7 +1307,7 @@ is costly to render mounts only while open.
 - **Tokens.** One turn per `--oct-motion-spin`, from the one keyframe
   `oct-spin` and the one rule `.octant-spinner`.
 - **States.** Under reduced motion, from the system or from the setting, it
-  turns once per `--oct-motion-spin-slow`: a frozen spinner reads as a hung
+  turns once per `--oct-motion-crawl`: a frozen spinner reads as a hung
   app. Until 2026-11-25 one spinner did that and the rest stopped.
 - **Don't** animate a glyph from a feature stylesheet or switch a spin on from
   a parent's state attribute; render the spinner for that state. The one

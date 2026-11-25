@@ -266,7 +266,7 @@
   --oct-motion-spin: 900ms;
   /* a spinner's turn under reduced motion: slow enough to trouble nobody, and
      still a turn, since a frozen spinner reads as a hung app */
-  --oct-motion-spin-slow: 2s;
+  --oct-motion-crawl: 2s;
   --oct-motion-pulse: 1.6s;
   /* CSS fallback for the Flowing ground: one slow drift, not an interaction. */
   --oct-motion-flowing: 36s;
@@ -2211,7 +2211,7 @@ input.switch:checked::after {
    slowly, since a frozen one reads as a hung app, and a live dot holds still,
    since the word beside it already says it is live. */
 html[data-octant-reduced-motion="true"] .octant-spinner {
-  animation-duration: var(--oct-motion-spin-slow);
+  animation-duration: var(--oct-motion-crawl);
 }
 
 html[data-octant-reduced-motion="true"] .octant-status-dot[data-live="true"] {
@@ -10117,7 +10117,7 @@ html[data-octant-native-host="true"]
      set one iteration on everything inside them) would otherwise stop it
      after a single turn. */
   html .octant-spinner {
-    animation-duration: var(--oct-motion-spin-slow) !important;
+    animation-duration: var(--oct-motion-crawl) !important;
     animation-iteration-count: infinite !important;
   }
   /* A live dot holds still: the word beside it already says it is live. */

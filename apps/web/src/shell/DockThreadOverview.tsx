@@ -179,6 +179,10 @@ export function DockThreadOverview(props: DockThreadOverviewProps) {
                 small
                 tone={server.listening ? "success" : "neutral"}
               />
+              {/* The dot is hidden from a screen reader, and here nothing else
+                  said whether the server answers: the row named only the
+                  server and its port. */}
+              <span className="sr-only">{server.listening ? "Listening" : "Not listening"}</span>
               <span className="dock-card__label">{server.label}</span>
               <span className="dock-card__meta">{`:${String(server.port)}`}</span>
             </div>
