@@ -19240,7 +19240,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
     threads remain openable, and new threads wait for standing to be confirmed
     whenever the phone switches its selected computer.
     The phone refreshes standing while its start or thread screen is in the
-    foreground and when it returns, so host-side changes reach open screens.
+    foreground and when it returns, so host-side changes reach open screens; a
+    refresh that meets a read still running is owed once that read settles. A
+    paired browser refreshes it the same way while its page is visible, when
+    the page becomes visible, and when the network returns. The open This
+    browser device panel shows that level and its explanation, and names none
+    until the host has confirmed one.
     Routes that change something but rode a read action before (revising or
     refreshing a Canvas, a connector's sign-in and operations) carry their own
     write actions, and the local-servers commands route and the server proxy
