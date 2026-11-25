@@ -1,3 +1,4 @@
+import { cleanedUpWorktreeSentence } from "@octant/domain";
 import { threadImageOfferKey, threadImageOffers } from "../composer/threadImageOffers";
 import { nativeFolderTransfer } from "../composer/folderDrop.test-fixture";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
@@ -730,6 +731,82 @@ describe("CodeThreadWorkspace", () => {
     await user.type(screen.getByLabelText("Follow-up message"), "check tests too");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
     expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], [], [], "approval-gated");
+  });
+
+  describe("a thread whose worktree was cleaned up", () => {
+    const withCleanup = (overrides: Partial<CodeController> = {}) => {
+      const base = controller();
+      return controller({
+        activeView: { ...base.activeView!, worktreeCleanup: "cleaned-up" },
+        ...overrides,
+      });
+    };
+
+    it("says so above the composer, holds sending, and restores the worktree from the notice", async () => {
+      const user = userEvent.setup();
+      const sendFollowUp = vi.fn(async () => true);
+      const reloadThreadView = vi.fn(async () => undefined);
+      const restores: unknown[] = [];
+      const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        if (!String(input).endsWith("/api/code/cleaned-up-worktrees/restore")) {
+          return new Response(null, { status: 404 });
+        }
+        restores.push({ method: init?.method, body: JSON.parse(String(init?.body)) });
+        return Response.json({ kind: "cleaned-up-worktree-restored", threadId });
+      });
+      try {
+        render(
+          <CodeThreadWorkspace
+            controller={withCleanup({ sendFollowUp, reloadThreadView })}
+            providerGroups={[providerGroup()]}
+            serverUrl="http://127.0.0.1:4000"
+            threadId={threadId}
+            windowCapability="capability"
+          />,
+        );
+        expect(screen.getByText(cleanedUpWorktreeSentence("cleaned-up"))).toBeVisible();
+        await user.type(screen.getByLabelText("Follow-up message"), "check tests too");
+        expect(screen.getByRole("button", { name: "Send follow-up" })).toBeDisabled();
+        await user.keyboard("{Enter}");
+        expect(sendFollowUp).not.toHaveBeenCalled();
+
+        await user.click(screen.getByRole("button", { name: "Restore worktree" }));
+        await waitFor(() => expect(reloadThreadView).toHaveBeenCalledWith(threadId));
+        expect(restores).toEqual([{ method: "POST", body: { threadId, confirmed: true } }]);
+      } finally {
+        fetch.mockRestore();
+      }
+    });
+
+    it("gives a device the hub introduced the sentence without the button", () => {
+      render(
+        <CodeThreadWorkspace
+          controller={withCleanup()}
+          pairedDevice
+          providerGroups={[providerGroup()]}
+          serverUrl="http://127.0.0.1:4000"
+          threadId={threadId}
+          windowCapability="capability"
+        />,
+      );
+      expect(screen.getByText(cleanedUpWorktreeSentence("cleaned-up"))).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Restore worktree" })).not.toBeInTheDocument();
+    });
+
+    it("offers the button to a device the host's own person paired", () => {
+      render(
+        <CodeThreadWorkspace
+          actsAsHostPerson
+          controller={withCleanup()}
+          pairedDevice
+          providerGroups={[providerGroup()]}
+          serverUrl="http://127.0.0.1:4000"
+          threadId={threadId}
+          windowCapability="capability"
+        />,
+      );
+      expect(screen.getByRole("button", { name: "Restore worktree" })).toBeVisible();
+    });
   });
 
   it("holds a follow-up while the host compacts the session, from Enter and from the button", async () => {

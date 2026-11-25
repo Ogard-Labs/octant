@@ -1,3 +1,4 @@
+import { cleanedUpWorktreeSentence } from "@octant/domain";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
@@ -1563,6 +1564,20 @@ function TerminalWorkspaceSurface(
     return <OctantEmpty state="loading" title="Connecting repository checkout" />;
   }
   if (props.checkoutAvailability === "unavailable") {
+    // A cleaned-up worktree is not a broken checkout: moving the thread to the
+    // Project's own folder would leave its branch behind, and the way back is
+    // the thread's Restore worktree.
+    const cleanedUp = props.controller.activeView?.worktreeCleanup;
+    if (cleanedUp !== undefined) {
+      return (
+        <OctantEmpty
+          message={cleanedUpWorktreeSentence(cleanedUp)}
+          role="status"
+          state="warning"
+          title="This worktree was cleaned up"
+        />
+      );
+    }
     return (
       <OctantEmpty
         action={{
