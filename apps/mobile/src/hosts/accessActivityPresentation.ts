@@ -80,11 +80,17 @@ export interface ChangeNoticeActions {
 export function changeNoticeActions(notice: ChangeNotice): ChangeNoticeActions {
   const agent = notice.actor.kind === "agent";
   const name = notice.actor.kind === "agent" ? notice.actor.name : notice.actor.label;
+  // A key added with no key id named may no longer be the provider's newest;
+  // Undo could remove the wrong one, so the web refuses it and so does the phone.
+  const noUndoReason =
+    notice.kind === "provider-key-replaced"
+      ? "No Undo: the earlier key is not kept."
+      : notice.kind === "provider-key-added" && notice.keyId === undefined
+        ? "No Undo: this provider's keys changed again since, so it could remove the wrong key. Check its keys in Settings."
+        : undefined;
   return {
-    undo: notice.kind !== "provider-key-replaced",
-    ...(notice.kind === "provider-key-replaced"
-      ? { noUndoReason: "No Undo: the earlier key is not kept." }
-      : {}),
+    undo: noUndoReason === undefined,
+    ...(noUndoReason === undefined ? {} : { noUndoReason }),
     revokeLabel: agent ? `End ${name}'s access` : `Revoke ${name}`,
     revokeTitle: agent ? `End ${name}'s access?` : `Revoke ${name}?`,
     revokeConsequence: agent

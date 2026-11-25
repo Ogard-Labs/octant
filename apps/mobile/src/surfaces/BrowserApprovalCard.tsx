@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import {
   decideMobileBrowserApproval,
   listMobileBrowserApprovals,
@@ -26,7 +26,10 @@ export interface BrowserApprovalCardProps {
   readonly threadId: string;
   /** What the host said of this session; absent reads as restricted. */
   readonly actsAsHostPerson?: boolean;
+  /** A session that may only watch is not let read these prompts, so none is asked for. */
   readonly watchingOnly?: boolean;
+  /** The thread's title, which names the thread a terminal's request came from. */
+  readonly threadTitle?: string;
   readonly refreshIntervalMs?: number;
   /** Confirms an approving answer on this phone; the device's own biometrics when absent. */
   readonly authenticator?: BiometricAuthenticator;
@@ -49,6 +52,9 @@ export function BrowserApprovalCard(props: BrowserApprovalCardProps) {
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [note, setNote] = useState<string>();
+  // Prompts this phone's own accepted answer settled, hidden at once so the
+  // buttons never come back for a prompt that is already gone.
+  const [settled, setSettled] = useState<ReadonlySet<string>>(new Set());
 
   const load = useCallback(
     () => listMobileBrowserApprovals({ transport: props.transport, threadId: props.threadId }),
@@ -56,9 +62,13 @@ export function BrowserApprovalCard(props: BrowserApprovalCardProps) {
   );
   // A waiting prompt holds the turn, so it is read often while the phone is in
   // front of someone and not at all from a pocket.
-  const resource = usePolledResource(load, { intervalMs: props.refreshIntervalMs ?? 2_000 });
+  // The host refuses a read-only session these prompts, so it does not ask.
+  const resource = usePolledResource(load, {
+    intervalMs: props.refreshIntervalMs ?? 2_000,
+    enabled: props.watchingOnly !== true,
+  });
 
-  const pending = resource.value?.[0];
+  const pending = resource.value?.find((entry) => !settled.has(String(entry.approvalId)));
   if (pending === undefined) {
     return note === undefined ? null : (
       <Text
@@ -74,7 +84,10 @@ export function BrowserApprovalCard(props: BrowserApprovalCardProps) {
     );
   }
 
-  const view = browserApprovalView(pending, { actsAsHostPerson: props.actsAsHostPerson === true });
+  const view = browserApprovalView(pending, {
+    actsAsHostPerson: props.actsAsHostPerson === true,
+    ...(props.threadTitle === undefined ? {} : { threadTitle: props.threadTitle }),
+  });
   const decide = async (answer: BrowserApprovalAnswer) => {
     if (props.watchingOnly === true || busyRef.current) return;
     busyRef.current = true;
@@ -92,15 +105,20 @@ export function BrowserApprovalCard(props: BrowserApprovalCardProps) {
         answer.decision.decision === "denied"
           ? { status: "sent", value: await send() }
           : await decideWithConfirmation({ authenticator, reason: "approve", send });
+      if (outcome.status === "sent" && outcome.value === "accepted") {
+        setSettled((current) => new Set(current).add(String(pending.approvalId)));
+      }
       setNote(
         outcome.status === "blocked" ? outcome.message : browserApprovalNote(outcome.value, view),
       );
     } catch {
       setNote(MOBILE_COPY.approvalSendFailed);
     } finally {
+      // The buttons stay settled until the host's list shows what is left, so a
+      // second tap never meets a prompt this phone already answered.
+      await resource.reload();
       busyRef.current = false;
       setBusy(false);
-      void resource.reload();
     }
   };
 
@@ -132,13 +150,21 @@ export function BrowserApprovalCard(props: BrowserApprovalCardProps) {
         </Text>
       )}
       {view.context === undefined ? null : (
-        <Text
-          numberOfLines={6}
-          style={[mobileTypography.caption, { color: colors.textSecondary }]}
-          testID="mobile-browser-approval-context"
+        // A script or a page tool's arguments is approved only as seen, so it is
+        // shown whole: scrolled when long, never cut off.
+        <ScrollView
+          nestedScrollEnabled
+          style={[styles.context, { borderColor: colors.border }]}
+          testID="mobile-browser-approval-context-scroll"
         >
-          {view.context}
-        </Text>
+          <Text
+            selectable
+            style={[mobileTypography.caption, { color: colors.textSecondary }]}
+            testID="mobile-browser-approval-context"
+          >
+            {view.context}
+          </Text>
+        </ScrollView>
       )}
       <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>{view.detail}</Text>
       {props.watchingOnly === true ? null : (
@@ -209,4 +235,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   busy: { opacity: 0.45 },
+  context: {
+    maxHeight: 240,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    padding: mobileSpacing.xs,
+  },
 });

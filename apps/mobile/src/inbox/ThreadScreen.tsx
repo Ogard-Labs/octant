@@ -591,6 +591,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 <BrowserApprovalCard
                   actsAsHostPerson={standing.actsAsHostPerson}
                   threadId={selected.threadId}
+                  threadTitle={title}
                   transport={transport}
                   watchingOnly={watchingOnly}
                 />

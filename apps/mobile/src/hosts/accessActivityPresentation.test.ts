@@ -90,6 +90,22 @@ describe("access activity on the phone", () => {
     });
   });
 
+  it("offers Undo for an added key only when the notice names the key, as the web does", () => {
+    const added: ChangeNotice = {
+      kind: "provider-key-added",
+      noticeId: id,
+      at: "2026-11-25T10:00:00.000Z",
+      actor: agent,
+      providerInstanceId: id,
+      providerName: "Anthropic",
+    };
+    expect(changeNoticeActions(added)).toMatchObject({
+      undo: false,
+      noUndoReason: expect.stringContaining("could remove the wrong key"),
+    });
+    expect(changeNoticeActions({ ...added, keyId: id })).toMatchObject({ undo: true });
+  });
+
   it("reads how long ago a change was made", () => {
     const now = Date.parse("2026-11-25T12:00:00.000Z");
     expect(relativeTimeLabel("2026-11-25T11:59:40.000Z", now)).toBe("just now");

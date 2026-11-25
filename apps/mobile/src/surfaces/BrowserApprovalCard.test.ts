@@ -173,11 +173,70 @@ describe("Browser prompt on the phone", () => {
     ).toContain("The host refused that answer.");
   });
 
-  it("keeps the prompt readable without answers when watching", async () => {
+  it("never reads the host's prompts for a session that may only watch", async () => {
     const { transport, answers } = host();
+    const read = vi.spyOn(transport, "authenticatedFetch");
     const container = await mount({ transport, watchingOnly: true });
-    expect(container.textContent).toContain("report.pdf (12 KB)");
-    expect(choices(container)).toEqual([]);
+    expect(read).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="mobile-browser-approval"]')).toBeNull();
     expect(answers).toEqual([]);
+  });
+
+  it("keeps the prompt settled while the reload runs, so a second tap cannot meet its own answer", async () => {
+    const answers: unknown[] = [];
+    // The host keeps listing the prompt after the answer, as a slow reload would.
+    const transport: MobileRemoteTransport = {
+      hostId: "00000000-0000-4000-8000-0000000000aa",
+      authenticatedFetch: async ({ body }) => {
+        const parsed = JSON.parse(String(body)) as { kind: string };
+        if (parsed.kind === "decide") {
+          answers.push(parsed);
+          return answers.length === 1
+            ? Response.json({ accepted: true })
+            : Response.json({ accepted: false }, { status: 409 });
+        }
+        return Response.json([upload]);
+      },
+    };
+    const container = await mount({ transport, authenticator: authenticator() });
+    await press(container, "Upload once");
+    expect(answers).toHaveLength(1);
+    expect(container.querySelector('[data-testid="mobile-browser-approval"]')).toBeNull();
+    expect(container.querySelector('[data-testid="mobile-browser-approval-note"]')).toBeNull();
+  });
+
+  it("shows a script whole, selectable, and scrollable instead of cutting it off", async () => {
+    const source = Array.from({ length: 40 }, (_, line) => `step${line}();`).join("\n");
+    const transport: MobileRemoteTransport = {
+      hostId: "00000000-0000-4000-8000-0000000000aa",
+      authenticatedFetch: async () =>
+        Response.json([{ ...upload, upload: undefined, script: { source }, mode: "work" }]),
+    };
+    const container = await mount({ transport });
+    const shown = container.querySelector('[data-testid="mobile-browser-approval-context"]');
+    expect(shown?.textContent).toBe(source);
+    expect(shown?.getAttribute("data-selectable")).not.toBe("false");
+    expect(choices(container)).toEqual(["Run once", "Cancel"]);
+  });
+
+  it("words and limits a program in a terminal's request as the web does", async () => {
+    const transport: MobileRemoteTransport = {
+      hostId: "00000000-0000-4000-8000-0000000000aa",
+      authenticatedFetch: async () =>
+        Response.json([{ ...upload, upload: undefined, mode: "code" }]),
+    };
+    const container = await mount({
+      transport,
+      actsAsHostPerson: true,
+      threadTitle: "Fix the login page",
+    });
+    expect(container.textContent).toContain("Browser request from a terminal");
+    expect(container.textContent).toContain(
+      "Let the terminal open https://example.com in the Browser?",
+    );
+    expect(container.textContent).toContain(
+      "Asked by a program in a terminal of “Fix the login page”, not by this thread's agent",
+    );
+    expect(choices(container)).toEqual(["Approve once", "Always allow", "Deny"]);
   });
 });

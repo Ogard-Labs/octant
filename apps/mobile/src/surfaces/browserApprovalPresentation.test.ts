@@ -93,4 +93,46 @@ describe("the phone's Browser approval", () => {
       "The host refused that answer. Nothing was changed.",
     );
   });
+
+  it("offers a script or arguments the card cannot show in full only Cancel", () => {
+    const whole = browserApprovalView(approval({ script: { source: "a".repeat(8192) } }), {
+      actsAsHostPerson: true,
+    });
+    expect(labels(whole)).toEqual(["Run once", "Cancel"]);
+    const tooLong = browserApprovalView(approval({ script: { source: "a".repeat(8193) } }), {
+      actsAsHostPerson: true,
+    });
+    expect(labels(tooLong)).toEqual(["Cancel"]);
+    const args = browserApprovalView(
+      approval({ pageTool: { name: "fill", arguments: "x".repeat(5000) } }),
+      { actsAsHostPerson: true },
+    );
+    expect(labels(args)).toEqual(["Cancel"]);
+  });
+
+  it("treats a Private site ask in a Code thread as a program in a terminal, and nothing else as one", () => {
+    const terminal = browserApprovalView(approval({ mode: "code" }), {
+      actsAsHostPerson: true,
+      threadTitle: "Fix the login page",
+    });
+    expect(terminal).toMatchObject({
+      kind: "terminal",
+      label: "Browser request from a terminal",
+      summary: "Let the terminal open https://example.com in the Browser?",
+      detail:
+        "Asked by a program in a terminal of “Fix the login page”, not by this thread's agent",
+    });
+    expect(labels(terminal)).toEqual(["Approve once", "Always allow", "Deny"]);
+    expect(
+      labels(browserApprovalView(approval({ mode: "code" }), { actsAsHostPerson: false })),
+    ).toEqual(["Approve once", "Deny"]);
+    expect(
+      browserApprovalView(approval({ mode: "code", profile: { kind: "personal" } }), {
+        actsAsHostPerson: true,
+      }).kind,
+    ).toBe("site");
+    expect(browserApprovalView(approval({ mode: "work" }), { actsAsHostPerson: true }).kind).toBe(
+      "site",
+    );
+  });
 });

@@ -19,7 +19,7 @@ export interface BrowserApprovalAnswer {
 }
 
 export interface BrowserApprovalView {
-  readonly kind: "site" | "upload" | "download" | "sign-in" | "script" | "page-tool";
+  readonly kind: "site" | "terminal" | "upload" | "download" | "sign-in" | "script" | "page-tool";
   readonly label: string;
   /** The question, as the desktop card asks it. */
   readonly summary: string;
@@ -37,6 +37,14 @@ export interface BrowserApprovalView {
   readonly answers: ReadonlyArray<BrowserApprovalAnswer>;
 }
 
+/**
+ * The longest script, and the longest page-tool arguments, the contract
+ * carries. A card shows either whole; longer text is never shown in full, so it
+ * is never approved here.
+ */
+const MAX_SHOWN_SCRIPT = 8192;
+const MAX_SHOWN_ARGUMENTS = 4096;
+
 const PROFILE_WORDS = { personal: "Personal", project: "Project" } as const;
 
 function profileWords(approval: BrowserToolApproval): string {
@@ -50,7 +58,23 @@ function profileWords(approval: BrowserToolApproval): string {
 
 export function browserApprovalView(
   approval: BrowserToolApproval,
-  options: { readonly actsAsHostPerson: boolean },
+  options: { readonly actsAsHostPerson: boolean; readonly threadTitle?: string },
+): BrowserApprovalView {
+  const view = browserApprovalViewOf(approval, options);
+  // A script or a page tool's arguments is approved only as seen, so text the
+  // card cannot show in full leaves the person Cancel alone.
+  const shownLimit = view.kind === "script" ? MAX_SHOWN_SCRIPT : MAX_SHOWN_ARGUMENTS;
+  if (view.context === undefined || view.context.length <= shownLimit) return view;
+  return {
+    ...view,
+    detail: `${view.detail}. This text is too long to show here in full, so it can only be cancelled from the phone`,
+    answers: view.answers.filter((answer) => answer.id === "deny"),
+  };
+}
+
+function browserApprovalViewOf(
+  approval: BrowserToolApproval,
+  options: { readonly actsAsHostPerson: boolean; readonly threadTitle?: string },
 ): BrowserApprovalView {
   const site = approval.origin;
   const profile = profileWords(approval);
@@ -148,6 +172,22 @@ export function browserApprovalView(
       answers: [once("Upload once"), ...always, deny("Deny")],
     };
   }
+  // A terminal's grant reaches Private pages only, so a Code thread's site ask
+  // that names no profile came from a program in one of its terminals, not from
+  // the thread's agent. It is never offered a profile-wide answer.
+  if (approval.mode === "code" && approval.profile === undefined) {
+    const title = options.threadTitle === undefined ? "this thread" : `“${options.threadTitle}”`;
+    return {
+      kind: "terminal",
+      label: "Browser request from a terminal",
+      summary: `Let the terminal open ${site} in the Browser?`,
+      detail: `Asked by a program in a terminal of ${title}, not by this thread's agent`,
+      site,
+      profile,
+      files: [],
+      answers: [once("Approve once"), ...always, deny("Deny")],
+    };
+  }
   const signedIn = approval.profile !== undefined;
   const extensions =
     approval.extensionCount === undefined
@@ -197,6 +237,8 @@ export function browserApprovalNote(
       return `The agent's download from ${view.site} ${ended}, so nothing was saved.`;
     case "sign-in":
       return `The agent's sign-in request for ${view.site} ${ended}.`;
+    case "terminal":
+      return `The terminal's request to open ${view.site} ${ended}, so nothing was let through.`;
     default:
       return `The request for ${view.site} ${ended}, by another device or window or because it ran out.`;
   }
