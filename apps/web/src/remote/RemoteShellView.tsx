@@ -34,6 +34,7 @@ import {
   createRemotePairedDeviceAdministrationClient,
   createRemoteProductClients,
   createRemoteProviderCredentialClient,
+  createRemoteProviderToolingClient,
   createRemoteProviderOAuth,
 } from "./remoteProductClients";
 import { NewDeviceAlerts } from "../host/NewDeviceAlerts";
@@ -123,6 +124,10 @@ export function RemoteShellView(props: RemoteShellViewProps) {
   const providerKeys = useMemo(
     () => createRemoteProviderCredentialClient(props.bridge),
     [props.bridge],
+  );
+  const providerTooling = useMemo(
+    () => (standing.actsAsHostPerson ? createRemoteProviderToolingClient(props.bridge) : undefined),
+    [props.bridge, standing.actsAsHostPerson],
   );
   const providerOAuth = useMemo(() => createRemoteProviderOAuth(props.bridge), [props.bridge]);
   const agentGrants = useMemo(() => createRemoteAgentGrantClient(props.bridge), [props.bridge]);
@@ -266,6 +271,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           ? {}
           : { providerCloudSessionClient: clients.code.providerCloudSessions })}
         providerKeys={providerKeys}
+        {...(providerTooling === undefined ? {} : { providerToolingClient: providerTooling })}
         providerOAuth={providerOAuth}
         reachable={reachableSettings}
       />

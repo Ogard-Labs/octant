@@ -3,10 +3,11 @@ import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { PairedDeviceAdministrationClient } from "@octant/client-runtime/paired-device-administration-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProviderClient } from "@octant/client-runtime/provider-client";
+import type { ProviderToolingClient } from "@octant/client-runtime/provider-tooling-client";
 import type { ProviderCloudSessionClient } from "@octant/client-runtime/provider-cloud-session-client";
 import type { RemoteShellSurfaceKind } from "@octant/client-runtime";
 import type { AgentAccessCommand } from "@octant/contracts";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { AgentAccessSettingsSection } from "../agentAccess/AgentAccessSettingsSection";
 import { ExtensionsSettingsView } from "../extensions/ExtensionsSettingsView";
 import type {
@@ -19,6 +20,11 @@ import { providerSettingsViewProps } from "../providers/providerSettingsViewProp
 import { useProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { RemotePairedDevices } from "./RemotePairedDevices";
+
+// Loaded when the Claude and Codex tab is opened, so the settings open without it.
+const LazyProviderToolingPanel = lazy(async () => ({
+  default: (await import("../extensions/ProviderToolingPanel")).ProviderToolingPanel,
+}));
 
 type HostSettingsSection = "extensions" | "providers" | "devices" | "agents";
 
@@ -52,6 +58,12 @@ export interface RemoteHostSettingsProps {
   readonly providerOAuth: (
     command: ProviderOAuthCommand,
   ) => Promise<ProviderOAuthCommandResult | undefined>;
+  /**
+   * Adds MCP servers and plugins to the host's Claude Code and Codex accounts.
+   * Given only for a browser the host's own person paired; absent, the tab is
+   * not offered and the host refuses the routes anyway.
+   */
+  readonly providerToolingClient?: ProviderToolingClient;
   /** Opts supported endpoints in or out of provider cloud jobs over the session. */
   readonly providerCloudSessionClient?: ProviderCloudSessionClient;
 }
@@ -88,7 +100,14 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
           </OctantButton>
         ))}
       </div>
-      {open === "extensions" ? <ExtensionsSettingsView client={props.extensionClient} /> : null}
+      {open === "extensions" ? (
+        <RemoteExtensions
+          client={props.extensionClient}
+          providerClient={props.providerClient}
+          providerToolingClient={props.providerToolingClient}
+          onOpenProviders={() => setOpen("providers")}
+        />
+      ) : null}
       {open === "devices" ? (
         <RemotePairedDevices client={props.pairedDevices} origin={props.origin} />
       ) : null}
@@ -106,6 +125,65 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
         />
       ) : null}
     </section>
+  );
+}
+
+/**
+ * Skills & Extensions, with the Claude and Codex tab where the host's own
+ * person paired this browser: the host's accounts come from its provider list,
+ * and the commands run on the host through the session.
+ */
+function RemoteExtensions(props: {
+  readonly client: ExtensionClient;
+  readonly providerClient: ProviderClient;
+  readonly providerToolingClient: ProviderToolingClient | undefined;
+  readonly onOpenProviders: () => void;
+}) {
+  const toolingClient = props.providerToolingClient;
+  if (toolingClient === undefined) return <ExtensionsSettingsView client={props.client} />;
+  return (
+    <RemoteExtensionsWithAccountTools
+      client={props.client}
+      onOpenProviders={props.onOpenProviders}
+      providerClient={props.providerClient}
+      toolingClient={toolingClient}
+    />
+  );
+}
+
+function RemoteExtensionsWithAccountTools(props: {
+  readonly client: ExtensionClient;
+  readonly providerClient: ProviderClient;
+  readonly toolingClient: ProviderToolingClient;
+  readonly onOpenProviders: () => void;
+}) {
+  const controller = useProviderController({ client: props.providerClient });
+  const accounts = controller.instances.flatMap((instance) =>
+    instance.driverKind === "claude" || instance.driverKind === "codex"
+      ? [
+          {
+            id: String(instance.id),
+            displayName: instance.displayName,
+            driverKind: instance.driverKind,
+            nativeSetup: instance.nativeSetup !== false,
+          },
+        ]
+      : [],
+  );
+  return (
+    <ExtensionsSettingsView
+      accountTools={
+        <Suspense fallback={null}>
+          <LazyProviderToolingPanel
+            accounts={accounts}
+            client={props.toolingClient}
+            localHost
+            onOpenRunAsItself={props.onOpenProviders}
+          />
+        </Suspense>
+      }
+      client={props.client}
+    />
   );
 }
 

@@ -191,6 +191,9 @@ function answerProduct(
         return Response.json({ kind: "thread-created", thread: command.thread });
       }
     }
+    if (method === "POST" && path === "/api/extensions/snapshot") {
+      return Response.json({ sequence: 1, snapshotAt: now, packages: [], collisions: [] });
+    }
     if (withToolPrompt && method === "POST" && path === "/api/extensions/tool-approvals") {
       if ((body as { readonly kind?: string }).kind === "decide") {
         toolPromptAnswered = true;
@@ -983,6 +986,22 @@ describe("RemoteShellView", () => {
     for (const request of seen) {
       expect(request.headers.get("x-octant-window-capability")).toBeNull();
     }
+  });
+
+  it("offers a browser the host's own person paired the Claude and Codex tool setup in Extensions", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const { bridge } = await readyBridge(seen, false, true);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    const settings = await screen.findByRole("region", { name: "Host settings" });
+    await user.click(await within(settings).findByRole("button", { name: "Extensions" }));
+    await user.click(await within(settings).findByRole("button", { name: "Claude and Codex" }));
+    // The panel is the one a window shows, not the page that sends a person to the computer.
+    await waitFor(() => expect(settings.textContent).toMatch(/MCP servers and plugins/), {
+      timeout: 4000,
+    });
+    expect(screen.queryByText(/Open Octant on this computer/)).toBeNull();
   });
 
   it("offers a restricted session no host settings", async () => {

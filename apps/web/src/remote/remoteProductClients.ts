@@ -24,6 +24,10 @@ import {
   createExtensionClient,
   type ExtensionClient,
 } from "@octant/client-runtime/extension-client";
+import {
+  createProviderToolingClient,
+  type ProviderToolingClient,
+} from "@octant/client-runtime/provider-tooling-client";
 import { createChatClient, type ChatClient } from "@octant/client-runtime/chat-client";
 import {
   createThreadImageResults,
@@ -205,6 +209,20 @@ export function createRemoteExtensionClient(
     fetch: createRemoteProductFetch({ bridge }),
     windowCapability: NO_WINDOW_CAPABILITY,
     session,
+  });
+}
+
+/**
+ * Claude Code and Codex tooling over the session. The host takes it only from
+ * a device its own person paired, so the shell builds it for no other session.
+ */
+export function createRemoteProviderToolingClient(
+  bridge: RemoteSessionBridge,
+): ProviderToolingClient {
+  return createProviderToolingClient({
+    baseUrl: REMOTE_CLIENT_BASE_URL,
+    fetch: createRemoteProductFetch({ bridge }),
+    windowCapability: NO_WINDOW_CAPABILITY,
   });
 }
 
