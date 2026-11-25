@@ -6244,7 +6244,6 @@ function makeConnection(
               return;
             }
             if (answer.approved) {
-              if (answer.scope !== "once") pending.keptByPerson = true;
               let persistence: PermissionPersistence = "project-default";
               try {
                 persistence = options.permissionPersistence?.() ?? "current-session";
@@ -6254,6 +6253,10 @@ function makeConnection(
               // A publish is never reused: the same input republishes the
               // file as it is now, which the person has not seen.
               const keptForSession = answer.scope !== "once" && persistence === "current-session";
+              // An outside folder joins what the session holds on the same
+              // decision as rule reuse: a person who keeps no approvals for
+              // the session has approved this one call, not the folder.
+              if (keptForSession) pending.keptByPerson = true;
               if (
                 keptForSession &&
                 pending.toolName !== CLAUDE_ARTIFACT_TOOL &&

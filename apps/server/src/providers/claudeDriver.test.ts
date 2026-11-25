@@ -1177,63 +1177,75 @@ describe("Claude execution policy", () => {
     }
   });
 
-  it("asks again for the next call from a folder outside the Project after an allow that covered one call only", async () => {
-    const elsewhere = "/tmp/octant-claude-elsewhere";
-    const signal = new AbortController().signal;
-    const f = harness();
-    const acquired = await acquire(f.driver, "code");
-    await Effect.runPromise(
-      acquired.connection.start({
-        sessionId,
-        modelId,
-        executionPolicy: "approval-gated",
-        strict: false,
-      }),
-    );
-    const open = f.opens[0]!;
-    const shell = { command: "git status" };
-    const pre = (toolUseId: string) =>
-      open.preToolUse({
-        sessionId: "sdk-session-1",
-        projectRoot: elsewhere,
-        toolName: "Bash",
-        input: shell,
-        toolUseId,
-        signal,
-      });
-    try {
-      const approvalEvent = Effect.runPromise(
-        Stream.runHead(
-          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
-            Stream.filter((event) => event.kind === "approval-request"),
-          ),
-        ),
-      );
-      await expect(pre("reviewed-shell")).resolves.toEqual({ behavior: "ask" });
-      const callback = open.canUseTool({
-        toolName: "Bash",
-        input: shell,
-        toolUseId: "reviewed-shell",
-        signal,
-      });
-      const raised = Option.getOrUndefined(await approvalEvent);
-      if (raised?.kind !== "approval-request") throw new Error("Expected an approval card");
-      // An automatic reviewer's answer, and one given for a helper, carry
-      // this scope: it reviewed the one command, not the folder.
+  it.each([
+    ["a reviewer's or a helper's answer", "current-session", "once"],
+    [
+      "the person's answer where approvals are not kept for the session",
+      "project-default",
+      undefined,
+    ],
+  ] as const)(
+    "asks again for the next call from a folder outside the Project after %s",
+    async (_who, persistence, scope) => {
+      const elsewhere = "/tmp/octant-claude-elsewhere";
+      const signal = new AbortController().signal;
+      const f = harness("subscription", persistence);
+      const acquired = await acquire(f.driver, "code");
       await Effect.runPromise(
-        acquired.connection.answerApproval({
+        acquired.connection.start({
           sessionId,
-          requestId: raised.requestId,
-          approved: true,
-          scope: "once",
+          modelId,
+          executionPolicy: "approval-gated",
+          strict: false,
         }),
       );
-      await expect(callback).resolves.toMatchObject({ behavior: "allow" });
-      await expect(pre("unreviewed-later")).resolves.toEqual({ behavior: "ask" });
-    } finally {
-      await acquired.close();
-    }
-  });
+      const open = f.opens[0]!;
+      const shell = { command: "git status" };
+      const pre = (toolUseId: string) =>
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot: elsewhere,
+          toolName: "Bash",
+          input: shell,
+          toolUseId,
+          signal,
+        });
+      try {
+        const approvalEvent = Effect.runPromise(
+          Stream.runHead(
+            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+              Stream.filter((event) => event.kind === "approval-request"),
+            ),
+          ),
+        );
+        await expect(pre("reviewed-shell")).resolves.toEqual({ behavior: "ask" });
+        const callback = open.canUseTool({
+          toolName: "Bash",
+          input: shell,
+          toolUseId: "reviewed-shell",
+          signal,
+        });
+        const raised = Option.getOrUndefined(await approvalEvent);
+        if (raised?.kind !== "approval-request") throw new Error("Expected an approval card");
+        // An automatic reviewer's answer, and one given for a helper, carry
+        // the "once" scope: it reviewed the one command, not the folder. The
+        // person's own answer carries none and follows their persistence
+        // setting, which here keeps nothing either.
+        await Effect.runPromise(
+          acquired.connection.answerApproval({
+            sessionId,
+            requestId: raised.requestId,
+            approved: true,
+            ...(scope === undefined ? {} : { scope }),
+          }),
+        );
+        await expect(callback).resolves.toMatchObject({ behavior: "allow" });
+        await expect(pre("unreviewed-later")).resolves.toEqual({ behavior: "ask" });
+      } finally {
+        await acquired.close();
+      }
+    },
+  );
 
   it("hands Claude its own session rule when the person keeps an approval for the session, and a bare allow otherwise", async () => {
     const sessionPermissions = [
