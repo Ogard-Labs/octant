@@ -5,7 +5,12 @@ import {
   StrictPreferenceControl,
   strictPreferenceValue,
 } from "../settings/StrictPreferenceControl";
-import type { CodeDiffLayout, CodeSettings, WindowsTerminalShell } from "@octant/contracts/code";
+import type {
+  CodeDiffLayout,
+  CodeSettings,
+  CodeWorktreeSettings,
+  WindowsTerminalShell,
+} from "@octant/contracts/code";
 import type { AutoReviewer, ShieldModelChoice } from "@octant/contracts/shield";
 import { Schema } from "effect";
 import {
@@ -25,6 +30,7 @@ import { useHostPlatform } from "../platform";
 import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantFieldError } from "../ui/base/OctantField";
+import { CodeWorktreeSettingsSection } from "./CodeWorktreeSettingsSection";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -63,6 +69,8 @@ export interface CodeSettingsUpdate {
   readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
   /** Absent keeps the stored choice. */
   readonly restartContinuation?: boolean;
+  /** Absent keeps the stored choice; a present value replaces it. */
+  readonly worktrees?: CodeWorktreeSettings;
   /** Absent keeps the stored choice. */
   readonly windowsTerminalShell?: WindowsTerminalShell;
 }
@@ -790,6 +798,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
           <CodeSettingsFeedbackSlot feedback={feedback} section="terminal" />
         </SettingsSection>
       ) : null}
+      <CodeWorktreeSettingsSection onUpdate={props.onUpdate} settings={props.settings} />
       <SettingsSection title="External editor">
         <div className="setgroup">
           <SettingRow

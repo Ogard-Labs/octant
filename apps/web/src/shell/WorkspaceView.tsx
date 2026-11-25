@@ -720,6 +720,7 @@ export interface WorkspaceViewProps {
   readonly draftSelectedModelId?: import("@octant/contracts/providers").ProviderModelId;
   readonly draftDefaultPermissionMode?: import("@octant/contracts/providers").PermissionMode;
   readonly draftDefaultPermissionPersistence?: import("@octant/contracts/providers").PermissionPersistence;
+  readonly draftWorktreeSettings?: import("@octant/contracts/code").CodeWorktreeSettings;
   readonly onDraftSelectProvider?: (selection: {
     readonly providerInstanceId: import("@octant/contracts/providers").ProviderInstanceId;
     readonly modelId: import("@octant/contracts/providers").ProviderModelId;
@@ -2323,6 +2324,9 @@ function renderNonCodeTab(
           {...(props.draftDefaultPermissionPersistence === undefined
             ? {}
             : { defaultPermissionPersistence: props.draftDefaultPermissionPersistence })}
+          {...(props.draftWorktreeSettings === undefined
+            ? {}
+            : { worktreeSettings: props.draftWorktreeSettings })}
           {...(props.onDraftPermissionModeChange === undefined
             ? {}
             : { onPermissionModeChange: props.onDraftPermissionModeChange })}

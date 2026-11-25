@@ -328,6 +328,18 @@ describe("starting workers", () => {
     });
   });
 
+  it("starts a worker on a branch under the prefix a person chose for worktrees", async () => {
+    const h = harness();
+    h.settings = { worktrees: { branchPrefix: "henrik/" } } as unknown as CodeSettings;
+    await h.service.start(startCall({}));
+    const creation = h.executed.find(
+      (entry) => entry.command.kind === "create-managed-code-thread",
+    );
+    expect(creation?.command).toMatchObject({
+      deliveryTarget: { branchIntent: expect.stringMatching(/^henrik\/[a-z0-9]+$/) },
+    });
+  });
+
   it("proposes instead of creating when a person chose Propose for approval for the Project", async () => {
     const h = harness();
     h.settings = {

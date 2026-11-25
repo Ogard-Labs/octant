@@ -1319,6 +1319,40 @@ describe("CodeService commands", () => {
     expect(back.settings.windowsTerminalShell).toBeUndefined();
   });
 
+  it("stores worktree naming choices, keeps them across later default changes, and stores nothing for the defaults", async () => {
+    const fixture = serviceFixture();
+    const defaults = {
+      kind: "update-code-settings",
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+    } as const;
+    const worktrees = {
+      branchPrefix: "henrik/",
+      branchNaming: "prompt",
+    } as const;
+    const chosen = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 0,
+      worktrees,
+    });
+    expect(chosen).toMatchObject({ settings: { worktrees } });
+    if (chosen.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: chosen.settings } as never);
+
+    const later = await fixture.service.execute(ids.window, { ...defaults, expectedVersion: 1 });
+    expect(later).toMatchObject({ settings: { worktrees } });
+    if (later.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: later.settings } as never);
+
+    const back = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 2,
+      worktrees: {},
+    });
+    if (back.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(back.settings.worktrees).toBeUndefined();
+  });
+
   it("keeps Android snapshot boot off until a person turns it on, then across later default changes", async () => {
     const fixture = serviceFixture();
     const defaults = {

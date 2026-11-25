@@ -480,6 +480,42 @@ describe("CodeComposerAdapter", () => {
     expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({ workspace: "managed-worktree" });
   });
 
+  it("shows the branch a prompt-named worktree gets before Send, numbers a taken name, and sends exactly that", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    const execute = vi.fn(async (command: { kind: string; projectId?: string }) =>
+      command.kind === "list-code-worktree-refs"
+        ? {
+            kind: "worktree-refs-listed",
+            projectId: command.projectId,
+            refs: [
+              { name: "development", kind: "local", isCurrent: true },
+              { name: "henrik/fix-the-login-bug", kind: "local" },
+            ],
+          }
+        : undefined,
+    );
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        newThreadWorkspace="managed-worktree"
+        execute={execute as never}
+        onCreateThread={onCreateThread}
+        worktreeSettings={{ branchPrefix: "henrik/", branchNaming: "prompt" }}
+      />,
+    );
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the login bug");
+    await user.click(whereChip());
+    await user.click(screen.getByRole("button", { name: /Worktree options/ }));
+    expect(await screen.findByText("henrik/fix-the-login-bug-2")).toBeVisible();
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    expect(onCreateThread.mock.calls[0]?.[0].deliveryTarget.branchIntent).toBe(
+      "henrik/fix-the-login-bug-2",
+    );
+  });
+
   it("keeps repository context on the context row above the composer", () => {
     const { container } = render(<CodeComposerAdapter {...defaultProps} />);
     const frame = container.querySelector(".composer");

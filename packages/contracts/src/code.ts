@@ -646,6 +646,44 @@ export const CodeDefaultModel = Schema.Struct({
   modelId: ProviderModelId,
 }).annotations(strict);
 
+const BRANCH_PREFIX_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * The start of a branch name Octant generates for a new managed worktree
+ * (`octant/`, `henrik/`, `wip-`). It uses the characters Octant generates and
+ * none Git treats specially; the domain naming policy repeats the check.
+ */
+export const CodeBranchPrefix = Schema.String.pipe(
+  Schema.maxLength(40),
+  Schema.filter((value) => {
+    const trimmed = value.endsWith("/") ? value.slice(0, -1) : value;
+    return (
+      trimmed.length > 0 &&
+      trimmed
+        .split("/")
+        .every(
+          (segment) =>
+            BRANCH_PREFIX_SEGMENT.test(segment) &&
+            !segment.endsWith(".") &&
+            !segment.endsWith(".lock") &&
+            !segment.includes(".."),
+        )
+    );
+  }),
+);
+
+export const CodeWorktreeNaming = Schema.Literal("short-id", "prompt");
+export type CodeWorktreeNaming = typeof CodeWorktreeNaming.Type;
+
+/** Settings › Code › Worktrees: how new worktrees are named. */
+export const CodeWorktreeSettings = Schema.Struct({
+  /** Absent is `octant/`. */
+  branchPrefix: Schema.optional(CodeBranchPrefix),
+  /** Absent is `short-id`: the prefix and a short id, with no words from the prompt. */
+  branchNaming: Schema.optional(CodeWorktreeNaming),
+}).annotations(strict);
+export type CodeWorktreeSettings = typeof CodeWorktreeSettings.Type;
+
 export const CodeSettings = Schema.Struct({
   defaultModel: Schema.optional(CodeDefaultModel),
   defaultExecutionPolicy: ProviderExecutionPolicy,
@@ -745,6 +783,8 @@ export const CodeSettings = Schema.Struct({
    * reads as.
    */
   windowsTerminalShell: Schema.optional(WindowsTerminalShell),
+  /** Settings › Code › Worktrees. Absent is the host's own defaults. */
+  worktrees: Schema.optional(CodeWorktreeSettings),
   fullAccessSandboxOff: RetiredSandboxOffSwitch,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
@@ -989,6 +1029,8 @@ export const CodeCommand = Schema.Union(
     restartContinuation: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
     windowsTerminalShell: Schema.optional(WindowsTerminalShell),
+    /** Absent keeps the stored choice; a present value replaces it, `{}` returns to the defaults. */
+    worktrees: Schema.optional(CodeWorktreeSettings),
   }).annotations(strict),
   CreateCodeThreadCommand,
   Schema.Struct({

@@ -159,6 +159,36 @@ describe("Code aggregate contracts", () => {
     ).toThrow();
   });
 
+  it("replays worktree settings stored before they existed, and refuses a prefix Git would reject", () => {
+    const settings = {
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      version: 1,
+      updatedAt: now,
+    } as const;
+    expect(decodeCodeSettings(settings)).not.toHaveProperty("worktrees");
+    const worktrees = {
+      branchPrefix: "feat/team-a/",
+      branchNaming: "prompt",
+    } as const;
+    expect(decodeCodeSettings({ ...settings, worktrees })).toMatchObject({ worktrees });
+    for (const branchPrefix of [
+      "",
+      "/",
+      "a b/",
+      "a..b/",
+      "-x/",
+      "x.lock/",
+      "a@{/",
+      "x".repeat(41),
+    ]) {
+      expect(
+        () => decodeCodeSettings({ ...settings, worktrees: { branchPrefix } }),
+        branchPrefix,
+      ).toThrow();
+    }
+  });
+
   it("decodes shell-free Code settings and rejects raw checkout/file paths", () => {
     const settings = {
       defaultExecutionPolicy: "approval-gated",
