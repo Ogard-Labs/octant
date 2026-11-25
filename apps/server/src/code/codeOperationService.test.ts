@@ -3523,7 +3523,10 @@ describe("CodeOperationService", () => {
     expect(fixture.turns.start).not.toHaveBeenCalled();
   });
 
-  function sideTaskReportFixture(recordIngestion = vi.fn(() => true)) {
+  function sideTaskReportFixture(
+    recordIngestion = vi.fn(() => true),
+    onSideTaskReportAdmitted = vi.fn(),
+  ) {
     const entry: SideTaskReportEntry = {
       childThreadId: "d6a1b000-0000-4000-8000-0000000000c1",
       state: "owed",
@@ -3541,6 +3544,7 @@ describe("CodeOperationService", () => {
     const fixture = providerTurnFixture({
       recordEvents: true,
       sideTaskReports: { reportsForParent: () => [entry], recordIngestion },
+      onSideTaskReportAdmitted,
     });
     const journaled = (
       operationId: CodeOperationId,
@@ -3574,7 +3578,7 @@ describe("CodeOperationService", () => {
         operationId: decodeCodeOperationId(operationId),
         delivery: { kind: "side-task-report", reportIds: [entry.report.reportId] },
       });
-    return { ...fixture, deliver, journaled, recordIngestion };
+    return { ...fixture, deliver, journaled, recordIngestion, onSideTaskReportAdmitted };
   }
 
   it("delivers a side-task report after a rate-limited turn was followed by a completed one", async () => {
@@ -3613,11 +3617,14 @@ describe("CodeOperationService", () => {
       failure: { category: "unavailable" },
     });
     expect(fixture.turns.start).not.toHaveBeenCalled();
+    // Neither a busy parent nor a refused mark touches the parent's rest.
+    expect(fixture.onSideTaskReportAdmitted).not.toHaveBeenCalled();
 
     recorded = true;
     await expect(fixture.deliver("74747474-7474-4474-8474-747474747405")).resolves.toMatchObject({
       kind: "provider-turn-state",
     });
+    expect(fixture.onSideTaskReportAdmitted).toHaveBeenCalledExactlyOnceWith(ids.thread);
     expect(fixture.recordIngestion).toHaveBeenCalledTimes(2);
     expect(fixture.recordIngestion.mock.invocationCallOrder[1]).toBeLessThan(
       fixture.turns.start.mock.invocationCallOrder[0] ?? 0,
@@ -4097,6 +4104,7 @@ function providerTurnFixture(
       | "git"
       | "isProviderModelAllowed"
       | "agentRuns"
+      | "onSideTaskReportAdmitted"
       | "sideTaskReports"
       | "consumeIssueContextFramed"
       | "carryAgentMessages"

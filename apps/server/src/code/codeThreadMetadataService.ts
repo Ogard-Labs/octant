@@ -531,6 +531,45 @@ function summarizeChildAgents(
   };
 }
 
+/**
+ * The task of one of the provider's own children that still runs, if one
+ * does. Its status is the provider's last report, not proof of a process: a
+ * child whose parent turn has ended (stopped, failed, or cut off) is not
+ * reported again, and neither is one from before `since`, this host's start.
+ * Either still reading `running` would hold a settle with nothing to clear it.
+ */
+export function runningProviderChild(
+  frames: ReadonlyArray<CodeOperationEventFrame>,
+  since: string,
+): string | undefined {
+  const endedTurns = new Set<string>();
+  for (const { operationId, event } of frames) {
+    if (
+      (event.kind === "operation-state" &&
+        event.state !== "running" &&
+        event.state !== "waiting") ||
+      (event.kind === "operation-result" &&
+        (event.result.kind === "operation-failed" ||
+          (event.result.kind === "provider-turn-state" &&
+            event.result.state !== "running" &&
+            event.result.state !== "waiting")))
+    )
+      endedTurns.add(String(operationId));
+  }
+  const latestByChild = new Map<string, { readonly task: string; readonly running: boolean }>();
+  for (const { operationId, event, occurredAt } of frames) {
+    if (event.kind !== "child-activity") continue;
+    latestByChild.set(event.childId, {
+      task: event.observation?.task ?? event.summary,
+      running:
+        occurredAt >= since &&
+        !endedTurns.has(String(operationId)) &&
+        (event.state === "starting" || event.state === "running" || event.state === "waiting"),
+    });
+  }
+  return [...latestByChild.values()].find((child) => child.running)?.task;
+}
+
 function emptyChildAgents(): CodeThreadChildAgentSummary {
   return { active: 0, completed: 0, failed: 0, unacknowledgedResults: 0 };
 }

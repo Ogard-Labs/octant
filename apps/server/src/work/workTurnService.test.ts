@@ -6462,8 +6462,10 @@ describe("WorkTurnService", () => {
     const report = owedSideTaskReport("work");
     let runs = 0;
     const onTurnRequested = vi.fn();
+    const onReportAdmitted = vi.fn();
     const fixture = serviceFixture({
       onTurnRequested,
+      onReportAdmitted,
       sideTaskReports: { reportsForParent: () => [report], recordIngestion: () => true },
       turnRuntime: {
         run: async () => {
@@ -6498,8 +6500,8 @@ describe("WorkTurnService", () => {
     await expect(
       deliver("cccccccc-cccc-4ccc-8ccc-ccccccccccc1", "dddddddd-dddd-4ddd-8ddd-ddddddddddd1"),
     ).rejects.toMatchObject({ failure: { category: "stale" } });
-    // A refused retry leaves the snooze the host set for that reset in place.
-    expect(onTurnRequested).toHaveBeenCalledTimes(1);
+    // A refused retry leaves the parent's rest as it is.
+    expect(onReportAdmitted).not.toHaveBeenCalled();
     await fixture.service.startFirstTurn(ids.window, {
       ...startCommand(),
       requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-ccccccccccc2"),
@@ -6510,6 +6512,9 @@ describe("WorkTurnService", () => {
     await expect(
       deliver("cccccccc-cccc-4ccc-8ccc-ccccccccccc3", "dddddddd-dddd-4ddd-8ddd-ddddddddddd3"),
     ).resolves.toMatchObject({ kind: "accepted", turn: { delivery } });
+    // A report is never the person asking for a turn, so it cannot end a snooze.
+    expect(onReportAdmitted).toHaveBeenCalledTimes(1);
+    expect(onTurnRequested).toHaveBeenCalledTimes(2);
   });
 
   it("marks a Work parent as having read a side-task report only once it takes the report, and before its provider does", async () => {
@@ -6518,9 +6523,9 @@ describe("WorkTurnService", () => {
     let recorded = true;
     const pending = deferred<{ readonly kind: "completed"; readonly response: string }>();
     let first = true;
-    const onTurnRequested = vi.fn();
+    const onReportAdmitted = vi.fn();
     const fixture = serviceFixture({
-      onTurnRequested,
+      onReportAdmitted,
       sideTaskReports: {
         reportsForParent: () => [report],
         recordIngestion: () => {
@@ -6560,8 +6565,8 @@ describe("WorkTurnService", () => {
     ).rejects.toMatchObject({ failure: { category: "unavailable" } });
     expect(order).toEqual(["marked"]);
     expect(fixture.projection.listForThread(ids.thread)).toHaveLength(1);
-    // Refused as late as a turn can be, the report still woke nothing.
-    expect(onTurnRequested).toHaveBeenCalledTimes(1);
+    // Refused as late as a turn can be, the report still changed no rest.
+    expect(onReportAdmitted).not.toHaveBeenCalled();
 
     recorded = true;
     await deliver("cccccccc-cccc-4ccc-8ccc-ccccccccccc3", "dddddddd-dddd-4ddd-8ddd-ddddddddddd3");
@@ -7169,6 +7174,7 @@ function serviceFixture(
     readonly resolveStrict?: WorkTurnServiceDependencies["resolveStrict"];
     readonly documentDelivery?: "canvas" | "native-artifacts";
     readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
+    readonly onReportAdmitted?: WorkTurnServiceDependencies["onReportAdmitted"];
     readonly onTurnCancelled?: WorkTurnServiceDependencies["onTurnCancelled"];
     readonly agentRuns?: WorkTurnServiceDependencies["agentRuns"];
     readonly sideTaskReports?: WorkTurnServiceDependencies["sideTaskReports"];
@@ -7414,6 +7420,9 @@ function serviceFixture(
       ? {}
       : { turnFileObserver: options.turnFileObserver }),
     ...(options.onTurnRequested === undefined ? {} : { onTurnRequested: options.onTurnRequested }),
+    ...(options.onReportAdmitted === undefined
+      ? {}
+      : { onReportAdmitted: options.onReportAdmitted }),
     ...(options.moveHold === undefined ? {} : { moveHold: options.moveHold }),
     ...(options.recordAdoptedSession === undefined
       ? {}

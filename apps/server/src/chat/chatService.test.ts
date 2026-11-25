@@ -441,6 +441,7 @@ function openFixture(options?: {
     ) => import("@octant/contracts").AgentRun | undefined;
     readonly resultText: (runId: import("@octant/contracts").AgentRunId) => string | undefined;
   };
+  readonly unfinishedWork?: ChatServiceOptions["unfinishedWork"];
   readonly sideTaskReports?: {
     readonly reportsForParent: (
       parentThreadId: string,
@@ -904,6 +905,7 @@ function openFixture(options?: {
       : { gatherMultiModelRuntimeFacts: options.gatherMultiModelRuntimeFacts }),
     ...(options?.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
     ...(options?.sideTaskReports === undefined ? {} : { sideTaskReports: options.sideTaskReports }),
+    ...(options?.unfinishedWork === undefined ? {} : { unfinishedWork: options.unfinishedWork }),
     ...(options?.issueContext === undefined ? {} : { issueContext: options.issueContext }),
     ...(options?.linearIssueContext === undefined
       ? {}
@@ -11852,6 +11854,30 @@ describe("completing and snoozing a Chat thread", () => {
     expect(service.read(thread.id).thread).not.toHaveProperty("completedAt");
   });
 
+  it("refuses to settle a Chat whose side task needs the person, says which, and settles it once that is done", async () => {
+    let work: ReturnType<NonNullable<ChatServiceOptions["unfinishedWork"]>> = {
+      kind: "side-task-attention",
+      title: "Fix the docs",
+    };
+    const { service } = openFixture({ unfinishedWork: () => work });
+    const thread = await createThread(service);
+    const settle = () =>
+      service.execute({
+        kind: "complete-chat-thread",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+      });
+    await expect(settle()).rejects.toMatchObject({
+      failure: {
+        category: "invalid",
+        message: expect.stringMatching(/side task “Fix the docs” needs you/),
+      },
+    });
+    expect(service.read(thread.id).thread).not.toHaveProperty("completedAt");
+    work = undefined;
+    await expect(settle()).resolves.toMatchObject({ thread: { completedAt: now } });
+  });
+
   it("snoozes a thread until a time ahead, wakes it by hand, and refuses a wake time already gone", async () => {
     const { service, persistence } = openFixture();
     const thread = await createThread(service);
@@ -12829,8 +12855,17 @@ describe("agent result delivery", () => {
       if (result.kind !== "thread-created") throw new Error("Expected a Chat thread.");
       return result.thread;
     };
-    const parent = await create("Parent");
+    let parent = await create("Parent");
     const child = await create("Child");
+    // The person hid the parent until later; a report runs under that snooze.
+    const snoozed = await fixture.service.execute({
+      kind: "snooze-chat-thread",
+      threadId: parent.id,
+      expectedVersion: parent.version,
+      until: "2099-01-01T00:00:00.000Z",
+    });
+    if (snoozed.kind !== "thread-updated") throw new Error("Expected the snoozed thread.");
+    parent = snoozed.thread;
     reports = new SideTaskReportStore({
       journal: fixture.persistence.journal,
       uuid: () => crypto.randomUUID(),
@@ -12870,6 +12905,7 @@ describe("agent result delivery", () => {
       const reportId = reports.reportsForParent(parent.id)[0]?.report.reportId;
       const delivery = fixture.service.read(parent.id).turns[0];
       expect(delivery?.delivery).toEqual({ kind: "side-task-report", reportIds: [reportId] });
+      expect(fixture.service.read(parent.id).thread.snooze).toEqual(parent.snooze);
       expect(fixture.fakeDriver.sentTurns[1]?.prompt).toContain('"text":"Fixture response"');
       const replay = {
         kind: "deliver-chat-side-task-report",
@@ -12885,6 +12921,8 @@ describe("agent result delivery", () => {
         fixture.service.execute(replay, { windowId: decodeWindowId(ids.actor) }),
       ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
       expect(fixture.service.read(parent.id).turns).toHaveLength(1);
+      fixture.service.noteReportTurnFailed(parent.id);
+      expect(fixture.service.read(parent.id).thread).not.toHaveProperty("snooze");
     } finally {
       unsubscribe();
       service.stop();

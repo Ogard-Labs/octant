@@ -1,3 +1,4 @@
+import { isAgentRunActiveStatus } from "@octant/domain";
 import {
   DEFAULT_HOST_RESOURCE_POLICY,
   decodeAgentRunParentThreadId,
@@ -116,6 +117,11 @@ import { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore"
 import { ThreadFollowUpSuggestionStore } from "../followUps/threadFollowUpSuggestionStore";
 import { SideTaskStore } from "../sideTasks/sideTaskStore";
 import { SideTaskReportStore } from "../sideTasks/sideTaskReportStore";
+import {
+  createThreadUnfinishedWork,
+  type ThreadUnfinishedWorkPorts,
+} from "../sideTasks/threadUnfinishedWork";
+import { runningProviderChild } from "../code/codeThreadMetadataService";
 import {
   recordSideTaskReportIngestion,
   type SideTaskReportAdmission,
@@ -747,6 +753,34 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     uuid: randomUUID,
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     clock: () => new Date().toISOString(),
+  });
+  // The work a thread started that is not done. Every mode's settle asks it;
+  // the thread services and the report delivery it reads are built after this
+  // wiring, so they bind their side here.
+  const threadUnfinishedWorkHost: {
+    childStanding?: ThreadUnfinishedWorkPorts["childStanding"];
+    reportsHeld?: ThreadUnfinishedWorkPorts["reportsHeld"];
+  } = {};
+  const hostStartedAt = new Date().toISOString();
+  const threadUnfinishedWork = createThreadUnfinishedWork({
+    sideTasks,
+    reports: sideTaskReports,
+    childStanding: (child) => threadUnfinishedWorkHost.childStanding?.(child) ?? "quiet",
+    reportsHeld: (parentThreadId) =>
+      threadUnfinishedWorkHost.reportsHeld?.(parentThreadId) ?? false,
+    runningChildRun: (parentThreadId) => {
+      const managed = persistence.agentRunProjection
+        .parentSummary(decodeAgentRunParentThreadId(parentThreadId))
+        .find((run) => isAgentRunActiveStatus(run.lifecycleStatus));
+      if (managed !== undefined) return managed.task;
+      // Octant-managed helpers live apart from the provider's own child
+      // events, which only a Code thread's history keeps. The whole history:
+      // its summary drops the ends of turns a later completion supersedes.
+      const history = codeBoardEventStore.historyForThread(decodeCodeThreadId(parentThreadId));
+      return history.status === "ok"
+        ? runningProviderChild(history.frames, hostStartedAt)
+        : undefined;
+    },
   });
   const finishedReceipts = new ThreadFinishedReceiptStore({
     journal: persistence.journal,
@@ -1803,6 +1837,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     sideTasks,
     sideTaskReports,
     sideTaskReportAdmission,
+    threadUnfinishedWork,
+    threadUnfinishedWorkHost,
     finishedReceipts,
     spendCeiling,
     spendCeilingHolder,

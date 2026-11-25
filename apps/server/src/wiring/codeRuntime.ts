@@ -1546,6 +1546,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);
         },
+        onSideTaskReportAdmitted: (threadId) => {
+          if (codeService instanceof CodeService) codeService.noteReportAdmitted(threadId);
+        },
         onUsageLimitStop: async (threadId, stopped) => {
           if (codeService instanceof CodeService)
             await codeService.handOffAfterUsageLimit(threadId);

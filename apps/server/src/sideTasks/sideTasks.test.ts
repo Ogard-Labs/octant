@@ -213,6 +213,13 @@ describe("side tasks", () => {
       mode: "chat",
     });
     expect(store.startedOfferFor("00000000-0000-4000-8000-0000000000ff", child)).toBeUndefined();
+    // What a settle asks of the thread's own children, dismissed offers left out.
+    for (const read of [store, storeOn(connection)]) {
+      expect(read.startedChildrenOf(threadId)).toMatchObject([
+        { childThreadId: child, offer: { title: offer.title } },
+      ]);
+      expect(read.startedChildrenOf("00000000-0000-4000-8000-0000000000ff")).toEqual([]);
+    }
   });
 
   it("refuses a worktree outside Code and a model that keeps offering past the open limit", async () => {

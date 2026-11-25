@@ -20,6 +20,7 @@ import {
   type AggregateVersion,
   type UtcTimestamp,
   decodeThreadWorkingDirectory,
+  decodeUtcTimestamp,
   decodeProjectExtraFolder,
   decodeWorkThread,
   decodeProviderModel,
@@ -2321,6 +2322,78 @@ describe("WorkThreadService", () => {
     });
   });
 
+  it("settles no Work thread whose side task is not done: Settle says why, Mark done only marks, and the host leaves it alone", async () => {
+    const unfinishedWork = vi.fn(
+      () => ({ kind: "side-task-report", title: "Fix the docs" }) as const,
+    );
+    const held = serviceFixture({
+      threads: [thread()],
+      putAwayWhenDone: () => true,
+      unfinishedWork,
+    });
+    await expect(
+      held.service.execute(ids.window, {
+        kind: "complete-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid",
+        message: expect.stringMatching(/side task “Fix the docs” has a report/),
+      },
+    });
+    await expect(held.service.settleFinishedThread(ids.thread)).resolves.toEqual({
+      status: "skipped",
+      reason: "child-work",
+    });
+    expect(unfinishedWork).toHaveBeenCalledWith(String(ids.thread));
+    const marked = await held.service.execute(ids.window, {
+      kind: "confirm-work-thread-completion",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      deliveryTarget: "Draft brief",
+    });
+    if (!("thread" in marked)) throw new Error("Expected the marked thread.");
+    expect(marked.thread).toMatchObject({ completionConfirmed: true });
+    expect(marked.thread).not.toHaveProperty("completedAt");
+  });
+
+  it("names a running child run instead of the turn a Work thread reads as running for it", async () => {
+    const held = serviceFixture({
+      threads: [thread()],
+      observeRuntime: () => ({ executing: true, awaitingInput: false }),
+      unfinishedWork: () => ({ kind: "child-run", title: "Compare the exports" }),
+    });
+    await expect(
+      held.service.execute(ids.window, {
+        kind: "complete-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        message: expect.stringMatching(/child run “Compare the exports” is still running/),
+      },
+    });
+  });
+
+  it("keeps a person's snooze when a side task's report starts a Work turn, and brings a settled thread back", () => {
+    const at = decodeUtcTimestamp(now);
+    const snooze = { until: decodeUtcTimestamp("2099-01-01T00:00:00.000Z"), at };
+    const fixture = serviceFixture({ threads: [thread({ completedAt: at, snooze })] });
+    fixture.service.noteReportAdmitted(ids.thread);
+    expect(fixture.projection.read(ids.thread)).toMatchObject({ snooze });
+    expect(fixture.projection.read(ids.thread)).not.toHaveProperty("completedAt");
+
+    fixture.service.noteTurnRequested(ids.thread);
+    expect(fixture.projection.read(ids.thread)).not.toHaveProperty("snooze");
+
+    const failed = serviceFixture({ threads: [thread({ snooze })] });
+    failed.service.noteReportTurnFailed(ids.thread);
+    expect(failed.projection.read(ids.thread)).not.toHaveProperty("snooze");
+  });
+
   it("keeps an evidence note an older client sends with the mark", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
 
@@ -2855,6 +2928,7 @@ function serviceFixture(
     readonly isMarked?: WorkThreadServiceDependencies["isMarked"];
     readonly readLatestFinishedReceipt?: WorkThreadServiceDependencies["readLatestFinishedReceipt"];
     readonly putAwayWhenDone?: WorkThreadServiceDependencies["putAwayWhenDone"];
+    readonly unfinishedWork?: WorkThreadServiceDependencies["unfinishedWork"];
     readonly uuid?: () => string;
     readonly serverProjects?: WorkThreadServiceDependencies["serverProjects"];
   } = {},
@@ -2955,6 +3029,7 @@ function serviceFixture(
       : { linearIssueContext: options.linearIssueContext }),
     ...(options.observeRuntime === undefined ? {} : { observeRuntime: options.observeRuntime }),
     ...(options.putAwayWhenDone === undefined ? {} : { putAwayWhenDone: options.putAwayWhenDone }),
+    ...(options.unfinishedWork === undefined ? {} : { unfinishedWork: options.unfinishedWork }),
     ...(options.projectDueReminder === undefined
       ? {}
       : { projectDueReminder: options.projectDueReminder }),

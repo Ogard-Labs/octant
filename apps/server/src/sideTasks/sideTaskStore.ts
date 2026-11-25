@@ -118,6 +118,15 @@ export class SideTaskStore {
       : undefined;
   }
 
+  /** Every child this thread's offers started, receipts that aged out included. */
+  startedChildrenOf(
+    parentThreadId: string,
+  ): ReadonlyArray<{ readonly childThreadId: string; readonly offer: SideTaskOffer }> {
+    return [...this.#startedOffers]
+      .filter(([, entry]) => entry.parentThreadId === parentThreadId)
+      .map(([childThreadId, entry]) => ({ childThreadId, offer: entry.offer }));
+  }
+
   /** The child an offer of this thread started, even after its receipt aged out. */
   startedChildOf(parentThreadId: string, sideTaskId: string): string | undefined {
     for (const [childThreadId, entry] of this.#startedOffers) {

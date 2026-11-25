@@ -196,6 +196,54 @@ describe("SideTaskReportDeliveryService", () => {
     f.service.stop();
   });
 
+  it("counts a report as held by its parent only while the parent's own state keeps it out, not its running turn", async () => {
+    let result: Awaited<ReturnType<SideTaskReportDeliveryModePort["dispatch"]>> = {
+      kind: "deferred",
+      detail: "mid-turn",
+      parentRunning: true,
+    };
+    const f = fixture({ chat: { dispatch: async () => result } });
+    f.service.start();
+    f.reports.owe(child, completion("Done."));
+    expect(f.service.heldFor(parent)).toBe(false);
+    await f.flush();
+    expect(f.service.heldFor(parent)).toBe(false);
+
+    result = { kind: "deferred", detail: "The parent Work thread is marked Done." };
+    f.timers.at(-1)?.fire();
+    await f.flush();
+    expect(f.service.heldFor(parent)).toBe(true);
+    expect(f.reports.undelivered()).toHaveLength(1);
+
+    // A restarted host tries it and finds the same state.
+    f.unsubscribe();
+    f.service.stop();
+    const restarted = f.restart();
+    restarted.service.start();
+    expect(restarted.service.heldFor(parent)).toBe(false);
+    await f.flush();
+    expect(restarted.service.heldFor(parent)).toBe(true);
+
+    result = { kind: "dispatched" };
+    f.timers.at(-1)?.fire();
+    await f.flush();
+    expect(restarted.service.heldFor(parent)).toBe(false);
+    expect(restarted.reports.undelivered()).toHaveLength(0);
+    restarted.service.stop();
+  });
+
+  it("counts a report whose delivery keeps throwing as held, so it cannot hold a settle for good", async () => {
+    const f = fixture({
+      chat: { dispatch: async () => Promise.reject(new Error("History unavailable.")) },
+    });
+    f.service.start();
+    f.reports.owe(child, completion("Done."));
+    await f.flush();
+    expect(f.service.heldFor(parent)).toBe(true);
+    f.unsubscribe();
+    f.service.stop();
+  });
+
   it("delivers what was still owed after a restart", async () => {
     const f = fixture();
     f.service.start();

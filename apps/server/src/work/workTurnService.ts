@@ -570,6 +570,11 @@ export interface WorkTurnServiceDependencies {
    */
   readonly onTurnRequested?: (threadId: WorkThreadId) => void;
   /**
+   * A side task's report was admitted and its turn is about to be journaled.
+   * Not the person asking for a turn, so it ends a settle but no snooze.
+   */
+  readonly onReportAdmitted?: (threadId: WorkThreadId) => void;
+  /**
    * A person stopped the thread's running turn. Fires once the turn is
    * recorded as cancelled, never for a turn that had already ended. A throw is
    * ignored: the stop has happened and must not report as failed.
@@ -815,6 +820,7 @@ export class WorkTurnService {
     ReturnType<typeof decodeSpendCeilingReservationId>
   >();
   readonly #onTurnRequested: WorkTurnServiceDependencies["onTurnRequested"];
+  readonly #onReportAdmitted: WorkTurnServiceDependencies["onReportAdmitted"];
   readonly #onUsageLimitStop: WorkTurnServiceDependencies["onUsageLimitStop"];
   readonly #onTurnCancelled: WorkTurnServiceDependencies["onTurnCancelled"];
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
@@ -891,6 +897,7 @@ export class WorkTurnService {
     this.#octantInstructionBlocks = dependencies.octantInstructionBlocks;
     this.#spendCeiling = dependencies.spendCeiling;
     this.#onTurnRequested = dependencies.onTurnRequested;
+    this.#onReportAdmitted = dependencies.onReportAdmitted;
     this.#onUsageLimitStop = dependencies.onUsageLimitStop;
     this.#onTurnCancelled = dependencies.onTurnCancelled;
     this.#turnFileObserver = dependencies.turnFileObserver;
@@ -1805,9 +1812,9 @@ export class WorkTurnService {
     // The host's own limit-recovery dispatch is not the person re-engaging,
     // so it must not wake a snooze or reopen a completion the way their turn
     // would; the spent limit-owned snooze goes in the settle instead.
-    // A side-task report is retried until the parent can take it, so it counts
-    // as a request only once it is admitted: a refused retry would otherwise
-    // clear the usage-limit snooze the host set on the parent it waits for.
+    // A side-task report is not the person re-engaging either, and it is
+    // retried until the parent can take it: it changes the parent's rest only
+    // once it is admitted.
     const reportsBack = command.delivery?.kind === "side-task-report";
     if (thread !== undefined && options?.limitRecovery !== true && !reportsBack)
       this.#onTurnRequested?.(thread.id);
@@ -2624,7 +2631,7 @@ export class WorkTurnService {
       try {
         if (!this.#markSideTaskReports(command))
           throw this.#failure("unavailable", SIDE_TASK_REPORT_MARK_REFUSAL);
-        if (reportsBack && thread !== undefined) this.#onTurnRequested?.(thread.id);
+        if (reportsBack && thread !== undefined) this.#onReportAdmitted?.(thread.id);
         this.#append(
           command.requestId,
           0,

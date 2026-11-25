@@ -385,6 +385,8 @@ export function startOctantServer(
       sideTasks,
       sideTaskReports,
       sideTaskReportAdmission,
+      threadUnfinishedWork,
+      threadUnfinishedWorkHost,
       finishedReceipts,
       spendCeiling,
       spendCeilingHolder,
@@ -873,6 +875,7 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      threadUnfinishedWork,
       hubActScopeSlot,
       isPairedDeviceScope,
       projectMemoryAccess,
@@ -1302,6 +1305,7 @@ export function startOctantServer(
       threadNotesRoutes,
       workspacePresetRoutes,
     } = yield* wireChat({
+      threadUnfinishedWork,
       imageDescriber,
       resolveThreadStrict,
       verifyModelToolsOnFirstUse,
@@ -1393,6 +1397,8 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      threadUnfinishedWork,
+      threadUnfinishedWorkHost,
       threadSecretFacts,
       narrationForTurn,
       hubActScopeSlot,
@@ -1504,6 +1510,9 @@ export function startOctantServer(
       shieldServerStore,
     });
     const { restartRecovery } = yield* wireContinuation({
+      threadUnfinishedWorkHost,
+      codeService,
+      workThreadService,
       hostDrain,
       threadWakeups,
       workThreadWakeupPort,

@@ -143,6 +143,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     | "runtimeOutsideContentMarks"
     | "sideTasks"
     | "sideTaskReportAdmission"
+    | "threadUnfinishedWork"
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
   > &
@@ -249,6 +250,7 @@ export function wireChat(deps: ChatDependencies) {
     shellService,
     sideTasks,
     sideTaskReportAdmission,
+    threadUnfinishedWork,
     skillDiscoveryService,
     spendCeiling,
     threadOutsideContentMarks,
@@ -516,6 +518,7 @@ export function wireChat(deps: ChatDependencies) {
           windowId,
         }),
       awaitsHarnessApproval: threadAwaitsHarnessApproval,
+      unfinishedWork: threadUnfinishedWork,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       outsideContentMarks: runtimeOutsideContentMarks,
       resolveStrict: deps.resolveThreadStrict,

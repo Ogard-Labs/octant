@@ -3928,7 +3928,8 @@ With **Settle threads when they're done** on (the default), Mark done on a
 Work or Code thread also settles it, the host settles a Work or Code thread
 once the turn that filed its passing finished report completes, and the host
 settles a Code thread once a pull request it delivers merged, read from
-cached evidence only; none of them marks a thread Done, and Un-settle brings it
+cached evidence only; none of them settles a thread whose side tasks or child
+runs are not done, none marks a thread Done, and Un-settle brings it
 back
 ([Workspace: thread visibility and completion](design/workspace.md#thread-visibility-and-completion)).
 
@@ -12488,6 +12489,18 @@ a person sends. A parent that no longer exists is the exception: its reports
 settle as `side-task-report-refused` with the reason journaled. Purging either
 thread erases the child's report aggregate and drops whatever was still owed;
 deleting a Chat child settles its owed reports as refused.
+
+The parent's rest follows the report only once it is admitted, in the same step
+that records the outside-content mark: a settled parent comes back, a person's
+snooze stays (`restAfterReport`), and a refused retry changes neither.
+`SideTaskReportFailureWake` reads each mode's journaled turn end and drops that
+snooze when the turn a report started failed. Every settle asks
+`createThreadUnfinishedWork` first: the host's own read of the started children
+(the facts the receipt shows, past the bounds a window's list keeps), the
+reports still owed, and the running child runs. The delivery service tells it
+which reports the parent's own state keeps out (`heldFor`), so they hold no
+settle; the rule is in
+[Workspace: thread visibility and completion](design/workspace.md#thread-visibility-and-completion).
 
 **Work fork.** `fork-work-thread` creates a Work thread in the source's
 Project on the source's provider and model, with a `forkedFrom` origin naming

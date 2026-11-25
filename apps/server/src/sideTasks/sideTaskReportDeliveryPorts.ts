@@ -52,9 +52,38 @@ export interface SideTaskReportDeliveryModePort {
     reports: ReadonlyArray<SideTaskReportOwed>,
   ) => Promise<
     | { readonly kind: "dispatched" }
-    | { readonly kind: "deferred"; readonly detail: string }
+    | {
+        readonly kind: "deferred";
+        readonly detail: string;
+        /**
+         * The parent's own turn runs, its session is compacted, or it changed
+         * a moment ago: what keeps the report out ends by itself.
+         */
+        readonly parentRunning?: true;
+      }
     | { readonly kind: "refused"; readonly detail: string }
   >;
+}
+
+/**
+ * Says whether a deferred report waits for the parent's own turn, which ends
+ * and lets it in, or for a state a person has to change. Asked on both sides
+ * of the try, since the turn that kept the report out may end during it.
+ */
+export function noteRunningParent(
+  port: SideTaskReportDeliveryModePort,
+  running: (parentThreadId: string) => boolean,
+): SideTaskReportDeliveryModePort {
+  return {
+    alreadyDelivered: port.alreadyDelivered,
+    dispatch: async (parentThreadId, reports) => {
+      const before = running(parentThreadId);
+      const result = await port.dispatch(parentThreadId, reports);
+      return result.kind === "deferred" && (before || running(parentThreadId))
+        ? { ...result, parentRunning: true }
+        : result;
+    },
+  };
 }
 
 /** A deletion is final from its request on: no reopen brings the thread back. */
@@ -163,7 +192,11 @@ export function createWorkSideTaskReportDeliveryPort(input: {
             };
       } catch (error) {
         if (error instanceof WorkTurnServiceError && error.failure.category === "stale") {
-          return { kind: "deferred", detail: "The parent Work thread is mid-turn." };
+          return {
+            kind: "deferred",
+            detail: "The parent Work thread is mid-turn.",
+            parentRunning: true,
+          };
         }
         if (input.readThread(thread.id)?.completionConfirmed === true) {
           return { kind: "deferred", detail: "The parent Work thread is marked Done." };
@@ -297,11 +330,17 @@ export function createChatSideTaskReportDeliveryPort(input: {
           ? sideTaskReportReceipt(reports, result.turn.delivery)
           : { kind: "deferred", detail: "The delivery was not admitted." };
       } catch (error) {
+        // Busy, or changed under the delivery a moment ago: both clear on
+        // their own, so the report still holds a settle meanwhile.
         if (
           error instanceof ChatServiceError &&
           (error.failure.category === "waiting" || error.failure.category === "stale")
         ) {
-          return { kind: "deferred", detail: "The parent Chat thread is mid-turn." };
+          return {
+            kind: "deferred",
+            detail: "The parent Chat thread is mid-turn.",
+            parentRunning: true,
+          };
         }
         return {
           kind: "deferred",

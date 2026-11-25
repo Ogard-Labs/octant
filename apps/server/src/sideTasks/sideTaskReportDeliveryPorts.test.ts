@@ -9,6 +9,7 @@ import { ChatServiceError } from "../chat/chatService";
 import {
   createChatSideTaskReportDeliveryPort,
   createWorkSideTaskReportDeliveryPort,
+  noteRunningParent,
 } from "./sideTaskReportDeliveryPorts";
 
 const now = "2026-11-24T12:00:00.000Z";
@@ -70,6 +71,23 @@ describe("a parent that cannot take a side task's report", () => {
     await expect(port.dispatch(parent, [report("chat")])).resolves.toMatchObject({
       kind: "deferred",
     });
+  });
+
+  it("says a deferred report waits for the parent's running turn, even one that ended during the try", async () => {
+    let running = true;
+    const { port } = chatPort("active");
+    const noted = noteRunningParent(port, () => {
+      const answer = running;
+      running = false;
+      return answer;
+    });
+    await expect(noted.dispatch(parent, [report("chat")])).resolves.toMatchObject({
+      kind: "deferred",
+      parentRunning: true,
+    });
+    await expect(noted.dispatch(parent, [report("chat")])).resolves.not.toHaveProperty(
+      "parentRunning",
+    );
   });
 
   it("settles the report for good when the Work parent is deleted", async () => {

@@ -48,6 +48,8 @@ interface PendingParent {
   readonly parentThreadId: string;
   timer: SideTaskReportDeliveryTimerHandle | undefined;
   evaluating: boolean;
+  /** The last try was refused for the parent's own state, not for its running turn. */
+  held: boolean;
 }
 
 interface SideTaskReportDeliveryServiceOptions {
@@ -122,6 +124,16 @@ export class SideTaskReportDeliveryService {
       this.#clearTimer(pending);
     }
     this.#pending.clear();
+  }
+
+  /**
+   * Whether what this parent is owed cannot reach it as it stands: its mode is
+   * off, it is marked Done, its worktree was cleaned up, its sign-in takes no
+   * unattended turn. The reports stay owed and are retried; a running turn is
+   * not such a state, because its end delivers them.
+   */
+  heldFor(parentThreadId: string): boolean {
+    return this.#pending.get(parentThreadId)?.held === true;
   }
 
   /** The single entry point `journal.subscribeCommitted` feeds. */
@@ -238,7 +250,12 @@ export class SideTaskReportDeliveryService {
       if (existing.evaluating) return;
       this.#clearTimer(existing);
     } else {
-      this.#pending.set(parentThreadId, { parentThreadId, timer: undefined, evaluating: false });
+      this.#pending.set(parentThreadId, {
+        parentThreadId,
+        timer: undefined,
+        evaluating: false,
+        held: false,
+      });
     }
     queueMicrotask(() => void this.#evaluate(parentThreadId));
   }
@@ -336,6 +353,7 @@ export class SideTaskReportDeliveryService {
         fitSideTaskReportDeliveryBatch(uncovered.map((entry) => entry.report)).length,
       );
       if (batch.length === 0) {
+        pending.held = true;
         this.#armTimer(pending);
         return;
       }
@@ -344,6 +362,7 @@ export class SideTaskReportDeliveryService {
         batch.map((entry) => entry.report),
       );
       if (this.#pending.get(parentThreadId) !== pending) return;
+      pending.held = result.kind === "deferred" && result.parentRunning !== true;
       if (result.kind === "dispatched") {
         const byChild = new Map<string, string[]>();
         for (const entry of batch) {
@@ -371,7 +390,10 @@ export class SideTaskReportDeliveryService {
       // A dispatch may have journaled its turn before throwing. Keep every
       // unsettled report owed so the next admission can read that durable mark.
       this.#options.onError?.("Side-task report delivery will retry.", error);
-      if (this.#pending.get(parentThreadId) === pending) this.#armTimer(pending);
+      if (this.#pending.get(parentThreadId) === pending) {
+        pending.held = true;
+        this.#armTimer(pending);
+      }
     } finally {
       pending.evaluating = false;
       if (this.#pending.get(parentThreadId) === pending) {

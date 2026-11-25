@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   completedThreadArchiveDue,
   decideCompleteThread,
+  restAfterReport,
+  restAfterReportFailure,
+  unfinishedWorkRefusal,
+  type ThreadRestLike,
+  type ThreadUnfinishedWork,
   decideSnoozeThread,
   resolveSnoozePresets,
   snoozeWakeLabel,
@@ -53,6 +58,47 @@ describe("threadShelf", () => {
 });
 
 describe("decideCompleteThread", () => {
+  it("refuses to settle a thread whose side task or child run is not done, before it says anything of the thread's own turn", () => {
+    const unfinishedWork = { kind: "side-task-working", title: "Fix the docs" } as const;
+    expect(decideCompleteThread({ ...idle, lifecycle: "active", unfinishedWork })).toEqual({
+      status: "refused",
+      reason: "unfinished-work",
+      work: unfinishedWork,
+    });
+    expect(
+      decideCompleteThread({
+        executing: true,
+        awaitingInput: false,
+        lifecycle: "active",
+        unfinishedWork,
+      }),
+    ).toMatchObject({ reason: "unfinished-work" });
+    expect(decideCompleteThread({ ...idle, lifecycle: "archived", unfinishedWork })).toEqual({
+      status: "refused",
+      reason: "archived",
+    });
+  });
+
+  it("names the work that is not done in the sentence a person reads", () => {
+    const sentence = (kind: ThreadUnfinishedWork["kind"], title = "Fix the docs") =>
+      unfinishedWorkRefusal({ kind, title });
+    expect(sentence("side-task-working")).toBe(
+      "The side task “Fix the docs” is still working. Settle this thread once it is done.",
+    );
+    expect(sentence("side-task-attention")).toBe(
+      "The side task “Fix the docs” needs you. Answer it before settling this thread.",
+    );
+    expect(sentence("side-task-report")).toBe(
+      "The side task “Fix the docs” has a report on its way here. Settle this thread once it arrives.",
+    );
+    expect(sentence("child-run")).toBe(
+      "The child run “Fix the docs” is still running. Settle this thread once it is done.",
+    );
+    // A run's task can be a whole prompt; the sentence keeps one short line of it.
+    expect(sentence("child-run", `First line\n${"x".repeat(200)}`).length).toBeLessThan(200);
+    expect(sentence("child-run", `First line\n${"x".repeat(200)}`)).not.toContain("\n");
+  });
+
   it("refuses while a turn runs or the thread waits on the person, and on an archived thread", () => {
     expect(decideCompleteThread({ ...idle, lifecycle: "active" })).toEqual({ status: "ok" });
     expect(
@@ -178,5 +224,42 @@ describe("snoozeWakeLabel", () => {
     expect(snoozeWakeLabel("2026-09-08T09:30:00.000Z", now)).toBe("1d");
     expect(snoozeWakeLabel("2026-09-10T10:00:00.000Z", now)).toBe("3d");
     expect(snoozeWakeLabel(earlier, now)).toBe("now");
+  });
+});
+
+describe("restAfterReportFailure", () => {
+  const snooze = { until: "2026-08-01T08:00:00.000Z", at: "2026-07-31T08:00:00.000Z" };
+
+  it("ends a person's snooze so the failure shows, and leaves a usage limit's own and a settle alone", () => {
+    const limited = { id: "t", snooze: { ...snooze, origin: "usage-limit" } };
+    expect(restAfterReportFailure({ id: "t", completedAt: now, snooze })).toEqual({
+      id: "t",
+      completedAt: now,
+    });
+    expect(restAfterReportFailure(limited)).toBe(limited);
+  });
+});
+
+describe("restAfterReport", () => {
+  const snooze = { until: "2026-08-01T08:00:00.000Z", at: "2026-07-31T08:00:00.000Z" };
+
+  it("brings a settled thread back and leaves a person's snooze holding", () => {
+    const never: ThreadRestLike & { readonly id: string } = { id: "t" };
+    expect(restAfterReport({ id: "t", completedAt: now, snooze })).toEqual({ id: "t", snooze });
+    expect(restAfterReport(never)).toEqual({ id: "t" });
+  });
+
+  it("keeps the thread hidden while the report's turn runs, and shows it once that turn needs the person", () => {
+    const kept = restAfterReport({ id: "t", snooze });
+    const at = "2026-07-31T09:00:00.000Z";
+    expect(threadShelf(kept, { executing: true, awaitingInput: false, now: at })).toBe("snoozed");
+    expect(threadShelf(kept, { executing: false, awaitingInput: false, now: at })).toBe("snoozed");
+    expect(threadShelf(kept, { executing: false, awaitingInput: true, now: at })).toBe("active");
+  });
+
+  it("drops a snooze that already ended with the turn it was set during, so the report's turn does not hide the thread again", () => {
+    expect(restAfterReport({ id: "t", snooze: { ...snooze, duringTurn: true } })).toEqual({
+      id: "t",
+    });
   });
 });

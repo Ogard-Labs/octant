@@ -1706,6 +1706,11 @@ export interface CodeOperationServiceOptions {
    * refused.
    */
   readonly sideTaskReports?: SideTaskReportAdmission;
+  /**
+   * A side task's report was admitted and its turn is about to be journaled.
+   * A refused retry never gets here, so it leaves the parent's rest alone.
+   */
+  readonly onSideTaskReportAdmitted?: (threadId: CodeThreadId) => void;
 }
 
 /**
@@ -2407,6 +2412,8 @@ export class CodeOperationService {
                     "refused",
                   );
                 } else {
+                  if (command.delivery?.kind === "side-task-report")
+                    this.#options.onSideTaskReportAdmitted?.(command.threadId);
                   this.#options.events.append({
                     threadId: command.threadId,
                     operationId: command.operationId,

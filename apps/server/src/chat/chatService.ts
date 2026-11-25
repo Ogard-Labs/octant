@@ -81,6 +81,7 @@ import {
   type ChatAttemptOutcome,
   type ChatBootstrap,
   type ChatNavigation,
+  type ChatNavigationThread,
   MAX_CHAT_NAVIGATION_THREADS,
   MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
   type ChatCommandResult,
@@ -189,6 +190,10 @@ import {
 import {
   completedThreadArchiveDue,
   decideCompleteThread,
+  restAfterReport,
+  restAfterReportFailure,
+  unfinishedWorkRefusal,
+  type ThreadUnfinishedWork,
   decideSnoozeThread,
 } from "@octant/domain/thread-completion-policy";
 import type {
@@ -754,6 +759,8 @@ export interface ChatServiceOptions {
    * the thread needs the person.
    */
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
+  /** A side task or child run the thread started that is not done, which holds every settle. */
+  readonly unfinishedWork?: (threadId: string) => ThreadUnfinishedWork | undefined;
   readonly conversationInputTransfer?: Pick<ConversationInputTransfer, "prepare">;
   /**
    * Carries a thread's session to another account of the same provider on the
@@ -1286,6 +1293,7 @@ export class ChatService {
   readonly #toolCallRecorders?: ThreadToolCallRecorders;
   readonly #toolStepsPerTurn: () => number;
   readonly #awaitsHarnessApproval?: (threadId: string) => boolean;
+  readonly #unfinishedWork: ChatServiceOptions["unfinishedWork"];
   readonly #researchRouter: ResearchRouter;
   readonly #webSearchReady: (chatSearxngBaseUrl: string | undefined) => boolean;
   readonly #contextMaintenanceTimeoutMs?: number;
@@ -1363,6 +1371,7 @@ export class ChatService {
     if (options.toolCallRecorders !== undefined) {
       this.#toolCallRecorders = options.toolCallRecorders;
     }
+    this.#unfinishedWork = options.unfinishedWork;
     if (options.awaitsHarnessApproval !== undefined) {
       this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     }
@@ -1677,45 +1686,62 @@ export class ChatService {
   navigation(): ChatNavigation {
     this.#assertReady();
     const hidden = this.#hiddenThreadIds();
-    // Read only when a row could be parked: a streaming turn is executing, and
-    // navigation is read on every streaming delta.
-    let questioning: ReadonlySet<string> | undefined;
+    const row = this.#navigationRows();
     return {
       threads: this.#persistence
         .readChatNavigation()
         .filter((thread) => !hidden.has(String(thread.id)))
         .slice(0, MAX_CHAT_NAVIGATION_THREADS)
-        .map((thread) => {
-          // A turn parked on the agent's own approval is owed by the person,
-          // not executing, the same as the boards read it. The thread keeps
-          // saying so after a restart took the turn, until it is resumed.
-          if (this.#awaitsHarnessApproval?.(String(thread.id)) === true) {
-            return {
-              ...thread,
-              executing: false,
-              awaitingInput: true as const,
-              awaitingKind: "approval" as const,
-            };
-          }
-          // A turn parked on a question is owed by the person in the same
-          // way, whether a provider asked it or the harness lead's own
-          // `ask-user` call did: both park the attempt on it.
-          if (!thread.executing && this.#activeThreadExecutions.has(String(thread.id))) {
-            questioning ??= this.#threadsParkedOnQuestion();
-          }
-          if (questioning?.has(String(thread.id)) === true) {
-            return {
-              ...thread,
-              executing: false,
-              awaitingInput: true as const,
-              awaitingKind: "user-input" as const,
-            };
-          }
-          // Only a row projected as executing speaks for a live turn; a stale
-          // registry entry can never make an idle row look busy.
-          const live = thread.executing ? this.#liveTurns?.read(String(thread.id)) : undefined;
-          return live === undefined ? thread : { ...thread, ...live };
-        }),
+        .map(row),
+    };
+  }
+
+  /**
+   * One active thread's sidebar row, past the bound a listing keeps. Absent
+   * for a thread that is archived, deleted or gone.
+   */
+  navigationRow(threadId: ChatThreadId): ChatNavigationThread | undefined {
+    this.#assertReady();
+    const thread = this.#persistence
+      .readChatNavigation()
+      .find((candidate) => String(candidate.id) === String(threadId));
+    return thread === undefined ? undefined : this.#navigationRows()(thread);
+  }
+
+  #navigationRows(): (thread: ChatNavigationThread) => ChatNavigationThread {
+    // Read only when a row could be parked: a streaming turn is executing, and
+    // navigation is read on every streaming delta.
+    let questioning: ReadonlySet<string> | undefined;
+    return (thread) => {
+      // A turn parked on the agent's own approval is owed by the person,
+      // not executing, the same as the boards read it. The thread keeps
+      // saying so after a restart took the turn, until it is resumed.
+      if (this.#awaitsHarnessApproval?.(String(thread.id)) === true) {
+        return {
+          ...thread,
+          executing: false,
+          awaitingInput: true as const,
+          awaitingKind: "approval" as const,
+        };
+      }
+      // A turn parked on a question is owed by the person in the same
+      // way, whether a provider asked it or the harness lead's own
+      // `ask-user` call did: both park the attempt on it.
+      if (!thread.executing && this.#activeThreadExecutions.has(String(thread.id))) {
+        questioning ??= this.#threadsParkedOnQuestion();
+      }
+      if (questioning?.has(String(thread.id)) === true) {
+        return {
+          ...thread,
+          executing: false,
+          awaitingInput: true as const,
+          awaitingKind: "user-input" as const,
+        };
+      }
+      // Only a row projected as executing speaks for a live turn; a stale
+      // registry entry can never make an idle row look busy.
+      const live = thread.executing ? this.#liveTurns?.read(String(thread.id)) : undefined;
+      return live === undefined ? thread : { ...thread, ...live };
     };
   }
 
@@ -2941,11 +2967,15 @@ export class ChatService {
         lifecycle: current.lifecycle,
         executing: this.isTurnActive(current.id),
         awaitingInput: false,
+        unfinishedWork: this.#unfinishedWork?.(String(current.id)),
       });
       if (decision.status === "refused") {
         throw new ChatServiceError({
           category: "invalid",
-          message: CHAT_COMPLETE_REFUSALS[decision.reason],
+          message:
+            decision.reason === "unfinished-work"
+              ? unfinishedWorkRefusal(decision.work)
+              : CHAT_COMPLETE_REFUSALS[decision.reason],
         });
       }
       next = {
@@ -3736,7 +3766,7 @@ export class ChatService {
         createdAt: timestamp,
       });
       const updatedThread = {
-        ...withoutThreadRest(thread),
+        ...restAfterReport(thread),
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       };
@@ -8739,6 +8769,33 @@ export class ChatService {
       ],
     });
     return { status: "archived" };
+  }
+
+  /** The turn a side task's report started here failed, so a person's snooze ends. */
+  noteReportTurnFailed(threadId: ChatThreadId): void {
+    const thread = this.#persistence.readChatThread(threadId);
+    if (thread === undefined || thread.lifecycle !== "active") return;
+    const rest = restAfterReportFailure(thread);
+    if (rest === thread) return;
+    const { version } = this.#withAggregateHeadVersion(thread);
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: threadId },
+      expectedVersion: version,
+      events: [
+        this.#pending(
+          "chat.thread-updated@1",
+          {
+            kind: "thread-updated",
+            thread: {
+              ...rest,
+              version: (version + 1) as AggregateVersion,
+              updatedAt: decodeTimestamp(this.#clock()),
+            },
+          },
+          { actorKind: "system" },
+        ),
+      ],
+    });
   }
 
   #assertNoActiveTurn(view: ChatThreadView | undefined, threadId: ChatThreadId): void {
