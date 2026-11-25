@@ -6,7 +6,7 @@ import { browserDownloadHoldRoot } from "@octant/host-runtime";
 import * as downloadSave from "./browserDownloadSave";
 import { decodeBrowserPageScriptPreparation } from "@octant/contracts/browser-page-script";
 import { Schema } from "effect";
-import { UtcTimestamp } from "@octant/contracts";
+import { UtcTimestamp, decodeEventActor } from "@octant/contracts";
 import {
   decodePairedBrowserLeaseId,
   PairedBrowserNativeTarget,
@@ -4367,7 +4367,11 @@ it("carries the held download's source receipt to its per-file review without su
 });
 
 describe("Browser session recording", () => {
-  const recorder = () => ({ opened: vi.fn(), ended: vi.fn(() => true) });
+  const personActor = decodeEventActor({
+    kind: "local-user",
+    actorId: "00000000-0000-4000-8000-000000000002",
+  });
+  const recorder = () => ({ opened: vi.fn(), ended: vi.fn(() => true), hold: vi.fn() });
   const open = async (
     f: ReturnType<typeof harness>,
     extra: Partial<Parameters<BrowserAutomationService["create"]>[0]> = {},
@@ -4554,13 +4558,25 @@ describe("Browser session recording", () => {
     await plain.service.revokeWindow(windowId);
     expect(closedWindow.ended).toHaveBeenCalledWith(contextOne, threadOne, "authority-ended");
 
-    // The desktop reports a person's Quit before it revokes the windows.
+    // The desktop says on the revoke request itself that its app is quitting.
     const quitSessions = recorder();
     const quit = harness({ pageSessions: quitSessions });
     await open(quit);
-    quit.service.holdPagesForQuit();
-    await quit.service.revokeWindow(windowId);
+    await quit.service.revokeWindow(windowId, { appQuitting: true, actor: personActor });
     expect(quitSessions.ended).not.toHaveBeenCalled();
+    expect(quitSessions.hold).toHaveBeenCalledWith(contextOne);
+
+    // A window closed afterwards on a running host is an ordinary close: the
+    // statement belongs to its own request and is never remembered.
+    const later = harness({ pageSessions: quitSessions });
+    await open(later);
+    await later.service.revokeWindow(windowId, { appQuitting: false, actor: personActor });
+    expect(quitSessions.ended).toHaveBeenCalledWith(
+      contextOne,
+      threadOne,
+      "authority-ended",
+      personActor,
+    );
 
     const hostSessions = recorder();
     const host = harness({ pageSessions: hostSessions });
@@ -4573,8 +4589,11 @@ describe("Browser session recording", () => {
     const pageSessions = recorder();
     const f = harness({ pageSessions });
     await open(f);
-    await f.service.stop(windowId, threadOne, contextOne);
-    await f.service.close();
+    await Promise.all([
+      f.service.revokeWindow(windowId),
+      f.service.releaseThread(windowId, threadOne, "person"),
+      f.service.stop(windowId, threadOne, contextOne),
+    ]);
     expect(pageSessions.ended).toHaveBeenCalledTimes(1);
   });
 

@@ -3034,7 +3034,6 @@ export function wireRemote(deps: RemoteDependencies) {
   const personQuitRoutes = createPersonQuitRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     dataDirectory: persistence.dataDirectory,
-    onPersonQuit: () => browserAutomationService.holdPagesForQuit(),
   });
   const hostControlRoutes = createHostControlRouteHandler({
     windowAuthorityStore,

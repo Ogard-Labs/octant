@@ -228,7 +228,7 @@ export interface BrowserAutomationServiceOptions {
    * Where the person's open pages are recorded, so a restart can offer one
    * back. Absent on a host that records none.
    */
-  readonly pageSessions?: Pick<BrowserPageSessions, "opened" | "ended">;
+  readonly pageSessions?: Pick<BrowserPageSessions, "opened" | "ended" | "hold">;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly now: () => number;
@@ -469,7 +469,6 @@ export class BrowserAutomationService {
   readonly #strict: (threadId: string) => boolean;
   readonly #downloads: BrowserDownloadRecorder | undefined;
   readonly #pageSessions: BrowserAutomationServiceOptions["pageSessions"];
-  #quitting = false;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #now: () => number;
@@ -3144,7 +3143,16 @@ export class BrowserAutomationService {
     return { status: "ready", threadId, evidence: [] };
   }
 
-  async revokeWindow(windowId: WindowId): Promise<void> {
+  /**
+   * `appQuitting` is the desktop's statement, on this one revoke request, that
+   * its app is quitting: the window is leaving with it rather than being closed
+   * by the person, so its page keeps its record open and is offered back.
+   * `actor` is the request's own.
+   */
+  async revokeWindow(
+    windowId: WindowId,
+    revocation?: { readonly appQuitting: boolean; readonly actor: EventActor },
+  ): Promise<void> {
     if (this.#executionOwner !== undefined) return;
     this.#forgetExpiry(windowId);
     await Promise.all(
@@ -3153,14 +3161,13 @@ export class BrowserAutomationService {
         .map(async (owned) => {
           owned.abort.abort();
           // A window closed by the person, and a remote device's session that
-          // ended, are ordinary endings and write the end. A Quit keeps the
-          // record open: the desktop reports it to the host before it revokes
-          // the windows, so `holdPagesForQuit` has been called by now.
+          // ended, are ordinary endings and write the end.
           await this.#destroy(
             owned,
             "authority-revoked",
             "interrupted",
-            this.#quitting ? "keep" : "authority-ended",
+            revocation?.appQuitting === true ? "keep" : "authority-ended",
+            revocation?.actor,
           );
         }),
     );
@@ -3872,6 +3879,12 @@ export class BrowserAutomationService {
     actor?: EventActor,
   ): Promise<void> {
     if (pageEnd !== "keep") this.#notePageEnded(owned, pageEnd ?? pageEndOf(reason), actor);
+    else if (owned.pageRecorded) {
+      // The app is leaving with the page open: its record stays, and this
+      // running host offers it again without waiting for a restart.
+      owned.pageRecorded = false;
+      this.#pageSessions?.hold(String(owned.record.contextId));
+    }
     const creating = owned.record.state === "creating";
     owned.abort.abort();
     owned.cancelExpiry?.();
@@ -4041,15 +4054,6 @@ export class BrowserAutomationService {
       reason,
       ...(actor === undefined ? [] : [actor]),
     );
-  }
-
-  /**
-   * The person's Quit was accepted and the desktop reported it: from here the
-   * windows it revokes are the app leaving, not the person closing them, so
-   * their pages keep their record and a restart offers them back.
-   */
-  holdPagesForQuit(): void {
-    this.#quitting = true;
   }
 
   /** Whether the thread has a page of its own Browser pane open in any window. */

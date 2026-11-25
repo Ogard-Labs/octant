@@ -228,6 +228,25 @@ describe("Browser session records", () => {
     expect(sessions.ended(id(5000), thread(1), "closed-by-person")).toBe(true);
   });
 
+  it("keeps the projection checkpoint inside the journal when the compaction removes the journal's tail", () => {
+    const { sessions, connection } = open();
+    for (let n = 0; n < 10; n += 1) {
+      sessions.opened(page(id(n), thread(1)));
+      sessions.ended(id(n), thread(1), "closed-by-person");
+    }
+    const checkpoint = () =>
+      connection
+        .prepare(`SELECT last_sequence AS n FROM projection_checkpoints WHERE projection_name = ?`)
+        .get("browser-page") as { n: number } | undefined;
+    expect(checkpoint()?.n).toBe(20);
+    compactClosedBrowserPages(connection);
+    const head = connection
+      .prepare(`SELECT coalesce(max(global_sequence), 0) AS n FROM event_journal`)
+      .get() as { n: number };
+    expect(head.n).toBe(0);
+    expect(checkpoint()?.n ?? 0).toBeLessThanOrEqual(head.n);
+  });
+
   it("offers no more pages after a start than the bound, newest first", () => {
     const { sessions } = open();
     for (let n = 1; n <= 40; n += 1) {
@@ -362,6 +381,20 @@ describe("Browser page offers", () => {
       status: "offered",
       profile: { kind: "project", projectId },
     });
+  });
+
+  it("offers a page this running host held when its app quit, without a restart, until a newer page supersedes it", async () => {
+    const harness = open();
+    const subject = offers(harness);
+    harness.sessions.opened(page(id(2), thread(2)));
+    expect(await subject.read(windowId, decodeBrowserThreadId(thread(2)))).toBeUndefined();
+    harness.sessions.hold(id(2));
+    expect(await subject.read(windowId, decodeBrowserThreadId(thread(2)))).toMatchObject({
+      pageId: id(2),
+      status: "offered",
+    });
+    harness.sessions.opened(page(id(3), thread(2)));
+    expect(harness.sessions.open().map((row) => row.pageId)).toEqual([id(3)]);
   });
 
   it("offers nothing for a page opened after this start, or while the thread has a page", async () => {

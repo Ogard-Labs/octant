@@ -141,6 +141,20 @@ export class BrowserPageSessions {
     }
   }
 
+  /**
+   * Keeps a page's record open on purpose, because the app left with the page
+   * open, and makes it one a later open for the thread may supersede, as a
+   * page the previous run left would be.
+   */
+  hold(pageId: string): void {
+    this.#carried = new Set([...this.#carried, pageId]);
+  }
+
+  /** Whether a page is one this host holds for an offer: left by the last run, or held since. */
+  carries(pageId: string): boolean {
+    return this.#carried.has(pageId);
+  }
+
   /** The pages with a start and no end. */
   open(): ReadonlyArray<OpenBrowserPage> {
     return readOpenBrowserPages(this.#connection);

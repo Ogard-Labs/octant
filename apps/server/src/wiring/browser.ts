@@ -797,7 +797,19 @@ export function wireBrowser(deps: BrowserDependencies) {
       clock: () => new Date().toISOString(),
       now: Date.now,
     });
-    onWindowRevoked((windowId) => void browserAutomationService.revokeWindow(windowId));
+    onWindowRevoked(
+      (windowId, revocation) =>
+        void browserAutomationService.revokeWindow(
+          windowId,
+          // The desktop's revoke route is the local person's own request.
+          revocation === undefined
+            ? undefined
+            : {
+                appQuitting: revocation.appQuitting,
+                actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+              },
+        ),
+    );
     const browserPageOffers = new BrowserPageOffers({
       sessions: pageSessions,
       offeredAtStart: offeredPageIds,

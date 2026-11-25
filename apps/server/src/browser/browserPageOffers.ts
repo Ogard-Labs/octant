@@ -28,7 +28,7 @@ const RESERVATION_MS = 120_000;
 export type BrowserProfileState = "exists" | "gone" | "unknown";
 
 export interface BrowserPageOffersOptions {
-  readonly sessions: Pick<BrowserPageSessions, "page" | "ended" | "openOfThread">;
+  readonly sessions: Pick<BrowserPageSessions, "page" | "ended" | "openOfThread" | "carries">;
   /** The pages the previous run left open and the start kept offered. */
   readonly offeredAtStart: ReadonlySet<string>;
   /** Whether the thread is live for this window now: not archived, not deleted, Project not archived. */
@@ -179,17 +179,22 @@ export class BrowserPageOffers {
     return held.holder !== String(windowId);
   }
 
+  /** Left by the previous run and kept by the start, or held by this run when its app quit. */
+  #isOffered(pageId: string): boolean {
+    return this.#offered.has(pageId) || this.#options.sessions.carries(pageId);
+  }
+
   #offeredPageOf(threadId: BrowserThreadId): OpenBrowserPage | undefined {
     return this.#options.sessions
       .openOfThread(String(threadId))
-      .find((page) => this.#offered.has(page.pageId));
+      .find((page) => this.#isOffered(page.pageId));
   }
 
   #claimable(
     windowId: WindowId,
     command: BrowserPageOfferCommand,
   ): OpenBrowserPage | "not-allowed" | undefined {
-    if (!this.#offered.has(String(command.pageId))) return undefined;
+    if (!this.#isOffered(String(command.pageId))) return undefined;
     const page = this.#options.sessions.page(String(command.pageId));
     if (page === undefined || page.threadId !== String(command.threadId)) return undefined;
     if (page.mode !== command.mode) return undefined;

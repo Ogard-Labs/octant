@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { uptime } from "node:os";
 import type { WindowId } from "@octant/contracts";
+import type { WindowRevocation } from "./windowRevocations";
 
 export const WINDOW_AUTHORITY_TTL_MS = 24 * 60 * 60 * 1_000;
 export const NATIVE_WINDOW_LEASE_MS = 15_000;
@@ -84,7 +85,7 @@ export class WindowAuthorityStore {
   readonly #schedule: (delayMs: number, callback: () => void) => () => void;
 
   constructor(
-    private readonly onRevoked?: (windowId: WindowId) => void,
+    private readonly onRevoked?: (windowId: WindowId, revocation?: WindowRevocation) => void,
     options?: WindowAuthorityStoreOptions,
   ) {
     this.#clampNow = options?.clampNow ?? ((wallClockMs) => wallClockMs);
@@ -414,9 +415,9 @@ export class WindowAuthorityStore {
     return native.lifetime.signal;
   }
 
-  revoke(windowId: WindowId): void {
+  revoke(windowId: WindowId, revocation?: WindowRevocation): void {
     const capability = this.#capabilityByWindow.get(windowId);
-    if (capability !== undefined) this.#delete(capability, windowId);
+    if (capability !== undefined) this.#delete(capability, windowId, revocation);
   }
 
   size(): number {
@@ -452,14 +453,14 @@ export class WindowAuthorityStore {
     }
   }
 
-  #delete(capability: string, windowId: WindowId): void {
+  #delete(capability: string, windowId: WindowId, revocation?: WindowRevocation): void {
     const native = this.#byCapability.get(capability)?.native;
     this.#byCapability.delete(capability);
     this.#capabilityByWindow.delete(windowId);
     native?.lifetime.abort();
     native?.cancel();
     try {
-      this.onRevoked?.(windowId);
+      this.onRevoked?.(windowId, revocation);
     } catch (error) {
       if (native === undefined) throw error;
       // Expiry runs outside a request's catch boundary. State and streams are
