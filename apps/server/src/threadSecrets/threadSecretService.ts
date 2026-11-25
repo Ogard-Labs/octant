@@ -827,7 +827,7 @@ export class ThreadSecretService {
     if (typeof result === "string") await this.#forgetAll(kept);
     else
       for (const [secretName, id] of kept)
-        await this.#options.remembered?.forgetOthers(secretName, id);
+        await this.#options.remembered?.forgetEarlier(secretName, id);
     return result;
   }
 

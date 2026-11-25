@@ -1052,6 +1052,7 @@ describe("a secret the person asked Octant to remember", () => {
     over: {
       readonly journalFails?: () => boolean;
       readonly setFails?: () => boolean;
+      readonly setWaits?: () => Promise<void>;
       readonly deleteFails?: () => boolean;
     } = {},
   ) {
@@ -1074,6 +1075,7 @@ describe("a secret the person asked Octant to remember", () => {
         store: {
           set: async (id, value) => {
             if (over.setFails?.() === true) throw new Error("The store is locked.");
+            await over.setWaits?.();
             stored.set(id, value);
           },
           resolve: async (id) => {
@@ -1208,6 +1210,31 @@ describe("a secret the person asked Octant to remember", () => {
     await grant(context, request(), { lifetime: "remember", value: "second-Value-1" });
     expect([...stored.values()]).toEqual(["second-Value-1"]);
     expect(open().list()).toHaveLength(1);
+  });
+
+  it("keeps the newest when two threads remember one name at once", async () => {
+    const { open, stored } = memory();
+    const remembered = open();
+    const first = await remembered.remember("TOKEN", { kind: "value", value: VALUE });
+    const second = await remembered.remember("TOKEN", { kind: "value", value: "second-Value-1" });
+    await remembered.forgetEarlier("TOKEN", first ?? "");
+    await remembered.forgetEarlier("TOKEN", second ?? "");
+    expect([...stored.values()]).toEqual(["second-Value-1"]);
+    await remembered.forgetEarlier("TOKEN", first ?? "");
+    expect([...stored.values()]).toEqual(["second-Value-1"]);
+  });
+
+  it("leaves no stored value behind when a newer one replaced it before it was stored", async () => {
+    const storing = Promise.withResolvers<void>();
+    const { open, stored } = memory({ setWaits: () => storing.promise });
+    const remembered = open();
+    const first = remembered.remember("TOKEN", { kind: "value", value: VALUE });
+    const second = remembered.remember("TOKEN", { kind: "value", value: "second-Value-1" });
+    const kept = remembered.list()[1]?.id ?? "";
+    await remembered.forgetEarlier("TOKEN", kept);
+    storing.resolve();
+    await Promise.all([first, second]);
+    expect([...stored.entries()]).toEqual([[kept, "second-Value-1"]]);
   });
 
   it.each(["journal", "store", "grant"] as const)(

@@ -97,6 +97,8 @@ export class RememberedThreadSecrets {
     if (value.kind === "value") {
       try {
         await this.#store.set(id, value.value);
+        // Replaced by a newer one while it was stored: nothing lists it any more.
+        if (!this.#remembered.has(id)) await this.#store.delete(id);
       } catch {
         await this.forget(id);
         return undefined;
@@ -105,9 +107,13 @@ export class RememberedThreadSecrets {
     return id;
   }
 
-  /** Keeps the newest of a name, once it is in use. */
-  async forgetOthers(secretName: string, keptId: string): Promise<void> {
-    for (const { id } of this.list([secretName])) if (id !== keptId) await this.forget(id);
+  /**
+   * Drops what a name held before this one, once it is in use. A newer one is
+   * another answer's: if each dropped the other, neither would be left.
+   */
+  async forgetEarlier(secretName: string, keptId: string): Promise<void> {
+    const ids = this.list([secretName]).map(({ id }) => id);
+    for (const id of ids.slice(0, Math.max(ids.indexOf(keptId), 0))) await this.forget(id);
   }
 
   /** Whether nothing of it is left. A value that could not be removed keeps its name listed. */
