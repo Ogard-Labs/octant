@@ -31,6 +31,7 @@ const providerGroups = [refusedProvider, allowedProvider].map((id) => ({
 const settings = {
   defaultExecutionPolicy: "approval-gated",
   defaultPermissionPersistence: "current-session",
+  worktrees: { branchPrefix: "henrik/" },
   version: 5,
   updatedAt: "2026-11-12T10:00:00.000Z",
 } as const;
@@ -64,6 +65,7 @@ async function startIn(
     readonly refusal?: string;
     readonly startThreadTurn?: (input: { readonly checkoutId: unknown }) => Promise<boolean>;
     readonly checkout?: Record<string, unknown>;
+    readonly branchNames?: ReadonlyArray<string>;
   } = {},
 ): Promise<ReadonlyArray<CodeCommand>> {
   const sent: Array<CodeCommand> = [];
@@ -83,6 +85,9 @@ async function startIn(
     if (command.kind === "get-worktree-remote-facts") {
       remoteFactReads += 1;
       return { kind: "worktree-remote-facts-retrieved", facts: { remotes: [] } };
+    }
+    if (command.kind === "list-code-worktree-branch-names") {
+      return { kind: "worktree-branch-names-listed", names: host.branchNames ?? [] };
     }
     sent.push(command);
     if (host.answer !== undefined) return host.answer(command);
@@ -213,6 +218,19 @@ describe("starting a Code thread from a browser the host's own person paired", (
       decodeProjectSummary({ ...project, newThreadWorkspace: "managed-worktree" }),
     );
     expect(sent[0]?.kind).toBe("create-managed-code-thread");
+    // The prefix the person chose in Settings, as on the host's own start screen.
+    expect(JSON.stringify(sent[0])).toMatch(/"branchIntent":"henrik\/[a-z0-9-]+"/);
+  });
+
+  it("steps around a branch or tag named like the person's prefix", async () => {
+    const sent = await startIn(
+      decodeProjectSummary({ ...project, newThreadWorkspace: "managed-worktree" }),
+      providerGroups,
+      {
+        branchNames: ["main", "henrik"],
+      },
+    );
+    expect(JSON.stringify(sent[0])).toMatch(/"branchIntent":"henrik-[a-z0-9-]+"/);
   });
 
   it("sends the first message to the new worktree's checkout once the host makes it", async () => {

@@ -2557,6 +2557,83 @@ computer and removal deletes from its disk). The receipt's
 `cleanup-pending` and `removed` states record each removal, as they do for the
 other cleanup callers.
 
+_Branch naming (maintainer decision, 2026-11-25)._ A new managed worktree's
+delivery branch is a configurable prefix (`octant/` unless changed in Settings ›
+Code › Worktrees) and either a short id, the default, or words from the person's
+own prompt (`deriveDeliveryBranch` in the domain, derived on this computer). The
+words are conservative, because a branch name is pushed: after a word that says
+a secret follows (password, passwd, pass, secret, token, key, credential,
+bearer, auth, pin, login code, compounds such as `DB_PASS` and `API_KEY`, and the
+Norwegian passord, hemmelig, nøkkel and kode) the rest of that clause is dropped;
+so is every word with `=`, every URL, path, email and host, every word that
+mixes letters and digits beyond an ordinary shape (`v2`, `utf8`, `h264`,
+`oauth2`, issue numbers such as `#123` stay), long digit runs and protected
+names (`.env`, `.ssh`, `id_rsa`). A clause ends at a sentence stop or a line end.
+When a line ends inside a clause that named a secret, the lines after it are left
+out too, up to a blank line, since the value is often pasted there.
+The text is redacted first, so a token shaped like a key never gets this far.
+At most 40 characters are kept, and with fewer than two words left the id name
+is used. Windows reserved names (`con`, `prn`, `aux`, `nul`, `com1` to `com9`,
+`lpt1` to `lpt9`, with or without an extension) are never produced and are
+refused when typed or used as a prefix segment. A name is always a valid Git ref
+and never the base branch (a prefix that is not one is ignored). A branch or tag
+named like the prefix, or like a part of it, blocks every name below it, so the
+prefix's slashes then become dashes (`feature/` with a `feature` branch gives
+`feature-abc123`). The phone's start, which shows the
+name in its delivery target sheet, and the starts that show none (a paired
+browser, a worker) read the taken names too when the person chose a prefix; a
+host that cannot say leaves the name to its own check.
+
+A name is numbered (`-2`, `-3`) when a branch of that name, or one above or below
+it, exists, compared without case, against every name the host lists with
+`list-code-worktree-branch-names`: local branches, remote branches with the
+remote's name removed, and tags. That read is names only, apart from the
+200-entry display list the Where picker shows, and returns at most 20,000
+names; a repository with more, a host that cannot read them, and a Project on a
+server (whose refs this host cannot read) answer `truncated`, and the composer
+then falls back to the id name, since nothing proves a worded name is free. The
+composer shows the name in Worktree options before Send and sends exactly it. The
+host holds creation to the same rule (the same names, case-insensitive, above and
+below) before it makes the worktree, and when the previewed name was taken in the
+meantime it refuses with a message and does not choose another name; the composer
+reads the names again after a refused creation, so the name shown is the one
+that would be tried next. The host keeps its exact local-branch check when the
+listing is cut short or fails. A choice (typed or suggested) belongs to the
+Project and base branch it was made for, and is forgotten when either changes.
+A typed name that is refused is not shown as if it would be used: the field
+returns to the name Send will create and says why.
+
+A model is asked for words only when the person presses **Suggest name**:
+`suggest-code-worktree-branch` carries the draft and the model the composer has
+selected, and nothing else about the Project or checkout. The client sends the
+draft after redaction and after the reduction above, so no dropped clause is
+sent, and at most 2,000 characters, so a long draft works. The host redacts and
+reduces it again, checks the Project's provider rules, sign-in and spend ceilings
+(the request is not a turn and is reserved against token ceilings as 4,000
+tokens, or refused where a monetary ceiling cannot price it), runs one short
+request, and reduces the reply with the same word rules. What a sent request used
+is recorded under the Code Project on the usage ledger before its reservation is
+released (a `worktree-branch-suggestion` request on its own
+`worktree-branch-suggestion-usage` aggregate, whose id is the Project's, since no
+thread exists yet), so the Project's ceilings and the usage view count it. A sent
+request that got no answer is recorded as unreported usage, as a stopped turn is;
+one that was never sent gives its reservation back. The call stops when the composer goes away, when the
+Project changes, or when the person types a name; a window has at most one
+suggestion in flight on the host, and a second is declined as busy. A refused,
+failed or outdated answer changes nothing and the local name stays. A device the host's own person paired
+may ask for one; a hub-introduced or agent-gated caller may not.
+
+The prefix applies wherever a person starts a new Code thread: the composer on
+the host's start screen, a paired browser's thread start, the phone's thread
+start, and a worker approved from a paired browser or the phone or started by a
+coordinator on the host. Follow-up suggestion, checkpoint, automation,
+delegation, benchmark and other host-made threads keep their own names
+(`octant/<short id>` and the like). The words of a prompt are used only on the
+host's start screen, where the taken names are known; the other starts use the
+prefix and an id. The `settings.worktrees` field is read by older clients as a
+host answer, which ignores a field it does not know, so they keep working
+without showing the choices.
+
 The host reads a worktree's changes outside any sandbox, so it runs nothing a
 repository configured: Git starts with `core.fsmonitor=false`,
 `GIT_OPTIONAL_LOCKS=0`, no global or system config, and

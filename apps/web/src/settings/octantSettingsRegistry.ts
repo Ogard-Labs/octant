@@ -837,6 +837,18 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "terminal shell windows powershell pwsh command prompt cmd",
         },
         {
+          id: settingId("code-worktree-branch-prefix"),
+          label: "Branch prefix",
+          scope: "app",
+          keywords: "worktree branch name prefix octant slash naming new threads",
+        },
+        {
+          id: settingId("code-worktree-branch-naming"),
+          label: "Branch name",
+          scope: "app",
+          keywords: "worktree branch name prompt words slug short id naming suggest",
+        },
+        {
           id: settingId("code-editor-executable"),
           label: "External editor",
           scope: "app",

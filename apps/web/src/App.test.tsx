@@ -789,6 +789,8 @@ describe("App", () => {
             return { kind: "worktree-remote-facts-retrieved", projectId, facts: { remotes: [] } };
           if (command.kind === "list-code-worktree-refs")
             return { kind: "worktree-refs-listed", projectId, refs: [] };
+          if (command.kind === "list-code-worktree-branch-names")
+            return { kind: "worktree-branch-names-listed", projectId, names: [], truncated: false };
           if (command.kind === "prepare-code-project-checkout") {
             return {
               kind: "checkout-prepared",

@@ -176,6 +176,28 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("shows no failure when an older host does not know the branch name reads", async () => {
+    const client = fakeClient({
+      execute: vi.fn().mockRejectedValue({
+        category: "invalid",
+        message: "The Code command is invalid.",
+      }),
+    });
+    const { result, unmount } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await result.current.execute({
+        kind: "list-code-worktree-branch-names",
+        projectId: ids.project,
+      });
+    });
+
+    expect(result.current.errorMessage).toBeUndefined();
+    expect(result.current.status).toBe("ready");
+    unmount();
+  });
+
   it("marks Code disconnected after a command transport failure", async () => {
     const client = fakeClient({
       execute: vi.fn().mockRejectedValue({

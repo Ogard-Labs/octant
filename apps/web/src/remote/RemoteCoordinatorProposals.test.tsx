@@ -58,6 +58,7 @@ function readOnly(readPlanner: () => Promise<unknown>) {
     executePlannerProposal: vi.fn(),
     putEvidence: vi.fn(),
     executeOperation: vi.fn(),
+    bootstrap: vi.fn(),
   };
 }
 
@@ -192,7 +193,14 @@ describe("a coordinator's proposals on a paired browser", () => {
       <RemoteCoordinatorProposals
         actsAsHostPerson
         client={
-          { readPlanner, execute, executePlannerProposal, putEvidence, executeOperation } as never
+          {
+            readPlanner,
+            execute,
+            executePlannerProposal,
+            putEvidence,
+            executeOperation,
+            bootstrap: async () => ({ settings: { worktrees: { branchPrefix: "henrik/" } } }),
+          } as never
         }
         thread={coordinator}
       />,
@@ -220,6 +228,10 @@ describe("a coordinator's proposals on a paired browser", () => {
           executionPolicy: "approval-gated",
           sourceBranch: "main",
           startFromOrigin: false,
+          // The prefix the person chose in Settings, not the default.
+          deliveryTarget: expect.objectContaining({
+            branchIntent: expect.stringMatching(/^henrik\/[a-z0-9]+$/),
+          }),
         }),
       }),
     );
