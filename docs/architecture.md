@@ -2579,9 +2579,10 @@ refused when typed or used as a prefix segment. A name is always a valid Git ref
 and never the base branch (a prefix that is not one is ignored). A branch or tag
 named like the prefix, or like a part of it, blocks every name below it, so the
 prefix's slashes then become dashes (`feature/` with a `feature` branch gives
-`feature-abc123`). A start that shows no name (a paired browser, the phone, a
-worker) reads the taken names too when the person chose a prefix; a host that
-cannot say leaves the name to its own check.
+`feature-abc123`). The phone's start, which shows the
+name in its delivery target sheet, and the starts that show none (a paired
+browser, a worker) read the taken names too when the person chose a prefix; a
+host that cannot say leaves the name to its own check.
 
 A name is numbered (`-2`, `-3`) when a branch of that name, or one above or below
 it, exists, compared without case, against every name the host lists with
