@@ -1314,21 +1314,55 @@ not again beside its waiting row: an earlier stop's line goes when a later
 turn starts. The rules are in
 [Architecture: usage limits](../architecture.md#modes-chat-work-and-code).
 
-## Live tasks
+## Background work
 
-A Work or Code thread whose last turn completed while background work it
-started (a dev server, a watch) still runs shows one row above the message queue, in
-the composer: an activity icon, each task's command on one line in monospace
-(its full text on hover, wrapping under each other at a narrow width),
-**Running** or the count running, and **Stop**, which stops the session and
-every task in it. With no live task, and while a turn holds the session (the
-turn shows its own task rows), the row takes no space. A failed stop shows a
-sentence under the row. The row refreshes on the thread's follow-up notices
-and on a slow visible-page interval. A turn the runtime starts by itself on
-the idle thread opens with the host's line `The agent started this turn by
-itself after background work it was running reported.` in place of a
-person's message. The rules are in
-[Provider runtimes](provider-runtimes.md#background-commands-and-runtime-started-turns).
+An idle Work or Code thread says what it still has going in one quiet line
+above the message queue, in the composer: a terminal mark, what the thread is
+doing ("Waiting", "Waiting on 3 pull requests", "Running 2 tasks"), then its
+entries as one muted, comma-separated list that ends in an ellipsis when it
+runs out of room (each entry's full text on hover), and **Details** and
+**Stop** as plain words at the end. A single entry reads after the state as
+"Waiting · Watching pull request #372". Two kinds of entry show:
+
+- **Live tasks** (Work and Code): background work the thread's last turn
+  started (a dev server, a watch) that still runs after it completed. Each
+  shows its command in monospace; the state reads **Running**, or **Running N
+  tasks**.
+- **Pull requests the thread waits on** (Code; maintainer request, 2026-11-25):
+  the agent's own watch ("Watching pull request #372"), and babysitting or
+  Auto-fix this thread repairs ("Babysitting pull request #372", "Auto-fixing
+  pull request #372"). With no live task the state reads **Waiting** (or
+  **Waiting on N pull requests**), or **Paused** when every one of them is on
+  but reading nothing. With both, it counts each ("Running 2 tasks, waiting on
+  1 pull request"). Merge when ready
+  belongs to the pull request, so it never shows here.
+
+With nothing running or waiting, and while a turn holds the thread (the turn
+shows its own work), the row takes no space. **Stop** is in the row only when
+it means one thing: every live task, which end together with their session, or
+the one pull request. Otherwise each is stopped by name in Details.
+
+**Details** opens the **Background work** dialog, closed by its corner close
+button or Escape: every entry with its state and its Stop in aligned columns
+(one Stop for the live tasks). A pull request's second line names
+its repository, its wakes used of its limit and, for a watch, when it ends; a
+paused one says how it resumes ("Open the pull request to resume", or "Octant
+can’t reach this pull request"). When the last entry ends while the dialog is
+open it says so and stays until closed. Showing the row or the dialog vouches
+for nothing: a watch a restart left quiet stays paused until a window shows the
+pull request.
+
+A failed stop shows a sentence under the row, or in the dialog while it is
+open. The row refreshes on the thread's follow-up notices and on a slow
+visible-page interval; one source failing keeps its last answer and never hides
+the other. A turn the runtime starts by itself on the idle thread opens with
+the host's line `The agent started this turn by itself after background work it
+was running reported.` in place of a person's message. The rules are in
+[Provider runtimes](provider-runtimes.md#background-commands-and-runtime-started-turns)
+and, for a watch, [Architecture: Modes, Watch](../architecture.md#modes-chat-work-and-code).
+The host
+answers the host person's own paired device too, but a paired browser and the
+phone do not draw the row yet.
 
 ## Plan-mode asks
 

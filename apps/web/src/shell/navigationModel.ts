@@ -177,6 +177,11 @@ export interface ChatThreadNavigationItem {
    * Limited until the reset it names passes, or while the thread rests.
    */
   readonly limited?: ThreadUsageLimited;
+  /**
+   * Between turns the thread waits on something outside it (a Code thread's
+   * pull request), since this time. Absent while it works or needs the person.
+   */
+  readonly waitingSince?: string;
   /** The kind of Work request currently waiting on the person, when known. */
   readonly awaitingKind?: "approval" | "user-input";
   /** Present when the host projected a Git checkout for this row. */
@@ -322,11 +327,16 @@ export function sidebarThreadStatusInput(row: {
   readonly limited?: ThreadUsageLimited | undefined;
   readonly shelf?: ChatThreadNavigationItem["shelf"] | undefined;
   readonly now?: number | undefined;
+  readonly waitingSince?: string | undefined;
 }): SidebarThreadStatusInput {
   return {
     working: row.activity === "working",
     attention: row.activity === "attention",
     limited: threadLimitHolds(row, row.now ?? Date.now()),
+    // A turn working or waiting on the person says more than the wait it will
+    // return to.
+    waiting:
+      row.waitingSince !== undefined && row.activity !== "working" && row.activity !== "attention",
     woke: row.woke,
     unread: row.unread,
   };
@@ -344,6 +354,7 @@ export function threadRowStatusInput(
     activity: threadRowActivity(thread),
     unread: thread.unread === true,
     woke: thread.woke === true,
+    waitingSince: thread.waitingSince,
   });
 }
 

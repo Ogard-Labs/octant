@@ -2035,6 +2035,12 @@ export const CodeNavigationRuntime = Schema.Struct({
   touchedIssues: Schema.optional(ThreadTouchedIssues),
   /** The issues the thread works on, oldest link first; absent when none. */
   linkedIssues: Schema.optional(ThreadLinkedIssues),
+  /**
+   * Between turns the thread waits on a pull request (its agent's watch, or
+   * babysitting or Auto-fix it repairs), since this time. Absent while a turn
+   * runs or waits on the person, and from an older host.
+   */
+  waitingSince: Schema.optional(UtcTimestamp),
   /** The latest turn's start and latest step while it runs; absent otherwise. */
   ...ThreadLiveTurnFields,
   /** The latest turn's current usage-limit stop; absent otherwise. */

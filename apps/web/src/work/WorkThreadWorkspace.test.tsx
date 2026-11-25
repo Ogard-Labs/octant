@@ -4404,7 +4404,7 @@ it("offers an empty Work thread its folder's outside sessions and shows live tas
       title="Draft brief"
     />,
   );
-  const live = await screen.findByRole("region", { name: "Live tasks" });
+  const live = await screen.findByRole("region", { name: "Background work" });
   expect(within(live).getByText("npm run preview")).toBeVisible();
   expect(
     await screen.findByText("1 session in this folder was started outside Octant"),

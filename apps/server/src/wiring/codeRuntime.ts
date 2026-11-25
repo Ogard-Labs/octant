@@ -213,6 +213,7 @@ import {
   stalledTurnLimitMs,
 } from "../providers/turnBudget";
 import { OutlivingSessions, type RuntimeTurnStarter } from "../providers/outlivingSessions";
+import { createCodePullRequestWaitRouteHandler } from "../code/codePullRequestWaitRoutes";
 import { createCodeSessionRouteHandler } from "../code/codeSessionRoutes";
 import { codeSessionKey, codeSessionTerms } from "../code/codeOperationRuntime";
 import { stopKeptSessionsOfChangedCodeThreads } from "../code/codeKeptSessions";
@@ -2506,7 +2507,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         ...(options.ghExecutable === undefined ? {} : { ghExecutable: options.ghExecutable }),
       });
     }
-    const { codeCompletedThreadSource, codeService } = buildCodeService(codeOperationRuntime);
+    // The switch service is built later from what the Code service exposes, so
+    // a row reads it through this late binding; until then no row waits.
+    let threadWaitingSince: ((threadId: string) => string | undefined) | undefined;
+    const { codeCompletedThreadSource, codeService } = buildCodeService(
+      codeOperationRuntime,
+      (threadId) => threadWaitingSince?.(threadId),
+    );
     builtCodeService = codeService instanceof CodeService ? codeService : undefined;
     yield* Effect.promise(() => codeOperationRuntime?.reconcile?.() ?? Promise.resolve());
     // A push or pull request step a restart left unknown is settled by looking
@@ -3473,6 +3480,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       logs: (input) => pullRequestSwitchService.ciLogs(input),
       rerun: (input) => pullRequestSwitchService.ciRerun(input),
     };
+    threadWaitingSince = (threadId) =>
+      pullRequestSwitchService.threadWaitingSince(decodeCodeThreadId(threadId));
     bindPullRequestSwitchReconciler(pullRequestSwitchService);
     // Host-local and idle-free: the forge is read only while a switch or a watch is on.
     const pullRequestSwitchAbort = new AbortController();
@@ -3571,30 +3580,38 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             },
           }),
     };
-    // A Code thread's live tasks are read and stopped by a window that can
-    // open the thread on this host; a paired device does not see them yet.
+    // A Code thread's live tasks and pull-request waits are read and stopped by
+    // a window, or the host person's own paired device, that can open the thread.
+    const canOpenCodeThread = (windowId: WindowId, threadId: CodeThreadId): boolean => {
+      const device = deps.isPairedDeviceScope(windowId);
+      if (device && deps.isRestrictedDeviceScope(windowId)) return false;
+      try {
+        const thread = persistence.readCodeThread(threadId);
+        if (thread === undefined) return false;
+        return device
+          ? codeProjectAccess.hasActiveCodeProject(thread.projectId)
+          : canAccessCodeProject(windowId, thread.projectId);
+      } catch {
+        return false;
+      }
+    };
+    // A window here or the host's own paired device is the person; the
+    // host acting for a routine or a hub-introduced device is not.
+    const isCodePerson = (windowId: WindowId): boolean =>
+      !isRoutineHostScope(windowId) && !deps.isRestrictedDeviceScope(windowId);
     const codeSessionRoutes = createCodeSessionRouteHandler({
       windowAuthorityStore: deps.windowAuthorityStore,
-      canOpenThread: (windowId, threadId) => {
-        const device = deps.isPairedDeviceScope(windowId);
-        if (device && deps.isRestrictedDeviceScope(windowId)) return false;
-        try {
-          const thread = persistence.readCodeThread(threadId);
-          if (thread === undefined) return false;
-          return device
-            ? codeProjectAccess.hasActiveCodeProject(thread.projectId)
-            : canAccessCodeProject(windowId, thread.projectId);
-        } catch {
-          return false;
-        }
-      },
+      canOpenThread: canOpenCodeThread,
       liveTasks: (threadId) => outlivingCodeSessions.liveTasks(codeSessionKey(threadId)),
       stopLiveTasks: (threadId) => outlivingCodeSessions.stopThread(codeSessionKey(threadId)),
-      // A window here or the host's own paired device is the person; the
-      // host acting for a routine or a hub-introduced device is not.
-      isPerson: (windowId) =>
-        !isRoutineHostScope(windowId) && !deps.isRestrictedDeviceScope(windowId),
+      isPerson: isCodePerson,
       nativeSessions: () => codeOperationRuntime?.nativeSessions,
+    });
+    const codePullRequestWaitRoutes = createCodePullRequestWaitRouteHandler({
+      windowAuthorityStore: deps.windowAuthorityStore,
+      canOpenThread: canOpenCodeThread,
+      isPerson: isCodePerson,
+      waits: pullRequestSwitchService,
     });
     const pullRequestReviewers = new PullRequestReviewerRegistry();
     pullRequestReviewers.register({
@@ -3832,6 +3849,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       androidToolchainRoutes,
       appleToolchainRoutes,
       baseRouteCodeService,
+      codePullRequestWaitRoutes,
       codeSessionRoutes,
       codeCompletedThreadSource,
       codeOperationRuntime,

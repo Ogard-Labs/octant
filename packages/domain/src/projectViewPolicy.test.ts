@@ -230,6 +230,16 @@ describe("a saved view that reads thread status", () => {
     ).toEqual([busy]);
   });
 
+  it("finds a thread waiting on its pull request under the Waiting status", () => {
+    const watching = { projectId: alpha.id, status: { waiting: true, unread: true } };
+    expect(
+      filterProjectViewThreads([working, watching, quiet], {
+        ...DEFAULT_PROJECT_VIEW_FILTERS,
+        statuses: ["waiting"],
+      }),
+    ).toEqual([watching]);
+  });
+
   it("shows every thread when the view named no status", () => {
     expect(
       filterProjectViewThreads([working, waiting, quiet], {

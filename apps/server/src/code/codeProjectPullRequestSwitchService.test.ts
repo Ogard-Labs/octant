@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   decodeCodeProjectPullRequestSwitchTarget,
   decodeCodeProjectPullRequestView,
+  decodeEventActor,
   decodeUtcTimestamp,
   decodeWindowId,
   type CodeProjectPullRequestMergeMethod,
@@ -30,6 +31,7 @@ import type {
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
 const threadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000001");
+const bystanderThreadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000003");
 const target = decodeCodeProjectPullRequestSwitchTarget({
   projectId: "10000000-0000-4000-8000-000000000001",
   repositoryOwner: "octant",
@@ -1264,6 +1266,121 @@ describe("a thread watching its own pull request", () => {
     expect(await f.service.unwatch({ threadId, providerInstanceId })).toEqual({
       status: "not-watching",
     });
+  });
+
+  it("lists a thread's own watch with its spent wakes and its end, and no other thread's", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    f.observe(activity({ checks: "failed" }));
+    await f.service.tick(signal);
+
+    expect(f.service.threadWaits(threadId)).toEqual([
+      {
+        kind: "watch",
+        target,
+        since: "2026-10-31T10:00:00.000Z",
+        paused: false,
+        wakes: 1,
+        wakeLimit: 10,
+        endsAt: "2026-11-03T10:00:00.000Z",
+      },
+    ]);
+    expect(f.service.threadWaits(bystanderThreadId)).toEqual([]);
+  });
+
+  it("lists Auto-fix and babysitting under the thread that repairs the pull request", async () => {
+    const f = fixture();
+    await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user");
+    expect(f.service.threadWaits(threadId)).toMatchObject([
+      { kind: "auto-fix", target, paused: false },
+    ]);
+    await f.service.setAutoFix(windowId, { kind: "disable", target, threadId }, "user");
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: { checks: "required" } },
+      "user",
+    );
+    expect(f.service.threadWaits(threadId)).toMatchObject([
+      { kind: "babysit", target, paused: false, wakes: 0, wakeLimit: 10 },
+    ]);
+  });
+
+  it("reads a watch nobody vouches for after a restart as paused, and reading it vouches for nothing", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    const restarted = f.restart();
+    expect(restarted.threadWaits(threadId)).toMatchObject([{ kind: "watch", paused: true }]);
+
+    f.observe(activity({ checks: "failed" }));
+    await restarted.tick(signal);
+    expect(f.threads.startTurn).not.toHaveBeenCalled();
+    expect(restarted.threadWaits(threadId)).toMatchObject([{ kind: "watch", paused: true }]);
+  });
+
+  it("reads babysitting whose connection was lost as paused", async () => {
+    const f = fixture();
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: { checks: "required" } },
+      "user",
+    );
+    f.setAuthority("disconnected");
+    await f.service.tick(signal);
+    expect(f.service.threadWaits(threadId)).toMatchObject([{ kind: "babysit", paused: true }]);
+  });
+
+  it("stops the thread's own watch for the person and journals who stopped it", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    const [wait] = f.service.threadWaits(threadId);
+    const person = { kind: "local-user" as const, actorId: "10000000-0000-4000-8000-0000000000aa" };
+    const stop = (over: Partial<Parameters<typeof f.service.stopThreadWait>[0]> = {}) =>
+      f.service.stopThreadWait({
+        threadId,
+        wait: "watch",
+        target,
+        since: wait?.since ?? "",
+        actor: decodeEventActor(person),
+        ...over,
+      });
+
+    // Another thread's name, the other kind, or a watch begun since stops nothing.
+    expect(stop({ threadId: bystanderThreadId })).toBe(false);
+    expect(stop({ wait: "auto-fix" })).toBe(false);
+    expect(stop({ since: "2026-10-30T10:00:00.000Z" })).toBe(false);
+    expect(f.service.watching).toBe(true);
+
+    expect(stop()).toBe(true);
+    expect(f.service.watching).toBe(false);
+    expect(f.recorded(WATCH).at(-1)).toMatchObject({
+      actor: person,
+      payload: { change: { kind: "disabled" } },
+    });
+    expect(stop()).toBe(false);
+  });
+
+  it("stops Auto-fix for the thread that repairs the pull request, and leaves its watch on", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user");
+    const autoFix = f.service.threadWaits(threadId).find((wait) => wait.kind === "auto-fix");
+    expect(
+      f.service.stopThreadWait({
+        threadId,
+        wait: "auto-fix",
+        target,
+        since: autoFix?.since ?? "",
+        actor: decodeEventActor({
+          kind: "local-user",
+          actorId: "10000000-0000-4000-8000-0000000000aa",
+        }),
+      }),
+    ).toBe(true);
+    expect(f.service.threadWaits(threadId).map((wait) => wait.kind)).toEqual(["watch"]);
   });
 
   it("answers a second watch of the same pull request without journaling it again", async () => {

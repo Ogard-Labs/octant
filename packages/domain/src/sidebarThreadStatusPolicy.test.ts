@@ -16,6 +16,7 @@ function thread(overrides: Partial<SidebarThreadStatusInput> = {}): SidebarThrea
     working: overrides.working ?? false,
     attention: overrides.attention ?? false,
     limited: overrides.limited ?? false,
+    waiting: overrides.waiting ?? false,
     woke: overrides.woke ?? false,
     unread: overrides.unread ?? false,
   };
@@ -46,6 +47,15 @@ describe("resolveSidebarThreadStatus", () => {
   it("shows an obligation ahead of an ended snooze and unread activity", () => {
     expect(resolveSidebarThreadStatus(thread({ attention: true, woke: true, unread: true }))).toBe(
       "attention",
+    );
+  });
+
+  it("shows a thread waiting on a pull request after an obligation and ahead of an ended snooze", () => {
+    expect(resolveSidebarThreadStatus(thread({ attention: true, waiting: true }))).toBe(
+      "attention",
+    );
+    expect(resolveSidebarThreadStatus(thread({ waiting: true, woke: true, unread: true }))).toBe(
+      "waiting",
     );
   });
 

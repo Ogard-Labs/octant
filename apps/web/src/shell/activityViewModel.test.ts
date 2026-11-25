@@ -386,6 +386,11 @@ describe("buildSidebarStatusView", () => {
         thread({ threadId: "working", title: "Running", activity: "working" }),
         thread({ threadId: "review", title: "Finished", unread: true }),
         thread({
+          threadId: "watching",
+          title: "Watching its pull request",
+          waitingSince: "2026-08-14T09:00:00.000Z",
+        }),
+        thread({
           threadId: "asks",
           title: "Asks",
           activity: "attention",
@@ -404,6 +409,7 @@ describe("buildSidebarStatusView", () => {
     ).toEqual([
       ["Pinned", ["pinned"]],
       ["Needs you", ["asks"]],
+      ["Waiting", ["watching"]],
       ["Ready for review", ["review"]],
       ["Idle", ["idle-new", "idle-old"]],
     ]);

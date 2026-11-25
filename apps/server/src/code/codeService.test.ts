@@ -786,6 +786,35 @@ describe("CodeService reads", () => {
     expect(after.runtime[0]).not.toHaveProperty("liveStep");
   });
 
+  it("says an idle thread waits on a pull request, and not while a turn runs or waits on the person", async () => {
+    const waiting = thread();
+    const other = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
+    const liveTurns = new LiveTurnRegistry();
+    let parked = false;
+    const fixture = serviceFixture({
+      threads: [waiting, other],
+      liveTurns,
+      awaitsHarnessApproval: () => parked,
+      threadWaitingSince: (threadId) =>
+        threadId === String(waiting.id) ? "2026-11-25T10:00:00.000Z" : undefined,
+    });
+
+    const idle = await fixture.service.navigation(ids.window);
+    expect(idle.runtime[0]).toMatchObject({ waitingSince: "2026-11-25T10:00:00.000Z" });
+    expect(idle.runtime[1]).not.toHaveProperty("waitingSince");
+
+    const tracker = liveTurns.tracker(String(waiting.id), "code-navigation");
+    tracker.begin(now);
+    expect((await fixture.service.navigation(ids.window)).runtime[0]).not.toHaveProperty(
+      "waitingSince",
+    );
+    tracker.end();
+    parked = true;
+    expect((await fixture.service.navigation(ids.window)).runtime[0]).not.toHaveProperty(
+      "waitingSince",
+    );
+  });
+
   it("reports a running thread whose agent waits on an approval as awaiting input, not executing", async () => {
     const waiting = thread();
     const other = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
@@ -7302,6 +7331,7 @@ function serviceFixture(
     readonly serverGitHistory?: CodeServiceOptions["serverGitHistory"];
     readonly liveTurns?: CodeServiceOptions["liveTurns"];
     readonly awaitsHarnessApproval?: CodeServiceOptions["awaitsHarnessApproval"];
+    readonly threadWaitingSince?: CodeServiceOptions["threadWaitingSince"];
     readonly turnAwaiting?: CodeServiceOptions["turnAwaiting"];
     readonly forkMergeBack?: CodeServiceOptions["forkMergeBack"];
     readonly forkConversation?: CodeServiceOptions["forkConversation"];
@@ -7448,6 +7478,9 @@ function serviceFixture(
     ...(options.linkedIssues === undefined ? {} : { linkedIssues: options.linkedIssues }),
     ...(options.issueContext === undefined ? {} : { issueContext: options.issueContext }),
     ...(options.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
+    ...(options.threadWaitingSince === undefined
+      ? {}
+      : { threadWaitingSince: options.threadWaitingSince }),
     ...(options.awaitsHarnessApproval === undefined
       ? {}
       : { awaitsHarnessApproval: options.awaitsHarnessApproval }),

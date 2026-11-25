@@ -5,6 +5,8 @@ import {
   decodeCodeProjectPullRequestMergeWhenReadyCommand,
   decodeCodeProjectPullRequestSwitchOutcome,
   decodeCodeProjectPullRequestWatchRecorded,
+  decodeCodeThreadPullRequestWaits,
+  decodeStopCodeThreadPullRequestWait,
 } from "./codeProjectPullRequestSwitches";
 
 const target = {
@@ -146,5 +148,42 @@ describe("pull-request switch contracts", () => {
         reason: "auto-merge-not-allowed",
       }),
     ).toEqual({ status: "unsupported", reason: "auto-merge-not-allowed" });
+  });
+
+  it("lists a thread's waits with the watch's spent wakes and end, and refuses a wait past its wake limit's range", () => {
+    const wait = {
+      kind: "watch",
+      target,
+      since: "2026-11-25T10:00:00.000Z",
+      paused: false,
+      wakes: 2,
+      wakeLimit: 10,
+      endsAt: "2026-11-28T10:00:00.000Z",
+    };
+    expect(decodeCodeThreadPullRequestWaits({ threadId, waits: [wait] })).toEqual({
+      threadId,
+      waits: [wait],
+    });
+    expect(() =>
+      decodeCodeThreadPullRequestWaits({ threadId, waits: [{ ...wait, wakeLimit: 0 }] }),
+    ).toThrow();
+  });
+
+  it("stops one named wait and refuses a window identity the renderer supplied", () => {
+    const command = {
+      kind: "stop-code-thread-pull-request-wait",
+      threadId,
+      wait: "watch",
+      target,
+      since: "2026-11-25T10:00:00.000Z",
+    };
+    expect(decodeStopCodeThreadPullRequestWait(command)).toEqual(command);
+    expect(() => decodeStopCodeThreadPullRequestWait({ ...command, wait: "merge" })).toThrow();
+    expect(() =>
+      decodeStopCodeThreadPullRequestWait({
+        ...command,
+        windowId: "00000000-0000-4000-8000-000000000901",
+      }),
+    ).toThrow();
   });
 });

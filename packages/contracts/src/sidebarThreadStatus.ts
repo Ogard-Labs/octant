@@ -27,6 +27,7 @@ export const SidebarThreadStatus = Schema.Literal(
   "working",
   "attention",
   "limited",
+  "waiting",
   "woke",
   "unread",
 );

@@ -16,6 +16,7 @@ import {
   decodeEventActor,
   GithubRepositoryName,
   GithubRepositoryOwner,
+  MAX_CODE_THREAD_PULL_REQUEST_WAITS,
   type CodeProjectPullRequestAutoFixCommand,
   type CodeProjectPullRequestWatchRecorded,
   type CodeProjectPullRequestWatchSignal,
@@ -32,6 +33,8 @@ import {
   type CodeProjectPullRequestAutoFixPauseReason,
   type CodeThreadId,
   type CodeThreadFollowUp,
+  type CodeThreadPullRequestWait,
+  type StopCodeThreadPullRequestWait,
   type PullRequestSwitchKind,
   type CodeProjectPullRequestView,
   type PullRequestBabysitStatus,
@@ -772,6 +775,99 @@ export class CodeProjectPullRequestSwitchService
       target: resolved.target,
       ...(pullRequestNodeId === undefined ? {} : { pullRequestNodeId }),
     };
+  }
+
+  /**
+   * What this thread waits on between turns, for a window that may open it.
+   * Local state only: it asks the forge nothing, and unlike a pull request's
+   * own view it vouches for nothing, so looking at a thread never restarts a
+   * watch a restart left quiet.
+   */
+  threadWaits(threadId: CodeThreadId): ReadonlyArray<CodeThreadPullRequestWait> {
+    this.#canonicalizeFolds();
+    const limits = this.#limits();
+    const waits: CodeThreadPullRequestWait[] = [];
+    for (const [key, fold] of this.#folds) {
+      const { autoFix, watch } = fold;
+      const vouched = this.#vouchingWindows.has(key);
+      if (watch.status === "on" && watch.threadId === String(threadId)) {
+        waits.push({
+          kind: "watch",
+          target: fold.target,
+          since: decodeUtcTimestamp(watch.enabledAt),
+          paused: !vouched,
+          wakes: watch.wakes,
+          wakeLimit: limits.watchWakes,
+          endsAt: decodeUtcTimestamp(
+            new Date(Date.parse(watch.enabledAt) + limits.watchDays * DAY_MS).toISOString(),
+          ),
+        });
+      }
+      if (autoFix.status === "on" && autoFix.threadId === String(threadId)) {
+        waits.push(
+          autoFix.babysit === undefined
+            ? {
+                kind: "auto-fix",
+                target: fold.target,
+                since: decodeUtcTimestamp(autoFix.enabledAt),
+                paused: !vouched,
+              }
+            : {
+                kind: "babysit",
+                target: fold.target,
+                since: decodeUtcTimestamp(autoFix.enabledAt),
+                // Babysitting finds a window again by itself; it waits only
+                // while a pass could not reach the pull request.
+                paused: this.#babysitProgress.get(key)?.status === "connection",
+                wakes: autoFix.feedbackWakes,
+                wakeLimit: limits.watchWakes,
+              },
+        );
+      }
+    }
+    return waits.slice(0, MAX_CODE_THREAD_PULL_REQUEST_WAITS);
+  }
+
+  /** When the thread began waiting on a pull request, for its sidebar row; absent when it is not. */
+  threadWaitingSince(threadId: CodeThreadId): string | undefined {
+    let earliest: string | undefined;
+    for (const wait of this.threadWaits(threadId)) {
+      if (earliest === undefined || Date.parse(wait.since) < Date.parse(earliest)) {
+        earliest = wait.since;
+      }
+    }
+    return earliest;
+  }
+
+  /**
+   * The person stops one of this thread's own waits. It only takes reach away,
+   * so it needs no forge and no Project check: the thread must own the wait,
+   * and `since` must name the one the person saw.
+   */
+  stopThreadWait(input: {
+    readonly threadId: CodeThreadId;
+    readonly wait: StopCodeThreadPullRequestWait["wait"];
+    readonly target: CodeProjectPullRequestSwitchTarget;
+    readonly since: string;
+    readonly actor: EventActor;
+  }): boolean {
+    this.#canonicalizeFolds();
+    const { target } = this.#resolveIdentity(input.target);
+    const fold = this.#fold(target);
+    const current = input.wait === "watch" ? fold.watch : fold.autoFix;
+    if (
+      current.status !== "on" ||
+      current.threadId !== String(input.threadId) ||
+      Date.parse(current.enabledAt) !== Date.parse(input.since)
+    ) {
+      return false;
+    }
+    if (input.wait === "watch") {
+      this.#recordWatch(target, input.threadId, { kind: "disabled" }, input.actor);
+    } else {
+      this.#recordAutoFix(target, input.threadId, { kind: "disabled" }, input.actor);
+    }
+    return true;
   }
 
   async #admitWatch(

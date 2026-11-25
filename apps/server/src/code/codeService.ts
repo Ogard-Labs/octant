@@ -79,6 +79,7 @@ import {
   type CodeAttachmentReference,
   EventId,
   UtcTimestamp,
+  decodeUtcTimestamp,
   decodeCodeCommand,
   decodeCodeThreadActivity,
   decodeCodeCheckoutHead,
@@ -844,6 +845,11 @@ export interface CodeServiceExecutionContext {
 
 export interface CodeServiceOptions {
   /** Where a running turn's start time and latest step are kept for the navigation read. */
+  /**
+   * When an idle thread began waiting on a pull request. GitHub is a separable
+   * integration, so the composition root binds this; absent, no row says so.
+   */
+  readonly threadWaitingSince?: (threadId: string) => string | undefined;
   readonly liveTurns?: LiveTurnRegistry;
   /**
    * Whether the agent's own harness approval is waiting on a person in this
@@ -1343,6 +1349,7 @@ export class CodeService {
   readonly #putAwayWhenDone: () => boolean;
   readonly #unfinishedWork: ((threadId: string) => ThreadUnfinishedWork | undefined) | undefined;
   readonly #liveTurns: LiveTurnRegistry | undefined;
+  readonly #threadWaitingSince: ((threadId: string) => string | undefined) | undefined;
   readonly #awaitsHarnessApproval: ((threadId: string) => boolean) | undefined;
   readonly #turnAwaiting: CodeServiceOptions["turnAwaiting"];
   readonly #issueContext?: GithubIssueContextPort;
@@ -1416,6 +1423,7 @@ export class CodeService {
     this.#touchedIssues = options.touchedIssues;
     this.#linkedIssues = options.linkedIssues;
     this.#liveTurns = options.liveTurns;
+    this.#threadWaitingSince = options.threadWaitingSince;
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     this.#turnAwaiting = options.turnAwaiting;
     this.#projectReportPage = options.projectReportPage;
@@ -1825,6 +1833,11 @@ export class CodeService {
         pullRequestSummaries !== undefined &&
         (pullRequestSummaries.items.length > 0 || pullRequestSummaries.hiddenCount > 0);
       const parked = awaitingKind !== undefined;
+      const live = parked ? undefined : this.#liveTurns?.read(String(thread.id));
+      // A thread waits between turns only: a turn running or parked on the
+      // person already says more.
+      const waitingSince =
+        parked || executing || live !== undefined ? undefined : this.#readWaitingSince(thread.id);
       return {
         threadId: thread.id,
         executing,
@@ -1840,9 +1853,19 @@ export class CodeService {
         // Rides on the row the caller was already allowed to see: `threads`
         // is the authority-filtered list, so a window never learns what a
         // thread it cannot browse is running.
-        ...(parked ? {} : this.#liveTurns?.read(String(thread.id))),
+        ...(parked ? {} : live),
+        ...(waitingSince === undefined ? {} : { waitingSince }),
       };
     });
+  }
+
+  #readWaitingSince(threadId: CodeThreadId): UtcTimestamp | undefined {
+    try {
+      const since = this.#threadWaitingSince?.(String(threadId));
+      return since === undefined ? undefined : decodeUtcTimestamp(since);
+    } catch {
+      return undefined;
+    }
   }
 
   /**

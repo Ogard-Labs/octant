@@ -89,6 +89,7 @@ export type RoutesDependencies = {
     CodeRuntimeWiring,
     | "androidToolchainRoutes"
     | "appleToolchainRoutes"
+    | "codePullRequestWaitRoutes"
     | "codeSessionRoutes"
     | "pullRequestReviewRoutes"
   > &
@@ -201,6 +202,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     agentRunRouteDependencies,
     agentRunSettingsRoutes,
     androidToolchainRoutes,
+    codePullRequestWaitRoutes,
     codeSessionRoutes,
     pullRequestReviewRoutes,
     appleToolchainRoutes,
@@ -374,6 +376,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await threadWakeupRoutes(request)) ??
     (await workSessionRoutes(request)) ??
     (await codeSessionRoutes(request)) ??
+    (await codePullRequestWaitRoutes(request)) ??
     (await pullRequestReviewRoutes(request)) ??
     (await threadCheckpointRoutes(request)) ??
     (await scaffoldRoutes(request)) ??

@@ -1279,6 +1279,7 @@ A Code thread's pull request review carries two switches the person turns on: Me
 - Merge when ready is the forge's own auto-merge on the head the person saw, never an Octant loop.
 - Auto-fix wakes the thread through the routine follow-up path at the thread's own level, after marking it as having read outside content; a refused mark sends nothing. It never force-pushes or rewrites pushed history.
 - A watch binds only the thread's own open linked pull request, needs no approval, fixes nothing, and is refused in Plan and host-started turns. (maintainer request, 2026-11-12)
+- An idle Code thread names the pull requests it waits on (its agent's watch, and babysitting or Auto-fix it repairs) beside its live tasks in one row above the composer, with Details and Stop (maintainer request, 2026-11-25). The host lists them without vouching for a paused watch, and stops one for the person only, journaled as that person or paired device; built for a window (a paired browser and the phone do not draw the row yet). The sidebar reads such a thread as Waiting with how long it has waited, ranked after Needs attention, and the Status arrangement lists it under its own Waiting heading.
 - Attempts and wakes are bounded by [Octant's own limits](#octants-own-limits-become-settings); every switch change, watch change and wake is journaled.
 
 Status: Built. Since: 2026-10-31. Detail: [Architecture: Modes, Merge when ready and Auto-fix](../architecture.md#modes-chat-work-and-code).
@@ -2972,6 +2973,7 @@ The sidebar speaks about what a thread is doing now with one fixed vocabulary, a
 
 - The vocabulary is owned by the domain package. Nothing to report is no status, and a failure is never inferred from silence.
 - A thread whose latest turn a provider usage limit holds says Limited in the warning tone, with the time until a named reset, ranked below Needs you and above Snooze ended (maintainer decision, 2026-11-26). The host reports the stop by the same rule as the strip above the composer; the word goes when the turn resumes, the reset passes, or the thread is snoozed or settled. A saved view can filter for it.
+- A Code thread between turns that still waits on a pull request says Waiting with how long it has waited ("Waiting 6m"; maintainer request, 2026-11-25).
 - The jump adds no host read.
 - A row's age slot and provider mark never move on hover, focus or an open menu (maintainer request, 2026-11-15); the uncommitted-changes count lives in Environment (maintainer request, 2026-11-16).
 

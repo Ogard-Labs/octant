@@ -4,6 +4,7 @@ import {
   type ChatThreadNavigationItem,
   type ThreadCheckoutChip,
   type ThreadRowActivity,
+  threadRowStatusInput,
 } from "./navigationModel";
 
 export const ACTIVITY_VIEW_STORAGE_KEY = "octant.sidebar.activity-view.v1";
@@ -323,6 +324,13 @@ export function buildSidebarStatusView(input: {
       holds: (thread) => thread.pinned === true || thread.coordinator === true,
     },
     { id: "needs-input", label: "Needs you", holds: (thread) => thread.activity === "attention" },
+    // Waiting on a pull request is not the person's to answer, but it is not
+    // finished either, so it sits after Needs you and before review.
+    {
+      id: "waiting",
+      label: "Waiting",
+      holds: (thread) => threadRowStatusInput(thread).waiting === true,
+    },
     {
       id: "ready-for-review",
       label: "Ready for review",

@@ -69,6 +69,7 @@ function threadStatusFacts(thread: ProjectViewThreadLike): SidebarThreadStatusIn
     working: thread.status?.working ?? false,
     attention: thread.status?.attention ?? false,
     limited: thread.status?.limited ?? false,
+    waiting: thread.status?.waiting ?? false,
     woke: thread.status?.woke ?? false,
     unread: thread.status?.unread ?? false,
   };

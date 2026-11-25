@@ -676,6 +676,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
         woke: props.thread.woke === true,
         followUp: props.thread.followUp === true,
         startedAt: props.thread.turnStartedAt,
+        waitingSince: props.thread.waitingSince,
         limited: props.thread.limited,
         shelf: props.thread.shelf,
         now,

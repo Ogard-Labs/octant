@@ -263,6 +263,62 @@ export const CodeThreadComposerActivity = Schema.Struct({
 }).annotations(strict);
 export type CodeThreadComposerActivity = typeof CodeThreadComposerActivity.Type;
 
+/** Pull requests one thread's waiting row and its details name. */
+export const MAX_CODE_THREAD_PULL_REQUEST_WAITS = 32;
+
+/**
+ * One pull request a Code thread waits on between turns: the agent's own
+ * watch, or Auto-fix or babysitting this thread repairs. Merge when ready is
+ * the pull request's, so it is never a thread's wait.
+ */
+export const CodeThreadPullRequestWait = Schema.Struct({
+  kind: Schema.Literal("watch", "auto-fix", "babysit"),
+  target: CodeProjectPullRequestSwitchTarget,
+  /** When it was turned on; a stop names it, so it never ends a later one. */
+  since: UtcTimestamp,
+  /** On, but reading nothing until a window vouches for it or the host reconnects. */
+  paused: Schema.Boolean,
+  /** Turns it has started, and the count that ends it. */
+  wakes: Schema.optional(Schema.NonNegativeInt),
+  wakeLimit: Schema.optional(
+    Schema.Int.pipe(Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_WATCH_WAKES_SETTING)),
+  ),
+  endsAt: Schema.optional(UtcTimestamp),
+}).annotations(strict);
+export type CodeThreadPullRequestWait = typeof CodeThreadPullRequestWait.Type;
+
+export const CodeThreadPullRequestWaits = Schema.Struct({
+  threadId: CodeThreadId,
+  waits: Schema.Array(CodeThreadPullRequestWait).pipe(
+    Schema.maxItems(MAX_CODE_THREAD_PULL_REQUEST_WAITS),
+  ),
+}).annotations(strict);
+export type CodeThreadPullRequestWaits = typeof CodeThreadPullRequestWaits.Type;
+
+/** The person stops one of a thread's own waits. Babysitting stops as Auto-fix. */
+export const StopCodeThreadPullRequestWait = Schema.Struct({
+  kind: Schema.Literal("stop-code-thread-pull-request-wait"),
+  threadId: CodeThreadId,
+  wait: Schema.Literal("watch", "auto-fix"),
+  target: CodeProjectPullRequestSwitchTarget,
+  since: UtcTimestamp,
+}).annotations(strict);
+export type StopCodeThreadPullRequestWait = typeof StopCodeThreadPullRequestWait.Type;
+
+export const StopCodeThreadPullRequestWaitResult = Schema.Struct({
+  kind: Schema.Literal("code-thread-pull-request-wait-stopped"),
+  /** False when that wait had already ended, or a later one took its place. */
+  stopped: Schema.Boolean,
+}).annotations(strict);
+export type StopCodeThreadPullRequestWaitResult = typeof StopCodeThreadPullRequestWaitResult.Type;
+
+export const decodeCodeThreadPullRequestWaits = Schema.decodeUnknownSync(
+  CodeThreadPullRequestWaits,
+);
+export const decodeStopCodeThreadPullRequestWait = Schema.decodeUnknownSync(
+  StopCodeThreadPullRequestWait,
+);
+
 export const CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED =
   "code.project-pull-request-merge-when-ready-recorded@1";
 export const CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED =

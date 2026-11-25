@@ -230,6 +230,8 @@ export interface CodeThreadNavigationItem {
   readonly turnStartedAt?: string;
   readonly liveStep?: ThreadLiveStep;
   readonly limited?: ThreadUsageLimited;
+  /** Between turns the thread waits on a pull request, since this time. */
+  readonly waitingSince?: string;
   readonly executionPolicy: CodeThread["executionPolicy"];
   readonly lifecycle: CodeThread["lifecycle"];
   readonly projectId: CodeThread["projectId"];
@@ -2602,6 +2604,7 @@ export function useCodeController(options: CodeControllerOptions) {
         readonly turnStartedAt?: string;
         readonly liveStep?: ThreadLiveStep;
         readonly limited?: ThreadUsageLimited;
+        readonly waitingSince?: string;
       }
     >();
     for (const entry of bootstrap?.runtime ?? []) {
@@ -2613,6 +2616,7 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(entry.turnStartedAt === undefined ? {} : { turnStartedAt: entry.turnStartedAt }),
         ...(entry.liveStep === undefined ? {} : { liveStep: entry.liveStep }),
         ...(entry.limited === undefined ? {} : { limited: entry.limited }),
+        ...(entry.waitingSince === undefined ? {} : { waitingSince: entry.waitingSince }),
         ...(entry.checkoutChip === undefined ? {} : { checkoutChip: entry.checkoutChip }),
         ...(pullRequestSummaries === undefined ? {} : { pullRequestSummaries }),
         ...(entry.touchedIssues === undefined ? {} : { touchedIssues: entry.touchedIssues }),
@@ -2686,6 +2690,7 @@ export function useCodeController(options: CodeControllerOptions) {
               : { turnStartedAt: runtime.turnStartedAt }),
             ...(runtime?.liveStep === undefined ? {} : { liveStep: runtime.liveStep }),
             ...(runtime?.limited === undefined ? {} : { limited: runtime.limited }),
+            ...(runtime?.waitingSince === undefined ? {} : { waitingSince: runtime.waitingSince }),
             ...(runtime?.checkoutChip === undefined ? {} : { checkoutChip: runtime.checkoutChip }),
             ...(runtime?.pullRequestSummaries === undefined
               ? {}

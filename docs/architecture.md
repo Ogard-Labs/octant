@@ -4797,6 +4797,7 @@ CI or reviewers should be woken, not left polling; maintainer request,
 - **Watch limits.** A watch ends when the pull request merges or closes, when
   the thread is archived, completed, or gone, when the Project no longer
   connects the repository (`authority-lost`), when the agent calls `unwatch`,
+  when the person stops it from the thread,
   after ten started wakes (`wake-limit`), or three days after it began
   (`expired`), both settings in Settings › Limits with those defaults
   ([Octant's own limits become settings](#security-and-authority); built), checked even while nothing vouches for it; the last two open the
@@ -4807,6 +4808,17 @@ CI or reviewers should be woken, not left polling; maintainer request,
   host restart a watch stays quiet, with its clock still running, until a
   window shows the pull request's review or the thread's agent asks to watch
   it again from a window that may act on it.
+- **What a thread waits on.** `GET /api/code-thread-waits` lists a Code
+  thread's own watch and the Auto-fix or babysitting it repairs, to a window or
+  the host person's own paired device that may open the thread. It reads local
+  state only: no forge call, and unlike a pull request's own view it vouches
+  for nothing. `POST /api/code-thread-waits/stop` stops one of them for the
+  person (a routine's scope and a hub-introduced device are refused). It only
+  takes reach away, so it asks the forge and the Project nothing: the thread
+  must own the wait, and the command names when that wait began, so it never
+  ends a later one. The journal records the existing `disabled` change with the
+  person or the paired device as its actor
+  ([Thread view: Background work](design/thread-view.md#background-work)).
 - **Watch reach.** GitHub is a separable integration
   ([Plugin boundaries](#plugin-boundaries-and-remaining-extraction)), so the
   Code runtime and its pull-request tool hold only a watch port (`watch`,
