@@ -20,24 +20,32 @@ import { providerSettingsViewProps } from "../providers/providerSettingsViewProp
 import { useProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { RemotePairedDevices } from "./RemotePairedDevices";
+import type { RemotePermissionClients } from "./remoteProductClients";
 
 // Loaded when the Claude and Codex tab is opened, so the settings open without it.
 const LazyProviderToolingPanel = lazy(async () => ({
   default: (await import("../extensions/ProviderToolingPanel")).ProviderToolingPanel,
 }));
 
-type HostSettingsSection = "extensions" | "providers" | "devices" | "agents";
+// Loaded when the section is opened, so the settings open without its components.
+const LazyRemoteHostPermissions = lazy(async () => ({
+  default: (await import("./RemoteHostPermissions")).RemoteHostPermissions,
+}));
+
+type HostSettingsSection = "extensions" | "providers" | "devices" | "agents" | "permissions";
 
 const SECTIONS: ReadonlyArray<{
   readonly id: HostSettingsSection;
   readonly label: string;
   /** The matrix surface whose routes the section sends to. */
-  readonly surface: RemoteShellSurfaceKind;
+  /** Absent where the section stands on what the shell hands it, not on a matrix surface. */
+  readonly surface?: RemoteShellSurfaceKind;
 }> = [
   { id: "extensions", label: "Extensions", surface: "extension-install" },
   { id: "providers", label: "Providers", surface: "provider-setup" },
   { id: "devices", label: "Paired devices", surface: "device-management" },
   { id: "agents", label: "Agent access", surface: "agent-access" },
+  { id: "permissions", label: "Permissions" },
 ];
 
 export interface RemoteHostSettingsProps {
@@ -64,6 +72,12 @@ export interface RemoteHostSettingsProps {
    * not offered and the host refuses the routes anyway.
    */
   readonly providerToolingClient?: ProviderToolingClient;
+  /**
+   * The host's permission lists, cleanup and spend ceilings. Given only for a
+   * browser the host's own person paired; absent, the section is not offered
+   * and the host refuses the routes anyway.
+   */
+  readonly permissionClients?: RemotePermissionClients;
   /** Opts supported endpoints in or out of provider cloud jobs over the session. */
   readonly providerCloudSessionClient?: ProviderCloudSessionClient;
 }
@@ -80,7 +94,11 @@ export interface RemoteHostSettingsProps {
  * the host's credential store and is never read back.
  */
 export function RemoteHostSettings(props: RemoteHostSettingsProps) {
-  const sections = SECTIONS.filter((section) => props.reachable.has(section.surface));
+  const sections = SECTIONS.filter((section) =>
+    section.id === "permissions"
+      ? props.permissionClients !== undefined
+      : section.surface !== undefined && props.reachable.has(section.surface),
+  );
   const [open, setOpen] = useState<HostSettingsSection>();
   if (sections.length === 0) return null;
   return (
@@ -113,6 +131,14 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
       ) : null}
       {open === "agents" ? (
         <RemoteAgentAccess client={props.agentGrants} projectClient={props.projectClient} />
+      ) : null}
+      {open === "permissions" && props.permissionClients !== undefined ? (
+        <Suspense fallback={null}>
+          <LazyRemoteHostPermissions
+            clients={props.permissionClients}
+            projectClient={props.projectClient}
+          />
+        </Suspense>
       ) : null}
       {open === "providers" ? (
         <RemoteProviderSettings

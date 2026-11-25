@@ -1004,6 +1004,41 @@ describe("RemoteShellView", () => {
     expect(screen.queryByText(/Open Octant on this computer/)).toBeNull();
   });
 
+  it("offers a browser the host's own person paired the host's permission lists, over the session", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const { bridge } = await readyBridge(seen, false, true);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    const settings = await screen.findByRole("region", { name: "Host settings" });
+    await user.click(await within(settings).findByRole("button", { name: "Permissions" }));
+    await waitFor(
+      () => {
+        const paths = seen.map((request) => request.path);
+        expect(paths).toContain("/api/protected-files");
+        expect(paths).toContain("/api/access/safe-networks");
+        expect(paths).toContain("/api/shield/servers");
+        expect(paths).toContain("/api/code/archived-worktrees");
+      },
+      { timeout: 4000 },
+    );
+    for (const request of seen) {
+      expect(request.headers.get("x-octant-window-capability")).toBeNull();
+    }
+  });
+
+  it("offers a device that is not the host's person, at any level, no Permissions section and asks the host for none of its lists", async () => {
+    for (const accessLevel of ["read-only", "approve-and-steer"] as const) {
+      const seen: ProductRequest[] = [];
+      const { bridge } = await readyBridge(seen, false, false, false, false, accessLevel);
+      const view = render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+      await screen.findByRole("note", { name: "Local host only surfaces" });
+      expect(screen.queryByRole("button", { name: "Permissions" })).toBeNull();
+      expect(seen.map((request) => request.path)).not.toContain("/api/protected-files");
+      view.unmount();
+    }
+  });
+
   it("offers a restricted session no host settings", async () => {
     const { bridge } = await readyBridge([], false, false);
     render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
