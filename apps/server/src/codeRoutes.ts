@@ -989,6 +989,24 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          // Which pull requests a thread stands for is the person's choice, at a
+          // window on this host or on a device they paired at Full. A device
+          // only the hub introduced starts threads, answers them and stops
+          // them, and nothing else (maintainer decision, 2026-11-20).
+          if (
+            command?.kind === "unlink-code-thread-pull-request" &&
+            (callerAuthority !== "local-window" || agentGrantSession)
+          ) {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message:
+                  "Only you, from a window or a device you paired, can unlink a pull request from a thread.",
+              },
+              403,
+              origin,
+            );
+          }
           // Whether the host may continue a turn by itself after a restart is
           // the person's choice about this computer's unattended work, at a
           // window on it or on a device they paired.

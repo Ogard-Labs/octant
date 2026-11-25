@@ -222,6 +222,7 @@ describe("Journal", () => {
         navigatorAssistant: {},
         voice: {},
         imageGeneration: { customSources: [] },
+        videoGeneration: {},
         standaloneSkillActivations: {},
         skillFolders: { providers: [], folders: [] },
         rememberedBrowserOrigins: [],

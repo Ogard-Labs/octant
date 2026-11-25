@@ -671,6 +671,47 @@ describe("CodeService reads", () => {
     expect(read.runtime[0]).not.toHaveProperty("threadPullRequests");
   });
 
+  it("lists the issues a thread touched that the window may read, open first, and Linear ones only while connected", async () => {
+    const issues = [
+      {
+        forge: "github" as const,
+        owner: "octant",
+        repository: "octant",
+        number: 3,
+        state: "closed",
+        observedAt: "2026-11-24T09:00:00.000Z",
+      },
+      {
+        forge: "github" as const,
+        owner: "someone-else",
+        repository: "private",
+        number: 4,
+        observedAt: "2026-11-24T09:00:00.000Z",
+      },
+      {
+        forge: "linear" as const,
+        identifier: "ENG-991",
+        state: "In Progress",
+        observedAt: "2026-11-24T08:00:00.000Z",
+      },
+    ];
+    const navigationWith = async (linearConnected: boolean) =>
+      (
+        await serviceFixture({
+          touchedIssues: { issuesFor: () => issues, linearConnected: () => linearConnected },
+        }).service.navigation(ids.window)
+      ).runtime[0];
+
+    expect((await navigationWith(true))?.touchedIssues).toEqual({
+      items: [issues[2], issues[0]],
+      hiddenCount: 0,
+    });
+    expect((await navigationWith(false))?.touchedIssues).toEqual({
+      items: [issues[0]],
+      hiddenCount: 0,
+    });
+  });
+
   it("keeps navigation rows without pull-request facts when the snapshot source fails or GitHub is revoked", async () => {
     const failing = serviceFixture({
       pullRequests: {
@@ -6612,6 +6653,7 @@ function serviceFixture(
     readonly probeProvider?: CodeServiceOptions["probeProvider"];
     readonly content?: CodeContentStoreOptions;
     readonly pullRequests?: CodeServiceOptions["pullRequests"];
+    readonly touchedIssues?: CodeServiceOptions["touchedIssues"];
     readonly readLatestFinishedReceipt?: CodeServiceOptions["readLatestFinishedReceipt"];
     readonly putAwayWhenDone?: CodeServiceOptions["putAwayWhenDone"];
     readonly gitHistory?: CodeServiceOptions["gitHistory"];
@@ -6751,6 +6793,7 @@ function serviceFixture(
       ? {}
       : { serverGitHistory: options.serverGitHistory }),
     ...(options.pullRequests === undefined ? {} : { pullRequests: options.pullRequests }),
+    ...(options.touchedIssues === undefined ? {} : { touchedIssues: options.touchedIssues }),
     ...(options.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
     ...(options.awaitsHarnessApproval === undefined
       ? {}
@@ -6868,7 +6911,7 @@ describe("completing and snoozing a Code thread", () => {
         expectedVersion: 1,
       }),
     ).rejects.toMatchObject({
-      failure: { category: "invalid", message: /before putting this thread away/ },
+      failure: { category: "invalid", message: /before settling this thread/ },
     });
 
     const waiting = serviceFixture();
@@ -6880,7 +6923,7 @@ describe("completing and snoozing a Code thread", () => {
         expectedVersion: 1,
       }),
     ).rejects.toMatchObject({
-      failure: { category: "invalid", message: /answer it before putting it away/ },
+      failure: { category: "invalid", message: /answer it before settling it/ },
     });
     expect(running.persistence.journal.append).not.toHaveBeenCalled();
     expect(waiting.persistence.journal.append).not.toHaveBeenCalled();
@@ -6998,6 +7041,23 @@ describe("completing and snoozing a Code thread", () => {
     expect(markedWithSettingOff.thread).not.toHaveProperty("completedAt");
   });
 
+  it("settles a thread whose agent finished, as the host, and not while its turn still runs", () => {
+    const fixture = serviceFixture();
+    expect(fixture.service.settleFinishedThread(ids.thread)).toEqual({ status: "settled" });
+    const append = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+      events: Array<{ actor: unknown; payload: { thread: Record<string, unknown> } }>;
+    };
+    expect(append.events[0]?.payload.thread.completedAt).toBe(now);
+    expect(append.events[0]?.payload.thread).not.toHaveProperty("markedDoneAt");
+    expect(append.events[0]?.actor).toMatchObject({ kind: "system" });
+
+    const waiting = serviceFixture({ awaitsHarnessApproval: () => true });
+    expect(waiting.service.settleFinishedThread(ids.thread)).toEqual({
+      status: "skipped",
+      reason: "busy",
+    });
+  });
+
   it("puts a thread away once for its merged pull request, as the host, and not again after the person takes it back", async () => {
     const pr41 = { baseRepository: "acme/app", number: 41 };
     const pr42 = { baseRepository: "acme/app", number: 42 };
@@ -7042,6 +7102,44 @@ describe("completing and snoozing a Code thread", () => {
       reason: "busy",
     });
     expect(running.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("journals a person's unlink of a pull request on the thread, and refuses one from a routine", async () => {
+    const fixture = serviceFixture();
+    const unlink = {
+      kind: "unlink-code-thread-pull-request" as const,
+      threadId: ids.thread,
+      expectedVersion: 1,
+      owner: "octant",
+      repository: "octant",
+      number: 12,
+    };
+
+    await expect(fixture.service.execute(ROUTINE_HOST_SCOPE_ID, unlink)).rejects.toMatchObject({
+      failure: {
+        category: "unauthorized",
+        message: "Only a person can unlink a pull request from a thread.",
+      },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+
+    const unlinked = await fixture.service.execute(ids.window, unlink);
+    expect(unlinked).toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        version: 2,
+        unlinkedPullRequests: [
+          { owner: "octant", repository: "octant", number: 12, unlinkedAt: now },
+        ],
+      },
+    });
+    const append = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+      events: Array<{ eventName: string; payload: { thread: Record<string, unknown> } }>;
+    };
+    expect(append.events[0]?.eventName).toBe("code.thread-updated@1");
+    expect(append.events[0]?.payload.thread.unlinkedPullRequests).toEqual([
+      { owner: "octant", repository: "octant", number: 12, unlinkedAt: now },
+    ]);
   });
 
   it("refuses a routine or anything else acting as the host when it tries to mark a Code thread Done", async () => {

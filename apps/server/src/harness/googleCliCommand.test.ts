@@ -66,4 +66,36 @@ describe("command-owned Google credential resources", () => {
     expect(close).toHaveBeenCalledOnce();
     await expect(stat(config)).rejects.toMatchObject({ code: "ENOENT" });
   });
+
+  it("asks the command's own admission last, and not at all once its credentials may not start", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "octant-google-command-"));
+    directories.push(directory);
+    const scripts = join(directory, "scripts");
+    await mkdir(scripts);
+    let ready = false;
+    const spent = vi.fn(() => true);
+    const shell = createNativeHarnessShell({
+      scriptDirectory: scripts,
+      googleCliCredentials: async () => ({
+        status: "ready" as const,
+        beforeLaunch: () => ready,
+        environment: {},
+        configurationDirectory: directory,
+        close: async () => undefined,
+      }),
+      process: {
+        executeShellScript: async (input: HarnessShellScriptInput) => {
+          input.beforeLaunch?.();
+          return result;
+        },
+      },
+    });
+    const run = () =>
+      shell.run({ command: "gcloud", cwd: directory, timeoutMs: 1000, beforeLaunch: spent });
+    await run();
+    expect(spent).not.toHaveBeenCalled();
+    ready = true;
+    await run();
+    expect(spent).toHaveBeenCalledOnce();
+  });
 });

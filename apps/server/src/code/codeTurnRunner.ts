@@ -17,6 +17,7 @@ import {
   type ProviderResumeCursor,
   type ProviderUsageLimit,
   type ThreadCallTiming,
+  type ThreadForgeReference,
   type ThreadPublishedPage,
   type ThreadCanvasPreviewReceipt,
   type ThreadRoutineReceipt,
@@ -214,6 +215,8 @@ export interface CodeTurnEvent {
   readonly riskLevel?: "low" | "medium" | "high" | "critical";
   /** A page a finished tool call published outside this host. */
   readonly published?: ThreadPublishedPage;
+  /** The pull requests and issues a finished tool call wrote to. */
+  readonly forgeReferences?: ReadonlyArray<ThreadForgeReference>;
   /** The finished call's result brought outside content into the thread. */
   readonly outsideContent?: ToolOutsideContentMark;
   /** The routine the finished call created. */
@@ -1287,6 +1290,9 @@ function normalizeProviderEvent(
           toolCallId: text(event.toolCallId),
           status: "provider-claimed-success",
           ...(event.published === undefined ? {} : { published: event.published }),
+          ...(event.forgeReferences === undefined
+            ? {}
+            : { forgeReferences: event.forgeReferences }),
         })),
       );
     case "tool-failure":

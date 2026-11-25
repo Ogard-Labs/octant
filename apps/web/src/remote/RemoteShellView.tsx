@@ -39,6 +39,7 @@ import {
 import { NewDeviceAlerts } from "../host/NewDeviceAlerts";
 import { RemoteHostSettings } from "./RemoteHostSettings";
 import { RemoteWorkspace } from "./RemoteWorkspace";
+import { usePairedComposerStashScope } from "./usePairedComposerStashScope";
 import { useRemoteSession } from "./useRemoteSession";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 
@@ -85,6 +86,8 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       setStandingRead((previous) =>
         previous?.connection === connection &&
         previous.sessionId === sessionId &&
+        (previous.standing === RESTRICTED_REMOTE_SESSION) ===
+          (standing === RESTRICTED_REMOTE_SESSION) &&
         previous.standing.actsAsHostPerson === standing.actsAsHostPerson &&
         previous.standing.accessLevel === standing.accessLevel
           ? previous
@@ -100,6 +103,11 @@ export function RemoteShellView(props: RemoteShellViewProps) {
     (standingRead.sessionId === sessionId || state.kind === "stale")
       ? standingRead.standing
       : RESTRICTED_REMOTE_SESSION;
+  const stashScope = usePairedComposerStashScope(
+    props.bridge,
+    hosts[0]?.hostId ?? "paired-browser",
+    connected && standing.actsAsHostPerson,
+  );
   const extensionClient = useMemo(
     () => createRemoteExtensionClient(props.bridge, standing),
     [props.bridge, standing],
@@ -234,11 +242,16 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       >
         <RemoteWorkspace
           actsAsHostPerson={standing.actsAsHostPerson}
+          canWatchVideoClips={
+            standing !== RESTRICTED_REMOTE_SESSION &&
+            (standing.actsAsHostPerson || standing.accessLevel !== undefined)
+          }
           clients={clients}
           connected={connected}
           extensionClient={extensionClient}
           mode={activeMode}
           readOnly={standing.accessLevel === "read-only"}
+          stashScope={stashScope}
         />
       </ContinuityScreenContext.Provider>
 

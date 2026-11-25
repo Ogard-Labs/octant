@@ -61,6 +61,8 @@ import { redactHostSecrets } from "../process/secretRedaction";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
 import type { SpendCeilingService } from "../spendCeilingService";
 import { geminiVideoDriver } from "./geminiVideoAdapter";
+import { falVideoDriver } from "./falVideoAdapter";
+import { runwayVideoDriver } from "./runwayVideoAdapter";
 import type { VideoClipStore } from "./videoClipStore";
 import { makeVideoGenerationPorts, type VideoSendRecord } from "./videoHttp";
 import type { VideoJobProjection } from "./videoJobProjection";
@@ -70,13 +72,19 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 type JournalPort = Pick<Journal, "append">;
 
-const BUNDLED_VIDEO_DRIVERS: ReadonlyArray<VideoGenerationDriver> = [geminiVideoDriver];
+const BUNDLED_VIDEO_DRIVERS: ReadonlyArray<VideoGenerationDriver> = [
+  geminiVideoDriver,
+  runwayVideoDriver,
+  falVideoDriver,
+];
 const FIRST_POLL_MS = 5_000;
 const MAX_POLL_MS = 30_000;
 /** How long the host waits on a provider's stop once a job's time has run out. */
 const VIDEO_TIMEOUT_CLEANUP_MS = 15_000;
 /** How often a partial or failed catalog read is retried per profile. */
 const VIDEO_DISCOVERY_RETRY_MS = 60_000;
+/** How long the host waits for prices and capabilities before a clip can be offered. */
+const VIDEO_QUOTE_DISCOVERY_TIMEOUT_MS = 30_000;
 
 /** A failed status check can leave the already accepted job's outcome unknown. */
 function pollFailureLeavesJobUnconfirmed(failure: ProviderFailure): boolean {
@@ -131,6 +139,7 @@ export interface EnqueueVideoJobInput extends VideoJobInputs {
   readonly modelId: ProviderModelId;
   readonly prompt: string;
   readonly options: VideoClipOptions;
+  readonly signal?: AbortSignal;
 }
 
 /** What the card needs before Generate: the model's declaration, the check, and the price. */
@@ -237,6 +246,24 @@ export class VideoJobService {
     { readonly models: ReadonlyArray<VideoModelCapabilities>; readonly complete: boolean }
   >();
   readonly #declaring = new Set<string>();
+  /**
+   * Profile versions whose key refused a stored-payload removal, for this host
+   * run: later jobs on them go straight to the provider's own expiry.
+   */
+  readonly #removalRefused = new Set<string>();
+  /**
+   * When a provider-expiring copy is gone anyway: a removal still owed past
+   * this is dropped rather than retried. It is derived from the journaled
+   * job's own record, not the catalog, so a restart — and a profile whose
+   * endpoint has since been removed — keeps the cutoff. A job journaled
+   * before the declaration was kept has none, and stays owed.
+   */
+  #owedCopyExpiry(job: VideoJob): number | undefined {
+    if (job.providerRemoval?.kind !== "expires") return undefined;
+    // Owed copies only exist on terminal jobs, so updatedAt is when the clip
+    // was made — the expiry counts from then, not from when the job started.
+    return Date.parse(job.updatedAt) + job.providerRemoval.afterHours * 3_600_000;
+  }
   /** When each profile's catalog was last read, bounding a retry to 60 s. */
   readonly #discoveryReadAt = new Map<string, number>();
   #active = 0;
@@ -315,7 +342,7 @@ export class VideoJobService {
         this.#discoveryReadAt.set(key, this.#now());
         const wanted = modelAllowlistOf(candidate.configuration).length;
         void adapter
-          .models()
+          .models(this.#closing.signal)
           .then((models) => this.#declared.set(key, { models, complete: models.length >= wanted }))
           .catch(() => undefined)
           .finally(() => this.#declaring.delete(key));
@@ -324,10 +351,35 @@ export class VideoJobService {
     return ready;
   }
 
+  /** Bytes `[start, end]` of a finished clip, clamped to it, for a byte-range response. */
+  async readClipRange(
+    job: VideoJob,
+    range: { readonly start: number; readonly end: number },
+  ): Promise<
+    | {
+        readonly bytes: Uint8Array;
+        readonly start: number;
+        readonly end: number;
+        readonly size: number;
+      }
+    | undefined
+  > {
+    if (job.status !== "completed" || job.clip === undefined) return undefined;
+    return this.#options.clips.readRange(job.scopeId, job.clip.clipId, range);
+  }
+
   /** A finished clip's bytes, for a save under the turn's folder. */
   async readClip(job: VideoJob): Promise<Uint8Array | undefined> {
     if (job.status !== "completed" || job.clip === undefined) return undefined;
     return this.#options.clips.readAll(job.scopeId, job.clip.clipId);
+  }
+
+  /** A finished clip as a bounded stream, for a whole-clip download. */
+  async streamClip(
+    job: VideoJob,
+  ): Promise<{ readonly body: ReadableStream<Uint8Array>; readonly size: number } | undefined> {
+    if (job.status !== "completed" || job.clip === undefined) return undefined;
+    return this.#options.clips.stream(job.scopeId, job.clip.clipId);
   }
 
   /**
@@ -337,9 +389,10 @@ export class VideoJobService {
    */
   async #modelsOf(
     adapter: VideoGenerationAdapter,
+    signal?: AbortSignal,
   ): Promise<ReadonlyArray<VideoModelCapabilities> | undefined> {
     try {
-      return await adapter.models();
+      return await adapter.models(signal);
     } catch {
       return undefined;
     }
@@ -365,9 +418,13 @@ export class VideoJobService {
     readonly firstFrame: boolean;
     readonly lastFrame: boolean;
     readonly referenceCount: number;
+    readonly signal?: AbortSignal;
   }): Promise<VideoQuote> {
     if (this.#closing.signal.aborted) {
       return { status: "refused", reason: "The host is shutting down." };
+    }
+    if (input.signal?.aborted) {
+      return { status: "refused", reason: "Video generation was stopped." };
     }
     const instance = this.#options.readProviderInstance(input.profileInstanceId);
     if (instance === undefined || !instance.enabled) {
@@ -381,11 +438,19 @@ export class VideoJobService {
     if (adapter === undefined) {
       return { status: "refused", reason: "That video provider's plugin is turned off." };
     }
-    const models = await this.#modelsOf(adapter);
+    const discoverySignal = AbortSignal.any([
+      this.#closing.signal,
+      AbortSignal.timeout(VIDEO_QUOTE_DISCOVERY_TIMEOUT_MS),
+      ...(input.signal === undefined ? [] : [input.signal]),
+    ]);
+    const models = await this.#modelsOf(adapter, discoverySignal);
     if (this.#closing.signal.aborted) {
       return { status: "refused", reason: "The host is shutting down." };
     }
-    if (models === undefined) {
+    if (input.signal?.aborted) {
+      return { status: "refused", reason: "Video generation was stopped." };
+    }
+    if (models === undefined || discoverySignal.aborted) {
       return { status: "refused", reason: "That video provider cannot be reached." };
     }
     const model = models.find((candidate) => String(candidate.modelId) === String(input.modelId));
@@ -438,9 +503,13 @@ export class VideoJobService {
       firstFrame: input.firstFrame !== undefined,
       lastFrame: input.lastFrame !== undefined,
       referenceCount: input.references.length,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
     if (this.#closing.signal.aborted) {
       throw new VideoJobServiceError("busy", "The host is shutting down.");
+    }
+    if (input.signal?.aborted) {
+      throw new VideoJobServiceError("ineligible", "Video generation was stopped.");
     }
     if (quote.status === "refused") throw new VideoJobServiceError("ineligible", quote.reason);
     if (this.#options.projection.countQueued() >= MAX_QUEUED_VIDEO_JOBS) {
@@ -698,8 +767,8 @@ export class VideoJobService {
     });
     const remainingMs =
       Date.parse(sending.startedAt ?? sending.createdAt) + VIDEO_JOB_TIMEOUT_MS - this.#now();
-    // The HTTP port's connection timer ends at the headers. The same signal
-    // stays attached to the response body until the start has been decoded.
+    // The HTTP port hands off a successful response at its headers. Keep
+    // the job deadline attached until the start response has been decoded.
     let startTimedOut = false;
     const startTimer = setTimeout(
       () => {
@@ -728,25 +797,23 @@ export class VideoJobService {
       return;
     }
     if (started.status === "failed") {
-      if (running.stopRequested && this.#knownUnsent(running)) {
-        this.#finish(sending, "cancelled", {});
-        return;
-      }
-      // Stop aborted the start request after it may have reached the
-      // provider, which can still make and bill the clip.
+      const failure = started.providerFailure;
+      const rejected = started.notStarted === true || failure.category === "rate-limited";
+      // A sent request can still be billed if Stop or a deadline cut off
+      // its answer. A confirmed rejection keeps its billing outcome.
+      const mayHaveStarted =
+        !rejected &&
+        !this.#knownUnsent(running) &&
+        (startMayHaveReachedProvider(failure) || running.stopRequested || startTimedOut);
       if (running.stopRequested) {
-        this.#finish(sending, "cancelled", {
-          settledCostUsdMicros: estimateOrZero(sending),
-          billed: true,
-        });
+        this.#finish(
+          sending,
+          "cancelled",
+          mayHaveStarted ? { settledCostUsdMicros: estimateOrZero(sending), billed: true } : {},
+        );
         return;
       }
-      // The provider may bill an unconfirmed start. A timeout while obtaining
-      // the key can also report "unavailable", before any request was sent.
-      if (
-        (startTimedOut || startMayHaveReachedProvider(started.providerFailure)) &&
-        !this.#knownUnsent(running)
-      ) {
+      if (mayHaveStarted) {
         this.#finish(sending, "failed", {
           failure: videoFailure(
             "interrupted",
@@ -758,9 +825,10 @@ export class VideoJobService {
         return;
       }
       this.#finish(sending, "failed", {
-        failure: startTimedOut
-          ? videoFailure("unavailable", "The clip timed out before it was sent.")
-          : started.providerFailure,
+        failure:
+          startTimedOut && !rejected
+            ? videoFailure("unavailable", "The clip timed out before it was sent.")
+            : failure,
       });
       return;
     }
@@ -769,22 +837,40 @@ export class VideoJobService {
     );
     if (this.#closing.signal.aborted) return;
     const recorded = this.#recordRemote(sending, started.remoteId, model);
-    await this.#pollToEnd(recorded, adapter, model);
+    await this.#pollToEnd(recorded, adapter, model?.job.cancel === "running");
   }
 
   async #resume(job: VideoJob): Promise<void> {
+    const running = this.#running.get(String(job.id));
+    if (running === undefined) return;
     const instance = this.#options.readProviderInstance(job.profileInstanceId);
     const adapter = instance === undefined ? undefined : this.#adapterFor(instance);
-    const model =
-      adapter === undefined
-        ? undefined
-        : (await this.#modelsOf(adapter))?.find(
-            (candidate) => String(candidate.modelId) === String(job.modelId),
-          );
-    if (this.#closing.signal.aborted) return;
     const startedAt = Date.parse(job.startedAt ?? job.createdAt);
+    const deadline = startedAt + VIDEO_JOB_TIMEOUT_MS;
+    const remaining = deadline - this.#now();
+    const deadlineSignal = remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abort();
+    const signal = AbortSignal.any([
+      this.#closing.signal,
+      running.controller.signal,
+      deadlineSignal,
+    ]);
+    const models =
+      adapter === undefined || signal.aborted ? undefined : await this.#modelsOf(adapter, signal);
+    const model = models?.find((candidate) => String(candidate.modelId) === String(job.modelId));
+    if (this.#closing.signal.aborted) return;
+    const canCancel =
+      model === undefined
+        ? adapter?.cancelRunningWithoutDiscovery === true
+        : model.job.cancel === "running";
+    if (adapter !== undefined && (deadlineSignal.aborted || this.#now() >= deadline)) {
+      await this.#finishExpired(job, adapter, canCancel);
+      return;
+    }
     const windowMs = (model?.job.resumeWindowHours ?? 0) * 3_600_000;
-    if (adapter === undefined || model === undefined || this.#now() - startedAt > windowMs) {
+    if (
+      adapter === undefined ||
+      (!running.stopRequested && (model === undefined || this.#now() - startedAt > windowMs))
+    ) {
       this.#finish(job, "failed", {
         failure: videoFailure(
           "interrupted",
@@ -795,7 +881,7 @@ export class VideoJobService {
       });
       return;
     }
-    await this.#pollToEnd(job, adapter, model);
+    await this.#pollToEnd(job, adapter, canCancel);
   }
 
   #recordRemote(
@@ -803,14 +889,31 @@ export class VideoJobService {
     remoteId: string,
     model: VideoModelCapabilities | undefined,
   ): VideoJob {
-    const copy: VideoProviderCopy = model?.job.removal.kind === "expires" ? "expires" : "held";
-    return this.#annotate(job, { remoteId, providerCopy: copy });
+    let copy: VideoProviderCopy = "held";
+    if (model?.job.removal.kind === "expires") {
+      const instance = this.#options.readProviderInstance(job.profileInstanceId);
+      if (instance !== undefined && this.#removalRefused.has(declaredKey(instance))) {
+        // This profile's key already refused a removal: the provider's own
+        // expiry ends this copy, and no DELETE is sent.
+        copy = "expires";
+      }
+      // Otherwise one removal is owed after the terminal state; a refusal or
+      // a copy still owed past its own expiry falls back to that expiry.
+    }
+    return this.#annotate(job, {
+      remoteId,
+      providerCopy: copy,
+      // Cleanup runs long after discovery and without its model: what it
+      // needs is journaled on the job itself, so a profile change or a lost
+      // endpoint can never change what this copy is owed.
+      ...(model?.job.removal === undefined ? {} : { providerRemoval: model.job.removal }),
+    });
   }
 
   async #pollToEnd(
     job: VideoJob,
     adapter: VideoGenerationAdapter,
-    model: VideoModelCapabilities | undefined,
+    canCancel: boolean,
   ): Promise<void> {
     const running = this.#running.get(String(job.id));
     const remoteId = job.remoteId;
@@ -821,7 +924,7 @@ export class VideoJobService {
     while (!this.#closing.signal.aborted) {
       if (running.stopRequested && !cancelAsked) {
         cancelAsked = true;
-        if (model?.job.cancel === "running") {
+        if (canCancel) {
           // Bounded by the job's deadline as well as shutdown, so the request
           // can never hold the job past the time it would settle anyway.
           const answer = await adapter.cancel(
@@ -855,23 +958,7 @@ export class VideoJobService {
         }
       }
       if (this.#now() >= deadline) {
-        // Settled before the provider is asked to stop, and the stop is
-        // bounded: a cancel that finds the clip already finished may download
-        // it again, which must not hold the job or its slot.
-        this.#finish(this.#current(job), "failed", {
-          failure: videoFailure(
-            "unavailable",
-            "Octant could not confirm the clip's result within 30 minutes.",
-          ),
-          settledCostUsdMicros: estimateOrZero(job),
-          billed: true,
-        });
-        if (model?.job.cancel === "running") {
-          await adapter.cancel(
-            remoteId,
-            AbortSignal.any([this.#closing.signal, AbortSignal.timeout(VIDEO_TIMEOUT_CLEANUP_MS)]),
-          );
-        }
+        await this.#finishExpired(job, adapter, canCancel);
         return;
       }
       // Once cancel is asked, Stop's signal stays aborted. Keep polling for
@@ -911,6 +998,25 @@ export class VideoJobService {
         waitSignal,
       );
       interval = Math.min(Math.round(interval * 1.5), MAX_POLL_MS);
+    }
+  }
+
+  async #finishExpired(job: VideoJob, adapter: VideoGenerationAdapter, canCancel: boolean) {
+    this.#finish(this.#current(job), "failed", {
+      failure: videoFailure(
+        "unavailable",
+        "Octant could not confirm the clip's result within 30 minutes.",
+      ),
+      settledCostUsdMicros: estimateOrZero(job),
+      billed: true,
+    });
+    // A cancel can download an already finished clip. Bound that cleanup
+    // separately after settling the job at its original deadline.
+    if (canCancel && job.remoteId !== undefined) {
+      await adapter.cancel(
+        job.remoteId,
+        AbortSignal.any([this.#closing.signal, AbortSignal.timeout(VIDEO_TIMEOUT_CLEANUP_MS)]),
+      );
     }
   }
 
@@ -980,11 +1086,24 @@ export class VideoJobService {
         }
         break;
       }
-      case "refused":
+      case "refused": {
+        // A provider can keep credits without returning the amount charged.
+        const reportedCharge = answer.usage?.costUsdMicros;
         this.#finish(current, "failed", {
           safetyRefusal: answer.safetyRefusal,
+          ...(answer.billed === true || reportedCharge !== undefined
+            ? {
+                settledCostUsdMicros:
+                  reportedCharge === undefined
+                    ? estimateOrZero(current)
+                    : Math.max(0, Math.round(reportedCharge)),
+                billed: true,
+                ...(answer.usage === undefined ? {} : { usage: answer.usage }),
+              }
+            : {}),
         });
         break;
+      }
       case "failed":
         this.#finish(current, stopped ? "cancelled" : "failed", {
           ...(stopped ? {} : { failure: answer.providerFailure }),
@@ -1008,11 +1127,15 @@ export class VideoJobService {
   }
 
   #settled(job: VideoJob, usage: VideoAdapterUsage | undefined): number {
-    return settleWithKnownPrice(job, usage, this.#priceFor(job));
-  }
-
-  #priceFor(job: VideoJob): VideoModelCapabilities["price"] | undefined {
-    return this.#priceCache.get(`${String(job.profileInstanceId)}\n${String(job.modelId)}`);
+    const price = this.#priceCache.get(`${String(job.profileInstanceId)}\n${String(job.modelId)}`);
+    // The provider can report the actual charge before recovery has a model price.
+    return settleVideoCostUsdMicros(
+      price ?? { kind: "unpublished" },
+      estimateOrZero(job),
+      usage,
+      job.options,
+      { imageCount: job.imageCount },
+    );
   }
 
   readonly #priceCache = new Map<string, VideoModelCapabilities["price"]>();
@@ -1029,6 +1152,12 @@ export class VideoJobService {
     const job = this.#current(candidate);
     if (job.providerCopy !== "held" || job.remoteId === undefined) return;
     if (this.#removing.has(String(job.id))) return;
+    // The journaled expiry can settle a copy even when the profile is gone.
+    const expiresAt = this.#owedCopyExpiry(job);
+    if (expiresAt !== undefined && this.#now() >= expiresAt) {
+      this.#markCopy(job, "expires");
+      return;
+    }
     this.#removing.add(String(job.id));
     try {
       const instance = this.#options.readProviderInstance(job.profileInstanceId);
@@ -1045,21 +1174,35 @@ export class VideoJobService {
       // still owed; the next host's recovery retries the removal.
       if (this.#closing.signal.aborted) return;
       if (result.status === "removed") {
-        const current = this.#current(job);
-        const updatedAt = decodeUtcTimestamp(this.#options.clock());
-        const version = decodeAggregateVersion(current.version + 1);
-        this.#append(current.id, current.version, [
-          {
-            eventName: VIDEO_JOB_PROVIDER_COPY_CHANGED,
-            payload: { jobId: current.id, version, updatedAt, providerCopy: "removed" },
-            occurredAt: updatedAt,
-          },
-        ]);
-        this.#notify(this.#current(job));
+        this.#markCopy(job, "removed");
+      } else if (
+        expiresAt !== undefined &&
+        (result.providerFailure.category === "unauthenticated" ||
+          result.providerFailure.category === "unauthorized")
+      ) {
+        // This copy expires on its own and this profile's later jobs skip DELETE.
+        if (instance !== undefined) this.#removalRefused.add(declaredKey(instance));
+        this.#markCopy(job, "expires");
       }
     } finally {
       this.#removing.delete(String(job.id));
     }
+    // Any other failure stays owed: the retry loop tries again until the
+    // copy's own expiry would have ended it anyway.
+  }
+
+  #markCopy(job: VideoJob, providerCopy: VideoProviderCopy): void {
+    const current = this.#current(job);
+    const updatedAt = decodeUtcTimestamp(this.#options.clock());
+    const version = decodeAggregateVersion(current.version + 1);
+    this.#append(current.id, current.version, [
+      {
+        eventName: VIDEO_JOB_PROVIDER_COPY_CHANGED,
+        payload: { jobId: current.id, version, updatedAt, providerCopy },
+        occurredAt: updatedAt,
+      },
+    ]);
+    this.#notify(this.#current(job));
   }
 
   // --- journal ---
@@ -1071,7 +1214,9 @@ export class VideoJobService {
   #transition(
     job: VideoJob,
     toStatus: VideoJob["status"],
-    extras: Partial<Pick<VideoJobStatusChanged, "startedAt" | "remoteId" | "providerCopy">>,
+    extras: Partial<
+      Pick<VideoJobStatusChanged, "startedAt" | "remoteId" | "providerCopy" | "providerRemoval">
+    >,
   ): VideoJob {
     const updatedAt = decodeUtcTimestamp(this.#options.clock());
     const version = decodeAggregateVersion(job.version + 1);
@@ -1090,7 +1235,8 @@ export class VideoJobService {
   /** Records the provider job id and copy state on a running job without changing its status. */
   #annotate(
     job: VideoJob,
-    extras: Pick<VideoJobStatusChanged, "remoteId" | "providerCopy">,
+    extras: Pick<VideoJobStatusChanged, "remoteId" | "providerCopy"> &
+      Partial<Pick<VideoJobStatusChanged, "providerRemoval">>,
   ): VideoJob {
     return this.#transition(job, job.status, extras);
   }
@@ -1267,8 +1413,8 @@ export class VideoJobService {
     });
     return {
       ...adapter,
-      models: async () => {
-        const models = await adapter.models();
+      models: async (signal) => {
+        const models = await adapter.models(signal);
         for (const model of models) {
           this.#priceCache.set(`${String(instance.id)}\n${String(model.modelId)}`, model.price);
         }
@@ -1284,19 +1430,6 @@ function isTerminal(job: VideoJob): boolean {
 
 function estimateOrZero(job: VideoJob): number {
   return job.estimatedCostUsdMicros === "unknown" ? 0 : job.estimatedCostUsdMicros;
-}
-
-function settleWithKnownPrice(
-  job: VideoJob,
-  usage: VideoAdapterUsage | undefined,
-  price: VideoModelCapabilities["price"] | undefined,
-): number {
-  const estimate = estimateOrZero(job);
-  return price === undefined
-    ? estimate
-    : settleVideoCostUsdMicros(price, estimate, usage, job.options, {
-        imageCount: job.imageCount,
-      });
 }
 
 function declaredKey(instance: ProviderInstance): string {

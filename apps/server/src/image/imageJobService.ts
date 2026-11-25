@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES } from "@octant/contracts/outside-driver-protocol";
 import {
   AggregateId,
   AggregateVersion,
@@ -36,6 +37,7 @@ import {
   type ImageJobStatus,
   type ImageJobThreadKind,
   type OpenAiCompatibleProviderInstance,
+  type OutsideImageProviderInstance,
   type OpenAiImageQuality,
   type OpenAiImageSize,
   type ProviderInstance,
@@ -53,6 +55,7 @@ import {
   type ImageAdapterRequest,
   type ImageGenerationAdapter,
   type ImageGenerationDriver,
+  type ImageGenerationPorts,
 } from "@octant/provider-sdk/image-generation";
 import {
   assertCustomImageSourceEligible,
@@ -78,7 +81,7 @@ import {
   type GeneratedImageStore,
 } from "./generatedImageStore";
 import { ideogramImageDriver } from "./ideogramImageAdapter";
-import { makeImageGenerationPorts, type ImageHttpFetch } from "./imageHttp";
+import { makeImageGenerationPorts, makePinnedImageFetch, type ImageHttpFetch } from "./imageHttp";
 import { ImageJobProjection } from "./imageJobProjection";
 import { openAiImageDriver } from "./openAiImageAdapter";
 import { makeOpenAiCompatibleImageAdapter } from "./openAiCompatibleImageAdapter";
@@ -144,6 +147,30 @@ export interface EnqueueImageJobInput {
   readonly resolution?: GeminiImageResolution;
 }
 
+/**
+ * How the job service reaches outside image drivers. Admission is decided by
+ * the host per profile, at the package digest it binds; the price is the one
+ * the trusted package declares, read by the host, never one a running driver
+ * states.
+ */
+export interface OutsideImageDrivers {
+  readonly admits: (instance: OutsideImageProviderInstance) => boolean;
+  /**
+   * The model as the package declares it at the profile's bound digest, with
+   * its published price when it states one; `undefined` when the package does
+   * not declare the model there, as after an update that removed it.
+   */
+  readonly declaredModel: (
+    instance: OutsideImageProviderInstance,
+    modelId: ProviderModelId,
+  ) => { readonly usdMicrosPerImage?: number | undefined } | undefined;
+  readonly adapter: (
+    instance: OutsideImageProviderInstance,
+    ports: Pick<ImageGenerationPorts, "fetchApprovedImageUrl" | "sniffMediaType">,
+    providerAnswered: () => void,
+  ) => ImageGenerationAdapter;
+}
+
 export interface ImageJobServiceOptions {
   readonly journal: JournalPort;
   readonly projection: ImageJobProjection;
@@ -160,6 +187,10 @@ export interface ImageJobServiceOptions {
   readonly imageDrivers?: ReadonlyArray<ImageGenerationDriver>;
   /** Image driver kinds the plugin activation ladder admits; bundled policy by default. */
   readonly admittedImageDriverKinds?: ReadonlySet<ProviderDriverKind>;
+  /** Absent on a host that admits no outside driver: every outside profile is refused. */
+  readonly outsideImageDrivers?: OutsideImageDrivers;
+  /** Resolves an approved image address's host name for the pinned download; the system resolver by default. */
+  readonly resolveImageAddress?: (hostname: string) => Promise<ReadonlyArray<string>>;
   readonly concurrency?: number;
   /** Host spend ceilings applied to thread-scoped image generation before dispatch. */
   readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle" | "abandon">;
@@ -175,6 +206,10 @@ interface QueuedImageWork {
   readonly references: NonNullable<ImageAdapterRequest["references"]>;
   readonly variantCount: number;
   readonly estimatedCostUsdMicros: number | "unknown";
+  /** An outside profile's declared price at enqueue, so settlement uses the price reserved. */
+  readonly declaredUsdMicrosPerImage?: number;
+  /** The outside driver digest the price was read at; dispatch refuses any other. */
+  readonly outsideDriverDigest?: string;
   readonly quality?: OpenAiImageQuality;
   readonly size?: OpenAiImageSize;
   readonly aspectRatio?: GeminiImageAspectRatio;
@@ -201,6 +236,8 @@ export class ImageJobService {
   readonly #createAdapter: ((instance: ProviderInstance) => ImageGenerationAdapter) | undefined;
   readonly #imageDrivers: ReadonlyArray<ImageGenerationDriver>;
   readonly #admittedImageDriverKinds: ReadonlySet<ProviderDriverKind>;
+  readonly #outsideImageDrivers: OutsideImageDrivers | undefined;
+  readonly #resolveImageAddress: ImageJobServiceOptions["resolveImageAddress"];
   readonly #concurrency: number;
   readonly #spendCeiling: ImageJobServiceOptions["spendCeiling"];
   readonly #resolveThreadProjectId: ImageJobServiceOptions["resolveThreadProjectId"];
@@ -227,6 +264,8 @@ export class ImageJobService {
     this.#imageDrivers = options.imageDrivers ?? BUNDLED_IMAGE_DRIVERS;
     this.#admittedImageDriverKinds =
       options.admittedImageDriverKinds ?? admittedBundledImageDriverKinds();
+    this.#outsideImageDrivers = options.outsideImageDrivers;
+    this.#resolveImageAddress = options.resolveImageAddress;
     this.#concurrency = options.concurrency ?? IMAGE_JOB_HOST_CONCURRENCY;
     this.#spendCeiling = options.spendCeiling;
     this.#resolveThreadProjectId = options.resolveThreadProjectId;
@@ -236,6 +275,11 @@ export class ImageJobService {
         "Image job concurrency must be a positive integer.",
       );
     }
+  }
+
+  /** Whether the host admits an outside image profile's driver now; false without outside drivers. */
+  admitsOutsideDriver(instance: OutsideImageProviderInstance): boolean {
+    return this.#outsideImageDrivers?.admits(instance) === true;
   }
 
   get(jobId: ImageJobId): ImageJob | undefined {
@@ -373,6 +417,42 @@ export class ImageJobService {
         error instanceof Error ? error.message : "The image profile is not eligible.",
       );
     }
+    // Decided before anything is reserved or sent: an outside profile refuses
+    // combined references that would overflow its brokered request line, and
+    // an unadmitted driver package runs nothing.
+    if (
+      instance.driverKind === "outside-image" &&
+      referenceBytes > OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES
+    ) {
+      throw new ImageJobServiceError(
+        "invalid",
+        "Reference images for an outside image driver cannot exceed 2.5 MiB combined.",
+      );
+    }
+    if (
+      instance.driverKind === "outside-image" &&
+      this.#outsideImageDrivers?.admits(instance) !== true
+    ) {
+      throw new ImageJobServiceError(
+        "ineligible",
+        "This image provider's driver is not available.",
+      );
+    }
+    const declaredModel =
+      instance.driverKind === "outside-image"
+        ? this.#outsideImageDrivers?.declaredModel(instance, input.modelId)
+        : undefined;
+    if (instance.driverKind === "outside-image" && declaredModel === undefined) {
+      throw new ImageJobServiceError(
+        "ineligible",
+        "This image provider's driver no longer offers that model.",
+      );
+    }
+    const declaredUsdMicrosPerImage = declaredModel?.usdMicrosPerImage;
+    const outsideDriverDigest =
+      instance.driverKind === "outside-image"
+        ? String(instance.configuration.driver.digest)
+        : undefined;
 
     const scopeId = decodeImageGenerationScopeId(input.scopeId);
     // Freeze the effective profile options at enqueue time so changing profile
@@ -383,6 +463,7 @@ export class ImageJobService {
       driverKind: instance.driverKind,
       modelId: String(input.modelId),
       variantCount,
+      ...(declaredUsdMicrosPerImage === undefined ? {} : { declaredUsdMicrosPerImage }),
       ...(effectiveOptions.quality === undefined ? {} : { quality: effectiveOptions.quality }),
       ...(effectiveOptions.size === undefined ? {} : { size: effectiveOptions.size }),
       ...(effectiveOptions.resolution === undefined
@@ -450,6 +531,8 @@ export class ImageJobService {
       references,
       variantCount,
       estimatedCostUsdMicros,
+      ...(declaredUsdMicrosPerImage === undefined ? {} : { declaredUsdMicrosPerImage }),
+      ...(outsideDriverDigest === undefined ? {} : { outsideDriverDigest }),
       ...(effectiveOptions.quality === undefined ? {} : { quality: effectiveOptions.quality }),
       ...(effectiveOptions.size === undefined ? {} : { size: effectiveOptions.size }),
       ...(effectiveOptions.aspectRatio === undefined
@@ -606,10 +689,63 @@ export class ImageJobService {
       providerAnswered();
       return response;
     };
-    return this.#defaultAdapter(instance, fetch);
+    return this.#defaultAdapter(instance, fetch, providerAnswered);
   }
 
-  #defaultAdapter(instance: ProviderInstance, fetch: ImageHttpFetch): ImageGenerationAdapter {
+  /**
+   * The approved-image download transport. A test that supplies its own fetch
+   * keeps it; otherwise the pinned transport, which connects only to the
+   * address it checked, allowing a private one only on the profile's own
+   * configured base URL.
+   */
+  #approvedFetch(
+    baseUrl: string | undefined,
+    fetch: ImageHttpFetch,
+  ): { readonly approvedFetch: ImageHttpFetch } {
+    if (this.#fetch !== undefined && this.#resolveImageAddress === undefined) {
+      return { approvedFetch: fetch };
+    }
+    let allowedOrigin: string | undefined;
+    try {
+      allowedOrigin = baseUrl === undefined ? undefined : new URL(baseUrl).origin;
+    } catch {
+      allowedOrigin = undefined;
+    }
+    return {
+      approvedFetch: makePinnedImageFetch({
+        ...(allowedOrigin === undefined ? {} : { allowedOrigin }),
+        ...(this.#resolveImageAddress === undefined
+          ? {}
+          : { resolveAll: this.#resolveImageAddress }),
+      }),
+    };
+  }
+
+  #defaultAdapter(
+    instance: ProviderInstance,
+    fetch: ImageHttpFetch,
+    providerAnswered: () => void,
+  ): ImageGenerationAdapter {
+    if (instance.driverKind === "outside-image") {
+      if (this.#outsideImageDrivers === undefined) return unavailableImageAdapter;
+      // The driver reaches its provider only through the brokered call; the
+      // host's own fetch and sniffing are what it gets of the image ports.
+      const ports = makeImageGenerationPorts({
+        instanceId: String(instance.id),
+        credentialResolver: this.#credentialResolver,
+        endpoint: { providerHosts: [], baseUrl: instance.configuration.baseUrl },
+        fetch,
+        ...this.#approvedFetch(instance.configuration.baseUrl, fetch),
+      });
+      return this.#outsideImageDrivers.adapter(
+        instance,
+        {
+          fetchApprovedImageUrl: ports.fetchApprovedImageUrl,
+          sniffMediaType: ports.sniffMediaType,
+        },
+        providerAnswered,
+      );
+    }
     if (
       isImageProfileDriverKind(instance.driverKind) &&
       !this.#admittedImageDriverKinds.has(instance.driverKind)
@@ -631,6 +767,7 @@ export class ImageJobService {
             ...(baseUrl === undefined ? {} : { baseUrl }),
           },
           fetch,
+          ...this.#approvedFetch(baseUrl, fetch),
         }),
       });
     }
@@ -731,6 +868,14 @@ export class ImageJobService {
           return;
         }
       }
+      const outsideRefusal = this.#outsideDispatchRefusal(instance, running.modelId, work);
+      if (outsideRefusal !== undefined) {
+        const failed = this.#transition(running, "failed", {
+          failure: { category: "invalid-configuration", message: outsideRefusal },
+        });
+        this.#resolve(failed);
+        return;
+      }
       const adapter = this.#adapterFor(instance, () => {
         reachedProvider = true;
       });
@@ -742,6 +887,9 @@ export class ImageJobService {
           adapterResult: result,
           pricingContext: {
             driverKind: instance.driverKind,
+            ...(work.declaredUsdMicrosPerImage === undefined
+              ? {}
+              : { declaredUsdMicrosPerImage: work.declaredUsdMicrosPerImage }),
             ...(work.quality === undefined ? {} : { quality: work.quality }),
             ...(work.size === undefined ? {} : { size: work.size }),
             ...(work.resolution === undefined ? {} : { resolution: work.resolution }),
@@ -1028,6 +1176,7 @@ export class ImageJobService {
     pricingContext:
       | {
           readonly driverKind: ProviderDriverKind;
+          readonly declaredUsdMicrosPerImage?: number;
           readonly quality?: OpenAiImageQuality;
           readonly size?: OpenAiImageSize;
           readonly resolution?: GeminiImageResolution;
@@ -1047,6 +1196,9 @@ export class ImageJobService {
             driverKind: pricingContext.driverKind,
             modelId: String(job.modelId),
             variantCount: imageCount,
+            ...(pricingContext.declaredUsdMicrosPerImage === undefined
+              ? {}
+              : { declaredUsdMicrosPerImage: pricingContext.declaredUsdMicrosPerImage }),
             ...(settledQuality === undefined ? {} : { quality: settledQuality }),
             ...(settledSize === undefined ? {} : { size: settledSize }),
             ...(pricingContext.resolution === undefined
@@ -1161,6 +1313,32 @@ export class ImageJobService {
           : new ImageJobServiceError("conflict", "The image job failed."),
       );
     }
+  }
+
+  /**
+   * Why an outside image job that waited in the queue must not run now, or
+   * nothing. Its reservation was made at one driver digest and price; a
+   * profile turned off, a driver no longer admitted, a newly trusted digest,
+   * or a model the package no longer declares each refuse here, before any
+   * process starts, and the reservation is released unspent.
+   */
+  #outsideDispatchRefusal(
+    instance: ProviderInstance,
+    modelId: ProviderModelId,
+    work: QueuedImageWork,
+  ): string | undefined {
+    if (instance.driverKind !== "outside-image") return undefined;
+    if (!instance.enabled) return "The image provider was turned off before this image started.";
+    if (this.#outsideImageDrivers?.admits(instance) !== true) {
+      return "This image provider's driver is not available.";
+    }
+    if (String(instance.configuration.driver.digest) !== work.outsideDriverDigest) {
+      return "This image provider moved to another version of its driver after this image was queued. Create it again.";
+    }
+    if (this.#outsideImageDrivers.declaredModel(instance, modelId) === undefined) {
+      return "This image provider's driver no longer offers that model.";
+    }
+    return undefined;
   }
 
   #finishSpendReservation(jobId: ImageJobId, outcome: "settle" | "abandon"): void {
@@ -1327,6 +1505,7 @@ interface BilledImageUsage {
   };
   readonly pricingContext: {
     readonly driverKind: ProviderDriverKind;
+    readonly declaredUsdMicrosPerImage?: number;
     readonly quality?: OpenAiImageQuality;
     readonly size?: OpenAiImageSize;
     readonly resolution?: GeminiImageResolution;

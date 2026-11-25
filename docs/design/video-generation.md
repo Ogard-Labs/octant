@@ -146,22 +146,51 @@ activation ladder.
    - It reuses the Gemini API key a person already set up for Gemini images.
    - Its published price is low: about $0.07/s at 720p.
    - Its range is wide: 3–15 s, up to 4K, with audio.
-   - It is the only provider that reports usage Octant can settle from (tokens).
+   - It reports usage Octant can settle from (tokens), as Runway does with credits.
    - It can both cancel a running job and delete its stored copy.
 2. **Runway.**
    - It is a dedicated video provider with self-serve keys and a published
      price.
    - One call cancels a running task or deletes a finished one.
+   - A job settles at the charged credits when Runway reports them. Runway
+     keeps credits for `SAFETY.INPUT.*` refusals, so Octant settles at the
+     reserved estimate if Runway omits the charge for one of those refusals.
+   - The driver offers Gen-4.5 (from text or a first frame) and Gen-4 Turbo
+     (first frame only), 2-10 s at 720p, with no audio.
    - It resells several other providers' models under the same key.
 3. **fal.**
    - One key reaches most other video models the survey lists: Veo, Kling,
      Hailuo, Seedance, Wan, Grok Imagine and Luma.
    - Its pricing API gives each endpoint's unit price, so the card can show a
      real price.
-   - Its queue cancels, and its delete removes stored payloads and output
-     files.
+   - Its queue cancels.
    - The driver sends `X-Fal-Store-IO: 0`, so fal keeps no 90-day copy of the
-     request.
+     request, and `X-Fal-Object-Lifecycle-Preference` with a two-hour
+     expiry, so fal's CDN copy of the clip is gone two hours after it is made.
+   - Removal asks once, then falls back to expiry. fal's
+     [payload deletion](https://fal.ai/docs/platform-apis/v1/models/requests/payloads.md)
+     (`DELETE /models/requests/{request_id}/payloads`) removes the request's
+     stored payloads and output files, so the host sends it once after a
+     terminal state. The delete needs a key with `models:requests:write` and
+     `assets:write` (fal's FULL preset), which an ordinary API key lacks, so
+     a 401/403 is expected for some keys: the host then records that the
+     provider's own expiry ends the copy, remembers the refusal for that
+     profile version while it runs so later jobs skip the DELETE, and never
+     retries it. A successful response confirms removal only when every
+     output's deletion result confirms success. Any other failure stays owed
+     until the copy's own expiry has passed. With request history off, fal
+     keeps a queue result for one hour, so the fal driver's resume window is
+     one hour.
+   - Each endpoint's options are read from its published queue schema — a
+     `num_frames` field at a fixed frame rate becomes the whole-second
+     lengths that rate makes, and `first_frame_url`/`last_frame_url` map to
+     the seam's frames — and its price from fal's pricing API (a per-second
+     unit is a per-second rate only when no option changes the billing, a
+     per-video unit a flat rate for the endpoint's default clip, anything
+     else unpublished, which the dollar ceiling refuses).
+   - After fal accepts a clip, the driver keeps the declaration it submitted
+     with so the host records the queue ID and its cleanup policy without
+     repeating discovery.
 
 Between them, these three reach every live model family in the survey except
 Pika's own models. Runway also resells MiniMax H3, which fal does not host.
@@ -276,6 +305,9 @@ to stay healthy:
 A video job counts against the thread's and the Project's spend ceilings,
 which the person sets, like any turn.
 
+- **Quote.** Before a clip can be offered or reserved, the host waits up to 30
+  seconds for a provider's model and price discovery. Stopping the turn or
+  shutting down the host interrupts the lookup before the clip is queued.
 - **Reserve.** Before Generate is honoured, the host reserves the card's
   estimate against every ceiling that applies. The estimate is the model's
   declared output price for the chosen duration, resolution and audio, plus its
@@ -290,12 +322,20 @@ which the person sets, like any turn.
   driver computes from the usage the provider reports (Gemini's token count),
   or to the estimate when the provider reports none.
   - A confirmed failure before output releases its reservation when there
-    is no charged usage. An unconfirmed start follows the interruption
-    rule below. A confirmed completion with invalid output still settles to
-    reported usage or to the estimate when no usage was reported.
+    is no charged usage. Rate limits and confirmed origin connection or TLS
+    failures still release the reservation if Stop or a deadline interrupts
+    the error body. The start recognises Cloudflare 521, 523, 525 and 526 when
+    both [error diagnostic headers](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-error-headers/)
+    identify a gateway-generated error. A bare 52x or a gateway timeout leaves
+    delivery uncertain, and the start settles at the estimate. A confirmed
+    completion with invalid output still settles to reported usage or to the
+    estimate when no usage was reported.
   - A cancelled job settles at the reported usage, or at the estimate when
     none is reported, because a provider may bill a job it had already
-    started.
+    started. Stop releases the reservation after a confirmed rejection
+    of the start. A provider's explicit charge takes precedence even before the
+    model price is available. fal reports zero for a cancellation confirmed
+    while the job was queued. Runway's DELETE leaves the estimate in place.
 - No video-only ceiling is added: the person's own ceilings already cover it.
 
 ### Storage, export and deletion
@@ -322,14 +362,28 @@ which the person sets, like any turn.
 - Clips are deleted with their thread. They are included in a thread export
   as files, with the export's size shown before it starts, because a person
   exporting a thread expects its results in it.
+  A local window exports a thread with completed clips as an uncompressed
+  `.octant-thread.tar`. Its `manifest.json` identifies `octant.thread-bundle/2`,
+  contains the usual JSON thread bundle, and records each clip's size and
+  digest. The MP4s live at `video/<clip-id>.mp4`. Opening the confirmation
+  prepares the manifest and exact archive size without reading the videos.
+  Confirming streams the archive from the host after checking that the window
+  can still open the thread. The desktop asks its native download surface to
+  start that ticket on its own loopback host, keeping the renderer on the
+  current thread. Archive negotiation uses the original export route. The
+  older `.octant-thread.json` format stays readable and remains the response
+  for threads without clips and older hosts.
 - Saving a clip as a file uses the same confined, create-only write as an
   image save, at the turn's level. Plan refuses; Ask first and Auto show a card
   naming the path; Accept edits and Full access write at once.
 - The host keeps no copy at the provider where the driver can remove one. As
   soon as the clip is stored, or the job fails or is cancelled, the host calls
   the driver's `forget`, and again during restart recovery. A model that
-  declares it cannot remove its copy says on the card how long the provider
-  keeps it.
+  declares `removal: expires` also gets one best-effort `forget` after the
+  terminal state: a refusal falls back to the declared expiry, and any other
+  failure is retried only until that expiry — counted from when the clip was
+  made — has passed. A model that declares it cannot remove its copy says on
+  the card how long the provider keeps it.
 
 ### Watching a clip
 
@@ -338,9 +392,32 @@ which the person sets, like any turn.
 - The clip is served by a host route that answers byte-range requests, so
   seeking does not download the whole clip. The route checks the window's or
   device's authority over the thread on every request, as image routes do.
+- A `<video>` element cannot send the window's credential, so the window asks
+  for a ten-minute ticket for one clip and plays from its address, asking for a
+  new one before it runs out. Each clip request rechecks the issuer's access
+  to its thread. Window revocation drops its tickets. A paired device's ticket
+  requires the original session and credential generation to remain current.
+  The ticket retains the pairing approval verified by the gateway at issuance.
+  A ticket grants only that clip.
+- A running job shows its state in the thread with Stop; a failed or stopped
+  one says why. Deleting a thread stops its jobs and removes its clips.
 - A paired browser or phone can watch and download clips from threads it can
   open, and answer its own video cards in the thread, as it answers image
-  cards. A client that cannot show the card's price cannot approve it.
+  cards. A client that cannot show the card's price cannot approve it. A
+  paired client does not stop jobs. A paired browser or a desktop Code pane
+  showing a paired computer reads clips through that computer's session in
+  byte ranges, up to 512 MB, and plays them from memory.
+  Leaving the thread stops requesting clip ranges and frees its playback copy.
+  The desktop main process can finish one already-submitted bounded range.
+  The phone reads authenticated byte ranges into a disposable app-cache file and
+  opens it in the native Expo Video player without autoplay. Closing the clip,
+  leaving or deleting its thread, or losing host access discards the cached copy.
+  A temporary list failure or reconnection leaves the already-downloaded clip playing.
+  **Save video** copies the file into a folder the person chooses on the phone.
+  A saved copy remains in that folder when the temporary player file is removed.
+  On iOS, Octant opens access to the chosen folder for each copy and releases it
+  when the copy finishes. If thread access is lost while the picker is open,
+  selecting a folder does not copy the clip.
 - A clip can be placed in a Canvas design as a `generated-video` asset in a
   later change. This design does not add the asset kind.
 
@@ -364,6 +441,14 @@ At startup the host reconciles every video job the journal left unfinished:
   `interrupted` and billed nothing.
 - A job that was **running** with a recorded provider job id is resumed while
   the model's declared resume window and the 30-minute job time both allow it.
+  - If recovery needs to reread the model, discovery ends on Stop, shutdown,
+    or the remaining job deadline. If Stop interrupts discovery before the
+    host knows whether the provider can cancel, the host stops waiting and
+    settles at the estimate.
+  - An adapter that can cancel all of its accepted jobs can cancel a recovered
+    job by its recorded ID without consulting the catalog. After the job
+    deadline, the host settles the estimate first and bounds cancellation
+    separately as cleanup.
   - The host polls until the job ends, stores the clip and calls `forget`.
   - The provider may already have billed it, so it is not thrown away.
   - Past either limit, it is cancelled where the driver can cancel, then
@@ -535,7 +620,12 @@ export interface VideoAdapterUsage {
 export type VideoAdapterStart =
   | { readonly status: "started"; readonly remoteId: string }
   | { readonly status: "refused"; readonly safetyRefusal: string }
-  | { readonly status: "failed"; readonly providerFailure: ProviderFailure };
+  | {
+      readonly status: "failed";
+      readonly providerFailure: ProviderFailure;
+      /** The attempt ended before the provider could start a job. */
+      readonly notStarted?: true;
+    };
 
 export type VideoAdapterPoll =
   | { readonly status: "running" }
@@ -544,7 +634,12 @@ export type VideoAdapterPoll =
       readonly video: { readonly bytes: Uint8Array; readonly mediaType: "video/mp4" };
       readonly usage?: VideoAdapterUsage;
     }
-  | { readonly status: "refused"; readonly safetyRefusal: string }
+  | {
+      readonly status: "refused";
+      readonly safetyRefusal: string;
+      readonly billed?: true;
+      readonly usage?: VideoAdapterUsage;
+    }
   | {
       readonly status: "failed";
       readonly providerFailure: ProviderFailure;
@@ -555,17 +650,18 @@ export type VideoAdapterPoll =
   | { readonly status: "cancelled"; readonly usage?: VideoAdapterUsage };
 
 /**
- * One video profile's generator. No method rejects: every refusal and
- * failure is a result the job records, so a broken adapter cannot leave a job
- * running.
+ * One video profile's generator. Job operations report refusals and failures
+ * as results. Discovery may reject if it fails.
  */
 export interface VideoGenerationAdapter {
-  readonly models: () => Promise<ReadonlyArray<VideoModelCapabilities>>;
+  readonly models: (signal?: AbortSignal) => Promise<ReadonlyArray<VideoModelCapabilities>>;
   readonly start: (request: VideoAdapterRequest) => Promise<VideoAdapterStart>;
   readonly poll: (remoteId: string, signal: AbortSignal) => Promise<VideoAdapterPoll>;
+  /** All accepted jobs can be cancelled by ID without consulting the catalog. */
+  readonly cancelRunningWithoutDiscovery?: true;
   /**
    * Asks the provider to stop, then reports the job's state with any usage it
-   * states. Called only when the model declares it can cancel. A result still
+   * states. Called when the model or adapter declares it can cancel. A result still
    * `running` means the stop is not yet confirmed: the job service keeps
    * polling until a terminal state or the job time runs out.
    */
@@ -574,7 +670,10 @@ export interface VideoGenerationAdapter {
    * Removes the provider's stored copy, called after every terminal state when
    * the model declares `removal: delete`. A failed `forget` is journaled and
    * retried every 15 minutes while the host runs and at every startup, until
-   * the provider confirms the copy is gone.
+   * the provider confirms the copy is gone. For a model that declares
+   * `removal: expires` the host also calls it once, best-effort: a refusal
+   * there falls back to the declared expiry, and any other failure is
+   * retried only until that expiry has passed.
    */
   readonly forget: (remoteId: string) => Promise<{ readonly status: "removed" | "failed" }>;
 }

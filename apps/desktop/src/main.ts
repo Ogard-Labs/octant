@@ -27,6 +27,7 @@ import {
 } from "./backgroundHost";
 import { KeepAwakeController, readDesktopAgentWork } from "./keepAwakeController";
 import { createOffscreenBrowserSurface } from "./offscreenBrowserSurface";
+import { startThreadVideoArchiveDownload } from "./threadVideoArchiveDownload";
 import { ownNightlyWindowLeases } from "./nightlyBrowserLease";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
 import {
@@ -1920,6 +1921,7 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
     backend.sshKeys,
     createDesktopBrowserCredentialFill({ stores: linkedStores, surface: () => browserSurfaceHost }),
     backend.webSearchCredentials,
+    backend.threadSecretCredentials,
   );
 }
 
@@ -3744,6 +3746,13 @@ function forgetAttentionBadge(windowId: number): void {
 function installIpcHandlers(): void {
   if (handlersInstalled) return;
   handlersInstalled = true;
+  ipcMain.handle(IPC_CHANNELS.downloadThreadVideoArchive, (event, ticket: unknown) =>
+    startThreadVideoArchiveDownload(
+      ownedTopLevelWindowContext(event).window.webContents,
+      activeServerUrl,
+      ticket,
+    ),
+  );
   installCodeOperationApprovalViews();
   installProviderCredentialIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),

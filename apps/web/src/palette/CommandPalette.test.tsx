@@ -248,7 +248,7 @@ describe("CommandPalette", () => {
 
     await openPalette(user);
 
-    expect(screen.getByRole("option", { name: /Toggle Zen mode/ })).toHaveTextContent("⌘⇧Z");
+    expect(screen.getByRole("option", { name: /Toggle Zen mode/ })).toHaveTextContent("⌘⇧E");
   });
 
   it("keeps host authority context and the close key in a quiet footer", async () => {

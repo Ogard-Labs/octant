@@ -680,7 +680,7 @@ describe("ProjectThreadRows", () => {
       "Pin",
       "Rename",
       "Mark as unread",
-      "Put away",
+      "Settle",
       "Snooze",
       "More",
       "Archive",
@@ -828,7 +828,7 @@ describe("ProjectThreadRows", () => {
     expect(card).toHaveTextContent("Claude · Opus 5.5");
   });
 
-  it("names a thread on the shelf Put away in its info card", async () => {
+  it("names a thread on the shelf Settled in its info card", async () => {
     const user = userEvent.setup();
     render(
       <ProjectThreadRows
@@ -840,7 +840,7 @@ describe("ProjectThreadRows", () => {
     await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
 
     const card = await findThreadDetails();
-    expect(card).toHaveTextContent("Put away");
+    expect(card).toHaveTextContent("Settled");
     expect(card).not.toHaveTextContent("Completed");
   });
 
@@ -1309,6 +1309,39 @@ describe("ProjectThreadRows", () => {
     expect(screen.queryByRole("menuitem", { name: "Open pull request #15" })).toBeNull();
   });
 
+  it("shows five touched issues in the hover card and counts the rest", async () => {
+    const user = userEvent.setup();
+    const items = Array.from({ length: 7 }, (_, index) => ({
+      forge: "github" as const,
+      owner: "octant",
+      repository: "octant",
+      number: index + 1,
+      title: `Issue ${String(index + 1)}`,
+      ...(index === 0 ? { state: "closed" } : {}),
+      observedAt: "2026-11-24T09:00:00.000Z",
+    }));
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, touchedIssues: { items, hiddenCount: 1 } }]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
+    const card = await findThreadDetails();
+    const group = within(card).getByRole("group", { name: "Issues" });
+
+    expect(within(group).getAllByRole("img")).toHaveLength(5);
+    expect(
+      within(group).getByRole("img", { name: "GitHub issue #1, Issue 1, octant/octant, closed" }),
+    ).toBeVisible();
+    expect(group).toHaveTextContent("+3 more");
+    // The row itself never counts issues.
+    expect(screen.getByRole("button", { name: /Controller foundation/ })).not.toHaveTextContent(
+      /issue/i,
+    );
+  });
+
   it("offers both pull-request destinations from the row menus for keyboard and coarse pointers", async () => {
     const user = userEvent.setup();
     const onOpenPullRequest = vi.fn();
@@ -1360,7 +1393,7 @@ describe("ProjectThreadRows", () => {
 });
 
 describe("completing and snoozing from a thread row", () => {
-  it("puts a thread away from its right-click menu and offers Reopen once it is put away", async () => {
+  it("settles a thread from its right-click menu and offers Un-settle once it is settled", async () => {
     const onCompleteThread = vi.fn();
     const onReopenThread = vi.fn();
     const { rerender } = render(
@@ -1375,8 +1408,8 @@ describe("completing and snoozing from a thread row", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
-    expect(screen.queryByRole("menuitem", { name: "Reopen" })).toBeNull();
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Put away" }));
+    expect(screen.queryByRole("menuitem", { name: "Un-settle" })).toBeNull();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Settle" }));
     expect(onCompleteThread).toHaveBeenCalledWith("thread-one");
 
     rerender(
@@ -1390,8 +1423,8 @@ describe("completing and snoozing from a thread row", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
-    expect(screen.queryByRole("menuitem", { name: "Put away" })).toBeNull();
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Reopen" }));
+    expect(screen.queryByRole("menuitem", { name: "Settle" })).toBeNull();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Un-settle" }));
     expect(onReopenThread).toHaveBeenCalledWith("thread-one");
   });
 
@@ -1410,7 +1443,7 @@ describe("completing and snoozing from a thread row", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
-    expect(screen.queryByRole("menuitem", { name: "Reopen" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Un-settle" })).toBeNull();
     await userEvent.click(await screen.findByRole("menuitem", { name: "Mark done" }));
     expect(onMarkThreadDone).toHaveBeenCalledWith("thread-one");
 
@@ -1425,7 +1458,9 @@ describe("completing and snoozing from a thread row", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
+    // Marked Done but not settled, the way back is Reopen, not Un-settle.
     expect(screen.queryByRole("menuitem", { name: "Mark done" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Un-settle" })).toBeNull();
     await userEvent.click(await screen.findByRole("menuitem", { name: "Reopen" }));
     expect(onReopenThread).toHaveBeenCalledWith("thread-one");
   });
@@ -1501,7 +1536,33 @@ describe("completing and snoozing from a thread row", () => {
     expect(screen.getByRole("button", { name: /Controller foundation/ })).toContainElement(woke);
   });
 
-  it("reaches Put away and each wake time from the overflow menu too", async () => {
+  it("offers Settle on a row's hover gutter, and Un-settle once the row is settled", async () => {
+    const onCompleteThread = vi.fn();
+    const onReopenThread = vi.fn();
+    const { rerender } = render(
+      <ProjectThreadRows
+        actions={{ onCompleteThread, onReopenThread, onArchiveThread: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Settle thread" }));
+    expect(onCompleteThread).toHaveBeenCalledWith("thread-one");
+    expect(screen.queryByRole("button", { name: "Archive thread" })).toBeNull();
+
+    rerender(
+      <ProjectThreadRows
+        actions={{ onCompleteThread, onReopenThread, onArchiveThread: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, completedAt: new Date().toISOString() }]}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Settle thread" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Un-settle thread" }));
+    expect(onReopenThread).toHaveBeenCalledWith("thread-one");
+  });
+
+  it("reaches Settle and each wake time from the overflow menu too", async () => {
     const onCompleteThread = vi.fn();
     const onSnoozeThread = vi.fn();
     render(
@@ -1514,7 +1575,7 @@ describe("completing and snoozing from a thread row", () => {
 
     const overflow = screen.getByRole("button", { name: "Thread actions" });
     await userEvent.click(overflow);
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Put thread away" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Settle thread" }));
     expect(onCompleteThread).toHaveBeenCalledWith("thread-one");
 
     await userEvent.click(overflow);

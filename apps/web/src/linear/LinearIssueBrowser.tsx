@@ -1,4 +1,5 @@
 import "../styles/linear-issues.css";
+import type { ProjectLinearTarget } from "@octant/contracts";
 import type {
   LinearIssueDetail,
   LinearIssueFilterOption,
@@ -32,6 +33,7 @@ export interface LinearIssueBrowserProps {
   readonly listIssues: (input?: LinearIssueListInput) => Promise<LinearIssueListPage>;
   readonly getIssue: (input: LinearIssueGetInput) => Promise<LinearIssueDetail>;
   readonly listIssueFilters: () => Promise<LinearIssueFilterOptions>;
+  readonly defaultLinearTarget?: ProjectLinearTarget;
   readonly onClose?: () => void;
   readonly isNarrow?: boolean;
 }
@@ -53,10 +55,10 @@ const ALL = "all";
 export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 250);
-  const [teamId, setTeamId] = useState(ALL);
+  const [teamId, setTeamId] = useState(props.defaultLinearTarget?.teamId ?? ALL);
   const [stateId, setStateId] = useState(ALL);
   const [assigneeId, setAssigneeId] = useState(ALL);
-  const [projectId, setProjectId] = useState(ALL);
+  const [projectId, setProjectId] = useState(props.defaultLinearTarget?.projectId ?? ALL);
   const [filters, setFilters] = useState<LinearIssueFilterOptions>();
   const [list, setList] = useState<ListState>({ status: "loading" });
   const [detail, setDetail] = useState<DetailState>({ status: "idle" });

@@ -68,6 +68,7 @@ export class VideoJobProjection implements Projection {
       ...(change.safetyRefusal === undefined ? {} : { safetyRefusal: change.safetyRefusal }),
       ...(change.failure === undefined ? {} : { failure: change.failure }),
       ...(change.providerCopy === undefined ? {} : { providerCopy: change.providerCopy }),
+      ...(change.providerRemoval === undefined ? {} : { providerRemoval: change.providerRemoval }),
       ...(change.settledCostUsdMicros === undefined
         ? {}
         : { settledCostUsdMicros: change.settledCostUsdMicros }),

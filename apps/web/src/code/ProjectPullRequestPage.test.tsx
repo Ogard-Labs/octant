@@ -230,6 +230,27 @@ describe("the pull-request reading pane", () => {
     expect(act).toHaveBeenCalledWith({ kind: "close", ...query });
   });
 
+  it("offers Unlink from this thread first in More actions when the pull request is open in a thread", async () => {
+    const user = userEvent.setup();
+    const onUnlinkFromThread = vi.fn(async () => ({ status: "ok" }) as const);
+    renderPage({ onUnlinkFromThread });
+    await user.click(await screen.findByRole("button", { name: "More actions" }));
+    const items = await screen.findAllByRole("menuitem");
+    expect(items[0]).toHaveAccessibleName("Unlink from this thread");
+    await user.click(items[0] as HTMLElement);
+    expect(onUnlinkFromThread).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Unlinked from this thread.")).toBeVisible();
+  });
+
+  it("says why an unlink was refused", async () => {
+    const user = userEvent.setup();
+    const message = "This thread changed in another window. Try again.";
+    renderPage({ onUnlinkFromThread: async () => ({ status: "refused", message }) as const });
+    await user.click(await screen.findByRole("button", { name: "More actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Unlink from this thread" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+  });
+
   it("a pull request's diff opens a line note from a line-number button", async () => {
     const user = userEvent.setup();
     const view = detailView("Adds manual refresh.", {

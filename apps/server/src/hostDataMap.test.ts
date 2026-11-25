@@ -132,6 +132,7 @@ describe("composeHostDataMap", () => {
         { service: "app.octant.push-platform-credentials.v1" },
         { service: "app.octant.ssh-keys.v1" },
         { service: "app.octant.web-search-credentials.v1" },
+        { service: "app.octant.thread-secret-credentials.v1" },
       ],
     });
     expect(decoded.host.outbound.map((entry) => entry.category)).toEqual([
@@ -139,7 +140,11 @@ describe("composeHostDataMap", () => {
       "update-checks",
       "marketplace-fetches",
     ]);
-    expect(JSON.stringify(decoded)).not.toMatch(/sk-|password|secret|token/i);
+    // The thread secrets service name is the one place "secret" is a service
+    // label rather than material.
+    expect(JSON.stringify(decoded).replaceAll("thread-secret-credentials.v1", "")).not.toMatch(
+      /sk-|password|secret|token/i,
+    );
     expect(decoded.projects.kind).toBe("known");
     if (decoded.projects.kind !== "known") return;
     expect(decoded.projects.projects).toHaveLength(2);

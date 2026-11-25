@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { decodeProjectSummary } from "@octant/contracts";
 import type {
   IntegrationAuthenticationCommand,
   IntegrationAuthenticationSnapshot,
@@ -159,5 +160,134 @@ describe("LinearConnectionSettings", () => {
     expect(screen.queryByLabelText("Personal API key")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Personal API key" }));
     expect(screen.getByLabelText("Personal API key")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Create one" })).toHaveAttribute(
+      "href",
+      "https://linear.app/settings/account/security",
+    );
+  });
+
+  it("shows connected user, linked project count, stored-key hint, and project mapping controls", async () => {
+    const onProjectLinearTargetChange = vi.fn(async () => true);
+    const snapshot: IntegrationAuthenticationSnapshot = {
+      state: "ready",
+      account: {
+        login: "ogard-labs",
+        displayName: "Henrik",
+        workspace: "Ogard Labs",
+        source: "personal-api-key",
+        scopes: ["read"],
+      },
+      capabilities: [{ operationId: "list-issues", available: true }],
+      personalCredentialStored: true,
+    };
+    const client: IntegrationClient = {
+      ...makeClient({ authenticationSnapshot: async () => snapshot }),
+      listIssueFilters: async () => ({
+        teams: [{ id: "team-oct", label: "Octant (OCT)", key: "OCT", name: "Octant" }],
+        states: [],
+        assignees: [],
+        projects: [{ id: "proj-1", label: "Preview 1" }],
+      }),
+    };
+    const projects = [
+      decodeProjectSummary({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "octant",
+        type: "code",
+        lifecycle: "active",
+        pinned: false,
+        rank: "1/1",
+        version: 1,
+        createdAt: "2026-11-24T00:00:00.000Z",
+        updatedAt: "2026-11-24T00:00:00.000Z",
+        binding: { canonicalRoot: "/tmp/octant" },
+        bindingRevisionId: "22222222-2222-4222-8222-222222222222",
+        codeAccessPersistence: "current-session",
+        linearTarget: { teamId: "team-oct", teamKey: "OCT", teamName: "Octant" },
+      }),
+    ];
+
+    render(
+      <LinearConnectionSettings
+        client={client}
+        onProjectLinearTargetChange={onProjectLinearTargetChange}
+        projects={projects}
+      />,
+    );
+    expect(await screen.findByText("Henrik")).toBeInTheDocument();
+    expect(screen.getByText("1 project linked")).toBeInTheDocument();
+    expect(await screen.findByText("octant")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Personal API key" }));
+    expect(screen.getByLabelText("Personal API key")).toHaveAttribute(
+      "placeholder",
+      "Stored secret, enter a new key to replace",
+    );
+  });
+
+  it("reloads Linear team options after a ready-to-ready personal API key replacement", async () => {
+    let workspace = "workspace-a";
+    const listIssueFilters = vi.fn(async () => ({
+      teams:
+        workspace === "workspace-a"
+          ? [{ id: "team-a", label: "Alpha (ALP)", key: "ALP", name: "Alpha" }]
+          : [{ id: "team-b", label: "Beta (BET)", key: "BET", name: "Beta" }],
+      states: [],
+      assignees: [],
+      projects: [],
+    }));
+    const client: IntegrationClient = {
+      ...makeClient({
+        authenticationSnapshot: async () => ({
+          state: "ready",
+          account: {
+            login: workspace,
+            source: "personal-api-key",
+            scopes: ["read"],
+          },
+          capabilities: [{ operationId: "list-issues", available: true }],
+          personalCredentialStored: true,
+        }),
+      }),
+      storePersonalCredential: async () => {
+        workspace = "workspace-b";
+      },
+      listIssueFilters,
+    };
+    const projects = [
+      decodeProjectSummary({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "octant",
+        type: "code",
+        lifecycle: "active",
+        pinned: false,
+        rank: "1/1",
+        version: 1,
+        createdAt: "2026-11-24T00:00:00.000Z",
+        updatedAt: "2026-11-24T00:00:00.000Z",
+        binding: { canonicalRoot: "/tmp/octant" },
+        bindingRevisionId: "22222222-2222-4222-8222-222222222222",
+        codeAccessPersistence: "current-session",
+      }),
+    ];
+
+    render(
+      <LinearConnectionSettings
+        client={client}
+        onProjectLinearTargetChange={vi.fn(async () => true)}
+        projects={projects}
+      />,
+    );
+    expect(await screen.findByText("workspace-a")).toBeInTheDocument();
+    expect(listIssueFilters).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Personal API key" }));
+    fireEvent.change(screen.getByLabelText("Personal API key"), {
+      target: { value: "new-secret-value" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Store key" }));
+
+    expect(await screen.findByText("workspace-b")).toBeInTheDocument();
+    expect(listIssueFilters).toHaveBeenCalledTimes(2);
   });
 });

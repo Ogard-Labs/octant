@@ -597,37 +597,186 @@ function buildRecovery(input: {
 type PullRequestReviewResult = Extract<CodeOperationResult, { kind: "pull-request-review" }>;
 type ObservedPullRequestReview = Extract<PullRequestReviewResult, { state: "observed" }>;
 type PullRequestStateResult = Extract<CodeOperationResult, { kind: "pull-request-state" }>;
-export const MAX_CODE_THREAD_KNOWN_PULL_REQUESTS = 16;
+export const MAX_CODE_THREAD_KNOWN_PULL_REQUESTS = 50;
+/** The most issues a Code thread is remembered to have touched. */
+export const MAX_CODE_THREAD_TOUCHED_ISSUES = 100;
 
 /**
- * Recover only exact PR identities from the authoritative operation journal.
- * GitHub status remains external cache data: callers must label these
- * identities stale/unknown until an explicit user-triggered refresh observes
- * them again.
+ * A pull request the journal proves this thread touched. `repository` is set
+ * when a tool call named it; absent, the pull request is in the thread's own
+ * delivery repository, which is where Octant's own pull-request operations run.
+ */
+export interface CodeThreadKnownPullRequest {
+  readonly number: number;
+  readonly observedAt: string;
+  readonly repository?: { readonly owner: string; readonly name: string };
+}
+
+/**
+ * Recover only exact PR identities from the authoritative operation journal:
+ * Octant's own pull-request operations, and the pull requests a tool call
+ * wrote to (created, merged, reviewed, commented on, edited, closed or
+ * reopened). GitHub status remains external cache data: callers must label
+ * these identities stale/unknown until a refresh observes them again.
  */
 export function pullRequestIdentitiesFromHistory(
   history: CodeThreadOperationHistory,
-): ReadonlyArray<{ readonly number: number; readonly observedAt: string }> {
+): ReadonlyArray<CodeThreadKnownPullRequest> {
   if (history.status !== "ok") return [];
-  const latestByNumber = new Map<number, string>();
+  const latest = new Map<string, CodeThreadKnownPullRequest>();
+  const note = (entry: CodeThreadKnownPullRequest) => {
+    const key =
+      entry.repository === undefined
+        ? `#${String(entry.number)}`
+        : `${entry.repository.owner.toLowerCase()}/${entry.repository.name.toLowerCase()}#${String(entry.number)}`;
+    latest.delete(key);
+    latest.set(key, entry);
+  };
   for (const frame of history.frames) {
-    if (frame.event.kind !== "operation-result") continue;
-    const result = frame.event.result;
+    const event = frame.event;
+    if (event.kind === "tool-activity") {
+      for (const reference of event.forgeReferences ?? []) {
+        if (reference.forge !== "github" || reference.kind !== "pull-request") continue;
+        note({
+          number: reference.number,
+          observedAt: frame.occurredAt,
+          repository: { owner: reference.owner, name: reference.repository },
+        });
+      }
+      continue;
+    }
+    if (event.kind !== "operation-result") continue;
+    const result = event.result;
     if (result.kind === "pull-request-review" && result.state === "observed") {
-      latestByNumber.set(result.number, frame.occurredAt);
+      note({ number: result.number, observedAt: frame.occurredAt });
       continue;
     }
     if (
       result.kind === "pull-request-state" &&
       (result.state === "created" || result.state === "existing" || result.state === "merged")
     ) {
-      latestByNumber.set(result.number, frame.occurredAt);
+      note({ number: result.number, observedAt: frame.occurredAt });
     }
   }
-  return [...latestByNumber]
-    .map(([number, observedAt]) => ({ number, observedAt }))
+  // Reversed first, so entries noted at the same instant keep journal order,
+  // the latest written first.
+  return [...latest.values()]
+    .reverse()
     .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
     .slice(0, MAX_CODE_THREAD_KNOWN_PULL_REQUESTS);
+}
+
+/** A pull request Octant's own operations handled for a thread, where they ran. */
+export interface CodeThreadOwnPullRequest {
+  readonly number: number;
+  readonly repository: { readonly owner: string; readonly name: string };
+}
+
+/**
+ * The pull requests Octant's own operations opened, reviewed or merged for the
+ * thread, each with the repository GitHub answered for. Tool calls never count.
+ */
+export function ownPullRequestsFromHistory(
+  history: CodeThreadOperationHistory,
+): ReadonlyArray<CodeThreadOwnPullRequest> {
+  if (history.status !== "ok") return [];
+  const own = new Map<string, CodeThreadOwnPullRequest>();
+  for (const { event } of history.frames) {
+    if (event.kind !== "operation-result") continue;
+    const result = event.result;
+    const named =
+      (result.kind === "pull-request-review" && result.state === "observed") ||
+      (result.kind === "pull-request-state" &&
+        (result.state === "created" || result.state === "existing" || result.state === "merged"))
+        ? result
+        : undefined;
+    if (named === undefined) continue;
+    const repository = splitRepositoryName(named.baseRepository);
+    if (repository === undefined) continue;
+    own.set(`${named.baseRepository.toLowerCase()}#${String(named.number)}`, {
+      number: named.number,
+      repository,
+    });
+  }
+  return [...own.values()];
+}
+
+/** An issue a tool call of this thread wrote to, as the call's result last described it. */
+export type CodeThreadTouchedIssue = (
+  | {
+      readonly forge: "github";
+      readonly owner: string;
+      readonly repository: string;
+      readonly number: number;
+    }
+  | { readonly forge: "linear"; readonly identifier: string; readonly url?: string }
+) & {
+  readonly title?: string;
+  readonly state?: string;
+  readonly observedAt: string;
+};
+
+/**
+ * Every issue the thread's tool calls wrote to, newest first, each with the
+ * title and state its latest call reported (an older call's title stands when
+ * a later one reported none). Rebuilt from the journal alone.
+ */
+export function touchedIssuesFromHistory(
+  history: CodeThreadOperationHistory,
+): ReadonlyArray<CodeThreadTouchedIssue> {
+  if (history.status !== "ok") return [];
+  const latest = new Map<string, CodeThreadTouchedIssue>();
+  for (const frame of history.frames) {
+    const event = frame.event;
+    if (event.kind !== "tool-activity") continue;
+    for (const reference of event.forgeReferences ?? []) {
+      if (reference.kind !== "issue") continue;
+      const key =
+        reference.forge === "github"
+          ? `github:${reference.owner.toLowerCase()}/${reference.repository.toLowerCase()}#${String(reference.number)}`
+          : `linear:${reference.identifier}`;
+      const previous = latest.get(key);
+      const title = reference.title ?? previous?.title;
+      // A close or reopen says the state even when the result did not.
+      const state =
+        reference.state ??
+        (reference.action === "closed"
+          ? "closed"
+          : reference.action === "reopened"
+            ? "open"
+            : previous?.state);
+      const linearUrl =
+        reference.forge === "linear"
+          ? (reference.url ?? (previous?.forge === "linear" ? previous.url : undefined))
+          : undefined;
+      const identity =
+        reference.forge === "github"
+          ? {
+              forge: "github" as const,
+              owner: reference.owner,
+              repository: reference.repository,
+              number: reference.number,
+            }
+          : {
+              forge: "linear" as const,
+              identifier: reference.identifier,
+              ...(linearUrl === undefined ? {} : { url: linearUrl }),
+            };
+      latest.delete(key);
+      latest.set(key, {
+        ...identity,
+        ...(title === undefined ? {} : { title }),
+        ...(state === undefined ? {} : { state }),
+        observedAt: frame.occurredAt,
+      });
+    }
+  }
+  // Reversed first, so entries noted at the same instant keep journal order,
+  // the latest written first.
+  return [...latest.values()]
+    .reverse()
+    .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
+    .slice(0, MAX_CODE_THREAD_TOUCHED_ISSUES);
 }
 
 /**

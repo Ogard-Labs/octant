@@ -33,6 +33,7 @@ import {
   type ProjectColor,
   type ProjectId,
   type ProjectLifecycle,
+  type ProjectLinearTarget,
   type ProjectOrigin,
   type ProjectProviderPolicy,
   type ProjectRank,
@@ -783,6 +784,35 @@ export function changeProjectDesignSystem(
   return {
     ...rest,
     ...(designSystem === null ? {} : { designSystem }),
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+/**
+ * Bind a Work or Code Project to a Linear team (and optional Linear project),
+ * or pass `null` to unbind it. Chat Projects have no workspace binding and
+ * refuse Linear targets. A no-op is refused so the journal never records a
+ * redundant event.
+ */
+export function changeProjectLinearTarget(
+  project: Project,
+  linearTarget: ProjectLinearTarget | null,
+  updatedAt: UtcTimestamp,
+): BoundProject {
+  if (project.type === "chat") {
+    reject("binding-not-allowed", "Chat Projects cannot bind a Linear team");
+  }
+  if (project.lifecycle !== "active") {
+    reject("invalid-lifecycle", "Archived Projects cannot change their Linear binding");
+  }
+  if (JSON.stringify(project.linearTarget ?? null) === JSON.stringify(linearTarget)) {
+    reject("binding-unchanged", "Project Linear binding is already selected");
+  }
+  const { linearTarget: _previous, ...rest } = project;
+  return {
+    ...rest,
+    ...(linearTarget === null ? {} : { linearTarget }),
     version: nextVersion(project),
     updatedAt,
   };

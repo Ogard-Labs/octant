@@ -94,6 +94,11 @@ export interface NativeHarnessShellPort {
      */
     readonly confirmedHosts?: ToolEgressCallConfirmation;
     /**
+     * Variables this one command gets over the shell's own. Never part of the
+     * command, so nothing that records or judges a command sees their values.
+     */
+    readonly environment?: Readonly<Record<string, string>>;
+    /**
      * Which end of combined stdout/stderr to keep when output exceeds the
      * process port's capture cap. Defaults to `"first"`; proof checks pass
      * `"newest"` so final failure diagnostics survive long logs.

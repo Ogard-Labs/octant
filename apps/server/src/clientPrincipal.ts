@@ -44,6 +44,19 @@ export function principalActsAsHostPerson(principal: ClientPrincipal): boolean {
 }
 
 /**
+ * Whether the principal is a device the host's own person paired directly, at
+ * any access level (Full, Approve and steer, or Read only). Hub-introduced
+ * devices and agent grants return false.
+ */
+export function principalIsDirectlyPaired(principal: ClientPrincipal): boolean {
+  return (
+    principal.kind === "remote-device" &&
+    principal.admittedBy === "host-person" &&
+    !isAgentGrantSession(principal)
+  );
+}
+
+/**
  * The origin an agent grant's session carries. It is not an HTTPS origin, so
  * no paired device's session can carry it.
  */

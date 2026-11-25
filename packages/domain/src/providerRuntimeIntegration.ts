@@ -57,6 +57,7 @@ export function providerToolTransport(
     case "bfl-image":
     case "ideogram-image":
     case "gemini-video":
+    case "outside-image":
       return undefined;
   }
 }

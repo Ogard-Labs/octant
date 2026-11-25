@@ -19,6 +19,7 @@ import { GithubCapabilityService } from "../github/githubCapabilityService";
 import { GithubCatalogueService } from "../github/githubCatalogueService";
 import { GithubIssueContextService } from "../github/githubIssueContextService";
 import { LinearIssueContextService } from "../plugins/linear/linearIssueContextService";
+import { LinearReadToolService } from "../plugins/linear/linearReadToolService";
 import { linearRoutineEventSources } from "../plugins/linear/linearRoutineEventSources";
 import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
 import { GithubReadToolService } from "../github/githubReadToolService";
@@ -430,11 +431,17 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
     yield* Effect.addFinalizer(() => Effect.promise(() => azureRuntime.close()));
     const linearRedirectUri =
       options.linearOAuthRedirectUri ?? "http://127.0.0.1:52693/oauth/linear/callback";
+    const linearConnectionStore = createFileConnectionStore(
+      join(persistence.dataDirectory, "integrations", "linear-connection.json"),
+    );
+    // Whether Linear is switched on and a connection is stored, read from
+    // memory: a navigation read asks it for every row and must never reach
+    // Linear to answer.
+    const linearConnected = () =>
+      linearIntegrationIsEffective() && linearConnectionStore.read() !== undefined;
     const integrationService = createLinearIntegrationService({
       vault: integrationVault,
-      connectionStore: createFileConnectionStore(
-        join(persistence.dataDirectory, "integrations", "linear-connection.json"),
-      ),
+      connectionStore: linearConnectionStore,
       config: {
         redirectUri: linearRedirectUri,
         ...(options.linearOAuthClientId === undefined
@@ -456,6 +463,19 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       ingestion: externalContentIngestionStore,
       uuid: randomUUID,
       isEffective: linearIntegrationIsEffective,
+    });
+    const linearReadToolService = new LinearReadToolService({
+      reader: {
+        snapshot: (signal) => integrationService.snapshot("linear", signal),
+        executeOperation: (operationId, input, signal) =>
+          integrationService.executeOperation(
+            "linear",
+            { kind: "operation", operationId, input },
+            signal,
+          ),
+      },
+      ingestion: externalContentIngestionStore,
+      uuid: randomUUID,
     });
     // The person's own command-line homes, where those tools keep sessions.
     const claudeHome = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
@@ -538,7 +558,9 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
           ? azureOperations.list()
           : []),
       ],
+      linearConnected,
       linearIssueContextService,
+      linearReadToolService,
       linearRoutineEventSources: linearRoutineEventSources(
         integrationService,
         linearIntegrationIsEffective,

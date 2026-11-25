@@ -67,6 +67,8 @@ import {
   type ProviderExecutionPolicy,
   type ProviderUsageLimit,
   ThreadBoardPullRequestSummaries,
+  type ThreadBoardPullRequestIdentity,
+  ThreadTouchedIssues,
   type ThreadLiveStep,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -130,6 +132,7 @@ import {
   pinCodeThread,
   renameCodeThread,
   markCodeThreadDone,
+  unlinkCodeThreadPullRequest,
   reopenCodeThread,
   setCodeThreadCoordinator,
   setCodeThreadCoordinatorBounds,
@@ -203,6 +206,8 @@ export interface CodeThreadNavigationItem {
   };
   /** Exact linked pull requests joined by the host; absent when it has none. */
   readonly pullRequestSummaries?: ThreadBoardPullRequestSummaries;
+  /** The issues the thread's tool calls wrote to; absent when it has none. */
+  readonly touchedIssues?: ThreadTouchedIssues;
   readonly executing?: boolean;
   /** The agent's own approval waits on the person; the thread is parked, not working. */
   readonly awaitingInput?: boolean;
@@ -2120,6 +2125,7 @@ export function useCodeController(options: CodeControllerOptions) {
           readonly label: string;
         };
         readonly pullRequestSummaries?: ThreadBoardPullRequestSummaries;
+        readonly touchedIssues?: ThreadTouchedIssues;
         readonly turnStartedAt?: string;
         readonly liveStep?: ThreadLiveStep;
       }
@@ -2134,6 +2140,7 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(entry.liveStep === undefined ? {} : { liveStep: entry.liveStep }),
         ...(entry.checkoutChip === undefined ? {} : { checkoutChip: entry.checkoutChip }),
         ...(pullRequestSummaries === undefined ? {} : { pullRequestSummaries }),
+        ...(entry.touchedIssues === undefined ? {} : { touchedIssues: entry.touchedIssues }),
       });
     }
     return byThread;
@@ -2184,6 +2191,9 @@ export function useCodeController(options: CodeControllerOptions) {
             ...(runtime?.pullRequestSummaries === undefined
               ? {}
               : { pullRequestSummaries: runtime.pullRequestSummaries }),
+            ...(runtime?.touchedIssues === undefined
+              ? {}
+              : { touchedIssues: runtime.touchedIssues }),
             ...(thread.pinned === true ? { pinned: true } : {}),
             ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
             ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
@@ -2662,6 +2672,16 @@ export function useCodeController(options: CodeControllerOptions) {
   );
   const markThreadDone = useCallback(
     (threadId: CodeThreadId) => restCommand(threadId, markCodeThreadDone),
+    [restCommand],
+  );
+  const unlinkPullRequest = useCallback(
+    (
+      threadId: CodeThreadId,
+      pullRequest: Pick<
+        ThreadBoardPullRequestIdentity,
+        "repositoryOwner" | "repositoryName" | "number"
+      >,
+    ) => restCommand(threadId, (thread) => unlinkCodeThreadPullRequest(thread, pullRequest)),
     [restCommand],
   );
   const snoozeThread = useCallback(
@@ -3654,6 +3674,7 @@ export function useCodeController(options: CodeControllerOptions) {
     readonly draftReviewFindingReferencesInvalid?: boolean;
     readonly draftRevision?: number;
     readonly readDraftRevision?: (threadId: string) => number;
+    readonly restoreComposerDraft?: typeof composerDraft.restoreFor;
   } = {
     draftSideChatReturns: composerDraft.sideChatReturns,
     draftSideChatReturnsInvalid: composerDraft.sideChatReturnsInvalid,
@@ -3661,6 +3682,7 @@ export function useCodeController(options: CodeControllerOptions) {
     draftReviewFindingReferencesInvalid: composerDraft.reviewFindingReferencesInvalid,
     draftRevision: composerDraft.revisionFor(String(options.activeThreadId ?? "")),
     readDraftRevision: composerDraft.revisionFor,
+    restoreComposerDraft: composerDraft.restoreFor,
   };
   return useRetainedRecord({
     activeView: activeView?.thread.id === options.activeThreadId ? activeView : undefined,
@@ -3674,6 +3696,7 @@ export function useCodeController(options: CodeControllerOptions) {
     completeThread,
     reopenThread,
     markThreadDone,
+    unlinkPullRequest,
     snoozeThread,
     wakeThread,
     moveThread,

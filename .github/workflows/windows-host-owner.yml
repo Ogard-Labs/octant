@@ -19,6 +19,7 @@ on:
       - apps/server/src/remote/privateListenerHostIdentity*
       - apps/server/src/remote/selfMadeListenerCertificate*
       - apps/server/src/hub/rosterSigningKey*
+      - apps/server/src/threadSecrets/threadSecretFiles*
       - packages/host-runtime/src/ownerControlProtocol.ts
       - packages/host-runtime/src/owner.ts
       - packages/host-runtime/src/ownerReceipt.ts

@@ -9,12 +9,17 @@ import {
   type ProviderModelId,
 } from "@octant/contracts";
 import {
+  decodeVideoJobId,
+  decodeVideoJobQueued,
+  decodeVideoJobStatusChanged,
   decodeVideoModelCapabilities,
   VIDEO_JOB_TIMEOUT_MS,
   type VideoModelCapabilities,
 } from "@octant/contracts/video-generation";
 import {
+  classifyVideoStartHttpFailure,
   isProviderFailure,
+  type VideoAdapterForget,
   type VideoAdapterPoll,
   type VideoAdapterRequest,
   type VideoAdapterStart,
@@ -28,6 +33,7 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { catchUpProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
+import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
 import type { SpendCeilingTurnRequest } from "../spendCeilingService";
 import { VideoClipStore } from "./videoClipStore";
 import { VIDEO_HTTP_LIMITS } from "./videoHttp";
@@ -68,22 +74,43 @@ function capabilities(
   });
 }
 
-function profile(allowlist: ReadonlyArray<ProviderModelId> = [modelId]): ProviderInstance {
-  return {
+function profile(
+  allowlist: ReadonlyArray<ProviderModelId> = [modelId],
+  driverKind: "gemini-video" | "runway-video" | "fal-video" = "gemini-video",
+): ProviderInstance {
+  const base = {
     id: profileId,
-    displayName: "Gemini Video",
+    displayName: "Video Provider",
     enabled: true,
-    environmentPolicy: "inherit-host",
+    environmentPolicy: "inherit-host" as const,
     version: 1 as ProviderInstance["version"],
     createdAt: now as ProviderInstance["createdAt"],
     updatedAt: now as ProviderInstance["updatedAt"],
-    driverKind: "gemini-video",
-    configuration: {
-      kind: "gemini-video-http",
-      modelAllowlist: [...allowlist],
-      defaultModel: allowlist[0] ?? modelId,
-    },
   };
+  const models = {
+    modelAllowlist: [...allowlist],
+    defaultModel: allowlist[0] ?? modelId,
+  };
+  switch (driverKind) {
+    case "runway-video":
+      return {
+        ...base,
+        driverKind,
+        configuration: { kind: "runway-video-http", ...models },
+      };
+    case "fal-video":
+      return {
+        ...base,
+        driverKind,
+        configuration: { kind: "fal-video-http", ...models },
+      };
+    default:
+      return {
+        ...base,
+        driverKind,
+        configuration: { kind: "gemini-video-http", ...models },
+      };
+  }
 }
 
 interface Script {
@@ -92,41 +119,46 @@ interface Script {
   polls?: Array<VideoAdapterPoll>;
   poll?: (signal: AbortSignal) => Promise<VideoAdapterPoll>;
   cancel?: (signal: AbortSignal | undefined) => Promise<VideoAdapterPoll>;
+  cancelRunningWithoutDiscovery?: true;
   credential?: () => Promise<string>;
-  forget?: () => Promise<"removed" | "failed">;
+  lease?: NonNullable<ProviderCredentialResolver["lease"]>;
+  forget?: () => Promise<"removed" | "failed" | VideoAdapterForget>;
   model?: VideoModelCapabilities;
-  beforeModels?: (call: number) => Promise<void>;
+  beforeModels?: (call: number, signal: AbortSignal | undefined) => Promise<void>;
   /** Rejects models() once, on a numbered call, or for good, as a failed discovery read can. */
   modelsFail?: "once" | "always" | number;
   /** Answers models() from the read's count, for a catalog that changes under the host. */
   modelsRead?: (call: number) => ReadonlyArray<VideoModelCapabilities>;
   /** The profile's configured models; a shorter answer is a partial read. */
   allowlist?: ReadonlyArray<ProviderModelId>;
+  /** Which video driver the profile and adapter pose as; Gemini by default. */
+  driverKind?: "gemini-video" | "runway-video" | "fal-video";
 }
 
 function fakeDriver(script: Script) {
-  const calls = { start: 0, poll: 0, cancel: 0, forget: 0 };
+  const calls = { start: 0, poll: 0, cancel: 0, forget: 0, models: 0 };
   const model =
     script.model ??
     capabilities({ cancel: "running", removal: { kind: "delete" }, resumeWindowHours: 24 });
-  // Read counts persist across adapters: the service creates one per call.
-  let modelsCalls = 0;
   let modelsFailOnce = script.modelsFail === "once";
   const driver: VideoGenerationDriver = {
-    driverKind: "gemini-video",
+    driverKind: script.driverKind ?? "gemini-video",
     providerName: "Example Video",
     providerHosts: ["video.example.test"],
     create: ({ ports }) => {
       return {
-        models: async () => {
-          modelsCalls += 1;
-          const call = modelsCalls;
-          if (script.beforeModels !== undefined) await script.beforeModels(call);
+        ...(script.cancelRunningWithoutDiscovery === true
+          ? { cancelRunningWithoutDiscovery: true as const }
+          : {}),
+        models: async (signal?: AbortSignal) => {
+          calls.models += 1;
+          const call = calls.models;
+          if (script.beforeModels !== undefined) await script.beforeModels(call, signal);
           if (modelsFailOnce || script.modelsFail === "always" || script.modelsFail === call) {
             modelsFailOnce = false;
             throw { category: "unavailable", message: "Discovery failed." };
           }
-          return script.modelsRead?.(modelsCalls) ?? [model];
+          return script.modelsRead?.(call) ?? [model];
         },
         start: async (request) => {
           calls.start += 1;
@@ -152,12 +184,14 @@ function fakeDriver(script: Script) {
         forget: async () => {
           calls.forget += 1;
           const outcome = (await script.forget?.()) ?? "removed";
-          return outcome === "removed"
-            ? { status: "removed" }
-            : {
-                status: "failed",
-                providerFailure: { category: "unavailable", message: "Try later." },
-              };
+          if (outcome === "removed") return { status: "removed" };
+          if (outcome === "failed") {
+            return {
+              status: "failed",
+              providerFailure: { category: "unavailable", message: "Try later." },
+            };
+          }
+          return outcome;
         },
       };
     },
@@ -185,7 +219,7 @@ function harness(script: Script, directory?: string) {
   const sleeps: Array<number> = [];
   let clockMs = Date.parse(now);
   const instance: { current: ProviderInstance | undefined } = {
-    current: profile(script.allowlist),
+    current: profile(script.allowlist, script.driverKind),
   };
   const spend = {
     admit: vi.fn((_request: SpendCeilingTurnRequest) => ({
@@ -206,6 +240,7 @@ function harness(script: Script, directory?: string) {
     credentialResolver: {
       has: async () => true,
       resolve: async () => (await script.credential?.()) ?? "key",
+      lease: script.lease,
     },
     fetch: async (input) => {
       fetched.push(String(input));
@@ -215,7 +250,7 @@ function harness(script: Script, directory?: string) {
     clock: () => new Date(clockMs++).toISOString(),
     actor,
     drivers: [fake.driver],
-    admittedDriverKinds: new Set(["gemini-video"]),
+    admittedDriverKinds: new Set([script.driverKind ?? "gemini-video"]),
     spendCeiling: spend,
     resolveThreadProjectId: () => projectId,
     sleep: (ms: number) => {
@@ -400,6 +435,42 @@ describe("video jobs", () => {
     expect(spend.settle).not.toHaveBeenCalled();
   });
 
+  it("bills nothing when Stop follows a discovery read before the clip was sent", async () => {
+    const discovering = Promise.withResolvers<void>();
+    const discoveryUrl = "https://video.example.test/discovery";
+    const { service, fetched, spend } = harness({
+      start: async (ports, request) => {
+        await ports.request({
+          url: discoveryUrl,
+          method: "GET",
+          auth: { header: "authorization", scheme: "Bearer" },
+          signal: request.signal,
+        });
+        return new Promise((resolve) => {
+          request.signal.addEventListener(
+            "abort",
+            () =>
+              resolve({
+                status: "failed",
+                providerFailure: { category: "interrupted", message: "Stopped." },
+              }),
+            { once: true },
+          );
+          discovering.resolve();
+        });
+      },
+    });
+    const job = await enqueue(service);
+    await discovering.promise;
+    service.stop(job.id);
+    const done = await service.whenTerminal(job.id);
+    expect(done?.status).toBe("cancelled");
+    expect(done?.settledCostUsdMicros).toBeUndefined();
+    expect(fetched).toEqual([discoveryUrl]);
+    expect(spend.abandon).toHaveBeenCalledOnce();
+    expect(spend.settle).not.toHaveBeenCalled();
+  });
+
   it("releases the reservation when a start times out before fetching with its key", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const reading = Promise.withResolvers<void>();
@@ -540,6 +611,58 @@ describe("video jobs", () => {
     expect(spend.admit).not.toHaveBeenCalled();
     expect(calls.start).toBe(0);
   });
+
+  it.each(["Stop", "shutdown", "the discovery deadline"])(
+    "interrupts discovery before reserving a clip on %s",
+    async (interruption) => {
+      const lookup = Promise.withResolvers<AbortSignal | undefined>();
+      const release = Promise.withResolvers<void>();
+      const caller = new AbortController();
+      const deadline = new AbortController();
+      const { service, calls, spend } = harness({
+        beforeModels: (_call, signal) => {
+          lookup.resolve(signal);
+          signal?.addEventListener("abort", () => release.reject(signal.reason), { once: true });
+          return release.promise;
+        },
+      });
+      const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(deadline.signal);
+      const input = {
+        threadKind: "work-thread" as const,
+        scopeId,
+        profileInstanceId: profileId,
+        modelId,
+        prompt: "A paper boat on a pond",
+        options,
+        references: [],
+        signal: caller.signal,
+      };
+      const pending = service.enqueue(input);
+      const observed = pending.catch((error: unknown) => error);
+      try {
+        const signal = await lookup.promise;
+        expect(signal).toBeDefined();
+        expect(timeout).toHaveBeenCalledWith(30_000);
+        if (interruption === "Stop") caller.abort();
+        if (interruption === "shutdown") service.close();
+        if (interruption === "the discovery deadline") deadline.abort();
+        expect(signal?.aborted).toBe(true);
+        await expect(pending).rejects.toThrow(
+          interruption === "Stop"
+            ? "Video generation was stopped."
+            : interruption === "shutdown"
+              ? "The host is shutting down."
+              : "That video provider cannot be reached.",
+        );
+        expect(spend.admit).not.toHaveBeenCalled();
+        expect(calls.start).toBe(0);
+      } finally {
+        timeout.mockRestore();
+        release.reject(new Error("The discovery fixture finished."));
+        await observed;
+      }
+    },
+  );
 
   it("releases both slots when start responses stall past the job deadline", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -744,10 +867,12 @@ describe("video jobs", () => {
     const done = await service.whenTerminal(queued.id);
     expect(done).toMatchObject({
       status: "cancelled",
-      providerCopy: "expires",
       settledCostUsdMicros: 695_040,
     });
     expect(calls.cancel).toBe(0);
+    // One removal is asked of a provider-expiring model too.
+    await vi.waitFor(() => expect(service.getById(queued.id)?.providerCopy).toBe("removed"));
+    expect(calls.forget).toBe(1);
   });
 
   it("bills nothing for a safety refusal the provider returns before any output", async () => {
@@ -762,6 +887,29 @@ describe("video jobs", () => {
     expect(done?.settledCostUsdMicros).toBeUndefined();
     expect(spend.abandon).toHaveBeenCalledOnce();
   });
+
+  it.each([undefined, 0, 600_000])(
+    "settles a billed safety refusal with the reported cost (%s) or its estimate",
+    async (costUsdMicros) => {
+      const { service, spend } = harness({
+        polls: [
+          {
+            status: "refused",
+            safetyRefusal: "Blocked by the provider's filters.",
+            ...(costUsdMicros === undefined ? { billed: true } : { usage: { costUsdMicros } }),
+          },
+        ],
+      });
+      const job = await enqueue(service);
+      expect(await service.whenTerminal(job.id)).toMatchObject({
+        status: "failed",
+        safetyRefusal: "Blocked by the provider's filters.",
+        settledCostUsdMicros: costUsdMicros ?? job.estimatedCostUsdMicros,
+      });
+      expect(spend.settle).toHaveBeenCalledOnce();
+      expect(spend.abandon).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps an owed removal through a failure and clears it on a later try", async () => {
     let refuse = true;
@@ -824,6 +972,273 @@ describe("video jobs", () => {
         "removed",
       ]),
     );
+  });
+
+  it("lets the provider's own expiry end a refused removal, and skips the DELETE on that profile's later jobs", async () => {
+    const model = capabilities({
+      cancel: "running",
+      removal: { kind: "expires", afterHours: 2 },
+      resumeWindowHours: 24,
+    });
+    const { service, calls } = harness({
+      model,
+      forget: async () => ({
+        status: "failed",
+        providerFailure: { category: "unauthorized", message: "The key cannot delete payloads." },
+      }),
+    });
+    const firstId = (await enqueue(service)).id;
+    await service.whenTerminal(firstId);
+    await vi.waitFor(() => expect(service.getById(firstId)?.providerCopy).toBe("expires"));
+    expect(calls.forget).toBe(1);
+
+    // A refused removal is never put on the retry loop.
+    await service.retryOwedRemovals();
+    expect(calls.forget).toBe(1);
+
+    const secondId = (await enqueue(service)).id;
+    await service.whenTerminal(secondId);
+    expect(service.getById(secondId)?.providerCopy).toBe("expires");
+    expect(calls.forget).toBe(1);
+  });
+
+  it("retries an owed removal on the loop but drops it once the provider's expiry has passed", async () => {
+    const model = capabilities({
+      cancel: "running",
+      removal: { kind: "expires", afterHours: 2 },
+      resumeWindowHours: 24,
+    });
+    const { service, calls, advance } = harness({
+      model,
+      forget: async () => ({
+        status: "failed",
+        providerFailure: { category: "provider-failed", message: "fal is down." },
+      }),
+    });
+    const doneId = (await enqueue(service)).id;
+    await service.whenTerminal(doneId);
+    // The first removal has been asked by the time the loop next runs.
+    await vi.waitFor(() => expect(calls.forget).toBe(1));
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+
+    await service.retryOwedRemovals();
+    expect(calls.forget).toBe(2);
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+
+    advance(2 * 3_600_000 + 1);
+    await service.retryOwedRemovals();
+    expect(calls.forget).toBe(2);
+    expect(service.getById(doneId)?.providerCopy).toBe("expires");
+  });
+
+  it("keeps a refused Runway removal owed so a restored key retries it", async () => {
+    let refuse = true;
+    const { service, calls } = harness({
+      driverKind: "runway-video",
+      forget: async () =>
+        refuse
+          ? {
+              status: "failed" as const,
+              providerFailure: {
+                category: "unauthorized" as const,
+                message: "The key cannot delete tasks.",
+              },
+            }
+          : "removed",
+    });
+    const doneId = (await enqueue(service)).id;
+    await service.whenTerminal(doneId);
+    // A model that deletes for real gets no expiry fallback for a 403: the
+    // copy stays owed and the loop keeps asking.
+    await vi.waitFor(() => expect(calls.forget).toBe(1));
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+    await service.retryOwedRemovals();
+    expect(calls.forget).toBe(2);
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+
+    refuse = false;
+    await service.retryOwedRemovals();
+    expect(service.getById(doneId)?.providerCopy).toBe("removed");
+  });
+
+  it("counts a provider-expiring copy's window from when the clip was made", async () => {
+    const model = capabilities({
+      cancel: "running",
+      removal: { kind: "expires", afterHours: 2 },
+      resumeWindowHours: 24,
+    });
+    let polls = 0;
+    const { service, calls, advance } = harness({
+      model,
+      poll: async () => {
+        polls += 1;
+        // The clip takes 25 minutes to make, still inside the job's deadline.
+        if (polls === 1) advance(25 * 60_000);
+        return polls === 1
+          ? { status: "running" as const }
+          : {
+              status: "completed" as const,
+              video: { bytes: CONFORMANCE_MP4_BYTES, mediaType: "video/mp4" },
+              usage: { outputTokens: 28_960 },
+            };
+      },
+      forget: async () => ({
+        status: "failed",
+        providerFailure: { category: "provider-failed", message: "fal is down." },
+      }),
+    });
+    const doneId = (await enqueue(service)).id;
+    await service.whenTerminal(doneId);
+    await vi.waitFor(() => expect(calls.forget).toBe(1));
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+
+    // Two hours from the job's start have passed, but only 100 minutes from
+    // when the clip was made: the copy is still owed and still asked.
+    advance(100 * 60_000);
+    await service.retryOwedRemovals();
+    expect(calls.forget).toBe(2);
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+
+    advance(25 * 60_000);
+    await service.retryOwedRemovals();
+    expect(calls.forget).toBe(2);
+    expect(service.getById(doneId)?.providerCopy).toBe("expires");
+  });
+
+  it("drops a recovered owed removal past the provider's expiry after a restart", async () => {
+    const model = capabilities({
+      cancel: "running",
+      removal: { kind: "expires", afterHours: 2 },
+      resumeWindowHours: 24,
+    });
+    const down = {
+      forget: async () => ({
+        status: "failed" as const,
+        providerFailure: { category: "provider-failed" as const, message: "fal is down." },
+      }),
+    };
+    const first = harness({ model, ...down });
+    const doneId = (await enqueue(first.service)).id;
+    await first.service.whenTerminal(doneId);
+    await vi.waitFor(() => expect(first.calls.forget).toBe(1));
+    first.service.close();
+
+    const second = harness({ model, ...down }, first.root);
+    await second.service.recover();
+    expect(second.service.getById(doneId)?.providerCopy).toBe("held");
+
+    // Inside the expiry window the restarted host still asks; the cutoff is
+    // read back from the journaled job, not remembered in memory.
+    await second.service.retryOwedRemovals();
+    expect(second.calls.forget).toBeGreaterThanOrEqual(1);
+    expect(second.service.getById(doneId)?.providerCopy).toBe("held");
+
+    second.advance(2 * 3_600_000 + 60_000);
+    const asked = second.calls.forget;
+    await second.service.retryOwedRemovals();
+    expect(second.calls.forget).toBe(asked);
+    expect(second.service.getById(doneId)?.providerCopy).toBe("expires");
+  });
+
+  it("keeps retrying an owed removal without ever reading the catalog again", async () => {
+    const { service, calls } = harness({
+      // Admission and the job read the catalog once each; every later read fails.
+      modelsFail: 3,
+      forget: async () => ({
+        status: "failed",
+        providerFailure: { category: "provider-failed", message: "The provider is down." },
+      }),
+    });
+    const doneId = (await enqueue(service)).id;
+    await service.whenTerminal(doneId);
+    await vi.waitFor(() => expect(calls.forget).toBe(1));
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+    const reads = calls.models;
+
+    await service.retryOwedRemovals();
+    expect(calls.forget).toBe(2);
+    expect(calls.models).toBe(reads);
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+  });
+
+  it("drops an expired owed copy from the job's own record before any read or call", async () => {
+    const model = capabilities({
+      cancel: "running",
+      removal: { kind: "expires", afterHours: 2 },
+      resumeWindowHours: 24,
+    });
+    const { service, calls, advance } = harness({
+      model,
+      // Discovery stops answering once the job is admitted and read.
+      modelsFail: 3,
+      forget: async () => ({
+        status: "failed",
+        providerFailure: { category: "provider-failed", message: "fal is down." },
+      }),
+    });
+    const doneId = (await enqueue(service)).id;
+    await service.whenTerminal(doneId);
+    await vi.waitFor(() => expect(calls.forget).toBe(1));
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+    const reads = calls.models;
+
+    advance(2 * 3_600_000 + 1);
+    await service.retryOwedRemovals();
+    expect(service.getById(doneId)?.providerCopy).toBe("expires");
+    expect(calls.forget).toBe(1);
+    expect(calls.models).toBe(reads);
+  });
+
+  it("keeps a copy journaled before its cleanup was recorded owed past any expiry", async () => {
+    const model = capabilities({
+      cancel: "running",
+      removal: { kind: "expires", afterHours: 2 },
+      resumeWindowHours: 24,
+    });
+    const { service, calls, runtime, advance } = harness({
+      model,
+      forget: async () => ({
+        status: "failed",
+        providerFailure: { category: "provider-failed", message: "fal is down." },
+      }),
+    });
+    const doneId = (await enqueue(service)).id;
+    await service.whenTerminal(doneId);
+    const done = service.getById(doneId);
+    expect(done?.providerRemoval).toEqual({ kind: "expires", afterHours: 2 });
+    await vi.waitFor(() => expect(calls.forget).toBe(1));
+
+    // A job the journal wrote before cleanup kept the declaration: its
+    // events still decode, and nothing on it says the copy expires.
+    const legacyId = decodeVideoJobId(crypto.randomUUID());
+    const { providerRemoval: _kept, remoteId, providerCopy: _copy, ...legacyJob } = done!;
+    runtime.videoJobProjection.applyQueued(
+      decodeVideoJobQueued({
+        job: { ...legacyJob, id: legacyId, status: "queued", providerCopy: "none" },
+      }).job,
+    );
+    runtime.videoJobProjection.applyStatusChanged(
+      decodeVideoJobStatusChanged({
+        jobId: legacyId,
+        fromStatus: "queued",
+        toStatus: "completed",
+        version: legacyJob.version + 1,
+        updatedAt: legacyJob.updatedAt,
+        remoteId,
+        providerCopy: "held",
+      }),
+    );
+    expect(service.getById(legacyId)?.providerRemoval).toBeUndefined();
+
+    // Past the expiry the recorded copy is dropped without a call, while the
+    // copy without a declaration keeps its safe default: still owed, still
+    // asked, never written off.
+    const asked = calls.forget;
+    advance(2 * 3_600_000 + 1);
+    await service.retryOwedRemovals();
+    expect(service.getById(doneId)?.providerCopy).toBe("expires");
+    expect(service.getById(legacyId)?.providerCopy).toBe("held");
+    expect(calls.forget).toBe(asked + 1);
   });
 
   it("refuses a seventeenth waiting job so a runaway loop cannot queue without end", async () => {
@@ -969,6 +1384,161 @@ describe("video jobs", () => {
     expect(done?.status).toBe("completed");
     await vi.waitFor(() => expect(second.service.getById(queued.id)?.providerCopy).toBe("removed"));
   });
+
+  it.each(["Stop", "shutdown", "the job deadline"])(
+    "interrupts stalled recovery discovery on %s",
+    async (interruption) => {
+      const first = harness({
+        poll: (signal) =>
+          new Promise((resolve) => {
+            signal.addEventListener("abort", () => resolve({ status: "running" }), { once: true });
+          }),
+      });
+      const queued = await enqueue(first.service);
+      await vi.waitFor(() => expect(first.calls.poll).toBe(1));
+      first.service.close();
+
+      const discovery = Promise.withResolvers<AbortSignal | undefined>();
+      const release = Promise.withResolvers<void>();
+      const second = harness(
+        {
+          cancelRunningWithoutDiscovery: true,
+          beforeModels: async (call, signal) => {
+            // The first lookup warms the catalog; the accepted job starts its own.
+            if (call === 1) return;
+            discovery.resolve(signal);
+            signal?.addEventListener("abort", () => release.reject(signal.reason), { once: true });
+            await release.promise;
+          },
+        },
+        first.root,
+      );
+      if (interruption === "the job deadline") second.advance(VIDEO_JOB_TIMEOUT_MS - 200);
+      try {
+        await second.service.recover();
+        const signal = await discovery.promise;
+        expect(signal).toBeDefined();
+        if (interruption === "Stop") second.service.stop(queued.id);
+        if (interruption === "shutdown") {
+          second.service.close();
+          expect(signal?.aborted).toBe(true);
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          expect(second.service.getById(queued.id)).toMatchObject({
+            status: "running",
+            remoteId: "remote-1",
+          });
+        } else {
+          const done = await second.service.whenTerminal(queued.id, 1_000);
+          expect(done).toMatchObject({
+            status: interruption === "Stop" ? "cancelled" : "failed",
+            settledCostUsdMicros: 695_040,
+          });
+          expect(signal?.aborted).toBe(true);
+        }
+        expect(second.calls.poll).toBe(0);
+        expect(second.calls.cancel).toBe(interruption === "shutdown" ? 0 : 1);
+      } finally {
+        second.service.close();
+        release.resolve();
+      }
+    },
+  );
+
+  it("settles an expired recovered job and asks the provider to cancel without discovering its model", async () => {
+    const first = harness({
+      poll: (signal) =>
+        new Promise((resolve) => {
+          signal.addEventListener("abort", () => resolve({ status: "running" }), { once: true });
+        }),
+    });
+    const queued = await enqueue(first.service);
+    await vi.waitFor(() => expect(first.calls.poll).toBe(1));
+    first.service.close();
+
+    let cleanupSignal: AbortSignal | undefined;
+    const stopped = Promise.withResolvers<VideoAdapterPoll>();
+    const second = harness(
+      {
+        cancelRunningWithoutDiscovery: true,
+        beforeModels: async (_call, signal) => signal?.throwIfAborted(),
+        cancel: (signal) => {
+          cleanupSignal = signal;
+          return stopped.promise;
+        },
+      },
+      first.root,
+    );
+    second.advance(VIDEO_JOB_TIMEOUT_MS + 1_000);
+    try {
+      await second.service.recover();
+      expect(await second.service.whenTerminal(queued.id, 1_000)).toMatchObject({
+        status: "failed",
+        settledCostUsdMicros: 695_040,
+      });
+      expect(second.calls.cancel).toBe(1);
+      expect(cleanupSignal?.aborted).toBe(false);
+      // Only the background catalog warmup ran.
+      expect(second.calls.models).toBe(1);
+      expect(second.calls.poll).toBe(0);
+    } finally {
+      second.service.close();
+      stopped.resolve({ status: "cancelled" });
+    }
+  });
+
+  it.each([0, 250_000, undefined])(
+    "settles a recovered cancellation with reported cost %s before the catalog responds",
+    async (costUsdMicros) => {
+      const first = harness({
+        driverKind: "fal-video",
+        poll: (signal) =>
+          new Promise((resolve) => {
+            signal.addEventListener("abort", () => resolve({ status: "running" }), { once: true });
+          }),
+      });
+      const queued = await enqueue(first.service);
+      await vi.waitFor(() => expect(first.calls.poll).toBe(1));
+      first.service.close();
+
+      const warmup = Promise.withResolvers<void>();
+      const discoveryStarted = Promise.withResolvers<void>();
+      const discovery = Promise.withResolvers<void>();
+      const second = harness(
+        {
+          driverKind: "fal-video",
+          cancelRunningWithoutDiscovery: true,
+          beforeModels: async (call, signal) => {
+            if (call === 1) return warmup.promise;
+            signal?.addEventListener("abort", () => discovery.reject(signal.reason), {
+              once: true,
+            });
+            discoveryStarted.resolve();
+            await discovery.promise;
+          },
+          cancel: async () => ({
+            status: "cancelled",
+            ...(costUsdMicros === undefined ? {} : { usage: { costUsdMicros } }),
+          }),
+        },
+        first.root,
+      );
+      try {
+        await second.service.recover();
+        await discoveryStarted.promise;
+        second.service.stop(queued.id);
+        expect(await second.service.whenTerminal(queued.id, 1_000)).toMatchObject({
+          status: "cancelled",
+          settledCostUsdMicros: costUsdMicros ?? queued.estimatedCostUsdMicros,
+        });
+        expect(second.calls.cancel).toBe(1);
+        expect(second.calls.poll).toBe(0);
+      } finally {
+        second.service.close();
+        discovery.resolve();
+        warmup.resolve();
+      }
+    },
+  );
 
   it("keeps polling a sent job whose post-start model lookup fails", async () => {
     const { service } = harness({ modelsFail: 2 });
@@ -1197,6 +1767,95 @@ describe("video jobs", () => {
       expect(spend.abandon).toHaveBeenCalledTimes(1);
     },
   );
+
+  it.each([
+    { status: 429, source: "bare", endRead: "deadline", terminal: "failed", charged: false },
+    { status: 429, source: "bare", endRead: "Stop", terminal: "cancelled", charged: false },
+    { status: 521, source: "edge", endRead: "deadline", terminal: "failed", charged: false },
+    { status: 523, source: "edge", endRead: "deadline", terminal: "failed", charged: false },
+    { status: 524, source: "edge", endRead: "deadline", terminal: "failed", charged: true },
+    { status: 525, source: "edge", endRead: "deadline", terminal: "failed", charged: false },
+    { status: 525, source: "bare", endRead: "deadline", terminal: "failed", charged: true },
+    { status: 525, source: "type-only", endRead: "deadline", terminal: "failed", charged: true },
+    { status: 526, source: "edge", endRead: "deadline", terminal: "failed", charged: false },
+    { status: 526, source: "edge", endRead: "Stop", terminal: "cancelled", charged: false },
+    { status: 526, source: "bare", endRead: "Stop", terminal: "cancelled", charged: true },
+    { status: 526, source: "origin-only", endRead: "Stop", terminal: "cancelled", charged: true },
+  ] as const)("settles $source HTTP $status after $endRead", async (scenario) => {
+    const diagnosticHeaders = {
+      bare: {},
+      edge: { "cf-error-type": "52x", "cf-error-origin": "fixture" },
+      "type-only": { "cf-error-type": "52x" },
+      "origin-only": { "cf-error-origin": "fixture" },
+    }[scenario.source];
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const reading = Promise.withResolvers<void>();
+    const cancelled = vi.fn();
+    const { service, spend } = harness({
+      lease: async () => ({ credential: "fixture-key", reportRejected: () => undefined }),
+      response: () =>
+        new Response(
+          new ReadableStream(
+            { pull: () => reading.resolve(), cancel: cancelled },
+            {
+              highWaterMark: 0,
+            },
+          ),
+          {
+            status: scenario.status,
+            headers: {
+              "retry-after": "60",
+              ...diagnosticHeaders,
+            },
+          },
+        ),
+      start: async (ports, request) => {
+        try {
+          const response = await ports.request({
+            url: "https://video.example.test/start",
+            method: "POST",
+            auth: { header: "authorization", scheme: "Bearer" },
+            signal: request.signal,
+          });
+          return classifyVideoStartHttpFailure(response);
+        } catch (error) {
+          if (!isProviderFailure(error)) throw error;
+          return { status: "failed", providerFailure: error };
+        }
+      },
+    });
+    try {
+      const queued = await enqueue(service);
+      await reading.promise;
+      if (scenario.endRead === "Stop") service.stop(queued.id);
+      else await vi.advanceTimersByTimeAsync(VIDEO_HTTP_LIMITS.connectionTimeoutMs);
+      const done = await service.whenTerminal(queued.id);
+      expect(done?.status).toBe(scenario.terminal);
+      if (scenario.charged) {
+        expect(done?.settledCostUsdMicros).toBe(695_040);
+        if (scenario.terminal === "failed") {
+          expect(done?.failure).toMatchObject({ category: "interrupted" });
+        }
+        expect(spend.settle).toHaveBeenCalledOnce();
+        expect(spend.abandon).not.toHaveBeenCalled();
+      } else {
+        if (scenario.terminal === "failed") {
+          expect(done?.failure).toMatchObject(
+            scenario.status === 429
+              ? { category: "rate-limited", retryAfterMs: 60_000 }
+              : { category: "unavailable" },
+          );
+        }
+        expect(done?.settledCostUsdMicros).toBeUndefined();
+        expect(spend.settle).not.toHaveBeenCalled();
+        expect(spend.abandon).toHaveBeenCalledOnce();
+      }
+      expect(cancelled).toHaveBeenCalledOnce();
+    } finally {
+      service.close();
+      vi.useRealTimers();
+    }
+  });
 
   it("waits out the provider's retry-after before polling again", async () => {
     const { service, sleeps } = harness({

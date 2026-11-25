@@ -1184,9 +1184,9 @@ function withChatThreadHeadVersion(
 }
 
 const CHAT_COMPLETE_REFUSALS = {
-  archived: "An archived thread cannot be put away.",
-  executing: "Wait for the running answer to finish before putting this thread away.",
-  "awaiting-input": "This thread is waiting on you; answer it before putting it away.",
+  archived: "An archived thread cannot be settled.",
+  executing: "Wait for the running answer to finish before settling this thread.",
+  "awaiting-input": "This thread is waiting on you; answer it before settling it.",
 } as const;
 
 const CHAT_SNOOZE_REFUSALS = {

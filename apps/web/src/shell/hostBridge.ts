@@ -720,6 +720,7 @@ export interface OctantHostBridge
    * never the path. Absent in a browser or on a paired device, which download.
    */
   readonly saveSupportBundle?: () => Promise<SupportBundleSaveResult>;
+  readonly downloadThreadVideoArchive?: (ticket: string) => Promise<boolean>;
   /**
    * Opens the desktop app's native folder picker and writes the thread's kept
    * Browser screenshots into the folder the person chose, as numbered files.

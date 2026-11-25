@@ -22,6 +22,7 @@ import {
   SERVICE_OFFER_DECISION_MAX_BYTES,
   WORK_ATTACHMENT_MEDIA_TYPES,
 } from "@octant/contracts";
+import { REPOSITORY_BOOTSTRAP_LAND_FILES_MAX_BODY_BYTES } from "@octant/contracts/repository-bootstrap";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER } from "./hub/hubLink";
 import { PENDING_REQUESTS_PATH } from "./pendingRequestRoutes";
@@ -98,6 +99,10 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/host-control/export",
   // Linking a store and pointing a key at it are acts at this machine.
   "/api/secret-stores",
+  // Source-side repository inspection and ignored-file reads stay local to the
+  // machine that owns the source Code Project.
+  "/api/projects/repository-bootstrap/inspect",
+  "/api/projects/repository-bootstrap/read-ignored-file",
 ] as const;
 
 /**
@@ -113,6 +118,11 @@ const PERSON_PAIRED_DEVICE_ROUTES = [
   // principal that is not the host's person.
   "/api/folders/browse",
   "/api/folders/select",
+  // Cloning a repository onto this computer from another paired computer: the
+  // route refuses any principal that does not act as this computer's person.
+  "/api/projects/repository-bootstrap/clone",
+  "/api/projects/repository-bootstrap/clone/status",
+  "/api/projects/repository-bootstrap/clone/cancel",
   // Installing, trusting, enabling, and removing a package; remembered tool
   // approvals; adding, pinning, signing in to, and reconnecting a server.
   "/api/extensions/lifecycle",
@@ -954,6 +964,19 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
 
 const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   { kind: "exact" as const, path: "/api/image/jobs", methods: ["GET"] as const, allowQuery: true },
+  { kind: "exact" as const, path: "/api/video/jobs", methods: ["GET"] as const, allowQuery: true },
+  {
+    // Clip tickets and ranged clip bytes for a paired player; Stop stays a
+    // local-only route the policy never forwards.
+    kind: "exact" as const,
+    path: "/api/video/clip",
+    methods: ["GET", "POST"] as const,
+    allowQuery: true,
+    allowedRequestHeaders: [...REMOTE_REQUEST_HEADERS, "range"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 4_096,
+    maxResponseBytes: 10 * 1_024 * 1_024,
+  },
   {
     kind: "exact" as const,
     path: "/api/image/thread-artifact",
@@ -1114,6 +1137,15 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     path,
     methods: ["POST"] as const,
   })),
+  // Landing explicitly ticked ignored files after a repository clone completes
+  // on this host: bounded JSON payload for a person-paired device only.
+  {
+    kind: "exact" as const,
+    path: "/api/projects/repository-bootstrap/land-files",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: REPOSITORY_BOOTSTRAP_LAND_FILES_MAX_BODY_BYTES,
+  },
   // One-time connector OAuth callback relay for a person-paired device:
   // JSON-only, tightly bounded, never in the restricted device catalogue.
   {
@@ -1866,7 +1898,7 @@ export interface RemoteRouteFacts {
 
 export const REMOTE_SECURITY_POLICY = {
   hsts: "max-age=31536000; includeSubDomains",
-  csp: "default-src 'self'; img-src 'self' data: blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'",
+  csp: "default-src 'self'; img-src 'self' data: blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; media-src 'self' blob:",
   nosniff: "nosniff",
   referrer: "no-referrer",
 } as const;

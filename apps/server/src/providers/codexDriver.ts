@@ -82,7 +82,7 @@ import {
 import { providerApprovalCall } from "./providerApprovalCall";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { isAtLeastRelease } from "./releaseVersion";
-import { secretGuardEntries } from "../process/secretGuard";
+import { secretGuardEntries, threadSecretGuardEntries } from "../process/secretGuard";
 import {
   codexWindowsStrictProfile,
   WINDOWS_STRICT_CODEX_SANDBOX_SETUP_REFUSAL,
@@ -2956,10 +2956,13 @@ function makeConnection(
       const sandbox = sessionSandbox({ executionPolicy: "full-access", strict: true });
       return codexWindowsStrictProfile({
         writableRoots: sandbox.kind === "native" ? sandbox.writableRoots : [],
-        protectedEntries: secretGuardEntries({
-          platform: "win32",
-          homeDirectory: launchEnvironment?.USERPROFILE,
-        }),
+        protectedEntries: [
+          ...secretGuardEntries({
+            platform: "win32",
+            homeDirectory: launchEnvironment?.USERPROFILE,
+          }),
+          ...threadSecretGuardEntries("win32"),
+        ],
         codexHome:
           launchEnvironment?.CODEX_HOME ??
           win32.join(launchEnvironment?.USERPROFILE ?? homedir(), ".codex"),

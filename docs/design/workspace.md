@@ -378,10 +378,26 @@ of the same threads; neither is shown as a duplicate list beneath the Project
 tree. **Status** is each mode's default until a person picks another
 arrangement, and each mode keeps its own pick (a pick made before Status
 existed is kept). It lists the threads flat under counted headings in the
-order a person acts on them: **Pinned**, **Needs input** (waiting on an
+order a person acts on them: **Pinned**, **Needs you** (waiting on an
 approval or an answer), **Ready for review** (a finished turn nobody has
-looked at), **Working**, and **Idle** (everything else), newest first within
-each. A thread appears once, under the first heading that holds it. Each
+looked at), and **Idle** (everything else), newest first within each. A
+thread appears once, under the first heading that holds it.
+
+In Status and the Activity feed, **Working** (threads whose turn is running)
+and **Settled** sit together at the foot of the sidebar, below the list and
+the Archive. The foot stays in sight while the list above scrolls, takes at
+most 40% of the sidebar's height and scrolls inside itself beyond that, with a
+hairline above it. A running thread is listed only there, with its live
+"Working 4m"; one waiting on an approval or an answer is not working and stays
+at the top under Needs you, with its state in words. A pinned thread and a
+coordinator keep their place among the pins, and in the Activity feed a thread
+waiting on an approval or an answer sits under Priority whatever its read
+state. Settled rows are the compact
+shelf rows, each with how long ago it settled. With no threads above it, the
+foot alone is the sidebar's list. The Project tree keeps both shelves below
+its Project groups (maintainer request, 2026-11-24). A running thread changes
+state on its own; in the middle of a long list it moved rows around and could
+scroll out of sight. Each
 heading is a fold button (`aria-expanded`) with its count and a chevron;
 folded, it keeps the count and still shows the thread the workspace has open,
 and a search shows every match. The window remembers each mode's folded
@@ -424,7 +440,7 @@ is not waiting it goes to the first, and when nothing waits it does nothing and
 the command is absent from the palette. A failed turn is not in the order: the
 thread listing reports no failure, and a status is never inferred from silence.
 A due follow-up is a reminder, not a waiting thread, and is left out. The
-Status arrangement's **Needs input** and **Ready for review** headings are the
+Status arrangement's **Needs you** and **Ready for review** headings are the
 list-side counterpart, so no second priority group is added to the Projects tree.
 
 ### Coordinators
@@ -450,9 +466,9 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   (`aria-expanded`) that shows or hides its workers beneath it; folded, the row
   reports the same counts. Its workers are listed only under it, never again
   among the Project's other threads; finished workers follow the ordinary
-  completion and put-away rules. The window remembers each coordinator's fold
+  completion and settle rules. The window remembers each coordinator's fold
   state as session storage. A worker whose coordinator is not listed (stopped
-  coordinating, archived, put away) stays an ordinary row. The Project's
+  coordinating, archived, settled) stays an ordinary row. The Project's
   designated planner is listed among its coordinators.
 - **Status arrangement.** Coordinators are listed under **Pinned**. Workers
   are left out unless Show workers lists them in the sidebar, and then keep
@@ -480,7 +496,7 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   with what it limits and its default
   ([Coordinator threads: Bounds](coordinator-threads.md#bounds)). The settings
   sat above the composer as a select and three number fields until 2026-11-15;
-  most people keep the defaults, and the box for the work came after them. A thread's row menu keeps its everyday actions on top (Pin in pane, Pin, Rename; Mark as read or unread, Mark done, Put away, Snooze; the pull-request destinations) and files the rest under **More**, with Archive last and alone (maintainer request, 2026-11-16). A Code thread's row menu has **Make coordinator**, a submenu
+  most people keep the defaults, and the box for the work came after them. A thread's row menu keeps its everyday actions on top (Pin in pane, Pin, Rename; Mark as read or unread, Mark done, Settle (Un-settle once settled, or Reopen on a Code thread marked Done but not settled), Snooze; the pull-request destinations) and files the rest under **More**, with Archive last and alone (maintainer request, 2026-11-16). A Code thread's row menu has **Make coordinator**, a submenu
   with the same worker-level choice, or **Stop
   coordinating** on a coordinator (never on a worker); on a coordinator
   **Coordinator limits…**, which opens the same dialog with the three bounds,
@@ -521,8 +537,8 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   opens a panel beside the transcript, and a sheet over it on a narrow window.
   Sections, in order: **Needs you**, **Working**, **In review** (delivered
   with a pull request still open), **Done** (marked Done, or its pull request
-  merged or closed; folded as "Done · N" with **Show more**), and **Put away**
-  (put away without either, folded the same way; putting away is not Done). Each row has the title, the state in words, the model
+  merged or closed; folded as "Done · N" with **Show more**), and **Settled**
+  (settled without either, folded the same way; settling is not Done). Each row has the title, the state in words, the model
   (with the same fallback or chosen note as the Agents dock's worker row), the
   pull request link when there is one, and when it last changed; a row opens
   the worker. A worker waiting on a person is always under Needs you, whatever
@@ -637,9 +653,9 @@ modes, Work and Code, each with its own set of saved views.
 
 A Chat, Work, or Code thread has two resting states beside archive, both fields
 on the thread aggregate rather than lifecycle values: **completed**, which
-every client and the user guide call **Put away** (`completedAt`, set by a
-person, by Mark done, or by the host when a Code thread's pull request merges,
-and refused by each mode's service while a turn runs or the thread waits on the
+every client and the user guide call **Settled** (`completedAt`, set by a
+person, by Mark done, or by the host when the thread's agent finished or a
+Code thread's pull request merged, and refused by each mode's service while a turn runs or the thread waits on the
 person) and **snoozed** (`snooze.until`, an overlay
 that hides the row until the wake time and wakes it early when the agent needs
 the person or a turn that was running at snooze time ends). The sidebar files
@@ -652,40 +668,67 @@ completed threads of every mode once their completion is older than the
 for never), re-deciding against each mode's authoritative record and
 journaling the ordinary thread update as the `system` actor. It archives only.
 
-**Put away when done** (Settings › General › Threads, **Put away threads when
+**Settle when done** (Settings › General › Threads, **Settle threads when
 they're done**, `putAwayThreadsWhenDone`, on by default; maintainer request,
-2026-11-24) files a thread in the Put away shelf once it is done, so finished
-work leaves the sidebar without a second click. A person's **Mark done** on a
-Work or Code thread also puts it away in the same journaled update; **Reopen**
-brings it back (a Work thread marked Done takes no message until reopened). A
-Code thread is also put away by the host, journaled as the `system` actor, once
-a pull request linked to it merged: on its delivery branch by the thread's own
+2026-11-24) settles a thread once it is done, so finished work leaves the list
+without a second click. The agent settles its own thread: when a Work or Code
+lead's `octant_report_finished` passes, the host settles the thread, as the
+`system` actor, once the turn that filed the report completes, since a thread
+cannot settle while its turn runs. It acts once, on that completion, and only
+when the completed turn is the one the thread's latest finished report names
+(the Work turn id or the Code operation id) and that report is still fresh (a
+later file change leaves its checks unproven), so a person who un-settles the
+thread keeps it: nothing re-reads an old report. A turn that failed, was
+cancelled or stopped to wait settles nothing. The host retries for a few
+seconds while the runtime still reports the just-completed turn as live, and
+stops once a newer turn starts, the report goes stale or the switch is turned
+off. It leaves alone a coordinator, a thread with child work still running or
+unread (the provider's own children and Octant-managed helpers alike),
+and one whose finished turn left a decision for the person. A person's **Mark
+done** on a Work or Code thread also settles it in the same journaled update;
+**Un-settle** (the reopen command) brings it back, as does a new message (a
+Work thread marked Done takes no message until reopened, and its Done banner
+keeps its **Reopen**). A Code thread is also settled by the host, journaled as the
+`system` actor, once a pull request it delivers merged: one Octant's own
+pull-request operations recorded for it, or one on its delivery branch in its
+delivery repository (for a server thread, whose target is a placeholder, the
+repository those operations ran in). The merge counts from the thread's own
 evidence, or as the Pull requests refresh cache records it, since a merge made
-outside Octant reaches that cache and not the thread's history. Both are cached
-reads; the host makes no GitHub call for this. An opened pull request, a
-finished investigation and a local commit are Done on the board but are not put
-away: a merge is the only evidence that the work is over. The host checks every
+outside Octant reaches that cache and not the thread's history. A pull request a
+tool call of the thread only touched (reviewed, commented on, or merged for
+another thread) is linked to the thread, but its merge delivers nothing here and
+does not settle the thread. Both are cached reads; the host makes no GitHub call
+for this. An opened pull request, a
+finished investigation and a local commit are Done on the board but do not
+settle the thread by themselves: a merge or the agent's finished report is the
+evidence that the work is over. The host checks every
 two minutes and leaves alone a coordinator, a thread whose child work is still
 running or unread, and a thread whose finished turn left a decision for the
 person. It records on the thread every merged pull request it has accounted
 for (`putAwayForPullRequests`, at most 32, matched across a repository rename),
-so a thread a person brings back with Reopen or a new message stays out of the
-shelf until a pull request merges that is not on that list. Pull request
+so a thread a person brings back with Un-settle or a new message stays out of
+Settled until a pull request merges that is not on that list. Pull request
 numbers order creation, not merging, so a lower number merging later still
 counts, and a merge one cache drops while another still shows (a GitHub
 sign-out empties the refresh cache) never reads as new. A thread whose turn runs or waits on the person, including an agent's
 approval that outlived a restart, keeps its row: Mark done still marks it, and
-the host tries again on its next pass. Putting away never marks a thread Done;
-with the setting off nothing is put away on its own and the host reads nothing
+the host tries again on its next pass. Settling never marks a thread Done;
+with the setting off nothing settles on its own and the host reads nothing
 for it.
 
-**Put away** is the only name people see for this state, beside the board's
-Done: the sidebar shelf, the row-menu action, the Review page action, the
-Settings rows and the host's refusal sentences all use it. It is a name only.
+A settled thread shows "Settled 19m ago" with an **Un-settle** button above its
+composer in Chat, Work and Code; a Work task marked Done shows its Done banner
+instead. A row's hover slot offers **Settle**, or **Un-settle** once the row
+has settled, in place of Archive, which stays in the row menu.
+
+**Settled** is the only name people see for this state, beside the board's
+Done: the sidebar group, the row-menu actions (**Settle**, **Un-settle**), the
+Review page action, the Settings rows and the host's refusal sentences all use
+it. It is a name only.
 The stored `completedAt` field, the `complete-*-thread` commands, the
 `completedThreadArchiveAfterDays` setting and the `thread-completed` end reason
 keep their names, and it is a different state from a Work thread marked Done.
-The sidebar's **Done today** tile keeps its name and opens the Put away shelf;
+The sidebar's **Done today** tile keeps its name and opens the Settled group;
 the shelf's `data-shelf` value stays `completed`, separate from its label.
 
 The **Review page** lists the threads the sidebar's To review count counts, by
@@ -704,7 +747,7 @@ ask and its options (the Needs you row, embedded) above the full reply; its
 number keys pick an option while the row has focus, and the option is sent as
 the thread's next turn. Work navigation projects no unread flag, so Work threads
 never count toward To review and never list here; the page's Work wiring
-(send-back refuses and points at the thread's composer) waits for that flag. Put away, Snooze and send-back go through each
+(send-back refuses and points at the thread's composer) waits for that flag. Settle, Snooze and send-back go through each
 mode's existing commands and show the host's refusal in one line; mark-seen
 moves the read cursor. Its single-key commands are page-scoped keybindings: they
 may be a bare key because only the focused page dispatches them, and the
@@ -1708,7 +1751,7 @@ the terminal's start in the journal records `program: "provider"`.
 Not built yet: the other ACP agents (offered once a CLI's interactive mode is
 confirmed), an added ACP agent, and the other providers with a command-line
 program.
-A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). A focused Browser page does not trap the window's shortcuts either: at their default chords the command palette (`Mod+K`), sidebar (`Mod+\`), dock (`Mod+Shift+J`) and focus composer (`Ctrl+Escape`) are held back from the page and handed to the window, and Settings (`Mod+,`) stays a menu accelerator; Zen's `Mod+Shift+Z` is Redo, which a page's text field keeps as the renderer's do. **Minimised tools.** A thread's Browser and Terminal can be minimised into small
+A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). A focused Browser page does not trap the window's shortcuts either: at their default chords the command palette (`Mod+K`), sidebar (`Mod+\`), dock (`Mod+Shift+J`) and focus composer (`Ctrl+Escape`) are held back from the page and handed to the window, and Settings (`Mod+,`) stays a menu accelerator; Zen's `Mod+Shift+E` stays with the page, as the renderer leaves it to a focused text field. **Minimised tools.** A thread's Browser and Terminal can be minimised into small
 live cards on a shelf at the foot of the dock, so a page or a shell can be
 watched, and seen to answer, while another tool or only the dock's overview is
 in front. A floating preview of the Browser, drawn over the thread, covered the
@@ -2159,8 +2202,8 @@ thread rows, the dock overview, the planner board read, the sibling-thread
 tools and side tasks read the same projections. Turning the plugin on again
 brings the boards back with no migration. A person marks a Work thread Done with **Mark done** in the
 add menu under attach, with no confirmation, and the card moves to Done and
-stays there until **Reopen** undoes it in one click (with **Put away threads
-when they're done** on, the default, the thread is also put away and leaves the
+stays there until **Reopen** undoes it in one click (with **Settle threads
+when they're done** on, the default, the thread also settles and leaves the
 board, as [Thread visibility and completion](#thread-visibility-and-completion)
 describes); a Code thread reaches Done by its objectively satisfied
 delivery target, or when a person marks it Done whatever that target says,
@@ -2400,6 +2443,14 @@ this surface.
 
 Composer `Create from…` also exposes a Linear tab when the Settings-owned
 connection reports `list-issues` available and the Linear plugin is effective.
+When the active Project is bound to a Linear team (and optional Linear
+project), the Linear tab and the Code Linear issue browser default to that
+binding while letting the person switch back to the whole Linear workspace;
+picking a Linear issue on Start automatically selects the uniquely matching
+bound Octant Project. Project-to-Linear bindings are edited on the host from
+Settings › Linear (Projects matrix, alongside connected user, workspace,
+linked-project count, and personal API key controls with a direct creation
+link) and from each Project's Overview page.
 Selecting a row attaches only `{ id }`. At creation the server reauthorizes
 through the Integration port, frames redacted issue text
 (`identifier`, status, description, comments, links) as external content and
@@ -2751,7 +2802,8 @@ without the spinner. See
 [Workspace](workspace.md).
 
 Main-pane content opens in a closable tab beside its conversation. Files, previews,
-and canvases retain navigation references, and selecting one uses the ordinary
+canvases and a Code thread's pull requests (one tab per pull request, opened from
+the Environment's list) retain navigation references, and selecting one uses the ordinary
 host-authorized open command. Image creation is a pane-owned view that retains
 its draft while the user switches back to the conversation. The strip occupies
 the existing pane title row rather than adding a second header.
@@ -2843,8 +2895,12 @@ under one Pull requests submenu of the right-click menu, while the flat
 overflow menu keeps the first three. A pull request the thread's tool calls
 created, merged or reviewed links the thread as its own branch does, and every
 GitHub and Linear issue those calls touched is listed in the thread's
-Environment tool and, at most five with the rest counted, in the card; both are
-designed, not built (maintainer decisions, 2026-11-23). Thread rows
+Environment tool and, at most five with the rest counted, in the card, as
+facts there rather than links (maintainer decisions, 2026-11-23). Only a write
+counts (created, merged, reviewed, commented on, edited, closed, reopened),
+never a read, and only an exact identity the call itself gave; the Claude and
+Codex adapters report them, and an adapter that cannot see a call's command and
+result reports none. Thread rows
 are not indented under their Project, so every row's fill sits the same
 distance from both edges of the sidebar. In Code, a Project whose threads run
 in two or more checkouts nests them under one heading per checkout, primary
@@ -2885,10 +2941,10 @@ threads that need the person: an approval, a question, a follow-up that is due,
 or a subagent request waiting on them; a finished turn is not one, and the
 dock badge counts the same threads), Running (threads the host projects as
 executing), To review (finished turns not opened since), and Done today
-(threads put away since local midnight). Each tile is one button whose name
+(threads settled since local midnight). Each tile is one button whose name
 carries its count ("Running, 2"); Inbox opens the Inbox, Running opens the
 Board (the Activity feed in Chat, which has no board), To review opens the
-Review page, and Done today opens the Put away shelf (see [Workspace](#thread-visibility-and-completion)). With the tiles on,
+Review page, and Done today opens the Settled group (see [Workspace](#thread-visibility-and-completion)). With the tiles on,
 the Inbox and Board rows are left out because their tiles go to the same
 place. Settings › Sidebar › Count tiles turns them off and brings the rows
 back. Tiles show only where the sidebar stands without a rail in a window wider
@@ -2947,7 +3003,7 @@ same three as a segmented control above their thread list
 ([Mobile maturity](mobile-maturity.md#exists-today)). That row stands in the same place in
 all three, with the Project tree's own Projects heading under it, so choosing
 an arrangement moves nothing but the list. Status headings carry their count in
-meta ink after the label ("Needs input 2"), the same face as the feed's folded
+meta ink after the label ("Needs you 2"), the same face as the feed's folded
 Earlier count. A row whose pull request's checks pass adds a 12px check in the
 success ink after the PR number.
 
@@ -3629,7 +3685,7 @@ first, under a small "Pull requests" caption. Past ten, the rest fold behind
 one quiet "Show more (n)" row that becomes "Show less", as the sidebar folds a
 long thread list. Each pull request is one row of fixed height with the
 state's mark in its colour (open, draft, merged, closed, or a neutral mark when
-the state is not known), the title on one line, then the repository, the
+the state is not known), the title on up to two lines, then the repository, the
 number and the state in the meta ink, with "Ready to merge" and a stale or
 unavailable reading said in words, then the pull request's added and removed
 lines as "+A −D" in the two inks of the changes row. An open pull request that
@@ -3651,15 +3707,47 @@ pull request known only from a thread, and a failed queue read send nothing for
 it, and an absent fact draws nothing (never a zero, never "0/0"). A merged or
 closed pull request keeps its line counts and has no checks or merging state.
 Pressing a row
-opens that pull request in the app; a "…" menu beside it (More for pull request
+opens that pull request as a tab of the thread's pane, named by its number
+(#917), drawn with the Pull requests page's reading view (Summary, Changes and
+Timeline, the status column, Merge with its method and confirmation); its More
+actions menu starts with **Unlink from this thread**, which journals the
+person's unlink on the thread: the thread stops listing the pull request and
+stops being one of its linked threads (for babysitting and line notes too)
+until the thread touches it again, whatever the branch or an earlier
+operation said, and across a repository rename. The thread keeps its newest 50
+unlinks; an older one lapses. The page says when the unlink is done or why it
+was refused. Only a person may unlink (maintainer decision,
+2026-11-24), at a window on this computer or on a device they paired at Full; a
+routine, an agent grant, a device paired at a narrower level and a device only
+the hub introduced are refused (maintainer decision, 2026-11-25). A "…" menu beside the row (More for pull request
 #N), shown on hover and keyboard focus and always on touch, offers Open on
 GitHub and Copy link. The list is the host's cached reading: opening the strip
 reaches no forge, and the link is built from the repository and number, never
 taken as text. The host sends at most 50 and a count of the rest, which the
 list says as "N more not shown". A thread with no pull request shows no caption
 and no row, and the folded Changes summary adds the count ("Clean · 1 PR").
+An open or draft pull request ends with the one next step it waits on, by
+what blocks it first: **Resolve ↗** while it has conflicts, which opens its
+conflicts on GitHub; **Fix ↗** while its checks fail, which opens its checks on
+GitHub; and **Merge** once it is ready to merge, which opens the pull request,
+whose Merge asks for the method before it acts. A pull request already in the
+merge queue or set to merge on its own offers no Merge, and a merged or closed
+one offers no step (maintainer decision, 2026-11-24).
 The Project's own open pull requests stay under Delivery (maintainer request,
 2026-11-16).
+**The thread's issues.** Under its pull requests, a small "Issues" caption lists
+every GitHub and Linear issue the thread's tool calls created, commented on,
+edited, closed or reopened, open ones first, then finished ones (closed, done,
+canceled), each newest first, in the same row recipe: an open or finished mark,
+the title, then the repository or "Linear", the reference (#3, ENG-991) and the
+state the latest call reported. Past ten the rest fold behind "Show more (n)".
+A row opens the issue's page outside Octant: a GitHub address is built from the
+repository and number, and a Linear one is the address the call's result gave,
+so a Linear issue without one is a plain row. The host lists a GitHub issue only
+in the thread's own repository or one the window's pull-request reading already
+covers and only while GitHub is not revoked, and a Linear issue only while
+Linear is switched on and connected on this host, which it reads locally; the
+list reaches no forge (maintainer decisions, 2026-11-23 and 2026-11-24).
 Chat's fact list leaves out a fact whose value is none.
 
 On the phone, a thread's header button (Views and panes) is the one way to
@@ -4133,6 +4221,25 @@ compact notice has a keyboard-accessible Dismiss action. Export files remain in
 downloads and hand-off documents remain in the dock; this single latest-result
 surface is not a notification history or queue.
 
+### Reserved keybindings
+
+Settings › Keybindings refuses to bind a global action to a chord that text
+fields, the message editor or the desktop Edit menu already answer, and says
+which command the chord is: `Mod+Z` (Undo); `Mod+Shift+Z`, `Mod+Y` and
+`Mod+Shift+Y` (Redo); `Mod+X` (Cut); `Mod+C` (Copy); `Mod+V` (Paste); `Mod+A`
+(Select All). A saved override on one is reported and the action uses its
+default. The Review page's and the terminal's own actions keep their own chord
+rules. Rationale: the message editor and the window listeners act on the same
+key press, in a browser and in the desktop app alike. Bound to `Mod+Z`, Dictate
+undid the text and started recording; bound to `Mod+C`, it recorded instead of
+copying.
+
+Zen's default is `Mod+Shift+E`, because its first default, `Mod+Shift+Z`, is
+Redo. It is listed last among the actions, so a chord a person had already saved
+on another action keeps working. The other way round, a chord saved for Zen that
+another action also holds now stays with that action, and Settings marks Zen as
+the one that will not run.
+
 ### Command palette and agent-page strip
 
 The command palette groups results and shows a shortcut badge when a row maps to a user-bindable chord.
@@ -4169,6 +4276,17 @@ keeps the theme's roles. The measurements are in
 `apps/web/src/code/scrollbarTreatment.ts`; the two rules that shape the
 thumb where no option exists are in `styles/code.css` and name the library
 classes they hold on.
+
+### Keybinding conflicts
+
+Settings › Keybindings says an action "Shares … with another action and will not
+run" only where that is true. Two actions on one chord conflict when they answer
+in the same place: two global actions, two commands of the same page, or two
+terminal commands. A terminal command also conflicts with a global action listed
+ahead of it, because the terminal yields that chord. The action listed first
+keeps the chord. A page's command never conflicts with a global or a terminal
+action, and a terminal command listed ahead of a global action keeps the chord
+in the terminal while the global action runs everywhere else.
 
 ### Terminal keyboard exit
 

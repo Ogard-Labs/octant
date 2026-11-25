@@ -42,7 +42,12 @@ export interface SettingsContainerProps {
   >[0]["onOpenRelayedServerProjectPreview"];
   readonly actions: Pick<
     ShellActions,
-    "openChatThread" | "setUsageOpen" | "selectChatThread" | "selectWorkThread" | "selectCodeThread"
+    | "openChatThread"
+    | "setUsageOpen"
+    | "selectChatThread"
+    | "selectWorkThread"
+    | "selectCodeThread"
+    | "setProjectLinearTarget"
   >;
   readonly allProjects: ReturnType<typeof useProjectController>["allProjects"];
   readonly availableFonts?: ReadonlyArray<string>;
@@ -364,6 +369,8 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
       githubClient={githubClient}
       integrationClient={linearClient}
+      linearProjects={allProjects}
+      onProjectLinearTargetChange={actions.setProjectLinearTarget}
       usageClient={usageClient}
       benchmarksClient={benchmarksClient}
       chatClient={chatClient}

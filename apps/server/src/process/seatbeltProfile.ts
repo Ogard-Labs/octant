@@ -56,6 +56,8 @@ import { buildBubblewrapLaunch, DEFAULT_BWRAP_PATH } from "./linuxConfinement";
 import { processConfinementAccountRoots } from "./processConfinementAccountRoots";
 import {
   protectedAtLevel,
+  threadSecretGuardEntries,
+  threadSecretSeatbeltRules,
   secretGuardEntries,
   secretGuardPersonRules,
   secretGuardSeatbeltRules,
@@ -843,10 +845,12 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     platform: "darwin",
     homeDirectory: input.homeDirectory,
   });
-  const guardEntries =
-    input.protectedFiles === "provider-sign-ins"
+  const guardEntries = [
+    ...(input.protectedFiles === "provider-sign-ins"
       ? protectedAtLevel(listedGuardEntries, true)
-      : listedGuardEntries;
+      : listedGuardEntries),
+    ...threadSecretGuardEntries("darwin"),
+  ];
   const lines = [
     "(version 1)",
     "(deny default)",
@@ -1021,6 +1025,7 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     '(allow file-write-data (literal "/dev/null"))',
     ...(input.extraRules ?? []),
     ...secretGuardPersonRules(guardEntries),
+    ...threadSecretSeatbeltRules(),
     `(deny network-outbound (remote unix-socket (path-regex #"^(/private)?/tmp/octant-sandbox-control-")))`,
     `(deny file-read* file-write* (regex #"^(/private)?/tmp/octant-sandbox-control-"))`,
     ...SEATBELT_DENY_SERVER_CONTROL_SOCKETS,

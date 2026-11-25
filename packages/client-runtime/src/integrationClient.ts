@@ -5,13 +5,16 @@ import {
   IntegrationExecutionResult,
 } from "@octant/contracts/integration";
 import {
+  decodeLinearIssueGetByIdentifierInput,
   decodeLinearIssueGetInput,
   decodeLinearIssueListInput,
   LINEAR_ISSUE_FILTERS_OPERATION,
+  LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION,
   LINEAR_ISSUE_GET_OPERATION,
   LINEAR_ISSUE_LIST_OPERATION,
   LinearIssueDetail,
   LinearIssueFilterOptions,
+  type LinearIssueGetByIdentifierInput,
   type LinearIssueGetInput,
   type LinearIssueListInput,
   LinearIssueListPage,
@@ -34,6 +37,7 @@ export interface IntegrationClient {
   executeOperation(operationId: string, input: unknown): Promise<IntegrationExecutionResult>;
   listIssues(input?: LinearIssueListInput): Promise<LinearIssueListPage>;
   getIssue(input: LinearIssueGetInput): Promise<LinearIssueDetail>;
+  getIssueByIdentifier?(input: LinearIssueGetByIdentifierInput): Promise<LinearIssueDetail>;
   listIssueFilters(): Promise<LinearIssueFilterOptions>;
   storePersonalCredential(credential: string): Promise<void>;
   deletePersonalCredential(): Promise<void>;
@@ -128,6 +132,13 @@ export function createIntegrationClient(options: IntegrationClientOptions): Inte
       const validated = decodeRequest(input, decodeLinearIssueGetInput);
       return readOperationValue(
         await executeOperation(LINEAR_ISSUE_GET_OPERATION, validated),
+        decodeHostAnswer(LinearIssueDetail),
+      );
+    },
+    async getIssueByIdentifier(input) {
+      const validated = decodeRequest(input, decodeLinearIssueGetByIdentifierInput);
+      return readOperationValue(
+        await executeOperation(LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION, validated),
         decodeHostAnswer(LinearIssueDetail),
       );
     },

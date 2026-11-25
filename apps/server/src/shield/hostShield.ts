@@ -104,7 +104,7 @@ export interface HostShieldDependencies {
    * The secret guard's list in force, the person's changes included, so the
    * Judge asks about a file the person added as it asks about a built-in one.
    */
-  readonly protectedSecretPath?: (path: string) => boolean;
+  readonly protectedSecretPath?: (path: string, threadId: string) => boolean;
   /** The places trusted for a Project while Network limits are on; none while they are off. */
   readonly safePlaces?: (projectId: string | undefined) => ReadonlyArray<SafeNetworkPlace>;
   /** A folder outside every Project, where Shield's one-shot sessions start. */

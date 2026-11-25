@@ -48,6 +48,7 @@ import {
   boundActivePullRequestRefresh,
   CODE_PROJECT_PULL_REQUEST_MAX_PULL_REQUESTS,
   matchLinkedThreadsToPullRequest,
+  threadUnlinkedPullRequest,
   type CodeProjectLinkedThreadFact,
 } from "@octant/domain/code-project-pull-request-policy";
 import type { PullRequestLinkRecord } from "@octant/domain/pull-request-identity-policy";
@@ -458,7 +459,24 @@ export class CodeProjectPullRequestService {
     threads: ReadonlyArray<CodeProjectLinkedThreadFact>,
   ): BoardSnapshot {
     const cachedRows = this.#authorizedRows(projects);
-    const rows = this.#boundRows(this.#mergeRows(cachedRows, this.#knownRows(projects, threads)));
+    // Cached rows carry the linked threads of their last refresh; a person's
+    // unlink since then holds at once, not only after the next refresh.
+    const factById = new Map(threads.map((thread) => [thread.threadId, thread] as const));
+    const rows = this.#boundRows(
+      this.#mergeRows(cachedRows, this.#knownRows(projects, threads)),
+    ).map((row) => {
+      const linkedThreads = row.linkedThreads.filter((linked) => {
+        const fact = factById.get(String(linked.threadId));
+        return (
+          fact === undefined ||
+          !this.#unlinkedFrom(fact, row.projectId, {
+            repository: { owner: row.repositoryOwner, name: row.repositoryName },
+            number: row.number,
+          })
+        );
+      });
+      return linkedThreads.length === row.linkedThreads.length ? row : { ...row, linkedThreads };
+    });
     const freshness = this.#queryFreshness();
     const boardFreshness =
       rows.some((row) => row.state === "unknown") && freshness.status !== "stale"
@@ -484,7 +502,20 @@ export class CodeProjectPullRequestService {
    * pull requests, so a merge made outside Octant shows here even though the
    * thread's own operation history still holds the open state it last saw.
    */
-  mergedPullRequestsForThread(threadId: string): ReadonlyArray<{
+  mergedPullRequestsForThread(
+    threadId: string,
+    /**
+     * Whether a merged row is the thread's own delivery. A thread is also
+     * linked to pull requests its tool calls only reviewed or commented on,
+     * and merging one of those does not deliver the thread.
+     */
+    delivers: (
+      row: Pick<
+        CodeProjectPullRequestRow,
+        "repositoryOwner" | "repositoryName" | "number" | "headBranch"
+      >,
+    ) => boolean,
+  ): ReadonlyArray<{
     readonly baseRepository: string;
     readonly number: number;
   }> {
@@ -493,7 +524,8 @@ export class CodeProjectPullRequestService {
       .filter(
         (row) =>
           row.state === "merged" &&
-          row.linkedThreads.some((thread) => String(thread.threadId) === threadId),
+          row.linkedThreads.some((thread) => String(thread.threadId) === threadId) &&
+          delivers(row),
       )
       .map((row) => this.#canonicalizeRow(row))
       .map((row) => ({
@@ -739,8 +771,24 @@ export class CodeProjectPullRequestService {
       },
       threads,
     );
+    const factById = new Map(threads.map((thread) => [thread.threadId, thread] as const));
     const linkedThreadIds = uniqueStrings([
-      ...(link?.threadIds.map((id) => String(id)) ?? []),
+      // A recorded link's threads, less any a person unlinked from it.
+      ...(link?.threadIds
+        .map((id) => String(id))
+        .filter((id) => {
+          const fact = factById.get(id);
+          return (
+            fact === undefined ||
+            !this.#unlinkedFrom(fact, target.projectId, {
+              repository: {
+                owner: canonicalTarget.repositoryOwner,
+                name: canonicalTarget.repositoryName,
+              },
+              number: target.number,
+            })
+          );
+        }) ?? []),
       ...linked.map((thread) => String(thread.threadId)),
     ]);
     return {
@@ -1791,10 +1839,15 @@ export class CodeProjectPullRequestService {
         ) {
           continue;
         }
+        // A person's unlink wins over a recorded link too.
         const linkedThreads = link.threadIds
           .flatMap((id) => {
             const fact = threadById.get(String(id));
-            return fact === undefined
+            return fact === undefined ||
+              this.#unlinkedFrom(fact, project.projectId, {
+                repository: { owner: link.repositoryOwner, name: link.repositoryName },
+                number: link.number,
+              })
               ? []
               : [{ threadId: decodeCodeThreadId(fact.threadId), title: fact.title }];
           })
@@ -1822,19 +1875,27 @@ export class CodeProjectPullRequestService {
       }
       for (const thread of threads) {
         if (thread.projectId !== String(project.projectId)) continue;
-        if (
-          !this.#areSameRepository(project.projectId, thread.repository, {
-            owner: project.repositoryOwner,
-            name: project.repositoryName,
-          })
-        ) {
-          continue;
-        }
         for (const identity of thread.pullRequestNumbers ?? []) {
+          // A number from Octant's own operations is in the thread's own
+          // repository; one a tool call wrote to names its repository.
+          const repository = identity.repository ?? thread.repository;
+          if (
+            !this.#areSameRepository(project.projectId, repository, {
+              owner: project.repositoryOwner,
+              name: project.repositoryName,
+            })
+          ) {
+            continue;
+          }
+          if (
+            this.#unlinkedFrom(thread, project.projectId, { repository, number: identity.number })
+          ) {
+            continue;
+          }
           const link = this.#resolveLink({
             projectId: project.projectId,
-            repositoryOwner: thread.repository.owner,
-            repositoryName: thread.repository.name,
+            repositoryOwner: repository.owner,
+            repositoryName: repository.name,
             number: identity.number,
           });
           rows.push({
@@ -2423,18 +2484,19 @@ export class CodeProjectPullRequestService {
     if (link !== undefined) {
       for (const id of link.threadIds) {
         const fact = threadById.get(String(id));
-        if (fact !== undefined) add(fact.threadId, fact.title);
+        // A person's unlink wins over a recorded link, as over every other
+        // linking evidence, until the thread touches the pull request again.
+        if (
+          fact !== undefined &&
+          !this.#unlinkedFrom(fact, project.projectId, {
+            repository: { owner: target.owner, name: target.name },
+            number: target.number,
+          })
+        ) {
+          add(fact.threadId, fact.title);
+        }
       }
     }
-    const normalizedThreads = threads.map((thread) =>
-      thread.projectId === String(project.projectId) &&
-      this.#areSameRepository(project.projectId, thread.repository, {
-        owner: target.owner,
-        name: target.name,
-      })
-        ? { ...thread, repository: { owner: target.owner, name: target.name } }
-        : thread,
-    );
     for (const thread of matchLinkedThreadsToPullRequest({
       pullRequest: {
         repository: { owner: target.owner, name: target.name },
@@ -2443,7 +2505,8 @@ export class CodeProjectPullRequestService {
         headBranch: target.headBranch,
         title: target.title,
       },
-      threads: normalizedThreads,
+      threads,
+      sameRepository: (left, right) => this.#areSameRepository(project.projectId, left, right),
     })) {
       add(thread.threadId, thread.title);
     }
@@ -2522,6 +2585,17 @@ export class CodeProjectPullRequestService {
     readonly pullRequestNodeId?: string;
   }): PullRequestLinkRecord | undefined {
     return this.#pullRequestLinks?.resolveLink?.(query);
+  }
+
+  /** A person's unlink of a pull request, matched across a repository rename. */
+  #unlinkedFrom(
+    thread: CodeProjectLinkedThreadFact,
+    projectId: ProjectId,
+    pullRequest: Parameters<typeof threadUnlinkedPullRequest>[1],
+  ): boolean {
+    return threadUnlinkedPullRequest(thread, pullRequest, (left, right) =>
+      this.#areSameRepository(projectId, left, right),
+    );
   }
 
   #areSameRepository(

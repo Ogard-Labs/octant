@@ -14,7 +14,11 @@ import { HarnessRetryEventFields } from "./harnessRetry";
 import { AccountMoveTextHandoffCause, ContextHandoffOmissions } from "./contextHandoff";
 import { ProviderChildActivityEvent } from "./providers";
 import { ProviderNativeSessionId } from "./providerNativeSession";
-import { ThreadCanvasPreviewReceipt, ThreadPublishedPage } from "./threadToolSteps";
+import {
+  ThreadCanvasPreviewReceipt,
+  ThreadForgeReferences,
+  ThreadPublishedPage,
+} from "./threadToolSteps";
 import { ThreadCallTiming } from "./threadToolStepList";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
 import { ThreadBoardFinishedMark } from "./finishedReceipt";
@@ -1952,6 +1956,8 @@ const ToolEvent = Schema.Struct({
   summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
   /** A page the call published outside this host; the transcript links to it. */
   published: Schema.optional(ThreadPublishedPage),
+  /** The pull requests and issues the call wrote to; they link the thread. */
+  forgeReferences: Schema.optional(ThreadForgeReferences),
   /** The call's result brought outside content into the thread; the row carries the mark. */
   outsideContent: Schema.optional(ToolOutsideContentMark),
   /** The routine the call set up; the transcript shows what was created. */

@@ -2,6 +2,8 @@ import {
   BFL_IMAGE_MODEL_PRESETS,
   GEMINI_IMAGE_MODEL_PRESETS,
   GEMINI_VIDEO_MODEL_PRESETS,
+  RUNWAY_VIDEO_MODEL_PRESETS,
+  FAL_VIDEO_MODEL_PRESETS,
   IDEOGRAM_IMAGE_MODEL_PRESETS,
   OPENAI_IMAGE_MODEL_PRESETS,
   type ProviderInstance,
@@ -22,7 +24,7 @@ import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
 import {
   openAiImageConfigurationFrom,
   geminiImageConfigurationFrom,
-  geminiVideoConfigurationFrom,
+  videoConfigurationFrom,
   bflImageConfigurationFrom,
   ideogramImageConfigurationFrom,
 } from "./configurationValues";
@@ -814,17 +816,55 @@ export function IdeogramImageConfigurationForm(props: IdeogramImageConfiguration
   );
 }
 
+type VideoProfileInstance = Extract<
+  ProviderInstance,
+  { driverKind: "gemini-video" | "runway-video" | "fal-video" }
+>;
+
+/** What each video profile kind suggests, and what to say about its models. */
+const VIDEO_PROFILE_COPY: Record<
+  VideoProfileInstance["driverKind"],
+  {
+    readonly presets: ReadonlyArray<string>;
+    readonly configurationKind: VideoProfileInstance["configuration"]["kind"];
+    readonly label: string;
+    readonly models: string;
+  }
+> = {
+  "gemini-video": {
+    presets: GEMINI_VIDEO_MODEL_PRESETS,
+    configurationKind: "gemini-video-http",
+    label: "Gemini video",
+    models: "Suggested models are data, not a catalog Octant maintains",
+  },
+  "runway-video": {
+    presets: RUNWAY_VIDEO_MODEL_PRESETS,
+    configurationKind: "runway-video-http",
+    label: "Runway video",
+    models: "Runway's own models Octant knows",
+  },
+  "fal-video": {
+    presets: FAL_VIDEO_MODEL_PRESETS,
+    configurationKind: "fal-video-http",
+    label: "fal video",
+    models:
+      "fal endpoint IDs; any fal video endpoint works, and Octant reads its options and price from fal. For example",
+  },
+};
+
 /**
- * A Gemini video profile's models and key. It has no aspect ratio or
- * resolution: those are chosen per clip when a video is generated.
+ * A video profile's models and key. It has no aspect ratio or resolution:
+ * those are chosen per clip when a video is generated.
  */
-export function GeminiVideoFields(props: {
+export function VideoProfileFields(props: {
+  readonly driverKind: VideoProfileInstance["driverKind"];
   readonly credentialInput: RefObject<HTMLInputElement | null>;
   readonly credentialManagementAvailable: boolean;
-  readonly instance?: Extract<ProviderInstance, { driverKind: "gemini-video" }>;
+  readonly instance?: VideoProfileInstance;
 }) {
   const hostPlatform = useHostPlatform();
   const configuration = props.instance?.configuration;
+  const copy = VIDEO_PROFILE_COPY[props.driverKind];
   const settingId = (field: string) =>
     props.instance === undefined ? undefined : `provider-${props.instance.id}-${field}`;
   return (
@@ -841,11 +881,9 @@ export function GeminiVideoFields(props: {
               : `Model allowlist for ${props.instance.displayName}`
           }
           className="settings-view__text-input window-no-drag"
-          defaultValue={
-            configuration?.modelAllowlist.join(", ") ?? GEMINI_VIDEO_MODEL_PRESETS.join(", ")
-          }
+          defaultValue={configuration?.modelAllowlist.join(", ") ?? copy.presets.join(", ")}
           name="modelAllowlist"
-          placeholder={GEMINI_VIDEO_MODEL_PRESETS.join(", ")}
+          placeholder={copy.presets.join(", ")}
           required
           rows={2}
         />
@@ -858,9 +896,9 @@ export function GeminiVideoFields(props: {
               : `Default model for ${props.instance.displayName}`
           }
           className="settings-view__text-input window-no-drag"
-          defaultValue={configuration?.defaultModel ?? GEMINI_VIDEO_MODEL_PRESETS[0]}
+          defaultValue={configuration?.defaultModel ?? copy.presets[0]}
           name="defaultModel"
-          placeholder={GEMINI_VIDEO_MODEL_PRESETS[0]}
+          placeholder={copy.presets[0]}
           required
         />
       </ProviderField>
@@ -882,10 +920,9 @@ export function GeminiVideoFields(props: {
         />
       </ProviderField>
       <p className="provider-settings__field-guidance">
-        Suggested models are data, not a catalog Octant maintains:{" "}
-        {GEMINI_VIDEO_MODEL_PRESETS.join(", ")}. Enter any model IDs. Aspect ratio, resolution, and
-        length are chosen for each clip. The API key is stored write-only in{" "}
-        {hostCredentialStore(hostPlatform)}. This profile has no editable base URL.
+        {copy.models}: {copy.presets.join(", ")}. Aspect ratio, resolution, and length are chosen
+        for each clip. The API key is stored write-only in {hostCredentialStore(hostPlatform)}. This
+        profile has no editable base URL.
       </p>
       {!props.credentialManagementAvailable ? (
         <p className="provider-settings__field-guidance">
@@ -897,16 +934,16 @@ export function GeminiVideoFields(props: {
   );
 }
 
-interface GeminiVideoConfigurationFormProps {
-  readonly instance: Extract<ProviderInstance, { driverKind: "gemini-video" }>;
+interface VideoConfigurationFormProps {
+  readonly instance: VideoProfileInstance;
   readonly disabled: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly credential: CredentialStatusController;
-  readonly onChange: ProviderSettingsViewProps["onChangeGeminiVideoConfiguration"];
+  readonly onChange: ProviderSettingsViewProps["onChangeVideoConfiguration"];
   readonly onClearCredential: ProviderSettingsViewProps["onClearProviderCredential"];
 }
 
-export function GeminiVideoConfigurationForm(props: GeminiVideoConfigurationFormProps) {
+export function VideoConfigurationForm(props: VideoConfigurationFormProps) {
   const credentialInput = useRef<HTMLInputElement>(null);
   return (
     <form
@@ -914,7 +951,10 @@ export function GeminiVideoConfigurationForm(props: GeminiVideoConfigurationForm
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
-        const configuration = geminiVideoConfigurationFrom(new FormData(event.currentTarget));
+        const configuration = videoConfigurationFrom(
+          new FormData(event.currentTarget),
+          VIDEO_PROFILE_COPY[props.instance.driverKind].configurationKind,
+        );
         const enteredCredential = transientCredential(credentialInput.current);
         const generation =
           enteredCredential.value.length > 0 ? props.credential.beginMutation() : undefined;
@@ -930,7 +970,8 @@ export function GeminiVideoConfigurationForm(props: GeminiVideoConfigurationForm
         );
       }}
     >
-      <GeminiVideoFields
+      <VideoProfileFields
+        driverKind={props.instance.driverKind}
         credentialInput={credentialInput}
         credentialManagementAvailable={props.credentialManagementAvailable}
         instance={props.instance}
@@ -941,7 +982,7 @@ export function GeminiVideoConfigurationForm(props: GeminiVideoConfigurationForm
           type="submit"
           variant="secondary"
           size="sm"
-          aria-label={`Save Gemini video settings for ${props.instance.displayName}`}
+          aria-label={`Save ${VIDEO_PROFILE_COPY[props.instance.driverKind].label} settings for ${props.instance.displayName}`}
         >
           Save
         </OctantButton>

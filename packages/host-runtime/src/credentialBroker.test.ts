@@ -814,6 +814,129 @@ describe("startCredentialBroker", () => {
     }
   });
 
+  it("keeps a remembered thread secret in its own namespace and refuses callers without the broker token", async () => {
+    const secretId = randomUUID();
+    const threadSecrets = memoryStore();
+    const providerKeys = memoryStore();
+    const broker = await startCredentialBroker(
+      providerKeys,
+      undefined,
+      undefined,
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      undefined,
+      memoryStore(),
+      undefined,
+      memoryStore(),
+      threadSecrets,
+    );
+    try {
+      const call = async (path: string, body: Record<string, string>, token = broker.token) =>
+        broker.fetchForTest(brokerRequest(broker.url, token, path, { body: JSON.stringify(body) }));
+      expect(
+        (await call("/v1/thread-secret-credentials/set", { secretId, credential: "remembered" }))
+          .status,
+      ).toBe(200);
+      expect((await call("/v1/credentials/resolve", { providerInstanceId: secretId })).status).toBe(
+        404,
+      );
+      for (const route of [
+        "/v1/desktop-provider-credentials/resolve",
+        "/v1/push-platform-credentials/resolve",
+        "/v1/web-search-credentials/resolve",
+      ]) {
+        expect((await call(route, { credentialRef: secretId })).status).toBe(404);
+      }
+      expect(
+        (await call("/v1/thread-secret-credentials/resolve", { secretId }, "wrong-token")).status,
+      ).toBe(401);
+      expect(
+        (
+          await broker.fetchForTest(
+            brokerRequest(broker.url, broker.token, "/v1/thread-secret-credentials/resolve", {
+              body: JSON.stringify({ secretId }),
+            }),
+            "192.0.2.10",
+          )
+        ).status,
+      ).toBe(401);
+      expect(
+        (await call("/v1/thread-secret-credentials/resolve", { credentialRef: secretId })).status,
+      ).toBe(400);
+      expect(
+        await (await call("/v1/thread-secret-credentials/resolve", { secretId })).json(),
+      ).toEqual({ credential: "remembered" });
+      expect(
+        await (await call("/v1/thread-secret-credentials/delete", { secretId })).json(),
+      ).toEqual({ deleted: true });
+      expect(await threadSecrets.has(secretId)).toBe(false);
+      expect(await providerKeys.has(secretId)).toBe(false);
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("keeps a thread secret and an MCP server secret with the same id apart", async () => {
+    const secretId = randomUUID();
+    const threadSecrets = memoryStore();
+    const mcpSecrets = memoryStore();
+    const broker = await startCredentialBroker(
+      memoryStore(),
+      undefined,
+      undefined,
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      mcpSecrets,
+      memoryStore(),
+      memoryStore(),
+      undefined,
+      memoryStore(),
+      undefined,
+      memoryStore(),
+      threadSecrets,
+    );
+    try {
+      const call = async (path: string, body: Record<string, string>) =>
+        broker.fetchForTest(
+          brokerRequest(broker.url, broker.token, path, { body: JSON.stringify(body) }),
+        );
+      await call("/v1/thread-secret-credentials/set", { secretId, credential: "thread-value" });
+      expect(
+        await (await call("/v1/mcp-server-credentials/resolve", { secretId })).json(),
+      ).not.toEqual({ credential: "thread-value" });
+      expect(await mcpSecrets.has(secretId)).toBe(false);
+      await call("/v1/mcp-server-credentials/set", { secretId, credential: "mcp-value" });
+      expect(
+        await (await call("/v1/thread-secret-credentials/resolve", { secretId })).json(),
+      ).toEqual({ credential: "thread-value" });
+      await call("/v1/mcp-server-credentials/delete", { secretId });
+      expect(await threadSecrets.has(secretId)).toBe(true);
+      await call("/v1/thread-secret-credentials/delete", { secretId });
+      expect(await threadSecrets.has(secretId)).toBe(false);
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("answers the thread secret routes as unknown when the host has no store for them", async () => {
+    const broker = await startCredentialBroker(memoryStore());
+    try {
+      const response = await broker.fetchForTest(
+        brokerRequest(broker.url, broker.token, "/v1/thread-secret-credentials/has", {
+          body: JSON.stringify({ secretId: randomUUID() }),
+        }),
+      );
+      expect(response.status).toBe(404);
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("gives out an SSH key's public line and signs only its logins, never the key", async () => {
     const serverId = randomUUID();
     const sshKeys = memoryStore();

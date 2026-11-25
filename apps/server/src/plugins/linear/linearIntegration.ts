@@ -182,6 +182,7 @@ async function identitySnapshot(
   source: "oauth" | "personal-api-key",
   signal?: AbortSignal,
 ): Promise<IntegrationAuthenticationSnapshot> {
+  const personalFlag = source === "personal-api-key" ? { personalCredentialStored: true } : {};
   const result = await graphqlWithReference(
     hostPort,
     reference,
@@ -192,14 +193,24 @@ async function identitySnapshot(
   );
   if (result.kind === "unauthorized") {
     return source === "personal-api-key" && !result.reconnect
-      ? unauthorized("The Linear personal API key was rejected.")
+      ? unauthorized("The Linear personal API key was rejected.", true)
       : reconnectSnapshot();
   }
   if (result.kind === "rate-limited") {
-    return { state: "rate-limited", capabilities: [], remediation: LINEAR_ISSUE_RATE_LIMITED };
+    return {
+      state: "rate-limited",
+      capabilities: [],
+      remediation: LINEAR_ISSUE_RATE_LIMITED,
+      ...personalFlag,
+    };
   }
   if (result.kind !== "ok") {
-    return { state: "unavailable", capabilities: [], remediation: LINEAR_ISSUE_UNAVAILABLE };
+    return {
+      state: "unavailable",
+      capabilities: [],
+      remediation: LINEAR_ISSUE_UNAVAILABLE,
+      ...personalFlag,
+    };
   }
   const account = readIdentity(result.body, source);
   if (account === undefined) {
@@ -207,9 +218,15 @@ async function identitySnapshot(
       state: "unavailable",
       capabilities: [],
       remediation: "Linear identity is unavailable.",
+      ...personalFlag,
     };
   }
-  return { state: "ready", account, capabilities: [...linearIssueBrowseCapabilities()] };
+  return {
+    state: "ready",
+    account,
+    capabilities: [...linearIssueBrowseCapabilities()],
+    ...personalFlag,
+  };
 }
 
 function readIdentity(
@@ -220,10 +237,17 @@ function readIdentity(
   const viewer = isRecord(body.data.viewer) ? body.data.viewer : undefined;
   const organization =
     viewer !== undefined && isRecord(viewer.organization) ? viewer.organization : undefined;
-  const login =
-    readName(organization?.urlKey) ?? readName(organization?.name) ?? readName(viewer?.name);
+  const displayName = readName(viewer?.name);
+  const workspace = readName(organization?.name) ?? readName(organization?.urlKey);
+  const login = readName(organization?.urlKey) ?? readName(organization?.name) ?? displayName;
   if (login === undefined) return undefined;
-  return { login, source, scopes: [...LINEAR_OAUTH_SCOPES] };
+  return {
+    login,
+    source,
+    scopes: [...LINEAR_OAUTH_SCOPES],
+    ...(displayName === undefined ? {} : { displayName }),
+    ...(workspace === undefined ? {} : { workspace }),
+  };
 }
 
 function configuredClientId(value: string | undefined): string | undefined {
@@ -234,8 +258,16 @@ function configuredClientId(value: string | undefined): string | undefined {
   return trimmed;
 }
 
-function unauthorized(remediation: string): IntegrationAuthenticationSnapshot {
-  return { state: "unauthorized", capabilities: [], remediation };
+function unauthorized(
+  remediation: string,
+  personalCredentialStored?: boolean,
+): IntegrationAuthenticationSnapshot {
+  return {
+    state: "unauthorized",
+    capabilities: [],
+    remediation,
+    ...(personalCredentialStored === undefined ? {} : { personalCredentialStored }),
+  };
 }
 
 function reconnectSnapshot(): IntegrationAuthenticationSnapshot {

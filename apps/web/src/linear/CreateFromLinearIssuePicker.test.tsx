@@ -129,4 +129,21 @@ describe("Create from Linear issue picker", () => {
     expect(screen.getByRole("button", { name: /ENG-12 Browse issues/ })).toBeVisible();
     expect(screen.queryByRole("status")).toBeNull();
   });
+
+  it("defaults to the active Project's Linear binding and lets the person widen to all workspace issues", async () => {
+    const user = userEvent.setup();
+    const listIssues = vi.fn(async () => page);
+    render(
+      <CreateFromLinearIssuePicker
+        client={makeClient(readySnapshot, { listIssues })}
+        defaultLinearTarget={{ teamId: "team-oct", teamKey: "OCT", teamName: "Octant" }}
+        onSelect={vi.fn()}
+      />,
+    );
+    await waitFor(() =>
+      expect(listIssues).toHaveBeenCalledWith({ filter: { teamId: "team-oct" } }),
+    );
+    await user.click(screen.getByRole("button", { name: "All workspace" }));
+    await waitFor(() => expect(listIssues).toHaveBeenCalledWith({}));
+  });
 });

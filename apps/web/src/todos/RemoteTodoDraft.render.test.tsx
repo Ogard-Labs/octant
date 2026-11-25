@@ -252,4 +252,80 @@ describe("the ordinary composer on a paired computer", () => {
     expect(ports.clients.code?.threadEvents).toBe("poll");
     expect(code.subscribe).toHaveBeenCalledTimes(2);
   });
+
+  it("loads thread video clips when opening a linked Code thread at Read only access", async () => {
+    vi.clearAllMocks();
+    const project = decodeProjectSummary({
+      id: projectId,
+      type: "code",
+      name: "Laptop Project",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      binding: { canonicalRoot: "/project" },
+      bindingRevisionId: "66666666-6666-4666-8666-666666666666",
+      codeAccessPersistence: "current-session",
+    });
+    const destinationLink = {
+      hostId: decodeStableHostId(hostId),
+      mode: "code" as const,
+      threadId: decodeMentionableThreadId(codeThreadId),
+    };
+    const sent: URL[] = [];
+    const bridge = await readyPairedBridge(sent, {
+      actsAsHostPerson: false,
+      wrapFetch: (inner) => async (input, init) => {
+        const response = await inner(input, init);
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.endsWith("/api/remote/auth/device") && response.ok) {
+          const payload = (await response.json()) as Record<string, unknown>;
+          return Response.json({
+            ...payload,
+            actsAsHostPerson: false,
+            accessLevel: "read-only",
+          });
+        }
+        return response;
+      },
+    });
+    const listVideo = vi.fn(async () => ({ jobs: [] }));
+    const actualClients = await vi
+      .importActual<typeof import("../remote/remoteProductClients")>(
+        "../remote/remoteProductClients",
+      )
+      .then((module) => module.createRemoteProductClients(bridge));
+    ports.clients = {
+      ...actualClients,
+      chat: chats(),
+      code: codes(),
+      project: projects({ active: [project], archived: [], availability: [], memory: [] }),
+      provider: providersWithToolModel(),
+      replyDetail: { read: vi.fn(async () => undefined) },
+      videoResults: { list: listVideo, clipUrl: vi.fn() },
+    };
+
+    render(
+      <RemoteTodoDraft
+        bridge={bridge}
+        hostId={hostId}
+        hostName="Laptop"
+        connected
+        project={project}
+        todo={todo}
+        thread={destinationLink}
+        onCreated={async () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(listVideo).toHaveBeenCalledWith({
+        threadKind: "code-thread",
+        scopeId: codeThreadId,
+      }),
+    );
+  });
 });

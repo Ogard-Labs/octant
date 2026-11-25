@@ -77,6 +77,8 @@ describe("Windows provider credentials", () => {
       "desktop-provider-credential",
       "push-platform-credential",
       "ssh-key",
+      "web-search-credential",
+      "thread-secret-credential",
     ];
     for (const [purpose, namespace] of namespaces.entries()) {
       const { store, calls } = fixture(reply(), namespace);

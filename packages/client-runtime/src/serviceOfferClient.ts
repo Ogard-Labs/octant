@@ -180,7 +180,7 @@ export function describeVideoOffer(offer: VideoGenerateOffer, options: VideoClip
   const retention =
     job.removal.kind === "delete"
       ? `${offer.providerName} receives ${sent} and keeps them until Octant removes its copy.`
-      : `${offer.providerName} receives ${sent} and keeps them for ${String(job.removal.afterHours)} hours.`;
+      : `${offer.providerName} receives ${sent} and keeps them for up to ${String(job.removal.afterHours)} hours.`;
   return {
     price,
     retention,

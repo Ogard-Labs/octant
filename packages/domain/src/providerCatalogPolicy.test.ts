@@ -296,6 +296,39 @@ describe("provider catalog state", () => {
     expect(added.authenticated).toBe("not-needed");
   });
 
+  it("offers an outside image profile no connection check once it is on, since its driver starts at the first image", () => {
+    const profile = {
+      id: "outside-image-1" as ProviderInstanceId,
+      displayName: "Example images",
+      driverKind: "outside-image",
+      configuration: {
+        kind: "outside-image",
+        driver: {
+          extensionId: "00000000-0000-4000-8000-000000000921",
+          packageId: "00000000-0000-4000-8000-000000000922",
+          componentId: "images",
+          version: "1.0.0",
+          digest: `sha256:${"d".repeat(64)}`,
+        },
+        baseUrl: "https://images.example.test",
+        key: { header: "authorization", scheme: "Bearer" },
+        modelAllowlist: ["example-image-1"],
+        defaultModel: "example-image-1",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    } as never as ProviderInstance;
+    const state = resolveProviderCatalogState(
+      bundled("outside-image"),
+      host({ instances: [profile] }),
+    );
+    expect(state.setup).toBe("endpoint");
+    expect(state.next).toEqual({ kind: "done", instanceId: profile.id });
+  });
+
   it("states each driver's modes and agent loop as the send gates apply them", () => {
     expect(providerCatalogCapabilities("claude")).toEqual({
       modes: { chat: "yes", work: "checked-models", code: "checked-models" },

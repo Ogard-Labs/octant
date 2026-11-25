@@ -19,6 +19,7 @@ import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { PullRequestStatePill } from "./PullRequestStatePill";
+import type { CodeThreadRestOutcome } from "./useCodeController";
 import { Markdown } from "../markdown/Markdown";
 import { CodeBlock } from "../transcript/CodeBlock";
 import "./project-pull-request-review.css";
@@ -79,6 +80,12 @@ export interface ProjectPullRequestReviewPaneProps {
   ) => Promise<CodeLineNotesSendResult>;
   readonly pullRequestReviewClient?: PullRequestReviewClient;
   readonly pullRequestTarget?: PullRequestReviewTarget;
+  /**
+   * Shown when the pull request is open inside a thread: its More actions
+   * menu then offers Unlink from this thread, which stops the thread listing
+   * it until the thread touches it again.
+   */
+  readonly onUnlinkFromThread?: () => Promise<CodeThreadRestOutcome>;
   /**
    * "page" is the destination's reading pane (tabs, a status column); the
    * default is the dock's one column. Both hold the same actions and refusals.

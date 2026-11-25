@@ -578,6 +578,21 @@
   margin-top: 4px;
 }
 
+/* Working and Settled stay at the foot of Status and the Activity feed while
+   the list above scrolls. The cap keeps a long Working list from taking the
+   sidebar; past it the foot scrolls inside itself. */
+/* The nav lays its children out as a column while the foot shows, so with a
+   short list the foot still sits at the sidebar's bottom edge. */
+.sidebar-live-dock {
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  max-height: 40%;
+  overflow-y: auto;
+  border-top: 1px solid var(--oct-hairline);
+  background: var(--octant-sidebar-opaque);
+}
+
 .project-row--archived {
   margin-top: 4px;
 }

@@ -119,6 +119,41 @@ describe("estimateImageGenerationCost", () => {
     });
   });
 
+  it("prices an outside image driver only from the price its package declares", () => {
+    expect(
+      estimateImageGenerationCost({
+        driverKind: "outside-image",
+        modelId: "example-image-1",
+        variantCount: 3,
+        declaredUsdMicrosPerImage: 40_000,
+      }),
+    ).toMatchObject({ kind: "api-estimate", usdMicros: 120_000, usdCents: 12 });
+    expect(
+      estimateImageGenerationCost({
+        driverKind: "outside-image",
+        modelId: "example-image-1",
+        variantCount: 1,
+      }),
+    ).toEqual({ kind: "unpriced", reason: "unknown-model" });
+    expect(
+      estimateImageGenerationCost({
+        driverKind: "outside-image",
+        modelId: "example-image-1",
+        variantCount: 1,
+        declaredUsdMicrosPerImage: -5,
+      }),
+    ).toEqual({ kind: "unpriced", reason: "unknown-option" });
+    // A declared price never reaches a bundled driver's estimate.
+    expect(
+      estimateImageGenerationCost({
+        driverKind: "bfl-image",
+        modelId: "flux-unknown",
+        variantCount: 1,
+        declaredUsdMicrosPerImage: 1,
+      }),
+    ).toEqual({ kind: "unpriced", reason: "unknown-model" });
+  });
+
   it("estimates Black Forest Labs and Ideogram model prices", () => {
     expect(
       estimateImageGenerationCost({

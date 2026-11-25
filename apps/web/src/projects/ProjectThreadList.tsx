@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { threadRowShortAge } from "./threadRowShortAge";
 import type { ComponentType, ReactElement, ReactNode } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -27,6 +28,7 @@ import {
   Pin,
   PinOff,
   RotateCcw,
+  Undo2,
 } from "../ui/icons";
 import type { IconComponent } from "../ui/icons";
 import { resolveSnoozePresets } from "@octant/domain";
@@ -194,36 +196,13 @@ export function threadRowState(props: {
  * header carries recency without the reader parsing a date. Falls back to the
  * absolute date past a year, where "14mo ago" stops being useful.
  */
-/**
- * The row's own age: the shortest true reading, because the row has one word
- * of room at its edge and the card beside it spells the rest out. Minutes,
- * hours, days, weeks and years floor, so "59m" never rounds up to a false
- * "60m". It never runs past three characters ("52w", "2y"), because the age
- * sits in a slot of fixed width and a date would not fit; the tooltip carries
- * the full moment.
- */
-export function threadRowShortAge(
-  updatedAt: string | undefined,
-  now: number = Date.now(),
-): string | undefined {
-  if (updatedAt === undefined) return undefined;
-  const date = new Date(updatedAt);
-  if (Number.isNaN(date.getTime())) return undefined;
-  const minutes = Math.max(0, Math.floor((now - date.getTime()) / 60000));
-  if (minutes < 1) return "now";
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
-  if (days < 365) return `${Math.floor(days / 7)}w`;
-  return `${Math.floor(days / 365)}y`;
-}
 
 /**
  * The time a row shows: when a snoozed thread returns, otherwise how long ago
  * it last moved, and only while the view shows Last updated.
  */
+export { threadRowShortAge };
+
 export function threadRowAgeFact(
   thread: {
     readonly wakeLabel?: string;
@@ -338,6 +317,10 @@ export function ThreadRowActionsGutter(props: {
   const threadId = props.thread.navigationId ?? props.thread.threadId;
   const pinned = props.thread.pinned === true;
   const pinLabel = pinned ? "Unpin thread" : "Pin thread";
+  // The gutter's second button settles or un-settles the thread, the action a
+  // finished row most often wants; Archive moves to the menus for such rows,
+  // since the slot holds two buttons and a third would cut every title short.
+  const settled = props.thread.completedAt !== undefined;
   // The overflow menu is flat, so it lists only the first few pull requests;
   // the right-click menu and the hover card reach the rest.
   const pullRequestDestinations = threadRowPullRequestDestinations(
@@ -390,7 +373,7 @@ export function ThreadRowActionsGutter(props: {
         : [
             {
               icon: <RotateCcw aria-hidden="true" size={14} />,
-              label: "Reopen thread",
+              label: "Un-settle thread",
               value: "reopen",
             } as const,
           ]
@@ -399,7 +382,7 @@ export function ThreadRowActionsGutter(props: {
         : [
             {
               icon: <Check aria-hidden="true" size={14} />,
-              label: "Put thread away",
+              label: "Settle thread",
               value: "complete",
             } as const,
           ]),
@@ -441,7 +424,29 @@ export function ThreadRowActionsGutter(props: {
           {pinned ? <PinOff aria-hidden="true" size={14} /> : <Pin aria-hidden="true" size={14} />}
         </OctantIconButton>
       )}
-      {props.actions.onArchiveThread === undefined ? null : (
+      {settled && props.actions.onReopenThread !== undefined ? (
+        <OctantIconButton
+          className="sidebar-navigation__thread-action sidebar-navigation__thread-action--inline"
+          label="Un-settle thread"
+          onClick={() => props.actions.onReopenThread?.(threadId)}
+          title="Un-settle thread"
+          type="button"
+          variant="bare"
+        >
+          <Undo2 aria-hidden="true" size={14} />
+        </OctantIconButton>
+      ) : !settled && props.actions.onCompleteThread !== undefined ? (
+        <OctantIconButton
+          className="sidebar-navigation__thread-action sidebar-navigation__thread-action--inline"
+          label="Settle thread"
+          onClick={() => props.actions.onCompleteThread?.(threadId)}
+          title="Settle thread"
+          type="button"
+          variant="bare"
+        >
+          <Check aria-hidden="true" size={14} />
+        </OctantIconButton>
+      ) : props.actions.onArchiveThread === undefined ? null : (
         <OctantIconButton
           className="sidebar-navigation__thread-action sidebar-navigation__thread-action--inline"
           label="Archive thread"
@@ -484,7 +489,12 @@ export function ThreadRowActionsGutter(props: {
  */
 export function hasInlineActions(actions: ThreadRowActions | undefined): boolean {
   if (actions === undefined) return false;
-  return actions.onPinThread !== undefined || actions.onArchiveThread !== undefined;
+  return (
+    actions.onPinThread !== undefined ||
+    actions.onArchiveThread !== undefined ||
+    actions.onCompleteThread !== undefined ||
+    actions.onReopenThread !== undefined
+  );
 }
 
 function selectionIdFor(

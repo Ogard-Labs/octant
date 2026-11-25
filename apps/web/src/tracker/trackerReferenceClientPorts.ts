@@ -84,9 +84,26 @@ export function createTrackerReferenceClientPorts(
             available: linearInput.available,
             getIssue: async (key: string) => {
               try {
-                // get-issue takes an opaque node id; tracker tags only carry the
-                // public identifier (ABC-99). list-issues is the seam that
-                // resolves identifiers, and the row has the chip fields.
+                if (typeof linearInput.client.getIssueByIdentifier === "function") {
+                  try {
+                    const detail = await linearInput.client.getIssueByIdentifier({
+                      identifier: key,
+                    });
+                    return {
+                      kind: "resolved" as const,
+                      title: detail.title,
+                      url: detail.url,
+                      state: linearStateToChipState(detail.state.type),
+                    };
+                  } catch (error) {
+                    if (
+                      !(error instanceof IntegrationClientFailure) ||
+                      !isUnsupportedDirectLookup(error)
+                    ) {
+                      throw error;
+                    }
+                  }
+                }
                 const page = await linearInput.client.listIssues({
                   search: key,
                   pageSize: 50,
@@ -111,4 +128,15 @@ export function createTrackerReferenceClientPorts(
           },
         }),
   };
+}
+
+function isUnsupportedDirectLookup(error: IntegrationClientFailure): boolean {
+  const normalized = error.message.toLowerCase();
+  return (
+    normalized.includes("operations are not available") ||
+    normalized.includes("operation is not available") ||
+    normalized.includes("not supported") ||
+    normalized.includes("unsupported") ||
+    normalized.includes("unknown operation")
+  );
 }

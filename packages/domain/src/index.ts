@@ -142,6 +142,7 @@ export * from "./previewPolicy";
 export * from "./parallelRunPolicy";
 export * from "./productFeedbackPolicy";
 export * from "./projectPolicy";
+export * from "./linearProjectPolicy";
 export * from "./projectViewPolicy";
 export * from "./pullRequestReviewPolicy";
 export * from "./providerCapacityPolicy";

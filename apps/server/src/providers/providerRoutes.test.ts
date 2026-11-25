@@ -59,7 +59,7 @@ describe("ProviderRoutes", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses a paired device adding or reconfiguring an outside driver provider or verifying tools before the service runs", async () => {
+  it("refuses a paired device adding or reconfiguring an outside chat or image driver provider or verifying tools before the service runs", async () => {
     const execute = vi.fn(() => ({ kind: "provider-created", instance: provider() }));
     const route = routeFixture({ execute });
     const pairedDeviceId = "80000000-0000-4000-8000-000000000030";
@@ -90,6 +90,29 @@ describe("ProviderRoutes", () => {
       kind: "change-outside-harness-endpoint-configuration",
       expectedVersion: 1,
     } as never);
+    const imageConfiguration = {
+      kind: "outside-image",
+      driver: (create.configuration as { readonly driver: unknown }).driver,
+      baseUrl: "https://images.example.test/",
+      key: { header: "authorization", scheme: "Bearer" },
+      modelAllowlist: ["example-image-1"],
+      defaultModel: "example-image-1",
+    };
+    commands.push(
+      {
+        kind: "create-outside-image-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Example images",
+        configuration: imageConfiguration,
+      } as never,
+      {
+        kind: "change-outside-image-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: imageConfiguration,
+      } as never,
+    );
     for (const body of commands) {
       const remote = new Request("http://127.0.0.1/api/providers/commands", {
         method: "POST",

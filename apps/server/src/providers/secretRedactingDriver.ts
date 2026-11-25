@@ -1,6 +1,7 @@
 import type { ProviderRuntimeEvent } from "@octant/contracts";
+import { ThreadForgeReference } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
-import { Effect, Stream } from "effect";
+import { Effect, Schema, Stream } from "effect";
 import { redactHostSecretsInValue } from "../process/secretRedaction";
 
 /**
@@ -36,8 +37,58 @@ const REDACTED_KINDS: ReadonlySet<ProviderRuntimeEvent["kind"]> = new Set([
   "failed",
 ]);
 
+/** What says which event this is and what state it reports, in Octant's own words. */
+const STRUCTURE = [
+  "instanceId",
+  "sessionId",
+  "correlationId",
+  "occurredAt",
+  "kind",
+  "part",
+  "change",
+  "status",
+] as const;
+
+const isForgeReference = Schema.is(ThreadForgeReference);
+
 export function redactProviderRuntimeEvent(event: ProviderRuntimeEvent): ProviderRuntimeEvent {
-  return REDACTED_KINDS.has(event.kind) ? redactHostSecretsInValue(event) : event;
+  if (!REDACTED_KINDS.has(event.kind)) return event;
+  const redacted = redactHostSecretsInValue(event);
+  if (redacted === event) return event;
+  // A password can be a word Octant uses ("completed"). Those stay; anything
+  // else that carries it is replaced.
+  const structure = STRUCTURE.filter((key) => key in event).map((key) => [
+    key,
+    Reflect.get(event, key),
+  ]);
+  const shown = { ...redacted, ...Object.fromEntries(structure) } as ProviderRuntimeEvent;
+  if (event.kind === "failed" && shown.kind === "failed") {
+    const { category, reason, diagnostic, usageLimit } = event.failure;
+    return {
+      ...shown,
+      failure: {
+        ...shown.failure,
+        category,
+        ...(reason === undefined ? {} : { reason }),
+        ...(diagnostic === undefined ? {} : { diagnostic }),
+        ...(usageLimit === undefined ? {} : { usageLimit }),
+      },
+    };
+  }
+  if (event.kind !== "tool-success" || shown.kind !== "tool-success") return shown;
+  const { forgeReferences, ...rest } = shown;
+  // A name that carried the secret names nothing once it is replaced.
+  const readable = (forgeReferences ?? []).flatMap((reference, index) => {
+    const { forge, kind, action } = event.forgeReferences?.[index] ?? reference;
+    const kept: unknown = { ...reference, forge, kind, action };
+    if (isForgeReference(kept)) return [kept];
+    // Its address only helps to find it; the rest still names it.
+    if (!("url" in reference)) return [];
+    const { url: _url, ...rest } = reference;
+    const named: unknown = { ...rest, forge, kind, action };
+    return isForgeReference(named) ? [named] : [];
+  });
+  return readable.length === 0 ? rest : { ...rest, forgeReferences: readable };
 }
 
 export function redactProviderRuntimeSecrets(driver: ProviderDriver): ProviderDriver {

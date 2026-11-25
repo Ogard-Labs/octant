@@ -1,8 +1,10 @@
 import type { IntegrationExecutionResult } from "@octant/contracts/integration";
 import {
+  decodeLinearIssueGetByIdentifierInput,
   decodeLinearIssueGetInput,
   decodeLinearIssueListInput,
   LINEAR_ISSUE_FILTERS_OPERATION,
+  LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION,
   LINEAR_ISSUE_GET_OPERATION,
   LINEAR_ISSUE_LIST_OPERATION,
   type LinearIssueDetail,
@@ -42,6 +44,8 @@ const ISSUES_QUERY = `query BrowseIssues($first: Int!, $after: String, $filter: 
       identifier
       title
       url
+      team { id key }
+      project { id }
       state { name type }
       assignee { name }
     }
@@ -55,6 +59,8 @@ const ISSUE_QUERY = `query IssueDetail($id: String!) {
     title
     description
     url
+    team { id key }
+    project { id }
     state { name type }
     assignee { name }
     comments(first: 10) {
@@ -62,6 +68,29 @@ const ISSUE_QUERY = `query IssueDetail($id: String!) {
         body
         createdAt
         user { name }
+      }
+    }
+  }
+}`;
+
+const ISSUE_BY_IDENTIFIER_QUERY = `query IssueByIdentifier($teamKey: String!, $number: Float!) {
+  issues(first: 1, filter: { team: { key: { eqIgnoreCase: $teamKey } }, number: { eq: $number } }) {
+    nodes {
+      id
+      identifier
+      title
+      description
+      url
+      team { id key }
+      project { id }
+      state { name type }
+      assignee { name }
+      comments(first: 10) {
+        nodes {
+          body
+          createdAt
+          user { name }
+        }
       }
     }
   }
@@ -87,6 +116,9 @@ export async function executeLinearIssueOperation(
   }
   if (operationId === LINEAR_ISSUE_GET_OPERATION) {
     return getIssue(hostPort, input, signal);
+  }
+  if (operationId === LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION) {
+    return getIssueByIdentifier(hostPort, input, signal);
   }
   if (operationId === LINEAR_ISSUE_FILTERS_OPERATION) {
     return listFilters(hostPort, signal);
@@ -136,6 +168,35 @@ async function getIssue(
   return { kind: "ok", value: detail };
 }
 
+async function getIssueByIdentifier(
+  hostPort: IntegrationHostPort,
+  input: unknown,
+  signal?: AbortSignal,
+): Promise<IntegrationExecutionResult> {
+  let request;
+  try {
+    request = decodeLinearIssueGetByIdentifierInput(input);
+  } catch {
+    return refused("The Linear issue request is invalid.");
+  }
+  const match = IDENTIFIER_PATTERN.exec(request.identifier.trim().toUpperCase());
+  const teamKey = match?.[1];
+  const number = match === null ? Number.NaN : Number(match[2]);
+  if (teamKey === undefined || !Number.isInteger(number)) {
+    return refused("The Linear issue request is invalid.");
+  }
+  const result = await linearGraphql(
+    hostPort,
+    ISSUE_BY_IDENTIFIER_QUERY,
+    { teamKey, number },
+    signal,
+  );
+  if (result.kind !== "ok") return graphqlFailure(result);
+  const detail = readFirstIssueDetail(result.body);
+  if (detail === undefined) return refused(LINEAR_ISSUE_NOT_FOUND);
+  return { kind: "ok", value: detail };
+}
+
 async function listFilters(
   hostPort: IntegrationHostPort,
   signal?: AbortSignal,
@@ -169,6 +230,11 @@ function buildIssueFilter(
   }
   if (filter?.teamId !== undefined) clauses.push({ team: { id: { eq: filter.teamId } } });
   if (filter?.stateId !== undefined) clauses.push({ state: { id: { eq: filter.stateId } } });
+  if (filter?.stateCategory === "open") {
+    clauses.push({ state: { type: { nin: ["completed", "canceled"] } } });
+  } else if (filter?.stateCategory === "closed") {
+    clauses.push({ state: { type: { in: ["completed", "canceled"] } } });
+  }
   if (filter?.projectId !== undefined) {
     clauses.push({ project: { id: { eq: filter.projectId } } });
   }
@@ -208,6 +274,20 @@ function readIssuePage(body: unknown): LinearIssueListPage | undefined {
 function readIssueDetail(body: unknown): LinearIssueDetail | undefined {
   if (!isRecord(body) || !isRecord(body.data)) return undefined;
   const issue = isRecord(body.data.issue) ? body.data.issue : undefined;
+  return readIssueDetailNode(issue);
+}
+
+function readFirstIssueDetail(body: unknown): LinearIssueDetail | undefined {
+  if (!isRecord(body) || !isRecord(body.data)) return undefined;
+  const nodes = readNodes(body.data.issues);
+  if (nodes === undefined || nodes.length === 0) return undefined;
+  const first = nodes[0];
+  return isRecord(first) ? readIssueDetailNode(first) : undefined;
+}
+
+function readIssueDetailNode(
+  issue: Record<string, unknown> | undefined,
+): LinearIssueDetail | undefined {
   if (issue === undefined || issue === null) return undefined;
   const row = readIssueRow(issue);
   if (row === undefined) return undefined;
@@ -282,6 +362,17 @@ function readIssueRow(value: unknown): LinearIssueRow | undefined {
   }
   const assigneeRecord = isRecord(value.assignee) ? value.assignee : undefined;
   const assignee = readName(assigneeRecord?.name, 128);
+  const teamRecord = isRecord(value.team) ? value.team : undefined;
+  const rawTeamId = readName(teamRecord?.id, 128);
+  const teamId =
+    rawTeamId !== undefined && /^[A-Za-z0-9_-]{1,128}$/.test(rawTeamId) ? rawTeamId : undefined;
+  const teamKey = readName(teamRecord?.key, 16);
+  const projectRecord = isRecord(value.project) ? value.project : undefined;
+  const rawProjectId = readName(projectRecord?.id, 128);
+  const projectId =
+    rawProjectId !== undefined && /^[A-Za-z0-9_-]{1,128}$/.test(rawProjectId)
+      ? rawProjectId
+      : undefined;
   return {
     id,
     identifier,
@@ -289,15 +380,25 @@ function readIssueRow(value: unknown): LinearIssueRow | undefined {
     state: { name: stateName, type: stateType },
     url,
     ...(assignee === undefined ? {} : { assignee }),
+    ...(teamId === undefined ? {} : { teamId }),
+    ...(teamKey === undefined ? {} : { teamKey }),
+    ...(projectId === undefined ? {} : { projectId }),
   };
 }
 
 function readFilterOptions(body: unknown): LinearIssueFilterOptions | undefined {
   if (!isRecord(body) || !isRecord(body.data)) return undefined;
-  const teams = readNamedNodes(body.data.teams, 50, (node) => {
+  const teams = readFilterNodes(body.data.teams, 50, (node) => {
     const name = readName(node.name, 128);
     if (name === undefined) return undefined;
-    return composedFilterLabel(name, readName(node.key, 16));
+    const key = readName(node.key, 16);
+    const label = composedFilterLabel(name, key);
+    if (label === undefined) return undefined;
+    return {
+      label,
+      ...(key === undefined ? {} : { key }),
+      name,
+    };
   });
   const states = readNamedNodes(body.data.workflowStates, 100, (node) => {
     const name = readName(node.name, 64);
@@ -321,6 +422,33 @@ function readFilterOptions(body: unknown): LinearIssueFilterOptions | undefined 
     assignees: [{ id: "unassigned", label: "Unassigned" }, ...users],
     projects,
   };
+}
+
+function readFilterNodes(
+  value: unknown,
+  limit: number,
+  build: (
+    node: Record<string, unknown>,
+  ) => { readonly label: string; readonly key?: string; readonly name?: string } | undefined,
+): ReadonlyArray<LinearIssueFilterOption> | undefined {
+  const nodes = readNodes(value);
+  if (nodes === undefined) return undefined;
+  const options: LinearIssueFilterOption[] = [];
+  for (const node of nodes) {
+    if (options.length >= limit) break;
+    if (!isRecord(node)) continue;
+    const id = readName(node.id, 128);
+    const built = build(node);
+    if (id === undefined || built === undefined) continue;
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) continue;
+    options.push({
+      id,
+      label: built.label,
+      ...(built.key === undefined ? {} : { key: built.key }),
+      ...(built.name === undefined ? {} : { name: built.name }),
+    });
+  }
+  return options;
 }
 
 function readNamedNodes(
@@ -428,6 +556,7 @@ export function linearIssueBrowseCapabilities(): ReadonlyArray<{
     { operationId: LINEAR_ASSIGNMENT_SOURCE_OPERATION, available: true },
     { operationId: LINEAR_ISSUE_LIST_OPERATION, available: true },
     { operationId: LINEAR_ISSUE_GET_OPERATION, available: true },
+    { operationId: LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION, available: true },
     { operationId: LINEAR_ISSUE_FILTERS_OPERATION, available: true },
   ];
 }

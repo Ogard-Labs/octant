@@ -87,11 +87,20 @@ export const AutomationIntegrationEventReceipt = Schema.Struct({
 }).annotations(strict);
 export type AutomationIntegrationEventReceipt = typeof AutomationIntegrationEventReceipt.Type;
 
+export const AutomationEventSourceFieldOption = Schema.Struct({
+  value: text(128),
+  label: text(128),
+}).annotations(strict);
+export type AutomationEventSourceFieldOption = typeof AutomationEventSourceFieldOption.Type;
+
 export const AutomationEventSourceField = Schema.Struct({
   id: text(64),
   label: text(128),
   required: Schema.Boolean,
   placeholder: Schema.optional(text(128)),
+  options: Schema.optional(
+    Schema.Array(AutomationEventSourceFieldOption).pipe(Schema.maxItems(100)),
+  ),
 }).annotations(strict);
 export const AutomationEventSourceChoice = Schema.Struct({
   integrationId: text(256),

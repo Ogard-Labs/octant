@@ -450,15 +450,18 @@ Settings loads the full registry of controls and search terms when it opens.
 The renderer's first load has a byte budget, recorded in
 `scripts/initial-renderer-budget.json` and enforced by `bun run renderer:check`
 in CI. The budget counts the static graph Vite loads for `index.html`: the main
-entry is at most 1,610,136 B (1,572 KiB), the initial CSS at most 665,705 B
-(650 KiB), and the initial JavaScript and CSS at most 1,216,755 B after gzip
+entry is at most 1,581,020 B (1,544 KiB), the initial CSS at most 647,699 B
+(633 KiB), and the initial JavaScript and CSS at most 1,148,496 B after gzip
 level 6. A change that grows any measure past its budget fails. A change that
 shrinks one lowers the recorded budget. Raising a budget is a maintainer
 decision; the editable composer prompt that holds inline `@model` chips raised
 it once (maintainer decision, 2026-11-23), its picker and chip loading on first
 use. Before the workspace tree-shaking re-baseline, the maintainer also
 approved an increase for video offer schemas that the window decodes for
-Needs you (2026-11-22). Deferring that decoding is a follow-up. The budgets are exact bytes with no headroom, because the same
+Needs you (2026-11-22). Deferring that decoding is a follow-up. The question card docked above the composer, with its
+1-9 number keys, raised it again (maintainer decision, 2026-11-24), and the
+Settled thread state raised it by 1,592 B of main entry, 187 B of CSS and 358 B
+gzipped (maintainer decision, 2026-11-24). The budgets are exact bytes with no headroom, because the same
 source measures identically on macOS and Linux with Bun 1.4.4.
 
 The window build marks every `Schema` call pure and treats every workspace
@@ -2206,7 +2209,7 @@ except where a bullet says otherwise.
   sources in Settings › Memory, and Forget everything erases all entries and
   digests at once.
 - **When it is written.** After a thread ends: a Chat, Work, or Code thread
-  the person completed (put away) after memory was turned on. A sweep of the
+  the person completed (settled) after memory was turned on. A sweep of the
   three modes' completed threads runs five minutes after start and then
   hourly, and distills
   each such thread at most once, so a thread that was reopened and completed
@@ -3438,10 +3441,12 @@ mark. Marking a Work or Code thread Done while a fresh receipt stands attaches
 that receipt (`completionReceiptId`) as the thread's completion evidence, and
 Reopen clears it. Reporting finished never marks a thread Done.
 
-With **Put away threads when they're done** on (the default), Mark done on a
-Work or Code thread also puts it away, and the host puts a Code thread away
-once a pull request linked to it merged, read from cached evidence only;
-neither marks a thread Done, and Reopen brings it back
+With **Settle threads when they're done** on (the default), Mark done on a
+Work or Code thread also settles it, the host settles a Work or Code thread
+once the turn that filed its passing finished report completes, and the host
+settles a Code thread once a pull request it delivers merged, read from
+cached evidence only; none of them marks a thread Done, and Un-settle brings it
+back
 ([Workspace: thread visibility and completion](design/workspace.md#thread-visibility-and-completion)).
 
 Each recorded `thread.finished-receipt-recorded@1` receipt also feeds a
@@ -7159,6 +7164,26 @@ ls-remote` against the thread's remote and the GitHub reads they already
   them. Sending or clearing removes the draft; deleting or purging the thread
   removes it too.
 
+  **Saved drafts** in the desktop and web composer are private to the client
+  profile. A saved entry carries the source host, Project, composer and binding
+  and the full editable draft, including attachment bytes and typed context.
+  IndexedDB commits the stash and its cleared source, or the restored
+  destination and removal from the stash, as one move. A restored draft keeps
+  its recovery data there while it is editable. New-task recovery belongs to
+  its window and follows the live composer across Project changes. When the
+  window closes, its recovered new-task draft becomes available in Saved
+  drafts. The live composer changes only after the write commits, and a
+  competing restore can consume the entry only once. A failed move preserves
+  a recoverable copy. Ordinary attachment
+  staging assigns destination-owned references. Ordinary turn admission
+  rechecks authority, context references and model capabilities. A host's
+  retention tombstones remove that thread's saved and recovered drafts,
+  including threads purged while the client was closed. The client reads
+  the owning host's tombstones through its existing retention permissions,
+  which a device paired at Full has. Archiving a thread or Project keeps
+  its saved drafts. Recovery waits for host acceptance before clearing a
+  submitted draft.
+
 - **Accepted message queue.** Chat, Work, and Code share a host-owned ordered
   queue for messages the user submits while a turn runs. A successful enqueue
   acknowledges durable storage; the renderer then relinquishes the submitted
@@ -7901,7 +7926,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   disclose it. The walk only goes forward, so a worker moves through its list
   at most once and then pauses as before, and it never reaches a model outside
   the roles. A coordinator, a worker on a model a person picked or with the
-  person's own usage-limit hand-off, a thread put away, marked Done, snoozed
+  person's own usage-limit hand-off, a thread settled, marked Done, snoozed
   or archived, and a role with the box off are never moved, and a move never
   goes into or within a role that has **Ask before using**
   ([Coordinator threads: Running workers](design/coordinator-threads.md#running-workers)).
@@ -7943,7 +7968,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   install, trust and enable, with digest-bound trust, admission and
   confinement unchanged (maintainer request, 2026-11-12); the catalog lists effective outside drivers in their own group from
   the registry snapshot. Third-party provider-driver plugins are in scope for the
-  first preview under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
+  first preview under [Outside provider drivers](design/outside-provider-drivers.md),
+  as harness endpoints or as media generators: an outside image driver lists
+  its declared models and prices in the same group and adds an image profile
+  ([Outside media generation drivers](design/outside-provider-drivers.md#outside-media-generation-drivers)). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -8056,15 +8084,24 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   own result: the image is fetched exactly at the URL the provider's
   authenticated response named, without the credential, and a configured
   base URL neither rewrites that URL to the base URL's host nor approves
-  any other URL on that host.
+  any other URL on that host. That download connects only to an address it
+  has just checked (maintainer decision, 2026-11-22): the name is resolved
+  once, every answer must be publicly routable except on the profile's own
+  configured base URL origin, and the socket opens to that same answer, on a
+  fresh connection, with the original name kept as `Host` and as the TLS
+  server name the certificate is verified against. No redirect is followed,
+  so the first hop is the only one. This holds for bundled and outside image
+  drivers alike, and closes DNS rebinding between a check and the fetch.
   The **Image generator** surface (profile menu, host-wide `image-library`
   scope;
   any registered window may use the `image-library` scope, while thread scopes
   keep thread authority and the agent tool generates only into its own thread)
   and an app-managed `octant_create_image` tool invoke that job service
   through `/api/image/` when an enabled image profile exists (a dedicated
-  image provider, or a custom image source named in Settings › Voice &
-  images, which every renderer surface lists alongside them). The
+  image provider, a profile added from an outside image driver the host
+  admits ([Outside media generation drivers](design/outside-provider-drivers.md#outside-media-generation-drivers)),
+  or a custom image source named in Settings › Voice & images, which every
+  renderer surface lists alongside them). The
   composer of an open Chat, Work, or Code thread also carries a **Create
   image…** icon beside attach and dictate. It opens the same generation sheet,
   scoped to that thread, so the result lands there as a thread artifact.
@@ -15477,7 +15514,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     credentials, the Provider sign-ins group (each provider's stored sign-in
     and Octant's managed account homes), with the same plain message, as the
     account's sign-in stays out of the instruction files Octant reads for
-    Claude at every level. Below Full access they refuse every protected path.
+    Claude at every level, and the folder of the
+    [secrets a person gave a thread](#thread-secrets) (maintainer decision,
+    2026-11-24). Below Full access they refuse every protected path.
     OpenCode's own file tools are held to the same narrowing: at Full access
     its read and list refusals, on 1.x and 2.x, name only the Provider
     sign-ins group ([detail](design/provider-runtimes.md#key-providers)).
@@ -15849,8 +15888,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     files Octant protects (`~/.aws`, kube, docker, npm and `gh`
     configuration, `.netrc`) at every level, as on its own, so `aws`,
     `kubectl`, `docker push`, private registries and `gh` work. Octant's own
-    file tools keep refusing them below Full access, and provider sign-ins
-    at Full access. Strict refuses them for every tool. Built for Claude
+    file tools keep refusing them below Full access, and at Full access the
+    provider sign-ins and the folder of thread secrets. Strict refuses them for every tool. Built for Claude
     Code's own file tools (its gate refuses only another provider's sign-in
     outside Strict) and for the confinement of Pi and the ACP agents
     (`protectedFiles: "provider-sign-ins"`), read at each launch. Built for
@@ -17875,7 +17914,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | Oh My Pi                  | `oh-my-pi`                                                                                                                                   | `no`  | `no`              | `no`              | `none`           |
 
   The image profiles (`openai-image`, `gemini-native-image`, `bfl-image`,
-  `ideogram-image`) are not turn drivers and are not in the matrix.
+  `ideogram-image`, and an outside package's `outside-image`) are not turn
+  drivers and are not in the matrix.
 
   Where each provider is weaker than Claude Code and Codex:
 
@@ -19651,8 +19691,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     text describes this specific consumer, not a general guarantee about every
     tool. A future credential-bearing command needs a separate consumer and
     its ordinary execution approval; it cannot reuse this card's grant.
-    Administrator passwords and arbitrary command/file delivery are not
-    supported. The person may instead submit a field reference from an already
+    This card takes no administrator password and delivers to no command or
+    file; [thread secrets](#thread-secrets) have their own rules for both. The
+    person may instead submit a field reference from an already
     linked 1Password store. The authenticated broker reads that exact reference
     once, checks its link revision before and after lookup, and returns transient
     material only to the host's already claimed card operation. The host rechecks
@@ -19661,6 +19702,114 @@ approval-gated` command that undoes it. The terminal shows no one-time
     bounded actionable cause; a new card requires new consent. There is no
     automatic linking, unlocking, fallback or retry. Item references resolve at
     use, including rotated values, under the existing linked-store rules.
+
+<a id="thread-secrets"></a>
+
+- **Thread secrets.** An agent in a Code or Work thread may ask the person for a
+  secret its work needs: an API key, a token, or an account password for `sudo`
+  (maintainer decision, 2026-11-24). The host half is built, with `run-with-secret`, Fresh each use and
+  Remember; the tool operation and the card are not built yet, so no agent is offered any of it.
+  - **Request.** The agent names the secret, a label, a kind (`token` or
+    `account-password`), a reason, an optional setup page, up to eight fields and
+    a delivery. It can never pass a value: the person enters it in the card every
+    time, and one pasted in chat is not picked up, stays in the chat and should be
+    changed (maintainer decision, 2026-11-24). Labels, reasons and placeholders are one line of visible text: no
+    control, reordering or zero-width character, so the card cannot imitate
+    Octant's own words. A setup page is an http or https address with no sign-in
+    in it, shown as the browser will open it. Chat is refused. A thread has at
+    most two cards waiting, so its cards cannot keep another thread's from
+    opening. A card never expires: it ends with its answer, its turn, its
+    thread's archive, its window, its authority or the host.
+  - **Lifetime.** The person chooses on every card: this command, this turn, one
+    hour, 24 hours, until the thread is archived, or Remember. It starts on their
+    last choice for that name and kind, else 24 hours, else this turn under
+    Strict. Strict offers neither 24 hours nor Remember, and an account password
+    never offers Remember. "Until archived" stays under Strict because its thread
+    bounds it and nothing under Strict writes a file. Time is the authority clock,
+    which counts a suspended host's time.
+  - **Delivery.** A `handle` is redeemed once, by a registered host or plugin
+    consumer, for its own thread, and never by a command. The thread's authority,
+    Strict, the turn, the consumer's registration and the cancellation signal are
+    read before the value is read and again after it. A 1Password item is read
+    again at every redemption. The value stays redacted until the consumer says
+    it is done or the turn ends. A `file` request also writes an owner-only file
+    where the thread's own commands run outside an Octant sandbox; under Strict,
+    in a sandbox, or for one command, nothing is written. Asking again for an
+    active secret returns a new handle per field with no card, never a wider
+    delivery, and never another turn's secret when it was given for one turn. The
+    same retry key returns the same answer while it is still true.
+  - **Run with a secret.** `run-with-secret` runs one command with the secrets it
+    names as `OCTANT_SECRET_<NAME>` variables, for any provider in Code and Work.
+    It is asked for as the thread's other commands are: the running turn's level,
+    remembered answers, Octant Shield, new hosts and forge rules, with a line in
+    Octant's words saying which variables it is given, and the whole command or
+    nothing. Values are read only after that, held only for the command, and reach
+    it only in its process's environment, never in its arguments, the approval, the
+    Judge, a receipt or a log. The secret is spent and its use recorded as the
+    command starts, so one the host refuses spends nothing, and a one-command secret
+    goes to exactly one. A secret granted as a handle is never lent. The command runs
+    in the thread's own shell, sandbox and folders, and its output is redacted before
+    it is cut, with a value's remains taken off a cut edge. Plan and server Projects
+    refuse it: on a server the value would show in its process list. `sudo` needs a
+    thread with no sandbox, since a sandbox lets nothing raise its privileges; and at
+    Full access the `reads-secrets-then-egress` tag reads the command's text, so a
+    use is recorded and not tagged.
+  - **Fresh each use.** A 1Password item the person chose to have read at each use is
+    read by the broker as each command starts being prepared or each handle is
+    redeemed. It is written nowhere, and kept nowhere but in what redacts it.
+  - **Remembered secrets.** A secret a person chose to have Octant remember is kept
+    for the host, not the thread, so a thread's purge leaves it. A typed value lives
+    only in the credential broker's `/v1/thread-secret-credentials/*` namespace
+    (Keychain service `thread-secret-credentials.v1`, Secret Service attribute
+    `octant.thread-secret-credentials.v1`, a Credential Manager purpose of its own),
+    keyed by an opaque secret id and served only on those routes, so no provider,
+    connector, search key or other secret with the same UUID can read, replace or
+    delete one. A linked item is kept as its address alone.
+    `thread-secret-memory.recorded@1` on one host-wide aggregate holds the name and
+    where the value is, before the store has it. It is offered on a later card for
+    its own name, never for an account password, and used only when the person picks
+    it there. A new one of the name replaces it. A step that fails, or a turn that
+    stops meanwhile, leaves nothing kept.
+  - **Files.** `<runtime>/thread-secrets/<host>/<thread>/<NAME>` on macOS and
+    Linux, folder 0700 and file 0600, where `<host>` names the data directory:
+    every host of one user shares the runtime folder, and each clears its own as
+    it starts and stops. Windows has no owner-only mode, so there the folder is in
+    the host profile's data directory, whose protected, inheritable access list
+    admits its owner and the system alone. No file is written until what an
+    earlier host left is gone. Every launch Octant confines is denied the folder,
+    apart from the protected list: the person cannot remove that rule, and it
+    holds for launches that carry only the sign-in rules. Octant's own file tools
+    refuse it at every level, Full access included (maintainer decision,
+    2026-11-24); an agent's own shell there can still read it.
+  - **Record first.** Values are redacted, written under a name nothing knows,
+    recorded, and only then put in place. A refused journal append leaves nothing
+    behind, and a file that cannot be put in place leaves an earlier secret of the
+    name as it was. `thread-secret.recorded@1` on one aggregate per thread holds
+    metadata alone, with no free text; a thread's purge erases it, and the next
+    start ends what a crashed host left open.
+  - **Redaction.** While a secret is active its value, its base64 at each
+    alignment, and its URL and JSON forms are replaced in runtime events, the
+    service log, exports and tool-call records, at any depth, and in a key unless
+    it reads as a field name. An agent cannot switch this off: a field it calls
+    not secret is spared only when the person typed it for a token. Matches are
+    found in the original text and overlapping ones replaced as one. An ended
+    value stays redacted, and is kept for nothing else, until the host stops
+    (maintainer decision, 2026-11-24): the token usually still works and may
+    still be in the agent's context. At most 128 ended values are kept, the
+    longest ended leaving first.
+  - **What it does not cover.** A command that runs without a sandbox (Full
+    access, and most providers below it outside Strict) can read any thread's
+    file, print it, encode it or send it, and may keep a hard link. Redaction
+    misses other encodings (hex, letter case, HTML, shell quoting, wrapped
+    base64), a value split across streamed chunks, short lines of a multi-line
+    value, values under six characters and plain ones under eight, and tool or
+    approval requests; a value the host no longer keeps; and it is host-wide, so a value
+    that is an ordinary word is hidden everywhere. Anything a runtime shows its
+    model directly is outside it. Consent is to the thread, the name and the
+    lifetime, so a repeat request may state another reason. A handle names no
+    consumer. The kind is the agent's claim. A window's end closes its cards and
+    not its secrets, and any local window may list and end a thread's secrets. A
+    crash leaves files until the next start.
 
 <a id="linked-secret-stores"></a>
 
@@ -20614,8 +20763,10 @@ cards; general Azure CLI credentials remain unavailable by design.
     decision, 2026-11-13). Stores without a fixed path (a KeePassXC database
     the person places) are left to the person's own protected paths.
   - **Octant's own secrets:** the bridge secret, the data directory's
-    `remote` and `integrations` folders, and the runtime directory's
-    `*.secret` files.
+    `remote` and `integrations` folders, the runtime directory's `*.secret`
+    files, and the `thread-secrets` folder in either. Every confined launch
+    denies that last folder, and Octant's own file tools refuse it at every
+    level, whatever this list keeps ([thread secrets](#thread-secrets)).
   - **Provider sign-ins:** each provider's stored sign-in file in the home
     folder, and Octant's managed account homes (`providers/` in the data
     directory). A runtime may read its own sign-in and no other tool's: a

@@ -51,7 +51,8 @@ export function listAutoProbeInstanceIds(
         // turn. The host's warm pass skips it, and turning it on clears its
         // observation, so a background check here would start it at every
         // launch and the moment it is turned on.
-        instance.driverKind !== "outside-harness-endpoint",
+        instance.driverKind !== "outside-harness-endpoint" &&
+        instance.driverKind !== "outside-image",
     )
     .toSorted((left, right) => {
       const leftRank = PREFERRED_DRIVERS.indexOf(left.driverKind);

@@ -115,6 +115,75 @@ describe("what a pane keeps in its row", () => {
     expect([...row.values()].flat().map((tab) => tab.title)).toEqual(["Thread 0", "Plan"]);
   });
 
+  it("keeps the conversation in the row when a pull request the thread worked on opens over it", () => {
+    const base = chatShellBootstrap().workspace;
+    const codePane = base.layouts.code;
+    if (codePane.kind !== "pane") throw new Error("Expected one Code pane.");
+    const threadId = "00000000-0000-4000-8000-000000000940";
+    const surface = (kind: "code-overview" | "code-pr", id: string, title: string) =>
+      decodeWorkspaceTab({
+        kind,
+        id,
+        mode: "code",
+        threadId,
+        title,
+        ...(kind === "code-pr"
+          ? {
+              pullRequest: {
+                projectId: "00000000-0000-4000-8000-000000000941",
+                repositoryOwner: "acme",
+                repositoryName: "app",
+                number: 917,
+              },
+            }
+          : {}),
+      });
+    const openSurface = (workspace: WindowWorkspace, tab: ReturnType<typeof surface>) =>
+      applyWorkspaceOperation(
+        workspace,
+        decodeWorkspaceOperation({
+          kind: "open-surface",
+          mode: "code",
+          paneId: String(codePane.paneId),
+          surface: tab,
+        }),
+      );
+    const conversation = openSurface(
+      base,
+      surface("code-overview", "00000000-0000-4000-8000-000000000942", "Fix flakes"),
+    );
+    const withPullRequest = openSurface(
+      conversation,
+      surface("code-pr", "00000000-0000-4000-8000-000000000943", "#917"),
+    );
+    const row = rememberWorkspaceContent(
+      rememberWorkspaceContent(new Map(), conversation, conversation),
+      conversation,
+      withPullRequest,
+    );
+    expect(row.get(codePane.paneId)?.map((tab) => tab.title)).toEqual(["Fix flakes", "#917"]);
+
+    // Back on the conversation a single click opened, a reload drops that
+    // conversation's reference and keeps the pull request the person opened.
+    const back = openSurface(
+      withPullRequest,
+      surface("code-overview", "00000000-0000-4000-8000-000000000942", "Fix flakes"),
+    );
+    const stored = encodeWorkspaceContent(
+      back,
+      rememberWorkspaceContent(row, withPullRequest, back),
+      new Set([threadId]),
+    );
+    const restored = decodeWorkspaceContent(stored, back);
+    expect([...restored.values()].flat().map((tab) => tab.title)).toEqual(["#917"]);
+    expect(
+      rememberWorkspaceContent(restored, back, back)
+        .get(codePane.paneId)
+        ?.map((tab) => tab.title)
+        .sort(),
+    ).toEqual(["#917", "Fix flakes"]);
+  });
+
   it("keeps a canvas beside the conversation, where it stood, when another thread opens", () => {
     const first = open(chatShellBootstrap().workspace, 0);
     const pane = first.layouts.chat;

@@ -73,7 +73,7 @@ if ($Mode -eq 'prepare-data') {
   exit 0
 }
 if ($Mode -eq 'inspect') {
-  foreach ($octantPath in @((Join-Path $octantRoot 'data\proof'), (Join-Path $octantRoot 'data\proof\written.txt'))) {
+  foreach ($octantPath in @((Join-Path $octantRoot 'data\proof'), (Join-Path $octantRoot 'data\proof\written.txt'), (Join-Path $octantRoot 'data\thread-secrets'), (Join-Path $octantRoot 'data\thread-secrets\thread-fixture'), (Join-Path $octantRoot 'data\thread-secrets\thread-fixture\TOKEN'))) {
     $octantEntry = Get-Item -LiteralPath $octantPath -Force
     if ($octantEntry.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Aliased owned descendant' }
     if ($octantEntry.PSIsContainer) { $octantAccess = [Security.AccessControl.DirectorySecurity]::new($octantPath, [Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner) }

@@ -686,6 +686,8 @@ export function wireChat(deps: ChatDependencies) {
                       offers: imageGenerationOffers,
                       kept: keptImageChoices,
                       jobs: imageJobService,
+                      admitsOutsideImageDriver: (instance) =>
+                        imageJobService.admitsOutsideDriver(instance),
                       imageSources: chatImageSources,
                       listInstances: () => persistence.readProviderInstances(),
                       readImageGenerationCustomSources: () =>

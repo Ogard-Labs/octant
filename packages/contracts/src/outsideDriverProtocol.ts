@@ -25,9 +25,12 @@ import {
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
-/** A harness endpoint wire protocol major version, such as `harness-endpoint/1`. */
+/**
+ * An outside driver wire protocol major version: a harness endpoint
+ * (`harness-endpoint/1`) or an image generator (`image-generation/1`).
+ */
 export const OutsideProviderDriverProtocolVersion = Schema.String.pipe(
-  Schema.pattern(/^harness-endpoint\/[1-9][0-9]{0,3}$/),
+  Schema.pattern(/^(harness-endpoint|image-generation)\/[1-9][0-9]{0,3}$/),
   Schema.brand("OutsideProviderDriverProtocolVersion"),
 );
 export type OutsideProviderDriverProtocolVersion = typeof OutsideProviderDriverProtocolVersion.Type;
@@ -38,6 +41,22 @@ export type OutsideProviderDriverProtocolVersion = typeof OutsideProviderDriverP
  */
 export const HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS: ReadonlyArray<OutsideProviderDriverProtocolVersion> =
   [OutsideProviderDriverProtocolVersion.make("harness-endpoint/1")];
+
+/**
+ * The image generation protocol versions this host speaks. It shares the
+ * framing, `initialize`, failures, and the brokered `http/*` calls with the
+ * harness endpoint protocol, and adds `image/generate` and `image/cancel` in
+ * place of the `probe` and `session/*` calls.
+ */
+export const HOST_IMAGE_GENERATION_PROTOCOL_VERSIONS: ReadonlyArray<OutsideProviderDriverProtocolVersion> =
+  [OutsideProviderDriverProtocolVersion.make("image-generation/1")];
+
+/** The protocol family a version belongs to: what kind of driver speaks it. */
+export function outsideDriverProtocolFamily(
+  version: OutsideProviderDriverProtocolVersion,
+): "harness-endpoint" | "image-generation" {
+  return version.startsWith("image-generation/") ? "image-generation" : "harness-endpoint";
+}
 
 export const OUTSIDE_DRIVER_METHODS = {
   initialize: "initialize",
@@ -50,6 +69,9 @@ export const OUTSIDE_DRIVER_METHODS = {
   cloudCreate: "cloud/create",
   cloudRead: "cloud/read",
   cloudCancel: "cloud/cancel",
+  imageGenerate: "image/generate",
+  imageCancel: "image/cancel",
+  imageChunk: "image/chunk",
   httpRequest: "http/request",
   httpChunk: "http/chunk",
   httpEnd: "http/end",
@@ -340,8 +362,138 @@ export const OutsideDriverToHostMessage = Schema.Union(
     method: Schema.Literal(OUTSIDE_DRIVER_METHODS.httpRequest),
     params: OutsideDriverHttpRequestParams,
   }).annotations(strict),
+  Schema.Struct({
+    jsonrpc: JsonRpcVersion,
+    method: Schema.Literal(OUTSIDE_DRIVER_METHODS.imageChunk),
+    params: Schema.suspend(() => OutsideDriverImageChunkParams),
+  }).annotations(strict),
 );
 export type OutsideDriverToHostMessage = typeof OutsideDriverToHostMessage.Type;
+
+// ── image generation ───────────────────────────────────────────────────────
+
+/** The largest base64 payload one inline driver result may carry in one line. */
+export const OUTSIDE_DRIVER_IMAGE_BASE64_CHARACTERS = 4_000_000;
+
+/**
+ * The most combined reference-image bytes an outside image job accepts: 2.5 MiB
+ * (~3.5M base64 characters), leaving headroom inside the 4 MiB brokered
+ * `http/request` line limit so a driver can forward references in JSON without
+ * hitting the channel frame cap.
+ */
+export const OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES = 2_621_440;
+
+/** The largest base64 payload one reference image may carry to an outside image driver. */
+export const OUTSIDE_DRIVER_REFERENCE_IMAGE_BASE64_CHARACTERS =
+  Math.ceil(OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES / 3) * 4;
+
+const OutsideDriverImageMediaType = Schema.Literal(
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+);
+
+const Base64Image = Schema.String.pipe(
+  Schema.minLength(4),
+  Schema.maxLength(OUTSIDE_DRIVER_IMAGE_BASE64_CHARACTERS),
+  Schema.pattern(/^[A-Za-z0-9+/]+={0,2}$/),
+);
+
+const Base64ReferenceImage = Schema.String.pipe(
+  Schema.minLength(4),
+  Schema.maxLength(OUTSIDE_DRIVER_REFERENCE_IMAGE_BASE64_CHARACTERS),
+  Schema.pattern(/^[A-Za-z0-9+/]+={0,2}$/),
+);
+
+/**
+ * One image job as it crosses to the driver. The host has already chosen the
+ * model from those the person listed and the package declared, frozen the
+ * options, and reserved the spend; `variantCount` is the most images the host
+ * accepts back. Reference images cross as bytes the host read and checked,
+ * never as a path or address.
+ */
+export const OutsideDriverImageGenerateParams = Schema.Struct({
+  modelId: ProviderModelId,
+  prompt: Schema.String,
+  variantCount: Schema.Int.pipe(Schema.between(1, 16)),
+  references: Schema.Array(
+    Schema.Struct({
+      mediaType: OutsideDriverImageMediaType,
+      data: Base64ReferenceImage,
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(16)),
+  quality: Schema.optional(Schema.String),
+  size: Schema.optional(Schema.String),
+  aspectRatio: Schema.optional(Schema.String),
+  resolution: Schema.optional(Schema.String),
+}).annotations(strict);
+export type OutsideDriverImageGenerateParams = typeof OutsideDriverImageGenerateParams.Type;
+
+/** A notification: the host has already answered the job as interrupted. */
+export const OutsideDriverImageCancelParams = Schema.Struct({
+  requestId: OutsideDriverMessageId,
+}).annotations(strict);
+export type OutsideDriverImageCancelParams = typeof OutsideDriverImageCancelParams.Type;
+
+/** The most base64 characters one `image/chunk` may carry, well inside a line. */
+export const OUTSIDE_DRIVER_IMAGE_CHUNK_CHARACTERS = 1_000_000;
+
+/**
+ * A notification: part of one image's bytes, in order, before the driver
+ * answers `image/generate`. A line is capped well below a whole image, so an
+ * image larger than an inline answer can carry crosses as chunks, and the
+ * answer names it with `chunked: true`. Base64 is chunked on four-character
+ * boundaries so each piece decodes on its own.
+ */
+export const OutsideDriverImageChunkParams = Schema.Struct({
+  requestId: OutsideDriverMessageId,
+  image: Schema.Int.pipe(Schema.between(0, 15)),
+  data: Schema.String.pipe(
+    Schema.minLength(4),
+    Schema.maxLength(OUTSIDE_DRIVER_IMAGE_CHUNK_CHARACTERS),
+    Schema.filter((data) => data.length % 4 === 0),
+    Schema.pattern(/^[A-Za-z0-9+/]+={0,2}$/),
+  ),
+}).annotations(strict);
+export type OutsideDriverImageChunkParams = typeof OutsideDriverImageChunkParams.Type;
+
+/**
+ * One image the driver returns: its bytes inline (only when the whole answer
+ * fits one line), bytes it streamed as `image/chunk` for this image's index,
+ * or an address the provider's own answer named. The host fetches an address itself, once, without the key,
+ * and only when it appeared in a response the host relayed for this job, so
+ * a driver cannot point the host at an address the provider never gave.
+ */
+export const OutsideDriverGeneratedImage = Schema.Union(
+  Schema.Struct({ mediaType: OutsideDriverImageMediaType, data: Base64Image }).annotations(strict),
+  Schema.Struct({
+    mediaType: OutsideDriverImageMediaType,
+    chunked: Schema.Literal(true),
+  }).annotations(strict),
+  Schema.Struct({
+    url: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(8_192)),
+  }).annotations(strict),
+);
+export type OutsideDriverGeneratedImage = typeof OutsideDriverGeneratedImage.Type;
+
+/**
+ * A settled job: the images, or the provider's safety refusal. A refusal
+ * carries no text: the host writes the sentence a person reads. Usage the
+ * driver reports is never a price; the host settles from its own estimate.
+ */
+export const OutsideDriverImageGenerateResult = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("completed"),
+    images: Schema.Array(OutsideDriverGeneratedImage).pipe(Schema.minItems(1), Schema.maxItems(16)),
+  }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("refused") }).annotations(strict),
+);
+export type OutsideDriverImageGenerateResult = typeof OutsideDriverImageGenerateResult.Type;
+
+export const decodeOutsideDriverImageGenerateResult = Schema.decodeUnknownEither(
+  OutsideDriverImageGenerateResult,
+);
 
 export const decodeOutsideDriverToHostMessage = Schema.decodeUnknownEither(
   OutsideDriverToHostMessage,

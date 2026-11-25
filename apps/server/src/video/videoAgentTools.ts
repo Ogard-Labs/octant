@@ -77,6 +77,8 @@ export interface VideoAgentToolPort {
   readonly asksAgain: () => boolean;
   readonly forget: () => void | Promise<void>;
   readonly fullAccess?: () => boolean;
+  /** The video profile Settings names for Full access, read at each call; absent is none. */
+  readonly defaultProfileInstanceId?: () => string | undefined;
   readonly unattended?: boolean;
   readonly refusal?: () => string | undefined;
   readonly imageSources?: ThreadImageSources;
@@ -327,6 +329,7 @@ async function generateVideo(
     kept: withImages ? undefined : port.remembered(),
     fullAccess: !withImages && port.fullAccess?.() === true,
     askAgain: port.asksAgain(),
+    defaultProfileInstanceId: port.defaultProfileInstanceId?.(),
   });
   if (unasked.kind === "ask" && unasked.keptUnavailable) await port.forget();
 
@@ -356,8 +359,10 @@ async function generateVideo(
       prompt: request.prompt,
       options: clip,
       ...counts,
+      ...(signal === undefined ? {} : { signal }),
     });
   const first = await quoteFor(proposed);
+  if (signal?.aborted) return { status: "cancelled", reason: "aborted" };
   if (first.status === "refused") return { status: "refused", error: first.reason };
 
   let clip = proposed;
@@ -395,6 +400,7 @@ async function generateVideo(
   const refusalNow = port.refusal?.();
   if (refusalNow !== undefined) return { status: "refused", error: refusalNow };
   const final = await quoteFor(clip);
+  if (signal?.aborted) return { status: "cancelled", reason: "aborted" };
   if (final.status === "refused") return { status: "refused", error: final.reason };
 
   try {
@@ -433,12 +439,14 @@ async function generateVideo(
       prompt: request.prompt,
       options: clip,
       references,
+      ...(signal === undefined ? {} : { signal }),
       ...(firstFrame === undefined ? {} : { firstFrame }),
       ...(lastFrame === undefined ? {} : { lastFrame }),
     };
     const job = await port.jobs.enqueue(input);
     return await settledOutcome(port, job, signal);
   } catch (error) {
+    if (signal?.aborted) return { status: "cancelled", reason: "aborted" };
     return {
       status: "refused",
       error: error instanceof Error ? error.message : "The video job could not be started.",
@@ -598,6 +606,7 @@ export function createThreadVideoAgentTools(input: {
   readonly recordExternalContentIngestion: TaintAppManagedToolResultsInput["recordExternalContentIngestion"];
   readonly unattended?: boolean;
   readonly fullAccess?: () => boolean;
+  readonly defaultProfileInstanceId?: () => string | undefined;
   readonly refusal?: () => string | undefined;
   readonly imageSources?: ThreadImageSources;
   /** The thread's image jobs, so a finished generated image can be a frame or reference. */
@@ -631,6 +640,9 @@ export function createThreadVideoAgentTools(input: {
       asksAgain: () => input.kept.asksAgain(scope),
       forget: () => input.kept.forget(scope),
       ...(input.fullAccess === undefined ? {} : { fullAccess: input.fullAccess }),
+      ...(input.defaultProfileInstanceId === undefined
+        ? {}
+        : { defaultProfileInstanceId: input.defaultProfileInstanceId }),
       ...(input.unattended === true ? { unattended: true } : {}),
       ...(input.refusal === undefined ? {} : { refusal: input.refusal }),
       ...(input.imageSources === undefined ? {} : { imageSources: input.imageSources }),

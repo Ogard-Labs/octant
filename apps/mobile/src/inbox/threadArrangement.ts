@@ -172,6 +172,6 @@ export function arrangeMobileThreads(input: {
   return [
     ...arranged,
     ...(snoozed.length > 0 ? [{ id: "snoozed", label: "Snoozed", rows: snoozed }] : []),
-    ...(putAway.length > 0 ? [{ id: "put-away", label: "Put away", rows: putAway }] : []),
+    ...(putAway.length > 0 ? [{ id: "put-away", label: "Settled", rows: putAway }] : []),
   ];
 }

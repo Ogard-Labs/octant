@@ -67,6 +67,7 @@ import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { ProjectId } from "./projects";
+import { ThreadBoardPullRequestIdentity } from "./threadBoardPullRequests";
 import { CanvasId } from "./canvas";
 import {
   AutoCompactIdleMinutes,
@@ -85,6 +86,7 @@ import { MentionableThreadId } from "./threadMention";
 import { NavigatorAssistantSettings } from "./navigatorAssistant";
 import { VoiceSettings } from "./speech";
 import { ImageGenerationSettings } from "./imageGeneration";
+import { VideoGenerationSettings } from "./videoGeneration";
 import { ComputerUseSettings } from "./computerUseSettings";
 import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR, UserProfile } from "./userProfile";
 import { SidebarBackground, DEFAULT_SIDEBAR_BACKGROUND } from "./theme";
@@ -1259,6 +1261,9 @@ export const ShellSettings = Schema.Struct({
   imageGeneration: Schema.optionalWith(ImageGenerationSettings, {
     default: () => ({ customSources: [] }),
   }),
+  // A store persisted before video shipped decodes to no named profile, so
+  // Full access uses the first ready video profile.
+  videoGeneration: Schema.optionalWith(VideoGenerationSettings, { default: () => ({}) }),
   // Who is using this host. A store persisted before profiles shipped decodes
   // to the empty profile rather than a name guessed from the OS account: the
   // host was never asked, and saying so is the honest reading.
@@ -1515,7 +1520,18 @@ const CodeTestWorkspaceTab = Schema.Struct({
   testRunId: Schema.optional(CodeTestRunId),
 }).annotations(strict);
 const CodeGitWorkspaceTab = codeThreadSurface("code-git");
-const CodePrWorkspaceTab = codeThreadSurface("code-pr");
+/**
+ * A Code thread's pull request tab. Without `pullRequest` it is the thread's
+ * own delivery pull request, observed from its checkout. With it, it is one
+ * pull request the thread worked on, drawn with the Pull requests page's
+ * reading view; the identity only names it, and every read of it still goes
+ * through the host's window-authorized pull-request routes.
+ */
+const CodePrWorkspaceTab = Schema.Struct({
+  kind: Schema.Literal("code-pr"),
+  ...CodeWorkspaceTabFields,
+  pullRequest: Schema.optional(ThreadBoardPullRequestIdentity),
+}).annotations(strict);
 const CodeLocalReviewWorkspaceTab = codeThreadSurface("code-local-review");
 const AppleWorkbenchWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("apple-workbench"),

@@ -250,7 +250,7 @@ describe("SettingsView", () => {
   it("offers the put-away archive window in General and reports Never as off", async () => {
     const user = userEvent.setup();
     const { props } = renderSettings();
-    const select = screen.getByRole("combobox", { name: "Archive put-away threads" });
+    const select = screen.getByRole("combobox", { name: "Archive settled threads" });
     expect(select).toHaveTextContent("After 7 days");
     await user.click(select);
     await user.click(await screen.findByRole("option", { name: "Never" }));
@@ -260,7 +260,7 @@ describe("SettingsView", () => {
   it("puts threads away when they're done by default and lets the person turn it off", async () => {
     const user = userEvent.setup();
     const { props } = renderSettings();
-    const toggle = screen.getByRole("switch", { name: "Put away threads when they're done" });
+    const toggle = screen.getByRole("switch", { name: "Settle threads when they're done" });
     expect(toggle).toBeChecked();
     await user.click(toggle);
     expect(props.onSettingsChange).toHaveBeenCalledWith({ putAwayThreadsWhenDone: false });

@@ -194,7 +194,8 @@ async function runScript(
           ? {}
           : {
               beforeLaunch: () =>
-                (input.beforeLaunch?.() ?? true) && (credentials?.beforeLaunch() ?? true),
+                // The caller's is last: what it spends, it spends on a command that starts.
+                (credentials?.beforeLaunch() ?? true) && (input.beforeLaunch?.() ?? true),
             }),
         environment: {
           ...(sandboxPolicy === undefined
@@ -205,6 +206,7 @@ async function runScript(
             sandboxPolicy === undefined ? options.sshAgentSocket?.() : undefined,
           ),
           ...options.environment,
+          ...input.environment,
         },
         timeoutMs: input.timeoutMs,
         ...(input.outputRetention === undefined ? {} : { outputRetention: input.outputRetention }),
@@ -276,5 +278,8 @@ function decodeOutput(result: RepositoryTestProcessResult): string {
   const stderr = Buffer.from(result.stderr).toString("utf8");
   if (stderr.trim().length === 0) return stdout;
   if (stdout.trim().length === 0) return stderr;
-  return `${stdout}\n[stderr]\n${stderr}`;
+  return `${stdout}${STDERR_MARK}${stderr}`;
 }
+
+/** Between the two streams' text. Each was kept, and can have been cut, on its own. */
+export const STDERR_MARK = "\n[stderr]\n";

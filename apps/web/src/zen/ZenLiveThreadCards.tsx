@@ -130,6 +130,10 @@ function buildCardSurface(
         {...(clients.workMutationClient === undefined
           ? {}
           : { mutationClient: clients.workMutationClient })}
+        {...(clients.serverUrl === undefined ? {} : { serverUrl: clients.serverUrl })}
+        {...(clients.windowCapability === undefined
+          ? {}
+          : { windowCapability: clients.windowCapability })}
       />
     );
   }
@@ -225,10 +229,12 @@ function ZenWorkCardSurface(props: {
   readonly mutationClient?: WorkMutationClient;
   readonly providerController?: ZenCardProviderView;
   readonly requestClient?: WorkRequestClient;
+  readonly serverUrl?: string;
   readonly threadClient: WorkThreadClient;
   readonly threadId: WorkThreadId;
   readonly title: string;
   readonly turnClient?: WorkTurnClient;
+  readonly windowCapability?: string;
 }) {
   const providerController = props.providerController;
   const providerGroups = useMemo(
@@ -261,6 +267,10 @@ function ZenWorkCardSurface(props: {
         threadId={props.threadId}
         title={props.title}
         {...(props.turnClient === undefined ? {} : { turnClient: props.turnClient })}
+        {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+        {...(props.windowCapability === undefined
+          ? {}
+          : { windowCapability: props.windowCapability })}
       />
     </Suspense>
   );

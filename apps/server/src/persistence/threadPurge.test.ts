@@ -31,6 +31,10 @@ import {
   CODE_LANGUAGE_SERVER_EVENT_NAMES,
 } from "@octant/contracts/code-language";
 import { decodeThreadRetentionThreadId } from "@octant/contracts/thread-retention";
+import {
+  THREAD_SECRET_AGGREGATE_TYPE,
+  THREAD_SECRET_EVENT_NAME,
+} from "@octant/contracts/thread-secrets";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -436,6 +440,38 @@ describe("thread purge sweep", () => {
       .prepare(`SELECT aggregate_id FROM event_journal WHERE aggregate_type = 'thread-wakeup'`)
       .all() as ReadonlyArray<{ readonly aggregate_id: string }>;
     expect(remaining.map((row) => row.aggregate_id)).toEqual([keptWakeup]);
+  });
+
+  it("erases a purged thread's secret records and keeps another thread's", async () => {
+    const harness = openHarness();
+    seedControlThread(harness);
+    seedCodeProjection(harness, threads.code.id);
+    for (const threadId of [threads.code.id, controlThreadId]) {
+      insertEvent(
+        harness.connection,
+        THREAD_SECRET_AGGREGATE_TYPE,
+        threadId,
+        {
+          name: "thread-secret.granted",
+          secretId: "c3630000-0000-4000-8000-0000000000e3",
+          threadId,
+          mode: "code",
+          secretName: "DEPLOY_TOKEN",
+          kind: "token",
+          source: "pasted",
+          lifetime: "24-hours",
+          delivery: "handle",
+        },
+        THREAD_SECRET_EVENT_NAME,
+      );
+    }
+
+    await purgeThread(harness, "code", threads.code.id);
+
+    const remaining = harness.connection
+      .prepare(`SELECT aggregate_id FROM event_journal WHERE aggregate_type = ?`)
+      .all(THREAD_SECRET_AGGREGATE_TYPE) as ReadonlyArray<{ readonly aggregate_id: string }>;
+    expect(remaining.map((row) => row.aggregate_id)).toEqual([controlThreadId]);
   });
 
   it("keeps a Chat source's Claude resume identity when its branch is purged and erases it with the source", async () => {

@@ -21,7 +21,19 @@ import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/de
 import type { ProjectColor, ProjectProviderPolicy } from "@octant/contracts/projects";
 import type { ProviderInstance } from "@octant/contracts/providers";
 import { ChevronDown, Ellipsis, SquarePen } from "../ui/icons";
-import { Children, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Children,
+  lazy,
+  Suspense,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { AddRepositoryToComputerContext } from "./addRepositoryToComputerContext";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { homeRelativePath } from "../lib/homeRelativePath";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
@@ -41,6 +53,12 @@ import type { ExtraFolderChange, ProjectChange } from "./useProjectController";
 import { ProjectDesktopRecipeSection } from "./ProjectDesktopRecipeSection";
 import { ProjectAutoReviewerSection } from "./ProjectAutoReviewerSection";
 import { ProjectPullRequestReviewerSection } from "../code/PullRequestReviewerSettings";
+
+const LazyProjectLinearTargetSection = lazy(() =>
+  import("./ProjectLinearTargetSection").then((module) => ({
+    default: module.ProjectLinearTargetSection,
+  })),
+);
 import {
   ProjectModelRolesSection,
   type ProjectModelRolesSectionProps,
@@ -76,6 +94,8 @@ export interface ProjectOverviewProps {
   readonly hostId?: string;
   readonly memoryProjects?: ReadonlyArray<ProjectSummary>;
   readonly onArchive: (projectId: ProjectId) => void;
+  /** Opens the modal to clone this local Code Project onto another paired computer. */
+  readonly onAddToAnotherComputer?: (projectId: ProjectId) => void;
   readonly onMemoryChanged?: () => void;
   readonly onNewThread?: () => void;
   readonly onRelink: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
@@ -130,6 +150,13 @@ export interface ProjectOverviewProps {
   readonly onDesignSystemChange?: (
     projectId: ProjectId,
     designSystem: DesignSystemChoice | null,
+  ) => Promise<boolean>;
+  /** Connected Linear client; when present, bound Projects show Linear team/project mapping. */
+  readonly linearClient?: import("@octant/client-runtime/integration-client").IntegrationClient;
+  /** Absent when the host cannot accept the change; the panel then stays read-only. */
+  readonly onLinearTargetChange?: (
+    projectId: ProjectId,
+    target: import("@octant/contracts").ProjectLinearTarget | null,
   ) => Promise<boolean>;
   /** Absent when the host cannot accept the change; a Code Project's recipe is then not shown. */
   readonly onDesktopRecipeChange?: (
@@ -236,8 +263,19 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               ]
             : []),
         ];
+  const contextAddToAnotherComputer = useContext(AddRepositoryToComputerContext);
+  const onAddToAnotherComputer = props.onAddToAnotherComputer ?? contextAddToAnotherComputer;
+  const canAddToAnotherComputer =
+    props.project.type === "code" &&
+    !archived &&
+    !connectionStale &&
+    !unavailable &&
+    onAddToAnotherComputer !== undefined;
   const overflowItems: ReadonlyArray<OctantMenuItem> = [
     ...iconItems,
+    ...(canAddToAnotherComputer
+      ? [{ label: "Add to another computer…", value: "add-to-computer" }]
+      : []),
     ...(canRelink && !unavailable ? [{ label: "Relink folder", value: "relink" }] : []),
     {
       destructive: true,
@@ -484,6 +522,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 items={overflowItems}
                 onValueChange={(value) => {
                   if (value === "relink") void relink();
+                  else if (value === "add-to-computer") onAddToAnotherComputer?.(props.project.id);
                   else if (value === "archive") props.onArchive(props.project.id);
                   else if (value === "icon-change") iconFile.current?.click();
                   else if (value === "icon-reset") void resetIcon();
@@ -506,25 +545,37 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               <h2 className="project-overview__card-title">
                 {props.project.type === "code" ? "Repository" : "Folders"}
               </h2>
-              {unavailable ? null : (
-                <span
-                  className="project-overview__availability"
-                  data-state={
-                    archived
-                      ? "quiet"
-                      : props.availability?.status === "unverified"
+              <div className="flex items-center gap-2">
+                {canAddToAnotherComputer ? (
+                  <OctantButton
+                    onClick={() => onAddToAnotherComputer?.(props.project.id)}
+                    size="xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Add to another computer…
+                  </OctantButton>
+                ) : null}
+                {unavailable ? null : (
+                  <span
+                    className="project-overview__availability"
+                    data-state={
+                      archived
                         ? "quiet"
-                        : "ok"
-                  }
-                >
-                  <span aria-hidden="true" className="project-overview__availability-dot" />
-                  {archived
-                    ? "Archived · read-only"
-                    : props.availability?.status === "unverified"
-                      ? "Availability unverified"
-                      : "Available"}
-                </span>
-              )}
+                        : props.availability?.status === "unverified"
+                          ? "quiet"
+                          : "ok"
+                    }
+                  >
+                    <span aria-hidden="true" className="project-overview__availability-dot" />
+                    {archived
+                      ? "Archived · read-only"
+                      : props.availability?.status === "unverified"
+                        ? "Availability unverified"
+                        : "Available"}
+                  </span>
+                )}
+              </div>
             </header>
             <ProjectFoldersSection
               key={String(props.project.id)}
@@ -663,6 +714,33 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                   disabled={archived || connectionStale}
                   project={props.project}
                 />
+              </ProjectOverviewInspector>
+            )}
+            {props.linearClient === undefined || props.project.type === "chat" ? null : (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-linear-target`}
+                label="Linear"
+                summary={
+                  props.project.linearTarget === undefined
+                    ? "Bind a Linear team to scope issues and octant_linear reads"
+                    : props.project.linearTarget.projectName === undefined
+                      ? `${props.project.linearTarget.teamName} (${props.project.linearTarget.teamKey})`
+                      : `${props.project.linearTarget.teamName} (${props.project.linearTarget.teamKey}) · ${props.project.linearTarget.projectName}`
+                }
+              >
+                <Suspense fallback={null}>
+                  <LazyProjectLinearTargetSection
+                    disabled={archived || connectionStale}
+                    linearClient={props.linearClient}
+                    {...(props.onLinearTargetChange === undefined
+                      ? {}
+                      : {
+                          onChoose: async (target) =>
+                            (await props.onLinearTargetChange?.(props.project.id, target)) ?? false,
+                        })}
+                    project={props.project}
+                  />
+                </Suspense>
               </ProjectOverviewInspector>
             )}
             {props.onBrandKitChange === undefined ? null : (

@@ -5,6 +5,8 @@ import {
   useComposerAtMenu,
 } from "../composer/useComposerAtMenu";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
+import { ComposerAttachmentIcon } from "../composer/ComposerAttachmentIcon";
+import type { ComposerStashBinding } from "../composer/useComposerStash";
 import {
   useId,
   useCallback,
@@ -114,6 +116,7 @@ export interface ChatComposerModelOption {
 const MODEL_OPTION_DEFAULT_ID = "(provider default)";
 
 export interface ChatComposerProps {
+  readonly stash?: ComposerStashBinding | undefined;
   readonly readOnly?: boolean;
   readonly benchmarkProjectId?: ProjectId | undefined;
   /** Caller-owned pending text. The component never persists or clears this value itself. */
@@ -547,13 +550,17 @@ export function ChatComposer(props: ChatComposerProps) {
       {(props.pendingAttachments ?? []).length > 0 ? (
         <ul aria-label="Attached files" className="composer-chips chat-composer__selections">
           {(props.pendingAttachments ?? []).map((attachmentSelection) => (
-            <li key={String(attachmentSelection.id)} className="chip chat-composer__selection">
-              <span>{attachmentSelection.displayName}</span>
+            <li
+              key={String(attachmentSelection.id)}
+              className="chip chat-composer__selection min-w-0"
+            >
+              <ComposerAttachmentIcon name={attachmentSelection.displayName} />
+              <span className="truncate">{attachmentSelection.displayName}</span>
               {props.onRemoveAttachment === undefined ? null : (
                 <OctantButton
                   aria-label={`Remove ${attachmentSelection.displayName} attachment`}
                   disabled={props.attachmentRemovalDisabled}
-                  className="chip-x window-no-drag"
+                  className="chip-x shrink-0 window-no-drag"
                   onClick={() => props.onRemoveAttachment?.(attachmentSelection.id)}
                   type="button"
                   variant="bare"
@@ -956,6 +963,7 @@ export function ChatComposer(props: ChatComposerProps) {
   return (
     <ThreadComposer
       readOnly={props.readOnly === true}
+      stash={props.readOnly === true ? undefined : props.stash}
       queue={props.queue}
       {...(props.threadBusy === undefined ? {} : { threadBusy: props.threadBusy })}
       presentation="follow-up"

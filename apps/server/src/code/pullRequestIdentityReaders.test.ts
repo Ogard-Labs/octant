@@ -11,13 +11,18 @@ import {
   CODE_PULL_REQUEST_LINK_AGGREGATE,
   CODE_PULL_REQUEST_LINK_FORGE_IDS_BACKFILLED,
   decodeAggregateVersion,
+  decodeCodeProjectPullRequestDetailRefreshCommand,
   decodeCodeProjectPullRequestSwitchTarget,
   decodeCodeThread,
   decodeCodeThreadFollowUp,
   decodeProjectId,
   decodeWindowId,
 } from "@octant/contracts";
-import { decodeCodeCheckoutId, decodeCodeThreadId } from "@octant/contracts/code";
+import {
+  decodeCodeCheckoutId,
+  decodeCodeDeliveryTarget,
+  decodeCodeThreadId,
+} from "@octant/contracts/code";
 import type { RequiredChecksState } from "@octant/domain/code-pull-request-action-policy";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Journal } from "../persistence/journal";
@@ -34,6 +39,7 @@ import {
   CodeProjectPullRequestSwitchService,
   type PullRequestAutoFixThreads,
 } from "./codeProjectPullRequestSwitchService";
+import { threadDeliversPullRequest } from "./mergedThreadPutAway";
 import { CodeThreadMetadataService } from "./codeThreadMetadataService";
 import { FailingChecksFollowUps } from "./failingChecksFollowUps";
 import { GhPullRequestPort, type GhCommandPort, type GhCommandResult } from "./ghPullRequestPort";
@@ -455,6 +461,12 @@ function buildStack(options: {
   readonly clock: () => string;
   readonly threadRepo?: { readonly owner: string; readonly name: string };
   readonly prNumbers?: ReadonlyArray<{ readonly number: number; readonly observedAt: string }>;
+  readonly unlinkedPullRequests?: ReadonlyArray<{
+    readonly owner: string;
+    readonly repository: string;
+    readonly number: number;
+    readonly unlinkedAt: string;
+  }>;
   readonly requiredChecks?: (request: {
     readonly owner: string;
     readonly name: string;
@@ -512,6 +524,9 @@ function buildStack(options: {
           pullRequestNumbers: options.prNumbers ?? [
             { number: 42, observedAt: "2026-11-19T11:50:00.000Z" },
           ],
+          ...(options.unlinkedPullRequests === undefined
+            ? {}
+            : { unlinkedPullRequests: options.unlinkedPullRequests }),
         },
       ],
     },
@@ -755,6 +770,145 @@ describe("pull request readers use the single forge identity owner", () => {
     const switchesAfterTick = await switches.query(windowId, newestTarget);
     expect(switchesAfterTick.autoFix.status).toBe("on");
     expect(switchesAfterTick.mergeWhenReady.status).toBe("on");
+  });
+
+  it("shows a thread with a placeholder target the merge of the pull request Octant opened for it", async () => {
+    const clock = () => "2026-11-19T12:00:00.000Z";
+    const { repoRoot, gitPort } = createRealGitRepo("https://github.com/acme/app.git");
+    const forge = createFakeForge({ owner: "acme", name: "app", nodeId: "R_kgDOapp001" });
+    forge.repo.pullRequests.set(42, defaultPr());
+    const { links, pullRequestService } = buildStack({
+      journal: openJournal(clock),
+      repoRoot,
+      gitPort,
+      forge,
+      clock,
+      // What the composer proposes when it can read no remote.
+      threadRepo: { owner: "local", name: "App" },
+      prNumbers: [],
+    });
+    // What the create operation records.
+    await links.recordObservation({
+      projectId,
+      repositoryOwner: "acme",
+      repositoryName: "app",
+      number: 42,
+      headBranch: "feature/work",
+      threadIds: [threadId],
+    });
+    const merges = () =>
+      pullRequestService.mergedPullRequestsForThread(String(threadId), (pullRequest) =>
+        threadDeliversPullRequest({
+          thread: {
+            projectId,
+            deliveryTarget: decodeCodeDeliveryTarget({
+              outcomeKind: "opened-pr",
+              branchIntent: "feature/work",
+              remoteName: "origin",
+              proposedBaseRepository: "local/App",
+              proposedBaseBranch: "main",
+              confirmedAt: "2026-11-19T12:00:00.000Z",
+            }),
+          },
+          own: [{ number: 42, repository: { owner: "acme", name: "app" } }],
+          pullRequest,
+          sameRepository: (project, left, right) => links.areSameRepository(project, left, right),
+        }),
+      );
+
+    await pullRequestService.refresh(windowId, { kind: "refresh-all" }, signal);
+    expect(merges()).toEqual([]);
+    forge.repo.pullRequests.set(42, defaultPr({ state: "MERGED" }));
+    await pullRequestService.refresh(windowId, { kind: "refresh-all" }, signal);
+    expect(merges()).toEqual([{ baseRepository: "acme/app", number: 42 }]);
+  });
+
+  it("keeps an unlinked pull request off the thread across a repository rename, until the thread touches it again", async () => {
+    let nowMs = Date.parse("2026-11-19T12:00:00.000Z");
+    const clock = () => new Date(nowMs).toISOString();
+    const { repoRoot, gitPort, git } = createRealGitRepo("https://github.com/acme/old-repo.git");
+    const forge = createFakeForge({ owner: "acme", name: "old-repo", nodeId: "R_kgDOold001" });
+    forge.repo.pullRequests.set(42, defaultPr());
+    const prNumbers = [{ number: 42, observedAt: "2026-11-19T11:50:00.000Z" }];
+    const unlinkedPullRequests: Array<{
+      owner: string;
+      repository: string;
+      number: number;
+      unlinkedAt: string;
+    }> = [];
+    const { pullRequestService } = buildStack({
+      journal: openJournal(clock),
+      repoRoot,
+      gitPort,
+      forge,
+      clock,
+      prNumbers,
+      unlinkedPullRequests,
+    });
+    const refresh = () =>
+      pullRequestService.refresh(windowId, { kind: "refresh-all" }, signal).then(() => undefined);
+    // Every reader answers for itself: the board filters unlinks on its own, so
+    // reading it alone would hide one that the detail or the switches missed.
+    const linked = async () => {
+      const target = {
+        projectId,
+        repositoryOwner: "acme",
+        repositoryName: forge.repo.name,
+        number: 42,
+      };
+      const board = (await pullRequestService.boardSnapshot(windowId)).rows
+        .flatMap((row) => row.linkedThreads)
+        .map((thread) => String(thread.threadId));
+      const authorized = async () =>
+        expect(
+          await pullRequestService.authorizePullRequest(
+            windowId,
+            decodeCodeProjectPullRequestSwitchTarget(target),
+          ),
+        ).toMatchObject({ status: "authorized", linkedThreadIds: board });
+      // The switches answer alone, and again once a detail refresh has
+      // recorded the link it observed.
+      await authorized();
+      const detail = await pullRequestService.refreshDetail(
+        windowId,
+        decodeCodeProjectPullRequestDetailRefreshCommand(target),
+        signal,
+      );
+      expect(detail.linkedThreads.map((thread) => String(thread.threadId))).toEqual(board);
+      await authorized();
+      return board;
+    };
+    const unlink = (repository: string) =>
+      unlinkedPullRequests.push({ owner: "acme", repository, number: 42, unlinkedAt: clock() });
+    const rename = (repository: string) => {
+      forge.renameTo("acme", repository);
+      git("remote", "set-url", "origin", `https://github.com/acme/${repository}.git`);
+    };
+
+    await refresh();
+    expect(await linked()).toEqual([threadId]);
+    // Unlinked under the old name; the rename must not bring it back.
+    unlink("old-repo");
+    expect(await linked()).toEqual([]);
+    nowMs += 5_000;
+    rename("new-repo");
+    await refresh();
+    expect(await linked()).toEqual([]);
+
+    // The thread still names the old repository, and its own operations record
+    // a number alone. Touching the pull request again links it again.
+    nowMs += 5_000;
+    prNumbers.push({ number: 42, observedAt: clock() });
+    expect(await linked()).toEqual([threadId]);
+    await refresh();
+    expect(await linked()).toEqual([threadId]);
+
+    // Unlinked again, now under the name the list shows: the newest unlink holds.
+    nowMs += 5_000;
+    unlink("new-repo");
+    expect(await linked()).toEqual([]);
+    await refresh();
+    expect(await linked()).toEqual([]);
   });
 
   it("keeps one link and all reader state when a repository is transferred to another owner", async () => {
