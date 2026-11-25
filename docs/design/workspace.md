@@ -207,7 +207,16 @@ the focused pane's named bar controls — every button, menu row and view
 option the bar offers, folded or not — and each palette command runs the
 exact callback the bar's own control invokes; state lines and tool-drawn
 controls are not commands, and a disabled control is absent there as it is
-on the bar. In the Activity feed the
+on the bar. For the thread in front it also lists that thread's sidebar row
+choices under the row menu's own words and conditions: **Pin** or **Unpin**
+(Code only), **Settle**, or **Un-settle** or **Reopen** once the thread is
+closed, and **Wake** on a snoozed thread or else one **Snooze · <time>**
+command for each wake time the row menu offers, since the palette has no
+submenu. They run the row menu's own actions, so a refusal reads where the
+row's does, and a wake time is worked out when its command runs. A draft, a
+page or Settings covering the workspace, and a thread this window has no row
+for leave no thread in front, so none are listed. **Mark done** stays on the
+row menu. In the Activity feed the
 newest group is open, so a feed whose only group is Earlier is never a blank
 column. Group headings in the sidebar are 12px in the meta ink with a 14px
 chevron and the count as a right-aligned number.

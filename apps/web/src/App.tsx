@@ -105,6 +105,7 @@ import { SurfaceLoading } from "./surface/SurfaceLoading";
 import { DockModuleBoundary } from "./shell/DockModuleBoundary";
 import type { ShellActions, ThreadMoveRequest } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
+import { threadRestRowActions } from "./app/threadRestRowActions";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
 import { useStableActions } from "./app/useStableActions";
 import { PaneDockToolsContext, type PaneDockTools } from "./shell/PaneDockTools";
@@ -8932,6 +8933,21 @@ function LaunchedShell(
         ? undefined
         : { id: serverActionsProject.projectId, name: serverActionsProject.name }
       : { id: actionsProject.id, name: actionsProject.name };
+  // The palette acts on the thread in front through that thread's own sidebar
+  // row: the same state decides what is offered, and the same actions run. A
+  // window with no row for it (still loading, or the thread lives elsewhere)
+  // offers nothing.
+  const frontThreadRow =
+    replyDetailThread === undefined
+      ? undefined
+      : (replyDetailThread.mode === "code"
+          ? navigationModel.codeProjectThreads
+          : replyDetailThread.mode === "work"
+            ? navigationModel.workProjectThreads
+            : chatController.status === "ready"
+              ? navigationModel.markedChatNavigation
+              : []
+        ).find((row) => row.threadId === replyDetailThread.threadId);
   const octantCommands = buildOctantCommands({
     activeMode,
     modes: enabledModes(controller.settings),
@@ -8993,6 +9009,14 @@ function LaunchedShell(
                     onSet: setCurrentThreadReplyDetail,
                   },
                 }),
+          },
+        }),
+    ...(replyDetailThread === undefined || frontThreadRow === undefined
+      ? {}
+      : {
+          frontThread: {
+            thread: frontThreadRow,
+            actions: threadRestRowActions(actions)[replyDetailThread.mode],
           },
         }),
     onOpenReview: openReview,
