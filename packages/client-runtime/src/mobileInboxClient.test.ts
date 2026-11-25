@@ -182,6 +182,12 @@ describe("mobileInboxClient", () => {
       status: "active",
       freshness: later,
     });
+    // What the list draws each thread's provider mark from.
+    expect(rows.map((row) => row.providerInstanceId)).toEqual([
+      String(workThread.providerInstanceId),
+      codeThread.providerInstanceId,
+      String(chatThread.providerInstanceId),
+    ]);
   });
 
   it("says a thread is working or needs input only when the host's runtime report says so", () => {

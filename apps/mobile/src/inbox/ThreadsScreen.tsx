@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, ScrollView, StyleSheet, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import {
   searchMobileTranscripts,
@@ -7,7 +7,7 @@ import {
   type MobileTranscriptHit,
 } from "@octant/client-runtime";
 import { MOBILE_COPY, MOBILE_SCREEN_TITLES } from "../copy";
-import { space, typography, useTheme } from "../../design-system";
+import { space, useTheme } from "../../design-system";
 import { NEW_BUTTON_CLEARANCE } from "../navigation/places";
 import { ScreenHeader } from "../navigation/ScreenHeader";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
@@ -122,7 +122,7 @@ export function ThreadsScreen(props: {
         },
         pillRow: { flexGrow: 0 },
       }),
-    [colors],
+    [],
   );
   const projectId =
     heldProject === "all" ? "all" : `${heldProject.hostId}:${heldProject.projectId}`;

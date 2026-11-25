@@ -488,14 +488,8 @@ function providerSnapshot() {
       decodeProviderInstance({
         id: PROVIDER_ID,
         displayName: "OpenAI",
-        driverKind: "openai-compatible",
-        configuration: {
-          kind: "openai-compatible-http",
-          baseUrl: "https://provider.octant.invalid/v1/",
-          authentication: "none",
-          protocol: "responses",
-          manualModelIds: [],
-        },
+        driverKind: "codex",
+        configuration: { kind: "codex-cli", binaryPath: "/mock/codex" },
         enabled: true,
         environmentPolicy: "inherit-host",
         version: 1,

@@ -1,9 +1,9 @@
 import { useCallback, useMemo } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import type { MobileInboxRow } from "@octant/client-runtime";
 import { MOBILE_COPY } from "../copy";
-import { space, typography, useTheme } from "../../design-system";
+import { space } from "../../design-system";
 import type { CountedThreads } from "../navigation/routes";
 import { ScreenHeader } from "../navigation/ScreenHeader";
 import { inboxCountedRows } from "./inboxWorkPresentation";
@@ -41,7 +41,6 @@ export function CountedThreadsScreen(props: {
   readonly view: CountedThreads;
   readonly onOpenThread: (row: MobileInboxRow) => void;
 }) {
-  const { colors } = useTheme();
   const { rows, loading, refresh } = useMobileThreads();
   useFocusEffect(
     useCallback(() => {
@@ -54,7 +53,7 @@ export function CountedThreadsScreen(props: {
       StyleSheet.create({
         content: { paddingTop: space.sm, paddingBottom: space.xl, flexGrow: 1 },
       }),
-    [colors],
+    [],
   );
   return (
     <View style={{ flex: 1 }} testID="mobile-counted-threads">

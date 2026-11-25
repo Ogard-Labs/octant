@@ -79,6 +79,8 @@ export interface MobileInboxRow {
   readonly pullRequests?: MobileRowPullRequests;
   /** The thread's Project; a Chat with no folder has none. */
   readonly projectId?: string;
+  /** The provider that answers here; a row known only from an ask has none. */
+  readonly providerInstanceId?: string;
   readonly pinned?: boolean;
   readonly live?: MobileThreadLiveState;
   /** The oldest approval, question or other ask the host says waits on the person here. */
@@ -185,6 +187,7 @@ function chatRow(hostId: string, thread: ChatThread): MobileInboxRow {
     title: thread.title,
     status: thread.lifecycle,
     freshness: thread.updatedAt,
+    providerInstanceId: String(thread.providerInstanceId),
     ...restFields(thread),
     ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
   };
@@ -198,6 +201,7 @@ function workRow(hostId: string, thread: WorkThread, live?: MobileThreadLiveStat
     title: thread.title,
     status: thread.lifecycle,
     freshness: thread.updatedAt,
+    providerInstanceId: String(thread.providerInstanceId),
     projectId: String(thread.projectId),
     ...restFields(thread),
     ...(live === undefined ? {} : { live }),
@@ -217,6 +221,7 @@ function codeRow(
     title: thread.title,
     status: thread.lifecycle,
     freshness: thread.updatedAt,
+    providerInstanceId: String(thread.providerInstanceId),
     projectId: String(thread.projectId),
     ...restFields(thread),
     ...(thread.pinned === true ? { pinned: true } : {}),

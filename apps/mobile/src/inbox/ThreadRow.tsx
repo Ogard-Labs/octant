@@ -6,6 +6,7 @@ import { space, typography, useTheme, withAlpha, type ThemeColors } from "../../
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { useMobileSession } from "../session/MobileSessionContext";
 import type { MobileIconName } from "../ui/IconButton";
+import { ProviderMark } from "../ui/ProviderMark";
 import { useMobileThreads } from "./MobileThreadsContext";
 import { ThreadRowActionsSheet } from "./ThreadRowActionsSheet";
 import { threadModeIcon, threadModeLabel } from "./threadRowPresentation";
@@ -60,7 +61,8 @@ const PULL_REQUEST_INK = (state: string, colors: ThemeColors): string =>
 
 /**
  * One thread in any list: its Project's letters and title, the computer and
- * mode under it, and at the end its state in words with its pull requests. A
+ * mode under it, and at the end its state in words with its pull requests and
+ * its provider's mark. A
  * long press offers what the row menu offers. A running thread steps back,
  * since nothing is asked of the person there.
  */
@@ -72,9 +74,10 @@ export function ThreadRow(props: {
   const { row } = props;
   const { colors } = useTheme();
   const { transports } = useMobileSession();
-  const { hostLabel, projectName, refresh } = useMobileThreads();
+  const { hostLabel, projectName, provider: providerOf, refresh } = useMobileThreads();
   const [actionsOpen, setActionsOpen] = useState(false);
   const project = projectName(row);
+  const provider = providerOf(row);
   const state = threadRowState(row, new Date());
   const quiet = state.kind === "working" || state.kind === "settled";
   const ink = stateInk(state.kind, colors);
@@ -140,6 +143,7 @@ export function ThreadRow(props: {
             : pullRequests.count === 1
               ? `Pull request ${pullRequests.number}`
               : `${pullRequests.count} pull requests`,
+          provider === undefined ? "" : formatScreenshotSafeLabel(provider.displayName),
         ]
           .filter((part) => part.length > 0)
           .join(", ")}
@@ -192,6 +196,9 @@ export function ThreadRow(props: {
                   {pullRequestChip(pullRequests)}
                 </Text>
               </View>
+            )}
+            {provider === undefined ? null : (
+              <ProviderMark driverKind={provider.driverKind} size={15} />
             )}
           </View>
         </View>

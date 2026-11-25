@@ -1,9 +1,9 @@
 import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, ScrollView, StyleSheet, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import type { MobileInboxRow } from "@octant/client-runtime";
 import { MOBILE_COPY, MOBILE_SCREEN_TITLES } from "../copy";
-import { space, typography, useTheme } from "../../design-system";
+import { useTheme } from "../../design-system";
 import { NEW_BUTTON_CLEARANCE } from "../navigation/places";
 import { ScreenHeader } from "../navigation/ScreenHeader";
 import { useMobileSession } from "../session/MobileSessionContext";
@@ -39,7 +39,7 @@ export function InboxScreen(props: { readonly onOpenThread: (row: MobileInboxRow
       StyleSheet.create({
         content: { paddingBottom: NEW_BUTTON_CLEARANCE, flexGrow: 1 },
       }),
-    [colors],
+    [],
   );
   const empty =
     transports.length === 0

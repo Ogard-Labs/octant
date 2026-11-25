@@ -10,11 +10,14 @@ import {
 } from "react";
 import {
   fetchMobileCodeProjects,
+  fetchMobileProviderCatalog,
   fetchMobileWorkProjects,
   listAllHostsMobileInbox,
   MobileInboxFailure,
+  normalizeMobileProviderDirectory,
   type MobileInboxHostFailure,
   type MobileInboxRow,
+  type MobileProviderDirectoryEntry,
 } from "@octant/client-runtime";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { createRequestGuard } from "./requestGuard";
@@ -32,6 +35,10 @@ export interface MobileThreads {
   readonly refresh: () => Promise<void>;
   readonly hostLabel: (hostId: string) => string;
   readonly projectName: (row: MobileInboxRow) => string | undefined;
+  /** Who answers a thread; unknown until its computer's directory is read. */
+  readonly provider: (
+    row: MobileInboxRow,
+  ) => Pick<MobileProviderDirectoryEntry, "displayName" | "driverKind"> | undefined;
   /** Every Project the paired computers name, for the Threads filter. */
   readonly projects: ReadonlyArray<{
     readonly hostId: string;
@@ -118,6 +125,31 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
     };
   }, [transports]);
 
+  // Only what a row's mark needs; a computer whose directory cannot be read
+  // leaves its rows unmarked, and its threads are listed all the same.
+  const [providers, setProviders] = useState<
+    ReadonlyMap<string, Pick<MobileProviderDirectoryEntry, "displayName" | "driverKind">>
+  >(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all(
+      transports.map(async (transport) => {
+        const catalog = await fetchMobileProviderCatalog(transport).catch(() => undefined);
+        return catalog === undefined
+          ? []
+          : normalizeMobileProviderDirectory(catalog).map(
+              ({ providerInstanceId, displayName, driverKind }) =>
+                [`${transport.hostId}:${providerInstanceId}`, { displayName, driverKind }] as const,
+            );
+      }),
+    ).then((entries) => {
+      if (!cancelled) setProviders(new Map(entries.flat()));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [transports]);
+
   const value = useMemo<MobileThreads>(() => {
     const labels = new Map(hosts.map((host) => [host.hostId, host.label]));
     const names = new Map(
@@ -131,10 +163,14 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
       refresh,
       projects,
       hostLabel: (hostId) => labels.get(hostId) ?? hostId.slice(0, 8),
+      provider: (row) =>
+        row.providerInstanceId === undefined
+          ? undefined
+          : providers.get(`${row.hostId}:${row.providerInstanceId}`),
       projectName: (row) =>
         row.projectId === undefined ? undefined : names.get(`${row.hostId}:${row.projectId}`),
     };
-  }, [error, failures, hosts, loading, projects, refresh, rows]);
+  }, [error, failures, hosts, loading, projects, providers, refresh, rows]);
 
   return <Context.Provider value={value}>{props.children}</Context.Provider>;
 }
