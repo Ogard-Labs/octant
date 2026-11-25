@@ -118,6 +118,26 @@ describe("pull-request stacks", () => {
     ).toEqual([]);
   });
 
+  it("leaves out an upper layer whose head another pull request shares", () => {
+    expect(
+      derivePullRequestStacks([pull(1, "a", "main"), pull(2, "b", "a"), pull(3, "b", "release")]),
+    ).toEqual([]);
+  });
+
+  it("leaves out an upper layer that several pull requests are based on", () => {
+    expect(
+      numbers(
+        derivePullRequestStacks([
+          pull(1, "a", "main"),
+          pull(2, "b", "a"),
+          pull(3, "c", "b"),
+          pull(4, "d", "c"),
+          pull(5, "e", "c"),
+        ]),
+      ),
+    ).toEqual([[1, 2]]);
+  });
+
   it("is no stack where the branches go round in a circle", () => {
     expect(
       derivePullRequestStacks([pull(1, "a", "b"), pull(2, "b", "a"), pull(3, "c", "c")]),
@@ -126,7 +146,7 @@ describe("pull-request stacks", () => {
 
   it("says each layer's place and the layer below it", () => {
     const rows = [pull(1, "a", "main"), pull(2, "b", "a"), pull(3, "c", "b"), pull(9, "x", "main")];
-    const places = pullRequestStackPlaces(rows);
+    const places = pullRequestStackPlaces(derivePullRequestStacks(rows));
     expect(rows.map((row) => places.get(row))).toEqual([
       { position: 1, size: 3 },
       { position: 2, size: 3, parent: 1 },

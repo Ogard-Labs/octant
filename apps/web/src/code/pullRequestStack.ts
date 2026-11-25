@@ -89,6 +89,8 @@ const STACK_REFUSAL: Readonly<
   duplicate: "a layer is listed twice",
   "not-a-chain": "its layers no longer build on each other",
   unreadable: "a layer is no longer open or could not be read",
+  "base-changed": "the stack lands on another branch than the one you confirmed",
+  stale: "a layer changed since you confirmed it",
 };
 
 /** What landed, and why it stopped where it did. */
@@ -101,10 +103,15 @@ export function stackMergeOutcomeCopy(
     case "refused":
       return `Nothing merged: ${STACK_REFUSAL[outcome.reason]}.`;
     case "stopped": {
-      const stopped = `stopped at #${String(outcome.stoppedAt)}. ${mergeOutcomeCopy(outcome.outcome)}`;
-      return outcome.merged.length === 0
-        ? `Nothing merged: ${stopped}`
-        : `Merged ${numberWords(outcome.merged)}, then ${stopped}`;
+      const at = `#${String(outcome.stoppedAt)}`;
+      const landed = outcome.merged.length === 0 ? "" : `Merged ${numberWords(outcome.merged)}. `;
+      // Its base is part of what happened: it was changed for this merge and stays.
+      const base =
+        outcome.retargetedTo === undefined ? "" : ` ${at} is now based on ${outcome.retargetedTo}.`;
+      if (outcome.outcome.status === "not-landed") {
+        return `${landed}GitHub accepted ${at} but has not landed it yet, as with a merge queue. Merge the rest of the stack once it has.${base}`;
+      }
+      return `${landed === "" ? "Nothing merged. " : landed}Stopped at ${at}. ${mergeOutcomeCopy(outcome.outcome)}${base}`;
     }
     case "owner-unlock-required":
     case "owner-unlock-not-given":

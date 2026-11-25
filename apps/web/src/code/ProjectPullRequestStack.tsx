@@ -34,6 +34,8 @@ export interface ProjectPullRequestStackProps {
   readonly layers: ReadonlyArray<CodeProjectPullRequestRow>;
   readonly number: number;
   readonly method: CodeProjectPullRequestMergeMethod;
+  /** The snapshot was cut at its bound, so a layer may be missing from it. */
+  readonly partial: boolean;
   /** Reads one layer from GitHub, so the confirmation names the head it would merge. */
   readonly readLayer: (
     layer: CodeProjectPullRequestRow,
@@ -42,7 +44,10 @@ export interface ProjectPullRequestStackProps {
   readonly onMergeStack?:
     | ((
         method: CodeProjectPullRequestMergeMethod,
-        layers: ReadonlyArray<ReviewedStackLayer>,
+        stack: {
+          readonly layers: ReadonlyArray<ReviewedStackLayer>;
+          readonly destination: string;
+        },
       ) => Promise<CodeProjectPullRequestStackMergeOutcome | OwnerUnlockNotGiven>)
     | undefined;
   /**
@@ -109,7 +114,7 @@ export function ProjectPullRequestStack(props: ProjectPullRequestStackProps) {
     setState({ step: "merging", method, stack });
     let result: StackMergeResult;
     try {
-      const outcome = await props.onMergeStack(method, stack.layers);
+      const outcome = await props.onMergeStack(method, stack);
       result = { text: stackMergeOutcomeCopy(outcome), merged: outcome.status === "merged" };
     } catch {
       // The request may have reached the host, so it is not said that nothing merged.
@@ -163,6 +168,11 @@ export function ProjectPullRequestStack(props: ProjectPullRequestStackProps) {
           );
         })}
       </ol>
+      {props.partial ? (
+        <p className="code-pr-stack__note">
+          The list is cut at its limit, so this stack may have more layers.
+        </p>
+      ) : null}
       {props.onMergeStack === undefined ? null : !isBottom ? (
         <p className="code-pr-stack__note">Merge the stack from its bottom, #{bottom.number}.</p>
       ) : tooLong ? (
@@ -213,9 +223,16 @@ export function ProjectPullRequestStack(props: ProjectPullRequestStackProps) {
                 ))}
               </ol>
               <p>
-                They merge bottom first, with {METHOD_WORDS[method]}. Octant stops at the first that
-                changed since this reading or does not merge; those before it stay merged.
+                They merge bottom first, with {METHOD_WORDS[method]}. Octant points each next layer
+                at {open.destination}, and stops at the first that changed since this reading or
+                does not merge; those before it stay merged.
               </p>
+              {method === "merge" ? null : (
+                <p>
+                  This method rewrites commits, so a layer that changes the same lines as the one
+                  below it can conflict once that one lands. A merge commit avoids that.
+                </p>
+              )}
             </>
           )}
           <div className="code-pr-review__actions">

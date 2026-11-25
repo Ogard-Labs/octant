@@ -278,6 +278,7 @@
 .environment-thread-prs {
   --environment-thread-pr-h: 44px;
 
+  container: environment-thread-prs / inline-size;
   display: grid;
   min-width: 0;
 }
@@ -416,6 +417,14 @@
 
 .environment-thread-pr[data-step] .environment-thread-pr__meta {
   padding-inline-end: 76px;
+}
+
+/* In a narrow strip the step leaves no room for both: the line counts go, in
+   words in the row's name still, rather than the number being cut to "#…". */
+@container environment-thread-prs (width < 360px) {
+  .environment-thread-pr[data-step] .environment-thread-pr__diffstat {
+    display: none;
+  }
 }
 
 .environment-thread-pr__step {

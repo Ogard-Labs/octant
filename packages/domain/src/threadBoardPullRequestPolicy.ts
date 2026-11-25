@@ -187,6 +187,9 @@ export function composeThreadNavigationPullRequestSummaries(
     readonly matches: ReadonlyArray<ThreadBoardPullRequestJoinRow>;
   },
 ): ThreadBoardPullRequestSummaries {
+  // Most threads have no pull request, and every one is read on each navigation.
+  if (input.matches.length === 0) return { items: [], hiddenCount: 0 };
+  const stacks = derivePullRequestStacks(input.rows);
   const matchOf = new Map(input.matches.map((match) => [match.row, match] as const));
   const ordered = [...input.matches].sort(
     (left, right) =>
@@ -194,13 +197,13 @@ export function composeThreadNavigationPullRequestSummaries(
   );
   const together = keepStacksTogether(
     ordered.map((match) => match.row),
-    derivePullRequestStacks(input.rows),
+    stacks,
   );
   return boundSummaries(
     input,
     together.flatMap((row) => matchOf.get(row) ?? []),
     MAX_THREAD_NAVIGATION_PULL_REQUEST_DISPLAY,
-    pullRequestStackPlaces(input.rows),
+    pullRequestStackPlaces(stacks),
   );
 }
 

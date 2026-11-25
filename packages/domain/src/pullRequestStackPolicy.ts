@@ -52,10 +52,15 @@ export function derivePullRequestStacks<Row extends StackablePullRequest>(
   const byBase = groupedBy(candidates, (row) => branchKey(row, row.baseBranch));
   const only = (group: ReadonlyArray<Row> | undefined): Row | undefined =>
     group?.length === 1 ? group[0] : undefined;
+  // What a layer must be wherever it stands, the top included: merging a stack
+  // lands its top too, with whatever else shares that branch.
+  const isLayer = (row: Row): boolean => {
+    const head = branchKey(row, row.headBranch);
+    return byHead.get(head)?.length === 1 && (byBase.get(head)?.length ?? 0) <= 1;
+  };
   const parentOf = (row: Row): Row | undefined => {
     const parent = only(byHead.get(branchKey(row, row.baseBranch)));
-    if (parent === undefined) return undefined;
-    return only(byBase.get(branchKey(parent, parent.headBranch))) === row ? parent : undefined;
+    return parent !== undefined && isLayer(parent) && isLayer(row) ? parent : undefined;
   };
   const childOf = (row: Row): Row | undefined => {
     const child = only(byBase.get(branchKey(row, row.headBranch)));
@@ -73,10 +78,10 @@ export function derivePullRequestStacks<Row extends StackablePullRequest>(
 
 /** Each stacked row's place. A row of no stack has none. */
 export function pullRequestStackPlaces<Row extends StackablePullRequest>(
-  rows: ReadonlyArray<Row>,
+  stacks: ReadonlyArray<ReadonlyArray<Row>>,
 ): ReadonlyMap<Row, PullRequestStackPlace> {
   const places = new Map<Row, PullRequestStackPlace>();
-  for (const stack of derivePullRequestStacks(rows)) {
+  for (const stack of stacks) {
     stack.forEach((row, index) => {
       const parent = stack[index - 1];
       places.set(row, {

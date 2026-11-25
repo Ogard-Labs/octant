@@ -125,7 +125,7 @@ function stackOf(
 export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestReviewToolProps) {
   const [workspace, setWorkspace] = useState<DetailState>({ status: "loading" });
   const [switches, setSwitches] = useState<CodeProjectPullRequestSwitchesView>();
-  const [rows, setRows] = useState<ReadonlyArray<CodeProjectPullRequestRow>>([]);
+  const [snapshot, setSnapshot] = useState<CodeProjectPullRequestView>();
   const refreshRef = useRef(props.refresh);
   const loadSwitchesRef = useRef(props.loadSwitches);
   useEffect(() => {
@@ -197,7 +197,7 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
     let active = true;
     load({ version: 1 }).then(
       (view) => {
-        if (active) setRows(view.rows);
+        if (active) setSnapshot(view);
       },
       // Without the snapshot the pull request reads alone, as it did.
       () => undefined,
@@ -350,7 +350,7 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
     );
   }
 
-  const layers = stackOf(rows, props.query, view.detail);
+  const layers = stackOf(snapshot?.rows ?? [], props.query, view.detail);
   const mergeStack = props.mergeStack;
 
   return (
@@ -380,6 +380,7 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
           : {
               stack: {
                 layers,
+                partial: snapshot?.pullRequestsTruncated === true,
                 readLayer: (layer: CodeProjectPullRequestRow) =>
                   props.refresh({
                     projectId,
@@ -391,13 +392,17 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
                   ? {}
                   : {
                       // The Confirm stack merge click is the person's
-                      // confirmation of these heads; the host checks them.
+                      // confirmation of these heads and the branch they land
+                      // on; the host checks both.
                       onMergeStack: (
                         method: CodeProjectPullRequestMergeMethod,
-                        reviewed: ReadonlyArray<{
-                          readonly number: number;
-                          readonly headSha: string;
-                        }>,
+                        reviewed: {
+                          readonly layers: ReadonlyArray<{
+                            readonly number: number;
+                            readonly headSha: string;
+                          }>;
+                          readonly destination: string;
+                        },
                       ) =>
                         mergeStack({
                           projectId,
@@ -405,7 +410,8 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
                           repositoryName,
                           method,
                           confirmed: true,
-                          items: reviewed.map(({ number: layer, headSha }) => ({
+                          baseBranch: reviewed.destination,
+                          items: reviewed.layers.map(({ number: layer, headSha }) => ({
                             number: layer,
                             headSha,
                           })),

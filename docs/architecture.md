@@ -3821,10 +3821,19 @@ on **Merge when ready** and **Auto-fix** for a Code thread's pull request
   with the head the person reviewed. The server reads every one first and
   refuses the stack whole unless each is open and each base is the head
   branch of the one before it (`not-a-chain`, `duplicate`, `too-long`,
-  `unreadable`). It then merges one at a time through the same path as a
-  single merge, and stops at the first that does not merge, answering what
-  landed and why it stopped. The review's Merge stack sends the heads its
-  confirmation read and named
+  `unreadable`), each head is the one the command names (`stale`), and the
+  bottom lands on the branch the command names, when it names one
+  (`base-changed`). It then merges one at a time through the same path as a
+  single merge, each held to that branch as well as to its head, because a
+  changed base moves no commit. A layer is pointed at the destination before its
+  merge; GitHub then says its mergeability is unknown for a moment, which the
+  merge refuses, so the host waits for the answer within a bound. A layer counts
+  as merged only when the forge shows it merged: one GitHub took but holds in a
+  merge queue stops the stack (`not-landed`) before the next is touched. It stops
+  at the first that does not merge, answering what landed, why it stopped, and
+  the branch that layer is now based on: it is not pointed back, because the
+  layer below has landed and its old base would strand it. The review's Merge
+  stack sends the heads and the branch its confirmation read and named
   ([Workspace](design/workspace.md#pull-requests-and-issues)).
 - **Confirmation.** The review enables Merge only for a fresh, unambiguous,
   open, mergeable observation. Merge opens an inline confirmation that names the reviewed head

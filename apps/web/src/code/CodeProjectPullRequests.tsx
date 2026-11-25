@@ -328,7 +328,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   // the others' places as they are. Kept with the view, so a row's place is the
   // same object until the rows change.
   const stacks = useMemo(() => derivePullRequestStacks(view?.rows ?? []), [view]);
-  const stackPlaces = useMemo(() => pullRequestStackPlaces(view?.rows ?? []), [view]);
+  const stackPlaces = useMemo(() => pullRequestStackPlaces(stacks), [stacks]);
   const dock = props.presentation === "dock";
   const projectId = props.projectId;
   const busy = workspace.status === "loading" || workspace.status === "refreshing";

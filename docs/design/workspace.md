@@ -3999,8 +3999,8 @@ decision, 2026-11-25). The host reads the stack from the cached snapshot's
 branches, every row of it the window may read, and asks the forge for nothing;
 a list that shows part of a stack still says the true place. A stack is one
 line of two or more. A fork's pull request is in none, because its head names a
-branch of another repository; neither is one whose head branch another open pull
-request shares, nor one that several are based on. The last is usually a
+branch of another repository; neither is one, the top included, whose head branch
+another open pull request shares, nor one that several are based on. The last is usually a
 long-lived branch on its way to another: linked, an open development-to-main
 pull request made every feature a layer of the release. The place is the words
 "2 of 4" in the meta ink, with "Layer 2 of 4 of a stack, on #12" in the tooltip
@@ -4016,8 +4016,11 @@ The review lists the stack in its status column (the dock, under its header),
 this pull request marked. On the bottom layer Merge stack reads every layer from
 GitHub again, then asks inline with each head and the branch the stack lands on;
 a draft, a conflict, a closed, unreadable or stale layer, or one no longer based
-on the layer below, is named instead of a confirmation. The result says what
-merged and why it stopped, and stays when the stack is gone. A higher layer
+on the layer below, is named instead of a confirmation. With a method that
+rewrites commits the confirmation says a layer can conflict with the one below
+it. The result says what merged, why it stopped, the branch a stopped layer is
+now based on, and when GitHub only queued a layer, and stays when the stack is
+gone. A list cut at its bound says the stack may have more layers. A higher layer
 points to the bottom. Its own Merge stays, because a pull request whose base is
 another's branch is sometimes merged alone on purpose, and its confirmation says
 which branch it merges into. The Merge shortcut of the thread's list is the

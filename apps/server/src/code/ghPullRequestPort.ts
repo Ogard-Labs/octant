@@ -750,6 +750,8 @@ export class GhPullRequestPort {
       readonly method: CodeProjectPullRequestMergeMethod;
       /** The head commit the reviewer approved. */
       readonly headSha: string;
+      /** The branch the reviewer approved it onto, when they approved one. */
+      readonly expectedBaseBranch?: string;
       /**
        * Expected GitHub pull request node ID from the identity owner. When both
        * this and the live pull request carry a node ID and they differ, the
@@ -777,6 +779,14 @@ export class GhPullRequestPort {
       return { status: "refused", reason: "stale" };
     }
     if (detail.state !== "open") return { status: "refused", reason: "not-open" };
+    // A changed base moves no commit, so the head check alone would pass and
+    // the same head would land on a branch that was never on screen.
+    if (
+      request.expectedBaseBranch !== undefined &&
+      detail.baseBranch !== request.expectedBaseBranch
+    ) {
+      return { status: "refused", reason: "stale" };
+    }
     if (detail.mergeability !== "mergeable") {
       return { status: "refused", reason: "not-mergeable" };
     }

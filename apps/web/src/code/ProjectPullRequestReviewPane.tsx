@@ -99,12 +99,15 @@ export interface ProjectPullRequestReviewPaneProps {
   /** When the list last saw the pull request change; the page's meta line says it. */
   readonly updatedAt?: string;
   /** The stack this pull request is a layer of, when the snapshot holds one. */
-  readonly stack?: Pick<ProjectPullRequestStackProps, "layers" | "onMergeStack" | "readLayer">;
+  readonly stack?: Pick<
+    ProjectPullRequestStackProps,
+    "layers" | "onMergeStack" | "partial" | "readLayer"
+  >;
 }
 
 /**
  * What merging this layer alone does, said before it is confirmed: its base is
- * the branch of the layer below, so nothing reaches where the stack lands yet.
+ * the branch of the layer below, so nothing reaches where the stack lands.
  */
 function mergesIntoLayerNote(
   stack: ProjectPullRequestReviewPaneProps["stack"],
@@ -114,7 +117,7 @@ function mergesIntoLayerNote(
   const below = stack?.layers[index - 1];
   const destination = stack?.layers[0]?.baseBranch;
   if (below === undefined || destination === undefined) return undefined;
-  return `This merges into ${detail.baseBranch}, the branch of #${String(below.number)}, and reaches ${destination} when that one does.`;
+  return `This merges into ${detail.baseBranch}, the branch of #${String(below.number)}, not into ${destination}.`;
 }
 
 export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPaneProps) {

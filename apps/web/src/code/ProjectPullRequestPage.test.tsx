@@ -651,6 +651,7 @@ describe("a pull request that is a layer of a stack", () => {
       readonly outcome?: CodeProjectPullRequestStackMergeOutcome;
       readonly details?: Readonly<Record<number, Readonly<Record<string, unknown>>>>;
       readonly layout?: "dock" | "page";
+      readonly truncated?: boolean;
     } = {},
   ) {
     const details = options.details ?? {};
@@ -660,7 +661,10 @@ describe("a pull request that is a layer of a stack", () => {
     const mergeStack = vi.fn(async (_command: CodeProjectPullRequestStackMergeCommand) => {
       return options.outcome ?? { status: "merged" as const, merged: [11, 12, 13] };
     });
-    const loadPullRequests = vi.fn(async () => snapshot());
+    const loadPullRequests = vi.fn(async () => ({
+      ...snapshot(),
+      pullRequestsTruncated: options.truncated === true,
+    }));
     render(
       <DockProjectPullRequestReviewTool
         layout={options.layout ?? "page"}
@@ -709,6 +713,7 @@ describe("a pull request that is a layer of a stack", () => {
         repositoryName: "octant",
         method: "squash",
         confirmed: true,
+        baseBranch: "main",
         items: [11, 12, 13].map((number) => ({ number, headSha: String(number).repeat(20) })),
       });
       expect(await screen.findByText(/^Merged #11, #12 and #13\./)).toHaveFocus();
@@ -750,6 +755,7 @@ describe("a pull request that is a layer of a stack", () => {
         status: "stopped",
         merged: [11],
         stoppedAt: 12,
+        retargetedTo: "main",
         outcome: { status: "refused", reason: "conflict" },
       },
     });
@@ -759,10 +765,47 @@ describe("a pull request that is a layer of a stack", () => {
     await user.click(confirm);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Merged #11, then stopped at #12. Merge refused: GitHub reported a merge conflict.",
+      "Merged #11. Stopped at #12. Merge refused: GitHub reported a merge conflict. #12 is now based on main.",
     );
     await waitFor(() => expect(screen.queryByRole("region", { name: "Stack" })).toBeNull());
     expect(screen.getByRole("alert")).toBeVisible();
+  });
+
+  it("says a layer waits in a merge queue instead of saying it merged", async () => {
+    const user = userEvent.setup();
+    renderLayer(11, {
+      outcome: {
+        status: "stopped",
+        merged: [],
+        stoppedAt: 11,
+        outcome: { status: "not-landed" },
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Merge stack" }));
+    await user.click(await screen.findByRole("button", { name: "Confirm stack merge" }));
+    const result = await screen.findByRole("alert");
+    expect(result).toHaveTextContent(
+      "GitHub accepted #11 but has not landed it yet, as with a merge queue.",
+    );
+    expect(result).not.toHaveTextContent("Merged");
+  });
+
+  it("warns that squashing can make the next layer conflict, and not for a merge commit", async () => {
+    const user = userEvent.setup();
+    renderLayer(11);
+    await user.click(await screen.findByRole("button", { name: "Merge stack" }));
+    const confirmation = await screen.findByRole("region", { name: "Confirm stack merge" });
+    expect(confirmation).toHaveTextContent("A merge commit avoids that.");
+    await user.click(screen.getByRole("button", { name: "Merge method" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Merge commit" }));
+    expect(confirmation).not.toHaveTextContent("A merge commit avoids that.");
+  });
+
+  it("says the stack may have more layers when the list was cut at its limit", async () => {
+    renderLayer(12, { truncated: true });
+    expect(
+      await screen.findByText("The list is cut at its limit, so this stack may have more layers."),
+    ).toBeVisible();
   });
 
   it.each(["page", "dock"] as const)(
@@ -773,7 +816,7 @@ describe("a pull request that is a layer of a stack", () => {
       await screen.findByRole("region", { name: "Stack" });
       await user.click(screen.getByRole("button", { name: "Merge" }));
       expect(screen.getByRole("region", { name: "Confirm pull-request merge" })).toHaveTextContent(
-        "This merges into a, the branch of #11, and reaches main when that one does.",
+        "This merges into a, the branch of #11, not into main.",
       );
     },
   );

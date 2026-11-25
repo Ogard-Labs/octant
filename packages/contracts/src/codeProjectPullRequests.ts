@@ -203,6 +203,13 @@ export const CodeProjectPullRequestMergeCommand = Schema.Struct({
    * local window's own confirmation step stands in for it there.
    */
   confirmed: Schema.optional(Schema.Literal(true)),
+  /**
+   * The branch the person confirmed this lands on. Pointing a pull request at
+   * another base leaves its head as it was, so the head alone does not show it;
+   * the server refuses with `stale` when the base is another one. Absent when
+   * the caller confirmed a head alone.
+   */
+  baseBranch: Schema.optional(branchName),
 }).annotations(strict);
 export type CodeProjectPullRequestMergeCommand = typeof CodeProjectPullRequestMergeCommand.Type;
 
@@ -348,6 +355,8 @@ export const CodeProjectPullRequestStackMergeCommand = Schema.Struct({
   repositoryName: GithubRepositoryName,
   method: CodeProjectPullRequestMergeMethod,
   confirmed: Schema.Literal(true),
+  /** The branch the person confirmed the whole stack lands on. */
+  baseBranch: Schema.optional(branchName),
   items: Schema.Array(
     Schema.Struct({
       number: Schema.Int.pipe(Schema.positive()),
@@ -374,6 +383,10 @@ export const CodeProjectPullRequestStackMergeOutcome = Schema.Union(
       "duplicate",
       "not-a-chain",
       "unreadable",
+      /** The bottom no longer lands on the branch the person confirmed. */
+      "base-changed",
+      /** A layer's head is not the one the person confirmed. */
+      "stale",
     ),
   }).annotations(strict),
   /** Some merged, then one did not: `merged` is what landed before it. */
@@ -381,7 +394,18 @@ export const CodeProjectPullRequestStackMergeOutcome = Schema.Union(
     status: Schema.Literal("stopped"),
     merged: Schema.Array(Schema.Int.pipe(Schema.positive())),
     stoppedAt: Schema.Int.pipe(Schema.positive()),
+    /**
+     * The branch the layer it stopped at was pointed at for its merge, and
+     * stays pointed at: the layer below has landed there, so its old base
+     * would strand it.
+     */
+    retargetedTo: Schema.optional(branchName),
     outcome: Schema.Union(
+      /**
+       * GitHub took the merge but has not landed it: a merge queue or
+       * auto-merge holds it. The layers above are left as they were.
+       */
+      Schema.Struct({ status: Schema.Literal("not-landed") }).annotations(strict),
       Schema.Struct({
         status: Schema.Literal("refused"),
         reason: CodeProjectPullRequestMergeRefusal,
