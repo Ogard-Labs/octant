@@ -2395,7 +2395,7 @@ except where a bullet says otherwise.
   is the receiving thread (for a subagent, its lead thread) is never in it,
   however late the cut falls, so a thread is not handed its own words back as
   earlier threads' memory; a source that had not ended by the cut was not in
-  the entry then, so it does not change the block between refresh points. The
+  the entry then, so it does not change the block between refresh points. Limit: the journal keeps no time per source, and an edit or deletion erases an entry's earlier events, so "had not ended" is the only test. A thread put away after the cut, but with an end time before it (learned later), gives an entry already in the block a second source, and the block of the thread that said it can then show that entry once before its next refresh point. The
   cut-off is the thread's creation until its context is rebuilt, so the block is the same text on every
   turn between and a provider's prompt cache keeps its prefix; an entry the
   person edits or deletes changes it, which re-sends the standing context once.
