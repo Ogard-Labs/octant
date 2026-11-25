@@ -576,6 +576,19 @@ export function ThreadScreen(props: ThreadScreenProps) {
           ) : connectionStatus.kind === "offline" ? (
             <Text style={styles.connectionStatus}>Waiting for the network.</Text>
           ) : null}
+          {/* One card, also above the full Browser view: handing a page back there
+              answers no prompt, so its Continue has to be in reach. */}
+          {offlineDemo ||
+          transport === undefined ||
+          (fullView && activeSurface !== "browser") ? null : (
+            <BrowserApprovalCard
+              actsAsHostPerson={standing.actsAsHostPerson}
+              threadId={selected.threadId}
+              threadTitle={title}
+              transport={transport}
+              watchingOnly={watchingOnly}
+            />
+          )}
           {!offlineDemo && fullView && activeSurface === "browser" && transport !== undefined ? (
             <BrowserSurfacePanel
               actsAsHostPerson={standing.actsAsHostPerson}
@@ -587,15 +600,6 @@ export function ThreadScreen(props: ThreadScreenProps) {
           ) : null}
           {fullView ? null : (
             <>
-              {offlineDemo || transport === undefined ? null : (
-                <BrowserApprovalCard
-                  actsAsHostPerson={standing.actsAsHostPerson}
-                  threadId={selected.threadId}
-                  threadTitle={title}
-                  transport={transport}
-                  watchingOnly={watchingOnly}
-                />
-              )}
               {offlineDemo || transport === undefined ? null : (
                 <ExtensionToolApprovalCard
                   actsAsHostPerson={standing.actsAsHostPerson}

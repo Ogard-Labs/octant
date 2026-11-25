@@ -32,6 +32,16 @@ describe("the phone's Browser approval", () => {
     ]);
   });
 
+  it("says what Always allow covers where it is offered, and only there", () => {
+    const upload = approval({ upload: { files: [{ name: "report.pdf", sizeBytes: 12_288 }] } });
+    expect(browserApprovalView(upload, { actsAsHostPerson: true }).detail).toContain(
+      "Always allow also covers later uploads with this site in this folder and profile",
+    );
+    expect(browserApprovalView(upload, { actsAsHostPerson: false }).detail).not.toContain(
+      "Always allow",
+    );
+  });
+
   it("names a download's file and offers Save once", () => {
     const view = browserApprovalView(
       approval({ download: { name: "data.csv", sizeBytes: 2048, mediaType: "text/csv" } }),

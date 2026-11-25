@@ -229,6 +229,26 @@ describe("support bundle routes", () => {
     expect(JSON.parse(row.actor)).toMatchObject({ kind: "remote-device", deviceId });
   });
 
+  it("journals no hand-over when the device's request ended while the bundle was built", async () => {
+    const { deviceRoutes, connection } = setup();
+    const ended = new AbortController();
+    const request = new Request(
+      call("/api/diagnostics/bundle", { body: { destinationCategory: "browser-download" } }),
+      { signal: ended.signal },
+    );
+    const answering = deviceRoutes(
+      asDevice(request, devicePrincipal({ admittedBy: "host-person" })),
+    );
+    // The gateway ends a device's open requests when its level is lowered.
+    ended.abort();
+    expect((await answering)?.status).toBe(422);
+    expect(
+      connection
+        .prepare("SELECT count(*) AS count FROM event_journal WHERE event_name = ?")
+        .get("diagnostics.support-bundle-exported@1"),
+    ).toMatchObject({ count: 0 });
+  });
+
   it("refuses a restricted device, a hub-introduced device, a device below Full and an agent grant", async () => {
     const { deviceRoutes, builds } = setup();
     const refused = [

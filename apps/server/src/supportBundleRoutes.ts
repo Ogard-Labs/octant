@@ -244,6 +244,7 @@ export function createSupportBundleRouteHandler(dependencies: SupportBundleRoute
         dependencies.sources(),
         undefined,
         caller.actor,
+        request.signal,
       );
       return json(outcome, outcome.kind === "exported" ? 200 : 422, origin);
     } catch {

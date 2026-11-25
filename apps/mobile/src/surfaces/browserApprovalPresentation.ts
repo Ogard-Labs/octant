@@ -90,6 +90,11 @@ function browserApprovalViewOf(
   });
   // "Always allow" is the person's: the host keeps it only from a session that
   // acts as its own person, so no other session is offered it.
+  // What "Always allow" reaches is said where it is offered, never elsewhere.
+  const coversLater = (direction: "upload" | "download") =>
+    options.actsAsHostPerson
+      ? `. Always allow also covers later ${direction}s with this site in this folder and profile`
+      : "";
   const always: ReadonlyArray<BrowserApprovalAnswer> = options.actsAsHostPerson
     ? [{ id: "always", label: "Always allow", decision: { decision: "approved", remember: true } }]
     : [];
@@ -145,8 +150,7 @@ function browserApprovalViewOf(
         mediaType: approval.download.mediaType,
         ...(approval.download.source === undefined ? {} : { source: approval.download.source }),
       }),
-      detail:
-        "The file comes from the page and is checked first. This answer covers this file once",
+      detail: `The file comes from the page and is checked first. Save once covers this file${coversLater("download")}`,
       site,
       profile,
       direction: "download",
@@ -164,7 +168,7 @@ function browserApprovalViewOf(
       kind: "upload",
       label: "Browser upload approval",
       summary: `Let the agent upload ${files.join(", ")} to ${site}?`,
-      detail: "The files leave this computer for that site. This answer covers these files once",
+      detail: `The files leave this computer for that site. Upload once covers these files${coversLater("upload")}`,
       site,
       profile,
       direction: "upload",
