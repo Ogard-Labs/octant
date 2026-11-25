@@ -476,9 +476,9 @@ line; a device the host's own person paired uses the section as a local window
 does, from Permissions in the paired browser's Host settings (maintainer
 decision, 2026-11-12; the server refuses hub-introduced devices)
 ([rules](../architecture.md#modes-chat-work-and-code)).
-The same section starts with the choices for new and kept worktrees (shown only
-for a host whose settings answer carries them; an earlier host would reject the
-update): **Branch
+The same section starts with the choices for new and kept worktrees (the
+naming ones on every host, the cleanup ones only for a host that answers with a
+`cleanup` object, since an earlier host would reject the update): **Branch
 prefix** (a text field, `octant/` unless changed, checked as a branch prefix when
 it loses focus; a segment Windows reserves is refused), **Branch name** (a select:
 prefix and short id, or prefix and words from the prompt, which leave out secrets

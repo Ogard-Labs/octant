@@ -57,7 +57,10 @@ restored counts as back. That answer belongs to the thread and to the cleanup it
 answered: moving to another thread while a restore runs never hides that
 thread's card, and a later cleanup of the same thread shows its card again. A refusal, such as a branch that moved, shows as a
 second quiet line (naming what to do where waiting would not help) and the card
-stays. Sending is held while the card shows: the
+stays; a warning that the host handed the folder back with some files missing
+stays on its line after the card is gone, with **Dismiss**. An open thread reads
+its cleanup standing again on the navigation refresh, so the card appears when
+a cleanup happens under it and goes when another window restores it. Sending is held while the card shows: the
 send button is disabled, Enter sends nothing, and the draft stays. The files and
 terminal surfaces of that thread say the same in place of "This checkout can't
 be read" and do not offer to move the thread to the Project's checkout. The host
