@@ -24,7 +24,7 @@ import {
   resolveSpeechEndpoint,
   type SpeechEndpointResolution,
 } from "@octant/domain";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -233,6 +233,7 @@ function useLocalEngine(language: string | undefined): LocalEngine {
   const client = speech.client;
   const [status, setStatus] = useState<SpeechLocalEngineStatus>();
   const [asked, setAsked] = useState(0);
+  const last = useRef<SpeechLocalEngineStatus | undefined>(undefined);
   const downloading = status?.status === "downloading";
 
   useEffect(() => {
@@ -241,13 +242,16 @@ function useLocalEngine(language: string | undefined): LocalEngine {
     client.localEngine(language).then(
       (next) => {
         if (!live) return;
-        setStatus((previous) => {
-          if (previous?.status !== "ready" && next.status === "ready") speech.refresh();
-          return next;
-        });
+        // Told outside the state update: React may run an updater while it
+        // renders, and the composers' provider must not change then.
+        if (last.current?.status !== "ready" && next.status === "ready") speech.refresh();
+        last.current = next;
+        setStatus(next);
       },
       () => {
-        if (live) setStatus(undefined);
+        if (!live) return;
+        last.current = undefined;
+        setStatus(undefined);
       },
     );
     return () => {
