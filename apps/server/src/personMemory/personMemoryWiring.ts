@@ -104,6 +104,147 @@ export function personMemorySpend(input: {
 /** The newest person messages a thread is distilled from; older ones are past the input cap anyway. */
 const PERSON_MESSAGE_LIMIT = 60;
 
+/** The newest `limit` messages in the order they were said; at one time, as given. */
+function newestInOrder(
+  messages: ReadonlyArray<PersonMessage>,
+  limit: number,
+): ReadonlyArray<PersonMessage> {
+  return messages
+    .map((message, index) => ({ message, index }))
+    .sort(
+      (left, right) => left.message.at.localeCompare(right.message.at) || left.index - right.index,
+    )
+    .map(({ message }) => message)
+    .slice(-limit);
+}
+
+/**
+ * A Work thread's newest messages from the person: each turn's prompt and each
+ * message steered into a running turn, in the order they were said. A turn the
+ * host accepted to deliver a subagent's result is left out. A steered message
+ * counts on its own mark, as a prompt does.
+ */
+export function workPersonMessages(
+  turns: ReadonlyArray<{
+    readonly turnId: string;
+    readonly acceptedAt: string;
+    readonly prompt: string;
+    readonly delivery?: unknown;
+    readonly steeredMessages?:
+      | ReadonlyArray<{
+          readonly messageId: string;
+          readonly body: string;
+          readonly steeredAt: string;
+        }>
+      | undefined;
+  }>,
+  limit: number,
+  counts: (message: { readonly turnId: string; readonly began: string }) => boolean,
+  typed: (id: string) => boolean,
+): ReadonlyArray<PersonMessage> {
+  return newestInOrder(
+    turns
+      .filter((turn) => turn.delivery === undefined)
+      .flatMap((turn) => [
+        ...(counts({ turnId: turn.turnId, began: turn.acceptedAt })
+          ? [
+              {
+                id: turn.turnId,
+                at: turn.acceptedAt,
+                text: turn.prompt,
+                typed: typed(turn.turnId),
+              },
+            ]
+          : []),
+        ...(turn.steeredMessages ?? [])
+          .filter((message) => counts({ turnId: message.messageId, began: message.steeredAt }))
+          .map((message) => ({
+            id: message.messageId,
+            at: message.steeredAt,
+            text: message.body,
+            typed: typed(message.messageId),
+          })),
+      ]),
+    limit,
+  );
+}
+
+/** When the person last wrote to a Work thread: its newest prompt or steered message. */
+export function workLastMessageAt(
+  turns: ReadonlyArray<{
+    readonly acceptedAt: string;
+    readonly delivery?: unknown;
+    readonly steeredMessages?: ReadonlyArray<{ readonly steeredAt: string }> | undefined;
+  }>,
+): string | undefined {
+  return turns
+    .filter((turn) => turn.delivery === undefined)
+    .flatMap((turn) => [turn.acceptedAt, ...(turn.steeredMessages ?? []).map((m) => m.steeredAt)])
+    .sort()
+    .at(-1);
+}
+
+/** When the person last wrote to a Code thread: its newest prompt or steered message. */
+export function codeLastMessageAt(
+  turns: ReadonlyArray<{ readonly began: string }>,
+  steered: ReadonlyArray<{ readonly at: string }>,
+): string | undefined {
+  return [...turns.map((turn) => turn.began), ...steered.map((message) => message.at)]
+    .sort()
+    .at(-1);
+}
+
+/**
+ * A Code thread's newest messages from the person: each turn's prompt (read
+ * through `readPrompt`, which may find it gone) and each message steered into a
+ * running turn, in the order they were said.
+ */
+export function codePersonMessages<Prompt>(input: {
+  readonly turns: ReadonlyArray<{
+    readonly operationId: string;
+    readonly began: string;
+    readonly prompt: Prompt;
+  }>;
+  readonly steered: ReadonlyArray<{
+    readonly messageId: string;
+    readonly at: string;
+    readonly body: string;
+  }>;
+  readonly readPrompt: (prompt: Prompt) => string | undefined;
+  readonly limit: number;
+  readonly counts: (message: { readonly turnId: string; readonly began: string }) => boolean;
+  readonly typed: (id: string) => boolean;
+}): ReadonlyArray<PersonMessage> {
+  return newestInOrder(
+    [
+      ...input.turns
+        .filter((turn) => input.counts({ turnId: turn.operationId, began: turn.began }))
+        .flatMap((turn) => {
+          const text = input.readPrompt(turn.prompt);
+          return text === undefined
+            ? []
+            : [
+                {
+                  id: turn.operationId,
+                  at: turn.began,
+                  text,
+                  typed: input.typed(turn.operationId),
+                },
+              ];
+        }),
+      ...input.steered
+        .filter((message) => input.counts({ turnId: message.messageId, began: message.at }))
+        .map((message) => ({
+          id: message.messageId,
+          at: message.at,
+          text: message.body,
+          typed: input.typed(message.messageId),
+        })),
+    ],
+    input.limit,
+  );
+}
+
 /**
  * A Chat thread's newest messages from the person. A turn the host started to
  * deliver a subagent's result carries that result where the person's message

@@ -1069,6 +1069,27 @@ export class CodeOperationEventStore {
   }
 
   /**
+   * The messages the person steered into this thread's running turns, oldest
+   * first, each under the id its typed mark uses. Empty when the journal cannot
+   * be read.
+   */
+  steeredPersonMessagesForThread(
+    threadId: CodeThreadId,
+  ): ReadonlyArray<{ readonly messageId: string; readonly at: string; readonly body: string }> {
+    try {
+      return readThreadMessagesSteered(this.#journal, String(threadId))
+        .filter((record) => record.mode === "code")
+        .map((record) => ({
+          messageId: String(record.messageId),
+          at: String(record.steeredAt),
+          body: record.body,
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * The messages of one turn: the prompt that started it, and each message the
    * person steered into it, under the id its typed mark uses (the operation id,
    * and the steered message's id). A turn the host started to deliver a

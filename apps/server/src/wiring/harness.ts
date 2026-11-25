@@ -25,7 +25,14 @@ import {
   threadTitleSubscriptionCredentials,
 } from "../automaticModels/threadTitle";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
-import { createPersonMemorySweep, newestTurnUpdate } from "../personMemory/personMemoryWiring";
+import {
+  codeLastMessageAt,
+  codePersonMessages,
+  createPersonMemorySweep,
+  newestTurnUpdate,
+  workLastMessageAt,
+  workPersonMessages,
+} from "../personMemory/personMemoryWiring";
 import { createDecisionReviewModelPort } from "../turnDecisions/decisionReviewWiring";
 import { isProtectedSecretPath } from "../process/secretGuard";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
@@ -1179,66 +1186,35 @@ export function wireHarness(deps: HarnessDependencies) {
     // that began before marks were kept), leaving out the turns the host
     // accepted to deliver a subagent's result.
     workPersonMessages: (threadId, limit) =>
-      workTurnProjection
-        .listForThread(decodeWorkThreadId(threadId))
-        .filter((turn) => turn.delivery === undefined)
-        .filter((turn) =>
-          personMemory.countsAsPersonWords({
-            mode: "work",
-            threadId,
-            turnId: String(turn.turnId),
-            began: String(turn.acceptedAt),
-          }),
-        )
-        .map((turn) => ({
-          id: String(turn.turnId),
-          at: String(turn.acceptedAt),
-          text: turn.prompt,
-          typed: personMemory.isTurnTyped({
-            mode: "work",
-            threadId,
-            turnId: String(turn.turnId),
-          }),
-        }))
-        .slice(-limit),
+      workPersonMessages(
+        workTurnProjection.listForThread(decodeWorkThreadId(threadId)),
+        limit,
+        ({ turnId, began }) =>
+          personMemory.countsAsPersonWords({ mode: "work", threadId, turnId, began }),
+        (turnId) => personMemory.isTurnTyped({ mode: "work", threadId, turnId }),
+      ),
     workLastMessageAt: (threadId) =>
-      workTurnProjection
-        .listForThread(decodeWorkThreadId(threadId))
-        .filter((turn) => turn.delivery === undefined)
-        .at(-1)?.acceptedAt,
+      workLastMessageAt(workTurnProjection.listForThread(decodeWorkThreadId(threadId))),
     workLastActivityAt: (threadId) =>
       newestTurnUpdate(workTurnProjection.listForThread(decodeWorkThreadId(threadId))),
     codePersonMessages: (threadId, limit) =>
-      codeBoardEventStore
-        .personPromptTurnsForThread(decodeCodeThreadId(threadId), limit * 4)
-        .filter((turn) =>
-          personMemory.countsAsPersonWords({
-            mode: "code",
-            threadId,
-            turnId: turn.operationId,
-            began: turn.began,
-          }),
-        )
-        .slice(-limit)
-        .flatMap((turn) => {
-          const text = codeEvidence.read(turn.prompt);
-          return text === undefined
-            ? []
-            : [
-                {
-                  id: turn.operationId,
-                  at: turn.began,
-                  text,
-                  typed: personMemory.isTurnTyped({
-                    mode: "code",
-                    threadId,
-                    turnId: turn.operationId,
-                  }),
-                },
-              ];
-        }),
+      codePersonMessages({
+        turns: codeBoardEventStore.personPromptTurnsForThread(
+          decodeCodeThreadId(threadId),
+          limit * 4,
+        ),
+        steered: codeBoardEventStore.steeredPersonMessagesForThread(decodeCodeThreadId(threadId)),
+        readPrompt: (prompt) => codeEvidence.read(prompt),
+        limit,
+        counts: ({ turnId, began }) =>
+          personMemory.countsAsPersonWords({ mode: "code", threadId, turnId, began }),
+        typed: (turnId) => personMemory.isTurnTyped({ mode: "code", threadId, turnId }),
+      }),
     codeLastMessageAt: (threadId) =>
-      codeBoardEventStore.personPromptTurnsForThread(decodeCodeThreadId(threadId), 1).at(-1)?.began,
+      codeLastMessageAt(
+        codeBoardEventStore.personPromptTurnsForThread(decodeCodeThreadId(threadId), 1),
+        codeBoardEventStore.steeredPersonMessagesForThread(decodeCodeThreadId(threadId)),
+      ),
     turnRunning: (threadId) => deps.liveTurns.read(threadId) !== undefined,
     resolveDriver: resolveConfiguredDriver,
     accountUnavailable: automaticModelAccountUnavailable,

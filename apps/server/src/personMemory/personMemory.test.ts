@@ -40,7 +40,14 @@ import {
   registerPersonMemoryEvents,
 } from "./personMemoryStore";
 import type { SpendCeilingTurnRequest } from "../spendCeilingService";
-import { chatPersonMessages, personMemorySpend } from "./personMemoryWiring";
+import {
+  chatPersonMessages,
+  codeLastMessageAt,
+  codePersonMessages,
+  personMemorySpend,
+  workLastMessageAt,
+  workPersonMessages,
+} from "./personMemoryWiring";
 import {
   PersonMemorySweep,
   type PersonMessage,
@@ -1879,6 +1886,81 @@ describe("which turns the person typed", () => {
     );
 
     expect(messages.map((message) => message.text)).toEqual(["I typed this", "Said before marks"]);
+  });
+
+  it("reads the messages steered into a running Work or Code turn with the prompts, in the order they were said", () => {
+    const h = harness([]);
+    h.advance("2026-11-01T12:00:00.000Z");
+    h.store.typedSince();
+    const steeredId = "eeeeeeee-0000-4000-8000-000000000001";
+    const unmarkedId = "eeeeeeee-0000-4000-8000-000000000002";
+    h.store.markTurnTyped({ mode: "work", threadId: THREAD_1, turnId: "turn-1" });
+    h.store.markTurnTyped({ mode: "work", threadId: THREAD_1, turnId: "turn-2" });
+    h.store.markTurnTyped({ mode: "work", threadId: THREAD_1, turnId: steeredId });
+    h.store.markTurnTyped({ mode: "code", threadId: THREAD_1, turnId: "op-1" });
+    h.store.markTurnTyped({ mode: "code", threadId: THREAD_1, turnId: steeredId });
+    const counts = (mode: "work" | "code") => (turn: { turnId: string; began: string }) =>
+      h.store.countsAsPersonWords({ mode, threadId: THREAD_1, ...turn });
+    const typed = (mode: "work" | "code") => (id: string) =>
+      h.store.isTurnTyped({ mode, threadId: THREAD_1, turnId: id });
+    const steered = [
+      { messageId: unmarkedId, body: "A button said this", steeredAt: "2026-11-01T12:25:00.000Z" },
+      { messageId: steeredId, body: "I always use pnpm", steeredAt: "2026-11-01T12:30:00.000Z" },
+    ];
+
+    const work = workPersonMessages(
+      [
+        {
+          turnId: "turn-1",
+          acceptedAt: "2026-11-01T12:10:00.000Z",
+          prompt: "Fix the build",
+          steeredMessages: steered,
+        },
+        { turnId: "turn-2", acceptedAt: "2026-11-01T12:40:00.000Z", prompt: "Ship it" },
+      ],
+      60,
+      counts("work"),
+      typed("work"),
+    );
+    const code = codePersonMessages({
+      turns: [{ operationId: "op-1", began: "2026-11-01T12:10:00.000Z", prompt: "Fix the build" }],
+      steered: steered.map((message) => ({
+        messageId: message.messageId,
+        at: message.steeredAt,
+        body: message.body,
+      })),
+      readPrompt: (prompt) => prompt,
+      limit: 60,
+      counts: counts("code"),
+      typed: typed("code"),
+    });
+
+    for (const messages of [work, code]) {
+      expect(messages.map((message) => [message.text, message.typed])).toContainEqual([
+        "I always use pnpm",
+        true,
+      ]);
+      expect(messages.map((message) => message.text)).not.toContain("A button said this");
+      expect(messages.map((message) => message.text).slice(0, 2)).toEqual([
+        "Fix the build",
+        "I always use pnpm",
+      ]);
+    }
+    expect(work.map((message) => message.text)).toEqual([
+      "Fix the build",
+      "I always use pnpm",
+      "Ship it",
+    ]);
+    // Steering is the newest thing said, which is what the sweep waits on.
+    expect(
+      workLastMessageAt([{ acceptedAt: "2026-11-01T12:10:00.000Z", steeredMessages: steered }]),
+    ).toBe("2026-11-01T12:30:00.000Z");
+    expect(
+      codeLastMessageAt(
+        [{ began: "2026-11-01T12:10:00.000Z" }],
+        [{ at: "2026-11-01T12:30:00.000Z" }],
+      ),
+    ).toBe("2026-11-01T12:30:00.000Z");
   });
 
   it("reads an old journal's turns as before, and starts counting marks from the first start that follows", () => {
