@@ -7,7 +7,7 @@ import type { ShellSettings, WindowWorkspace } from "@octant/contracts/shell";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import type { ResolvedSidebarBackground } from "@octant/theme/backgrounds";
 import { House, PanelLeftClose, Search, SquarePen, X } from "../ui/icons";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCenterGate";
 import { AGENTS_CENTER_NAVIGATION_ENABLED } from "../agents/agentsCenterGate";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -30,6 +30,7 @@ import { SidebarCountTiles, type SidebarTile } from "./SidebarCountTiles";
 import { SidebarRail, type SidebarRailProject } from "./SidebarRail";
 import type { VisibleMode } from "./workKind";
 import { SidebarMore } from "./SidebarMore";
+import type { RailUsage as LoadedRailUsage } from "../usage/RailUsage";
 import { RailAccount, SidebarProfile } from "./SidebarProfile";
 import { SidebarWhatsNew, type SidebarWhatsNewProps } from "./SidebarWhatsNew";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
@@ -160,14 +161,30 @@ export interface ShellSidebarProps {
     readonly projects: ReadonlyArray<SidebarRailProject>;
     readonly onUnpin: (projectId: string) => void;
   };
-  readonly railBeside?: {
-    readonly onOpenActivity?: () => void;
-  };
+  /** Whether the rail stands beside the open sidebar. */
+  readonly railBeside?: boolean;
   readonly rail?: {
     readonly projects: ReadonlyArray<SidebarRailProject>;
-    readonly onOpenActivity?: () => void;
   };
+  /** The host's own key for Settings; absent where no key opens it. */
+  readonly settingsShortcut?: string;
 }
+
+/**
+ * The rings wait on the host's reading anyway, so they and their card load
+ * after the window first renders. A rail without them still works: a chunk that
+ * cannot load leaves them out, where the failure thrown out of render would take
+ * the window down. Awaited in a try for the reason `importThreadRowInfoCard` is.
+ */
+async function importRailUsage(): Promise<{ readonly default: typeof LoadedRailUsage }> {
+  try {
+    const module = await import("../usage/RailUsage");
+    return { default: module.RailUsage };
+  } catch {
+    return { default: () => null };
+  }
+}
+const RailUsage = lazy(importRailUsage);
 
 const NEW_THREAD_DESTINATIONS = new Set(["new-chat", "new-code-thread", "new-work-thread"]);
 
@@ -354,7 +371,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
     props.onOpenSettings({ section: "appearance", setting: "sidebar-destinations" });
   // Projects is a rail place like the others when the person keeps it shown;
   // its own action stays out of the destination list so it sits after
-  // Activity, where the rail keeps its Project controls.
+  // the pinned tiles, where the rail keeps its Project controls.
   const projectsShown =
     destinationRows.includes("projects") && navigationActions.projects !== undefined;
   // The More menu is the only way to the menu-only destinations once they have
@@ -381,20 +398,24 @@ export function ShellSidebar(props: ShellSidebarProps) {
     onOpenSettings: props.onOpenSettings,
     ...(props.onOpenZen === undefined ? {} : { onOpenZen: props.onOpenZen }),
     profile: props.settings?.userProfile ?? defaultShellSettings().userProfile,
+    ...(props.settingsShortcut === undefined ? {} : { settingsShortcut: props.settingsShortcut }),
     secondaryActions,
   };
   const railAccount = <RailAccount {...accountProps} />;
+  // Above the face, the way the foot reads: what is left, then who it is.
+  const railUsage = (
+    <Suspense fallback={null}>
+      <RailUsage onOpenUsage={() => props.onOpenSettings({ section: "usage" })} />
+    </Suspense>
+  );
   const besideRail =
-    props.railBeside === undefined ? null : (
+    props.railBeside !== true ? null : (
       <SidebarRail
         activeMode={activeMode}
         destinations={railDestinations}
         {...(props.home === undefined ? {} : { home: props.home })}
         modes={modes}
         nativeHost={props.nativeHost === true}
-        {...(props.railBeside.onOpenActivity === undefined
-          ? {}
-          : { onOpenActivity: props.railBeside.onOpenActivity })}
         {...(projectsShown && navigationActions.projects !== undefined
           ? {
               onOpenProjects: navigationActions.projects,
@@ -404,6 +425,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
         {...(railMore === undefined ? {} : { more: railMore })}
         onOpenSettings={() => props.onOpenSettings()}
         account={railAccount}
+        usage={railUsage}
         onSelectMode={props.onSelectMode}
         placement="beside"
         projects={[]}
@@ -422,35 +444,23 @@ export function ShellSidebar(props: ShellSidebarProps) {
       <SidebarRail
         activeMode={activeMode}
         {...(props.home === undefined ? {} : { home: props.home })}
-        destinations={railRows.flatMap((id) => {
-          const action = navigationActions[id];
-          return id === "projects" || action === undefined
-            ? []
-            : [
-                {
-                  id,
-                  label: sidebarNavigationDescriptor(id).label,
-                  onSelect: action,
-                  active: props.activeDestination === id,
-                  ...(navigationCounts?.[id] === undefined ? {} : { count: navigationCounts[id] }),
-                },
-              ];
-        })}
+        destinations={railDestinations}
         modes={modes}
         nativeHost={props.nativeHost === true}
         {...(newThread === undefined || newThreadLabel === undefined
           ? {}
           : { newThread: { label: newThreadLabel, onSelect: () => newThread() } })}
-        {...(props.rail.onOpenActivity === undefined
-          ? {}
-          : { onOpenActivity: props.rail.onOpenActivity })}
         {...(navigationActions.projects === undefined
           ? {}
-          : { onOpenProjects: navigationActions.projects })}
+          : {
+              onOpenProjects: navigationActions.projects,
+              projectsActive: props.activeDestination === "projects",
+            })}
         {...(props.onOpenSearch === undefined ? {} : { onOpenSearch: props.onOpenSearch })}
         {...(railMore === undefined ? {} : { more: railMore })}
         onOpenSettings={() => props.onOpenSettings()}
         account={railAccount}
+        usage={railUsage}
         onSelectMode={props.onSelectMode}
         projects={props.rail.projects}
         {...railPinProps}

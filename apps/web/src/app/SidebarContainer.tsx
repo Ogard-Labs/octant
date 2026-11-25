@@ -33,6 +33,8 @@ import {
   isThreadBoardAvailable,
   resolveSidebarDestinationContributions,
 } from "../shell/contributionRegistry";
+import { describeChord } from "@octant/domain";
+import { isApplePlatform } from "../platform";
 import { useFirstPartyPluginsEffective } from "../shell/firstPartyPluginsEffective";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import type { SidebarNavigationDescriptorId } from "../shell/navigationModel";
@@ -638,6 +640,13 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
   );
   const workThreadRowActions = rowActions.work;
 
+  // Settings' key belongs to the Mac app's own menu; a browser has none, so it
+  // is named only where it works.
+  const settingsShortcut =
+    hostBridge !== undefined && isApplePlatform()
+      ? describeChord({ key: ",", mod: true, alt: false, shift: false }, true)
+      : undefined;
+
   return (
     <>
       <ThreadVideoArchiveConfirmation
@@ -768,9 +777,8 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
               },
             }
           : {})}
-        {...(sidebarRailBeside
-          ? { railBeside: { onOpenActivity: () => openSidebarList("activity") } }
-          : {})}
+        railBeside={sidebarRailBeside}
+        {...(settingsShortcut === undefined ? {} : { settingsShortcut })}
         {...(whatsNew.card === undefined
           ? {}
           : {
@@ -783,7 +791,6 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
         {...(sidebarRail
           ? {
               rail: {
-                onOpenActivity: () => openSidebarList("activity"),
                 projects: (workSide ? workSideProjects : projects).map((project) => ({
                   id: String(project.id),
                   name: project.name,

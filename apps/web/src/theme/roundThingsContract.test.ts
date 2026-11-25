@@ -38,7 +38,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".avatar",
   ".user-avatar",
   // The rail's account face is the avatar's hover and focus ring.
-  ".rail-account__face",
+  ".rail-account, .rail-account__face",
   ".skeleton-circle",
   ".canvas-mockup__avatar",
   ".provider-glyph--monogram",
@@ -132,6 +132,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".context-window-popover__meter",
   ".context-window-popover__limit-meter",
   ".computers-card__track",
+  ".rail-usage__bar",
   ".canvas-mockup__progress-track, .canvas-mockup__slider-track",
   ".canvas-mockup__progress-fill",
   ".canvas-ref__progress-track",

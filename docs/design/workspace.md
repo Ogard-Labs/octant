@@ -387,7 +387,11 @@ In Status and the Activity feed, **Working** (threads whose turn is running)
 and **Settled** sit together at the foot of the sidebar, below the list and
 the Archive. The foot stays in sight while the list above scrolls, takes at
 most 40% of the sidebar's height and scrolls inside itself beyond that, with a
-hairline above it. A running thread is listed only there, with its live
+hairline above it and no ground of its own: the list scrolls above it, never
+under it, because an opaque ground drew a slab on the translucent sidebar (the
+narrow drawer scrolls as one column, so there the foot sticks and paints the
+drawer's opaque ground). Both headings have one form: the label, a trailing
+chevron and the count at the right edge. A running thread is listed only there, with its live
 "Working 4m"; one waiting on an approval or an answer is not working and stays
 at the top under Needs you, with its state in words. A pinned thread and a
 coordinator keep their place among the pins, and in the Activity feed a thread
@@ -1255,8 +1259,8 @@ under rules.
   quiet text button. A GitHub or Linear source still loading is one quiet
   skeleton row, never a sentence that reads as an error; empty and failed are
   one sentence in their card.
-- The Inbox shows no plan usage: that reading lives in the account menu and the
-  rail's ring, the start screen's composer line and Settings › Usage (maintainer
+- The Inbox shows no plan usage: that reading lives in the rail's usage rings
+  (the account menu where no rail shows), the start screen's composer line and Settings › Usage (maintainer
   request, 2026-11-18).
 - **Inset.** A card's label, its rows' glyphs and text and its notes stand on one
   16px inset, and a row's trailing items end 16px in, on the filters' right edge.
@@ -2528,11 +2532,11 @@ Project overviews retain loaded content during same-Project refreshes
 on the same client connection. Changing Project or client clears retained
 content; disconnect and authorization failures remain explicit unavailable
 states. Project memory lives on every mode's Project Overview. Navigator is one host-owned conversation opened
-as an app-wide popover from the bottom-left profile and Settings control, and
+as an app-wide popover from the account menu, and
 opening it never changes the active Project or thread. Zen is a separate
 presentation aggregate inside the same window, not a split-tree tab and not a
 fourth authority mode. Zen is a bundled plugin that is on by default. While it
-is off, the Zen keyboard chord does nothing, the profile menu has no Zen row,
+is off, the Zen keyboard chord does nothing, the account menu has no Zen row,
 the command palette has no Zen entry, no Pin in Zen or Add to Zen action is
 offered, the recovery banner is hidden, and a Zen that was open closes back to
 the workspace; the host refuses the Zen routes and the assistant gets no Zen
@@ -2767,7 +2771,7 @@ whatever the width; it holds no strip, Add tool, Show another tool or quick
 tools (the bottom panel keeps its strip and Add tool). At 960px and under the
 dock is a modal drawer over an inert band, so the same row stands in the
 drawer's header, a press replaces the one tool shown, and there is no dragging. Zen
-remains in the bottom-left identity menu.
+remains in the account menu.
 
 ### Content tabs
 
@@ -2968,10 +2972,12 @@ active mode. The destinations a person placed under Menu
 only wait in a More row that closes the destination list (the rail's More
 button when the rail stands beside the sidebar) — an ellipsis opening a popup
 beside the rail with those destinations and Customize sidebar; the
-setting that turns the More row off returns them to the bottom-left identity
-menu. The identity menu owns Settings, Navigator, Agents, Providers, Usage,
-Plugins, Automations, Artifacts, and Zen entry points. The account menu opens
-above its identity row, aligned to the
+setting that turns the More row off returns them to the account menu. The
+account menu leads with Settings (its key, ⌘, in the Mac app, stands at the
+row's end; a browser has no such key and names none), Usage, Providers and
+Customize sidebar, then the destinations that wait in it, then Navigator,
+Archive, Zen mode and the tour. It opens beside the rail from the account face,
+or, where no rail shows, above the sidebar's profile row, aligned to the
 row’s leading edge. Search is a compact in-place filter for the current mode's visible
 threads: the header's Search icon opens a Filter threads field under the
 header, Escape or its close control clears and hides it, and Settings ›
@@ -3010,14 +3016,14 @@ success ink after the PR number.
 ### Icon rail and title band navigation
 
 **Icon rail foot.** The rail's destinations scroll, with the same short fade at
-their edges and no scrollbar, above a foot (usage, Settings) that stays on
-screen. One column that scrolled as a whole put Settings out of reach in a short
+their edges and no scrollbar, above a foot (plan usage, then the account face)
+that stays on screen. One column that scrolled as a whole put Settings out of reach in a short
 window and cut the last destination through its icon at the window's edge.
 
 **Icon rail.** By default (Settings › Sidebar › Icon rail: Always) an icon
 rail stands in its own column in front of the open sidebar. It is exactly as
-wide as the title band is tall (38px), open or collapsed, so the frame's two
-arms match. It stands on the window's own ground with no fill and no line of its
+wide open as collapsed (52px, [DESIGN.md: Window frame](../../DESIGN.md#window-frame)).
+It stands on the window's own ground with no fill and no line of its
 own; the framed panel (the sidebar and the stage, one outline) begins at its
 right edge. In the desktop app the traffic lights sit in the title band above
 it, and the sidebar's head, or with the sidebar hidden the window chrome,
@@ -3030,12 +3036,15 @@ look-alike count icons made the rail the busiest column in the window; they
 stay as tiles in a sidebar with no rail beside it, maintainer request,
 2026-11-17), the destination
 rows the person keeps shown (Settings › Sidebar › Sidebar destinations decides
-which and in what order, for the rail as for the sidebar), the Activity feed,
+which and in what order, for the rail as for the sidebar),
 Projects, a tile for each Project the person pinned (its icon or initial on the
 same 32px face, after the divider; a context menu on the tile unpins it; the
 collapsed rail lists pinned Projects first and draws six Project tiles at most
-so the account face stays in the window), More (the menu-only destinations and Customize sidebar), and the
-account face. The sidebar keeps its header (modes, search, new thread,
+so the places above them stay in the window), More (the menu-only destinations and Customize sidebar), and the
+foot. The Activity feed is not a rail place: it is one of the list's three
+arrangements, chosen on the list itself, and its rail button changed how the
+list was drawn while looking like a page (and opened a hidden sidebar to do it;
+maintainer request, 2026-11-25). The sidebar keeps its header (modes, search, new thread,
 hide), the Project list with its view, filter, and Activity controls, and the
 threads; its profile row is not drawn beside the rail, whose account face is
 the same control, so nothing is offered twice. Rail icons are 16px on a 36px face, and a selected place keeps its glyph and takes the
@@ -3045,7 +3054,7 @@ have their own marks: Inbox a tray, Running a spinner, To review a checked
 clipboard, Done today a double check, Board a kanban, Issues the issue dot,
 Pull requests the pull-request arrow, Linear a checklist, Projects stacked
 folders, Agents a bot, Automations a calendar clock, Artifacts layers, Image
-generator images, Plugins blocks, and the Activity feed a pulse line.
+generator images, and Plugins blocks.
 To-dos is a circle whose check runs out past it, so it does not read as the
 ticked circle of Done today ([To-dos](todos.md#the-to-dos-destination)).
 
@@ -3057,20 +3066,28 @@ under the tray instead of sliding beneath it. The tray's row stays first at the
 top of the sidebar, and the header keeps its full wrapped height however long
 the thread list is, so the list always starts under both rows.
 
-**Account face.** The foot of either rail is one round face: the person's
+**Account face.** The last thing in either rail is one round face: the person's
 picture, else the initials of the name they gave, else a person glyph (24px).
-A thin ring around it shows what is left of their tightest plan window across
-every provider that reports one, in the meta ink, or the danger ink when that
-window is near or at its limit; with no reported figure there is no ring,
-because an empty ring would claim a limit nobody reported. Its accessible name
-says the share left. It opens the account menu, the same one the sidebar's
-profile row opens, beside the rail: a Plan usage group first (each account that
-reports a window, with its lowest window's share and when it resets; a row
-opens Settings › Usage), then the Workspace and Octant groups (Settings among
-them). It replaced a Settings gear and one ring per provider, two kinds of
-thing at the foot where one does (maintainer request, 2026-11-17). The reading
-is the host's last observation, the one the start screen's composer line reads, never
-a fresh provider call, and it survives a restart.
+It opens the account menu beside the rail, headed by their name, with Settings
+first; the rail has no Settings gear of its own, because the face and a gear
+side by side offered Settings twice. While its menu is open the face stays
+held, as More does, and its focus ring is the circle it is.
+
+**Plan usage.** Above the face stands one 26px ring for each account that
+reports a plan window, the provider's mark inside it: the arc is what is left
+of the window with the least left, in the meta ink, or the warning ink close to
+its limit; a spent window is an empty ring in the danger ink. An account with no
+reported figure has no ring, because an empty ring would claim a limit nobody
+reported. Pointing at a ring or focusing it opens a card with every window, its
+share left, its reset, and the reading's age when it is hours old; its
+accessible name says each window's share, and pressing it opens Settings ›
+Usage. The rail draws the three accounts with the least left, in account order;
+with more than three, and wherever no rail shows, the account menu carries a
+Plan usage group with every account. The one ring the avatar carried before
+(2026-11-17) showed the tightest window of all accounts without saying whose it
+was, so the menu had to be opened to find out (maintainer request, 2026-11-25).
+The reading is the host's last observation, the one the start screen's composer
+line reads, never a fresh provider call, and it survives a restart.
 
 **Back and forward.** Back and Forward sit in the title band beside the
 sidebar control (beside Show sidebar while the sidebar is hidden, with or
@@ -3088,7 +3105,7 @@ disabled, at its end of the history.
 **Hiding the sidebar.** Hide sidebar, or Mod+\ (rebindable, "Show or hide
 the sidebar", answered in text fields too and leaving focus where it was),
 collapses the sidebar to the rail alone, which then also shows New thread and
-Search at the top, the modes (with the same marks as the sidebar's mode switcher, so Work keeps one icon), and up to six Project letters (outlined at icon
+Search at the top, the modes (one tray with the same marks as the sidebar's mode switcher, so Work keeps one icon, and the mode that is on does not read as a second current place), and up to six Project letters (outlined at icon
 size in the icons' muted ink) with a Projects button for the rest; Show sidebar, Back, and Forward move into the
 title band, so the rail stays one icon wide. Icon rail: When hidden shows the
 rail only in that state; Never removes the sidebar completely when hidden and
@@ -4056,7 +4073,7 @@ at 28px (the line-number buttons set the row) and 22px.
 ### What's new card and announcement
 
 After an update the person chose finishes applying, the full sidebar shows one
-small flat card above the profile row. A 64px band carries the Octant
+small flat card at its foot, above the profile row where one shows. A 64px band carries the Octant
 aperture on a soft wash of the theme's ink with a hint of the accent, so the
 card is depth and not an accent banner. Under it sit a "New · v{version}" line,
 the notes' first line as a one-line strong headline, the next paragraph as a

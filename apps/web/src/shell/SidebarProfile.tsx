@@ -21,7 +21,7 @@ import type { ComponentType } from "react";
 import { UserAvatar } from "../profile/UserAvatar";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
-import { useAccountUsage } from "../usage/accountUsage";
+import { RAIL_USAGE_LIMIT, useAccountUsage } from "../usage/accountUsage";
 import { openGuidedTour } from "../tour/guidedTourState";
 import {
   OctantMenuGroup,
@@ -37,8 +37,9 @@ import {
 import type { SidebarAppMenuDescriptorId } from "./navigationModel";
 
 /**
- * The profile row's trigger: the stable control at the foot of the sidebar that
- * focus returns to when a card above it, or a dialog it opened, goes away.
+ * The account control: the rail's face, or the profile row where no rail
+ * stands. It stays put, so focus returns to it when a card above it, or a
+ * dialog it opened, goes away.
  */
 export const SIDEBAR_ACCOUNT_TRIGGER_SELECTOR =
   "[data-octant-sidebar] [aria-label^='Account menu'], [data-octant-sidebar-rail] [aria-label^='Account menu']";
@@ -58,6 +59,8 @@ export interface SidebarProfileProps {
   /** Absent on a window that cannot enter Zen, which keeps the row off entirely. */
   readonly onOpenZen?: () => void;
   readonly profile: UserProfile;
+  /** The host's own key for Settings; absent where no key opens it (a browser). */
+  readonly settingsShortcut?: string;
   readonly secondaryActions?: ReadonlyArray<SidebarSecondaryAction>;
 }
 
@@ -100,47 +103,22 @@ export function SidebarProfile(props: SidebarProfileProps) {
   );
 }
 
-/** The ring's radius around the 24px face, inside the rail's 36px face. */
-const RING_RADIUS = 15;
-
 /**
  * The same person at the foot of the icon rail: one round face, their picture
- * or initials, with what is left of their tightest plan window drawn as a ring
- * around it. It replaced a Settings gear and one usage ring per provider, two
- * kinds of thing at the foot where one does: Settings, Usage and every
- * provider's reading are in the menu it opens.
+ * or initials, opening the account menu that holds Settings. What is left of
+ * each plan stands above it as its own rings, so the face says only who.
  */
 export function RailAccount(props: SidebarProfileProps) {
   const label = profileLabel(props.profile);
-  const usage = useAccountUsage();
-  const lowest = usage.lowest;
-  const circumference = 2 * Math.PI * RING_RADIUS;
-  const name =
-    lowest === undefined
-      ? `Account menu, ${label}`
-      : `Account menu, ${label}, ${String(lowest.percent)}% of plan usage left`;
   return (
     <OctantMenuRoot>
-      <OctantTooltip label={label} side="right">
+      <OctantTooltip align="center" compact label={label} side="right">
         <OctantMenuTrigger
-          aria-label={name}
+          aria-label={`Account menu, ${label}`}
           className="sidebar-rail__button rail-account window-no-drag"
         >
           <span aria-hidden="true" className="sidebar-rail__face rail-account__face">
             <UserAvatar profile={props.profile} size={24} />
-            {lowest === undefined ? null : (
-              <svg className="rail-account__ring" viewBox="0 0 34 34">
-                <circle className="rail-account__track" cx="17" cy="17" r={RING_RADIUS} />
-                <circle
-                  className="rail-account__arc"
-                  cx="17"
-                  cy="17"
-                  data-level={lowest.level}
-                  r={RING_RADIUS}
-                  strokeDasharray={`${((circumference * lowest.percent) / 100).toFixed(2)} ${circumference.toFixed(2)}`}
-                />
-              </svg>
-            )}
           </span>
         </OctantMenuTrigger>
       </OctantTooltip>
@@ -158,15 +136,48 @@ function AccountMenuPopup(props: SidebarProfileProps & { readonly side: "top" | 
   const openZen = props.onOpenZen;
   const usage = useAccountUsage();
   const openUsage = () => props.onOpenSettings({ section: "usage" });
+  // The rail's rings already say this; the menu repeats it only where no rail
+  // stands, or where the rail has more accounts than it rings.
+  const usageLines =
+    props.side === "top" || usage.lines.length > RAIL_USAGE_LIMIT ? usage.lines : [];
+  const name = props.profile.displayName ?? "";
   return (
     <OctantMenuPortal>
       <OctantMenuPositioner align={props.side === "right" ? "end" : "start"} side={props.side}>
         <OctantMenuPopup aria-label="Octant menu" className="w-[min(248px,calc(100vw-24px))]">
-          {usage.lines.length === 0 ? null : (
+          <OctantMenuGroup aria-label="Account">
+            {/* The rail's face shows no name; the row under a sidebar does. */}
+            <OctantMenuGroupLabel>
+              <span className="truncate">
+                {props.side === "right" && name !== "" ? name : "Account"}
+              </span>
+            </OctantMenuGroupLabel>
+            <ProfileAction
+              icon={Settings}
+              label="Settings"
+              onClick={() => props.onOpenSettings()}
+              shortcut={props.settingsShortcut}
+            />
+            <ProfileAction icon={ChartNoAxesColumn} label="Usage" onClick={openUsage} />
+            <ProfileAction
+              icon={Plug}
+              label="Providers"
+              onClick={() => props.onOpenSettings({ section: "providers" })}
+            />
+            <ProfileAction
+              icon={PanelLeft}
+              label="Customize sidebar"
+              onClick={() =>
+                props.onOpenSettings({ section: "appearance", setting: "sidebar-destinations" })
+              }
+            />
+          </OctantMenuGroup>
+          <OctantMenuSeparator />
+          {usageLines.length === 0 ? null : (
             <>
               <OctantMenuGroup aria-label="Plan usage">
                 <OctantMenuGroupLabel>Plan usage</OctantMenuGroupLabel>
-                {usage.lines.map((line) => (
+                {usageLines.map((line) => (
                   <OctantMenuItem
                     aria-label={`${line.instance.displayName}, ${line.lowest.short} ${String(line.lowest.percent)}% left`}
                     key={String(line.instance.id)}
@@ -221,24 +232,6 @@ function AccountMenuPopup(props: SidebarProfileProps & { readonly side: "top" | 
             {props.onOpenArchive === undefined ? null : (
               <ProfileAction icon={Archive} label="Archive" onClick={props.onOpenArchive} />
             )}
-            <ProfileAction
-              icon={Settings}
-              label="Settings"
-              onClick={() => props.onOpenSettings()}
-            />
-            <ProfileAction
-              icon={PanelLeft}
-              label="Customize sidebar"
-              onClick={() =>
-                props.onOpenSettings({ section: "appearance", setting: "sidebar-destinations" })
-              }
-            />
-            <ProfileAction icon={ChartNoAxesColumn} label="Usage" onClick={openUsage} />
-            <ProfileAction
-              icon={Plug}
-              label="Providers"
-              onClick={() => props.onOpenSettings({ section: "providers" })}
-            />
             {openZen === undefined ? null : (
               <ProfileAction icon={Sparkles} label="Zen mode" onClick={openZen} />
             )}
@@ -258,12 +251,19 @@ function ProfileAction(props: {
   }>;
   readonly label: string;
   readonly onClick: () => void;
+  /** The key that does the same, as a quiet key cap at the row's end. */
+  readonly shortcut?: string | undefined;
 }) {
   const Icon = props.icon;
   return (
     <OctantMenuItem onClick={props.onClick}>
       <Icon aria-hidden={true} className="icon" size={16} />
       <span>{props.label}</span>
+      {props.shortcut === undefined ? null : (
+        <kbd aria-hidden="true" className="sidebar-item__key">
+          {props.shortcut}
+        </kbd>
+      )}
     </OctantMenuItem>
   );
 }

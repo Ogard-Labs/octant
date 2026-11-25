@@ -518,7 +518,7 @@ token.
 | 24     | button `sm`, `icon-sm`; `--oct-tray-segment-h`; `--oct-toast-control-h`                              | A row action, a chip, a tab, a tray segment, a tile bar control, a toast's dismiss      |
 | 28     | button `default`, `icon`; `--oct-rail-button-h`; `--oct-menu-row-h`; `--oct-settings-control-height` | A button, field, select, combobox, tray, title band control, menu row, Settings control |
 | 32     | button `lg`; `--oct-nav-row-h`                                                                       | A large button, a navigation row, a rail face, a tile bar                               |
-| 44     | `--oct-title-rail-h`                                                                                 | The title band and the icon rail's width                                                |
+| 44     | `--oct-title-rail-h`                                                                                 | The title band                                                                          |
 | 44     | `--oct-nav-head-h`, `--oct-menu-row-two-h`                                                           | The account row, a two-line row, a touch target, the one-row composer                   |
 
 Recipe heights are rem rounded to a whole 2px (`h-[round(2rem,2px)]` is 28
@@ -781,9 +781,14 @@ coat), painted once on the shell. Neither has a fill or line of its own.
   line icons, 2px apart (the button's `rail` variant); the first face is centred on
   the band's centreline (4px down). The current face takes
   `--oct-wash-selected`, the pointed-at face `--oct-wash-hover`, no border.
-  The foot is the person's account face: a round face holding their 24px
-  avatar, ringed 3px out by a 1.5px arc of their tightest plan window
-  ([Workspace: Account face](docs/design/workspace.md#presentation)).
+  A control whose menu is open keeps `--oct-wash-selected`. The collapsed
+  rail's modes stand in one 40px tray (2px around the faces, ink 6%, the mode
+  that is on ink 12%, as the sidebar's). The foot is one 26px usage ring per
+  account (a 2px arc in ink 50% on an ink 12% track, the provider's mark at
+  14px inside it, `--oct-warn-fg` close to a limit, an empty
+  `--oct-danger-fg` track once spent) above the person's account face: a round
+  face holding their 24px avatar
+  ([Workspace: Account face](docs/design/workspace.md#icon-rail-and-title-band-navigation)).
 - **Desktop title bar**: Electron's native frame with `titleBarStyle:
 hiddenInset` and no custom `trafficLightPosition` (it would grow the native
   overlay and eat clicks; if a packaged run shows the lights off the band's
@@ -1594,7 +1599,7 @@ narrowest pane's width.
   access (at Full access nothing shows; it opens the same review as the
   Environment panel's "Outside content · read N times" row). The thread's
   Project, branch, folder and pull requests live in the Environment panel (plan
-  usage does not: it shows in the account menu, on a start screen and in
+  usage does not: it shows in the rail's rings, on a start screen and in
   Settings), and its info and plan proposal are items of the + menu: a full row
   truncated every label in a thread's column. Labels 12px meta, icons 16px,
   nothing filled at rest.
@@ -1949,8 +1954,8 @@ the merge queue, it reports passed without drawing, since the pull request's own
 run already compared the change. The scenes (`apps/web/visual-check.html`, source in
 `apps/web/src/visualCheck/`) are the start screen, the Code side panel, the
 Appearance and Usage Settings pages, the Agents, Artifacts and Automations
-tables, the Where, Project and approval menus open, the icon rail with the
-account face, and a thread's subagent progress (the transcript rows, a finished
+tables, the Where, Project and approval menus open, the icon rail alone
+and beside the sidebar with the account menu open, and a thread's subagent progress (the transcript rows, a finished
 child's result line and the composer's folded card). Each is drawn in light and
 dark at 1280 by 800, and the tables, the side panel and the subagent progress
 again at 760 wide, from fixed data, a fixed clock, bundled fonts

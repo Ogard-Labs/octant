@@ -16,8 +16,29 @@ export interface AccountUsageLine {
 
 export interface AccountUsage {
   readonly lines: ReadonlyArray<AccountUsageLine>;
-  /** The window with the least left across every provider: the account face's ring. */
-  readonly lowest?: ComposerLimitWindow;
+}
+
+/**
+ * How many accounts the rail rings. Past this many the foot would push the
+ * places out of a short window, so the rest wait in the account menu.
+ */
+export const RAIL_USAGE_LIMIT = 3;
+
+/**
+ * The accounts the rail rings: those with the least left, kept in account order
+ * so a ring never changes places as the figures move.
+ */
+export function railUsageLines(
+  lines: ReadonlyArray<AccountUsageLine>,
+): ReadonlyArray<AccountUsageLine> {
+  if (lines.length <= RAIL_USAGE_LIMIT) return lines;
+  const tightest = new Set(
+    [...lines]
+      .sort((a, b) => a.lowest.percent - b.lowest.percent)
+      .slice(0, RAIL_USAGE_LIMIT)
+      .map((line) => String(line.instance.id)),
+  );
+  return lines.filter((line) => tightest.has(String(line.instance.id)));
 }
 
 function lowestWindow(
@@ -31,7 +52,7 @@ function lowestWindow(
 
 /**
  * The plan readings of the accounts this window knows, read from the shared
- * usage reading so the account face, the composer and the Inbox ask the host
+ * usage reading so the rail, the account menu and the composer ask the host
  * once. A provider that reports no window has no line.
  */
 export function useAccountUsage(): AccountUsage {
@@ -50,7 +71,6 @@ export function useAccountUsage(): AccountUsage {
       const reset = resetPhrase(reading.resetsAt.get(lowest.window), now);
       return [{ instance, reading, lowest, ...(reset === undefined ? {} : { reset }) }];
     });
-    const lowest = lowestWindow(lines.map((line) => line.lowest));
-    return lowest === undefined ? { lines } : { lines, lowest };
+    return { lines };
   }, [instances, now, snapshot]);
 }

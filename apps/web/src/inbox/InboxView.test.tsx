@@ -4,8 +4,7 @@ import type { LinearIssueRow } from "@octant/contracts/linear-issues";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
-import { defaultShellSettings } from "@octant/domain/shell-policy";
-import { RailAccount } from "../shell/SidebarProfile";
+import { RailUsage } from "../usage/RailUsage";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -714,28 +713,21 @@ describe("InboxView page", () => {
       updatedAt: observedAt,
     });
     const list = vi.fn(() => Promise.resolve(snapshot));
-    const onOpenSettings = vi.fn();
+    const onOpenUsage = vi.fn();
     render(
       <PlanUsageProvider
         client={{ list } as unknown as ProviderUsageLimitsClient}
         instances={[account]}
       >
-        <RailAccount
-          onOpenNavigator={vi.fn()}
-          onOpenSettings={onOpenSettings}
-          profile={{ ...defaultShellSettings().userProfile, displayName: "Ada" }}
-        />
+        <RailUsage onOpenUsage={onOpenUsage} />
         <ComposerPlanUsage providerInstanceId={accountId} />
       </PlanUsageProvider>,
     );
     expect(await screen.findByLabelText("Plan usage left")).toBeVisible();
-    // The rail's face rings the tightest window and lists each account's
-    // reading in its menu, which leads to Settings › Usage.
     await userEvent.click(
-      screen.getByRole("button", { name: "Account menu, Ada, 60% of plan usage left" }),
+      screen.getByRole("button", { name: "Claude Max plan usage, 5h 60% left" }),
     );
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Claude Max, 5h 60% left" }));
-    expect(onOpenSettings).toHaveBeenCalledWith({ section: "usage" });
+    expect(onOpenUsage).toHaveBeenCalledOnce();
     expect(list).toHaveBeenCalledTimes(1);
   });
 
