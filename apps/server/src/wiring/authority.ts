@@ -37,8 +37,10 @@ import {
   type CodeOperationRuntime,
   threadWithActiveTurnPosture,
 } from "../code/codeOperationRuntime";
+import { createRestrictedDeviceScope } from "../hostPersonScope";
 import { ProcessAuthorityClock } from "../processAuthorityClock";
 import {
+  readDeviceAccessLevel,
   readDeviceApprovedByPerson,
   readDeviceRegistration,
   readRemoteSessionInvalidation,
@@ -247,12 +249,15 @@ export function wireAuthority(deps: AuthorityDependencies) {
       readDeviceRegistration(persistence.connection, String(scopeId)),
       Date.now(),
     );
-  // A device the host's own person paired is that person, so its turns are not
-  // held to what a hub-introduced device's turns are: its prompts may be
-  // remembered and its turns carry the person's memory, as a local window's do.
-  const isRestrictedDeviceScope = (scopeId: WindowId): boolean =>
-    isPairedDeviceScope(scopeId) &&
-    !readDeviceApprovedByPerson(persistence.connection, String(scopeId));
+  // A device the host's own person paired at Full is that person, so its turns
+  // are not held to what a hub-introduced device's turns are: its prompts may
+  // be remembered and its turns carry the person's memory, as a local window's
+  // do. A device paired below Full is not the person, whatever its approval.
+  const isRestrictedDeviceScope = createRestrictedDeviceScope({
+    isPairedDeviceScope,
+    approvedByPerson: (deviceId) => readDeviceApprovedByPerson(persistence.connection, deviceId),
+    hasFullAccess: (deviceId) => readDeviceAccessLevel(persistence.connection, deviceId) === "full",
+  });
   const isPairedDeviceSessionCurrent = (
     principal: {
       readonly deviceId: unknown;

@@ -63,6 +63,9 @@ export function createThreadProviderMentionsAccess(
     localWindows: options.listLiveWindowIds,
     devices: options.readDevices,
     approvedByPerson: options.approvedByPerson,
+    // Only the device actor is read here; the level is judged by
+    // `isRestrictedDeviceScope` below.
+    hasFullAccess: () => true,
   });
   const isActiveProject = (projectId: ProjectId, mode: "work" | "code"): boolean => {
     const project = options.readProject(projectId);

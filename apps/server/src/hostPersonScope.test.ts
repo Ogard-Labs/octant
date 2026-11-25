@@ -7,6 +7,7 @@ const personPaired = decodeWindowId("20000000-0000-4000-8000-000000000001");
 const hubIntroduced = decodeWindowId("20000000-0000-4000-8000-000000000002");
 const revoked = decodeWindowId("20000000-0000-4000-8000-000000000003");
 const unknown = decodeWindowId("20000000-0000-4000-8000-000000000004");
+const belowFull = decodeWindowId("20000000-0000-4000-8000-000000000005");
 
 function scopes() {
   return createHostPersonScopes({
@@ -15,8 +16,10 @@ function scopes() {
       { device_id: String(personPaired), state: "active" },
       { device_id: String(hubIntroduced), state: "active" },
       { device_id: String(revoked), state: "revoked" },
+      { device_id: String(belowFull), state: "active" },
     ],
     approvedByPerson: (deviceId) => deviceId !== String(hubIntroduced),
+    hasFullAccess: (deviceId) => deviceId !== String(belowFull),
   });
 }
 
@@ -29,6 +32,8 @@ describe("the scopes that act as the host's own person", () => {
     expect(actsAsHostPerson(hubIntroduced)).toBe(false);
     expect(actsAsHostPerson(revoked)).toBe(false);
     expect(actsAsHostPerson(unknown)).toBe(false);
+    // The person paired it below Full: it is a device they trust, not them.
+    expect(actsAsHostPerson(belowFull)).toBe(false);
   });
 
   it("names the device for a person-paired device's scope, and no device for a window or any other scope", () => {
@@ -38,6 +43,8 @@ describe("the scopes that act as the host's own person", () => {
       actorId: String(personPaired),
       deviceId: String(personPaired),
     });
+    // A device below Full is still the actor of what it is allowed to do.
+    expect(deviceActor(belowFull)).toMatchObject({ deviceId: String(belowFull) });
     expect(deviceActor(windowId)).toBeUndefined();
     expect(deviceActor(hubIntroduced)).toBeUndefined();
     expect(deviceActor(revoked)).toBeUndefined();
