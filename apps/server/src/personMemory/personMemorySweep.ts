@@ -255,10 +255,10 @@ export class PersonMemorySweep {
     const since = store.since();
     const callsBefore = this.#calls;
     const readsBefore = this.#reads;
+    // Each mode's threads are listed once: a source may rebuild its lookups on every call.
+    const listed = this.#options.sources.map((source) => ({ source, threads: source.threads() }));
     const phases = [false, true].map((open) =>
-      this.#options.sources.flatMap((source) =>
-        source.threads().map((thread) => ({ source, thread, open })),
-      ),
+      listed.flatMap(({ source, threads }) => threads.map((thread) => ({ source, thread, open }))),
     );
     // A thread that is gone takes its settled mark with it.
     const live = new Set(

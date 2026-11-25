@@ -2404,6 +2404,36 @@ describe("learning from threads still open", () => {
     expect(h.prompts).toHaveLength(30);
   });
 
+  it("lists each mode's threads once a pass, however many phases it makes", async () => {
+    let listed = 0;
+    const h = begin([open()]);
+    const sweep = new PersonMemorySweep({
+      store: h.store,
+      clock: () => QUIET,
+      sources: [
+        {
+          mode: "chat",
+          threads: () => {
+            listed += 1;
+            return [{ id: THREAD_1 }];
+          },
+          peek: () => ({ running: true }),
+          read: () => undefined,
+        },
+      ],
+      model: {
+        resolve: () => undefined,
+        complete: async () => ({ status: "unavailable" }),
+        recordUsage: () => undefined,
+      },
+      namesProtectedPath: () => false,
+    });
+
+    await sweep.pass();
+
+    expect(listed).toBe(1);
+  });
+
   it("reads an open thread in full only when it has something to learn, and not again until it changes", async () => {
     const unmarked = open({ id: THREAD_2, typed: false });
     const thread = open();
