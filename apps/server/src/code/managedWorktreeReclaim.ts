@@ -341,8 +341,8 @@ export class ManagedWorktreeReclaimService {
 
   /**
    * What changed in the folder since the cleanup recorded its branch and commit,
-   * or what Git must not be asked to delete, or nothing. Anything that cannot be read counts as changed: the worktree
-   * stays the thread's.
+   * or what Git must not be asked to delete, or nothing. Anything that cannot be
+   * read counts as changed: the worktree stays the thread's.
    */
   async #changedSince(
     receipt: ManagedWorktreeReceipt,
