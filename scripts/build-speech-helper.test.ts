@@ -40,6 +40,7 @@ function exchange(
   options: { readonly hold: boolean; readonly leaveWhenAnalysing?: boolean },
 ): Promise<{
   readonly code: number | null;
+  readonly signal: NodeJS.Signals | null;
   readonly stdout: string;
   readonly stderr: string;
 }> {
@@ -55,9 +56,9 @@ function exchange(
     });
     child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
     child.stdin.on("error", () => undefined);
-    child.on("exit", (code) => {
+    child.on("exit", (code, signal) => {
       clearTimeout(guard);
-      settle({ code, stdout, stderr });
+      settle({ code, signal, stdout, stderr });
     });
     if (!options.hold) {
       child.stdin.end(bytes);
@@ -252,5 +253,8 @@ describe("speech helper process", () => {
     const left = await exchange(request, { hold: true, leaveWhenAnalysing: true });
     expect(lines(left.stdout).map(({ event }) => event)).toEqual(["analysing"]);
     expect(left.stderr).toBe("");
+    // The helper left on its own when its input closed; the guard's kill
+    // would show as a signal and no exit code.
+    expect({ code: left.code, signal: left.signal }).toEqual({ code: 0, signal: null });
   }, 90_000);
 });
