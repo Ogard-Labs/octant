@@ -1058,7 +1058,9 @@ export class ManagedWorktreeReclaimService {
     }
     try {
       if (await this.#filesystem.pathExists(receipt.canonicalWorktreePath, signal)) {
-        return { status: "waiting", receipt };
+        // Git no longer lists it (someone ran `git worktree prune`) yet the
+        // folder is there. Waiting would never end: it is the person's to move.
+        return { status: "refused", reason: "path-collision" };
       }
       const reclaimed = await this.#receipts.transition(receipt.receiptId, "reclaimed");
       return { status: "reclaimed", receipt: reclaimed };

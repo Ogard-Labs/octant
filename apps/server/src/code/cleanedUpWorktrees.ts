@@ -51,8 +51,19 @@ const REFUSALS: Record<CleanedUpWorktreeRefusalReason, string> = {
 
 export function cleanedUpRefusal(
   reason: CleanedUpWorktreeRefusalReason,
+  /** Says what the person should do about this one worktree, in place of the general answer. */
+  message?: string,
 ): Extract<RestoreCleanedUpWorktreeResult, { kind: "cleaned-up-worktree-refused" }> {
-  return { kind: "cleaned-up-worktree-refused", reason, message: REFUSALS[reason] };
+  const specific = message !== undefined && message.length <= 512 ? message : undefined;
+  return { kind: "cleaned-up-worktree-refused", reason, message: specific ?? REFUSALS[reason] };
+}
+
+function branchChangedMessage(reclaim: { branch: string; head: string }): string {
+  return `The branch ${reclaim.branch} no longer points at commit ${reclaim.head} (it moved or was deleted), so the worktree was not restored. Put it back with git branch -f ${reclaim.branch} ${reclaim.head}, then restore again.`;
+}
+
+function folderInTheWayMessage(path: string): string {
+  return `The folder ${path} is in the way: Git no longer lists it as a worktree, but it is still there. Move it away, then restore again.`;
 }
 
 /** Where a receipt's cleanup stands, or nothing while the thread may use its folder. */
@@ -138,10 +149,10 @@ export function createCleanedUpWorktrees(dependencies: CleanedUpWorktreesDepende
         if (settled.status === "restored") {
           return { kind: "cleaned-up-worktree-restored", threadId };
         }
-        if (settled.status !== "reclaimed") return mapRefusal(settled);
+        if (settled.status !== "reclaimed") return mapRefusal(settled, current);
         current = settled.receipt;
       }
-      return mapRefusal(await dependencies.restore(current.receiptId, signal), threadId);
+      return mapRefusal(await dependencies.restore(current.receiptId, signal), current, threadId);
     },
   };
 }
@@ -150,6 +161,7 @@ export type CleanedUpWorktrees = ReturnType<typeof createCleanedUpWorktrees>;
 
 function mapRefusal(
   result: ManagedWorktreeReclaimResult,
+  receipt: ManagedWorktreeReceipt,
   threadId?: CodeThreadId,
 ): RestoreCleanedUpWorktreeResult {
   if (result.status === "restored" && threadId !== undefined) {
@@ -158,8 +170,12 @@ function mapRefusal(
   if (result.status === "refused") {
     switch (result.reason) {
       case "restore-mismatch":
-        return cleanedUpRefusal("branch-changed");
+        return cleanedUpRefusal(
+          "branch-changed",
+          receipt.reclaim === undefined ? undefined : branchChangedMessage(receipt.reclaim),
+        );
       case "path-collision":
+        return cleanedUpRefusal("folder-in-use", folderInTheWayMessage(receipt.canonicalWorktreePath));
       case "branch-collision":
       case "inventory-ambiguous":
         return cleanedUpRefusal("folder-in-use");

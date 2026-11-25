@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -19,6 +19,7 @@ import { ManagedRootGrantStore } from "./managedRootGrantStore";
 import { createManagedWorktreeNodePorts } from "./managedWorktreeNodePorts";
 import { ManagedWorktreeReceiptStore } from "./managedWorktreeReceiptStore";
 import { ManagedWorktreeReclaimService } from "./managedWorktreeReclaim";
+import { createCleanedUpWorktrees } from "./cleanedUpWorktrees";
 import { ManagedWorktreeService } from "./managedWorktreeService";
 
 const execFileAsync = promisify(execFile);
@@ -390,6 +391,22 @@ describe("managed worktree Node ports", () => {
         restore: () => reclaimService.restore({ receiptId: created.receipt.receiptId }, signal),
         abandon: () => reclaimService.abandon({ receiptId: created.receipt.receiptId }, signal),
         state: async () => (await receipts.load(created.receipt.receiptId))?.state,
+        /** What a person's Restore button reaches: the same service, behind the thread's own answer. */
+        personRestore: () => {
+          const thread = { id: threadId, projectId: "p", checkoutId, title: "t" };
+          return createCleanedUpWorktrees({
+            readCodeThreads: () => [thread] as never,
+            readCodeThread: () => thread as never,
+            readCodeCheckout: () =>
+              ({
+                kind: "managed-worktree",
+                ownershipReceiptId: created.receipt.receiptId,
+              }) as never,
+            loadReceipt: (id) => receipts.load(id),
+            restore: (id, stop) => reclaimService.restore({ receiptId: id }, stop),
+            abandon: (id, stop) => reclaimService.abandon({ receiptId: id }, stop),
+          }).restore(threadId);
+        },
       };
     }
 
@@ -481,6 +498,28 @@ describe("managed worktree Node ports", () => {
       await expect(w.restore()).resolves.toEqual({ status: "refused", reason: "restore-mismatch" });
       expect(await w.ports.filesystem.pathExists(w.created.targetPath, signal)).toBe(false);
       expect(await w.state()).toBe("reclaimed");
+    });
+
+    it("tells the person the recorded branch and commit when the branch moved or is gone, and restores once it is back", async () => {
+      const w = await readyWorktree();
+      const head = (await w.git("-C", w.created.targetPath, "rev-parse", "HEAD")).stdout.trim();
+      await expect(w.reclaim()).resolves.toMatchObject({ status: "reclaimed" });
+      await w.git("-C", w.fixture.repository, "commit", "--allow-empty", "-m", "elsewhere");
+      await w.git("-C", w.fixture.repository, "branch", "-f", "feature/restorable", "development");
+      for (const gone of [false, true]) {
+        if (gone) await w.git("-C", w.fixture.repository, "branch", "-D", "feature/restorable");
+        const refused = await w.personRestore();
+        expect(refused).toMatchObject({ reason: "branch-changed" });
+        expect(JSON.stringify(refused)).toContain("feature/restorable");
+        expect(JSON.stringify(refused)).toContain(head);
+        expect(await w.state()).toBe("reclaimed");
+      }
+      await w.git("-C", w.fixture.repository, "branch", "feature/restorable", head);
+      await expect(w.personRestore()).resolves.toMatchObject({
+        kind: "cleaned-up-worktree-restored",
+      });
+      expect(await w.state()).toBe("ready");
+      expect((await w.git("-C", w.created.targetPath, "rev-parse", "HEAD")).stdout.trim()).toBe(head);
     });
 
     async function committedFile(w: Awaited<ReturnType<typeof readyWorktree>>) {
@@ -657,6 +696,33 @@ describe("managed worktree Node ports", () => {
       await w.receipts.transition(w.receiptId, "reclaimed");
       await expect(w.restore()).resolves.toMatchObject({ status: "restored" });
       expect(await w.state()).toBe("ready");
+    });
+
+    it("names the folder in the way when a pruned registration leaves its folder behind, and restores once it is moved", async () => {
+      const w = await readyWorktree();
+      await begun(w);
+      // Git was killed after it deleted the folder's link to the repository.
+      await rm(join(w.created.targetPath, ".git"));
+      await w.git("-C", w.fixture.repository, "worktree", "prune");
+      expect(await listed(w)).not.toContain(w.created.targetPath);
+      expect(await w.ports.filesystem.pathExists(w.created.targetPath, signal)).toBe(true);
+
+      const refused = await w.personRestore();
+      expect(refused).toMatchObject({
+        kind: "cleaned-up-worktree-refused",
+        reason: "folder-in-use",
+      });
+      expect(JSON.stringify(refused)).toContain(w.created.targetPath);
+      expect(await w.state()).toBe("cleanup-pending");
+      await expect(w.reclaim()).resolves.toEqual({ status: "refused", reason: "path-collision" });
+      expect(await readFile(join(w.created.targetPath, "tracked.txt"), "utf8")).toBe("one\n");
+
+      await rename(w.created.targetPath, join(w.fixture.root, "moved-away"));
+      await expect(w.personRestore()).resolves.toMatchObject({
+        kind: "cleaned-up-worktree-restored",
+      });
+      expect(await w.state()).toBe("ready");
+      expect(await readFile(join(w.created.targetPath, "tracked.txt"), "utf8")).toBe("one\n");
     });
 
     /** The folder of a restore killed during `git worktree add`: locked, no index, a lock left, files missing. */
