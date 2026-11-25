@@ -1,9 +1,11 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { lstat, open, readFile, realpath } from "node:fs/promises";
+import { devNull } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
+import { runBoundedGit, GIT_MUTATION_TIME_LIMIT_MS, GIT_READ_TIME_LIMIT_MS } from "./boundedGit";
+import { readFolderAgainstCommit } from "./folderAgainstCommit";
 import { checkpointRefNamespace } from "./gitMutationPort";
+import { worktreeAdminDirectory } from "./hostWorktreeDiscovery";
 import {
   observeRepositoryIdentity,
   type FileSystemIdentity,
@@ -15,9 +17,14 @@ import type {
   ManagedWorktreeRepositoryPort,
 } from "./managedWorktreeService";
 import { childProcessEnvironment } from "../childProcessEnvironment";
-import { readWorktreeStatus } from "./hostGitReads";
+import {
+  readCleanupHazard,
+  readRemovalDamage,
+  readUntrackedAndIgnored,
+  restoreMissingTrackedFiles,
+  readWorktreeStatus,
+} from "./hostGitReads";
 
-const execFileAsync = promisify(execFile);
 // Git runs hooks and configured programs from the repository it is pointed at,
 // so it gets the host's environment without the desktop's broker coordinates.
 const gitEnvironment = {
@@ -33,31 +40,27 @@ async function statIdentity(path: string): Promise<FileSystemIdentity> {
   return { device: metadata.dev.toString(10), inode: metadata.ino.toString(10) };
 }
 
+/**
+ * Every Git call here is bounded: it stops at the caller's signal or the time
+ * limit, and it returns only after the child has exited, so the per-receipt
+ * lock is never released while Git still writes in the folder. A call that hit
+ * its time limit throws, which callers settle as interrupted.
+ */
 async function run(
   executable: string,
   args: readonly string[],
   signal: AbortSignal,
+  timeoutMs: number = GIT_READ_TIME_LIMIT_MS,
 ): Promise<GitCommandResult> {
+  let result: Awaited<ReturnType<typeof runBoundedGit>>;
   try {
-    const result = await execFileAsync(executable, [...args], {
-      encoding: "utf8",
-      env: gitEnvironment,
-      maxBuffer: 16 * 1024 * 1024,
-      shell: false,
-      signal,
-    });
-    return { exitCode: 0, stdout: result.stdout, stderr: result.stderr };
+    result = await runBoundedGit({ executable, args, env: gitEnvironment, signal, timeoutMs });
   } catch (error) {
     if (signal.aborted) throw error;
-    if (isExecFailure(error)) {
-      return {
-        exitCode: typeof error.code === "number" ? error.code : 1,
-        stdout: error.stdout ?? "",
-        stderr: error.stderr ?? "",
-      };
-    }
-    throw error;
+    return { exitCode: 1, stdout: "", stderr: error instanceof Error ? error.message : "" };
   }
+  if (result.timedOut) throw new Error("Git took longer than its time limit");
+  return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 }
 
 /** Physical identity excludes HEAD and the index, which ordinary child work changes. */
@@ -216,6 +219,7 @@ export function createManagedWorktreeNodePorts(): {
           input.startPoint,
         ],
         signal,
+        GIT_MUTATION_TIME_LIMIT_MS,
       );
       return { status: result.exitCode === 0 ? "created" : "rejected" };
     },
@@ -230,6 +234,146 @@ export function createManagedWorktreeNodePorts(): {
         return { status: "observed", dirty: reading.changedPaths > 0 };
       }
       return reading.status === "runs-filters" ? { status: "unavailable" } : { status: "failed" };
+    },
+    hasUnrecoverableFiles: async (targetPath, signal) => {
+      const reading = await readUntrackedAndIgnored(targetPath, signal);
+      if (reading.status === "observed") {
+        return { status: "observed", found: reading.changedPaths > 0 };
+      }
+      return reading.status === "runs-filters" ? { status: "unavailable" } : { status: "failed" };
+    },
+    findCleanupHazard: async (targetPath, signal) => {
+      const reading = await readCleanupHazard(targetPath, signal);
+      return reading.status === "observed"
+        ? {
+            status: "observed",
+            ...(reading.hazard === undefined ? {} : { hazard: reading.hazard }),
+          }
+        : { status: "failed" };
+    },
+    readRemovalDamage: async (targetPath, signal) => {
+      const reading = await readRemovalDamage(targetPath, signal);
+      if (reading.status === "observed") {
+        return {
+          status: "observed",
+          missingTrackedFiles: reading.missingTrackedFiles,
+          otherChanges: reading.otherChanges,
+        };
+      }
+      return reading.status === "runs-filters" ? { status: "unavailable" } : { status: "failed" };
+    },
+    relinkWorktree: async (input) => {
+      const pointer = join(input.targetPath, ".git");
+      try {
+        const folder = await lstat(input.targetPath);
+        if (!folder.isDirectory() || folder.isSymbolicLink()) return { status: "rejected" };
+        // The same reading of an admin directory's `gitdir` that discovery uses,
+        // so a relative path (`worktree.useRelativePaths`) and Windows
+        // separators and case name the same folder as the absolute path does.
+        const home = await worktreeAdminDirectory(input.commonDirectory, input.targetPath);
+        if (home === undefined) return { status: "rejected" };
+        // `wx` fails when the folder already has a `.git`, so nothing is replaced.
+        const handle = await open(pointer, "wx", 0o644);
+        try {
+          await handle.writeFile(`gitdir: ${home}\n`, "utf8");
+        } finally {
+          await handle.close();
+        }
+        return { status: "linked" };
+      } catch {
+        return { status: "rejected" };
+      }
+    },
+    readFolderAgainstCommit: async (input, signal) => {
+      const reading = await readFolderAgainstCommit(
+        input.repositoryRoot,
+        input.targetPath,
+        input.head,
+        signal,
+      );
+      return reading.status === "observed"
+        ? { status: "observed", matches: reading.matches }
+        : { status: "failed" };
+    },
+    inspectRestoredFolder: async (targetPath, signal) => {
+      const directory = await run(
+        "git",
+        ["-C", targetPath, "rev-parse", "--absolute-git-dir"],
+        signal,
+      );
+      if (directory.exitCode !== 0) return { status: "failed" };
+      const admin = directory.stdout.trim();
+      const present = async (name: string): Promise<boolean> =>
+        lstat(join(admin, name)).then(
+          () => true,
+          (error: unknown) => {
+            if (isMissingError(error)) return false;
+            throw error;
+          },
+        );
+      try {
+        if (!(await present("index")) || (await present("index.lock"))) {
+          return { status: "observed", whole: false };
+        }
+      } catch {
+        return { status: "failed" };
+      }
+      const reading = await readWorktreeStatus(targetPath, signal);
+      if (reading.status === "observed") {
+        return { status: "observed", whole: reading.changedPaths === 0 };
+      }
+      return reading.status === "runs-filters" ? { status: "unavailable" } : { status: "failed" };
+    },
+    restoreMissingFiles: async (targetPath, signal) => {
+      const reading = await restoreMissingTrackedFiles(targetPath, signal);
+      if (reading.status === "restored") return { status: "observed", files: reading.files };
+      return reading.status === "runs-filters" ? { status: "unavailable" } : { status: "failed" };
+    },
+    resolveBranchHead: async (input, signal) => {
+      const validation = await run("git", ["check-ref-format", "--branch", input.branch], signal);
+      if (validation.exitCode !== 0) return { status: "failed" };
+      const result = await run(
+        "git",
+        [
+          "-C",
+          input.repositoryRoot,
+          "rev-parse",
+          "--verify",
+          "--quiet",
+          `refs/heads/${input.branch}^{commit}`,
+        ],
+        signal,
+      );
+      if (result.exitCode === 1) return { status: "observed" };
+      const head = result.stdout.trim();
+      return result.exitCode === 0 && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(head)
+        ? { status: "observed", head }
+        : { status: "failed" };
+    },
+    restoreWorktree: async (input, signal) => {
+      const validation = await run("git", ["check-ref-format", "--branch", input.branch], signal);
+      if (validation.exitCode !== 0) return { status: "rejected" };
+      // Restore recreates the recorded checkout and nothing else: no hook the
+      // repository or the person's config names runs (`post-checkout` may write
+      // files the verification would then take for a partial folder). A command
+      // line `-c` outranks every config file, `core.hooksPath` included.
+      const result = await run(
+        "git",
+        [
+          "-c",
+          `core.hooksPath=${devNull}`,
+          "-C",
+          input.repositoryRoot,
+          "worktree",
+          "add",
+          "--",
+          input.targetPath,
+          input.branch,
+        ],
+        signal,
+        GIT_MUTATION_TIME_LIMIT_MS,
+      );
+      return { status: result.exitCode === 0 ? "created" : "rejected" };
     },
     isDelivered: async (input, signal) => {
       const result = await run(
@@ -247,6 +391,24 @@ export function createManagedWorktreeNodePorts(): {
         signal,
       );
       if (result.exitCode !== 0) return { status: "failed" };
+      if (input.startPoint !== undefined) {
+        // A worktree nobody committed to sits on the commit it started from;
+        // every other ref contains that commit, which is not delivery.
+        const ahead = await run(
+          "git",
+          [
+            "-C",
+            input.targetPath,
+            "rev-list",
+            "--count",
+            "--end-of-options",
+            `${input.startPoint}..HEAD`,
+          ],
+          signal,
+        );
+        if (ahead.exitCode !== 0) return { status: "failed" };
+        if (Number(ahead.stdout.trim()) === 0) return { status: "observed", delivered: false };
+      }
       const own = `refs/heads/${input.branch}`;
       return {
         status: "observed",
@@ -261,6 +423,7 @@ export function createManagedWorktreeNodePorts(): {
         "git",
         ["-C", repositoryRoot, "fetch", "--quiet", remoteName],
         signal,
+        GIT_MUTATION_TIME_LIMIT_MS,
       );
       if (result.exitCode !== 0) {
         return result.exitCode === 128 ? { status: "interrupted" } : { status: "failed" };
@@ -289,10 +452,12 @@ export function createManagedWorktreeNodePorts(): {
           "worktree",
           "remove",
           ...(input.force === true ? ["--force"] : []),
+          ...(input.overrideLock === true ? ["--force"] : []),
           "--",
           input.targetPath,
         ],
         signal,
+        GIT_MUTATION_TIME_LIMIT_MS,
       );
       return { status: result.exitCode === 0 ? "removed" : "rejected" };
     },
@@ -459,14 +624,6 @@ export async function listBranchNames(
 
 function isMissingError(error: unknown): boolean {
   return isRecord(error) && error.code === "ENOENT";
-}
-
-function isExecFailure(error: unknown): error is {
-  readonly code?: string | number;
-  readonly stdout?: string;
-  readonly stderr?: string;
-} {
-  return isRecord(error);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

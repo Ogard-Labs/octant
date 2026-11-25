@@ -1,7 +1,12 @@
 import { render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { decodeHostId, LOCAL_HOST_ID, type HostIdentity } from "@octant/contracts/host";
-import { decodeImageGenerationScopeId, decodeVideoJobId } from "@octant/contracts";
+import {
+  decodeCodeThreadId,
+  decodeImageGenerationScopeId,
+  decodeVideoJobId,
+} from "@octant/contracts";
+import { createArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
 import { useContext, type ContextType } from "react";
 import { ComposerStashScopeContext } from "../composer/ComposerStashControls";
 import type { RemoteCodeSurfaceProps } from "../remote/RemoteWorkspace";
@@ -111,6 +116,25 @@ describe("a paired computer's Code start screen", () => {
     expect(client?.toolGrantsAvailable).toBe(true);
     await client?.listToolApprovals().catch(() => undefined);
     expect(sent.some((url) => url.pathname === "/api/extensions/tool-approvals")).toBe(true);
+  });
+
+  it("restores a cleaned-up worktree through the paired computer's session, for the person's own device only", async () => {
+    const sent: URL[] = [];
+    await surfaceFor(true, sent);
+    await waitFor(() => expect(surfaces.at(-1)?.actsAsHostPerson).toBe(true));
+    const port = surfaces.at(-1)?.worktreePort;
+    expect(port).toBeDefined();
+    if (port === undefined) throw new Error("no worktree port");
+    await createArchivedWorktreesClient(port)
+      .restore(decodeCodeThreadId("a1b2c3d4-0000-4000-8000-000000000001"))
+      .catch(() => undefined);
+    const restore = sent.find((url) => url.pathname === "/api/code/cleaned-up-worktrees/restore");
+    expect(restore?.origin).toBe(ORIGIN);
+
+    await surfaceFor(false);
+    await waitFor(() => expect(surfaces.length).toBeGreaterThan(0));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(surfaces.every((props) => props.worktreePort === undefined)).toBe(true);
   });
 
   it("reads confirmed purges from a computer that paired this device at Full", async () => {

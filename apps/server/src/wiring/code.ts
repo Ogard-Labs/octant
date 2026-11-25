@@ -5,6 +5,9 @@ import { removeHostWorktree } from "../code/hostWorktreeRemoval";
 import { createDiskCleanupRouteHandler } from "../diskCleanupRoutes";
 import { createArchivedWorktreeRouteHandler } from "../archivedWorktreeRoutes";
 import { createArchivedWorktrees } from "../code/archivedWorktrees";
+import { cleanedUpWorktreeOf, createCleanedUpWorktrees } from "../code/cleanedUpWorktrees";
+import { WorktreeReclaimSweep } from "../code/worktreeReclaimSweep";
+import type { ThreadCleanupWorkOptions } from "../code/threadCleanupWork";
 import {
   decodeThreadWorkingDirectory,
   type CodeThreadUnlinkedPullRequest,
@@ -35,6 +38,7 @@ import {
   decodeCodeRelativePath,
   decodeCodeRepositoryId,
   decodeCodeThreadId,
+  type CodeThreadId,
   decodeWindowId,
   type ProjectId,
   type ProviderInstance,
@@ -661,6 +665,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "managedWorktreeService"
     | "managedWorktreeRefsList"
     | "managedWorktreeBranchNames"
+    | "managedWorktreeReclaim"
     | "managedWorktreeSourcePreview"
     | "probeProviderForThreads"
     | "providerFolderDiscoveryPorts"
@@ -697,6 +702,7 @@ export function wireCode(deps: CodeDependencies) {
     managedWorktreeReceipts,
     managedWorktreeRefsList,
     managedWorktreeBranchNames,
+    managedWorktreeReclaim,
     managedWorktreeService,
     managedWorktreeSourcePreview,
     onGithubPullRequestsUnreadable,
@@ -719,6 +725,13 @@ export function wireCode(deps: CodeDependencies) {
     // The Code runtime is built after this area, so the turn check reads the
     // runtime the service is built with; before that no turn can run.
     let archivedWorktreeTurns: CodeOperationRuntime | undefined;
+    // Everything the host tracks that may be working in a thread's folder is
+    // wired after this, so until it is the answer is that work is going on.
+    let threadWorkCheck:
+      | ((threadId: CodeThreadId, options?: ThreadCleanupWorkOptions) => boolean)
+      | undefined;
+    const threadHasWork = (threadId: CodeThreadId, options?: ThreadCleanupWorkOptions): boolean =>
+      threadWorkCheck?.(threadId, options) ?? true;
     const archivedWorktrees = createArchivedWorktrees({
       readCodeThreads: () => persistence.readCodeThreads(),
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
@@ -726,10 +739,66 @@ export function wireCode(deps: CodeDependencies) {
       loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
       turnInProgress: (threadId) =>
         archivedWorktreeTurns?.turnInProgress?.(String(threadId)) === true,
-      cleanup: (input, signal) => managedWorktreeService.cleanup(input, signal),
+      workGoing: (threadId) => threadHasWork(threadId, { ignoreProjectTerminals: true }),
+      // One receipt changes one step at a time: a restore waits for this.
+      cleanup: (input, signal, stillIdle) =>
+        managedWorktreeReclaim.exclusive(input.receiptId, async () =>
+          // Asked again here, after the wait: a restore or another cleanup held
+          // the receipt, and work may have started meanwhile.
+          stillIdle?.() === false
+            ? ({ status: "refused", reason: "working" } as const)
+            : managedWorktreeService.cleanup(input, signal),
+        ),
+      cleanupOnArchive: () =>
+        persistence.readCodeSettings()?.settings.worktrees?.cleanup?.onArchive !== false,
+    });
+    const cleanedUpWorktrees = createCleanedUpWorktrees({
+      readCodeThreads: () => persistence.readCodeThreads(),
+      readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+      readCodeCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
+      loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
+      restore: (receiptId, signal) => managedWorktreeReclaim.restore({ receiptId }, signal),
+      abandon: (receiptId, signal) => managedWorktreeReclaim.abandon({ receiptId }, signal),
+    });
+    // The host's own timer for the cleanup a person opted into. With no choice
+    // on it removes nothing, and it only settles a cleanup a restart cut short.
+    const journalTimeOfSequence = persistence.connection.prepare(
+      "SELECT occurred_at FROM event_journal WHERE global_sequence = ?",
+    );
+    let activityRead:
+      | { readonly at: number; readonly sequences: ReadonlyMap<string, number> }
+      | undefined;
+    const worktreeReclaimSweep = new WorktreeReclaimSweep({
+      cleanup: () => persistence.readCodeSettings()?.settings.worktrees?.cleanup,
+      threads: () => persistence.readCodeThreads(),
+      readCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
+      loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
+      lastActivityAt: (threadId) => {
+        // One read of the table serves a whole pass, not one per thread.
+        if (activityRead === undefined || Date.now() - activityRead.at > 10_000) {
+          activityRead = {
+            at: Date.now(),
+            sequences: new Map(
+              persistence
+                .readCodeThreadActivity()
+                .map((entry) => [String(entry.threadId), entry.lastSequence] as const),
+            ),
+          };
+        }
+        const sequence = activityRead.sequences.get(String(threadId));
+        if (sequence === undefined) return undefined;
+        const row = journalTimeOfSequence.get(sequence) as
+          | { readonly occurred_at?: unknown }
+          | undefined;
+        return typeof row?.occurred_at === "string" ? Date.parse(row.occurred_at) : undefined;
+      },
+      threadHasWork: (threadId) => threadHasWork(threadId),
+      reclaim: (input, signal) => managedWorktreeReclaim.reclaim(input, signal),
+      abandon: (receiptId, signal) => managedWorktreeReclaim.abandon({ receiptId }, signal),
     });
     const archivedWorktreeRoutes = createArchivedWorktreeRouteHandler({
       worktrees: archivedWorktrees,
+      cleanedUp: cleanedUpWorktrees,
       windowAuthorityStore,
     });
     // Worktrees Octant made and still owns are cleaned up through their
@@ -1085,6 +1154,7 @@ export function wireCode(deps: CodeDependencies) {
                 ? { names: [], truncated: true }
                 : managedWorktreeBranchNames(input, signal),
           },
+          worktreeCleanup: cleanedUpWorktreeOf((id) => managedWorktreeReceipts.load(id)),
           worktreeRefs: {
             list: async (input, signal) =>
               (await listServerWorktreeRefs(
@@ -1397,6 +1467,12 @@ export function wireCode(deps: CodeDependencies) {
     return {
       agentProfileRoutes,
       archivedWorktreeRoutes,
+      worktreeReclaimSweep,
+      setThreadWorkCheck: (
+        check: (threadId: CodeThreadId, options?: ThreadCleanupWorkOptions) => boolean,
+      ) => {
+        threadWorkCheck = check;
+      },
       buildCodeService,
       diskCleanupRoutes,
       canAccessCodeProject,

@@ -65,6 +65,8 @@ import {
   resolveConfinedDesktopFilePath,
 } from "../codeExternalEditorRoutes";
 import { withCodeBoard, withCodeOperationRuntime } from "../wiring/codeRuntime";
+import { createCodeRouteHandler } from "../codeRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { pathIsProjectConfined } from "../wiring/providers";
 import { CodeFileListingService } from "./codeFileListingService";
 import { withProjectExtraFolders } from "./codeProjectFolderRoot";
@@ -277,6 +279,8 @@ describe("CodeService reads", () => {
         defaultPermissionPersistence: "current-session",
         requireGitRepository: true,
         defaultDiffLayout: "unified",
+        // Always answered, so a window can tell this host from one that predates it.
+        worktrees: { cleanup: {} },
         version: 0,
         updatedAt: now,
       },
@@ -965,6 +969,54 @@ describe("CodeService reads", () => {
     expect(result.checkouts).toContainEqual(managedCheckout);
   });
 
+  it("names a cleaned-up worktree in the thread view, and says nothing when the folder is in use", async () => {
+    const cleaned = serviceFixture({ worktreeCleanup: async () => "cleaned-up" });
+    await expect(
+      cleaned.service.read(ids.window, ids.thread, { worktreeCleanup: true }),
+    ).resolves.toMatchObject({ worktreeCleanup: "cleaned-up" });
+    // A client built before the field refuses a view with a key it does not know.
+    expect(await cleaned.service.read(ids.window, ids.thread)).not.toHaveProperty(
+      "worktreeCleanup",
+    );
+    const unreadable = serviceFixture({
+      worktreeCleanup: async () => {
+        throw new Error("receipt unreadable");
+      },
+    });
+    const view = await unreadable.service.read(ids.window, ids.thread, { worktreeCleanup: true });
+    expect(view).not.toHaveProperty("worktreeCleanup");
+    const plain = await serviceFixture().service.read(ids.window, ids.thread);
+    expect(plain).not.toHaveProperty("worktreeCleanup");
+  });
+
+  it("names a cleaned-up worktree in the thread view through the composed production route", async () => {
+    const cleaned = serviceFixture({ worktreeCleanup: async () => "cleaned-up" });
+    // The adapters the production Code route is built from.
+    const composed = withCodeBoard(
+      withCodeOperationRuntime(cleaned.service, {} as never),
+      vi.fn() as never,
+    );
+    const store = new WindowAuthorityStore();
+    const capability = "A".repeat(43);
+    store.register({ windowId: ids.window, capability, now: 0 });
+    const route = createCodeRouteHandler({
+      service: composed,
+      windowAuthorityStore: store,
+      now: () => 1,
+    });
+    const read = async (query: string) => {
+      const response = await route(
+        new Request(`http://127.0.0.1/api/code/threads/${ids.thread}${query}`, {
+          headers: { "x-octant-window-capability": capability },
+        }),
+      );
+      expect(response?.status).toBe(200);
+      return (await response?.json()) as Record<string, unknown>;
+    };
+    expect(await read("?reads=worktree-cleanup")).toMatchObject({ worktreeCleanup: "cleaned-up" });
+    expect(await read("")).not.toHaveProperty("worktreeCleanup");
+  });
+
   it("fails closed when a thread is missing or outside the authenticated window", async () => {
     const hidden = thread({ projectId: ids.unauthorizedProject });
     const fixture = serviceFixture({ threads: [hidden] });
@@ -1323,7 +1375,7 @@ describe("CodeService commands", () => {
     expect(back.settings.windowsTerminalShell).toBeUndefined();
   });
 
-  it("stores worktree naming choices, keeps them across later default changes, and stores nothing for the defaults", async () => {
+  it("stores worktree naming and cleanup choices, keeps them across later default changes, and stores nothing for the defaults", async () => {
     const fixture = serviceFixture();
     const defaults = {
       kind: "update-code-settings",
@@ -1333,6 +1385,7 @@ describe("CodeService commands", () => {
     const worktrees = {
       branchPrefix: "henrik/",
       branchNaming: "prompt",
+      cleanup: { whenMerged: true, inactivityDays: 30 },
     } as const;
     const chosen = await fixture.service.execute(ids.window, {
       ...defaults,
@@ -1354,7 +1407,35 @@ describe("CodeService commands", () => {
       worktrees: {},
     });
     if (back.kind !== "settings-updated") throw new Error("settings were not updated");
-    expect(back.settings.worktrees).toBeUndefined();
+    // The answer carries the empty choice; the journal keeps none.
+    expect(back.settings.worktrees).toEqual({ cleanup: {} });
+    const journaled = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as
+      | {
+          readonly events: ReadonlyArray<{
+            readonly payload: { readonly settings: { readonly worktrees?: unknown } };
+          }>;
+        }
+      | undefined;
+    expect(journaled?.events[0]?.payload.settings.worktrees).toBeUndefined();
+
+    // A naming choice alone still answers with a cleanup object, so it does not
+    // read as a host without cleanup, and stores no empty one.
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: back.settings } as never);
+    const named = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 3,
+      worktrees: { branchPrefix: "team/", cleanup: {} },
+    });
+    if (named.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(named.settings.worktrees).toEqual({ branchPrefix: "team/", cleanup: {} });
+    const stored = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as
+      | {
+          readonly events: ReadonlyArray<{
+            readonly payload: { readonly settings: { readonly worktrees?: unknown } };
+          }>;
+        }
+      | undefined;
+    expect(stored?.events[0]?.payload.settings.worktrees).toEqual({ branchPrefix: "team/" });
   });
 
   it("keeps Android snapshot boot off until a person turns it on, then across later default changes", async () => {
@@ -6793,6 +6874,7 @@ function serviceFixture(
     readonly worktreeRefs?: CodeWorktreeRefsPort;
     readonly worktreeBranchSuggestion?: CodeWorktreeBranchSuggestionPort;
     readonly worktreeBranchNames?: CodeWorktreeBranchNamesPort;
+    readonly worktreeCleanup?: CodeServiceOptions["worktreeCleanup"];
     readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
     readonly worktreeRemoteFacts?: CodeWorktreeRemoteFacts;
     readonly probeProvider?: CodeServiceOptions["probeProvider"];
@@ -6934,6 +7016,7 @@ function serviceFixture(
     ...(options.worktreeBranchNames === undefined
       ? {}
       : { worktreeBranchNames: options.worktreeBranchNames }),
+    ...(options.worktreeCleanup === undefined ? {} : { worktreeCleanup: options.worktreeCleanup }),
     ...(options.managedThreadCreation === undefined
       ? {}
       : { managedThreadCreation: options.managedThreadCreation }),

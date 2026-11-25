@@ -24,6 +24,7 @@ import type {
   ManagedWorktreeReceiptState,
   ManagedWorktreeSourceProvenance,
 } from "./managedWorktreeReceiptStore";
+import { forReceipt } from "./boundedGit";
 import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
 import type { RepositoryIdentityObservation } from "./repositoryIdentity";
 
@@ -97,6 +98,13 @@ export interface ManagedWorktreeGitPort {
       targetPath: string;
       /** Discards uncommitted changes (`git worktree remove --force`); only a discarding cleanup sets it. */
       force?: boolean;
+      /**
+       * Also removes a worktree Git has locked (`--force --force`). Only the
+       * discard of this host's own interrupted `git worktree add`, whose lock
+       * reason is `initializing`, sets it, and only after the folder was proven
+       * to hold nothing but the recorded commit's files.
+       */
+      overrideLock?: true;
     }>,
     signal: AbortSignal,
   ): Promise<Readonly<{ status: "removed" | "rejected" }>>;
@@ -107,7 +115,15 @@ export interface ManagedWorktreeGitPort {
    * removal is refused.
    */
   isDelivered?(
-    input: Readonly<{ targetPath: string; branch: string }>,
+    input: Readonly<{
+      targetPath: string;
+      branch: string;
+      /**
+       * The commit the branch started from. With it, a branch that never moved
+       * past it has no work of its own, so it is not delivered.
+       */
+      startPoint?: string;
+    }>,
     signal: AbortSignal,
   ): Promise<Readonly<{ status: "observed"; delivered: boolean }> | Readonly<{ status: "failed" }>>;
   /**
@@ -118,6 +134,97 @@ export interface ManagedWorktreeGitPort {
     input: Readonly<{ repositoryRoot: string; branch: string }>,
     signal: AbortSignal,
   ): Promise<Readonly<{ status: "deleted" | "rejected" }>>;
+  /**
+   * Whether the worktree holds anything a person could not get back from the
+   * branch: untracked or ignored files. A port without it cannot tell, so a
+   * restorable cleanup that needs it is refused.
+   */
+  hasUnrecoverableFiles?(
+    targetPath: string,
+    signal: AbortSignal,
+  ): Promise<
+    | Readonly<{ status: "observed"; found: boolean }>
+    | Readonly<{ status: "unavailable" | "failed" }>
+  >;
+  /**
+   * What makes a restorable cleanup unsafe even when status shows nothing:
+   * files Git was told to ignore changes to, a sparse checkout, a submodule, or
+   * an operation under way. A port without it cannot tell, so the cleanup is
+   * refused.
+   */
+  findCleanupHazard?(
+    targetPath: string,
+    signal: AbortSignal,
+  ): Promise<
+    | Readonly<{ status: "observed"; hazard?: "hidden-edits" | "unsupported" }>
+    | Readonly<{ status: "unavailable" | "failed" }>
+  >;
+  /** What a removal that stopped part way left behind; see `findCleanupHazard` for a port without it. */
+  readRemovalDamage?(
+    targetPath: string,
+    signal: AbortSignal,
+  ): Promise<
+    | Readonly<{ status: "observed"; missingTrackedFiles: number; otherChanges: number }>
+    | Readonly<{ status: "unavailable" | "failed" }>
+  >;
+  /**
+   * Writes the `.git` file back into a folder a removal took it from, pointing
+   * at the worktree's own admin directory in the repository, so Git lists the
+   * folder as the worktree it was and its other contents show as ordinary
+   * changes. It creates the file and nothing else; it rejects a folder that
+   * has one, a link, or an admin directory it cannot name exactly.
+   */
+  relinkWorktree?(
+    input: Readonly<{ commonDirectory: string; targetPath: string }>,
+    signal: AbortSignal,
+  ): Promise<Readonly<{ status: "linked" | "rejected" }>>;
+  /**
+   * Puts back the tracked files a removal that stopped part way took, from the
+   * folder's own index, without replacing any file that exists. It deletes and
+   * overwrites nothing.
+   */
+  restoreMissingFiles?(
+    targetPath: string,
+    signal: AbortSignal,
+  ): Promise<
+    Readonly<{ status: "observed"; files: number }> | Readonly<{ status: "unavailable" | "failed" }>
+  >;
+  /**
+   * Whether every file in a folder is exactly the recorded commit's file at the
+   * same path, so nothing in it can be a person's work. Reads the folder and the
+   * commit's tree and runs nothing the repository configured; a folder with a
+   * file the commit lacks or holds differently, or a shape it cannot compare
+   * (a submodule, an unreadable file), does not match.
+   */
+  readFolderAgainstCommit?(
+    input: Readonly<{ repositoryRoot: string; targetPath: string; head: string }>,
+    signal: AbortSignal,
+  ): Promise<
+    | Readonly<{ status: "observed"; matches: boolean }>
+    | Readonly<{ status: "unavailable" | "failed" }>
+  >;
+  /**
+   * Whether a worktree Git says it just added is whole: its own index exists,
+   * no `index.lock` is left, and status against its commit is clean. A restore
+   * killed during the add can leave a folder Git lists without any of these.
+   */
+  inspectRestoredFolder?(
+    targetPath: string,
+    signal: AbortSignal,
+  ): Promise<
+    | Readonly<{ status: "observed"; whole: boolean }>
+    | Readonly<{ status: "unavailable" | "failed" }>
+  >;
+  /** The commit one local branch points at, or none when it does not exist. */
+  resolveBranchHead?(
+    input: Readonly<{ repositoryRoot: string; branch: string }>,
+    signal: AbortSignal,
+  ): Promise<Readonly<{ status: "observed"; head?: string }> | Readonly<{ status: "failed" }>>;
+  /** Checks out an existing local branch in a new worktree folder (`git worktree add <path> <branch>`). */
+  restoreWorktree?(
+    input: Readonly<{ repositoryRoot: string; targetPath: string; branch: string }>,
+    signal: AbortSignal,
+  ): Promise<Readonly<{ status: "created" | "rejected" }>>;
   /**
    * Drop the checkpoint anchors of a checkout that is gone. The anchors live in
    * the repository's shared ref store, not in the worktree, so removing the
@@ -169,8 +276,13 @@ export const BENCHMARK_DISCARD_BRANCH = /^benchmark\/[a-f0-9]{8}\/[a-f0-9]{12}$/
 export type ManagedWorktreeRefusalReason =
   | "active-thread"
   | "branch-collision"
+  | "cleanup-running"
+  | "restore-running"
+  | "files-missing"
+  | "partial-folder"
   | "confirmation-required"
   | "dirty"
+  | "git-refused"
   | "invalid-grant"
   | "invalid-intent"
   | "inventory-ambiguous"
@@ -181,7 +293,13 @@ export type ManagedWorktreeRefusalReason =
   | "repository-mismatch"
   | "remote-unavailable"
   | "undelivered"
-  | "unowned";
+  | "not-reclaimed"
+  | "restore-mismatch"
+  | "unowned"
+  | "unrecoverable-files"
+  | "unsupported-checkout"
+  | "unverified"
+  | "working";
 
 type ManagedWorktreeRefusal = Readonly<{
   status: "refused";
@@ -416,14 +534,16 @@ export class ManagedWorktreeService {
     }
 
     try {
-      const added = await this.#git.addWorktree(
-        {
-          repositoryRoot: fresh.state.repositoryRoot,
-          targetPath: fresh.state.targetPath,
-          branchIntent: input.branchIntent,
-          startPoint: input.startPoint,
-        },
-        signal,
+      const added = await forReceipt(receipt.receiptId, () =>
+        this.#git.addWorktree(
+          {
+            repositoryRoot: fresh.state.repositoryRoot,
+            targetPath: fresh.state.targetPath,
+            branchIntent: input.branchIntent,
+            startPoint: input.startPoint,
+          },
+          signal,
+        ),
       );
       if (added.status !== "created") return { status: "waiting", receipt };
     } catch {
@@ -567,9 +687,12 @@ export class ManagedWorktreeService {
     if (present) {
       let removed: Awaited<ReturnType<ManagedWorktreeGitPort["removeWorktree"]>>;
       try {
-        removed = await this.#git.removeWorktree(
-          { repositoryRoot: observation.repositoryRoot, targetPath: receipt.canonicalWorktreePath },
-          signal,
+        const targetPath = receipt.canonicalWorktreePath;
+        removed = await forReceipt(receiptId, () =>
+          this.#git.removeWorktree(
+            { repositoryRoot: observation.repositoryRoot, targetPath },
+            signal,
+          ),
         );
       } catch {
         return { status: "interrupted" };
@@ -723,6 +846,15 @@ export class ManagedWorktreeService {
       return { status: "interrupted" };
     }
     if (receipt === undefined) return { status: "refused", reason: "unowned" };
+    // A restorable cleanup keeps what a restore needs; finishing it as a
+    // removal here would throw that away, so only the reclaim path touches it.
+    if (
+      receipt.reclaim !== undefined ||
+      receipt.state === "reclaimed" ||
+      receipt.state === "restoring"
+    ) {
+      return { status: "refused", reason: "mismatched" };
+    }
     if (
       discard !== undefined &&
       (receipt.branchIntent !== discard ||
@@ -1171,7 +1303,7 @@ export function managedWorktreeRoot(repositoryRoot: string, repositoryId: string
   return join(dirname(repositoryRoot), ".octant-worktrees", repositoryId);
 }
 
-function branchRef(branchIntent: string): string {
+export function branchRef(branchIntent: string): string {
   return `refs/heads/${branchIntent}`;
 }
 
@@ -1180,7 +1312,7 @@ function branchFromRefIntent(refIntent: string): string | undefined {
   return match?.[1];
 }
 
-function hasAmbiguousInventory(
+export function hasAmbiguousInventory(
   observation: Extract<RepositoryIdentityObservation, { status: "available" }>,
 ): boolean {
   return observation.worktrees.some(

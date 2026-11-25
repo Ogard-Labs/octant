@@ -1,3 +1,4 @@
+import { cleanedUpWorktreeSentence } from "@octant/domain";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { WorkspaceTab, WorkspaceTabId } from "@octant/contracts/shell";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -310,6 +311,25 @@ describe("CodeWorkspace", () => {
     );
     // Nothing about the checkout is fetched just to write this line.
     expect(client.executeOperation).not.toHaveBeenCalled();
+  });
+
+  it("says a cleaned-up worktree was cleaned up, and offers no move to the Project's checkout", async () => {
+    render(
+      activated(
+        <CodeWorkspace
+          client={codeClient()}
+          controller={controller("full-access", "unavailable", undefined, "cleaned-up")}
+          createUuid={uuidFactory()}
+          tab={tab("code-terminal", "Terminal")}
+        />,
+      ),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      cleanedUpWorktreeSentence("cleaned-up"),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Use the Project's checkout" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps the plain wording when no checkout reason is known", async () => {
@@ -942,10 +962,12 @@ function controller(
   executionPolicy: "plan" | "approval-gated" | "full-access",
   availability: "available" | "unavailable" | "waiting" = "available",
   rebindThreadCheckout = vi.fn(async () => undefined as unknown),
+  worktreeCleanup?: "cleaned-up",
 ) {
   return {
     rebindThreadCheckout,
     activeView: {
+      ...(worktreeCleanup === undefined ? {} : { worktreeCleanup }),
       checkout: {
         id: ids.checkout,
         repositoryId: "c0000000-0000-4000-8000-000000000001",

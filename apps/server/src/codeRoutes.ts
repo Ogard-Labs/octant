@@ -334,6 +334,7 @@ export interface CodeRouteService {
   readonly read: (
     authenticatedWindowId: WindowId,
     threadId: CodeThreadId,
+    reads?: Readonly<{ worktreeCleanup?: boolean }>,
   ) => Promise<CodeThreadView> | CodeThreadView;
   readonly execute: (
     authenticatedWindowId: WindowId,
@@ -901,10 +902,20 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         case "thread": {
-          requireMethodAndEmptyQuery(request, url, "GET");
+          // A client built before the thread view named a cleaned-up worktree
+          // refuses a view with a key it does not know, so the field is sent
+          // only to one that says it reads it. A query, not a header: a paired
+          // device's forwarding refuses a header it does not list.
+          const readsCleanup = url.search === "?reads=worktree-cleanup";
+          if (!readsCleanup) requireMethodAndEmptyQuery(request, url, "GET");
+          else if (request.method !== "GET") {
+            throw new CodeRouteRejected("Code request is invalid.", 400);
+          }
           const threadId = decodePathThreadId(route.threadId);
           return jsonResponse(
-            await dependencies.service.read(authenticatedWindowId, threadId),
+            await dependencies.service.read(authenticatedWindowId, threadId, {
+              worktreeCleanup: readsCleanup,
+            }),
             200,
             origin,
           );
@@ -1039,7 +1050,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               {
                 category: "unauthorized",
                 message:
-                  "Only you, from a window or a device you paired, can change worktree naming.",
+                  "Only you, from a window or a device you paired, can change worktree naming and cleanup.",
               },
               403,
               origin,

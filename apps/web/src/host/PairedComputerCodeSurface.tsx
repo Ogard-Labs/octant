@@ -13,7 +13,7 @@ import { buildModelPickerGroups, type CreateHostViewScope } from "@octant/domain
 import { useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { AddRepositoryToComputerContext } from "../projects/addRepositoryToComputerContext";
 import { useProviderController } from "../providers/useProviderController";
-import { createRemoteExtensionClient } from "../remote/remoteProductClients";
+import { createRemoteExtensionClient, remoteProductPort } from "../remote/remoteProductClients";
 import { RemoteCodeSurface } from "../remote/RemoteWorkspace";
 import { HostSelector } from "../shell/HostSelector";
 import { VideoClientContext } from "../video/ThreadVideoClips";
@@ -109,6 +109,13 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
     [bridge, standing],
   );
 
+  // The thread's Restore worktree, which the computer takes only from a device
+  // its own person paired: gated as the paired browser's shell gates it.
+  const worktreePort = useMemo(
+    () => (standing.actsAsHostPerson ? remoteProductPort(bridge) : undefined),
+    [bridge, standing.actsAsHostPerson],
+  );
+
   const providerController = useProviderController({ client: clients.provider });
   const providerGroups = useMemo(
     () =>
@@ -152,6 +159,7 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
             clients={clients}
             actsAsHostPerson={standing.actsAsHostPerson}
             extensionClient={extensionClient}
+            {...(worktreePort === undefined ? {} : { worktreePort })}
             connected={connected}
             providerGroups={providerGroups}
             followsContinuationLink={false}

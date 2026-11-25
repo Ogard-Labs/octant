@@ -1,3 +1,4 @@
+import { type CleanedUpWorktreeStanding } from "@octant/domain/code-worktree-cleanup-policy";
 import {
   decodeThreadWorkingDirectory,
   MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
@@ -287,11 +288,28 @@ const MANAGED_CREATION_REFUSAL_MESSAGES: Record<string, string> = {
     "Plan changes nothing on a server, so it cannot start a thread in a new worktree there. Choose another level or Current checkout.",
 };
 
+/**
+ * What the host answers with: a `cleanup` object is always present, empty for
+ * the defaults, whatever naming choices are stored, so a window can tell a host
+ * that has cleanup from an earlier one that never answers with it. Storage
+ * keeps an empty choice as none.
+ */
+function answeredSettings(settings: CodeSettings): CodeSettings {
+  return {
+    ...settings,
+    worktrees: { ...settings.worktrees, cleanup: settings.worktrees?.cleanup ?? {} },
+  };
+}
+
 /** An empty choice is the defaults, so it is stored as none. */
 function worktreeSettingsField(worktrees: CodeWorktreeSettings | undefined): {
   readonly worktrees?: CodeWorktreeSettings;
 } {
-  return worktrees === undefined || Object.keys(worktrees).length === 0 ? {} : { worktrees };
+  if (worktrees === undefined) return {};
+  const { cleanup, ...naming } = worktrees;
+  const kept: CodeWorktreeSettings =
+    cleanup === undefined || Object.keys(cleanup).length === 0 ? naming : { ...naming, cleanup };
+  return Object.keys(kept).length === 0 ? {} : { worktrees: kept };
 }
 
 /** Absent reads as Windows PowerShell, so only another choice is stored. */
@@ -855,6 +873,10 @@ export interface CodeServiceOptions {
   readonly worktreeRefs?: CodeWorktreeRefsPort;
   readonly worktreeBranchSuggestion?: CodeWorktreeBranchSuggestionPort;
   readonly worktreeBranchNames?: CodeWorktreeBranchNamesPort;
+  /** Where a managed worktree's cleanup stands, when the host removed its folder; the thread view names it. */
+  readonly worktreeCleanup?: (
+    checkout: CodeCheckoutIdentity,
+  ) => Promise<CleanedUpWorktreeStanding | undefined>;
   readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
   /** Where a fork starts; without it a fork refuses as unavailable. */
   readonly forkPoints?: CodeForkPointPort;
@@ -1190,6 +1212,7 @@ export class CodeService {
   readonly #worktreeBranchNames: CodeWorktreeBranchNamesPort | undefined;
   /** Windows with a branch-name suggestion in flight: a window has at most one. */
   readonly #suggestingWindows = new Set<string>();
+  readonly #worktreeCleanup: CodeServiceOptions["worktreeCleanup"];
   readonly #managedThreadCreation: ManagedCodeThreadCreationPort | undefined;
   readonly #forkPoints: CodeForkPointPort | undefined;
   readonly #forkMergeBack: CodeServiceOptions["forkMergeBack"];
@@ -1262,6 +1285,7 @@ export class CodeService {
     this.#worktreeRefs = options.worktreeRefs;
     this.#worktreeBranchSuggestion = options.worktreeBranchSuggestion;
     this.#worktreeBranchNames = options.worktreeBranchNames;
+    this.#worktreeCleanup = options.worktreeCleanup;
     this.#managedThreadCreation = options.managedThreadCreation;
     this.#forkPoints = options.forkPoints;
     this.#forkMergeBack = options.forkMergeBack;
@@ -1509,7 +1533,9 @@ export class CodeService {
       }
     }
     return {
-      settings: this.#persistence.readCodeSettings()?.settings ?? this.#defaultSettings(),
+      settings: answeredSettings(
+        this.#persistence.readCodeSettings()?.settings ?? this.#defaultSettings(),
+      ),
       threads,
       checkouts: this.#persistence
         .readCodeCheckouts()
@@ -1676,15 +1702,24 @@ export class CodeService {
     }
   }
 
-  async read(authenticatedWindowId: WindowId, threadId: CodeThreadId): Promise<CodeThreadView> {
+  async read(
+    authenticatedWindowId: WindowId,
+    threadId: CodeThreadId,
+    reads: Readonly<{ worktreeCleanup?: boolean }> = {},
+  ): Promise<CodeThreadView> {
     const thread = this.#persistence.readCodeThread(threadId);
     if (thread === undefined) throw this.#failure("invalid", "Code thread was not found.");
     await this.#authorizeThread(authenticatedWindowId, thread);
     const view = this.#persistence.readCodeThreadView(threadId);
     if (view === undefined) throw this.#failure("unavailable", "Code thread is unavailable.");
+    const worktreeCleanup =
+      reads.worktreeCleanup === true
+        ? await this.#worktreeCleanup?.(view.checkout).catch(() => undefined)
+        : undefined;
     return {
       ...view,
       thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, view.thread),
+      ...(worktreeCleanup === undefined ? {} : { worktreeCleanup }),
     };
   }
 
@@ -2456,7 +2491,7 @@ export class CodeService {
             actor,
           );
         });
-        return { kind: "settings-updated", settings };
+        return { kind: "settings-updated", settings: answeredSettings(settings) };
       }
       if (command.kind === "create-code-thread") {
         await this.#authorizeThread(authenticatedWindowId, command.thread);

@@ -651,3 +651,39 @@ describe("Code child workspace ownership", () => {
     );
   });
 });
+
+describe("a child run's parent checkout", () => {
+  it("is not resolved while the parent's worktree is cleaned up or being cleaned up", async () => {
+    const checkout = decodeCodeCheckoutIdentity({
+      id: "99000000-0000-4000-8000-000000000001",
+      repositoryId: `repo_${"a".repeat(64)}`,
+      kind: "managed-worktree",
+      availability: "available",
+      ownershipReceiptId: "99000000-0000-4000-8000-000000000002",
+      head: { kind: "branch", name: "octant/parent", oid: "a".repeat(40) },
+      observedAt: "2026-11-25T12:00:00.000Z",
+    });
+    const resolve = (state: "ready" | "cleanup-pending" | "reclaimed" | "restoring") =>
+      resolveAgentRunCodeWorkspaceContext({
+        thread: {
+          projectId,
+          bindingRevisionId,
+          repositoryId: `repo_${"a".repeat(64)}`,
+          checkoutId: "99000000-0000-4000-8000-000000000001",
+        },
+        repositoryRoot: "/workspace/repository",
+        checkout,
+        loadManagedReceipt: async () => ({
+          canonicalRepositoryPath: "/workspace/repository",
+          canonicalWorktreePath: "/workspace/.octant-worktrees/parent",
+          state,
+        }),
+      });
+    await expect(resolve("ready")).resolves.toMatchObject({
+      parentCheckoutRoot: "/workspace/.octant-worktrees/parent",
+    });
+    for (const state of ["cleanup-pending", "reclaimed", "restoring"] as const) {
+      await expect(resolve(state), state).resolves.toBeUndefined();
+    }
+  });
+});

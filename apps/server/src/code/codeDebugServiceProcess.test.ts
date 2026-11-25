@@ -324,6 +324,8 @@ async function host(
   const approvalStore = approvals();
   const windowGrant = { fullAccess: false };
   const extraFolders: string[] = [];
+  /** Holds the checkout's folder while it is resolved, as a slow disk would. */
+  const folderGate: { wait: Promise<void> | undefined } = { wait: undefined };
   const service = new CodeDebugService({
     authority: {
       readThread: (threadId) =>
@@ -345,7 +347,10 @@ async function host(
         probePath: decodeCodeRelativePath("package.json"),
         fileId: (threadId, checkoutId, path) =>
           deriveCodeFileId(threadId, checkoutId, path as never),
-        statIdentity: async () => ({ device: "2", inode: "2" }),
+        statIdentity: async () => {
+          await folderGate.wait;
+          return { device: "2", inode: "2" };
+        },
       }),
     },
     approvals: approvalStore,
@@ -476,6 +481,8 @@ async function host(
         desired,
         expectedStateVersion: installed().stateVersion,
       } as Parameters<ExtensionApiService["execute"]>[0]),
+    folderGate,
+    hasSession: () => service.hasSession(thread().id),
     configurations: (principal?: PrincipalKind) =>
       service.configurations(caller(principal), scope()),
     approve: (
@@ -553,6 +560,22 @@ async function startedSession(test: Host, value = test.configuration()) {
   if (started.status !== "started") throw new Error(`not started: ${JSON.stringify(started)}`);
   return started.sessionId;
 }
+
+describe("a debug session that is still starting", () => {
+  it("counts as a session from its first line, before it has resolved the checkout's folder", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    const value = test.configuration();
+    expect(await test.approve(value)).toMatchObject({ status: "approved" });
+    let release: () => void = () => undefined;
+    test.folderGate.wait = new Promise<void>((resolve) => (release = resolve));
+    const starting = test.start(value);
+    expect(test.hasSession()).toBe(true);
+    release();
+    await starting;
+  });
+});
 
 describe("debug adapters a person adds", () => {
   it("names the binary, its digest, the runtimes, the launch body, and the port in review, and installs it untrusted", async () => {
