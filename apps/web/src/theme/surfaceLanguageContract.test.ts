@@ -32,6 +32,28 @@ function splitOutsideBrackets(text: string, separator: RegExp): ReadonlyArray<st
 }
 
 /**
+ * The classes a compound selector asks of its own element. `:has()` and
+ * `:not()` name other elements or what the element is not, so what they hold
+ * is left out; `:is()` and `:where()` describe the element itself and stay.
+ */
+function ownClasses(compound: string): ReadonlyArray<string> {
+  let own = "";
+  let skipUntilDepth: number | undefined;
+  let depth = 0;
+  for (let index = 0; index < compound.length; index += 1) {
+    const char = compound[index] ?? "";
+    if (skipUntilDepth === undefined && /^:(?:has|not)\($/.test(compound.slice(index, index + 5))) {
+      skipUntilDepth = depth;
+    }
+    if (char === "(" || char === "[") depth += 1;
+    else if (char === ")" || char === "]") depth -= 1;
+    if (skipUntilDepth === undefined) own += char;
+    else if (char === ")" && depth === skipUntilDepth) skipUntilDepth = undefined;
+  }
+  return own.match(/\.[A-Za-z0-9_-]+/g) ?? [];
+}
+
+/**
  * DESIGN.md "Voice" and "Face" are the part of the system that leaves the renderer.
  * These checks keep the renderer honest about it: one face, one set of type
  * roles, and no uppercase kickers creeping back into headings.
@@ -145,7 +167,7 @@ describe("surface language", () => {
         // cell inside the row is the page's own.
         const named = selectors.filter((selector) => {
           const subject = splitOutsideBrackets(selector, /[\s>+~]/).at(-1) ?? "";
-          const classes: ReadonlyArray<string> = subject.match(/\.[A-Za-z0-9_-]+/g) ?? [];
+          const classes = ownClasses(subject);
           return page.own.some((own) => classes.includes(own));
         });
         if (named.length > 0 && theTables.test(block[2] ?? "")) redrawn.push(...named);
