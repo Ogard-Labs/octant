@@ -3179,6 +3179,10 @@ describe("BrowserWorkspace reopening a page a restart took", () => {
     render(<BrowserWorkspace client={offered()} tab={tab} />);
     expect(await screen.findByRole("button", { name: "Reopen page" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    // The line takes the pane's notice row, so the grid keeps a row for it.
+    expect(screen.getByRole("region", { name: "Browser automation" })).toHaveClass(
+      "browser-workspace--message",
+    );
   });
 
   it("offers nothing when the host sent no offer", async () => {

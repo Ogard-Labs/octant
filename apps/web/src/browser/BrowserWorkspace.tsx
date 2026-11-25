@@ -1420,6 +1420,16 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   }
 
   const notice = message ?? elementPicking.message ?? captureNotice;
+  // The line about a page a restart took takes the pane's one notice row, so it
+  // yields to any other notice and the grid keeps its row count.
+  const reopenLine =
+    !activeContext && notice === undefined
+      ? snapshot?.reopenOffer !== undefined
+        ? "offer"
+        : reopenNotice !== undefined
+          ? "notice"
+          : undefined
+      : undefined;
   const showFeedback =
     feedback.available &&
     (snapshot?.context !== undefined ||
@@ -1890,7 +1900,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   return (
     <section
       aria-label="Browser automation"
-      className={`browser-workspace${notice === undefined ? "" : " browser-workspace--message"}${showFeedback || annotateTools.length > 0 ? " browser-workspace--feedback" : ""}`}
+      className={`browser-workspace${notice === undefined && reopenLine === undefined ? "" : " browser-workspace--message"}${showFeedback || annotateTools.length > 0 ? " browser-workspace--feedback" : ""}`}
     >
       <OctantDialogPresence>
         {pendingTaskProfile === undefined ? null : (
@@ -2137,7 +2147,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           {notice}
         </OctantAlert>
       )}
-      {!activeContext && snapshot?.reopenOffer !== undefined ? (
+      {reopenLine === "offer" && snapshot?.reopenOffer !== undefined ? (
         <OctantAlert
           action={
             <>
@@ -2172,7 +2182,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             : "Octant restarted and closed the page you had open, and the profile it was in no longer exists."}
         </OctantAlert>
       ) : null}
-      {!activeContext && snapshot?.reopenOffer === undefined && reopenNotice !== undefined ? (
+      {reopenLine === "notice" ? (
         <OctantAlert className="browser-workspace__message" layout="row" tone="neutral">
           {reopenNotice}
         </OctantAlert>

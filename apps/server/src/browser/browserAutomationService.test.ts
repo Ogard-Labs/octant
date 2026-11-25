@@ -126,6 +126,7 @@ function harness(
     readonly pageSessions?: ConstructorParameters<
       typeof BrowserAutomationService
     >[0]["pageSessions"];
+    readonly hostRun?: boolean;
   } = {},
 ) {
   const contexts = new Set<BrowserContextId>();
