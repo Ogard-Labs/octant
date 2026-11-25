@@ -4046,32 +4046,54 @@ export class WorkTurnService {
     ];
   }
 
-  /** The conversation a requested compaction may summarize, sourced as turn context sources it. */
+  /**
+   * The conversation a requested compaction may summarize, sourced as turn
+   * context sources it. The messages the person sent into a running turn are
+   * in it, each under a source of its own, so a summary or a rebuilt context
+   * never loses a correction the turn acted on.
+   */
   sessionCompactionConversation(threadId: WorkThreadId): ReadonlyArray<SessionConversationMessage> {
     return this.#projection.listForThread(threadId).flatMap((turn) => {
       // The words Sees images wrote for the turn's images were part of what
       // the person's message said to the model, so a rebuilt history and a
       // compaction read them with it.
       const described = describedImageLines(turn.describedImages);
-      return turn.transcript.flatMap((entry, index): ReadonlyArray<SessionConversationMessage> => {
-        const text =
-          index === 0 && entry.role === "user" && described.length > 0
-            ? [...described, entry.text].join("\n\n")
-            : entry.text;
-        return text.trim() === ""
-          ? []
-          : [
-              {
-                source: {
-                  kind: "message",
-                  referenceId: `${String(turn.requestId)}:${entry.role}:${String(index)}`,
+      const exchangeKey = String(turn.turnId);
+      const messages = turn.transcript.flatMap(
+        (entry, index): ReadonlyArray<SessionConversationMessage> => {
+          const text =
+            index === 0 && entry.role === "user" && described.length > 0
+              ? [...described, entry.text].join("\n\n")
+              : entry.text;
+          return text.trim() === ""
+            ? []
+            : [
+                {
+                  source: {
+                    kind: "message",
+                    referenceId: `${String(turn.requestId)}:${entry.role}:${String(index)}`,
+                  },
+                  role: entry.role,
+                  exchangeKey,
+                  content: text,
                 },
-                role: entry.role,
-                exchangeKey: String(turn.turnId),
-                content: text,
-              },
-            ];
-      });
+              ];
+        },
+      );
+      const steered = (turn.steeredMessages ?? []).map(
+        (message): SessionConversationMessage => ({
+          source: {
+            kind: "message",
+            referenceId: `${String(turn.requestId)}:steered:${message.messageId}`,
+          },
+          role: "user",
+          exchangeKey,
+          content: message.body,
+        }),
+      );
+      // After the turn's own prompt; a turn that recorded none has them first.
+      const prompt = messages.findIndex((message) => message.role === "user");
+      return [...messages.slice(0, prompt + 1), ...steered, ...messages.slice(prompt + 1)];
     });
   }
 

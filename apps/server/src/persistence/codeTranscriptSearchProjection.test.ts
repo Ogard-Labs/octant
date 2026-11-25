@@ -97,6 +97,43 @@ describe("Code message search", () => {
     }
   });
 
+  it("finds what the person sent into a running turn and rebuilds to the same rows", () => {
+    const store = openStore();
+    try {
+      store.thread(ids.thread, "Migration", now);
+      store.turn(ids.thread, operation(1), "Add the index", ["Added it."]);
+      store.steered("code", ids.thread, operation(1), 1, "Skip the Backfill please");
+      // A Work thread's record is not this view's, whatever turn it names.
+      store.steered("work", ids.thread, operation(1), 2, "Leave out the appendix");
+      const visible = new Set([ids.thread]);
+      expect(searchCodeTranscript(store.connection, "backfill", visible).matches).toMatchObject([
+        { operationId: operation(1), snippet: expect.stringContaining("Skip the Backfill please") },
+      ]);
+      expect(searchCodeTranscript(store.connection, "appendix", visible).matches).toEqual([]);
+      const rows = () =>
+        store.connection
+          .prepare(
+            "SELECT * FROM code_transcript_search_projection ORDER BY operation_id, content_role",
+          )
+          .all();
+      const before = rows();
+      const projection = store.registries.projections.get("code-transcript-search");
+      if (projection === undefined) throw new Error("Code transcript search must be registered");
+      rebuildProjection({
+        connection: store.connection,
+        journal: store.journal,
+        projection,
+        clock: () => now,
+      });
+      expect(rows()).toEqual(before);
+
+      store.rewind(ids.thread, operation(2), operation(1), "conversation");
+      expect(searchCodeTranscript(store.connection, "backfill", visible).matches).toEqual([]);
+    } finally {
+      store.connection.close();
+    }
+  });
+
   it("drops turns a conversation rewind removed, keeps turns sent after it, and rebuilds to the same answer", () => {
     const store = openStore();
     try {
@@ -227,6 +264,25 @@ function openStore() {
           channel: "message",
           content: evidence.put(part),
         }),
+      );
+    },
+    steered(mode: "work" | "code", threadId: string, turnKey: string, index: number, body: string) {
+      append(
+        {
+          aggregateType: "thread-message-steering",
+          aggregateId: `86000000-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`,
+        },
+        0,
+        "thread.message-steered@1",
+        {
+          kind: "thread-message-steered",
+          mode,
+          threadId,
+          turnKey,
+          messageId: `86000000-0000-4000-8000-0000000002${String(index).padStart(2, "0")}`,
+          body,
+          steeredAt: now,
+        },
       );
     },
     rewind(

@@ -1069,6 +1069,7 @@ export function createWorkThreadMentionDirectory(input: {
         readonly role: "user" | "assistant";
         readonly text: string;
       }>;
+      readonly steeredMessages?: SteeredMentionMessages | undefined;
       readonly acceptedAt: UtcTimestamp;
       readonly updatedAt: UtcTimestamp;
     }>;
@@ -1111,6 +1112,8 @@ export function createWorkThreadMentionDirectory(input: {
             version: turn.version,
           });
       for (const turn of view.turns) {
+        const steered = steeredMentionEntries(turn.steeredMessages);
+        let steeredPlaced = false;
         for (const line of turn.transcript) {
           // A turn that has not completed has no answer yet: its text is a
           // partial stream, an interrupted attempt, or an empty placeholder.
@@ -1124,7 +1127,12 @@ export function createWorkThreadMentionDirectory(input: {
             text: truncateEntry(text),
             occurredAt: line.role === "user" ? turn.acceptedAt : turn.updatedAt,
           });
+          if (line.role === "user" && !steeredPlaced) {
+            entries.push(...steered);
+            steeredPlaced = true;
+          }
         }
+        if (!steeredPlaced) entries.push(...steered);
       }
       return entries;
     },
@@ -1164,6 +1172,7 @@ export function createCodeThreadMentionDirectory(input: {
       readonly operationId: CodeOperationId;
       readonly prompt: { readonly contentId: string };
       readonly assistant: ReadonlyArray<{ readonly contentId: string }>;
+      readonly steeredMessages?: SteeredMentionMessages | undefined;
       readonly status: string;
       readonly startedAt: UtcTimestamp;
       readonly updatedAt: UtcTimestamp;
@@ -1216,6 +1225,7 @@ export function createCodeThreadMentionDirectory(input: {
         if (prompt !== undefined) {
           entries.push({ role: "user", text: prompt, occurredAt: turn.startedAt });
         }
+        entries.push(...steeredMentionEntries(turn.steeredMessages));
         // Same honesty rule as Work: an incomplete, waiting, interrupted, or
         // failed turn has no answer, so its partial stream is neither read nor
         // quoted as one.
@@ -1343,6 +1353,25 @@ function threadPlacement(
  * able to consume the whole mention window on its own.
  */
 const MAX_THREAD_MENTION_ENTRY_CHARACTERS = 4_000;
+
+type SteeredMentionMessages = ReadonlyArray<{
+  readonly body: string;
+  readonly steeredAt: UtcTimestamp;
+}>;
+
+/**
+ * The person's messages a running turn took in, as that turn's user lines.
+ * They are journaled beside the turn, and the runtime heard them whether or
+ * not the turn went on to finish.
+ */
+function steeredMentionEntries(
+  steered: SteeredMentionMessages | undefined,
+): ReadonlyArray<ThreadMentionTranscriptEntry> {
+  return (steered ?? []).flatMap((message) => {
+    const text = truncateEntry(message.body);
+    return text.length === 0 ? [] : [{ role: "user", text, occurredAt: message.steeredAt }];
+  });
+}
 
 function truncateEntry(text: string): string {
   const normalized = text.trim();
