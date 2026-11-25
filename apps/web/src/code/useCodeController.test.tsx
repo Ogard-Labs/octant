@@ -3457,6 +3457,51 @@ describe("useCodeController", () => {
       unmount();
     });
 
+    it("opens no second stream for a turn this window sends just after the turn it followed ended", async () => {
+      const { client, emit, host } = runningThread();
+      const sentTurns: string[] = [];
+      const sent = fakeClient({
+        ...client,
+        executeOperation: vi.fn(async (command: CodeOperationCommand) => {
+          sentTurns.push(String(command.operationId));
+          host.threads[String(ids.thread)]?.turns.push({
+            ...conversationTurn(command.operationId, "60000000-0000-4000-8000-000000000002"),
+            status: "incomplete",
+          } as never);
+          return {
+            kind: "provider-turn-state",
+            operationId: command.operationId,
+            state: "running",
+          };
+        }) as never,
+      });
+      const { result, unmount } = renderHook(() =>
+        useCodeController({
+          activeThreadId: ids.thread,
+          client: sent,
+          navigationRefreshMs: 0,
+          reconnectDelayMs: 60_000,
+        }),
+      );
+      await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      // Let the followed turn's poll back off, so it is asleep when it ends.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 900)));
+      const stored = host.threads[String(ids.thread)];
+      stored?.turns.splice(0, 1, { ...stored.turns[0], status: "completed" } as never);
+      act(() => emit(1, { kind: "operation-state", state: "completed" }));
+      await waitFor(() => expect(result.current.turnStatus).toBe("idle"));
+
+      void result.current.sendFollowUp("Add the index");
+      await waitFor(() => expect(sentTurns).toHaveLength(1));
+      // The poll wakes to the sent turn running with no stream of its own.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 2_500)));
+      const streamsOfSent = vi
+        .mocked(client.subscribeOperation)
+        .mock.calls.filter(([, operationId]) => String(operationId) === sentTurns[0]);
+      expect(streamsOfSent).toHaveLength(1);
+      unmount();
+    });
+
     it("shows in a turn this window sent, which no conversation read follows", async () => {
       const { client, hold, host, say } = runningThread();
       host.threads[String(ids.thread)]?.turns.splice(0, 1);

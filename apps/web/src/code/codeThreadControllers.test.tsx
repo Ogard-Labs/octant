@@ -603,6 +603,25 @@ describe("CodeThreadControllerSlots", () => {
       expect(wholeReads()).toBe(before);
     });
 
+    it("looks again on its own when its look at a settled thread failed", async () => {
+      const { api, conversationWindow, held } = host([providerTurn(asked, "completed")]);
+      const settled = (sequence: number): CodeBootstrap => ({
+        ...bootstrap(),
+        activity: [{ threadId: threadA, lastSequence: sequence }] as never,
+      });
+      const { registry, rerender } = open(api, settled(2));
+      await waitFor(() => expect(registry.get(threadA)?.conversationHistory).toBe("loaded"));
+      held.turnsOfA = [providerTurn(asked, "completed"), providerTurn(next, "completed")];
+      conversationWindow.mockRejectedValueOnce(new Error("offline"));
+      // The list moves once and then says the same thing on every refresh.
+      rerender(settled(9));
+      await waitFor(
+        () =>
+          expect(registry.get(threadA)?.conversation.at(-1)).toMatchObject({ operationId: next }),
+        { timeout: 8_000 },
+      );
+    }, 12_000);
+
     it("streams the queued turn that follows the one this view followed", async () => {
       let finishFirst = () => {};
       const firstEnds = new Promise<void>((resolve) => {
@@ -640,7 +659,11 @@ describe("CodeThreadControllerSlots", () => {
         ),
       );
       expect(registry.get(threadA)?.turnStatus).toBe("running");
-    });
+      await act(() => new Promise((resolve) => setTimeout(resolve, 2_500)));
+      expect(
+        subscribeOperation.mock.calls.filter(([, operationId]) => String(operationId) === next),
+      ).toHaveLength(1);
+    }, 10_000);
 
     it("reads nothing more for a thread the list already says is working when it opens", async () => {
       const { api, conversationWindow, subscribeOperation } = host([

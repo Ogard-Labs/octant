@@ -403,6 +403,9 @@ function readsConversationWindow(
   );
 }
 
+/** How long an open view waits to look again after a look for a turn failed. */
+const FAILED_LOOK_RETRY_MS = 5_000;
+
 /**
  * How far a thread's activity has reached in the thread list, and whether the
  * list says it is working; undefined for a thread the list reports neither
@@ -830,6 +833,8 @@ export function useCodeController(options: CodeControllerOptions) {
    * thread's activity sequence. Set once the activation's own first read is
    * in, so it never races that read.
    */
+  // The turn this window's own send streams, which no other path may stream.
+  const sentTurnStreaming = useRef<string | undefined>(undefined);
   const followTurnStartedElsewhere = useRef<
     ((activity: number, working: boolean) => void) | undefined
   >(undefined);
@@ -1919,7 +1924,14 @@ export function useCodeController(options: CodeControllerOptions) {
                   // A queued turn that started as the followed one ended
                   // runs with no stream: the ended one's stream has stopped.
                   // It is read once and followed like a turn found at open.
-                  if (latest.threadId === threadId && operationStream === undefined) {
+                  const newest = latest.turns.at(-1);
+                  if (
+                    latest.threadId === threadId &&
+                    newest !== undefined &&
+                    operationStream === undefined &&
+                    turnStatusNow.current !== "sending" &&
+                    sentTurnStreaming.current !== String(newest.operationId)
+                  ) {
                     const hydrated = await hydrateConversation(
                       threadId,
                       request,
@@ -2000,7 +2012,7 @@ export function useCodeController(options: CodeControllerOptions) {
             return true;
           return followTurn();
         };
-        followTurnStartedElsewhere.current = (activity, working) => {
+        const follow = (activity: number, working: boolean): void => {
           if (
             activity <= triedActivity ||
             following ||
@@ -2020,21 +2032,27 @@ export function useCodeController(options: CodeControllerOptions) {
           const lookedAt = triedActivity;
           triedActivity = activity;
           following = true;
+          const lookAgainLater = () => {
+            triedActivity = lookedAt;
+            // A settled thread's activity may not move again, so the look is
+            // tried again on its own, once per failure, until it succeeds or
+            // the view moves on.
+            void waitForReconnect(controller.signal, FAILED_LOOK_RETRY_MS).then(() =>
+              follow(activity, working),
+            );
+          };
           void (working ? followTurn() : lookAtNewestTurn())
             .then((read) => {
-              if (!read) triedActivity = lookedAt;
+              if (!read) lookAgainLater();
             })
-            .catch(() => {
-              triedActivity = lookedAt;
-            })
+            .catch(lookAgainLater)
             .finally(() => {
               following = false;
             });
         };
+        followTurnStartedElsewhere.current = follow;
         const listNow = threadListActivity(bootstrapRef.current, threadId);
-        if (listNow !== undefined) {
-          followTurnStartedElsewhere.current(listNow.sequence, listNow.working);
-        }
+        if (listNow !== undefined) follow(listNow.sequence, listNow.working);
 
         let reconnectBackoffMs = MIN_CODE_RECONNECT_BACKOFF_MS;
         let reconnectFailed = false;
@@ -3428,6 +3446,7 @@ export function useCodeController(options: CodeControllerOptions) {
         }
         // The running turn's identity is what Stop names, so a Stop that lands
         // after this turn is replaced cannot stop the next one.
+        sentTurnStreaming.current = String(operationId);
         activeTurnOperations.current.set(String(view.thread.id), {
           operationId,
           status: "running",
@@ -3667,6 +3686,9 @@ export function useCodeController(options: CodeControllerOptions) {
             }
           }
         } finally {
+          if (sentTurnStreaming.current === String(operationId)) {
+            sentTurnStreaming.current = undefined;
+          }
           // Every exit that did not settle the beat leaves whatever text and
           // reasoning arrived in the row the person can see.
           replyBeat.flush();

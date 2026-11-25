@@ -7894,13 +7894,17 @@ ls-remote` against the thread's remote and the GitHub reads they already
   and operation stream a read at open starts. When the activity moved but the
   list says the thread is settled, as for a turn that started and finished
   between two reads of the list, the view looks at the newest turn alone and
-  reads the conversation only for a turn it does not show. A queued turn that
-  becomes the newest as the followed one ends is read once by the followed
-  turn's poll and streamed in its place. It does not look while it
-  follows a running turn, is sending one itself, or is still on its first
-  read, so it never opens a second stream or reopens a turn it settled; a turn
-  waiting on the person does not stop it looking, and a read that fails leaves
-  that activity to be looked at again. The steered messages are held apart from the transcript and only ever grow, so the read
+  reads the conversation only for a turn it does not show or one that runs; a
+  host without the window read gets no such look. This costs one light read
+  in each open view of the thread whenever its activity moves while settled,
+  including once after each turn the view itself followed or sent. A queued
+  turn that becomes the newest as the followed one ends is read once by the
+  followed turn's poll and streamed in its place, unless it is a turn this
+  window is sending or streams itself. It does not look while it follows a
+  running turn, is sending one itself, or is still on its first read, so it
+  never opens a second stream or reopens a turn it settled; a turn waiting on
+  the person does not stop it looking, and a look that fails is tried again
+  five seconds later, since a settled thread's activity may not move again. The steered messages are held apart from the transcript and only ever grow, so the read
   cannot roll back the reply, tool steps or tasks the stream is writing, and
   a slower read of the conversation cannot take a shown message away. Reading
   on every `code-navigation` notice was rejected because most of those say
