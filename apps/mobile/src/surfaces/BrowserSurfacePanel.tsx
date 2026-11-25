@@ -22,6 +22,7 @@ import {
   type RemoteThreadSurfaceReach,
 } from "@octant/client-runtime";
 import {
+  type PairedBrowserEndReason,
   MAX_PAIRED_BROWSER_TEXT_LENGTH,
   type PairedBrowserInput,
   type PairedBrowserStreamEvent,
@@ -64,6 +65,15 @@ const WITHHELD_COPY: Readonly<Record<PairedBrowserWithheldReason, string>> = {
  * viewport rather than trusting anything this device measured. It never renders
  * the page itself, so nothing the page contains ever runs here.
  */
+/** What the panel says once this phone no longer holds the page. */
+export function pairedControlEndedMessage(reason: PairedBrowserEndReason): string {
+  if (reason === "handed-back") return "Handed back to the agent.";
+  // Answering the agent's sign-in prompt ends the hold; nothing was cut short.
+  if (reason === "agent-sign-in")
+    return "The sign-in request was answered. The agent has the page.";
+  return "Remote control ended. Finish this on the computer or take over again.";
+}
+
 export function BrowserSurfacePanel(props: BrowserSurfacePanelProps) {
   const { colors } = useTheme();
   const [view, setView] = useState<MobileBrowserSurfaceView | undefined>();
@@ -149,11 +159,7 @@ export function BrowserSurfacePanel(props: BrowserSurfacePanelProps) {
       }
       setLiveFrame(undefined);
       setPairedLease(undefined);
-      setMessage(
-        event.reason === "handed-back"
-          ? "Handed back to the agent."
-          : "Remote control ended. Finish this on the computer or take over again.",
-      );
+      setMessage(pairedControlEndedMessage(event.reason));
     };
     void pairedControl
       .stream({ leaseId: pairedLease.leaseId, onEvent, signal: abort.signal })

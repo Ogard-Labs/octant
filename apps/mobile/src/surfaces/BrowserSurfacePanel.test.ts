@@ -5,7 +5,7 @@ import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MobileRemoteTransport } from "@octant/client-runtime";
 import { ThemeProvider } from "../../design-system/theme";
-import { BrowserSurfacePanel } from "./BrowserSurfacePanel";
+import { BrowserSurfacePanel, pairedControlEndedMessage } from "./BrowserSurfacePanel";
 
 const { appStateListeners, appState } = vi.hoisted(() => {
   const listeners = new Set<(state: string) => void>();
@@ -211,6 +211,15 @@ async function mountPanel(props: {
   });
   return container;
 }
+
+describe("what the panel says once the phone no longer holds the page", () => {
+  it("does not tell the person to finish a sign-in they just answered", () => {
+    expect(pairedControlEndedMessage("agent-sign-in")).toBe(
+      "The sign-in request was answered. The agent has the page.",
+    );
+    expect(pairedControlEndedMessage("disconnected")).toContain("take over again");
+  });
+});
 
 describe("BrowserSurfacePanel paired hold", () => {
   it("hides take-over controls on a restricted device", async () => {

@@ -30,7 +30,7 @@ afterEach(() => {
   }
 });
 
-function setup() {
+function setup(options: { readonly whileGathering?: () => void } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "octant-support-bundle-routes-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "octant.sqlite3"));
@@ -57,6 +57,10 @@ function setup() {
         octantVersion: "0.9.0-test",
         clock: () => NOW,
         providers: () => ({ instances: [], observed: [] }),
+        readCrashRecords: async () => {
+          options.whileGathering?.();
+          return [];
+        },
         codeSettings: () => undefined,
         codeThreadPolicies: () => [],
         platformCapabilities: [],
@@ -230,18 +234,17 @@ describe("support bundle routes", () => {
   });
 
   it("journals no hand-over when the device's request ended while the bundle was built", async () => {
-    const { deviceRoutes, connection } = setup();
     const ended = new AbortController();
+    // The gateway ends a device's open requests when its level is lowered.
+    const { deviceRoutes, connection } = setup({ whileGathering: () => ended.abort() });
     const request = new Request(
       call("/api/diagnostics/bundle", { body: { destinationCategory: "browser-download" } }),
       { signal: ended.signal },
     );
-    const answering = deviceRoutes(
+    const answered = await deviceRoutes(
       asDevice(request, devicePrincipal({ admittedBy: "host-person" })),
     );
-    // The gateway ends a device's open requests when its level is lowered.
-    ended.abort();
-    expect((await answering)?.status).toBe(422);
+    expect(answered?.status).toBe(422);
     expect(
       connection
         .prepare("SELECT count(*) AS count FROM event_journal WHERE event_name = ?")
