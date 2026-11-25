@@ -16,23 +16,167 @@ const MODES = {
 };
 
 const THREADS = [
-  { id: "sync", title: "Speed up the sync worker", mode: "code", computer: "studio", project: "octant", section: "working", elapsed: "2m", pr: null },
-  { id: "pairing", title: "Fix flaky pairing test", mode: "code", computer: "studio", project: "octant", section: "needs", elapsed: "12m", pr: null },
-  { id: "release", title: "Write release notes for 0.2", mode: "chat", computer: "devbox", project: "octant", section: "working", elapsed: "18m", pr: null },
-  { id: "ipad", title: "Add iPad split view", mode: "code", computer: "studio", project: "octant", section: "working", elapsed: "44m", pr: "+2" },
-  { id: "payload", title: "Review the push payload proposal", mode: "chat", computer: "studio", project: "octant", section: "review", elapsed: "1h", pr: "#2864" },
-  { id: "botsplan", title: "Plan the Bots tab", mode: "work", computer: "studio", project: "octant", section: "review", elapsed: "3h", pr: "+4" },
-  { id: "tokens", title: "Migrate theme tokens to CSS variables", mode: "code", computer: "devbox", project: "octant", section: "settled", elapsed: "5h", pr: "#2851" },
+  {
+    id: "sync",
+    title: "Speed up the sync worker",
+    mode: "code",
+    computer: "studio",
+    project: "octant",
+    section: "working",
+    elapsed: "2m",
+    pr: null,
+  },
+  {
+    id: "pairing",
+    title: "Fix flaky pairing test",
+    mode: "code",
+    computer: "studio",
+    project: "octant",
+    section: "needs",
+    elapsed: "12m",
+    pr: null,
+  },
+  {
+    id: "release",
+    title: "Write release notes for 0.2",
+    mode: "chat",
+    computer: "devbox",
+    project: "octant",
+    section: "working",
+    elapsed: "18m",
+    pr: null,
+  },
+  {
+    id: "ipad",
+    title: "Add iPad split view",
+    mode: "code",
+    computer: "studio",
+    project: "octant",
+    section: "working",
+    elapsed: "44m",
+    pr: "+2",
+  },
+  {
+    id: "payload",
+    title: "Review the push payload proposal",
+    mode: "chat",
+    computer: "studio",
+    project: "octant",
+    section: "review",
+    elapsed: "1h",
+    pr: "#2864",
+  },
+  {
+    id: "botsplan",
+    title: "Plan the Bots tab",
+    mode: "work",
+    computer: "studio",
+    project: "octant",
+    section: "review",
+    elapsed: "3h",
+    pr: "+4",
+  },
+  {
+    id: "tokens",
+    title: "Migrate theme tokens to CSS variables",
+    mode: "code",
+    computer: "devbox",
+    project: "octant",
+    section: "settled",
+    elapsed: "5h",
+    pr: "#2851",
+  },
   // settled
-  { id: "s1", title: "Audit accessibility labels in settings", mode: "work", computer: "studio", project: "octant", section: "settled", elapsed: "1d", pr: null },
-  { id: "s2", title: "Triage crash reports from 0.1", mode: "chat", computer: "devbox", project: "octant", section: "settled", elapsed: "1d", pr: null },
-  { id: "s3", title: "Draft the 0.1 changelog", mode: "chat", computer: "studio", project: "octant-site", section: "settled", elapsed: "2d", pr: null },
-  { id: "s4", title: "Port settings search to mobile", mode: "code", computer: "studio", project: "octant", section: "settled", elapsed: "2d", pr: null },
-  { id: "s5", title: "Spike: offline queue replay", mode: "code", computer: "devbox", project: "octant", section: "settled", elapsed: "3d", pr: null },
-  { id: "s6", title: "Review onboarding copy", mode: "work", computer: "studio", project: "octant", section: "settled", elapsed: "4d", pr: null },
-  { id: "s7", title: "Fix dock resize jitter", mode: "code", computer: "studio", project: "octant", section: "settled", elapsed: "4d", pr: "#2790" },
-  { id: "s8", title: "Polish empty states", mode: "chat", computer: "studio", project: "octant", section: "settled", elapsed: "5d", pr: null },
-  { id: "s9", title: "Write release notes for 0.1", mode: "chat", computer: "studio", project: "octant", section: "settled", elapsed: "6d", pr: null },
+  {
+    id: "s1",
+    title: "Audit accessibility labels in settings",
+    mode: "work",
+    computer: "studio",
+    project: "octant",
+    section: "settled",
+    elapsed: "1d",
+    pr: null,
+  },
+  {
+    id: "s2",
+    title: "Triage crash reports from 0.1",
+    mode: "chat",
+    computer: "devbox",
+    project: "octant",
+    section: "settled",
+    elapsed: "1d",
+    pr: null,
+  },
+  {
+    id: "s3",
+    title: "Draft the 0.1 changelog",
+    mode: "chat",
+    computer: "studio",
+    project: "octant-site",
+    section: "settled",
+    elapsed: "2d",
+    pr: null,
+  },
+  {
+    id: "s4",
+    title: "Port settings search to mobile",
+    mode: "code",
+    computer: "studio",
+    project: "octant",
+    section: "settled",
+    elapsed: "2d",
+    pr: null,
+  },
+  {
+    id: "s5",
+    title: "Spike: offline queue replay",
+    mode: "code",
+    computer: "devbox",
+    project: "octant",
+    section: "settled",
+    elapsed: "3d",
+    pr: null,
+  },
+  {
+    id: "s6",
+    title: "Review onboarding copy",
+    mode: "work",
+    computer: "studio",
+    project: "octant",
+    section: "settled",
+    elapsed: "4d",
+    pr: null,
+  },
+  {
+    id: "s7",
+    title: "Fix dock resize jitter",
+    mode: "code",
+    computer: "studio",
+    project: "octant",
+    section: "settled",
+    elapsed: "4d",
+    pr: "#2790",
+  },
+  {
+    id: "s8",
+    title: "Polish empty states",
+    mode: "chat",
+    computer: "studio",
+    project: "octant",
+    section: "settled",
+    elapsed: "5d",
+    pr: null,
+  },
+  {
+    id: "s9",
+    title: "Write release notes for 0.1",
+    mode: "chat",
+    computer: "studio",
+    project: "octant",
+    section: "settled",
+    elapsed: "6d",
+    pr: null,
+  },
 ];
 
 const SECTIONS = [
@@ -50,27 +194,112 @@ const STATUS_META = {
 };
 
 const BOTS = [
-  { id: "navigator", name: "Navigator", role: "What should I keep an eye on for you today?", lead: true, g1: "var(--palette-blue)", g2: "var(--palette-purple)", glyph: "star" },
-  { id: "bugscout", name: "Bug Scout", role: "Which bugs should I hunt down next?", g1: "var(--palette-orange)", g2: "var(--palette-red)", glyph: "bug" },
-  { id: "release", name: "Release Captain", role: "What should go into the next release?", g1: "var(--palette-green)", g2: "var(--palette-teal)", glyph: "rocket" },
+  {
+    id: "navigator",
+    name: "Navigator",
+    role: "What should I keep an eye on for you today?",
+    lead: true,
+    g1: "var(--palette-blue)",
+    g2: "var(--palette-purple)",
+    glyph: "star",
+  },
+  {
+    id: "bugscout",
+    name: "Bug Scout",
+    role: "Which bugs should I hunt down next?",
+    g1: "var(--palette-orange)",
+    g2: "var(--palette-red)",
+    glyph: "bug",
+  },
+  {
+    id: "release",
+    name: "Release Captain",
+    role: "What should go into the next release?",
+    g1: "var(--palette-green)",
+    g2: "var(--palette-teal)",
+    glyph: "rocket",
+  },
 ];
 
 const REPOS = [
   {
     name: "Ogard-Labs/octant",
     prs: [
-      { n: 2864, title: "Add push payload signing to the sync worker", state: "open", branch: "feature/push-payload", base: "main", author: "henrik", time: "2h", meta: "Review pending" },
-      { n: 2859, title: "Cache the thread list snapshot on mobile", state: "open", branch: "perf/thread-cache", base: "main", author: "henrik", time: "5h", meta: "Conflicts" },
-      { n: 2855, title: "Fix pairing flake in the sync test suite", state: "draft", branch: "fix/pairing-flake", base: "main", author: "henrik", time: "1d", meta: "Draft" },
-      { n: 2851, title: "Migrate theme tokens to CSS variables", state: "open", branch: "theme/css-tokens", base: "main", author: "henrik", time: "2d", meta: "ok" },
-      { n: 2848, title: "Bump xterm and rework the terminal font stack", state: "open", branch: "deps/xterm", base: "main", author: "henrik", time: "3d", meta: "ok" },
+      {
+        n: 2864,
+        title: "Add push payload signing to the sync worker",
+        state: "open",
+        branch: "feature/push-payload",
+        base: "main",
+        author: "henrik",
+        time: "2h",
+        meta: "Review pending",
+      },
+      {
+        n: 2859,
+        title: "Cache the thread list snapshot on mobile",
+        state: "open",
+        branch: "perf/thread-cache",
+        base: "main",
+        author: "henrik",
+        time: "5h",
+        meta: "Conflicts",
+      },
+      {
+        n: 2855,
+        title: "Fix pairing flake in the sync test suite",
+        state: "draft",
+        branch: "fix/pairing-flake",
+        base: "main",
+        author: "henrik",
+        time: "1d",
+        meta: "Draft",
+      },
+      {
+        n: 2851,
+        title: "Migrate theme tokens to CSS variables",
+        state: "open",
+        branch: "theme/css-tokens",
+        base: "main",
+        author: "henrik",
+        time: "2d",
+        meta: "ok",
+      },
+      {
+        n: 2848,
+        title: "Bump xterm and rework the terminal font stack",
+        state: "open",
+        branch: "deps/xterm",
+        base: "main",
+        author: "henrik",
+        time: "3d",
+        meta: "ok",
+      },
     ],
   },
   {
     name: "Ogard-Labs/octant-site",
     prs: [
-      { n: 132, title: "Rewrite the pricing page copy", state: "open", branch: "copy/pricing", base: "main", author: "henrik", time: "4h", meta: "Review pending" },
-      { n: 128, title: "Add a case study for the Studio Mac setup", state: "merged", branch: "case-studies/studio-mac", base: "main", author: "henrik", time: "1d", meta: "ok" },
+      {
+        n: 132,
+        title: "Rewrite the pricing page copy",
+        state: "open",
+        branch: "copy/pricing",
+        base: "main",
+        author: "henrik",
+        time: "4h",
+        meta: "Review pending",
+      },
+      {
+        n: 128,
+        title: "Add a case study for the Studio Mac setup",
+        state: "merged",
+        branch: "case-studies/studio-mac",
+        base: "main",
+        author: "henrik",
+        time: "1d",
+        meta: "ok",
+      },
     ],
   },
 ];
@@ -80,18 +309,32 @@ const PR2864 = {
   title: "Add push payload signing to the sync worker",
   branch: "feature/push-payload",
   base: "main",
-  add: 212, del: 48,
+  add: 212,
+  del: 48,
   description: [
-    { t: "p", x: "The sync worker currently sends payloads unsigned, so a tampered queue entry is indistinguishable from a real one. This PR signs each payload with the device key before it leaves the worker." },
+    {
+      t: "p",
+      x: "The sync worker currently sends payloads unsigned, so a tampered queue entry is indistinguishable from a real one. This PR signs each payload with the device key before it leaves the worker.",
+    },
     { t: "h", x: "What changed" },
-    { t: "ul", x: ["Sign payloads with the device key before enqueue", "Verify signatures on the receiving side and reject mismatches", "Rotate keys when a computer goes stale"] },
+    {
+      t: "ul",
+      x: [
+        "Sign payloads with the device key before enqueue",
+        "Verify signatures on the receiving side and reject mismatches",
+        "Rotate keys when a computer goes stale",
+      ],
+    },
     { t: "h", x: "Still to do" },
-    { t: "tasks", x: [
-      { done: true, x: "Sign payloads with the device key before enqueue" },
-      { done: true, x: "Verify signatures on the receiving side and reject mismatches" },
-      { done: false, x: "Add a metric for rejected payloads" },
-      { done: false, x: "Document the key rotation flow" },
-    ]},
+    {
+      t: "tasks",
+      x: [
+        { done: true, x: "Sign payloads with the device key before enqueue" },
+        { done: true, x: "Verify signatures on the receiving side and reject mismatches" },
+        { done: false, x: "Add a metric for rejected payloads" },
+        { done: false, x: "Document the key rotation flow" },
+      ],
+    },
   ],
   checks: [
     { name: "lint", sub: "oxlint · 41 files", state: "pass", time: "38s" },
@@ -100,34 +343,71 @@ const PR2864 = {
     { name: "sync e2e", sub: "scenarios:prove", state: "pending", time: "queued" },
   ],
   files: [
-    { path: "apps/server/src/sync/push.ts", add: 86, del: 12, open: true, diff: [
-      ["ctx", " 1", "import { createHash } from \"node:crypto\";"],
-      ["ctx", " 2", "import { signPayload } from \"./sign.js\";"],
-      ["del", " 3", "-export async function pushPayload(entry: QueueEntry) {"],
-      ["del", " 4", "-  await transport.send(entry.payload);"],
-      ["add", " 3", "+export async function pushPayload(entry: QueueEntry, key: DeviceKey) {"],
-      ["add", " 4", "+  const signature = await signPayload(entry.payload, key);"],
-      ["add", " 5", "+  await transport.send({ ...entry.payload, signature });"],
-      ["ctx", " 6", "}"],
-      ["add", " 7", "+"],
-      ["add", " 8", "+export async function verifyIncoming(raw: SignedPayload, key: DeviceKey) {"],
-      ["add", " 9", "+  if (!verify(raw.signature, raw.payload, key)) throw new BadSignature();"],
-      ["add", "10", "+  return raw.payload;"],
-      ["add", "11", "+}"],
-    ]},
+    {
+      path: "apps/server/src/sync/push.ts",
+      add: 86,
+      del: 12,
+      open: true,
+      diff: [
+        ["ctx", " 1", 'import { createHash } from "node:crypto";'],
+        ["ctx", " 2", 'import { signPayload } from "./sign.js";'],
+        ["del", " 3", "-export async function pushPayload(entry: QueueEntry) {"],
+        ["del", " 4", "-  await transport.send(entry.payload);"],
+        ["add", " 3", "+export async function pushPayload(entry: QueueEntry, key: DeviceKey) {"],
+        ["add", " 4", "+  const signature = await signPayload(entry.payload, key);"],
+        ["add", " 5", "+  await transport.send({ ...entry.payload, signature });"],
+        ["ctx", " 6", "}"],
+        ["add", " 7", "+"],
+        [
+          "add",
+          " 8",
+          "+export async function verifyIncoming(raw: SignedPayload, key: DeviceKey) {",
+        ],
+        ["add", " 9", "+  if (!verify(raw.signature, raw.payload, key)) throw new BadSignature();"],
+        ["add", "10", "+  return raw.payload;"],
+        ["add", "11", "+}"],
+      ],
+    },
     { path: "packages/contracts/src/push.ts", add: 64, del: 20, open: false },
     { path: "apps/server/src/sync/verify.ts", add: 38, del: 9, open: false },
     { path: "docs/internals/09_connection-runtime.md", add: 24, del: 7, open: false },
   ],
   commits: [
-    { hash: "a3f9c21", msg: "Sign sync payloads with the device key", author: "henrik", time: "2h" },
-    { hash: "7be02d4", msg: "Verify incoming signatures and reject mismatches", author: "henrik", time: "4h" },
-    { hash: "e81c6b9", msg: "Add signature field to the push contract", author: "henrik", time: "1d" },
+    {
+      hash: "a3f9c21",
+      msg: "Sign sync payloads with the device key",
+      author: "henrik",
+      time: "2h",
+    },
+    {
+      hash: "7be02d4",
+      msg: "Verify incoming signatures and reject mismatches",
+      author: "henrik",
+      time: "4h",
+    },
+    {
+      hash: "e81c6b9",
+      msg: "Add signature field to the push contract",
+      author: "henrik",
+      time: "1d",
+    },
   ],
   activity: [
-    { who: "henrik", when: "12m", text: "Pushed the key rotation notes into the description. The e2e scenario is still queued on CI." },
-    { who: "Mara", when: "1h", text: "The verify path looks right. One nit: `BadSignature` should carry the payload hash so the log line is useful." },
-    { who: "henrik", when: "2h", text: "Addressed — `BadSignature` now includes `payloadHash`. Ready for another look." },
+    {
+      who: "henrik",
+      when: "12m",
+      text: "Pushed the key rotation notes into the description. The e2e scenario is still queued on CI.",
+    },
+    {
+      who: "Mara",
+      when: "1h",
+      text: "The verify path looks right. One nit: `BadSignature` should carry the payload hash so the log line is useful.",
+    },
+    {
+      who: "henrik",
+      when: "2h",
+      text: "Addressed — `BadSignature` now includes `payloadHash`. Ready for another look.",
+    },
   ],
 };
 
@@ -183,16 +463,78 @@ const INBOX = {
     { key: "finished", label: "Finished", n: 1 },
   ],
   needs: [
-    { kind: "urgent", icon: "shield-check", tint: "var(--warning-text)", title: "Approval needed · npm test", sub: "Fix flaky pairing test", meta: "Studio Mac · octant", allow: true, open: "thread/pairing" },
-    { kind: "decide", icon: "message-circle-question", tint: "var(--accent)", title: "Question · Which scope should the sweep cover?", sub: "Plan the Bots tab", meta: "Studio Mac · octant", allow: false, open: "thread/botsplan" },
-    { kind: "finished", icon: "circle-check", tint: "var(--success-text)", title: "Finished · Draft ready for review", sub: "Write release notes for 0.1", meta: "Studio Mac · octant", allow: false, open: "thread/s9" },
+    {
+      kind: "urgent",
+      icon: "shield-check",
+      tint: "var(--warning-text)",
+      title: "Approval needed · npm test",
+      sub: "Fix flaky pairing test",
+      meta: "Studio Mac · octant",
+      allow: true,
+      open: "thread/pairing",
+    },
+    {
+      kind: "decide",
+      icon: "message-circle-question",
+      tint: "var(--accent)",
+      title: "Question · Which scope should the sweep cover?",
+      sub: "Plan the Bots tab",
+      meta: "Studio Mac · octant",
+      allow: false,
+      open: "thread/botsplan",
+    },
+    {
+      kind: "finished",
+      icon: "circle-check",
+      tint: "var(--success-text)",
+      title: "Finished · Draft ready for review",
+      sub: "Write release notes for 0.1",
+      meta: "Studio Mac · octant",
+      allow: false,
+      open: "thread/s9",
+    },
   ],
   notifs: [
-    { icon: "bell-dot", tint: "var(--warning-text)", title: "Approval needed · npm test", sub: "Fix flaky pairing test · Studio Mac", when: "4m", open: "thread/pairing" },
-    { icon: "message-circle-question", tint: "var(--accent)", title: "Asks which scope the sweep should cover", sub: "Plan the Bots tab · Studio Mac", when: "22m", open: "thread/botsplan" },
-    { icon: "circle-check", tint: "var(--success-text)", title: "Finished in 6m", sub: "Write release notes for 0.1 · Studio Mac", when: "1h", open: "thread/s9" },
-    { icon: "git-pull-request", tint: "var(--palette-purple)", title: "Review requested", sub: "Review the push payload proposal · Studio Mac", when: "3h", open: "thread/payload" },
-    { icon: "bell-off", tint: "var(--text-muted)", title: "No longer available", sub: "Audit accessibility labels · Devbox", when: "2d", unavail: true },
+    {
+      icon: "bell-dot",
+      tint: "var(--warning-text)",
+      title: "Approval needed · npm test",
+      sub: "Fix flaky pairing test · Studio Mac",
+      when: "4m",
+      open: "thread/pairing",
+    },
+    {
+      icon: "message-circle-question",
+      tint: "var(--accent)",
+      title: "Asks which scope the sweep should cover",
+      sub: "Plan the Bots tab · Studio Mac",
+      when: "22m",
+      open: "thread/botsplan",
+    },
+    {
+      icon: "circle-check",
+      tint: "var(--success-text)",
+      title: "Finished in 6m",
+      sub: "Write release notes for 0.1 · Studio Mac",
+      when: "1h",
+      open: "thread/s9",
+    },
+    {
+      icon: "git-pull-request",
+      tint: "var(--palette-purple)",
+      title: "Review requested",
+      sub: "Review the push payload proposal · Studio Mac",
+      when: "3h",
+      open: "thread/payload",
+    },
+    {
+      icon: "bell-off",
+      tint: "var(--text-muted)",
+      title: "No longer available",
+      sub: "Audit accessibility labels · Devbox",
+      when: "2d",
+      unavail: true,
+    },
   ],
 };
 
@@ -200,7 +542,12 @@ const INBOX = {
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const esc = (s) =>
+  String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 
 const threadById = (id) => THREADS.find((t) => t.id === id) || THREADS[0];
 const compName = (id) => COMPUTERS[id].name;
@@ -325,20 +672,30 @@ function threadsScreen() {
 }
 
 function inboxScreen() {
-  const needs = INBOX.needs.map((n, i) => `
+  const needs = INBOX.needs
+    .map(
+      (n, i) => `
     <div class="nrow" data-kind="${n.kind}" data-ni="${i}"${n.open ? ` data-open="${n.open}"` : ""}>
       <div class="kindic" style="background:color-mix(in srgb, ${n.tint} 16%, transparent);color:${n.tint}">${I(n.icon)}</div>
       <div class="main">
         <div class="k1">${esc(n.title)}</div>
         <div class="k2">${esc(n.sub)}</div>
         <div class="k3">${esc(n.meta)}</div>
-        ${n.allow ? `<div class="actions">
+        ${
+          n.allow
+            ? `<div class="actions">
           <button class="mini-btn allow" data-inbox="allow">Allow</button>
           <button class="mini-btn deny" data-inbox="deny">Deny</button>
-        </div>` : ""}
+        </div>`
+            : ""
+        }
       </div>
-    </div>`).join("");
-  const notifs = INBOX.notifs.map((n) => `
+    </div>`,
+    )
+    .join("");
+  const notifs = INBOX.notifs
+    .map(
+      (n) => `
     <div class="notif-row${n.unavail ? " unavail" : ""}"${n.open ? ` data-open="${n.open}"` : ""}>
       <div class="kindic" style="background:color-mix(in srgb, ${n.tint} 14%, transparent);color:${n.tint}">${I(n.icon)}</div>
       <div class="main">
@@ -346,7 +703,9 @@ function inboxScreen() {
         <div class="n2">${esc(n.sub)}</div>
       </div>
       <div class="when">${n.when}</div>
-    </div>`).join("");
+    </div>`,
+    )
+    .join("");
   return `
   <section class="screen" data-route="inbox">
     <div class="scroll">
@@ -371,22 +730,30 @@ function inboxScreen() {
 }
 
 function prsScreen() {
-  const groups = REPOS.map((r) => `
+  const groups = REPOS.map(
+    (r) => `
     <div class="repohead">${I("folder-git-2")}<span>${r.name}</span><span class="n">(${r.prs.length})</span>
       <button data-menu="prrepo" aria-label="Repository options">${I("more-horizontal", "s16")}</button>
     </div>
     <div class="screen-body">
-      ${r.prs.map((p) => {
-        const glyph = p.state === "merged" ? "git-merge" : p.state === "draft" ? "git-pull-request" : "git-pull-request-arrow";
-        const gcls = p.state === "merged" ? "merged" : p.state === "draft" ? "draft" : "open";
-        const trail = p.meta === "ok"
-          ? `<span class="trail-ok">${I("circle-check")}</span>`
-          : p.meta === "Draft"
-          ? `<span class="pill" style="color:var(--text-muted);background:var(--control)">Draft</span>`
-          : `<span class="pill ${p.meta === "Conflicts" ? "conflict" : "warn"}">${p.meta === "Conflicts" ? "Conflicts" : "Review pending"}</span>`;
-        const repoShort = r.name.split("/")[1];
-        const clickable = p.n === 2864 ? `data-pr="2864"` : `data-dead="PR #${p.n}"`;
-        return `
+      ${r.prs
+        .map((p) => {
+          const glyph =
+            p.state === "merged"
+              ? "git-merge"
+              : p.state === "draft"
+                ? "git-pull-request"
+                : "git-pull-request-arrow";
+          const gcls = p.state === "merged" ? "merged" : p.state === "draft" ? "draft" : "open";
+          const trail =
+            p.meta === "ok"
+              ? `<span class="trail-ok">${I("circle-check")}</span>`
+              : p.meta === "Draft"
+                ? `<span class="pill" style="color:var(--text-muted);background:var(--control)">Draft</span>`
+                : `<span class="pill ${p.meta === "Conflicts" ? "conflict" : "warn"}">${p.meta === "Conflicts" ? "Conflicts" : "Review pending"}</span>`;
+          const repoShort = r.name.split("/")[1];
+          const clickable = p.n === 2864 ? `data-pr="2864"` : `data-dead="PR #${p.n}"`;
+          return `
         <div class="prrow row" ${clickable} style="cursor:pointer">
           <div class="glyph ${gcls}">${I(glyph)}</div>
           <div class="main">
@@ -395,8 +762,10 @@ function prsScreen() {
           </div>
           <div class="trail">${trail}</div>
         </div>`;
-      }).join("")}
-    </div>`).join("");
+        })
+        .join("")}
+    </div>`,
+  ).join("");
   return `
   <section class="screen" data-route="prs">
     <div class="scroll">
@@ -418,7 +787,8 @@ function prsScreen() {
 }
 
 function botsScreen() {
-  const rows = BOTS.map((b) => `
+  const rows = BOTS.map(
+    (b) => `
     <div class="row trow botrow" data-bot="${b.id}" style="cursor:pointer">
       <div class="bot-avatar" style="width:40px;height:40px;background:linear-gradient(135deg,${b.g1},${b.g2})">${I(b.glyph)}</div>
       <div class="main">
@@ -426,7 +796,8 @@ function botsScreen() {
         <div class="t2" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(b.role)}</div>
       </div>
       <div class="trail">${I("chevron-right", "s16")}</div>
-    </div>`).join("");
+    </div>`,
+  ).join("");
   return `
   <section class="screen" data-route="bots">
     <div class="scroll">
@@ -497,12 +868,16 @@ for (const entry of queue) {
         <div class="card approval-card${stale ? " is-stale" : ""}" id="approval">
           <div class="chead">${I("shield-check")}<span>Approval needed</span></div>
           <div class="q">Run <code>bun run test</code>?</div>
-          ${stale ? `<div class="stale-note">${esc(comp.name)} is offline — approvals are paused.</div>` : `
+          ${
+            stale
+              ? `<div class="stale-note">${esc(comp.name)} is offline — approvals are paused.</div>`
+              : `
           <div class="btns">
             <button class="b-primary" data-approve="once">Allow once</button>
             <button class="b-ghost" data-approve="always">Always allow in this Project</button>
             <button class="b-danger" data-approve="deny">Deny</button>
-          </div>`}
+          </div>`
+          }
           <div class="resolved-note" style="display:none"></div>
         </div>
         <div class="live-status"><span class="pulse-dot"></span><span>${stale ? "Paused · Devbox offline" : "Working · 2m"}</span></div>
@@ -563,14 +938,21 @@ function prScreen() {
 }
 
 function mdBlocks(blocks) {
-  return blocks.map((b) => {
-    if (b.t === "p") return `<p>${esc(b.x)}</p>`;
-    if (b.t === "h") return `<h2>${esc(b.x)}</h2>`;
-    if (b.t === "ul") return `<ul>${b.x.map((i) => `<li>${i}</li>`).join("")}</ul>`;
-    if (b.t === "tasks") return `<ul class="task">${b.x.map((i) => `
-      <li class="${i.done ? "done" : ""}"><span class="box ${i.done ? "done" : ""}">${i.done ? I("check") : ""}</span><span>${esc(i.x)}</span></li>`).join("")}</ul>`;
-    return "";
-  }).join("");
+  return blocks
+    .map((b) => {
+      if (b.t === "p") return `<p>${esc(b.x)}</p>`;
+      if (b.t === "h") return `<h2>${esc(b.x)}</h2>`;
+      if (b.t === "ul") return `<ul>${b.x.map((i) => `<li>${i}</li>`).join("")}</ul>`;
+      if (b.t === "tasks")
+        return `<ul class="task">${b.x
+          .map(
+            (i) => `
+      <li class="${i.done ? "done" : ""}"><span class="box ${i.done ? "done" : ""}">${i.done ? I("check") : ""}</span><span>${esc(i.x)}</span></li>`,
+          )
+          .join("")}</ul>`;
+      return "";
+    })
+    .join("");
 }
 
 function prOverview(p) {
@@ -578,7 +960,9 @@ function prOverview(p) {
 }
 
 function prChecks(p) {
-  return `<div>${p.checks.map((c) => `
+  return `<div>${p.checks
+    .map(
+      (c) => `
     <div class="checkrow">
       <div class="ci ${c.state === "pass" ? "pass" : "pending"}">${I(c.state === "pass" ? "circle-check" : "clock-3")}</div>
       <div class="main">
@@ -586,11 +970,15 @@ function prChecks(p) {
         <div class="c2 mono">${esc(c.sub)}</div>
       </div>
       <div class="when">${c.time}</div>
-    </div>`).join("")}</div>`;
+    </div>`,
+    )
+    .join("")}</div>`;
 }
 
 function prFiles(p) {
-  return `<div>${p.files.map((f) => `
+  return `<div>${p.files
+    .map(
+      (f) => `
     <div class="filecard${f.open ? " open" : ""}">
       <button class="filehead" data-file>
         ${I("file-code-2")}
@@ -598,34 +986,50 @@ function prFiles(p) {
         <span class="st"><span class="a">+${f.add}</span> <span class="d">−${f.del}</span></span>
         <span class="chev">${I("chevron-down", "s14")}</span>
       </button>
-      ${f.diff ? `<div class="filediff">${f.diff.map(([k, o, n]) => {
-        const sign = k === "add" ? "+" : k === "del" ? "−" : " ";
-        const cls = k === "add" ? "add" : k === "del" ? "del" : "ctx";
-        return `<div class="dline ${cls}"><span class="ln">${o}</span><span class="pm">${sign}</span><span class="lc">${esc(n)}</span></div>`;
-      }).join("")}</div>` : ""}
-    </div>`).join("")}</div>`;
+      ${
+        f.diff
+          ? `<div class="filediff">${f.diff
+              .map(([k, o, n]) => {
+                const sign = k === "add" ? "+" : k === "del" ? "−" : " ";
+                const cls = k === "add" ? "add" : k === "del" ? "del" : "ctx";
+                return `<div class="dline ${cls}"><span class="ln">${o}</span><span class="pm">${sign}</span><span class="lc">${esc(n)}</span></div>`;
+              })
+              .join("")}</div>`
+          : ""
+      }
+    </div>`,
+    )
+    .join("")}</div>`;
 }
 
 function prCommits(p) {
-  return `<div>${p.commits.map((c) => `
+  return `<div>${p.commits
+    .map(
+      (c) => `
     <div class="commitrow">
       <div class="cavatar">${c.author[0].toUpperCase()}</div>
       <div class="cmain">
         <div class="cm1">${esc(c.msg)}</div>
         <div class="cm2"><span class="hash">${c.hash}</span><span>${esc(c.author)}</span><span>·</span><span>${c.time} ago</span></div>
       </div>
-    </div>`).join("")}</div>`;
+    </div>`,
+    )
+    .join("")}</div>`;
 }
 
 function prActivity(p) {
-  return `<div>${p.activity.map((a) => `
+  return `<div>${p.activity
+    .map(
+      (a) => `
     <div class="actrow">
       <div class="cavatar">${a.who[0].toUpperCase()}</div>
       <div class="amain">
         <div class="a1"><b>${esc(a.who)}</b><span class="when">${a.when} ago</span></div>
         <div class="a2">${esc(a.text)}</div>
       </div>
-    </div>`).join("")}</div>`;
+    </div>`,
+    )
+    .join("")}</div>`;
 }
 
 function botAvatarHTML(b, size = 40) {
@@ -635,24 +1039,30 @@ function botAvatarHTML(b, size = 40) {
 function botScreen(id = "bugscout") {
   const b = BOTS.find((x) => x.id === id) || BOTS[1];
   const isBug = b.id === "bugscout";
-  const greets = isBug ? [
-    "Hi, I'm Bug Scout.",
-    "I find reproducible bugs, fix each one in a small tested change, and keep your review queue short.",
-    "Which bugs should I hunt down next?",
-  ] : [
-    `Hi, I'm ${b.name}.`,
-    b.lead ? "I watch your threads and pull requests, and surface what needs a decision before it slips." : "I work on one focused job and report back with proof.",
-    b.role,
-  ];
-  const workrows = isBug ? [
-    { icon: "bug", title: "Fix bugs with proof", sub: "Reproduce, fix and add a test" },
-    { icon: "timer", title: "Check slow screens", sub: "Measure before and after" },
-    { icon: "alarm-clock", title: "Start a daily sweep", sub: "Every morning at 9:00" },
-  ] : [
-    { icon: "star", title: "Watch my queue", sub: "Summarize what changed overnight" },
-    { icon: "bell", title: "Nudge me on decisions", sub: "Only when something is blocked" },
-    { icon: "list-checks", title: "Weekly digest", sub: "Every Friday at 17:00" },
-  ];
+  const greets = isBug
+    ? [
+        "Hi, I'm Bug Scout.",
+        "I find reproducible bugs, fix each one in a small tested change, and keep your review queue short.",
+        "Which bugs should I hunt down next?",
+      ]
+    : [
+        `Hi, I'm ${b.name}.`,
+        b.lead
+          ? "I watch your threads and pull requests, and surface what needs a decision before it slips."
+          : "I work on one focused job and report back with proof.",
+        b.role,
+      ];
+  const workrows = isBug
+    ? [
+        { icon: "bug", title: "Fix bugs with proof", sub: "Reproduce, fix and add a test" },
+        { icon: "timer", title: "Check slow screens", sub: "Measure before and after" },
+        { icon: "alarm-clock", title: "Start a daily sweep", sub: "Every morning at 9:00" },
+      ]
+    : [
+        { icon: "star", title: "Watch my queue", sub: "Summarize what changed overnight" },
+        { icon: "bell", title: "Nudge me on decisions", sub: "Only when something is blocked" },
+        { icon: "list-checks", title: "Weekly digest", sub: "Every Friday at 17:00" },
+      ];
   const dkey = `bot/${b.id}`;
   const attach = attachChipsHTML(dkey);
   return `
@@ -672,12 +1082,16 @@ function botScreen(id = "bugscout") {
         ${greets.map((g) => `<div class="greet"><div class="bubble">${esc(g)}</div></div>`).join("")}
         <div class="card workcard">
           <div class="chead">${I("zap")}<span>Put ${esc(b.name)} to work</span></div>
-          ${workrows.map((w) => `
+          ${workrows
+            .map(
+              (w) => `
             <button class="workrow" data-dead="${esc(w.title)}">
               <div class="dest-ic">${I(w.icon)}</div>
               <div class="main"><div class="w1">${esc(w.title)}</div><div class="w2">${esc(w.sub)}</div></div>
               ${I("chevron-right", "s16")}
-            </button>`).join("")}
+            </button>`,
+            )
+            .join("")}
         </div>
         <div class="sleep-status"><span class="dot"></span><span>${esc(b.name)} went to sleep</span></div>
       </div>
@@ -698,18 +1112,51 @@ function botScreen(id = "bugscout") {
 
 /* ============================== settings & computer ============================== */
 
-const ICON_ALIAS = { "scan-face": "shield-check", palette: "moon", "layout-grid": "rows-3", smartphone: "laptop", info: "circle-alert", scale: "file-text", network: "git-fork", user: "user-plus", "shield-off": "shield-check", server: "monitor", cpu: "monitor", wrench: "terminal" };
+const ICON_ALIAS = {
+  "scan-face": "shield-check",
+  palette: "moon",
+  "layout-grid": "rows-3",
+  smartphone: "laptop",
+  info: "circle-alert",
+  scale: "file-text",
+  network: "git-fork",
+  user: "user-plus",
+  "shield-off": "shield-check",
+  server: "monitor",
+  cpu: "monitor",
+  wrench: "terminal",
+};
 const SET_ICON = {
-  monitor: "var(--palette-blue)", bell: "var(--palette-orange)", "message-square": "var(--palette-teal)",
-  "bell-dot": "var(--palette-yellow)", "message-circle-question": "var(--palette-blue)", "circle-x": "var(--danger-text)",
-  "circle-check": "var(--success-text)", zap: "var(--palette-orange)", "rows-3": "var(--palette-teal)",
-  moon: "var(--palette-purple)", image: "var(--palette-purple)", mic: "var(--palette-teal)",
-  "shield-check": "var(--palette-green)", "eye-off": "var(--palette-yellow)", laptop: "var(--palette-blue)",
-  "circle-alert": "var(--palette-yellow)", "file-text": "var(--text-secondary)", plus: "var(--accent)",
-  "git-fork": "var(--palette-blue)", "user-plus": "var(--palette-purple)", "sliders-horizontal": "var(--palette-orange)",
-  "trash-2": "var(--danger-text)", folder: "var(--text-secondary)", "git-branch": "var(--palette-blue)",
-  "folder-git-2": "var(--text-secondary)", "file-diff": "var(--success-text)", "git-pull-request": "var(--palette-purple)",
-  "git-commit-horizontal": "var(--text-secondary)", "file-code-2": "var(--text-secondary)", bot: "var(--palette-blue)",
+  monitor: "var(--palette-blue)",
+  bell: "var(--palette-orange)",
+  "message-square": "var(--palette-teal)",
+  "bell-dot": "var(--palette-yellow)",
+  "message-circle-question": "var(--palette-blue)",
+  "circle-x": "var(--danger-text)",
+  "circle-check": "var(--success-text)",
+  zap: "var(--palette-orange)",
+  "rows-3": "var(--palette-teal)",
+  moon: "var(--palette-purple)",
+  image: "var(--palette-purple)",
+  mic: "var(--palette-teal)",
+  "shield-check": "var(--palette-green)",
+  "eye-off": "var(--palette-yellow)",
+  laptop: "var(--palette-blue)",
+  "circle-alert": "var(--palette-yellow)",
+  "file-text": "var(--text-secondary)",
+  plus: "var(--accent)",
+  "git-fork": "var(--palette-blue)",
+  "user-plus": "var(--palette-purple)",
+  "sliders-horizontal": "var(--palette-orange)",
+  "trash-2": "var(--danger-text)",
+  folder: "var(--text-secondary)",
+  "git-branch": "var(--palette-blue)",
+  "folder-git-2": "var(--text-secondary)",
+  "file-diff": "var(--success-text)",
+  "git-pull-request": "var(--palette-purple)",
+  "git-commit-horizontal": "var(--text-secondary)",
+  "file-code-2": "var(--text-secondary)",
+  bot: "var(--palette-blue)",
   terminal: "var(--palette-orange)",
 };
 const setIcon = (name) => {
@@ -722,7 +1169,8 @@ const demoPrefs = {};
 const prefOn = (k, d) => (k in demoPrefs ? demoPrefs[k] : d);
 
 function setRow(icon, label, trail = "", sub = "", opts = {}) {
-  const chev = opts.push || opts.menu ? `<span class="set-chev">${I("chevron-right", "s14")}</span>` : "";
+  const chev =
+    opts.push || opts.menu ? `<span class="set-chev">${I("chevron-right", "s14")}</span>` : "";
   const inner = `
     ${setIcon(icon)}
     <div class="set-main"><div class="set-label">${esc(label)}</div>${sub ? `<div class="set-sub">${esc(sub)}</div>` : ""}</div>
@@ -733,28 +1181,50 @@ function setRow(icon, label, trail = "", sub = "", opts = {}) {
     ? `<button class="${cls}" ${opts.menu ? `data-menu="${opts.menu}"` : opts.action ? `data-action="${opts.action}"` : opts.dead ? `data-dead="${esc(opts.dead)}"` : `data-push="${opts.push}"`}>${inner}</button>`
     : `<div class="${cls}">${inner}</div>`;
 }
-const setSwitch = (key, on) => `<input class="set-switch" type="checkbox" role="switch" data-set="${key}"${on ? " checked" : ""}>`;
+const setSwitch = (key, on) =>
+  `<input class="set-switch" type="checkbox" role="switch" data-set="${key}"${on ? " checked" : ""}>`;
 const setGroup = (rows) => `<div class="set-group">${rows.join("")}</div>`;
 const setHeader = (t) => `<div class="set-head">${t}</div>`;
 const setFooter = (t) => `<div class="set-foot">${t}</div>`;
 const setSep = () => `<div class="set-sep"></div>`;
 
-let themePref = localStorage.getItem("octant-mock-theme-pref") || localStorage.getItem("octant-mock-theme") || "dark";
-function themeLabel() { return themePref === "system" ? "System" : themePref === "light" ? "Light" : "Dark"; }
+let themePref =
+  localStorage.getItem("octant-mock-theme-pref") ||
+  localStorage.getItem("octant-mock-theme") ||
+  "dark";
+function themeLabel() {
+  return themePref === "system" ? "System" : themePref === "light" ? "Light" : "Dark";
+}
 
 function settingsScreen() {
   const notifRows = [
-    setRow("bell-dot", "Approval needed", setSwitch("n-approval", prefOn("n-approval", true)), "", { sw: true }),
+    setRow("bell-dot", "Approval needed", setSwitch("n-approval", prefOn("n-approval", true)), "", {
+      sw: true,
+    }),
     setSep(),
-    setRow("message-circle-question", "Waiting for you", setSwitch("n-waiting", prefOn("n-waiting", true)), "", { sw: true }),
+    setRow(
+      "message-circle-question",
+      "Waiting for you",
+      setSwitch("n-waiting", prefOn("n-waiting", true)),
+      "",
+      { sw: true },
+    ),
     setSep(),
-    setRow("circle-x", "Failed", setSwitch("n-failed", prefOn("n-failed", false)), "", { sw: true }),
+    setRow("circle-x", "Failed", setSwitch("n-failed", prefOn("n-failed", false)), "", {
+      sw: true,
+    }),
     setSep(),
-    setRow("circle-check", "Finished", setSwitch("n-finished", prefOn("n-finished", true)), "", { sw: true }),
+    setRow("circle-check", "Finished", setSwitch("n-finished", prefOn("n-finished", true)), "", {
+      sw: true,
+    }),
     setSep(),
-    setRow("zap", "Live Activity", `<span class="set-val">On</span>`, "", { dead: "Not in this preview" }),
+    setRow("zap", "Live Activity", `<span class="set-val">On</span>`, "", {
+      dead: "Not in this preview",
+    }),
     setSep(),
-    setRow("rows-3", "Widget data", `<span class="set-val">On</span>`, "", { dead: "Not in this preview" }),
+    setRow("rows-3", "Widget data", `<span class="set-val">On</span>`, "", {
+      dead: "Not in this preview",
+    }),
   ];
   return `
   <section class="screen" data-route="settings">
@@ -765,18 +1235,34 @@ function settingsScreen() {
       <h1 class="settings-title">Settings</h1>
       ${setHeader("Computers")}
       ${setGroup([
-        setRow("monitor", "Studio Mac", `<span class="set-val set-connected">Connected</span>`, "Local network", { push: "computer/studio" }),
+        setRow(
+          "monitor",
+          "Studio Mac",
+          `<span class="set-val set-connected">Connected</span>`,
+          "Local network",
+          { push: "computer/studio" },
+        ),
         setSep(),
-        setRow("monitor", "Devbox", `<span class="set-val" style="color:var(--warning-text)">Last seen 2h ago</span>`, "", { push: "computer/devbox" }),
+        setRow(
+          "monitor",
+          "Devbox",
+          `<span class="set-val" style="color:var(--warning-text)">Last seen 2h ago</span>`,
+          "",
+          { push: "computer/devbox" },
+        ),
         setSep(),
         setRow("plus", "Pair a computer", "", "", { accent: true, push: "pair" }),
       ])}
       ${setFooter("Computers Octant can reach on your network or tailnet.")}
       ${setHeader("Notifications")}
       ${setGroup([
-        setRow("bell", "Notifications", setSwitch("notif", prefOn("notif", true)), "", { sw: true }),
+        setRow("bell", "Notifications", setSwitch("notif", prefOn("notif", true)), "", {
+          sw: true,
+        }),
         setSep(),
-        setRow("message-square", "Show thread names", setSwitch("names", showNames), "", { sw: true }),
+        setRow("message-square", "Show thread names", setSwitch("names", showNames), "", {
+          sw: true,
+        }),
         setSep(),
         `<details class="set-disclosure"><summary class="set-row"><span class="set-ic" style="background:color-mix(in srgb, var(--palette-blue) 16%, transparent);color:var(--palette-blue)">${I("bell-dot", "s15")}</span><div class="set-main"><div class="set-label">Notification options</div></div><span class="set-chev">${I("chevron-right", "s14")}</span></summary><div>${notifRows.join("")}</div></details>`,
       ])}
@@ -784,21 +1270,35 @@ function settingsScreen() {
       <div class="set-foot" style="color:var(--success-text)">Sent by Studio Mac directly</div>
       ${setHeader("Appearance")}
       ${setGroup([
-        setRow("moon", "Theme", `<span class="set-val">${themeLabel()}</span>`, "", { menu: "settheme" }),
+        setRow("moon", "Theme", `<span class="set-val">${themeLabel()}</span>`, "", {
+          menu: "settheme",
+        }),
         setSep(),
         setRow("image", "Background", `<span class="set-val">Off</span>`, "", { menu: "setbg" }),
       ])}
       ${setHeader("Voice")}
       ${setGroup([
-        setRow("mic", "Dictation", `<span class="set-val">On</span>`, "Transcribed on Studio Mac", { dead: "Not in this preview" }),
+        setRow("mic", "Dictation", `<span class="set-val">On</span>`, "Transcribed on Studio Mac", {
+          dead: "Not in this preview",
+        }),
       ])}
       ${setHeader("Privacy & security")}
       ${setGroup([
-        setRow("shield-check", "Face ID to open", setSwitch("faceid", prefOn("faceid", true)), "", { sw: true }),
+        setRow("shield-check", "Face ID to open", setSwitch("faceid", prefOn("faceid", true)), "", {
+          sw: true,
+        }),
         setSep(),
-        setRow("eye-off", "Hide in app switcher", setSwitch("hideapp", prefOn("hideapp", true)), "", { sw: true }),
+        setRow(
+          "eye-off",
+          "Hide in app switcher",
+          setSwitch("hideapp", prefOn("hideapp", true)),
+          "",
+          { sw: true },
+        ),
         setSep(),
-        setRow("laptop", "Paired devices", `<span class="set-val">2</span>`, "", { dead: "Not in this preview" }),
+        setRow("laptop", "Paired devices", `<span class="set-val">2</span>`, "", {
+          dead: "Not in this preview",
+        }),
       ])}
       ${setHeader("About")}
       ${setGroup([
@@ -829,7 +1329,11 @@ function computerScreen(id = "studio") {
       </div>
       <div class="set-head">Connection</div>
       ${setGroup([
-        setRow("network", "Address", `<span class="set-val mono">${id === "studio" ? "studio.local" : "devbox.local"}</span>`),
+        setRow(
+          "network",
+          "Address",
+          `<span class="set-val mono">${id === "studio" ? "studio.local" : "devbox.local"}</span>`,
+        ),
         setSep(),
         setRow("user", "Access", `<span class="set-val">Acts as you</span>`),
         setSep(),
@@ -837,9 +1341,15 @@ function computerScreen(id = "studio") {
       ])}
       <div class="set-head">This phone</div>
       ${setGroup([
-        setRow("shield-off", "Revoke this phone", "", "", { danger: true, dead: "Revocation needs the computer online" }),
+        setRow("shield-off", "Revoke this phone", "", "", {
+          danger: true,
+          dead: "Revocation needs the computer online",
+        }),
         setSep(),
-        setRow("trash-2", "Remove from this phone", "", "", { danger: true, dead: "Remove this computer from Octant?" }),
+        setRow("trash-2", "Remove from this phone", "", "", {
+          danger: true,
+          dead: "Remove this computer from Octant?",
+        }),
       ])}
       <div style="height:40px"></div>
     </div>
@@ -881,7 +1391,13 @@ function lockScreen() {
   const islandMinimal = `<div class="isl isl-minimal">${I("bot", "s12")}</div>`;
   const islandExpanded = `<div class="isl isl-expanded">
       <div class="isl-top"><img src="../../assets/icon.png" alt="" class="isl-logo"><span class="isl-count">${active} agents</span></div>
-      ${AWARE.slice(0, 2).map((a) => { const t = threadById(a.tid); const nm = showNames ? t.title : `Thread on ${compName(t.computer)}`; return `<div class="isl-row"><span class="isl-t">${esc(nm.length > 26 ? nm.slice(0, 26) + "…" : nm)}</span><span class="isl-s" style="color:${PHASE_COLOR[a.phase]}">${a.status}</span></div>`; }).join("")}
+      ${AWARE.slice(0, 2)
+        .map((a) => {
+          const t = threadById(a.tid);
+          const nm = showNames ? t.title : `Thread on ${compName(t.computer)}`;
+          return `<div class="isl-row"><span class="isl-t">${esc(nm.length > 26 ? nm.slice(0, 26) + "…" : nm)}</span><span class="isl-s" style="color:${PHASE_COLOR[a.phase]}">${a.status}</span></div>`;
+        })
+        .join("")}
       <div class="isl-needs">Needs you: ${showNames ? esc(threadById("pairing").title) : "a thread on Studio Mac"}</div>
     </div>`;
   return `
@@ -911,9 +1427,46 @@ function lockScreen() {
 
 function widgetScreen() {
   const { active, needs } = awareCounts();
-  const smallRows = AWARE.slice(0, 2).map((a) => { const t = threadById(a.tid); const nm = showNames ? t.title : `Thread on ${compName(t.computer)}`; return `<div class="wg-row"><span class="wg-t">${esc(nm.length > 22 ? nm.slice(0, 22) + "…" : nm)}</span><span class="wg-s" style="color:${PHASE_COLOR[a.phase]}">${a.status}</span></div>`; }).join("");
-  const medRows = AWARE.slice(0, 4).map((a) => { const t = threadById(a.tid); const nm = showNames ? t.title : `Thread on ${compName(t.computer)}`; return `<div class="wg-row"><span class="wg-t">${esc(nm.length > 30 ? nm.slice(0, 30) + "…" : nm)}</span><span class="wg-s" style="color:${PHASE_COLOR[a.phase]}">${a.status}</span></div>`; }).join("");
-  const icons = ["message-square", "bot", "git-pull-request", "inbox", "settings", "search", "image", "map", "music", "camera", "mail", "calendar", "clock", "cloud", "folder", "globe", "phone", "video", "wallet", "book", "gamepad-2", "newspaper", "shopping-bag", "heart-pulse"];
+  const smallRows = AWARE.slice(0, 2)
+    .map((a) => {
+      const t = threadById(a.tid);
+      const nm = showNames ? t.title : `Thread on ${compName(t.computer)}`;
+      return `<div class="wg-row"><span class="wg-t">${esc(nm.length > 22 ? nm.slice(0, 22) + "…" : nm)}</span><span class="wg-s" style="color:${PHASE_COLOR[a.phase]}">${a.status}</span></div>`;
+    })
+    .join("");
+  const medRows = AWARE.slice(0, 4)
+    .map((a) => {
+      const t = threadById(a.tid);
+      const nm = showNames ? t.title : `Thread on ${compName(t.computer)}`;
+      return `<div class="wg-row"><span class="wg-t">${esc(nm.length > 30 ? nm.slice(0, 30) + "…" : nm)}</span><span class="wg-s" style="color:${PHASE_COLOR[a.phase]}">${a.status}</span></div>`;
+    })
+    .join("");
+  const icons = [
+    "message-square",
+    "bot",
+    "git-pull-request",
+    "inbox",
+    "settings",
+    "search",
+    "image",
+    "map",
+    "music",
+    "camera",
+    "mail",
+    "calendar",
+    "clock",
+    "cloud",
+    "folder",
+    "globe",
+    "phone",
+    "video",
+    "wallet",
+    "book",
+    "gamepad-2",
+    "newspaper",
+    "shopping-bag",
+    "heart-pulse",
+  ];
   const grid = icons.map((ic) => `<div class="appicon">${I(ic, "s22")}</div>`).join("");
   return `
   <section class="screen device" data-route="homescreen">
@@ -935,7 +1488,13 @@ function widgetScreen() {
 
 function androidNotifScreen() {
   const { active, needs } = awareCounts();
-  const rows = AWARE.slice(0, 4).map((a) => { const t = threadById(a.tid); const nm = showNames ? t.title : `Thread on ${compName(t.computer)}`; return `<div class="an-row"><span class="an-dot" style="background:${PHASE_COLOR[a.phase]}"></span><span class="an-t">${esc(nm.length > 30 ? nm.slice(0, 30) + "…" : nm)}</span><span class="an-s" style="color:${PHASE_COLOR[a.phase]}">${a.status}</span></div>`; }).join("");
+  const rows = AWARE.slice(0, 4)
+    .map((a) => {
+      const t = threadById(a.tid);
+      const nm = showNames ? t.title : `Thread on ${compName(t.computer)}`;
+      return `<div class="an-row"><span class="an-dot" style="background:${PHASE_COLOR[a.phase]}"></span><span class="an-t">${esc(nm.length > 30 ? nm.slice(0, 30) + "…" : nm)}</span><span class="an-s" style="color:${PHASE_COLOR[a.phase]}">${a.status}</span></div>`;
+    })
+    .join("");
   return `
   <section class="screen device" data-route="android-notification">
     <div class="wallpaper wp-android"></div>
@@ -974,11 +1533,17 @@ function panesContentHTML() {
     <div class="panes-diff">
       <div class="pd-path mono">${esc(file.path)}</div>
       <div class="pd-stat"><span class="add">+${file.add}</span><span class="del">−${file.del}</span></div>
-      ${file.diff ? file.diff.map(([k, o, n]) => {
-        const sign = k === "add" ? "+" : k === "del" ? "−" : " ";
-        const cls = k === "add" ? "add" : k === "del" ? "del" : "ctx";
-        return `<div class="dline ${cls}"><span class="ln">${o}</span><span class="pm">${sign}</span><span class="lc">${esc(n)}</span></div>`;
-      }).join("") : `<div class="pd-nodiff">Diff not available in this preview.</div>`}
+      ${
+        file.diff
+          ? file.diff
+              .map(([k, o, n]) => {
+                const sign = k === "add" ? "+" : k === "del" ? "−" : " ";
+                const cls = k === "add" ? "add" : k === "del" ? "del" : "ctx";
+                return `<div class="dline ${cls}"><span class="ln">${o}</span><span class="pm">${sign}</span><span class="lc">${esc(n)}</span></div>`;
+              })
+              .join("")
+          : `<div class="pd-nodiff">Diff not available in this preview.</div>`
+      }
     </div>`;
   }
   if (seg === 0) {
@@ -1006,19 +1571,23 @@ function panesContentHTML() {
   if (seg === 1) {
     return `
     <div class="panes-list">
-      ${PANES_FILES.map((f) => `
+      ${PANES_FILES.map(
+        (f) => `
       <button class="set-row" data-panes-file="${PANES_FILES.indexOf(f)}">
         <span class="set-ic" style="background:var(--control);color:var(--text-secondary)">${I("file-code-2")}</span>
         <div class="set-main"><div class="set-label mono" style="font-size:12.5px">${esc(f.path)}</div></div>
         <span class="set-val"><span class="add">+${f.add}</span> <span class="del">−${f.del}</span></span>
         ${I("chevron-right", "s14")}
-      </button>`).join("")}
+      </button>`,
+      ).join("")}
       <div class="set-head" style="padding-top:16px">Recent commits</div>
-      ${PANES_COMMITS.map((c) => `
+      ${PANES_COMMITS.map(
+        (c) => `
       <div class="set-row">
         <span class="set-ic" style="background:var(--control);color:var(--text-secondary)">${I("git-commit-horizontal")}</span>
         <div class="set-main"><div class="set-label" style="font-weight:500">${esc(c.msg)}</div><div class="set-sub mono">${c.hash} · ${c.time} ago</div></div>
-      </div>`).join("")}
+      </div>`,
+      ).join("")}
     </div>`;
   }
   if (seg === 2) {
@@ -1077,10 +1646,14 @@ const getDrafts = (key) => {
 function attachChipsHTML(key) {
   const list = getDrafts(key);
   if (!list.length) return "";
-  return `<div class="attachchips">${list.map((a, i) => `
+  return `<div class="attachchips">${list
+    .map(
+      (a, i) => `
     <span class="attachchip">${I(a.icon)}<span>${esc(a.name)}</span>
       <button data-unattach="${i}" aria-label="Remove">${I("x")}</button>
-    </span>`).join("")}</div>`;
+    </span>`,
+    )
+    .join("")}</div>`;
 }
 
 function refreshComposerChips() {
@@ -1148,21 +1721,27 @@ function sendSheetHTML() {
       <div class="main"><div class="d1">New chat</div><div class="d2">Start a fresh thread on Studio Mac</div></div>
     </button>
     <div class="section-label">Threads</div>
-    ${threads.map(({ id, disabled }) => {
-      const t = threadById(id);
-      return `
+    ${threads
+      .map(({ id, disabled }) => {
+        const t = threadById(id);
+        return `
       <button class="destrow${disabled ? " disabled" : ""}" data-dest="${disabled ? "__disabled" : "thread/" + t.id}">
         ${modeBadge(t.mode)}
         <div class="main"><div class="d1"${disabled ? ' style="color:var(--text-muted)"' : ""}>${esc(t.title)}</div>
         <div class="d2">${disabled ? "PDFs can't be added to a Work thread" : compName(t.computer) + " · " + esc(t.project)}</div></div>
       </button>`;
-    }).join("")}
+      })
+      .join("")}
     <div class="section-label">Bots</div>
-    ${bots.map((b) => `
+    ${bots
+      .map(
+        (b) => `
       <button class="destrow" data-dest="bot/${b.id}">
         ${botAvatarHTML(b, 30)}
         <div class="main"><div class="d1">${esc(b.name)}</div><div class="d2">${esc(b.role)}</div></div>
-      </button>`).join("")}
+      </button>`,
+      )
+      .join("")}
     <div style="height:30px"></div>
   </div>`;
 }
@@ -1192,8 +1771,10 @@ function visibleTabs() {
 
 const DETAIL_KINDS = new Set(["thread", "bot", "pr", "computer"]);
 function foldWide() {
-  return (deviceMode === "duo" && posture === "unfolded") ||
-    (deviceMode === "androidfold" && (posture === "unfolded" || posture === "spanned"));
+  return (
+    (deviceMode === "duo" && posture === "unfolded") ||
+    (deviceMode === "androidfold" && (posture === "unfolded" || posture === "spanned"))
+  );
 }
 function updateFoldLayout() {
   const wide = foldWide();
@@ -1208,7 +1789,7 @@ function updateFoldLayout() {
     el.removeAttribute("data-pane");
     el.style.display = "";
     if (!usePanes) {
-      const hidden = deviceMode === "ipad" ? (i > 0 && i < stack.length - 1) : (i !== stack.length - 1);
+      const hidden = deviceMode === "ipad" ? i > 0 && i < stack.length - 1 : i !== stack.length - 1;
       el.inert = hidden;
       if (hidden) el.style.display = "none";
       return;
@@ -1216,10 +1797,16 @@ function updateFoldLayout() {
     if (detailOK) {
       if (i === 0) el.dataset.pane = "list";
       else if (i === stack.length - 1) el.dataset.pane = "detail";
-      else { el.style.display = "none"; el.inert = true; }
+      else {
+        el.style.display = "none";
+        el.inert = true;
+      }
     } else {
       if (i === 0) el.dataset.pane = "list";
-      else { el.style.display = "none"; el.inert = true; }
+      else {
+        el.style.display = "none";
+        el.inert = true;
+      }
     }
     el.inert = el.style.display === "none";
   });
@@ -1246,23 +1833,34 @@ function renderTabbar() {
   tabbarEl.classList.remove("hidden");
   const tabs = visibleTabs();
   const current = top ? top.tab : activeTab;
-  const activeKey = tabs.some((t) => t.key === current) ? current
-    : tabs.some((t) => t.key === activeTab) ? activeTab : tabs[0].key;
+  const activeKey = tabs.some((t) => t.key === current)
+    ? current
+    : tabs.some((t) => t.key === activeTab)
+      ? activeTab
+      : tabs[0].key;
   if (deviceMode === "android" || deviceMode === "androidfold") {
     tabbarEl.innerHTML = `
       <nav class="android-nav">
-        ${tabs.map((t) => `
+        ${tabs
+          .map(
+            (t) => `
           <button class="anav ${t.key === activeKey ? "active" : ""}" data-tab="${t.key}"
-            aria-label="${t.label}" title="${t.label}">${I(t.icon, "s22")}</button>`).join("")}
+            aria-label="${t.label}" title="${t.label}">${I(t.icon, "s22")}</button>`,
+          )
+          .join("")}
       </nav>
       <button class="android-fab" id="newbtn" aria-label="New">${I("square-pen", "s22")}</button>`;
     return;
   }
   tabbarEl.innerHTML = `
     <div class="capsule">
-      ${tabs.map((t) => `
+      ${tabs
+        .map(
+          (t) => `
         <button class="tabbtn ${t.key === activeKey ? "active" : ""}" data-tab="${t.key}"
-          aria-label="${t.label}" title="${t.label}">${I(t.icon)}</button>`).join("")}
+          aria-label="${t.label}" title="${t.label}">${I(t.icon)}</button>`,
+        )
+        .join("")}
     </div>
     <button class="newbtn" id="newbtn" aria-label="New" title="New">${I("square-pen")}</button>`;
 }
@@ -1317,7 +1915,9 @@ function screenHost(routeStr) {
   return viewport;
 }
 
-function topScreen() { return stack[stack.length - 1]; }
+function topScreen() {
+  return stack[stack.length - 1];
+}
 
 function pushScreen(routeStr, { instant = false } = {}) {
   const el = buildScreen(routeStr);
@@ -1344,10 +1944,12 @@ function pushScreen(routeStr, { instant = false } = {}) {
   renderIpadChrome();
   const rname = parseRoute(routeStr).name;
   if (rname === "thread" || rname === "bot") {
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      const sc = el.querySelector(".scroll");
-      if (sc) sc.scrollTop = sc.scrollHeight;
-    }));
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const sc = el.querySelector(".scroll");
+        if (sc) sc.scrollTop = sc.scrollHeight;
+      }),
+    );
   }
   if (deviceMode === "android") wireAndroidAppbars();
 }
@@ -1375,8 +1977,16 @@ function route() {
   if (deviceMode === "ipad") {
     // iPad: stack[0] is the place (mid column); anything deeper is detail
     const idx = stack.findIndex((s) => s.route === r);
-    if (stack.length && idx === stack.length - 1) { renderTabbar(); renderIpadChrome(); return; }
-    if (idx >= 0) { popTo(idx); renderIpadChrome(); return; }
+    if (stack.length && idx === stack.length - 1) {
+      renderTabbar();
+      renderIpadChrome();
+      return;
+    }
+    if (idx >= 0) {
+      popTo(idx);
+      renderIpadChrome();
+      return;
+    }
     if (isTab(r) || isDevicePage(r)) {
       clearScreens();
       pushScreen(r, { instant: true });
@@ -1392,8 +2002,14 @@ function route() {
     return;
   }
   const idx = stack.findIndex((s) => s.route === r);
-  if (stack.length && idx === stack.length - 1) { renderTabbar(); return; }
-  if (idx >= 0) { popTo(idx); return; }
+  if (stack.length && idx === stack.length - 1) {
+    renderTabbar();
+    return;
+  }
+  if (idx >= 0) {
+    popTo(idx);
+    return;
+  }
   if (isTab(r) || isDevicePage(r)) {
     clearScreens();
     pushScreen(r, { instant: true });
@@ -1418,12 +2034,20 @@ function route() {
 
 window.addEventListener("hashchange", route);
 
-function go(hash) { location.hash = hash; }
+function go(hash) {
+  location.hash = hash;
+}
 
 /* ---------- iPad shell ---------- */
 
 const IPAD_PLACES = ["home", "bots", "threads", "prs", "inbox"];
-const PLACE_LABEL = { home: "Home", bots: "Bots", threads: "Threads", prs: "Pull requests", inbox: "Inbox" };
+const PLACE_LABEL = {
+  home: "Home",
+  bots: "Bots",
+  threads: "Threads",
+  prs: "Pull requests",
+  inbox: "Inbox",
+};
 let ipadShellBuilt = false;
 
 function ensureIpadShell() {
@@ -1470,11 +2094,19 @@ function renderIpadChrome() {
 }
 
 const POSTURES = {
-  duo: [["folded", "Folded"], ["unfolded", "Unfolded"]],
-  androidfold: [["single", "Single screen"], ["unfolded", "Unfolded"], ["spanned", "Spanned (dual screen)"]],
+  duo: [
+    ["folded", "Folded"],
+    ["unfolded", "Unfolded"],
+  ],
+  androidfold: [
+    ["single", "Single screen"],
+    ["unfolded", "Unfolded"],
+    ["spanned", "Spanned (dual screen)"],
+  ],
 };
 let posture = localStorage.getItem("octant-mock-posture") || "folded";
-if (POSTURES[deviceMode] && !POSTURES[deviceMode].some(([k]) => k === posture)) posture = POSTURES[deviceMode][0][0];
+if (POSTURES[deviceMode] && !POSTURES[deviceMode].some(([k]) => k === posture))
+  posture = POSTURES[deviceMode][0][0];
 
 function setPosture(p) {
   posture = p;
@@ -1487,12 +2119,16 @@ function setPosture(p) {
 function setDeviceMode(mode) {
   deviceMode = mode;
   localStorage.setItem("octant-mock-device", mode);
-  if (POSTURES[mode] && !POSTURES[mode].some(([k]) => k === posture)) posture = POSTURES[mode][0][0];
+  if (POSTURES[mode] && !POSTURES[mode].some(([k]) => k === posture))
+    posture = POSTURES[mode][0][0];
   phone.dataset.device = mode;
   phone.dataset.posture = POSTURES[mode] ? posture : "";
   syncDeviceUI();
   if (mode === "ipad") ensureIpadShell();
-  else { document.querySelector(".ipad-shell")?.remove(); ipadShellBuilt = false; }
+  else {
+    document.querySelector(".ipad-shell")?.remove();
+    ipadShellBuilt = false;
+  }
   // rebuild synchronously on the current route — never leave a blank frame
   const r = parseRoute(location.hash).route;
   clearScreens();
@@ -1505,7 +2141,10 @@ function setDeviceMode(mode) {
     }
     return;
   }
-  if (isTab(r) || isDevicePage(r)) { pushScreen(r, { instant: true }); return; }
+  if (isTab(r) || isDevicePage(r)) {
+    pushScreen(r, { instant: true });
+    return;
+  }
   const root = visibleTabs().some((t) => t.key === activeTab) ? activeTab : "home";
   pushScreen(root, { instant: true });
   pushScreen(r);
@@ -1513,7 +2152,22 @@ function setDeviceMode(mode) {
 
 /* ---------- Android chrome ---------- */
 
-const ANDROID_TITLES = { home: "Home", threads: "Threads", inbox: "Inbox", prs: "Pull requests", bots: "Bots", thread: "Thread", pr: "Pull request", bot: "Bot", settings: "Settings", computer: "Computer", pair: "Pair a computer", lock: "Lock Screen", homescreen: "Home Screen", "android-notification": "Notification" };
+const ANDROID_TITLES = {
+  home: "Home",
+  threads: "Threads",
+  inbox: "Inbox",
+  prs: "Pull requests",
+  bots: "Bots",
+  thread: "Thread",
+  pr: "Pull request",
+  bot: "Bot",
+  settings: "Settings",
+  computer: "Computer",
+  pair: "Pair a computer",
+  lock: "Lock Screen",
+  homescreen: "Home Screen",
+  "android-notification": "Notification",
+};
 
 function wireAndroidAppbars() {
   if (deviceMode !== "android" && deviceMode !== "androidfold") return;
@@ -1528,7 +2182,10 @@ function wireAndroidAppbars() {
     el.insertBefore(bar, el.firstChild);
     el.dataset.abar = "1";
     const sc = el.querySelector(".scroll");
-    if (sc) sc.addEventListener("scroll", () => el.classList.toggle("abar-on", sc.scrollTop > 24), { passive: true });
+    if (sc)
+      sc.addEventListener("scroll", () => el.classList.toggle("abar-on", sc.scrollTop > 24), {
+        passive: true,
+      });
   });
 }
 
@@ -1563,7 +2220,14 @@ const EXTRA_SHEETS = {
 function openSheetEl(kind) {
   closeMenus();
   closeAlert();
-  const html = kind === "new" ? newSheetHTML() : kind === "send" ? sendSheetHTML() : EXTRA_SHEETS[kind] ? EXTRA_SHEETS[kind]() : "";
+  const html =
+    kind === "new"
+      ? newSheetHTML()
+      : kind === "send"
+        ? sendSheetHTML()
+        : EXTRA_SHEETS[kind]
+          ? EXTRA_SHEETS[kind]()
+          : "";
   sheetRoot.innerHTML = `
     <div class="sheet-backdrop" data-close-sheet></div>
     <div class="sheet${kind === "panes" ? " sheet-tall" : ""}" id="sheet">
@@ -1614,47 +2278,54 @@ function onSheetPointerDown(e) {
 
 function bindSheetContent(sheet, kind) {
   if (kind === "new") {
-    $$("#newsheet-seg button", sheet).forEach((b) => b.addEventListener("click", () => {
-      $$("#newsheet-seg button", sheet).forEach((x) => x.classList.remove("on"));
-      b.classList.add("on");
-    }));
+    $$("#newsheet-seg button", sheet).forEach((b) =>
+      b.addEventListener("click", () => {
+        $$("#newsheet-seg button", sheet).forEach((x) => x.classList.remove("on"));
+        b.classList.add("on");
+      }),
+    );
     $("#sheet-start", sheet).addEventListener("click", () => {
       const prompt = sheet.querySelector(".promptarea").value.trim();
       closeSheet();
       if (prompt) setTimeout(() => toast("Thread started"), 320);
     });
   } else if (kind === "send") {
-    $$("[data-dest]", sheet).forEach((el) => el.addEventListener("click", () => {
-      const dest = el.dataset.dest;
-      if (dest === "__disabled") return;
-      if (dest === "__new") {
-        getDrafts("__new").push(...SHARE_ITEMS.map((s) => ({ name: s.name, icon: s.icon })));
+    $$("[data-dest]", sheet).forEach((el) =>
+      el.addEventListener("click", () => {
+        const dest = el.dataset.dest;
+        if (dest === "__disabled") return;
+        if (dest === "__new") {
+          getDrafts("__new").push(...SHARE_ITEMS.map((s) => ({ name: s.name, icon: s.icon })));
+          closeSheet();
+          setTimeout(() => openSheetEl("new"), 320);
+          return;
+        }
+        getDrafts(dest).push(...SHARE_ITEMS.map((s) => ({ name: s.name, icon: s.icon })));
         closeSheet();
-        setTimeout(() => openSheetEl("new"), 320);
-        return;
-      }
-      getDrafts(dest).push(...SHARE_ITEMS.map((s) => ({ name: s.name, icon: s.icon })));
-      closeSheet();
-      setTimeout(() => {
-        if (topScreen() && topScreen().route === dest) refreshComposerChips();
-        else go("#/" + dest);
-      }, 300);
-    }));
+        setTimeout(() => {
+          if (topScreen() && topScreen().route === dest) refreshComposerChips();
+          else go("#/" + dest);
+        }, 300);
+      }),
+    );
     const search = $(".send-search input", sheet);
-    if (search) search.addEventListener("input", () => {
-      const q = search.value.toLowerCase();
-      $$(".destrow", sheet).forEach((r) => {
-        r.style.display = r.textContent.toLowerCase().includes(q) ? "" : "none";
+    if (search)
+      search.addEventListener("input", () => {
+        const q = search.value.toLowerCase();
+        $$(".destrow", sheet).forEach((r) => {
+          r.style.display = r.textContent.toLowerCase().includes(q) ? "" : "none";
+        });
       });
-    });
   }
   if (kind === "panes") bindPanesSheet(sheet);
   if (kind === "model") bindModelSheet(sheet);
   if (kind === "paircode" || kind === "pairdetails") {
-    $$("[data-pair-go]", sheet).forEach((b) => b.addEventListener("click", () => {
-      closeSheet();
-      setTimeout(() => toast(kind === "paircode" ? "Comparing codes…" : "Connecting…"), 300);
-    }));
+    $$("[data-pair-go]", sheet).forEach((b) =>
+      b.addEventListener("click", () => {
+        closeSheet();
+        setTimeout(() => toast(kind === "paircode" ? "Comparing codes…" : "Connecting…"), 300);
+      }),
+    );
   }
   if (kind === "rewind") {
     $("[data-rewind-go]", sheet)?.addEventListener("click", () => {
@@ -1670,21 +2341,46 @@ function bindPanesSheet(sheet) {
   const refresh = () => {
     const seg = $("#panes-seg", sheet);
     const body = $("#panes-body", sheet);
-    if (seg) seg.innerHTML = ["Environment", "Review", "Context", "Agents"]
-      .map((s, i) => `<button class="${i === panesState.seg ? "on" : ""}" data-panes-seg="${i}">${s}</button>`).join("");
+    if (seg)
+      seg.innerHTML = ["Environment", "Review", "Context", "Agents"]
+        .map(
+          (s, i) =>
+            `<button class="${i === panesState.seg ? "on" : ""}" data-panes-seg="${i}">${s}</button>`,
+        )
+        .join("");
     if (body) body.innerHTML = panesContentHTML();
     const head = sheet.querySelector(".sheet-head");
-    if (head) head.innerHTML = `<div class="sh-title">Panes</div>${panesState.view !== "root" ? `<button class="panes-back" data-panes="back" style="position:static">${I("x", "s16")} Close</button>` : ""}`;
+    if (head)
+      head.innerHTML = `<div class="sh-title">Panes</div>${panesState.view !== "root" ? `<button class="panes-back" data-panes="back" style="position:static">${I("x", "s16")} Close</button>` : ""}`;
   };
   sheet.addEventListener("click", (e) => {
     const segBtn = e.target.closest("[data-panes-seg]");
-    if (segBtn) { panesState.seg = +segBtn.dataset.panesSeg; panesState.view = "root"; refresh(); return; }
+    if (segBtn) {
+      panesState.seg = +segBtn.dataset.panesSeg;
+      panesState.view = "root";
+      refresh();
+      return;
+    }
     const fileBtn = e.target.closest("[data-panes-file]");
-    if (fileBtn) { panesState.file = PANES_FILES[+fileBtn.dataset.panesFile]; panesState.view = "diff"; refresh(); return; }
-    if (e.target.closest("[data-panes='review']")) { panesState.seg = 1; panesState.view = "root"; refresh(); return; }
+    if (fileBtn) {
+      panesState.file = PANES_FILES[+fileBtn.dataset.panesFile];
+      panesState.view = "diff";
+      refresh();
+      return;
+    }
+    if (e.target.closest("[data-panes='review']")) {
+      panesState.seg = 1;
+      panesState.view = "root";
+      refresh();
+      return;
+    }
     if (e.target.closest("[data-panes='back']")) {
-      if (panesState.view === "diff") { panesState.view = "root"; panesState.file = null; }
-      refresh(); return;
+      if (panesState.view === "diff") {
+        panesState.view = "root";
+        panesState.file = null;
+      }
+      refresh();
+      return;
     }
   });
 }
@@ -1692,16 +2388,22 @@ function bindPanesSheet(sheet) {
 /* ---------- model sheet ---------- */
 
 function modelSheetHTML() {
-  const groups = MODEL_GROUPS.map((g) => `
+  const groups = MODEL_GROUPS.map(
+    (g) => `
     <div class="set-head">${g.provider}</div>
     <div class="set-group">
-      ${g.models.map((m) => `
+      ${g.models
+        .map(
+          (m) => `
         <button class="set-row" data-model="${esc(m)}">
           <span class="set-ic" style="background:var(--control);color:var(--text-secondary)">${I("bot", "s15")}</span>
           <div class="set-main"><div class="set-label">${esc(m)}</div></div>
           ${modelState.model === m ? `<span style="color:var(--accent)">${I("check", "s16")}</span>` : ""}
-        </button>`).join("")}
-    </div>`).join("");
+        </button>`,
+        )
+        .join("")}
+    </div>`,
+  ).join("");
   return `
   <div class="grabber"></div>
   <div class="sheet-head"><div class="sh-title">Model</div></div>
@@ -1719,7 +2421,8 @@ function modelSheetHTML() {
 function bindModelSheet(sheet) {
   const syncChip = () => {
     const chip = $(".modelchip");
-    if (chip) chip.innerHTML = `${modelState.model} · ${modelState.effort} ${I("chevron-down", "s12")}`;
+    if (chip)
+      chip.innerHTML = `${modelState.model} · ${modelState.effort} ${I("chevron-down", "s12")}`;
   };
   sheet.addEventListener("click", (e) => {
     const mb = e.target.closest("[data-model]");
@@ -1729,7 +2432,13 @@ function bindModelSheet(sheet) {
         const on = b.dataset.model === modelState.model;
         b.querySelector(".set-ic + .set-main")?.parentElement;
         let chk = b.querySelector(".pick-check");
-        if (on && !chk) { chk = document.createElement("span"); chk.className = "pick-check"; chk.style.color = "var(--accent)"; chk.innerHTML = I("check", "s16"); b.appendChild(chk); }
+        if (on && !chk) {
+          chk = document.createElement("span");
+          chk.className = "pick-check";
+          chk.style.color = "var(--accent)";
+          chk.innerHTML = I("check", "s16");
+          b.appendChild(chk);
+        }
         if (!on && chk) chk.remove();
       });
       syncChip();
@@ -1791,16 +2500,26 @@ function rewindSheetHTML() {
 
 function doRewind() {
   const t = msgTargetEl;
-  if (!t || !t.isConnected) { toast("Nothing to rewind"); return; }
+  if (!t || !t.isConnected) {
+    toast("Nothing to rewind");
+    return;
+  }
   const transcript = t.closest(".transcript");
   if (!transcript) return;
   if (t.classList.contains("msg-user")) {
     const input = $("#msg-input");
-    if (input) { input.value = t.textContent.trim(); input.dispatchEvent(new Event("input")); }
+    if (input) {
+      input.value = t.textContent.trim();
+      input.dispatchEvent(new Event("input"));
+    }
     t.remove();
   }
   let el = transcript.lastElementChild;
-  while (el && el !== t) { const prev = el.previousElementSibling; el.remove(); el = prev; }
+  while (el && el !== t) {
+    const prev = el.previousElementSibling;
+    el.remove();
+    el = prev;
+  }
   toast("Rewound");
 }
 
@@ -1818,21 +2537,25 @@ function openMessageMenu(x, y, target) {
   closeMenus();
   menuRoot.innerHTML = `<div class="menu-backdrop" data-close-menu></div><div class="menu ctxmenu" id="ctxmenu"></div>`;
   const menu = $("#ctxmenu", menuRoot);
-  menu.innerHTML = MSG_ACTIONS.map((it) => `<button data-msgact="${it.label}">${I(it.icon)}<span>${it.label}</span></button>`).join("");
+  menu.innerHTML = MSG_ACTIONS.map(
+    (it) => `<button data-msgact="${it.label}">${I(it.icon)}<span>${it.label}</span></button>`,
+  ).join("");
   const pr = phone.getBoundingClientRect();
   let mx = Math.min(x - pr.left, pr.width - 200);
   let my = Math.min(y - pr.top, pr.height - MSG_ACTIONS.length * 44 - 130);
   menu.style.left = Math.max(8, mx) + "px";
   menu.style.top = Math.max(70, my) + "px";
   menuRoot.classList.add("open");
-  $$("button", menu).forEach((b) => b.addEventListener("click", () => {
-    const label = b.dataset.msgact;
-    closeMenus();
-    if (label === "Copy") toast("Copied to clipboard");
-    else if (label === "Fork from here") toast("Forked — new thread created");
-    else if (label === "Share") toast("Share sheet opened");
-    else if (label === "Rewind to here") openSheetEl("rewind");
-  }));
+  $$("button", menu).forEach((b) =>
+    b.addEventListener("click", () => {
+      const label = b.dataset.msgact;
+      closeMenus();
+      if (label === "Copy") toast("Copied to clipboard");
+      else if (label === "Fork from here") toast("Forked — new thread created");
+      else if (label === "Share") toast("Share sheet opened");
+      else if (label === "Rewind to here") openSheetEl("rewind");
+    }),
+  );
 }
 
 /* ---------- menus ---------- */
@@ -1840,19 +2563,13 @@ function openMessageMenu(x, y, target) {
 const menuRoot = $("#menu-root");
 
 const MENUS = {
-  computers: [
-    { label: "All computers", on: true },
-    { label: "Studio Mac" },
-    { label: "Devbox" },
-  ],
-  projects: [
-    { label: "All projects", on: true },
-    { label: "octant" },
-    { label: "octant-site" },
-  ],
+  computers: [{ label: "All computers", on: true }, { label: "Studio Mac" }, { label: "Devbox" }],
+  projects: [{ label: "All projects", on: true }, { label: "octant" }, { label: "octant-site" }],
   modes: [
     { label: "All modes", on: true },
-    { label: "Chat" }, { label: "Work" }, { label: "Code" },
+    { label: "Chat" },
+    { label: "Work" },
+    { label: "Code" },
   ],
   arrange: [
     { label: "Status", icon: "circle-dot" },
@@ -1935,14 +2652,8 @@ const MENUS = {
     { label: "Sonnet · High" },
     { label: "Haiku · Low" },
   ],
-  sheetcomputer: [
-    { label: "Studio Mac", on: true },
-    { label: "Devbox" },
-  ],
-  sheetproject: [
-    { label: "octant", on: true },
-    { label: "octant-site" },
-  ],
+  sheetcomputer: [{ label: "Studio Mac", on: true }, { label: "Devbox" }],
+  sheetproject: [{ label: "octant", on: true }, { label: "octant-site" }],
   sheetmodel: [
     { label: "Opus · High", on: true },
     { label: "Sonnet · High" },
@@ -1970,13 +2681,17 @@ function openMenu(key, anchorEl) {
   menuAnchor = anchorEl;
   menuRoot.innerHTML = `<div class="menu-backdrop" data-close-menu></div><div class="menu" id="menu"></div>`;
   const menu = $("#menu", menuRoot);
-  menu.innerHTML = items.map((it) => it.sep
-    ? `<div class="msep"></div>`
-    : `<button class="${it.danger ? "mdanger" : ""}${it.disabled ? " mdisabled" : ""}" data-mlabel="${esc(it.label)}" ${it.sub ? `data-msub="${it.sub}"` : ""}>
+  menu.innerHTML = items
+    .map((it) =>
+      it.sep
+        ? `<div class="msep"></div>`
+        : `<button class="${it.danger ? "mdanger" : ""}${it.disabled ? " mdisabled" : ""}" data-mlabel="${esc(it.label)}" ${it.sub ? `data-msub="${it.sub}"` : ""}>
         ${it.icon ? I(it.icon) : ""}<span>${esc(it.label)}</span>
         ${it.on ? `<span style="margin-left:auto;color:var(--accent)">${I("check", "s14")}</span>` : ""}
         ${it.sub ? `<span style="margin-left:auto;color:var(--text-muted)">${I("chevron-right", "s13")}</span>` : ""}
-      </button>`).join("");
+      </button>`,
+    )
+    .join("");
   // position near anchor, inside phone
   const phoneRect = phone.getBoundingClientRect();
   const r = anchorEl.getBoundingClientRect();
@@ -1985,7 +2700,8 @@ function openMenu(key, anchorEl) {
   let y = r.bottom - phoneRect.top + 6;
   if (x < 8) x = 8;
   if (x + mw > phoneRect.width - 8) x = phoneRect.width - mw - 8;
-  if (y + items.length * 40 > phoneRect.height - 90) y = r.top - phoneRect.top - items.length * 40 - 8;
+  if (y + items.length * 40 > phoneRect.height - 90)
+    y = r.top - phoneRect.top - items.length * 40 - 8;
   menu.style.left = x + "px";
   menu.style.top = Math.max(60, y) + "px";
   if (foldWide() && posture === "spanned") {
@@ -1997,15 +2713,23 @@ function openMenu(key, anchorEl) {
     menu.style.left = x + "px";
   }
   menuRoot.classList.add("open");
-  $$("button", menu).forEach((b) => b.addEventListener("click", () => {
-    const label = b.dataset.mlabel;
-    const sub = b.dataset.msub;
-    const wasDisabled = b.classList.contains("mdisabled");
-    closeMenus();
-    if (wasDisabled) { toast(`${compName(currentThreadComputer())} is offline`); return; }
-    if (sub === "mode") { openMenu("mode", anchorEl); return; }
-    onMenuPick(key, label, anchorEl);
-  }));
+  $$("button", menu).forEach((b) =>
+    b.addEventListener("click", () => {
+      const label = b.dataset.mlabel;
+      const sub = b.dataset.msub;
+      const wasDisabled = b.classList.contains("mdisabled");
+      closeMenus();
+      if (wasDisabled) {
+        toast(`${compName(currentThreadComputer())} is offline`);
+        return;
+      }
+      if (sub === "mode") {
+        openMenu("mode", anchorEl);
+        return;
+      }
+      onMenuPick(key, label, anchorEl);
+    }),
+  );
 }
 
 function currentThreadComputer() {
@@ -2028,12 +2752,30 @@ function relabel(anchor, label) {
   }
 }
 
-const SELECT_KEYS = ["computers", "projects", "modes", "prcomputers", "prrepos", "prsort", "models", "sheetcomputer", "sheetproject", "sheetmodel"];
+const SELECT_KEYS = [
+  "computers",
+  "projects",
+  "modes",
+  "prcomputers",
+  "prrepos",
+  "prsort",
+  "models",
+  "sheetcomputer",
+  "sheetproject",
+  "sheetmodel",
+];
 
 function onMenuPick(key, label, anchor) {
   if (SELECT_KEYS.includes(key)) relabel(anchor, label);
   if (key === "arrange") toast(`Sorted by ${label.toLowerCase()}`);
-  if (key === "review") toast(label === "Approve" ? "Review submitted: approved" : label === "Request changes" ? "Changes requested" : "Comment draft opened");
+  if (key === "review")
+    toast(
+      label === "Approve"
+        ? "Review submitted: approved"
+        : label === "Request changes"
+          ? "Changes requested"
+          : "Comment draft opened",
+    );
   if (key === "mergeinfo") toast(`Will ${label.toLowerCase()}`);
   if (key === "prmore2" && label === "Start a Code thread") toast("Opening a Code thread…");
   if (key === "prrepo" || key === "prmore") toast(label);
@@ -2051,7 +2793,10 @@ function onMenuPick(key, label, anchor) {
     if (map[label]) setThemePref(map[label]);
     return;
   }
-  if (key === "setbg") { toast(`Background: ${label.toLowerCase()}`); return; }
+  if (key === "setbg") {
+    toast(`Background: ${label.toLowerCase()}`);
+    return;
+  }
   if (key === "mode") {
     if (label === "Full access") {
       openAlert({
@@ -2059,7 +2804,14 @@ function onMenuPick(key, label, anchor) {
         msg: "Full access lets agents run commands and change files without asking. Use it only on a computer and Project you trust.",
         actions: [
           { label: "Cancel", tone: "plain" },
-          { label: "Use Full access", tone: "danger", fn: () => { modeState = "Full access"; toast("Mode: Full access"); } },
+          {
+            label: "Use Full access",
+            tone: "danger",
+            fn: () => {
+              modeState = "Full access";
+              toast("Mode: Full access");
+            },
+          },
         ],
       });
       return;
@@ -2086,18 +2838,22 @@ function openAlert({ title, msg, actions }) {
     </div>`;
   alertRoot.classList.add("open");
   alertRoot._actions = actions;
-  $$("[data-alert-act]", alertRoot).forEach((b) => b.addEventListener("click", () => {
-    const a = alertRoot._actions[+b.dataset.alertAct];
-    closeAlert();
-    a.fn && a.fn();
-  }));
+  $$("[data-alert-act]", alertRoot).forEach((b) =>
+    b.addEventListener("click", () => {
+      const a = alertRoot._actions[+b.dataset.alertAct];
+      closeAlert();
+      a.fn && a.fn();
+    }),
+  );
 }
 function closeAlert() {
   alertRoot.classList.remove("open");
   alertRoot.innerHTML = "";
   alertRoot._actions = null;
 }
-alertRoot.addEventListener("click", (e) => { if (e.target.dataset.alertClose !== undefined) closeAlert(); });
+alertRoot.addEventListener("click", (e) => {
+  if (e.target.dataset.alertClose !== undefined) closeAlert();
+});
 
 /* ---------- toast ---------- */
 
@@ -2115,9 +2871,9 @@ function toast(msg) {
     phone.appendChild(toastEl);
   }
   toastEl.textContent = msg;
-  requestAnimationFrame(() => toastEl.style.opacity = "1");
+  requestAnimationFrame(() => (toastEl.style.opacity = "1"));
   clearTimeout(toastEl._t);
-  toastEl._t = setTimeout(() => toastEl.style.opacity = "0", 1800);
+  toastEl._t = setTimeout(() => (toastEl.style.opacity = "0"), 1800);
 }
 
 /* ---------- context menu (long press) ---------- */
@@ -2132,60 +2888,73 @@ function openContextMenu(x, y, tid) {
     { label: "Put away", icon: "archive" },
     { label: "Rename", icon: "pencil" },
   ];
-  menu.innerHTML = items.map((it) => `<button data-ctx="${it.label}">${I(it.icon)}<span>${it.label}</span></button>`).join("");
+  menu.innerHTML = items
+    .map((it) => `<button data-ctx="${it.label}">${I(it.icon)}<span>${it.label}</span></button>`)
+    .join("");
   const pr = phone.getBoundingClientRect();
   let mx = Math.min(x - pr.left, pr.width - 190);
   let my = Math.min(y - pr.top, pr.height - items.length * 42 - 120);
   menu.style.left = Math.max(8, mx) + "px";
   menu.style.top = Math.max(70, my) + "px";
   menuRoot.classList.add("open");
-  $$("button", menu).forEach((b) => b.addEventListener("click", () => {
-    const label = b.dataset.ctx;
-    const row = viewport.querySelector(`.rowwrap[data-tid="${tid}"] .trow`);
-    closeMenus();
-    if (!row) return;
-    if (label === "Pin") {
-      if (!row.querySelector(".pinmark")) {
-        const pin = document.createElement("span");
-        pin.className = "pinmark";
-        pin.innerHTML = I("pin", "s12");
-        row.querySelector(".main").prepend(pin);
-        row.querySelector(".main").style.display = "flex";
-        row.querySelector(".main").style.alignItems = "center";
-        row.querySelector(".main").style.gap = "7px";
+  $$("button", menu).forEach((b) =>
+    b.addEventListener("click", () => {
+      const label = b.dataset.ctx;
+      const row = viewport.querySelector(`.rowwrap[data-tid="${tid}"] .trow`);
+      closeMenus();
+      if (!row) return;
+      if (label === "Pin") {
+        if (!row.querySelector(".pinmark")) {
+          const pin = document.createElement("span");
+          pin.className = "pinmark";
+          pin.innerHTML = I("pin", "s12");
+          row.querySelector(".main").prepend(pin);
+          row.querySelector(".main").style.display = "flex";
+          row.querySelector(".main").style.alignItems = "center";
+          row.querySelector(".main").style.gap = "7px";
+        }
+        toast("Thread pinned");
+      } else if (label === "Snooze") {
+        row.classList.add("snoozed");
+        toast("Snoozed until tomorrow");
+      } else if (label === "Put away") {
+        const wrap = row.closest(".rowwrap");
+        wrap.style.transition = "all .25s ease";
+        wrap.style.opacity = "0";
+        wrap.style.maxHeight = wrap.offsetHeight + "px";
+        requestAnimationFrame(() => {
+          wrap.style.maxHeight = "0px";
+          wrap.style.paddingTop = "0";
+          wrap.style.paddingBottom = "0";
+        });
+        setTimeout(() => wrap.remove(), 280);
+        toast("Thread put away");
+      } else if (label === "Rename") {
+        const t1 = row.querySelector(".t1");
+        const input = document.createElement("input");
+        input.className = "rename-input";
+        input.value = t1.textContent;
+        t1.replaceWith(input);
+        input.focus();
+        input.select();
+        const done = () => {
+          const v = input.value.trim() || t1.textContent;
+          const d = document.createElement("div");
+          d.className = "t1";
+          d.textContent = v;
+          input.replaceWith(d);
+        };
+        input.addEventListener("blur", done);
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") input.blur();
+          if (e.key === "Escape") {
+            input.value = "";
+            input.blur();
+          }
+        });
       }
-      toast("Thread pinned");
-    } else if (label === "Snooze") {
-      row.classList.add("snoozed");
-      toast("Snoozed until tomorrow");
-    } else if (label === "Put away") {
-      const wrap = row.closest(".rowwrap");
-      wrap.style.transition = "all .25s ease";
-      wrap.style.opacity = "0";
-      wrap.style.maxHeight = wrap.offsetHeight + "px";
-      requestAnimationFrame(() => {
-        wrap.style.maxHeight = "0px";
-        wrap.style.paddingTop = "0"; wrap.style.paddingBottom = "0";
-      });
-      setTimeout(() => wrap.remove(), 280);
-      toast("Thread put away");
-    } else if (label === "Rename") {
-      const t1 = row.querySelector(".t1");
-      const input = document.createElement("input");
-      input.className = "rename-input";
-      input.value = t1.textContent;
-      t1.replaceWith(input);
-      input.focus(); input.select();
-      const done = () => {
-        const v = input.value.trim() || t1.textContent;
-        const d = document.createElement("div");
-        d.className = "t1"; d.textContent = v;
-        input.replaceWith(d);
-      };
-      input.addEventListener("blur", done);
-      input.addEventListener("keydown", (e) => { if (e.key === "Enter") input.blur(); if (e.key === "Escape") { input.value = ""; input.blur(); } });
-    }
-  }));
+    }),
+  );
 }
 
 /* ============================== global events ============================== */
@@ -2207,7 +2976,8 @@ phone.addEventListener("pointerdown", (e) => {
   if (onEdge && stack.length > 1 && !trow) {
     swipe = {
       kind: "edge",
-      x: e.clientX, y: e.clientY,
+      x: e.clientX,
+      y: e.clientY,
       active: false,
       topEl: topScreen() ? topScreen().el : null,
       underEl: stack.length > 1 ? stack[stack.length - 2].el : null,
@@ -2239,7 +3009,10 @@ phone.addEventListener("pointermove", (e) => {
   if (!swipe) return;
   const dx = e.clientX - swipe.x;
   const dy = e.clientY - swipe.y;
-  if (pressTimer && Math.abs(dy) > 10) { clearTimeout(pressTimer); pressTimer = null; }
+  if (pressTimer && Math.abs(dy) > 10) {
+    clearTimeout(pressTimer);
+    pressTimer = null;
+  }
 
   if (swipe.kind === "edge") {
     if (Math.abs(dx) > 4 || Math.abs(dy) > 4) swipe.active = true;
@@ -2257,10 +3030,12 @@ phone.addEventListener("pointermove", (e) => {
     if (swipe.mode === null) {
       if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
         swipe.mode = "h";
-        clearTimeout(pressTimer); pressTimer = null;
+        clearTimeout(pressTimer);
+        pressTimer = null;
       } else if (Math.abs(dy) > 12) {
         swipe.mode = "v";
-        clearTimeout(pressTimer); pressTimer = null;
+        clearTimeout(pressTimer);
+        pressTimer = null;
       }
     }
     if (swipe.mode === "h") {
@@ -2318,14 +3093,18 @@ phone.addEventListener("contextmenu", (e) => {
 });
 
 // suppress click after long-press or swipe
-phone.addEventListener("click", (e) => {
-  if (pressFired || suppressClick) {
-    pressFired = false;
-    suppressClick = false;
-    e.stopPropagation();
-    e.preventDefault();
-  }
-}, true);
+phone.addEventListener(
+  "click",
+  (e) => {
+    if (pressFired || suppressClick) {
+      pressFired = false;
+      suppressClick = false;
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  },
+  true,
+);
 
 // long-press tooltip on tab bar icons
 let tipTimer = null;
@@ -2339,7 +3118,7 @@ tabbarEl.addEventListener("pointerdown", (e) => {
     tipEl.textContent = b.getAttribute("aria-label") || "";
     const pr = phone.getBoundingClientRect();
     const r = b.getBoundingClientRect();
-    tipEl.style.left = (r.left - pr.left + r.width / 2) + "px";
+    tipEl.style.left = r.left - pr.left + r.width / 2 + "px";
     tipEl.style.bottom = "78px";
     phone.appendChild(tipEl);
   }, 550);
@@ -2347,8 +3126,11 @@ tabbarEl.addEventListener("pointerdown", (e) => {
 ["pointerup", "pointermove", "pointercancel"].forEach((ev) =>
   tabbarEl.addEventListener(ev, () => {
     clearTimeout(tipTimer);
-    if (tipEl) { tipEl.remove(); tipEl = null; }
-  })
+    if (tipEl) {
+      tipEl.remove();
+      tipEl = null;
+    }
+  }),
 );
 
 /* ---------- delegated clicks ---------- */
@@ -2359,21 +3141,39 @@ phone.addEventListener("click", (e) => {
 
   // tab bar
   const tab = el.closest("[data-tab]");
-  if (tab) { go("#/" + tab.dataset.tab); return; }
-  if (el.closest("#newbtn")) { openSheetEl("new"); return; }
-  if (el.closest("#new-bot")) { toast("Describe the bot and Octant will draft its role"); return; }
+  if (tab) {
+    go("#/" + tab.dataset.tab);
+    return;
+  }
+  if (el.closest("#newbtn")) {
+    openSheetEl("new");
+    return;
+  }
+  if (el.closest("#new-bot")) {
+    toast("Describe the bot and Octant will draft its role");
+    return;
+  }
 
   // back
   const back = el.closest("[data-back]");
-  if (back) { goBack(); return; }
+  if (back) {
+    goBack();
+    return;
+  }
 
   // dead buttons get a subtle toast
   const dead = el.closest("[data-dead]");
-  if (dead) { toast(dead.dataset.dead); return; }
+  if (dead) {
+    toast(dead.dataset.dead);
+    return;
+  }
 
   // menus
   const menuBtn = el.closest("[data-menu]");
-  if (menuBtn) { openMenu(menuBtn.dataset.menu, menuBtn); return; }
+  if (menuBtn) {
+    openMenu(menuBtn.dataset.menu, menuBtn);
+    return;
+  }
 
   // thread rows (only inside .rowwrap; bot rows reuse .trow styling)
   const trow = el.closest(".trow");
@@ -2399,7 +3199,9 @@ phone.addEventListener("click", (e) => {
       wrap.style.transition = "all .25s ease";
       wrap.style.opacity = "0";
       wrap.style.maxHeight = wrap.offsetHeight + "px";
-      requestAnimationFrame(() => { wrap.style.maxHeight = "0px"; });
+      requestAnimationFrame(() => {
+        wrap.style.maxHeight = "0px";
+      });
       setTimeout(() => wrap.remove(), 280);
       toast("Thread put away");
     } else {
@@ -2412,11 +3214,17 @@ phone.addEventListener("click", (e) => {
 
   // bots rows
   const botrow = el.closest("[data-bot]");
-  if (botrow) { go("#/bot/" + botrow.dataset.bot); return; }
+  if (botrow) {
+    go("#/bot/" + botrow.dataset.bot);
+    return;
+  }
 
   // PR rows
   const prrow = el.closest("[data-pr]");
-  if (prrow) { go("#/pr/2864"); return; }
+  if (prrow) {
+    go("#/pr/2864");
+    return;
+  }
 
   // section headers
   const sechead = el.closest(".sechead");
@@ -2460,10 +3268,13 @@ phone.addEventListener("click", (e) => {
     const card = appr.closest(".approval-card");
     card.classList.add("resolved");
     const note = card.querySelector(".resolved-note");
-    const what = { once: "Allowed once", always: "Always allowed in this Project", deny: "Denied" }[appr.dataset.approve];
+    const what = { once: "Allowed once", always: "Always allowed in this Project", deny: "Denied" }[
+      appr.dataset.approve
+    ];
     note.style.display = "";
     note.textContent = what;
-    note.style.color = appr.dataset.approve === "deny" ? "var(--danger-text)" : "var(--success-text)";
+    note.style.color =
+      appr.dataset.approve === "deny" ? "var(--danger-text)" : "var(--success-text)";
     return;
   }
 
@@ -2487,14 +3298,20 @@ phone.addEventListener("click", (e) => {
     const nrow = inb.closest(".nrow");
     nrow.style.transition = "all .25s ease";
     nrow.style.opacity = "0";
-    setTimeout(() => { nrow.remove(); checkNeedsEmpty(); }, 260);
+    setTimeout(() => {
+      nrow.remove();
+      checkNeedsEmpty();
+    }, 260);
     toast(inb.dataset.inbox === "allow" ? "Allowed" : "Denied");
     return;
   }
 
   // inbox rows open their thread
   const openRow = el.closest("[data-open]");
-  if (openRow && !el.closest("button")) { go("#/" + openRow.dataset.open); return; }
+  if (openRow && !el.closest("button")) {
+    go("#/" + openRow.dataset.open);
+    return;
+  }
 
   // needs-my-review chip
   if (el.closest("#needs-review")) {
@@ -2529,29 +3346,62 @@ phone.addEventListener("click", (e) => {
   const sheetBtn = el.closest("[data-sheet]");
   if (sheetBtn) {
     const kind = sheetBtn.dataset.sheet;
-    if (kind === "panes" && deviceMode === "ipad") { ipadInspector = !ipadInspector; renderIpadChrome(); return; }
+    if (kind === "panes" && deviceMode === "ipad") {
+      ipadInspector = !ipadInspector;
+      renderIpadChrome();
+      return;
+    }
     openSheetEl(kind);
     return;
   }
 
   // pushes (settings rows, iPad sidebar)
   const pushEl = el.closest("[data-push]");
-  if (pushEl) { go("#/" + pushEl.dataset.push); return; }
+  if (pushEl) {
+    go("#/" + pushEl.dataset.push);
+    return;
+  }
 
   // iPad sidebar places
   const place = el.closest("[data-ipad-place]");
-  if (place) { go("#/" + place.dataset.ipadPlace); return; }
-  if (el.closest("#ipad-compose")) { openSheetEl("new"); return; }
+  if (place) {
+    go("#/" + place.dataset.ipadPlace);
+    return;
+  }
+  if (el.closest("#ipad-compose")) {
+    openSheetEl("new");
+    return;
+  }
 
   // iPad inspector panes controls
   const insp = el.closest("#ipad-inspector");
   if (insp) {
     const segBtn = el.closest("[data-panes-seg]");
-    if (segBtn) { panesState.seg = +segBtn.dataset.panesSeg; panesState.view = "root"; renderIpadChrome(); return; }
+    if (segBtn) {
+      panesState.seg = +segBtn.dataset.panesSeg;
+      panesState.view = "root";
+      renderIpadChrome();
+      return;
+    }
     const fileBtn = el.closest("[data-panes-file]");
-    if (fileBtn) { panesState.file = PANES_FILES[+fileBtn.dataset.panesFile]; panesState.view = "diff"; renderIpadChrome(); return; }
-    if (el.closest("[data-panes='review']")) { panesState.seg = 1; panesState.view = "root"; renderIpadChrome(); return; }
-    if (el.closest("[data-panes='back']")) { panesState.view = "root"; panesState.file = null; renderIpadChrome(); return; }
+    if (fileBtn) {
+      panesState.file = PANES_FILES[+fileBtn.dataset.panesFile];
+      panesState.view = "diff";
+      renderIpadChrome();
+      return;
+    }
+    if (el.closest("[data-panes='review']")) {
+      panesState.seg = 1;
+      panesState.view = "root";
+      renderIpadChrome();
+      return;
+    }
+    if (el.closest("[data-panes='back']")) {
+      panesState.view = "root";
+      panesState.file = null;
+      renderIpadChrome();
+      return;
+    }
   }
 
   // lock screen stale toggle
@@ -2580,7 +3430,9 @@ phone.addEventListener("change", (e) => {
 });
 
 function syncNamesUI() {
-  $$("input.set-switch[data-set='names']").forEach((s) => { s.checked = showNames; });
+  $$("input.set-switch[data-set='names']").forEach((s) => {
+    s.checked = showNames;
+  });
   const nc = $("#names-toggle");
   if (nc) nc.checked = showNames;
 }
@@ -2622,7 +3474,8 @@ phone.addEventListener("input", (e) => {
 /* ---------- sheet backdrop / menu backdrop clicks ---------- */
 
 sheetRoot.addEventListener("click", (e) => {
-  if (e.target.dataset.closeSheet !== undefined || e.target.classList.contains("sheet-backdrop")) closeSheet();
+  if (e.target.dataset.closeSheet !== undefined || e.target.classList.contains("sheet-backdrop"))
+    closeSheet();
 });
 menuRoot.addEventListener("click", (e) => {
   if (e.target.classList.contains("menu-backdrop")) closeMenus();
@@ -2633,7 +3486,12 @@ menuRoot.addEventListener("click", (e) => {
 const themeBtns = $$(".seg-light button");
 function setThemePref(p) {
   themePref = p === "system" ? "system" : p;
-  const eff = themePref === "system" ? (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : themePref;
+  const eff =
+    themePref === "system"
+      ? window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light"
+      : themePref;
   phone.dataset.theme = eff;
   localStorage.setItem("octant-mock-theme", eff);
   localStorage.setItem("octant-mock-theme-pref", themePref);
@@ -2641,7 +3499,9 @@ function setThemePref(p) {
   const tv = document.querySelector('[data-menu="settheme"] .set-val');
   if (tv) tv.textContent = themeLabel();
 }
-function setTheme(t) { setThemePref(t); }
+function setTheme(t) {
+  setThemePref(t);
+}
 themeBtns.forEach((b) => b.addEventListener("click", () => setTheme(b.dataset.theme)));
 
 const beforeCheck = $("#before-toggle");
@@ -2677,7 +3537,9 @@ function syncDeviceUI() {
   const opts = POSTURES[deviceMode];
   postSelect.style.display = opts ? "" : "none";
   if (opts) {
-    postSelect.innerHTML = opts.map(([v, l]) => `<option value="${v}"${v === posture ? " selected" : ""}>${l}</option>`).join("");
+    postSelect.innerHTML = opts
+      .map(([v, l]) => `<option value="${v}"${v === posture ? " selected" : ""}>${l}</option>`)
+      .join("");
   }
   updateDeviceNote();
 }
@@ -2686,11 +3548,14 @@ postSelect.addEventListener("change", () => setPosture(postSelect.value));
 function updateDeviceNote() {
   const note = $("#device-note");
   if (!note) return;
-  note.textContent = deviceMode === "android" || deviceMode === "androidfold"
-    ? "Android preview: Material chrome; non-core screens may keep iOS styling. Spanned is a hinge-safe single-pane layout, not real dual-screen rendering."
-    : deviceMode === "ipad" ? "iPad layout: sidebar + list + detail columns."
-    : deviceMode === "duo" ? "iPhone Duo preview: folded/unfolded are illustrative widths, not hardware metrics."
-    : "";
+  note.textContent =
+    deviceMode === "android" || deviceMode === "androidfold"
+      ? "Android preview: Material chrome; non-core screens may keep iOS styling. Spanned is a hinge-safe single-pane layout, not real dual-screen rendering."
+      : deviceMode === "ipad"
+        ? "iPad layout: sidebar + list + detail columns."
+        : deviceMode === "duo"
+          ? "iPhone Duo preview: folded/unfolded are illustrative widths, not hardware metrics."
+          : "";
 }
 phone.dataset.device = deviceMode;
 phone.dataset.posture = POSTURES[deviceMode] ? posture : "";
