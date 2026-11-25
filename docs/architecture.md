@@ -11450,7 +11450,8 @@ the model at another size.
   Code's boards file it under Waiting with the awaiting-input reason; Work's
   navigation row carries `awaitingInput` with the `approval` kind, Chat's carries
   it with `executing` false and the `approval` kind, and Code's carries
-  `awaitingInput` with `executing` false, so the sidebar mark and
+  `awaitingInput` with `executing` false and `awaitingKind` naming what a live
+  turn asks, its provider's question (`user-input`) included, so the sidebar mark and
   the pane header say the thread needs the person (**Needs you**, not
   **Running**) and the thread's attention signal reads "Waiting for your
   approval". The pending-requests read lists it as a `lead-approval` row (see

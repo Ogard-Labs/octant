@@ -21,6 +21,11 @@ const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 const PREFIX = "/api/side-tasks/";
 
+export type SideTaskChildStateReader = (child: {
+  readonly mode: OctantMode;
+  readonly threadId: string;
+}) => Promise<SideTaskChildState | undefined>;
+
 export interface SideTaskRouteDependencies extends SideTaskStartDependencies {
   readonly store: Pick<SideTaskStore, "read" | "find" | "settle">;
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -30,22 +35,13 @@ export interface SideTaskRouteDependencies extends SideTaskStartDependencies {
     readonly windowId: string;
   }) => boolean | Promise<boolean>;
   /**
-   * What a started child thread is doing, in the sidebar row vocabulary, as
-   * this window may read it. `undefined` when the child cannot be read — the
-   * receipt then says nothing rather than guessing. Absent on a host that
-   * cannot read thread activity.
+   * Opens a reader of what started children are doing, in the sidebar row
+   * vocabulary, as this window may read it. One reader serves one request, so
+   * children of one mode answer from the same navigation read. A child that
+   * cannot be read answers `undefined`: the receipt then says nothing rather
+   * than guessing. Absent on a host that cannot read thread activity.
    */
-  readonly childState?: (input: {
-    readonly mode: OctantMode;
-    readonly threadId: string;
-    readonly windowId: string;
-    /**
-     * Shares one read across the started tasks of a single GET: several
-     * children in one mode answer from the same navigation snapshot instead
-     * of each re-reading it. The cache lives only for the request.
-     */
-    readonly share?: <T>(key: string, read: () => Promise<T>) => Promise<T>;
-  }) => Promise<SideTaskChildState | undefined> | SideTaskChildState | undefined;
+  readonly childStates?: (windowId: string) => SideTaskChildStateReader;
   readonly now?: () => number;
 }
 
@@ -108,30 +104,20 @@ export function createSideTaskRouteHandler(dependencies: SideTaskRouteDependenci
     }
     if (request.method === "GET" && action === "") {
       const sideTasks = dependencies.store.read(threadId);
-      const childState = dependencies.childState;
-      if (sideTasks === undefined || childState === undefined) {
+      const childStates = dependencies.childStates;
+      if (sideTasks === undefined || childStates === undefined) {
         return json({ sideTasks }, 200, origin);
       }
       // The child's live state is read-time enrichment: it rides on the task
       // view but is never journaled, and it is simply absent when the window
-      // cannot read the child. Started children of one mode share that mode's
-      // navigation read for the length of this request only.
-      const shared = new Map<string, Promise<unknown>>();
-      const share = <T>(key: string, read: () => Promise<T>): Promise<T> => {
-        const existing = shared.get(key);
-        if (existing !== undefined) return existing.then((value) => value as T);
-        const pending = read();
-        shared.set(key, pending);
-        return pending;
-      };
+      // cannot read the child.
+      const childState = childStates(windowId);
       const tasks = await Promise.all(
         sideTasks.tasks.map(async (task) => {
           if (task.status !== "started" || task.startedThreadId === undefined) return task;
           const state = await childState({
             mode: task.offer.mode,
             threadId: task.startedThreadId,
-            windowId,
-            share,
           });
           return state === undefined ? task : { ...task, childState: state };
         }),

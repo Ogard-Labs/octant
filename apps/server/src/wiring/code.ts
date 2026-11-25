@@ -981,8 +981,7 @@ export function wireCode(deps: CodeDependencies) {
           moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
           liveTurns,
           awaitsHarnessApproval: threadAwaitsHarnessApproval,
-          turnAwaitsPerson: (threadId) =>
-            codeOperationRuntime?.turnAwaitsPerson?.(threadId) === true,
+          turnAwaiting: (threadId) => codeOperationRuntime?.turnAwaiting?.(threadId),
           readLatestFinishedReceipt: (threadId) => finishedReceipts.latest(threadId),
           putAwayWhenDone: () =>
             (persistence.readShellSettings()?.settings ?? defaultShellSettings())

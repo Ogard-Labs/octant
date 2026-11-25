@@ -209,8 +209,10 @@ export interface CodeThreadNavigationItem {
   /** The issues the thread's tool calls wrote to; absent when it has none. */
   readonly touchedIssues?: ThreadTouchedIssues;
   readonly executing?: boolean;
-  /** The agent's own approval waits on the person; the thread is parked, not working. */
+  /** An approval or a question waits on the person; the thread is parked, not working. */
   readonly awaitingInput?: boolean;
+  /** What the person is asked. Absent from an older host, which only reported an approval. */
+  readonly awaitingKind?: "approval" | "user-input";
   /** When the running turn began and its latest step; absent outside a live turn. */
   readonly turnStartedAt?: string;
   readonly liveStep?: ThreadLiveStep;
@@ -2120,6 +2122,7 @@ export function useCodeController(options: CodeControllerOptions) {
       {
         readonly executing: boolean;
         readonly awaitingInput?: boolean;
+        readonly awaitingKind?: "approval" | "user-input";
         readonly checkoutChip?: {
           readonly checkoutKind: "existing-worktree" | "managed-worktree";
           readonly label: string;
@@ -2135,7 +2138,9 @@ export function useCodeController(options: CodeControllerOptions) {
       const pullRequestSummaries = entry.threadPullRequests ?? entry.pullRequestSummaries;
       byThread.set(String(entry.threadId), {
         executing: entry.executing,
-        ...(entry.awaitingInput === true ? { awaitingInput: true } : {}),
+        ...(entry.awaitingInput === true
+          ? { awaitingInput: true, awaitingKind: entry.awaitingKind ?? "approval" }
+          : {}),
         ...(entry.turnStartedAt === undefined ? {} : { turnStartedAt: entry.turnStartedAt }),
         ...(entry.liveStep === undefined ? {} : { liveStep: entry.liveStep }),
         ...(entry.checkoutChip === undefined ? {} : { checkoutChip: entry.checkoutChip }),
@@ -2182,7 +2187,9 @@ export function useCodeController(options: CodeControllerOptions) {
               (activityByThread.get(String(thread.id)) ?? 0) >
                 (readCursors.get(String(thread.id)) ?? 0),
             ...(runtime?.executing === true ? { executing: true } : {}),
-            ...(runtime?.awaitingInput === true ? { awaitingInput: true } : {}),
+            ...(runtime?.awaitingInput === true
+              ? { awaitingInput: true, awaitingKind: runtime.awaitingKind ?? "approval" }
+              : {}),
             ...(runtime?.turnStartedAt === undefined
               ? {}
               : { turnStartedAt: runtime.turnStartedAt }),

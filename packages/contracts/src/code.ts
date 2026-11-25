@@ -1705,13 +1705,15 @@ export const CodeNavigationRuntime = Schema.Struct({
   threadId: CodeThreadId,
   executing: Schema.Boolean,
   /**
-   * The thread's running turn is parked on the person: the agent's own harness
-   * approval is waiting. Carried only when true, with `executing` false, so the
+   * The thread's running turn is parked on the person: an approval or a
+   * question is waiting. Carried only when true, with `executing` false, so the
    * sidebar says the thread needs the person rather than that it is working.
    * Optional so an older host's payload still decodes; absent reads as not
    * waiting.
    */
   awaitingInput: Schema.optional(Schema.Literal(true)),
+  /** What the person is asked. Absent from an older host, which only reported an approval. */
+  awaitingKind: Schema.optional(Schema.Literal("approval", "user-input")),
   checkoutChip: Schema.optional(
     Schema.Struct({
       checkoutKind: Schema.Literal("existing-worktree", "managed-worktree"),
