@@ -64,6 +64,20 @@ export function protocol(message = "Claude returned an invalid SDK response."): 
 }
 
 /**
+ * A frame showing the runtime holds authority Octant did not give it: another
+ * permission mode, or a call to a tool that was not offered. It ends the
+ * session. Every other frame `decodeMessage` cannot read is dropped,
+ * because a runtime release that adds a message, a field, or a value used to
+ * end the turn each time (`ping`, `caller`, `thinking_tokens`, `dev_intent`
+ * and `api_retry` were each an outage before they were listed here).
+ */
+class ClaudeSurfaceRefusal extends ClaudePortError {}
+
+function surfaceRefused(message: string): ClaudeSurfaceRefusal {
+  return new ClaudeSurfaceRefusal(failure("protocol", message));
+}
+
+/**
  * The reason a runtime error is allowed to carry into the person's view.
  *
  * Raw error text stays out of every failure (it can quote paths, prompts, or
@@ -138,12 +152,18 @@ export function decodeInterruptReceipt(value: unknown): readonly string[] | unde
   return receipt === undefined ? undefined : stringArray(receipt.still_queued);
 }
 
+// A count the runtime sends as null, or leaves out, is none.
 function nullableTokenCount(value: unknown): number | undefined {
-  if (value === null) return 0;
+  if (value === null || value === undefined) return 0;
   return nonNegativeNumber(value);
 }
 
-function decodeUsage(value: unknown, nullableCache: boolean, nullableInput = false): ClaudeUsage {
+/** The token counts a frame reports, or nothing when they cannot be read. */
+function readUsage(
+  value: unknown,
+  nullableCache: boolean,
+  nullableInput = false,
+): ClaudeUsage | undefined {
   const usage = object(value);
   const inputTokens = nullableInput
     ? nullableTokenCount(usage?.input_tokens)
@@ -161,9 +181,15 @@ function decodeUsage(value: unknown, nullableCache: boolean, nullableInput = fal
     cacheCreationInputTokens === undefined ||
     cacheReadInputTokens === undefined
   ) {
-    throw protocol("Claude returned an unsupported runtime message.");
+    return undefined;
   }
   return { inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens };
+}
+
+function decodeUsage(value: unknown, nullableCache: boolean, nullableInput = false): ClaudeUsage {
+  const usage = readUsage(value, nullableCache, nullableInput);
+  if (usage === undefined) throw protocol("Claude returned an unsupported runtime message.");
+  return usage;
 }
 
 function decodeJsonValue(value: unknown, depth = 0): ClaudeJsonValue {
@@ -183,82 +209,52 @@ function decodeJsonValue(value: unknown, depth = 0): ClaudeJsonValue {
   return decoded;
 }
 
+/**
+ * One block of an assistant message, or nothing for a block this build does
+ * not read (a block type a newer runtime added, or one missing what Octant
+ * shows of it). Fields beyond the ones read are the runtime's own.
+ */
 function decodeAssistantContent(
   value: unknown,
   input: Pick<ClaudeOpenQueryInput, "tools" | "executionPolicy" | "nativeSetup">,
-): ClaudeAssistantContent {
+): ClaudeAssistantContent | undefined {
   const block = object(value);
-  if (block === undefined || typeof block.type !== "string") {
-    throw protocol("Claude returned an unsupported runtime message.");
-  }
+  if (block === undefined) return undefined;
   if (block.type === "text") {
-    if (
-      typeof block.text !== "string" ||
-      (block.citations !== null &&
-        block.citations !== undefined &&
-        (!Array.isArray(block.citations) || block.citations.length > 0))
-    ) {
-      throw protocol("Claude returned an unsupported runtime message.");
-    }
-    return { kind: "text", text: block.text };
+    return typeof block.text === "string" ? { kind: "text", text: block.text } : undefined;
   }
   if (block.type === "thinking") {
-    if (typeof block.thinking !== "string" || typeof block.signature !== "string") {
-      throw protocol("Claude returned an unsupported runtime message.");
-    }
-    return { kind: "reasoning", text: block.thinking };
+    return typeof block.thinking === "string"
+      ? { kind: "reasoning", text: block.thinking }
+      : undefined;
   }
-  if (block.type === "redacted_thinking") {
-    if (typeof block.data !== "string") {
-      throw protocol("Claude returned an unsupported runtime message.");
-    }
-    return { kind: "redacted-reasoning" };
+  if (block.type === "redacted_thinking") return { kind: "redacted-reasoning" };
+  if (block.type !== "tool_use") return undefined;
+  if (typeof block.id !== "string" || typeof block.name !== "string") return undefined;
+  // Claude 2.1.301 can report a file-tool attempt before its disabled-tool
+  // error in Plan. Recognize that report without granting execution authority.
+  const disabled =
+    input.executionPolicy === "plan" &&
+    !input.tools.includes(block.name) &&
+    (block.name === "Write" || block.name === "Edit");
+  // A call to a tool Octant did not offer is the runtime acting beyond the
+  // session it was opened with, which no later frame can undo.
+  if (!claudeOffersTool(input, block.name) && !disabled) {
+    throw surfaceRefused("Claude returned an unsupported runtime message.");
   }
-  if (block.type === "tool_use") {
-    // Claude 2.1.301 can report a file-tool attempt before its disabled-tool
-    // error in Plan. Recognize that report without granting execution authority.
-    const disabled =
-      input.executionPolicy === "plan" &&
-      !input.tools.includes(String(block.name)) &&
-      (block.name === "Write" || block.name === "Edit");
-    const decodedInput = decodeJsonValue(block.input);
-    const decodedInputObject = object(decodedInput);
-    // Claude Code 2.1.26x stamps every tool call with `caller: { type }`; the
-    // annotation changes nothing about the call, and refusing it failed every
-    // tool-using turn while plain chat kept working.
-    const caller = block.caller;
-    const callerIsKnownShape =
-      caller === undefined || caller === null || typeof object(caller)?.type === "string";
-    if (
-      typeof block.id !== "string" ||
-      typeof block.name !== "string" ||
-      (!claudeOffersTool(input, block.name) && !disabled) ||
-      decodedInputObject === undefined ||
-      !callerIsKnownShape
-    ) {
-      throw protocol("Claude returned an unsupported runtime message.");
-    }
-    return {
-      kind: "tool-use",
-      toolUseId: block.id,
-      toolName: block.name,
-      ...(disabled ? { disabled: true as const } : {}),
-      input: decodedInputObject as { readonly [key: string]: ClaudeJsonValue },
-    };
-  }
-  throw protocol("Claude returned an unsupported runtime message.");
+  // Claude Code 2.1.26x stamps every tool call with `caller: { type }`; the
+  // annotation changes nothing about the call, and refusing it failed every
+  // tool-using turn while plain chat kept working.
+  const decodedInputObject = object(decodeJsonValue(block.input));
+  if (decodedInputObject === undefined) return undefined;
+  return {
+    kind: "tool-use",
+    toolUseId: block.id,
+    toolName: block.name,
+    ...(disabled ? { disabled: true as const } : {}),
+    input: decodedInputObject as { readonly [key: string]: ClaudeJsonValue },
+  };
 }
-
-const STREAM_STOP_REASONS = new Set([
-  "end_turn",
-  "max_tokens",
-  "stop_sequence",
-  "tool_use",
-  "pause_turn",
-  "compaction",
-  "refusal",
-  "model_context_window_exceeded",
-]);
 
 function decodeStreamEvent(
   value: unknown,
@@ -273,10 +269,7 @@ function decodeStreamEvent(
     if (
       message === undefined ||
       typeof message.id !== "string" ||
-      typeof message.model !== "string" ||
-      message.role !== "assistant" ||
-      !Array.isArray(message.content) ||
-      message.content.length > 0
+      typeof message.model !== "string"
     ) {
       throw protocol("Claude returned an unsupported runtime message.");
     }
@@ -289,20 +282,14 @@ function decodeStreamEvent(
   }
   if (event.type === "message_delta") {
     const delta = object(event.delta);
-    if (
-      delta === undefined ||
-      (delta.stop_reason !== null &&
-        (typeof delta.stop_reason !== "string" || !STREAM_STOP_REASONS.has(delta.stop_reason))) ||
-      (delta.stop_sequence !== null && typeof delta.stop_sequence !== "string") ||
-      !absentOrNull(delta.stop_details) ||
-      !absentOrNull(delta.container) ||
-      !absentNullOrObject(event.context_management)
-    ) {
+    if (delta === undefined) {
       throw protocol("Claude returned an unsupported runtime message.");
     }
     return {
       kind: "message-delta",
-      stopReason: delta.stop_reason,
+      // Any reason is carried as the runtime names it; only the result's own
+      // stop reason is shown, and an unknown one there reads as none.
+      stopReason: typeof delta.stop_reason === "string" ? delta.stop_reason : null,
       usage: decodeUsage(event.usage, true, true),
     };
   }
@@ -318,11 +305,9 @@ function decodeStreamEvent(
     throw protocol("Claude returned an unsupported runtime message.");
   }
   if (event.type === "content_block_start") {
-    return {
-      kind: "content-start",
-      index,
-      content: decodeAssistantContent(event.content_block, input),
-    };
+    const content = decodeAssistantContent(event.content_block, input);
+    if (content === undefined) throw protocol("Claude returned an unsupported runtime message.");
+    return { kind: "content-start", index, content };
   }
   if (event.type === "content_block_stop") return { kind: "content-stop", index };
   if (event.type !== "content_block_delta") {
@@ -390,7 +375,11 @@ function isInterruptionMarker(content: ReadonlyArray<unknown>): boolean {
 
 function decodeToolResults(message: Record<string, unknown>): ClaudeDecodedMessage {
   const user = object(message.message);
-  if (user === undefined || user.role !== "user" || message.parent_tool_use_id !== null) {
+  if (
+    user === undefined ||
+    user.role !== "user" ||
+    (message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined)
+  ) {
     throw protocol("Claude returned an unsupported runtime message.");
   }
   if (message.isReplay === true || typeof user.content === "string") return { kind: "ignored" };
@@ -398,23 +387,20 @@ function decodeToolResults(message: Record<string, unknown>): ClaudeDecodedMessa
     throw protocol("Claude returned an unsupported runtime message.");
   }
   if (isInterruptionMarker(user.content)) return { kind: "ignored" };
-  const results = user.content.map((value) => {
+  // A block that is not a tool result (text the runtime wrote into its own
+  // transcript, a block type a newer runtime added) settles no call.
+  const results = user.content.flatMap((value) => {
     const block = object(value);
-    if (
-      block === undefined ||
-      block.type !== "tool_result" ||
-      typeof block.tool_use_id !== "string" ||
-      (block.is_error !== undefined && typeof block.is_error !== "boolean")
-    ) {
-      throw protocol("Claude returned an unsupported runtime message.");
-    }
-    return {
-      toolUseId: block.tool_use_id,
-      isError: block.is_error === true,
-      ...toolResultText(block.content),
-    };
+    if (block?.type !== "tool_result" || typeof block.tool_use_id !== "string") return [];
+    return [
+      {
+        toolUseId: block.tool_use_id,
+        isError: block.is_error === true,
+        ...toolResultText(block.content),
+      },
+    ];
   });
-  if (results.length === 0) throw protocol("Claude returned an unsupported runtime message.");
+  if (results.length === 0) return { kind: "ignored" };
   // `tool_use_result` is the structured output of the one call a message
   // settles; with several results it cannot be told apart, so it is ignored.
   const only = results.length === 1 ? results[0] : undefined;
@@ -498,212 +484,6 @@ function claudePublishedPage(
       ? output.title.replace(/\s+/g, " ").trim().slice(0, MAX_PUBLISHED_TITLE_CHARACTERS).trim()
       : "";
   return { url: url.href, ...(title === "" ? {} : { title }) };
-}
-
-// Claude Code 2.1.258 omits `container` and `stop_details` from assistant
-// messages instead of sending null, and reports context management as an
-// object (`{ applied_edits: [] }`) rather than null. Neither shape widens what
-// the session can do, so both spellings are accepted.
-function absentOrNull(value: unknown): boolean {
-  return value === undefined || value === null;
-}
-
-function absentNullOrObject(value: unknown): boolean {
-  return value === undefined || value === null || object(value) !== undefined;
-}
-
-function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
-  const allowedKeys = new Set(allowed);
-  return Object.keys(value).every((key) => allowedKeys.has(key));
-}
-
-/** System subtypes `isHarmlessInformational` drops when their fields check out. */
-const INFORMATIONAL_SYSTEM_SUBTYPES: ReadonlySet<string> = new Set([
-  "api_retry",
-  "post_turn_summary",
-  "notification",
-  "thinking_tokens",
-  "informational",
-  "dev_intent",
-]);
-
-function isHarmlessInformational(message: Record<string, unknown>): boolean {
-  if (message.type === "keep_alive") return hasOnlyKeys(message, ["type"]);
-  if (message.type === "prompt_suggestion") {
-    return (
-      hasOnlyKeys(message, ["type", "suggestion", "uuid", "session_id"]) &&
-      typeof message.suggestion === "string" &&
-      typeof message.uuid === "string" &&
-      typeof message.session_id === "string"
-    );
-  }
-  // Claude Code 2.1.258 announces the active goal and the autocompact window
-  // as their own message types, before the runtime initializes and again when
-  // they change. Neither carries authority; both are dropped.
-  if (message.type === "active_goal") {
-    return (
-      hasOnlyKeys(message, ["type", "value", "uuid", "session_id"]) &&
-      (message.value === null ||
-        typeof message.value === "string" ||
-        object(message.value) !== undefined) &&
-      typeof message.uuid === "string" &&
-      typeof message.session_id === "string"
-    );
-  }
-  // The runtime acknowledges each queued user message with a lifecycle note
-  // (2.1.258), and sends it before the initialized message on the first turn.
-  if (message.type === "command_lifecycle") {
-    return (
-      hasOnlyKeys(message, ["type", "command_uuid", "state", "uuid", "session_id"]) &&
-      typeof message.command_uuid === "string" &&
-      typeof message.state === "string" &&
-      typeof message.uuid === "string" &&
-      typeof message.session_id === "string"
-    );
-  }
-  if (message.type === "autocompact_state") {
-    return (
-      hasOnlyKeys(message, ["type", "value", "uuid", "session_id"]) &&
-      object(message.value) !== undefined &&
-      typeof message.uuid === "string" &&
-      typeof message.session_id === "string"
-    );
-  }
-  if (message.type !== "system") return false;
-  // The runtime narrates each API retry (2.1.234: `api_retry` with the
-  // attempt count, the delay, and the HTTP status it is retrying after).
-  // Refusing it as unsupported ended the turn on the first transient error,
-  // before the retry it was announcing could succeed or the runtime could
-  // report the final outcome; the note itself changes nothing.
-  if (message.subtype === "api_retry") {
-    return (
-      hasOnlyKeys(message, [
-        "type",
-        "subtype",
-        "attempt",
-        "max_retries",
-        "retry_delay_ms",
-        "error_status",
-        "error",
-        "uuid",
-        "session_id",
-      ]) &&
-      nonNegativeInteger(message.attempt) !== undefined &&
-      nonNegativeInteger(message.max_retries) !== undefined &&
-      nonNegativeNumber(message.retry_delay_ms) !== undefined &&
-      (message.error_status === undefined ||
-        nonNegativeInteger(message.error_status) !== undefined) &&
-      (message.error === undefined || typeof message.error === "string") &&
-      typeof message.uuid === "string" &&
-      typeof message.session_id === "string"
-    );
-  }
-  // A post-turn summary is the runtime's own one-line status of the turn it
-  // just finished (2.1.258); it neither changes state nor grants anything.
-  if (message.subtype === "post_turn_summary") {
-    return (
-      hasOnlyKeys(message, [
-        "type",
-        "subtype",
-        "summarizes_uuid",
-        "status_category",
-        "status_detail",
-        "needs_action",
-        "uuid",
-        "session_id",
-      ]) &&
-      typeof message.summarizes_uuid === "string" &&
-      typeof message.status_category === "string" &&
-      typeof message.status_detail === "string" &&
-      typeof message.needs_action === "string" &&
-      typeof message.uuid === "string" &&
-      typeof message.session_id === "string"
-    );
-  }
-  if (message.subtype === "notification") {
-    return (
-      hasOnlyKeys(message, [
-        "type",
-        "subtype",
-        "key",
-        "text",
-        "priority",
-        "color",
-        "timeout_ms",
-        "uuid",
-        "session_id",
-      ]) &&
-      typeof message.key === "string" &&
-      typeof message.text === "string" &&
-      (message.priority === "low" ||
-        message.priority === "medium" ||
-        message.priority === "high" ||
-        message.priority === "immediate") &&
-      (message.color === undefined || typeof message.color === "string") &&
-      (message.timeout_ms === undefined || nonNegativeNumber(message.timeout_ms) !== undefined) &&
-      typeof message.uuid === "string" &&
-      typeof message.session_id === "string"
-    );
-  }
-  // The runtime reports how many tokens a turn is thinking with (Claude Code
-  // 2.1.26x: `thinking_tokens` with an estimate and its delta). Refusing it
-  // ended a tool-using turn as "unsupported runtime message" the moment the
-  // runtime began reasoning about a tool result; the figure changes nothing.
-  if (message.subtype === "thinking_tokens") {
-    return (
-      hasOnlyKeys(message, [
-        "type",
-        "subtype",
-        "estimated_tokens",
-        "estimated_tokens_delta",
-        "user_message_uuid",
-        "uuid",
-        "session_id",
-      ]) &&
-      nonNegativeInteger(message.estimated_tokens) !== undefined &&
-      typeof message.estimated_tokens_delta === "number" &&
-      Number.isFinite(message.estimated_tokens_delta) &&
-      (message.user_message_uuid === undefined || typeof message.user_message_uuid === "string") &&
-      typeof message.uuid === "string" &&
-      typeof message.session_id === "string"
-    );
-  }
-  // Claude Code 2.1.308 notes what it understood a turn to be for (`kind`) and
-  // what started it (`trigger`). Refusing it failed Code sessions at startup;
-  // the note names no tool, path, or permission, so nothing acts on it.
-  if (message.subtype === "dev_intent") {
-    return (
-      hasOnlyKeys(message, ["type", "subtype", "kind", "trigger", "uuid", "session_id"]) &&
-      typeof message.kind === "string" &&
-      typeof message.trigger === "string" &&
-      typeof message.uuid === "string" &&
-      typeof message.session_id === "string"
-    );
-  }
-  if (message.subtype === "informational") {
-    return (
-      hasOnlyKeys(message, [
-        "type",
-        "subtype",
-        "content",
-        "level",
-        "tool_use_id",
-        "prevent_continuation",
-        "uuid",
-        "session_id",
-      ]) &&
-      typeof message.content === "string" &&
-      (message.level === "info" ||
-        message.level === "notice" ||
-        message.level === "suggestion" ||
-        message.level === "warning") &&
-      (message.tool_use_id === undefined || typeof message.tool_use_id === "string") &&
-      (message.prevent_continuation === undefined || message.prevent_continuation === false) &&
-      typeof message.uuid === "string" &&
-      typeof message.session_id === "string"
-    );
-  }
-  return false;
 }
 
 export function decodeModels(value: unknown): readonly ClaudeModelInfo[] {
@@ -1058,59 +838,6 @@ const RESULT_SUBTYPES = new Set<ClaudeResultSubtype>([
   "error_max_structured_output_retries",
 ]);
 
-const TERMINAL_REASONS = new Set([
-  "blocking_limit",
-  "rapid_refill_breaker",
-  "prompt_too_long",
-  "image_error",
-  "model_error",
-  "api_error",
-  "malformed_tool_use_exhausted",
-  "aborted_streaming",
-  "aborted_tools",
-  "stop_hook_prevented",
-  "hook_stopped",
-  "tool_deferred",
-  "max_turns",
-  "completed",
-  "budget_exhausted",
-  "structured_output_retry_exhausted",
-  "tool_deferred_unavailable",
-  "turn_setup_failed",
-]);
-
-const ASSISTANT_ERRORS = new Set([
-  "authentication_failed",
-  "oauth_org_not_allowed",
-  "billing_error",
-  "rate_limit",
-  "overloaded",
-  "invalid_request",
-  "model_not_found",
-  "server_error",
-  "unknown",
-  "max_output_tokens",
-]);
-
-const RATE_LIMIT_TYPES = new Set([
-  "five_hour",
-  "seven_day",
-  "seven_day_opus",
-  "seven_day_sonnet",
-  "seven_day_overage_included",
-  "overage",
-]);
-
-const TASK_NOTIFICATION_STATUSES = new Set(["completed", "failed", "stopped"]);
-const TASK_UPDATE_STATUSES = new Set([
-  "pending",
-  "running",
-  "completed",
-  "failed",
-  "killed",
-  "paused",
-]);
-
 const MAX_WORKFLOW_PROGRESS_ENTRIES = 512;
 const WORKFLOW_AGENT_STATES = new Set(["start", "progress", "done", "error"]);
 
@@ -1127,20 +854,18 @@ function decodeWorkflowAgents(value: unknown): readonly ClaudeWorkflowAgent[] {
   }
   return value.flatMap((entry): ClaudeWorkflowAgent[] => {
     const item = object(entry);
-    if (item === undefined || typeof item.type !== "string") {
-      throw protocol("Claude returned an unsupported runtime message.");
-    }
-    if (item.type !== "workflow_agent") return [];
+    // An entry this build cannot place (another entry type, a state a newer
+    // runtime added) is left out; the next whole list restates the rest.
     if (
+      item?.type !== "workflow_agent" ||
       typeof item.index !== "number" ||
       !Number.isSafeInteger(item.index) ||
       item.index < 0 ||
       typeof item.label !== "string" ||
       typeof item.state !== "string" ||
-      !WORKFLOW_AGENT_STATES.has(item.state) ||
-      (item.lastToolName !== undefined && typeof item.lastToolName !== "string")
+      !WORKFLOW_AGENT_STATES.has(item.state)
     ) {
-      throw protocol("Claude returned an unsupported runtime message.");
+      return [];
     }
     return [
       {
@@ -1169,66 +894,53 @@ function decodeTaskUsage(value: unknown): ClaudeTaskUsage {
   return { totalTokens, toolUses, durationMs };
 }
 
-function decodeResult(
-  message: Record<string, unknown>,
-  offered: Pick<ClaudeOpenQueryInput, "tools" | "nativeSetup">,
-): ClaudeDecodedMessage {
-  const usage = decodeUsage(message.usage, false);
-  const durationMs = nonNegativeNumber(message.duration_ms);
-  const permissionDenials = Array.isArray(message.permission_denials)
-    ? message.permission_denials.map((entry) => object(entry))
-    : undefined;
-  if (
-    typeof message.session_id !== "string" ||
-    typeof message.subtype !== "string" ||
-    !RESULT_SUBTYPES.has(message.subtype as ClaudeResultSubtype) ||
-    typeof message.uuid !== "string" ||
-    durationMs === undefined ||
-    nonNegativeNumber(message.duration_api_ms) === undefined ||
-    nonNegativeNumber(message.num_turns) === undefined ||
-    !Number.isInteger(message.num_turns) ||
-    nonNegativeNumber(message.total_cost_usd) === undefined ||
-    typeof message.is_error !== "boolean" ||
-    (message.subtype === "success" && (message.is_error || typeof message.result !== "string")) ||
-    (message.subtype !== "success" &&
-      (!message.is_error ||
-        !Array.isArray(message.errors) ||
-        !message.errors.every((entry) => typeof entry === "string"))) ||
-    (message.stop_reason !== null && typeof message.stop_reason !== "string") ||
-    (message.terminal_reason !== undefined &&
-      (typeof message.terminal_reason !== "string" ||
-        !TERMINAL_REASONS.has(message.terminal_reason))) ||
-    object(message.modelUsage) === undefined ||
-    permissionDenials === undefined ||
-    permissionDenials.some(
-      (entry) =>
-        entry === undefined ||
-        typeof entry.tool_name !== "string" ||
-        !claudeOffersTool(offered, entry.tool_name) ||
-        typeof entry.tool_use_id !== "string" ||
-        object(decodeJsonValue(entry.tool_input)) === undefined,
-    )
-  ) {
+/**
+ * The turn's terminal statement, read as leniently as it can be: a result the
+ * decoder dropped would leave the turn waiting for an end that never comes.
+ * A subtype this build does not know reads as the plain success or failure
+ * `is_error` states, and a figure it cannot read is left out.
+ */
+function decodeResult(message: Record<string, unknown>): ClaudeDecodedMessage {
+  if (typeof message.session_id !== "string") {
     throw protocol("Claude returned an unsupported runtime message.");
   }
+  const knownSubtype =
+    typeof message.subtype === "string" &&
+    RESULT_SUBTYPES.has(message.subtype as ClaudeResultSubtype)
+      ? (message.subtype as ClaudeResultSubtype)
+      : undefined;
+  const failed =
+    message.is_error === true || (knownSubtype !== undefined && knownSubtype !== "success");
+  const usage = readUsage(message.usage, true, true);
+  const durationMs = nonNegativeNumber(message.duration_ms);
+  const totalCostUsd = nonNegativeNumber(message.total_cost_usd);
+  const permissionDenials = Array.isArray(message.permission_denials)
+    ? message.permission_denials.flatMap((value) => {
+        const entry = object(value);
+        return typeof entry?.tool_name === "string" && typeof entry.tool_use_id === "string"
+          ? [{ toolName: entry.tool_name, toolUseId: entry.tool_use_id }]
+          : [];
+      })
+    : [];
   return {
     kind: "result",
     sessionId: message.session_id,
-    outcome: message.subtype === "success" ? "success" : "error",
-    subtype: message.subtype as ClaudeResultSubtype,
-    stopReason: message.stop_reason,
+    outcome: failed ? "error" : "success",
+    subtype: !failed
+      ? "success"
+      : knownSubtype === undefined || knownSubtype === "success"
+        ? "error_during_execution"
+        : knownSubtype,
+    stopReason: typeof message.stop_reason === "string" ? message.stop_reason : null,
     ...(typeof message.terminal_reason === "string"
       ? { terminalReason: message.terminal_reason }
       : {}),
-    durationMs,
-    usage,
+    ...(durationMs === undefined ? {} : { durationMs }),
+    ...(usage === undefined ? {} : { usage }),
     // Claude states the turn's price itself. Carrying it through is the only
     // way Octant can show a cost: it holds no price list of its own.
-    totalCostUsd: message.total_cost_usd as number,
-    permissionDenials: permissionDenials.map((entry) => ({
-      toolName: entry!.tool_name as string,
-      toolUseId: entry!.tool_use_id as string,
-    })),
+    ...(totalCostUsd === undefined ? {} : { totalCostUsd }),
+    permissionDenials,
   };
 }
 
@@ -1239,11 +951,7 @@ function decodeRateLimit(message: Record<string, unknown>): ClaudeDecodedMessage
   if (
     typeof message.session_id !== "string" ||
     info === undefined ||
-    (info.status !== "allowed" &&
-      info.status !== "allowed_warning" &&
-      info.status !== "rejected") ||
-    (info.rateLimitType !== undefined &&
-      (typeof info.rateLimitType !== "string" || !RATE_LIMIT_TYPES.has(info.rateLimitType)))
+    (info.status !== "allowed" && info.status !== "allowed_warning" && info.status !== "rejected")
   )
     throw protocol("Claude returned an unsupported runtime message.");
   const overageResetsAt = optionalNonNegativeNumber(info.overageResetsAt);
@@ -1273,40 +981,27 @@ function decodeStatus(
   input: ClaudeOpenQueryInput,
 ): ClaudeDecodedMessage {
   const mode = message.permissionMode;
+  const expectedMode = permissionMode(
+    input.executionPolicy,
+    input.autoApprove,
+    input.ownPermissions === true,
+  );
+  // The one field of a status note that states authority: a mode other than
+  // the one the host launched the session at is never passed over, whatever
+  // else the note carries.
+  if (mode !== undefined && mode !== expectedMode) {
+    throw surfaceRefused("Claude returned an unsupported runtime message.");
+  }
   if (
     typeof message.session_id !== "string" ||
-    (message.status !== null &&
-      message.status !== "compacting" &&
-      message.status !== "requesting") ||
-    (mode !== undefined &&
-      ((mode !== "default" &&
-        mode !== "acceptEdits" &&
-        mode !== "bypassPermissions" &&
-        mode !== "plan" &&
-        mode !== "auto") ||
-        mode !==
-          permissionMode(
-            input.executionPolicy,
-            input.autoApprove,
-            input.ownPermissions === true,
-          ))) ||
-    (message.compact_result !== undefined &&
-      message.compact_result !== "success" &&
-      message.compact_result !== "failed") ||
-    (message.compact_error !== undefined && typeof message.compact_error !== "string")
+    (message.status !== null && message.status !== "compacting" && message.status !== "requesting")
   )
     throw protocol("Claude returned an unsupported runtime message.");
   return {
     kind: "status",
     sessionId: message.session_id,
     status: message.status,
-    ...(mode === "default" ||
-    mode === "acceptEdits" ||
-    mode === "bypassPermissions" ||
-    mode === "plan" ||
-    mode === "auto"
-      ? { permissionMode: mode }
-      : {}),
+    ...(mode === undefined ? {} : { permissionMode: expectedMode }),
     ...(message.compact_result === "success" || message.compact_result === "failed"
       ? { compactResult: message.compact_result }
       : {}),
@@ -1385,15 +1080,35 @@ export function decodeMessage(
   phase: ClaudeDecodePhase,
 ): ClaudeDecodedMessage {
   const message = object(value);
-  if (message === undefined || typeof message.type !== "string") {
-    throw protocol("Claude returned an unsupported runtime message.");
+  if (message === undefined || typeof message.type !== "string") return { kind: "ignored" };
+  // The initialized message is where the runtime states its surface, so it is
+  // never dropped: unreadable, or sent a second time, it ends the session.
+  if (message.type === "system" && message.subtype === "init") {
+    if (phase.kind !== "initializing") {
+      throw protocol("Claude returned an unsupported runtime message.");
+    }
+    return decodeInitializedMessage(message, input, phase.acceptedModels);
   }
-  const isInitialization = message.type === "system" && message.subtype === "init";
+  try {
+    return decodeRecognizedMessage(message, input, phase);
+  } catch (error) {
+    // No log sink exists here, and the frame is runtime-supplied text, so a
+    // frame this build cannot read is dropped without a note.
+    if (error instanceof ClaudePortError && !(error instanceof ClaudeSurfaceRefusal)) {
+      return { kind: "ignored" };
+    }
+    throw error;
+  }
+}
+
+function decodeRecognizedMessage(
+  message: Record<string, unknown>,
+  input: ClaudeOpenQueryInput,
+  phase: ClaudeDecodePhase,
+): ClaudeDecodedMessage {
   if (phase.kind === "initializing") {
-    if (isInitialization) return decodeInitializedMessage(message, input, phase.acceptedModels);
     // Since Claude Code 2.1.258 the runtime does not initialize until the
     // first user message arrives; what it sends before that is informational.
-    if (isHarmlessInformational(message)) return { kind: "ignored" };
     // The runtime writes its status notes and rate-limit frames straight to
     // its output, beside the stream that opens with the initialized message.
     // A resumed session whose first input is `/compact` says `compacting`,
@@ -1411,14 +1126,10 @@ export function decodeMessage(
     if (message.type === "system" && message.subtype === "session_state_changed") {
       return decodeSessionState(message);
     }
-    throw protocol("Claude returned an unsupported runtime message.");
+    return { kind: "ignored" };
   }
-  if (
-    isInitialization ||
-    (message.type !== "keep_alive" && message.session_id !== phase.sessionId)
-  ) {
-    throw protocol("Claude returned an unsupported runtime message.");
-  }
+  // A frame for another session is dropped, never applied to this one.
+  if (message.session_id !== phase.sessionId) return { kind: "ignored" };
   // A subagent's own messages name the parent's `Agent` call. They exist only
   // in a session the person let run its own subagents; anywhere else one is
   // still a runtime surface Octant did not open.
@@ -1448,25 +1159,14 @@ export function decodeMessage(
     if (
       assistant === undefined ||
       typeof assistant.id !== "string" ||
-      assistant.type !== "message" ||
       assistant.role !== "assistant" ||
-      typeof assistant.model !== "string" ||
       !Array.isArray(assistant.content) ||
-      !absentOrNull(assistant.container) ||
-      !absentNullOrObject(assistant.context_management) ||
-      !absentNullOrObject(assistant.diagnostics) ||
-      !absentOrNull(assistant.stop_details) ||
-      (assistant.stop_reason !== null &&
-        (typeof assistant.stop_reason !== "string" ||
-          !STREAM_STOP_REASONS.has(assistant.stop_reason))) ||
-      (assistant.stop_sequence !== null && typeof assistant.stop_sequence !== "string") ||
       typeof message.session_id !== "string" ||
-      message.parent_tool_use_id !== null ||
-      (message.error !== undefined &&
-        (typeof message.error !== "string" || !ASSISTANT_ERRORS.has(message.error)))
+      (message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined)
     ) {
       throw protocol("Claude returned an unsupported runtime message.");
     }
+    const usage = readUsage(assistant.usage, true, true);
     return {
       kind: "assistant",
       sessionId: message.session_id,
@@ -1474,13 +1174,21 @@ export function decodeMessage(
       ...(typeof message.uuid === "string" && message.uuid.trim().length > 0
         ? { uuid: message.uuid }
         : {}),
-      ...(message.error === undefined ? {} : { error: message.error }),
-      content: assistant.content.map((content) => decodeAssistantContent(content, input)),
-      usage: decodeUsage(assistant.usage, true),
+      // Any error code ends the turn; one this build does not know reads as
+      // the plain failure.
+      ...(typeof message.error === "string" ? { error: message.error } : {}),
+      content: assistant.content.flatMap((content) => {
+        const decoded = decodeAssistantContent(content, input);
+        return decoded === undefined ? [] : [decoded];
+      }),
+      ...(usage === undefined ? {} : { usage }),
     };
   }
   if (message.type === "stream_event") {
-    if (typeof message.session_id !== "string" || message.parent_tool_use_id !== null) {
+    if (
+      typeof message.session_id !== "string" ||
+      (message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined)
+    ) {
       throw protocol("Claude returned an unsupported runtime message.");
     }
     return {
@@ -1490,7 +1198,7 @@ export function decodeMessage(
     };
   }
   if (message.type === "user") return decodeToolResults(message);
-  if (message.type === "result") return decodeResult(message, input);
+  if (message.type === "result") return decodeResult(message);
   if (message.type === "tool_progress") {
     const elapsedSeconds = nonNegativeNumber(message.elapsed_time_seconds);
     // App-owned MCP calls report parent-correlated heartbeats while awaiting
@@ -1570,7 +1278,6 @@ export function decodeMessage(
       typeof message.session_id !== "string" ||
       typeof message.uuid !== "string" ||
       metadata === undefined ||
-      (metadata.trigger !== "auto" && metadata.trigger !== "manual") ||
       nonNegativeInteger(metadata.pre_tokens) === undefined ||
       (metadata.post_tokens !== undefined && nonNegativeInteger(metadata.post_tokens) === undefined)
     ) {
@@ -1580,7 +1287,9 @@ export function decodeMessage(
     return {
       kind: "compaction",
       sessionId: message.session_id,
-      trigger: metadata.trigger,
+      // Only `manual` can be a compaction the person asked for; any other
+      // trigger is the runtime's own choice.
+      trigger: metadata.trigger === "manual" ? "manual" : "auto",
       preTokens: nonNegativeInteger(metadata.pre_tokens) ?? 0,
       ...(postTokens === undefined ? {} : { postTokens }),
     };
@@ -1682,13 +1391,10 @@ export function decodeMessage(
       }
     } else if (message.subtype === "task_notification") {
       if (
+        // A notification says the task ended; any status but `completed`
+        // reads as not finished, so one a newer runtime added still ends it.
         typeof message.status !== "string" ||
-        !TASK_NOTIFICATION_STATUSES.has(message.status) ||
-        typeof message.output_file !== "string" ||
-        typeof message.summary !== "string" ||
-        // Only a display hint; a background command's housekeeping notice
-        // carries it as a subagent's does.
-        (message.skip_transcript !== undefined && typeof message.skip_transcript !== "boolean")
+        typeof message.summary !== "string"
       ) {
         throw protocol("Claude returned an unsupported runtime message.");
       }
@@ -1699,8 +1405,7 @@ export function decodeMessage(
       const patch = object(message.patch);
       if (
         patch === undefined ||
-        (patch.status !== undefined &&
-          (typeof patch.status !== "string" || !TASK_UPDATE_STATUSES.has(patch.status))) ||
+        (patch.status !== undefined && typeof patch.status !== "string") ||
         (patch.description !== undefined && typeof patch.description !== "string") ||
         (patch.error !== undefined && typeof patch.error !== "string") ||
         (patch.is_backgrounded !== undefined &&
@@ -1709,8 +1414,6 @@ export function decodeMessage(
       ) {
         throw protocol("Claude returned an unsupported runtime message.");
       }
-      optionalNonNegativeNumber(patch.end_time);
-      optionalNonNegativeNumber(patch.total_paused_ms);
       status = optionalString(patch.status);
       description = optionalString(patch.description);
     }
@@ -1751,7 +1454,6 @@ export function decodeMessage(
       ...(message.decision_reason === undefined ? {} : { reason: message.decision_reason }),
     };
   }
-  if (isHarmlessInformational(message)) return { kind: "ignored" };
   // The runtime pushes its whole command list when skills are found mid-
   // session (SDK 0.3.211 `commands_changed`); it replaces the cached list.
   if (
@@ -1766,18 +1468,11 @@ export function decodeMessage(
       commands: advertisedSlashCommands(message.commands),
     };
   }
-  // A system subtype this decoder does not know says so in a sentence of its
-  // own. The subtype itself is runtime-supplied text and stays out of a
-  // failure the driver journals; a known subtype with refused fields stays
-  // generic.
-  if (
-    message.type === "system" &&
-    typeof message.subtype === "string" &&
-    !INFORMATIONAL_SYSTEM_SUBTYPES.has(message.subtype)
-  ) {
-    throw protocol("Claude returned an unsupported system message.");
-  }
-  throw protocol("Claude returned an unsupported runtime message.");
+  // Everything else is the runtime's own bookkeeping (keep-alives, retry and
+  // thinking notes, goals, prompt suggestions) or a message type or system
+  // subtype a newer runtime added. None of it is read, so none of it can
+  // change what the session may do.
+  return { kind: "ignored" };
 }
 
 /**

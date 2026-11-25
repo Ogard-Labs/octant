@@ -157,7 +157,7 @@ describe("ACP event normalization", () => {
     ).toBe("Reading the file.\nIt exports one function.\nNothing else.");
   });
 
-  it("maps ordered tool lifecycle and rejects contradictory ordering", () => {
+  it("maps ordered tool lifecycle and ignores an update for a call that already finished", () => {
     const ctx = context();
     expect(
       event(
@@ -205,15 +205,7 @@ describe("ACP event normalization", () => {
           },
         },
       }),
-    ).toEqual([
-      {
-        kind: "protocol-failure",
-        failure: {
-          category: "protocol",
-          message: "Fixture Agent repeated a terminal tool update.",
-        },
-      },
-    ]);
+    ).toEqual([{ kind: "ignored" }]);
   });
 
   it("names a title-less tool call by its kind rather than its provider call ID", () => {
@@ -712,7 +704,7 @@ describe("ACP event normalization", () => {
     ).toEqual([{ kind: "ignored" }]);
   });
 
-  it("fails closed on a mismatched source session", () => {
+  it("never applies an update for another session", () => {
     expect(
       mapAcpNotification(context(), {
         kind: "notification",
@@ -725,15 +717,42 @@ describe("ACP event normalization", () => {
           },
         },
       }),
-    ).toEqual([
-      {
-        kind: "protocol-failure",
-        failure: {
-          category: "protocol",
-          message: "Fixture Agent update did not match the active session.",
-        },
-      },
+    ).toEqual([{ kind: "ignored" }]);
+  });
+
+  it("keeps the turn running when the agent sends an update type, a plan status, or a tool update this build does not know", () => {
+    const ctx = context();
+    const update = (sessionUpdate: Readonly<Record<string, unknown>>) =>
+      mapAcpNotification(ctx, {
+        kind: "notification",
+        method: "session/update",
+        params: { sessionId: "acp-session-1", update: sessionUpdate },
+      });
+
+    expect(update({ sessionUpdate: "future_update", payload: "private" })).toEqual([
+      { kind: "ignored" },
     ]);
+    expect(update({ sessionUpdate: "tool_call_update", status: "completed" })).toEqual([
+      { kind: "ignored" },
+    ]);
+    expect(update({ sessionUpdate: "plan", entries: "not a list" })).toEqual([{ kind: "ignored" }]);
+    const plan = update({
+      sessionUpdate: "plan",
+      entries: [
+        { content: "Ship it", status: "blocked" },
+        { status: "pending" },
+        { content: "Test it", status: "in_progress" },
+      ],
+    });
+    expect(
+      plan.map((item) =>
+        item.kind === "event" && item.event.kind === "task-progress"
+          ? item.event.status
+          : item.kind === "event"
+            ? item.event.kind
+            : item.kind,
+      ),
+    ).toEqual(["pending", "in-progress", "task-list"]);
   });
 
   it("refuses an ID-only approval for an unknown tool without reserving the request", () => {
@@ -859,7 +878,7 @@ describe("ACP event normalization", () => {
   });
 });
 
-describe("an agent that sends stray updates", () => {
+describe("stray updates, from any agent", () => {
   const update = (sessionUpdate: Readonly<Record<string, unknown>>, session = "acp-session-1") =>
     ({
       kind: "notification",
@@ -867,16 +886,12 @@ describe("an agent that sends stray updates", () => {
       params: { sessionId: session, update: sessionUpdate },
     }) as const;
 
-  it("ignores updates after its turn ended and a subagent's own session, where a strict agent fails", () => {
-    const strict = context({ terminal: true });
-    expect(mapAcpNotification(strict, update({ sessionUpdate: "usage_update" }))[0]?.kind).toBe(
-      "protocol-failure",
-    );
-    const tolerant = context({ terminal: true, toleratesStrayUpdates: true });
-    expect(mapAcpNotification(tolerant, update({ sessionUpdate: "usage_update" }))).toEqual([
+  it("ignores updates after the turn ended and a subagent's own session", () => {
+    const ended = context({ terminal: true });
+    expect(mapAcpNotification(ended, update({ sessionUpdate: "usage_update" }))).toEqual([
       { kind: "ignored" },
     ]);
-    const live = context({ toleratesStrayUpdates: true });
+    const live = context();
     expect(
       mapAcpNotification(
         live,
@@ -889,7 +904,7 @@ describe("an agent that sends stray updates", () => {
   });
 
   it("starts a call it only ever updated, reads a repeated start as an update, and ignores a repeated finish", () => {
-    const state = context({ toleratesStrayUpdates: true });
+    const state = context();
     const finished = mapAcpNotification(
       state,
       update({

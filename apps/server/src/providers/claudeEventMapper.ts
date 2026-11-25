@@ -284,6 +284,14 @@ type RuntimeEventWithoutEnvelope = ProviderRuntimeEvent extends infer RuntimeEve
     : never
   : never;
 
+/**
+ * Ends the turn. Kept for what guards authority: another Project root, a
+ * write Plan disabled that the runtime says it made, an approval or question
+ * that cannot be tied to its call. A frame that merely surprises this mapper
+ * (a result for a call it never saw, a task it does not know, a frame after
+ * the turn ended) is dropped instead, because each runtime release reorders
+ * or adds some and every one of them used to fail the turn.
+ */
 function failure(message: string, category: ProviderFailure["category"] = "protocol") {
   return { kind: "failure", failure: { category, message } } as const;
 }
@@ -713,23 +721,14 @@ function mapToolUse(
 ): ReadonlyArray<ClaudeMappedMessage> {
   endAgentMessage(context);
   const resolved = toolState(context, content.toolUseId, content.toolName, content.disabled);
-  if (resolved === undefined) {
-    return [failure("Claude returned invalid tool correlation metadata.")];
+  // A report that contradicts the call this turn already knows under the id,
+  // or follows its result, is dropped; the first report stands.
+  if (resolved === undefined || resolved.state.lifecycle === "terminal") {
+    return [{ kind: "ignored" }];
   }
-  if (resolved.state.lifecycle === "terminal") {
-    return [failure("Claude returned tool activity after completion.")];
-  }
-  if (
-    authoritativeInput &&
-    content.disabled !== true &&
-    (content.toolName === "Edit" || content.toolName === "Write")
-  ) {
-    if (authoritativeFileChange === undefined) {
-      return [failure("Claude returned invalid file-change metadata.")];
-    }
-    if (resolved.state.fileChange !== undefined) {
-      return [failure("Claude returned duplicate authoritative file metadata.")];
-    }
+  // An edit whose input this build cannot read into a file change still shows
+  // as a tool row; it ends as a plain completed call.
+  if (authoritativeFileChange !== undefined && resolved.state.fileChange === undefined) {
     resolved.state.fileChange = authoritativeFileChange;
   }
   if (
@@ -884,12 +883,12 @@ function mapChildAssistant(
     parent.toolName !== CLAUDE_SUBAGENT_TOOL ||
     parent.lifecycle !== "active"
   ) {
-    return [failure("Claude subagent activity did not match a running subagent.")];
+    return [{ kind: "ignored" }];
   }
   const results: ClaudeMappedMessage[] = [];
   for (const use of message.toolUses) {
     const toolName = normalized(use.toolName, LABEL_MAX_CHARACTERS);
-    if (toolName === undefined) return [failure("Claude returned invalid tool metadata.")];
+    if (toolName === undefined) continue;
     results.push(
       event(context, {
         kind: "child-agent-activity",
@@ -1023,73 +1022,53 @@ function mapAssistant(
   context: ClaudeEventContext,
   message: Extract<ClaudeDecodedMessage, { readonly kind: "assistant" }>,
 ): ReadonlyArray<ClaudeMappedMessage> {
-  if (!usageIsSafe(message.usage)) {
-    return [failure("Claude returned invalid usage metadata.")];
-  }
   if (message.uuid !== undefined) context.lastAssistantUuid = message.uuid;
-  const messageToolNames = new Map<string, string>();
-  const fileChanges = new Map<string, ClaudeFileChange>();
+  // A block that contradicts what this turn knows of its call (the id twice
+  // in one message, another tool under the id, a call already settled, an
+  // edit whose file change is already recorded) is dropped, and the first
+  // report stands.
+  const toolUses: Extract<ClaudeAssistantContent, { readonly kind: "tool-use" }>[] = [];
+  const messageToolUseIds = new Set<string>();
   for (const content of message.content) {
-    if (content.kind !== "tool-use") continue;
+    if (content.kind !== "tool-use" || messageToolUseIds.has(content.toolUseId)) continue;
+    messageToolUseIds.add(content.toolUseId);
     const existing = context.toolStates.get(content.toolUseId);
-    const messageToolName = messageToolNames.get(content.toolUseId);
     const normalizedToolName = normalized(content.toolName, LABEL_MAX_CHARACTERS);
-    const authoritativeFileTool = content.toolName === "Edit" || content.toolName === "Write";
-    if (messageToolName !== undefined) {
-      const duplicateAuthoritativeFileTool =
-        authoritativeFileTool || messageToolName === "Edit" || messageToolName === "Write";
-      return [
-        failure(
-          duplicateAuthoritativeFileTool
-            ? "Claude returned duplicate authoritative file metadata."
-            : "Claude returned invalid tool correlation metadata.",
-        ),
-      ];
-    }
     if (
       normalizedToolName === undefined ||
       (existing !== undefined &&
         (existing.toolName !== normalizedToolName ||
           existing.disabled !== content.disabled ||
-          existing.lifecycle !== "active"))
+          existing.lifecycle !== "active" ||
+          existing.fileChange !== undefined))
     ) {
-      return [failure("Claude returned invalid tool correlation metadata.")];
+      continue;
     }
-    if (authoritativeFileTool && existing?.fileChange !== undefined) {
-      return [failure("Claude returned duplicate authoritative file metadata.")];
-    }
-    messageToolNames.set(content.toolUseId, content.toolName);
-  }
-  for (const content of message.content) {
-    if (content.kind !== "tool-use") continue;
-    if (
-      content.disabled !== true &&
-      (content.toolName === "Edit" || content.toolName === "Write")
-    ) {
-      const metadata = fileChange(context, content);
-      if (metadata === undefined) {
-        return [failure("Claude returned invalid file-change metadata.")];
-      }
-      fileChanges.set(content.toolUseId, metadata);
-    }
+    toolUses.push(content);
   }
   const results: ClaudeMappedMessage[] = [];
-  for (const content of message.content) {
-    if (content.kind !== "tool-use") continue;
-    results.push(...mapToolUse(context, content, true, fileChanges.get(content.toolUseId)));
+  for (const content of toolUses) {
+    const editsFile =
+      content.disabled !== true && (content.toolName === "Edit" || content.toolName === "Write");
+    results.push(
+      ...mapToolUse(context, content, true, editsFile ? fileChange(context, content) : undefined),
+    );
   }
-  context.contextTokens =
-    message.usage.inputTokens +
-    message.usage.cacheReadInputTokens +
-    message.usage.cacheCreationInputTokens;
-  // A usage report without a request time covers the whole turn so far and
-  // replaces the one before it. Reporting only this call's usage left a turn
-  // that ended without its result (cancelled, crashed) charged for its last
-  // call alone.
-  context.callUsage.set(message.messageId, message.usage);
-  results.push(usageEvent(context, turnUsageSoFar(context.callUsage)));
+  // Figures the runtime left out, or sent in a shape this build cannot count,
+  // are not reported at all rather than reported as zero.
+  if (message.usage !== undefined && usageIsSafe(message.usage)) {
+    context.contextTokens =
+      message.usage.inputTokens +
+      message.usage.cacheReadInputTokens +
+      message.usage.cacheCreationInputTokens;
+    // A usage report without a request time covers the whole turn so far and
+    // replaces the one before it. Reporting only this call's usage left a turn
+    // that ended without its result (cancelled, crashed) charged for its last
+    // call alone.
+    context.callUsage.set(message.messageId, message.usage);
+    results.push(usageEvent(context, turnUsageSoFar(context.callUsage)));
+  }
   if (message.error !== undefined) {
-    if (context.terminal) return [failure("Claude returned a duplicate terminal message.")];
     const classified = assistantErrorFailure(message.error);
     results.push(terminal(context, { kind: "failed", failure: classified }));
   }
@@ -1129,29 +1108,29 @@ function mapToolResults(
   message: Extract<ClaudeDecodedMessage, { readonly kind: "tool-results" }>,
 ): ReadonlyArray<ClaudeMappedMessage> {
   endAgentMessage(context);
+  // A result for a call this turn never saw, one already settled, or one named
+  // twice in a message settles nothing and is dropped; the rest still land.
   const providerToolUseIds = new Set<string>();
-  for (const result of message.results) {
-    if (providerToolUseIds.has(result.toolUseId)) {
-      return [failure("Claude returned duplicate or contradictory tool results.")];
+  const states = message.results.flatMap((result) => {
+    const state = context.toolStates.get(result.toolUseId);
+    if (
+      state === undefined ||
+      state.lifecycle !== "active" ||
+      providerToolUseIds.has(result.toolUseId)
+    ) {
+      return [];
     }
     providerToolUseIds.add(result.toolUseId);
-  }
-  const states = message.results.map((result) => ({
-    result,
-    state: context.toolStates.get(result.toolUseId),
-  }));
-  if (states.some(({ state }) => state === undefined)) {
-    return [failure("Claude tool result did not match an active tool.")];
-  }
-  if (states.some(({ state }) => state?.lifecycle !== "active")) {
-    return [failure("Claude returned a duplicate tool result.")];
-  }
-  if (states.some(({ state, result }) => state?.disabled === true && !result.isError)) {
+    return [{ result, state }];
+  });
+  // Plan withheld the file tools, so a write the runtime says succeeded is a
+  // change made in a read-only session. That is never passed over.
+  if (states.some(({ state, result }) => state.disabled === true && !result.isError)) {
     return [failure("Claude reported success for a disabled tool.")];
   }
   const results: ClaudeMappedMessage[] = [];
   for (const pair of states) {
-    const state = pair.state!;
+    const state = pair.state;
     state.lifecycle = "terminal";
     if (isClaudeTaskTool(state.toolName)) {
       if (
@@ -1240,51 +1219,6 @@ function mapToolResults(
   return withoutIgnored(results);
 }
 
-function resultMetadataIsValid(
-  message: Extract<ClaudeDecodedMessage, { readonly kind: "result" }>,
-): boolean {
-  const noPermissionDenials = message.permissionDenials.length === 0;
-  if (message.subtype === "success") {
-    // A denied tool is an ordinary way for a turn to end: the person said no
-    // at the approval and the model finished without it. Reading the denial
-    // list as a contradiction failed every turn that was ever refused.
-    return (
-      message.outcome === "success" &&
-      (message.terminalReason === undefined || message.terminalReason === "completed")
-    );
-  }
-  if (message.outcome !== "error") return false;
-  if (message.subtype === "error_during_execution") {
-    return (
-      message.terminalReason !== "completed" &&
-      message.terminalReason !== "max_turns" &&
-      message.terminalReason !== "budget_exhausted" &&
-      message.terminalReason !== "structured_output_retry_exhausted"
-    );
-  }
-  if (!noPermissionDenials) return false;
-  if (message.subtype === "error_max_turns") {
-    return message.terminalReason === undefined || message.terminalReason === "max_turns";
-  }
-  if (message.subtype === "error_max_budget_usd") {
-    return message.terminalReason === undefined || message.terminalReason === "budget_exhausted";
-  }
-  return (
-    message.terminalReason === undefined ||
-    message.terminalReason === "structured_output_retry_exhausted"
-  );
-}
-
-const TASK_UPDATE_STATUSES = new Set([
-  "pending",
-  "running",
-  "completed",
-  "failed",
-  "killed",
-  "paused",
-]);
-const TASK_NOTIFICATION_STATUSES = new Set(["completed", "failed", "stopped"]);
-
 function taskMessageShapeIsValid(
   message: Extract<ClaudeDecodedMessage, { readonly kind: "task" }>,
 ): boolean {
@@ -1297,24 +1231,15 @@ function taskMessageShapeIsValid(
         message.usage === undefined
       );
     case "task_progress":
-      return (
-        message.status === undefined &&
-        typeof message.description === "string" &&
-        message.usage !== undefined
-      );
+      return message.status === undefined && typeof message.description === "string";
     case "task_notification":
       return (
         typeof message.status === "string" &&
-        TASK_NOTIFICATION_STATUSES.has(message.status) &&
         message.description === undefined &&
         typeof message.summary === "string"
       );
     case "task_updated":
-      return (
-        (message.status === undefined || TASK_UPDATE_STATUSES.has(message.status)) &&
-        message.summary === undefined &&
-        message.usage === undefined
-      );
+      return message.summary === undefined && message.usage === undefined;
     default:
       return false;
   }
@@ -1331,11 +1256,10 @@ function mapTask(
   context: ClaudeEventContext,
   message: Extract<ClaudeDecodedMessage, { readonly kind: "task" }>,
 ): ReadonlyArray<ClaudeMappedMessage> {
-  if (message.usage !== undefined && !taskUsageIsSafe(message.usage)) {
-    return [failure("Claude returned invalid usage metadata.")];
-  }
+  // A task frame that does not follow from what this turn knows of the task
+  // (an unknown task, a second start, an update after it ended) is dropped.
   if (!taskMessageShapeIsValid(message)) {
-    return [failure("Claude returned an invalid task lifecycle transition.")];
+    return [{ kind: "ignored" }];
   }
   const existing = context.taskIds.get(message.taskId);
   const providedSummary = normalized(
@@ -1345,7 +1269,7 @@ function mapTask(
   let next: ClaudeTaskState | undefined;
   if (message.subtype === "task_started") {
     if (existing !== undefined || providedSummary === undefined) {
-      return [failure("Claude returned an invalid task lifecycle transition.")];
+      return [{ kind: "ignored" }];
     }
     let workflow: ClaudeTaskState["workflow"];
     if (message.workflow !== undefined) {
@@ -1354,7 +1278,7 @@ function mapTask(
       const call =
         message.toolUseId === undefined ? undefined : context.toolStates.get(message.toolUseId);
       if (call === undefined || call.toolName !== CLAUDE_WORKFLOW_TOOL) {
-        return [failure("Claude workflow activity did not match a workflow call.")];
+        return [{ kind: "ignored" }];
       }
       workflow = { childAgentId: call.toolCallId, shownAgents: new Map() };
     }
@@ -1367,20 +1291,15 @@ function mapTask(
     };
   } else {
     if (existing === undefined) {
-      return [failure("Claude returned an invalid task lifecycle transition.")];
+      return [{ kind: "ignored" }];
     }
     const summary = providedSummary ?? existing.summary;
     if (existing.lifecycle === "completed" || existing.lifecycle === "failed") {
-      const repeatedTerminal =
-        message.subtype === "task_notification" &&
-        (message.status === "completed" ? "completed" : "failed") === existing.lifecycle;
-      return repeatedTerminal
-        ? [{ kind: "ignored" }]
-        : [failure("Claude returned an invalid task lifecycle transition.")];
+      return [{ kind: "ignored" }];
     }
     if (message.subtype === "task_progress") {
       if (existing.lifecycle !== "running") {
-        return [failure("Claude returned an invalid task lifecycle transition.")];
+        return [{ kind: "ignored" }];
       }
       next = { ...existing, lastSubtype: message.subtype, summary };
     } else if (message.subtype === "task_notification") {
@@ -1400,13 +1319,13 @@ function mapTask(
           break;
         case "paused":
           if (existing.lifecycle !== "running") {
-            return [failure("Claude returned an invalid task lifecycle transition.")];
+            return [{ kind: "ignored" }];
           }
           lifecycle = "paused";
           break;
         case "pending":
           if (existing.lifecycle !== "pending") {
-            return [failure("Claude returned an invalid task lifecycle transition.")];
+            return [{ kind: "ignored" }];
           }
           break;
         case "completed":
@@ -1416,14 +1335,16 @@ function mapTask(
         case "killed":
           lifecycle = "failed";
           break;
+        // A status a newer runtime added says nothing this build can show;
+        // the task keeps the state it had.
         default:
-          return [failure("Claude returned an invalid task lifecycle transition.")];
+          break;
       }
       next = { ...existing, lifecycle, lastSubtype: message.subtype, summary };
     }
   }
   if (message.workflow?.agents !== undefined && next.workflow === undefined) {
-    return [failure("Claude workflow activity did not match a workflow call.")];
+    return [{ kind: "ignored" }];
   }
   context.taskIds.set(message.taskId, next);
   if (message.subtype === "task_started" && message.toolUseId !== undefined) {
@@ -1451,7 +1372,7 @@ function mapTask(
   // result Claude itself returned.
   const finalSummary = boundedChildFinalSummary(message.summary);
   const usage =
-    message.usage === undefined
+    message.usage === undefined || !taskUsageIsSafe(message.usage)
       ? undefined
       : reportedChildUsage({ totalTokens: message.usage.totalTokens });
   return [
@@ -1633,13 +1554,8 @@ function mapResult(
   context: ClaudeEventContext,
   message: Extract<ClaudeDecodedMessage, { readonly kind: "result" }>,
 ): ReadonlyArray<ClaudeMappedMessage> {
-  if (context.terminal) return [failure("Claude returned a duplicate terminal message.")];
-  if (!resultMetadataIsValid(message)) {
-    return [failure("Claude returned contradictory result metadata.")];
-  }
-  if (!usageIsSafe(message.usage)) {
-    return [failure("Claude returned invalid usage metadata.")];
-  }
+  // Plan withheld the file tools; a turn that ends well while a withheld write
+  // was never refused is not passed over.
   if (
     message.outcome === "success" &&
     [...context.toolStates.values()].some(
@@ -1648,15 +1564,20 @@ function mapResult(
   ) {
     return [failure("Claude did not report a refusal for a disabled tool.")];
   }
-  const results: ClaudeMappedMessage[] = [
-    usageEvent(
-      context,
-      message.usage,
-      message.durationMs,
-      message.costUsd,
-      message.contextBreakdown,
-    ),
-  ];
+  // The result's figures replace the turn's running total, so ones this build
+  // cannot count leave that total standing instead of zeroing it.
+  const results: ClaudeMappedMessage[] =
+    message.usage !== undefined && usageIsSafe(message.usage)
+      ? [
+          usageEvent(
+            context,
+            message.usage,
+            message.durationMs,
+            message.costUsd,
+            message.contextBreakdown,
+          ),
+        ]
+      : [];
   if (message.outcome === "success") {
     const stop = outputStopReason(message.stopReason);
     results.push(
@@ -1718,9 +1639,7 @@ function mapStreamEvent(
         : [{ kind: "ignored" }];
     case "message-start":
     case "message-delta":
-      return usageIsSafe(message.event.usage)
-        ? [{ kind: "ignored" }]
-        : [failure("Claude returned invalid usage metadata.")];
+      return [{ kind: "ignored" }];
     // A tool call's input streams for minutes with nothing to show; the
     // runner's idle clock would read that as a dead session.
     case "ping":
@@ -1741,20 +1660,17 @@ export function mapClaudeMessage(
 ): ReadonlyArray<ClaudeMappedMessage> {
   const decoded = message as unknown as { readonly kind?: unknown; readonly sessionId?: unknown };
   if (decoded.kind === "ignored") return [{ kind: "ignored" }];
-  if (typeof decoded.kind !== "string" || !DECODED_MESSAGE_KINDS.has(decoded.kind)) {
-    return [failure("Claude returned an unsupported decoded message.")];
-  }
-  if (typeof decoded.sessionId !== "string" || decoded.sessionId !== context.claudeSessionId) {
-    return [failure("Claude message did not match the active session.")];
-  }
-  if (context.terminal) {
-    return [
-      failure(
-        decoded.kind === "result"
-          ? "Claude returned a duplicate terminal message."
-          : "Claude returned activity after the terminal message.",
-      ),
-    ];
+  // A message kind this mapper does not know, one for another session, and
+  // one that follows the turn's end are each dropped: none is applied to this
+  // turn, and none is a reason to end it.
+  if (
+    typeof decoded.kind !== "string" ||
+    !DECODED_MESSAGE_KINDS.has(decoded.kind) ||
+    typeof decoded.sessionId !== "string" ||
+    decoded.sessionId !== context.claudeSessionId ||
+    context.terminal
+  ) {
+    return [{ kind: "ignored" }];
   }
   switch (message.kind) {
     case "initialized":
@@ -1780,7 +1696,7 @@ export function mapClaudeMessage(
         state.toolName !== normalized(message.toolName, LABEL_MAX_CHARACTERS) ||
         state.lifecycle !== "active"
       ) {
-        return [failure("Claude tool progress did not match an active tool.")];
+        return [{ kind: "ignored" }];
       }
       const results: ClaudeMappedMessage[] = [];
       if (state.emitsActivity) {
@@ -1885,7 +1801,7 @@ export function mapClaudeMessage(
     case "ignored":
       return [{ kind: "ignored" }];
     default:
-      return [failure("Claude returned an unsupported decoded message.")];
+      return [{ kind: "ignored" }];
   }
 }
 

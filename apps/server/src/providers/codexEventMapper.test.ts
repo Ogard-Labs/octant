@@ -177,8 +177,8 @@ describe("mapCodexMessage", () => {
     }
   });
 
-  it("fails a tool progress notification that belongs to another turn", () => {
-    const [result] = map(
+  it("never applies a tool progress notification that belongs to another turn", () => {
+    const result = map(
       context(),
       notification("item/mcpToolCall/progress", {
         threadId: "thread-1",
@@ -187,7 +187,7 @@ describe("mapCodexMessage", () => {
       }),
     );
 
-    expect(result).toMatchObject({ kind: "protocol-failure" });
+    expect(result).toEqual([{ kind: "ignored" }]);
   });
 
   it("preserves meaningful streamed whitespace, ignores empty deltas, and bounds large deltas", () => {
@@ -397,7 +397,7 @@ describe("mapCodexMessage", () => {
     ).toEqual([{ kind: "ignored" }]);
   });
 
-  it("fails closed when completed agent text contradicts streamed text", () => {
+  it("keeps the streamed text when the completed agent text does not continue it", () => {
     const ctx = context();
     map(
       ctx,
@@ -423,15 +423,8 @@ describe("mapCodexMessage", () => {
       }),
     );
 
-    expect(result).toEqual([
-      {
-        kind: "protocol-failure",
-        failure: {
-          category: "protocol",
-          message: "Provider completed agent text that contradicted its streamed text.",
-        },
-      },
-    ]);
+    expect(result).toEqual([{ kind: "ignored" }]);
+    expect(ctx.agentMessages.get("provider-agent-conflict")?.lifecycle).toBe("terminal");
     expect(JSON.stringify(result)).not.toMatch(/private-stream|different-private|provider-agent/);
   });
 
@@ -1128,7 +1121,7 @@ describe("mapCodexMessage", () => {
     expect(JSON.stringify(result)).not.toMatch(/Users|started-secret|failed-secret|raw .* diff/);
   });
 
-  it("maps bounded diffs and rejects oversized diffs without exposing provider content", () => {
+  it("maps bounded diffs and drops oversized diffs without exposing provider content", () => {
     const ok = map(
       context(),
       notification("turn/diff/updated", {
@@ -1149,12 +1142,7 @@ describe("mapCodexMessage", () => {
     expect(ok).toMatchObject([
       { kind: "event", event: { kind: "diff", diff: "diff --git a/src/a.ts b/src/a.ts\n+value" } },
     ]);
-    expect(oversized).toEqual([
-      {
-        kind: "protocol-failure",
-        failure: { category: "protocol", message: "Provider diff exceeded the supported size." },
-      },
-    ]);
+    expect(oversized).toEqual([{ kind: "ignored" }]);
     expect(JSON.stringify(oversized)).not.toContain("raw-provider-diff");
   });
 
@@ -1471,9 +1459,7 @@ describe("mapCodexMessage", () => {
       );
     expect(report("turn-1", 100)).toEqual([{ kind: "ignored" }]);
     expect(session.usage).toBeUndefined();
-    expect(report("turn-2", 100, "other-thread")).toMatchObject([
-      { kind: "protocol-failure", failure: { category: "protocol" } },
-    ]);
+    expect(report("turn-2", 100, "other-thread")).toEqual([{ kind: "ignored" }]);
     expect(report("turn-2", 110)).toMatchObject([
       { kind: "event", event: { kind: "usage", inputTokens: 10 } },
     ]);
@@ -1708,6 +1694,40 @@ describe("mapCodexMessage", () => {
     expect("toolCallId" in result.approval.event).toBe(false);
   });
 
+  it("still fails closed on an approval request for another turn, or one that comes after the turn ended", () => {
+    const approval = (turnId: string) => ({
+      kind: "request" as const,
+      id: 9,
+      method: "item/commandExecution/requestApproval" as const,
+      params: {
+        threadId: "thread-1",
+        turnId,
+        itemId: "item-1",
+        startedAtMs: 10,
+        environmentId: null,
+      },
+    });
+
+    expect(map(context(), approval("other-turn"))).toEqual([
+      {
+        kind: "protocol-failure",
+        failure: {
+          category: "protocol",
+          message: "Provider message did not match the active thread and turn.",
+        },
+      },
+    ]);
+    expect(map(context({ terminal: true }), approval("turn-1"))).toEqual([
+      {
+        kind: "protocol-failure",
+        failure: {
+          category: "protocol",
+          message: "Provider emitted runtime activity after the terminal event.",
+        },
+      },
+    ]);
+  });
+
   it("rejects a duplicate provider approval request ID", () => {
     const ctx = context();
     const message = {
@@ -1895,7 +1915,7 @@ describe("mapCodexMessage", () => {
     expect(failed[0]).not.toHaveProperty("event.failure.usageLimit");
   });
 
-  it("fails closed on duplicate terminal without consuming another sequence", () => {
+  it("ends the turn once, dropping a second completion without consuming another sequence", () => {
     const ctx = context();
     map(
       ctx,
@@ -1913,19 +1933,11 @@ describe("mapCodexMessage", () => {
           turn: { id: "turn-1", status: "failed" },
         }),
       ),
-    ).toEqual([
-      {
-        kind: "protocol-failure",
-        failure: {
-          category: "protocol",
-          message: "Provider emitted more than one terminal event.",
-        },
-      },
-    ]);
+    ).toEqual([{ kind: "ignored" }]);
     expect(ctx.sequence).toBe(42);
   });
 
-  it("rejects tool lifecycle completion without a matching start", () => {
+  it("drops a tool completion that has no matching start", () => {
     expect(
       map(
         context(),
@@ -1936,18 +1948,10 @@ describe("mapCodexMessage", () => {
           completedAtMs: 20,
         }),
       ),
-    ).toEqual([
-      {
-        kind: "protocol-failure",
-        failure: {
-          category: "protocol",
-          message: "Provider completed a tool item that was not started.",
-        },
-      },
-    ]);
+    ).toEqual([{ kind: "ignored" }]);
   });
 
-  it("rejects a duplicate tool start", () => {
+  it("drops a duplicate tool start", () => {
     const ctx = context();
     const started = notification("item/started", {
       threadId: "thread-1",
@@ -1957,18 +1961,11 @@ describe("mapCodexMessage", () => {
     });
     map(ctx, started);
 
-    expect(map(ctx, started)).toEqual([
-      {
-        kind: "protocol-failure",
-        failure: {
-          category: "protocol",
-          message: "Provider started a tool item more than once.",
-        },
-      },
-    ]);
+    expect(map(ctx, started)).toEqual([{ kind: "ignored" }]);
+    expect(ctx.toolStates.size).toBe(1);
   });
 
-  it("rejects a duplicate tool completion", () => {
+  it("drops a duplicate tool completion", () => {
     const ctx = context();
     map(
       ctx,
@@ -1987,57 +1984,49 @@ describe("mapCodexMessage", () => {
     });
     map(ctx, completed);
 
-    expect(map(ctx, completed)).toEqual([
-      {
-        kind: "protocol-failure",
-        failure: {
-          category: "protocol",
-          message: "Provider completed a terminal tool item.",
-        },
-      },
-    ]);
+    expect(map(ctx, completed)).toEqual([{ kind: "ignored" }]);
   });
 
-  it.each([
-    {
-      name: "a terminal status in item/started",
-      message: notification("item/started", {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        item: { ...commandItem, status: "completed" },
-        startedAtMs: 10,
-      }),
-      expected: "Provider started a tool item with a terminal status.",
-    },
-    {
-      name: "an in-progress status in item/completed",
-      message: notification("item/completed", {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        item: commandItem,
-        completedAtMs: 20,
-      }),
-      expected: "Provider completed a tool item with a non-terminal status.",
-    },
-  ])("rejects $name", ({ message, expected }) => {
+  it("starts a tool whatever status its start names, and waits for a completion that still says running", () => {
     const ctx = context();
-    if (message.kind === "notification" && message.method === "item/completed") {
+    expect(
       map(
         ctx,
         notification("item/started", {
           threadId: "thread-1",
           turnId: "turn-1",
-          item: commandItem,
+          item: { ...commandItem, status: "future-status" },
           startedAtMs: 10,
         }),
-      );
-    }
-    expect(map(ctx, message)).toEqual([
-      { kind: "protocol-failure", failure: { category: "protocol", message: expected } },
-    ]);
+      )[0],
+    ).toMatchObject({ kind: "event", event: { kind: "tool-start" } });
+    expect(
+      map(
+        ctx,
+        notification("item/completed", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: commandItem,
+          completedAtMs: 20,
+        }),
+      ),
+    ).toEqual([{ kind: "ignored" }]);
+    expect([...ctx.toolStates.values()]).toMatchObject([{ lifecycle: "active" }]);
+    // A terminal status this build does not know reads as not completed.
+    expect(
+      map(
+        ctx,
+        notification("item/completed", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: { ...commandItem, status: "future-status" },
+          completedAtMs: 30,
+        }),
+      ),
+    ).toMatchObject([{ kind: "event", event: { kind: "tool-failure" } }]);
   });
 
-  it("rejects turn completion while a tool item remains active", () => {
+  it("ends the turn on its completion while a tool item remains active, closing the tool with it", () => {
     const ctx = context();
     map(
       ctx,
@@ -2057,17 +2046,31 @@ describe("mapCodexMessage", () => {
           turn: { id: "turn-1", status: "completed" },
         }),
       ),
-    ).toEqual([
+    ).toMatchObject([{ kind: "event", event: { kind: "completed" } }]);
+    expect(ctx.terminal).toBe(true);
+    expect([...ctx.toolStates.values()]).toMatchObject([{ lifecycle: "terminal" }]);
+  });
+
+  it("ends the turn on a completion status this build does not know: failed when Codex attached an error, completed otherwise", () => {
+    const end = (turn: {
+      readonly id: string;
+      readonly status: string;
+      readonly error?: { readonly message: string };
+    }) => map(context(), notification("turn/completed", { threadId: "thread-1", turn }));
+    expect(end({ id: "turn-1", status: "future-status" })).toMatchObject([
+      { kind: "event", event: { kind: "completed" } },
+    ]);
+    expect(
+      end({ id: "turn-1", status: "future-status", error: { message: "It stopped." } }),
+    ).toMatchObject([
       {
-        kind: "protocol-failure",
-        failure: {
-          category: "protocol",
-          message: "Provider completed the turn while tool items were still active.",
+        kind: "event",
+        event: {
+          kind: "failed",
+          failure: { category: "provider-failed", message: "It stopped." },
         },
       },
     ]);
-    expect(ctx.terminal).toBe(false);
-    expect([...ctx.toolStates.values()]).toMatchObject([{ lifecycle: "active" }]);
   });
 
   it.each([
@@ -2117,19 +2120,11 @@ describe("mapCodexMessage", () => {
             delta: "late provider output must-not-cross",
           }),
         ),
-      ).toEqual([
-        {
-          kind: "protocol-failure",
-          failure: {
-            category: "protocol",
-            message: "Provider emitted runtime activity after the terminal event.",
-          },
-        },
-      ]);
+      ).toEqual([{ kind: "ignored" }]);
     },
   );
 
-  it("rejects a non-running turn start and activity after terminal", () => {
+  it("reads nothing from a turn start, whatever its status, and drops activity after the turn ended", () => {
     expect(
       map(
         context(),
@@ -2138,15 +2133,7 @@ describe("mapCodexMessage", () => {
           turn: { id: "turn-1", status: "completed" },
         }),
       ),
-    ).toEqual([
-      {
-        kind: "protocol-failure",
-        failure: {
-          category: "protocol",
-          message: "Provider returned a non-running turn start status.",
-        },
-      },
-    ]);
+    ).toEqual([{ kind: "ignored" }]);
 
     const ctx = context();
     map(
@@ -2166,15 +2153,7 @@ describe("mapCodexMessage", () => {
           delta: "late raw output must-not-cross",
         }),
       ),
-    ).toEqual([
-      {
-        kind: "protocol-failure",
-        failure: {
-          category: "protocol",
-          message: "Provider emitted runtime activity after the terminal event.",
-        },
-      },
-    ]);
+    ).toEqual([{ kind: "ignored" }]);
   });
 
   it("ignores a usage report that lands after the turn ended instead of failing the turn", () => {
@@ -2215,19 +2194,15 @@ describe("mapCodexMessage", () => {
     expect(late("turn-2")).toEqual([{ kind: "ignored" }]);
   });
 
-  it("ignores unrelated unknown notifications but fails an unknown required transition", () => {
+  it("keeps the turn running when Codex sends a notification this build does not know", () => {
     expect(map(context(), { kind: "unknown-notification", method: "account/updated" })).toEqual([
       { kind: "ignored" },
     ]);
-    expect(map(context(), { kind: "unknown-notification", method: "turn/cancelled" })).toEqual([
-      {
-        kind: "protocol-failure",
-        failure: {
-          category: "protocol",
-          message: "Provider emitted an unsupported active runtime notification.",
-        },
-      },
+    const ctx = context();
+    expect(map(ctx, { kind: "unknown-notification", method: "turn/cancelled" })).toEqual([
+      { kind: "ignored" },
     ]);
+    expect(ctx.terminal).toBe(false);
   });
 
   it("reports each account usage window without a thread correlation", () => {
@@ -2298,7 +2273,7 @@ describe("mapCodexMessage", () => {
     ).toEqual([{ kind: "ignored" }]);
   });
 
-  it("fails mismatched active correlations without leaking provider data", () => {
+  it("never applies a notification for another thread and turn, and leaks none of it", () => {
     const failure = map(
       context(),
       notification("item/agentMessage/delta", {
@@ -2309,15 +2284,7 @@ describe("mapCodexMessage", () => {
       }),
     );
 
-    expect(failure).toEqual([
-      {
-        kind: "protocol-failure",
-        failure: {
-          category: "protocol",
-          message: "Provider message did not match the active thread and turn.",
-        },
-      },
-    ]);
+    expect(failure).toEqual([{ kind: "ignored" }]);
     expect(JSON.stringify(failure)).not.toMatch(
       /other-thread|account@example|other-turn|Users|private|raw-item|raw prompt/,
     );

@@ -85,7 +85,20 @@ const Model = Schema.Struct({
   hidden: Schema.Boolean,
   supportedReasoningEfforts: Schema.Array(ReasoningEffortOption),
   defaultReasoningEffort: Schema.String,
-  inputModalities: Schema.Array(Schema.Literal("text", "image")),
+  // A modality a newer Codex lists is left out, so one new name cannot fail
+  // the whole model list.
+  inputModalities: Schema.transform(
+    Schema.Array(Schema.String),
+    Schema.Array(Schema.Literal("text", "image")),
+    {
+      strict: true,
+      decode: (modalities) =>
+        modalities.filter(
+          (modality): modality is "text" | "image" => modality === "text" || modality === "image",
+        ),
+      encode: (modalities) => modalities,
+    },
+  ),
   serviceTiers: Schema.Array(ModelServiceTier),
   defaultServiceTier: NullableString,
   isDefault: Schema.Boolean,
@@ -99,7 +112,13 @@ export type CodexModelListResult = typeof ModelListResult.Type;
 export const decodeModelListResult = decode(ModelListResult);
 
 const ThreadReference = Schema.Struct({ id: Schema.String });
-const TurnStatus = Schema.Literal("completed", "interrupted", "failed", "inProgress");
+/**
+ * `completed`, `interrupted`, `failed` or `inProgress` today. Statuses stay
+ * open strings throughout this file: a value a newer Codex adds must not make
+ * the notification that carries it undecodable, least of all the one that ends
+ * a turn. The mapper reads the values it knows and treats any other neutrally.
+ */
+const TurnStatus = Schema.String;
 /**
  * The reason the app-server reports on a failed turn. `codexErrorInfo` is the
  * classified signal (`"usageLimitExceeded"`, `"rateLimitExceeded"`, ...);
@@ -434,7 +453,7 @@ const ThreadItem = Schema.Union(
     id: Schema.String,
     command: Schema.String,
     cwd: Schema.String,
-    status: Schema.Literal("inProgress", "completed", "failed", "declined"),
+    status: Schema.String,
     aggregatedOutput: Schema.optional(Schema.NullOr(Schema.String)),
     exitCode: Schema.optional(NullableNonNegativeInteger),
     durationMs: Schema.optional(NullableNonNegativeInteger),
@@ -443,14 +462,14 @@ const ThreadItem = Schema.Union(
     type: Schema.Literal("fileChange"),
     id: Schema.String,
     changes: Schema.Array(FileUpdate),
-    status: Schema.Literal("inProgress", "completed", "failed", "declined"),
+    status: Schema.String,
   }),
   Schema.Struct({
     type: Schema.Literal("mcpToolCall"),
     id: Schema.String,
     server: Schema.String,
     tool: Schema.String,
-    status: Schema.Literal("inProgress", "completed", "failed"),
+    status: Schema.String,
     durationMs: Schema.optional(NullableNonNegativeInteger),
   }),
   Schema.Struct({
@@ -458,7 +477,7 @@ const ThreadItem = Schema.Union(
     id: Schema.String,
     namespace: Schema.NullOr(Schema.String),
     tool: Schema.String,
-    status: Schema.Literal("inProgress", "completed", "failed"),
+    status: Schema.String,
     success: Schema.NullOr(Schema.Boolean),
     durationMs: Schema.optional(NullableNonNegativeInteger),
   }),
@@ -483,7 +502,7 @@ const ThreadItem = Schema.Union(
     type: Schema.Literal("collabAgentToolCall"),
     id: Schema.String,
     tool: Schema.String,
-    status: Schema.Literal("inProgress", "completed", "failed", "interrupted"),
+    status: Schema.String,
     receiverThreadIds: Schema.Array(Schema.String).pipe(Schema.maxItems(32)),
     prompt: Schema.optional(Schema.NullOr(Schema.String)),
     /** The model a `spawnAgent` call asked for, when it named one. */
@@ -537,7 +556,7 @@ const TurnDiffNotification = Schema.Struct({
 
 const TurnPlanStep = Schema.Struct({
   step: Schema.String,
-  status: Schema.Literal("pending", "inProgress", "completed"),
+  status: Schema.String,
 });
 
 const TurnPlanNotification = Schema.Struct({
@@ -893,23 +912,33 @@ export function decodeCodexServerMessage(value: unknown): CodexServerMessage {
     const id = decodeRpcId(value.id);
     if (hasOwn(stableRequestSchemas, method)) {
       const stableMethod = method as CodexStableRequestMethod;
-      return {
-        kind: "request",
-        id,
-        method: stableMethod,
-        params: stableRequestDecoders[stableMethod](value.params),
-      } as CodexServerRequest;
+      let params: unknown;
+      try {
+        params = stableRequestDecoders[stableMethod](value.params);
+      } catch {
+        // An approval, question or tool call this build cannot read is never
+        // answered as allowed: Codex is told the request is not supported,
+        // as for a method this build does not know, and the connection and
+        // every other thread on it stay up.
+        return { kind: "unsupported-request", id, method };
+      }
+      return { kind: "request", id, method: stableMethod, params } as CodexServerRequest;
     }
     return { kind: "unsupported-request", id, method };
   }
 
   if (hasOwn(stableNotificationSchemas, method)) {
     const stableMethod = method as CodexStableNotificationMethod;
-    return {
-      kind: "notification",
-      method: stableMethod,
-      params: stableNotificationDecoders[stableMethod](value.params),
-    } as CodexServerNotification;
+    let params: unknown;
+    try {
+      params = stableNotificationDecoders[stableMethod](value.params);
+    } catch {
+      // One app-server process carries every thread, so a notification whose
+      // shape a newer Codex changed is dropped like one this build does not
+      // know. Failing it closed the connection under all of them.
+      return { kind: "unknown-notification", method };
+    }
+    return { kind: "notification", method: stableMethod, params } as CodexServerNotification;
   }
 
   return { kind: "unknown-notification", method };

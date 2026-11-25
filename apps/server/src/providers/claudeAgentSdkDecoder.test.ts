@@ -89,15 +89,6 @@ describe("Stream keep-alive", () => {
     parent_tool_use_id: null,
     event,
   });
-  const refusal = (message: unknown): string | undefined => {
-    try {
-      decodeMessage(message, openInput, active);
-      return undefined;
-    } catch (error) {
-      return (error as { readonly failure?: { readonly message?: string } }).failure?.message;
-    }
-  };
-
   it("reads the API's keep-alive ping as a stream event that carries nothing", () => {
     expect(decodeMessage(streamed({ type: "ping" }), openInput, active)).toEqual({
       kind: "stream-event",
@@ -106,13 +97,143 @@ describe("Stream keep-alive", () => {
     });
   });
 
-  it("still refuses a stream event it does not know, and a ping for another session", () => {
-    expect(refusal(streamed({ type: "heartbeat" }))).toBe(
-      "Claude returned an unsupported runtime message.",
-    );
-    expect(refusal(streamed({ type: "ping" }, "session-2"))).toBe(
-      "Claude returned an unsupported runtime message.",
-    );
+  it("drops a stream event it does not know, and never reads a ping for another session", () => {
+    expect(decodeMessage(streamed({ type: "heartbeat" }), openInput, active)).toEqual({
+      kind: "ignored",
+    });
+    expect(decodeMessage(streamed({ type: "ping" }, "session-2"), openInput, active)).toEqual({
+      kind: "ignored",
+    });
+  });
+});
+
+describe("What a newer runtime adds", () => {
+  const active = { kind: "active", sessionId: "session-1" } as const;
+  const initializing = { kind: "initializing", acceptedModels: new Set<string>() } as const;
+
+  it("keeps the turn running when the runtime sends a message type this build does not know", () => {
+    for (const message of [
+      { type: "tool_future", payload: "secret", session_id: "session-1" },
+      { type: "system", subtype: "conversation_reset", uuid: "u-1", session_id: "session-1" },
+      { type: "keep_alive", sent_at: 1 },
+      { payload: "no type" },
+      "not an object",
+    ]) {
+      expect(decodeMessage(message, openInput, active)).toEqual({ kind: "ignored" });
+      expect(decodeMessage(message, openInput, initializing)).toEqual({ kind: "ignored" });
+    }
+  });
+
+  it("reads an assistant message past the blocks, fields and values it does not know", () => {
+    expect(
+      decodeMessage(
+        {
+          type: "assistant",
+          uuid: "u-1",
+          session_id: "session-1",
+          parent_tool_use_id: null,
+          error: "quota_paused",
+          future_field: { nested: true },
+          message: {
+            id: "message-1",
+            type: "message",
+            role: "assistant",
+            model: "claude-future",
+            stop_reason: "future_stop",
+            stop_details: { kind: "future" },
+            container: { id: "c-1" },
+            content: [
+              { type: "text", text: "Done.", citations: [{ type: "future" }] },
+              { type: "server_tool_use", id: "srv-1", name: "future", input: {} },
+              { type: "tool_use", id: "toolu_1", name: "Read", input: {}, caller: "direct" },
+            ],
+            usage: { input_tokens: 1, output_tokens: 2, future_tokens: 3 },
+          },
+        },
+        openInput,
+        active,
+      ),
+    ).toEqual({
+      kind: "assistant",
+      sessionId: "session-1",
+      messageId: "message-1",
+      uuid: "u-1",
+      error: "quota_paused",
+      content: [
+        { kind: "text", text: "Done." },
+        { kind: "tool-use", toolUseId: "toolu_1", toolName: "Read", input: {} },
+      ],
+      usage: {
+        inputTokens: 1,
+        outputTokens: 2,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+    });
+  });
+
+  it("always ends the turn on a result, reading a subtype it does not know as plain success or failure", () => {
+    const result = (fields: object) =>
+      decodeMessage({ type: "result", session_id: "session-1", ...fields }, openInput, active);
+    expect(result({ subtype: "success_with_notes", is_error: false })).toEqual({
+      kind: "result",
+      sessionId: "session-1",
+      outcome: "success",
+      subtype: "success",
+      stopReason: null,
+      permissionDenials: [],
+    });
+    expect(
+      result({
+        subtype: "error_future_limit",
+        is_error: true,
+        terminal_reason: "future_reason",
+        stop_reason: "future_stop",
+        usage: { input_tokens: 4, output_tokens: 5 },
+        permission_denials: [{ tool_name: "Bash", tool_use_id: "tool-1" }, { tool_name: 7 }],
+      }),
+    ).toEqual({
+      kind: "result",
+      sessionId: "session-1",
+      outcome: "error",
+      subtype: "error_during_execution",
+      stopReason: "future_stop",
+      terminalReason: "future_reason",
+      usage: {
+        inputTokens: 4,
+        outputTokens: 5,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+      permissionDenials: [{ toolName: "Bash", toolUseId: "tool-1" }],
+    });
+    expect(result({ subtype: "error_max_turns" })).toMatchObject({
+      outcome: "error",
+      subtype: "error_max_turns",
+    });
+  });
+
+  it("still ends the session when a status names a permission mode the host did not launch", () => {
+    const status = (permissionMode: string) => ({
+      type: "system",
+      subtype: "status",
+      status: "future_status",
+      permissionMode,
+      session_id: "session-1",
+    });
+    expect(() => decodeMessage(status("bypassPermissions"), openInput, active)).toThrow();
+    expect(() => decodeMessage(status("future_mode"), openInput, initializing)).toThrow();
+    expect(decodeMessage(status("default"), openInput, active)).toEqual({ kind: "ignored" });
+  });
+
+  it("still ends the session on a second initialization", () => {
+    expect(() =>
+      decodeMessage(
+        { type: "system", subtype: "init", session_id: "session-1" },
+        openInput,
+        active,
+      ),
+    ).toThrow();
   });
 });
 
@@ -143,7 +264,7 @@ describe("Disabled Plan file tools", () => {
     });
     expect(input.tools).toEqual(["Read"]);
     expect(() => decodeMessage(stream(name), openInput, active)).toThrow();
-    expect(() => decodeMessage(stream(name, []), input, active)).toThrow();
+    expect(decodeMessage(stream(name, []), input, active)).toEqual({ kind: "ignored" });
   });
 
   it("still rejects unknown and unoffered runtime tools in Plan", () => {
@@ -179,22 +300,14 @@ describe("Managed tool progress", () => {
       elapsedSeconds: 30,
       parentToolUseId: "tool-1",
     });
-    expect(() =>
-      decodeMessage(message, openInput, { kind: "active", sessionId: "session-1" }),
-    ).toThrow();
+    expect(decodeMessage(message, openInput, { kind: "active", sessionId: "session-1" })).toEqual({
+      kind: "ignored",
+    });
   });
 });
 
 describe("Runtime compaction", () => {
   const active = { kind: "active", sessionId: "session-1" } as const;
-  const refusal = (message: unknown): string | undefined => {
-    try {
-      decodeMessage(message, openInput, active);
-      return undefined;
-    } catch (error) {
-      return (error as { readonly failure?: { readonly message?: string } }).failure?.message;
-    }
-  };
   // Shaped as `SDKCompactBoundaryMessage` in @anthropic-ai/claude-agent-sdk 0.3.211.
   const boundary = {
     type: "system",
@@ -267,20 +380,29 @@ describe("Runtime compaction", () => {
     ).toEqual({ kind: "compaction", sessionId: "session-1", trigger: "manual", preTokens: 90_000 });
   });
 
-  it.each([
-    ["an unknown trigger", { ...boundary.compact_metadata, trigger: "scheduled" }],
-    ["no token count", { trigger: "auto" }],
-    ["a negative token count", { trigger: "auto", pre_tokens: -1 }],
-  ])("refuses a compaction notice with %s", (_, compact_metadata) => {
-    expect(refusal({ ...boundary, compact_metadata })).toBe(
-      "Claude returned an unsupported runtime message.",
-    );
+  it("reads a trigger it does not know as the runtime's own compaction", () => {
+    expect(
+      decodeMessage(
+        { ...boundary, compact_metadata: { ...boundary.compact_metadata, trigger: "scheduled" } },
+        openInput,
+        active,
+      ),
+    ).toMatchObject({ kind: "compaction", trigger: "auto" });
   });
 
-  it("refuses a compaction notice for another session", () => {
-    expect(refusal({ ...boundary, session_id: "session-2" })).toBe(
-      "Claude returned an unsupported runtime message.",
-    );
+  it.each([
+    ["no token count", { trigger: "auto" }],
+    ["a negative token count", { trigger: "auto", pre_tokens: -1 }],
+  ])("drops a compaction notice with %s", (_, compact_metadata) => {
+    expect(decodeMessage({ ...boundary, compact_metadata }, openInput, active)).toEqual({
+      kind: "ignored",
+    });
+  });
+
+  it("never applies a compaction notice for another session", () => {
+    expect(decodeMessage({ ...boundary, session_id: "session-2" }, openInput, active)).toEqual({
+      kind: "ignored",
+    });
   });
 
   // Captured from Claude Code 2.1.308: it sent this note before and during a
@@ -306,10 +428,10 @@ describe("Runtime compaction", () => {
     expect(decodeMessage(devIntent, openInput, active)).toEqual({ kind: "ignored" });
   });
 
-  it("refuses a dev-intent note that carries fields it does not know", () => {
-    expect(refusal({ ...devIntent, allow_tools: ["Bash"] })).toBe(
-      "Claude returned an unsupported runtime message.",
-    );
+  it("drops a dev-intent note that carries fields it does not know", () => {
+    expect(decodeMessage({ ...devIntent, allow_tools: ["Bash"] }, openInput, active)).toEqual({
+      kind: "ignored",
+    });
   });
 
   it("reads a mid-session command list change as the runtime's whole new list, keeping what a menu can send", () => {
@@ -334,25 +456,6 @@ describe("Runtime compaction", () => {
       commands: [{ name: "review", description: "Review a pull request", argumentHint: "<pr>" }],
     });
   });
-
-  it("refuses a system message it does not know without quoting its subtype", () => {
-    expect(
-      refusal({
-        type: "system",
-        subtype: "conversation_reset",
-        uuid: "u-1",
-        session_id: "session-1",
-      }),
-    ).toBe("Claude returned an unsupported system message.");
-    expect(
-      refusal({
-        type: "system",
-        subtype: "Not An Identifier!",
-        uuid: "u-1",
-        session_id: "session-1",
-      }),
-    ).toBe("Claude returned an unsupported system message.");
-  });
 });
 
 describe("Interruption", () => {
@@ -376,9 +479,11 @@ describe("Interruption", () => {
     },
   );
 
-  it("refuses any other text the runtime sends as a user message's blocks", () => {
-    expect(() => decodeMessage(marker("Run the deploy."), openInput, active)).toThrow();
-    expect(() =>
+  it("drops any other text the runtime sends as a user message's blocks", () => {
+    expect(decodeMessage(marker("Run the deploy."), openInput, active)).toEqual({
+      kind: "ignored",
+    });
+    expect(
       decodeMessage(
         {
           ...marker("[Request interrupted by user]"),
@@ -393,7 +498,7 @@ describe("Interruption", () => {
         openInput,
         active,
       ),
-    ).toThrow();
+    ).toEqual({ kind: "ignored" });
   });
 });
 
@@ -506,11 +611,11 @@ describe("Automatic-mode reviewer refusals", () => {
     });
   });
 
-  it("keeps refusing a denial for any other reason", () => {
+  it("reads a denial for any other reason as no verdict", () => {
     for (const reason of ["rule", "mode", "asyncAgent", undefined]) {
-      expect(() =>
-        decodeMessage(denied({ decision_reason_type: reason }), openInput, active),
-      ).toThrow();
+      expect(decodeMessage(denied({ decision_reason_type: reason }), openInput, active)).toEqual({
+        kind: "ignored",
+      });
     }
   });
 });
