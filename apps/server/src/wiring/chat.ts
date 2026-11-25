@@ -142,7 +142,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     | "externalContentIngestionStore"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
-    | "sideTaskReports"
+    | "sideTaskReportAdmission"
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
   > &
@@ -248,7 +248,7 @@ export function wireChat(deps: ChatDependencies) {
     runtimeOutsideContentMarks,
     shellService,
     sideTasks,
-    sideTaskReports,
+    sideTaskReportAdmission,
     skillDiscoveryService,
     spendCeiling,
     threadOutsideContentMarks,
@@ -522,7 +522,7 @@ export function wireChat(deps: ChatDependencies) {
         for (const guard of attachmentPurgeGuards) await guard(threadId);
       },
       agentRuns: agentRunPersistence,
-      sideTaskReports,
+      sideTaskReports: sideTaskReportAdmission,
       // A routine's or a follow-up's turn runs as the host with no window, so
       // it takes the Canvas, bound to the thread's own Chat Project, the
       // scope a window showing that Project would give, and the video tool a

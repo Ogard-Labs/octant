@@ -16,7 +16,10 @@ import {
   decodeContextCompactionCompleted,
   decodeContextCompactionFailed,
   decodeSideTaskReportOwed,
+  decodeThreadRetentionThreadPurged,
+  decodeWorkTurnUpdated,
   MAX_SIDE_TASK_REPORT_DELIVERY_BATCH_SIZE,
+  THREAD_RETENTION_EVENT_NAMES,
   THREAD_SIDE_TASK_REPORT_EVENT_NAMES,
   type CommittedAppend,
   type EventEnvelope,
@@ -51,7 +54,13 @@ interface SideTaskReportDeliveryServiceOptions {
   readonly journal: Pick<Journal, "subscribeCommitted">;
   readonly reports: Pick<
     SideTaskReportStore,
-    "undelivered" | "undeliveredForParent" | "reportsForParent" | "markDelivered" | "markRefused"
+    | "undelivered"
+    | "undeliveredForParent"
+    | "reportsForParent"
+    | "markDelivered"
+    | "markRefused"
+    | "refuseOwedFrom"
+    | "forgetPurgedThread"
   >;
   readonly ports: SideTaskReportDeliveryPorts;
   readonly clock: () => Date;
@@ -61,16 +70,6 @@ interface SideTaskReportDeliveryServiceOptions {
   /** How long a deferred dispatch waits before retrying. */
   readonly retryAfterMs?: number;
   readonly onError?: (message: string, error: unknown) => void;
-  /**
-   * Journals that a child's report is about to enter its parent, which taints
-   * the parent: the child may have relayed content it fetched, and a local
-   * tool result no longer taints the parent after it. Answers whether the
-   * taint was recorded; a delivery whose taint could not be recorded waits.
-   */
-  readonly recordIngestion: (
-    parentThreadId: string,
-    reports: ReadonlyArray<OwedSideTaskReport>,
-  ) => boolean;
 }
 
 const DEFER_RETRY_AFTER_MS = 30_000;
@@ -133,6 +132,25 @@ export class SideTaskReportDeliveryService {
       }
       return;
     }
+    if (event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged) {
+      try {
+        const { threadId } = decodeThreadRetentionThreadPurged(event.payload);
+        this.#options.reports.forgetPurgedThread(String(threadId));
+      } catch (error) {
+        this.#options.onError?.("Side-task report delivery could not decode a purge.", error);
+      }
+      return;
+    }
+    if (event.eventName === "chat.deleted@1") {
+      try {
+        this.#options.reports.refuseOwedFrom(
+          event.aggregateId,
+          "The side task's thread was deleted.",
+        );
+      } catch (error) {
+        this.#options.onError?.("A deleted side task's reports could not be settled.", error);
+      }
+    }
     this.#watchParent(event);
   }
 
@@ -141,7 +159,9 @@ export class SideTaskReportDeliveryService {
    * the active turn settling is exactly such a commit. Code turns journal on
    * their own `code-operation` aggregates, so their frames name the thread
    * for the same wake, and a compaction that held the parent's turns ends on
-   * the thread's context ledger, which names it as the subject.
+   * the thread's context ledger, which names it as the subject. A Work turn
+   * journals on its own `work-turn` aggregate; only its end can free the
+   * parent, so what it streams on the way is passed by.
    */
   #watchParent(event: EventEnvelope): void {
     const candidates: ReadonlyArray<string> = (() => {
@@ -156,6 +176,15 @@ export class SideTaskReportDeliveryService {
             "Side-task report delivery could not decode a code frame.",
             error,
           );
+          return [];
+        }
+      }
+      if (event.aggregateType === "work-turn" && event.eventName === "work.turn-updated@1") {
+        try {
+          const turn = decodeWorkTurnUpdated(event.payload);
+          return turn.status === "running" ? [] : [String(turn.threadId)];
+        } catch (error) {
+          this.#options.onError?.("Side-task report delivery could not decode a Work turn.", error);
           return [];
         }
       }
@@ -297,10 +326,6 @@ export class SideTaskReportDeliveryService {
         fitSideTaskReportDeliveryBatch(uncovered.map((entry) => entry.report)).length,
       );
       if (batch.length === 0) {
-        this.#armTimer(pending);
-        return;
-      }
-      if (!this.#options.recordIngestion(parentThreadId, batch)) {
         this.#armTimer(pending);
         return;
       }

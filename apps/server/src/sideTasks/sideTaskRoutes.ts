@@ -2,6 +2,7 @@ import {
   decodeContinueSideTaskHere,
   decodeDismissSideTask,
   decodeSetSideTaskReporting,
+  decodeSideTaskId,
   decodeStartSideTask,
   type OctantMode,
   type SideTaskChildState,
@@ -24,7 +25,7 @@ const HEADERS = "content-type, x-octant-window-capability";
 const PREFIX = "/api/side-tasks/";
 
 export interface SideTaskRouteDependencies extends SideTaskStartDependencies {
-  readonly store: Pick<SideTaskStore, "read" | "find" | "settle">;
+  readonly store: Pick<SideTaskStore, "read" | "find" | "startedChildOf" | "settle">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   /** Whether this window may read the thread and act on it; never a body field. */
   readonly authorizeThread: (input: {
@@ -258,15 +259,18 @@ function setSideTaskReporting(
   });
   const reports = dependencies.reports;
   if (reports === undefined) return refused("target-unavailable");
-  const task = dependencies.store.find(input.threadId, input.sideTaskId);
-  if (task === undefined) return refused("not-found");
-  if (task.status !== "started" || task.startedThreadId === undefined) {
-    return refused("already-settled");
+  const child = dependencies.store.startedChildOf(input.threadId, input.sideTaskId);
+  if (child === undefined) {
+    return refused(
+      dependencies.store.find(input.threadId, input.sideTaskId) === undefined
+        ? "not-found"
+        : "already-settled",
+    );
   }
-  reports.setReporting(task.startedThreadId, input.on);
+  if (reports.setReporting(child, input.on) === "purged") return refused("target-unavailable");
   return {
     kind: "side-task-reporting",
-    sideTaskId: task.offer.id,
+    sideTaskId: decodeSideTaskId(input.sideTaskId),
     reporting: input.on ? "on" : "stopped",
   };
 }

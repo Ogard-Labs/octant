@@ -1,4 +1,4 @@
-import { decodeStartWorkThreadTurnCommand } from "@octant/contracts";
+import { decodeSideTaskReportOwed, decodeStartWorkThreadTurnCommand } from "@octant/contracts";
 import { SERVER_ATTACHMENT_TRANSFER_REFUSAL } from "../serverProjects/serverAttachments";
 import { continueWorkTurns } from "../wiring/continuation";
 import { RESTART_CONTINUATION_PROMPT } from "../harness/restartContinuation";
@@ -130,6 +130,7 @@ import { liveWorkFilesystem } from "./workFilesystemPort";
 import type { TurnEndSummary } from "../metrics/turnEnd";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import type { SideTaskReportEntry } from "../sideTasks/sideTaskReportStore";
 import { HOST_DRAINING_REFUSAL, HostDrain } from "../hostDrain";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
 import {
@@ -6341,6 +6342,117 @@ describe("WorkTurnService", () => {
     ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
   });
 
+  it("delivers a side-task report after a turn that waited on a usage limit was followed by a completed one", async () => {
+    const report = owedSideTaskReport("work");
+    let runs = 0;
+    const onTurnRequested = vi.fn();
+    const fixture = serviceFixture({
+      onTurnRequested,
+      sideTaskReports: { reportsForParent: () => [report], recordIngestion: () => true },
+      turnRuntime: {
+        run: async () => {
+          runs += 1;
+          return runs === 1
+            ? {
+                kind: "waiting",
+                failure: {
+                  category: "interrupted",
+                  message: "Usage limit reached.",
+                  usageLimit: {
+                    kind: "temporary",
+                    resetsAt: "2026-08-11T18:00:00.000Z" as UtcTimestamp,
+                  },
+                },
+              }
+            : { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    const delivery = { kind: "side-task-report", reportIds: [report.report.reportId] };
+    const deliver = (requestId: string, turnId: string) =>
+      fixture.service.startFirstTurn(ROUTINE_HOST_SCOPE_ID, {
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId(requestId),
+        turnId: decodeWorkTurnId(turnId),
+        delivery,
+      });
+    // Still the latest turn: the limit's reset or the person continues it, so the report waits.
+    await expect(
+      deliver("cccccccc-cccc-4ccc-8ccc-ccccccccccc1", "dddddddd-dddd-4ddd-8ddd-ddddddddddd1"),
+    ).rejects.toMatchObject({ failure: { category: "stale" } });
+    // A refused retry leaves the snooze the host set for that reset in place.
+    expect(onTurnRequested).toHaveBeenCalledTimes(1);
+    await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-ccccccccccc2"),
+      turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-ddddddddddd2"),
+    });
+    await fixture.waitForIdle();
+
+    await expect(
+      deliver("cccccccc-cccc-4ccc-8ccc-ccccccccccc3", "dddddddd-dddd-4ddd-8ddd-ddddddddddd3"),
+    ).resolves.toMatchObject({ kind: "accepted", turn: { delivery } });
+  });
+
+  it("marks a Work parent as having read a side-task report only once it takes the report, and before its provider does", async () => {
+    const report = owedSideTaskReport("work");
+    const order: string[] = [];
+    let recorded = true;
+    const pending = deferred<{ readonly kind: "completed"; readonly response: string }>();
+    let first = true;
+    const onTurnRequested = vi.fn();
+    const fixture = serviceFixture({
+      onTurnRequested,
+      sideTaskReports: {
+        reportsForParent: () => [report],
+        recordIngestion: () => {
+          order.push("marked");
+          return recorded;
+        },
+      },
+      turnRuntime: {
+        run: async () => {
+          if (first) {
+            first = false;
+            return pending.promise;
+          }
+          order.push("provider");
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+    const deliver = (requestId: string, turnId: string) =>
+      fixture.service.startFirstTurn(ROUTINE_HOST_SCOPE_ID, {
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId(requestId),
+        turnId: decodeWorkTurnId(turnId),
+        delivery: { kind: "side-task-report", reportIds: [report.report.reportId] },
+      });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await expect(
+      deliver("cccccccc-cccc-4ccc-8ccc-ccccccccccc1", "dddddddd-dddd-4ddd-8ddd-ddddddddddd1"),
+    ).rejects.toMatchObject({ failure: { category: "stale" } });
+    expect(order).toEqual([]);
+
+    pending.resolve({ kind: "completed", response: "done" });
+    await fixture.waitForIdle();
+    recorded = false;
+    await expect(
+      deliver("cccccccc-cccc-4ccc-8ccc-ccccccccccc2", "dddddddd-dddd-4ddd-8ddd-ddddddddddd2"),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(order).toEqual(["marked"]);
+    expect(fixture.projection.listForThread(ids.thread)).toHaveLength(1);
+    // Refused as late as a turn can be, the report still woke nothing.
+    expect(onTurnRequested).toHaveBeenCalledTimes(1);
+
+    recorded = true;
+    await deliver("cccccccc-cccc-4ccc-8ccc-ccccccccccc3", "dddddddd-dddd-4ddd-8ddd-ddddddddddd3");
+    await fixture.waitForIdle();
+    expect(order).toEqual(["marked", "marked", "provider"]);
+  });
+
   it("refuses a turn that claims to deliver a subagent result the journal does not back", async () => {
     const delivery = { kind: "agent-result", runId: "d4a1b000-0000-4000-8000-000000000099" };
     // No agentRuns dependency: an unbacked mark is refused.
@@ -6943,6 +7055,7 @@ function serviceFixture(
     readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
     readonly onTurnCancelled?: WorkTurnServiceDependencies["onTurnCancelled"];
     readonly agentRuns?: WorkTurnServiceDependencies["agentRuns"];
+    readonly sideTaskReports?: WorkTurnServiceDependencies["sideTaskReports"];
     readonly runningAccess?: RunningWorkTurnAccess;
     readonly toolStepSettings?: WorkTurnServiceDependencies["toolStepSettings"];
     /** Read on every thread read, so a test can mark and reactivate between turns. */
@@ -7195,6 +7308,7 @@ function serviceFixture(
     ...(options.stopKeptSession === undefined ? {} : { stopKeptSession: options.stopKeptSession }),
     ...(options.onTurnCancelled === undefined ? {} : { onTurnCancelled: options.onTurnCancelled }),
     ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
+    ...(options.sideTaskReports === undefined ? {} : { sideTaskReports: options.sideTaskReports }),
     ...(options.runningAccess === undefined ? {} : { runningAccess: options.runningAccess }),
     ...(options.toolStepSettings === undefined
       ? {}
@@ -7290,6 +7404,23 @@ function workProject(
     ],
     ...overrides,
   } as Extract<Project, { readonly type: "work" }>;
+}
+
+function owedSideTaskReport(parentMode: "work"): SideTaskReportEntry {
+  return {
+    childThreadId: "d4a1b000-0000-4000-8000-0000000000c1",
+    state: "owed",
+    report: decodeSideTaskReportOwed({
+      reportId: "d4a1b000-0000-4000-8000-0000000000c2",
+      parentThreadId: ids.thread,
+      parentMode,
+      title: "Fix stale install docs",
+      outcome: "completed",
+      text: "The docs are updated.",
+      endedAt: "2026-07-21T10:00:00.000Z",
+      owedAt: "2026-07-21T10:00:00.000Z",
+    }),
+  };
 }
 
 function workRunFor(parentThreadId: string, overrides: Record<string, unknown> = {}): AgentRun {

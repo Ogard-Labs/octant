@@ -6,6 +6,7 @@ import {
   EventId,
   MAX_OPEN_SIDE_TASKS,
   MAX_SIDE_TASK_VIEW_ENTRIES,
+  MAX_STARTED_SIDE_TASK_RECEIPTS,
   SideTaskContinuedHere,
   SideTaskContinuationRefused,
   SideTaskDismissed,
@@ -70,9 +71,9 @@ export class SideTaskStore {
   readonly #records = new Map<string, ThreadRecord>();
   /**
    * The offer behind every started child, keyed by the child's thread id.
-   * The view keeps only a recent tail, so a long-lived child's offer can fall
-   * off it while the child still owes its parent reports; this index is what
-   * report detection reads instead of the capped list.
+   * The view is bounded, so a long-lived child's offer can fall off it while
+   * the child still owes its parent reports; report detection and the
+   * reporting switch read this index instead of the capped list.
    */
   readonly #startedOffers = new Map<
     string,
@@ -115,6 +116,15 @@ export class SideTaskStore {
     return entry !== undefined && String(entry.parentThreadId) === parentThreadId
       ? entry.offer
       : undefined;
+  }
+
+  /** The child an offer of this thread started, even after its receipt aged out. */
+  startedChildOf(parentThreadId: string, sideTaskId: string): string | undefined {
+    for (const [childThreadId, entry] of this.#startedOffers) {
+      if (String(entry.parentThreadId) === parentThreadId && String(entry.offer.id) === sideTaskId)
+        return childThreadId;
+    }
+    return undefined;
   }
 
   /**
@@ -179,9 +189,19 @@ export class SideTaskStore {
 
   #applyOffer(record: ThreadRecord, offer: SideTaskOffer): void {
     record.tasks.push({ offer, status: "offered" });
-    if (record.tasks.length > MAX_SIDE_TASK_VIEW_ENTRIES) {
-      record.tasks.splice(0, record.tasks.length - MAX_SIDE_TASK_VIEW_ENTRIES);
-    }
+    this.#boundView(record);
+  }
+
+  /** Drops the oldest receipts past the view's bounds, started ones against their own. */
+  #boundView(record: ThreadRecord): void {
+    const started = record.tasks.filter((task) => task.status === "started");
+    const others = record.tasks.filter((task) => task.status !== "started");
+    const kept = new Set([
+      ...started.slice(-MAX_STARTED_SIDE_TASK_RECEIPTS),
+      ...others.slice(-MAX_SIDE_TASK_VIEW_ENTRIES),
+    ]);
+    if (kept.size === record.tasks.length) return;
+    record.tasks.splice(0, record.tasks.length, ...record.tasks.filter((task) => kept.has(task)));
   }
 
   #applySettlement(record: ThreadRecord, settlement: SideTaskSettlement): void {
@@ -197,6 +217,7 @@ export class SideTaskStore {
       });
     }
     record.tasks[index] = settledTask(task, settlement);
+    this.#boundView(record);
   }
 
   #hydrate(): void {

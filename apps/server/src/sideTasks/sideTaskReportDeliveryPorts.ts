@@ -36,6 +36,12 @@ import { sideTaskReportDeliveryPrompt } from "./sideTaskReportDeliveryPrompt";
  * because one turn may cover any subset of what is owed. `dispatch` admits
  * the one journaled delivery turn and answers whether it landed.
  */
+/**
+ * `refused` is only for a parent that no longer exists, so the report could
+ * never land. Every other refusal names a standing a person can change: the
+ * parent is busy, archived, marked Done or paused, its mode is off, or its
+ * sign-in runs only turns a person sends. Those wait, so nothing is dropped.
+ */
 export interface SideTaskReportDeliveryModePort {
   readonly alreadyDelivered: (
     parentThreadId: string,
@@ -50,6 +56,10 @@ export interface SideTaskReportDeliveryModePort {
     | { readonly kind: "refused"; readonly detail: string }
   >;
 }
+
+/** A deletion is final from its request on: no reopen brings the thread back. */
+const threadIsGone = (thread: Pick<ChatThread | WorkThread, "lifecycle">): boolean =>
+  thread.lifecycle === "deleting" || thread.lifecycle === "deleted";
 
 const refusalDetail = (error: unknown): string =>
   error instanceof Error ? error.message : "The delivery could not be admitted.";
@@ -115,7 +125,7 @@ export function createWorkSideTaskReportDeliveryPort(input: {
         return { kind: "deferred", detail: "Work is turned off on this host." };
       }
       const thread = input.readThread(decodeWorkThreadId(parentThreadId));
-      if (thread === undefined) {
+      if (thread === undefined || threadIsGone(thread)) {
         return { kind: "refused", detail: "The parent Work thread is gone." };
       }
       if (thread.bindingRevisionId === undefined) {
@@ -271,7 +281,8 @@ export function createChatSideTaskReportDeliveryPort(input: {
         return { kind: "refused", detail: "No side-task reports were supplied." };
       }
       const threadId = decodeChatThreadId(parentThreadId);
-      if (input.readThread(threadId) === undefined) {
+      const parent = input.readThread(threadId);
+      if (parent === undefined || threadIsGone(parent)) {
         return { kind: "refused", detail: "The parent Chat thread is gone." };
       }
       try {

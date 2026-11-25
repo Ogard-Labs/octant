@@ -566,7 +566,8 @@ shows no state rather than a guessed one. Beside the state the receipt
 carries a link-variant **Stop reporting** / **Resume reporting** control
 that switches whether the child's ended turns are owed back to this thread;
 the switch is journaled on the child's report record and reads back on the
-next list.
+next list. A started receipt stays in the list while the child may still
+report, past the ten newest other offers (the fifty newest starts are kept).
 
 ## Turn figures and plan usage
 

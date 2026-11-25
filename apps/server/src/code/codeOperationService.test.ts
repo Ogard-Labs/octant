@@ -5,6 +5,7 @@ import {
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceReference,
   decodeCodeOperationId,
+  decodeSideTaskReportOwed,
   decodeCodeOperationEventFrame,
   decodeProviderSessionId,
   type CodeOperationEventFrame,
@@ -18,7 +19,10 @@ import {
   type CodeFileId,
   type CodeTerminalLiveFrame,
   type WindowId,
+  type CodeOperationId,
 } from "@octant/contracts";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import type { SideTaskReportEntry } from "../sideTasks/sideTaskReportStore";
 import { SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL } from "../attachments/attachedFiles";
 import { turnBlocksInPlaceRestore } from "@octant/domain/code-policy";
 import { describe, expect, it, vi } from "vitest";
@@ -3496,6 +3500,107 @@ describe("CodeOperationService", () => {
     expect(fixture.turns.start).not.toHaveBeenCalled();
   });
 
+  function sideTaskReportFixture(recordIngestion = vi.fn(() => true)) {
+    const entry: SideTaskReportEntry = {
+      childThreadId: "d6a1b000-0000-4000-8000-0000000000c1",
+      state: "owed",
+      report: decodeSideTaskReportOwed({
+        reportId: "d6a1b000-0000-4000-8000-0000000000c2",
+        parentThreadId: ids.thread,
+        parentMode: "code",
+        title: "Fix stale install docs",
+        outcome: "completed",
+        text: "The docs are updated.",
+        endedAt: "2026-07-21T10:00:00.000Z",
+        owedAt: "2026-07-21T10:00:00.000Z",
+      }),
+    };
+    const fixture = providerTurnFixture({
+      recordEvents: true,
+      sideTaskReports: { reportsForParent: () => [entry], recordIngestion },
+    });
+    const journaled = (
+      operationId: CodeOperationId,
+      expectedCursor: number,
+      state: "waiting" | "completed",
+    ) => {
+      const parent = thread();
+      fixture.events.append({
+        threadId: ids.thread,
+        operationId,
+        expectedCursor,
+        event: {
+          kind: "conversation-turn-started",
+          providerInstanceId: parent.providerInstanceId,
+          modelId: parent.modelId,
+          sessionId: decodeProviderSessionId(startProviderTurn.sessionId),
+          prompt: startProviderTurn.prompt,
+          executionPolicy: parent.executionPolicy,
+        },
+      });
+      fixture.events.append({
+        threadId: ids.thread,
+        operationId,
+        expectedCursor: expectedCursor + 1,
+        event: { kind: "operation-state", state },
+      });
+    };
+    const deliver = (operationId: string) =>
+      fixture.service.execute(ROUTINE_HOST_SCOPE_ID, {
+        ...startProviderTurn,
+        operationId: decodeCodeOperationId(operationId),
+        delivery: { kind: "side-task-report", reportIds: [entry.report.reportId] },
+      });
+    return { ...fixture, deliver, journaled, recordIngestion };
+  }
+
+  it("delivers a side-task report after a rate-limited turn was followed by a completed one", async () => {
+    const fixture = sideTaskReportFixture();
+    const limited = decodeCodeOperationId("74747474-7474-4474-8474-747474747401");
+    const later = decodeCodeOperationId("74747474-7474-4474-8474-747474747402");
+    fixture.journaled(limited, 0, "waiting");
+    // Still the latest turn: it may be parked on the person, so the report waits.
+    await expect(fixture.deliver("74747474-7474-4474-8474-747474747403")).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "waiting" },
+    });
+    fixture.journaled(later, 0, "completed");
+
+    await expect(fixture.deliver("74747474-7474-4474-8474-747474747404")).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      delivery: { kind: "side-task-report" },
+    });
+  });
+
+  it("marks a Code parent as having read a side-task report only once it takes the report, and before its provider does", async () => {
+    let recorded = true;
+    const fixture = sideTaskReportFixture(vi.fn(() => recorded));
+    fixture.journaled(decodeCodeOperationId("74747474-7474-4474-8474-747474747401"), 0, "waiting");
+    await fixture.deliver("74747474-7474-4474-8474-747474747402");
+    expect(fixture.recordIngestion).not.toHaveBeenCalled();
+
+    fixture.journaled(
+      decodeCodeOperationId("74747474-7474-4474-8474-747474747403"),
+      0,
+      "completed",
+    );
+    recorded = false;
+    await expect(fixture.deliver("74747474-7474-4474-8474-747474747404")).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unavailable" },
+    });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+
+    recorded = true;
+    await expect(fixture.deliver("74747474-7474-4474-8474-747474747405")).resolves.toMatchObject({
+      kind: "provider-turn-state",
+    });
+    expect(fixture.recordIngestion).toHaveBeenCalledTimes(2);
+    expect(fixture.recordIngestion.mock.invocationCallOrder[1]).toBeLessThan(
+      fixture.turns.start.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
   it("refuses a Code turn that claims to deliver a subagent result the journal does not back", async () => {
     const fixture = providerTurnFixture();
     await expect(
@@ -3969,6 +4074,7 @@ function providerTurnFixture(
       | "git"
       | "isProviderModelAllowed"
       | "agentRuns"
+      | "sideTaskReports"
       | "consumeIssueContextFramed"
       | "carryAgentMessages"
       | "confirmAgentMessagesDelivered"

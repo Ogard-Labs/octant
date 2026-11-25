@@ -1967,8 +1967,8 @@ Follow-up suggestions and offered side tasks are journaled offers that grant not
 - Do it here records a durable unconfirmed claim before dispatch. A known refusal reopens the offer; an uncertain delivery or failed receipt stays visibly unconfirmed across restart and is never retried automatically.
 - A Code Project's designated planner offers work to its board with the same tool and target `board`; that records a pending planner proposal, which only a person confirms.
 - Every turn that ends in a side-task child is owed back to the offering thread as a host report: a completion carries the reply (honestly truncated when cut), a failure or cancellation carries its outcome alone. The person can stop or resume reporting from the started receipt; a stopped child owes nothing.
-- Reports reach the parent only as queued delivery turns marked `side-task-report`, never steering an answer in flight. The child's words are recorded as outside content before delivery, reports from several children coalesce into one turn up to a batch bound, and owed reports survive a restart so nothing is delivered twice or dropped silently.
-- A parent that can never take a report — gone or refusing for good — has its reports settled as refused with the reason journaled, not retried forever.
+- Reports reach the parent only as queued delivery turns marked `side-task-report`, never steering an answer in flight. The child's words are recorded as outside content when the parent takes the report and before its provider reads it, never while the parent is still busy; reports from several children coalesce into one turn up to a batch bound, and owed reports survive a restart so nothing is delivered twice or dropped silently.
+- A report waits for as long as its parent could still take it. A parent that no longer exists has its reports settled as refused with the reason journaled; a purge of either thread erases them, and a deleted child's are never delivered.
 
 Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness).
 

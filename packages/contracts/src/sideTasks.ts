@@ -35,7 +35,13 @@ export const MAX_SIDE_TASK_REASON_LENGTH = 280;
 export const MAX_SIDE_TASK_PROMPT_LENGTH = 8_192;
 /** Offers still waiting on a person; a model past this is refused, not queued. */
 export const MAX_OPEN_SIDE_TASKS = 5;
+/** Offered, dismissed and continued-here entries a thread's view keeps, newest last. */
 export const MAX_SIDE_TASK_VIEW_ENTRIES = 10;
+/**
+ * Started receipts a thread's view keeps beside them. A started child goes on
+ * reporting, so its Stop reporting control must outlive the offers around it.
+ */
+export const MAX_STARTED_SIDE_TASK_RECEIPTS = 50;
 
 export const SideTaskId = Schema.UUID.pipe(Schema.brand("SideTaskId"));
 export type SideTaskId = typeof SideTaskId.Type;
@@ -117,7 +123,9 @@ export type SideTask = typeof SideTask.Type;
 
 export const ThreadSideTasks = Schema.Struct({
   threadId: Schema.UUID,
-  tasks: Schema.Array(SideTask).pipe(Schema.maxItems(MAX_SIDE_TASK_VIEW_ENTRIES)),
+  tasks: Schema.Array(SideTask).pipe(
+    Schema.maxItems(MAX_SIDE_TASK_VIEW_ENTRIES + MAX_STARTED_SIDE_TASK_RECEIPTS),
+  ),
 }).annotations(strict);
 export type ThreadSideTasks = typeof ThreadSideTasks.Type;
 

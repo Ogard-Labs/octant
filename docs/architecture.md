@@ -11867,15 +11867,24 @@ Stop/Resume control on the receipt journals `side-task-reporting-stopped` /
 `-resumed` on the same record; a stopped child owes nothing. A
 `SideTaskReportDeliveryService` watches the journal for owed events and armed
 parents, coalesces owed reports per offering thread (bounded per delivery),
-records each batch as outside content before dispatch, and asks the mode's
-port to begin a turn carrying the `side-task-report` delivery mark — Chat
-through `deliver-chat-side-task-report`, Work and Code through their ordinary
-start commands. Delivery admission in each mode service verifies every named
-report is still owed to that thread, so a forged or replayed mark cannot mint
-a delivery; a turn that already carries the mark settles its reports without
-a second dispatch, a deferred parent is retried on a timer, and a parent that
-is gone or refuses for good gets its reports settled as `side-task-report-refused`
-with the reason journaled rather than retried forever.
+and asks the mode's port to begin a turn carrying the `side-task-report`
+delivery mark — Chat through `deliver-chat-side-task-report`, Work and Code
+through their ordinary start commands. Delivery admission in each mode service
+verifies every named report is still owed to that thread, so a forged or
+replayed mark cannot mint a delivery, and records the batch as outside content
+as its last step before journaling the turn: a parent that is still busy is
+never marked for a report it has not taken, the provider never reads one
+unmarked, and a mark that cannot be recorded refuses the turn. Only the
+parent's latest turn can hold a report back; one that stopped at a usage limit
+stops counting once a newer turn takes over. A turn that already carries the
+mark settles its reports without a second dispatch. A refused dispatch is tried
+again when the parent commits (a Work turn's end among them) and on a timer,
+because every refusal but one names a standing a person can change: busy,
+archived, marked Done, paused, the mode off, or a sign-in that runs only turns
+a person sends. A parent that no longer exists is the exception: its reports
+settle as `side-task-report-refused` with the reason journaled. Purging either
+thread erases the child's report aggregate and drops whatever was still owed;
+deleting a Chat child settles its owed reports as refused.
 
 **Work fork.** `fork-work-thread` creates a Work thread in the source's
 Project on the source's provider and model, with a `forkedFrom` origin naming

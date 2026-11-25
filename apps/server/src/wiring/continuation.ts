@@ -71,7 +71,6 @@ import {
   createCodeSideTaskReportDeliveryPort,
   createWorkSideTaskReportDeliveryPort,
 } from "../sideTasks/sideTaskReportDeliveryPorts";
-import { recordSideTaskReportIngestion } from "../sideTasks/sideTaskReports";
 import { defaultShellSettings, enabledModes } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -365,13 +364,6 @@ export function wireContinuation(deps: ContinuationDependencies) {
       journal: persistence.journal,
       reports: deps.sideTaskReports,
       clock: () => new Date(),
-      recordIngestion: (parentThreadId, reports) =>
-        recordSideTaskReportIngestion(
-          (input) => externalContentIngestionStore.record(input),
-          parentThreadId,
-          reports,
-          randomUUID,
-        ),
       ports: {
         chat: createChatSideTaskReportDeliveryPort({
           readThread: (threadId) => persistence.readChatThread(threadId),

@@ -117,7 +117,7 @@ import type {
   ProviderWakeupSchedule,
 } from "@octant/provider-sdk/driver";
 import type { Journal } from "../persistence/journal";
-import type { SideTaskReportStore } from "../sideTasks/sideTaskReportStore";
+import type { SideTaskReportAdmission } from "../sideTasks/sideTaskReports";
 import type { OutlivingSessions } from "../providers/outlivingSessions";
 import { createGhPullRequestPort } from "./ghPullRequestActionPort";
 import type { PullRequestLinkReader, PullRequestLinkRecorder } from "./pullRequestLinkService";
@@ -552,7 +552,7 @@ export interface CodeOperationRuntimeOptions {
    * Read access to journaled side-task reports, for verifying the report mark
    * a `start-provider-turn` claims. Absent means report claims are refused.
    */
-  readonly sideTaskReports?: Pick<SideTaskReportStore, "reportsForParent">;
+  readonly sideTaskReports?: SideTaskReportAdmission;
   readonly probeProvider?: (
     instanceId: CodeThread["providerInstanceId"],
   ) => Promise<Pick<ProviderProbeResult, "readiness" | "models">>;

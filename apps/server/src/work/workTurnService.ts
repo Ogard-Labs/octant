@@ -19,7 +19,10 @@ import {
   coveredAgentResultDeliveryMembers,
   validateAgentResultDelivery,
 } from "../agentRun/agentResultDeliveryBatch";
-import type { SideTaskReportStore } from "../sideTasks/sideTaskReportStore";
+import {
+  SIDE_TASK_REPORT_MARK_REFUSAL,
+  type SideTaskReportAdmission,
+} from "../sideTasks/sideTaskReports";
 import {
   contextSourceKey,
   reusableContextSummaryIds,
@@ -721,7 +724,7 @@ export interface WorkTurnServiceDependencies {
    * already be settled — so a caller cannot mark a turn as a delivery the
    * journal does not record. Absent means report claims are refused.
    */
-  readonly sideTaskReports?: Pick<SideTaskReportStore, "reportsForParent">;
+  readonly sideTaskReports?: SideTaskReportAdmission;
   /**
    * Where the service records the access each running turn holds. The host
    * passes one it built before the native harness, which reads it; absent,
@@ -1158,14 +1161,31 @@ export class WorkTurnService {
     }
     const existing = this.#projection.lookup(command.requestId);
     if (existing !== undefined) return this.#lookupMatching(command, existing);
+    // Only the latest turn can still be waiting on the person or a limit's
+    // reset. One that stopped to wait keeps that status for good once a newer
+    // turn takes over, and counting it held every later report back.
+    const latest = this.#projection.latestForThread(command.threadId);
     if (
-      turns.some(
-        (turn) =>
-          turn.status === "accepted" || turn.status === "running" || turn.status === "waiting",
-      )
+      latest?.status === "waiting" ||
+      turns.some((turn) => turn.status === "accepted" || turn.status === "running")
     )
       throw this.#failure("stale", "The Work parent already has an active turn.");
     return undefined;
+  }
+
+  /** Marks the thread before a turn carrying reports is journaled; see `SideTaskReportAdmission`. */
+  #markSideTaskReports(command: StartWorkThreadTurnCommand): boolean {
+    const mark = command.delivery;
+    if (mark?.kind !== "side-task-report") return true;
+    const admission = this.#sideTaskReports;
+    if (admission === undefined) return false;
+    const named = new Set(mark.reportIds.map(String));
+    return admission.recordIngestion(
+      String(command.threadId),
+      admission
+        .reportsForParent(String(command.threadId))
+        .filter((entry) => named.has(String(entry.report.reportId))),
+    );
   }
 
   async startFirstTurn(
@@ -1747,7 +1767,12 @@ export class WorkTurnService {
     // The host's own limit-recovery dispatch is not the person re-engaging,
     // so it must not wake a snooze or reopen a completion the way their turn
     // would; the spent limit-owned snooze goes in the settle instead.
-    if (thread !== undefined && options?.limitRecovery !== true) this.#onTurnRequested?.(thread.id);
+    // A side-task report is retried until the parent can take it, so it counts
+    // as a request only once it is admitted: a refused retry would otherwise
+    // clear the usage-limit snooze the host set on the parent it waits for.
+    const reportsBack = command.delivery?.kind === "side-task-report";
+    if (thread !== undefined && options?.limitRecovery !== true && !reportsBack)
+      this.#onTurnRequested?.(thread.id);
     const localProject =
       server === undefined ? this.#persistence.readProject(command.authority.projectId) : undefined;
     const decision = decideWorkTurnAuthority({
@@ -2539,6 +2564,9 @@ export class WorkTurnService {
       }
 
       try {
+        if (!this.#markSideTaskReports(command))
+          throw this.#failure("unavailable", SIDE_TASK_REPORT_MARK_REFUSAL);
+        if (reportsBack && thread !== undefined) this.#onTurnRequested?.(thread.id);
         this.#append(
           command.requestId,
           0,

@@ -234,7 +234,11 @@ import {
   validateAgentResultDelivery,
 } from "../agentRun/agentResultDeliveryBatch";
 import { sideTaskReportDeliveryPrompt } from "../sideTasks/sideTaskReportDeliveryPrompt";
-import type { SideTaskReportEntry, SideTaskReportStore } from "../sideTasks/sideTaskReportStore";
+import type { SideTaskReportEntry } from "../sideTasks/sideTaskReportStore";
+import {
+  SIDE_TASK_REPORT_MARK_REFUSAL,
+  type SideTaskReportAdmission,
+} from "../sideTasks/sideTaskReports";
 import { Schema } from "effect";
 import { Effect } from "effect";
 import {
@@ -1004,7 +1008,7 @@ export interface ChatServiceOptions {
    * the report of a side task that owes this thread — never text a caller
    * supplied. Absent means this host delivers no side-task reports into Chat.
    */
-  readonly sideTaskReports?: Pick<SideTaskReportStore, "reportsForParent">;
+  readonly sideTaskReports?: SideTaskReportAdmission;
 }
 
 /**
@@ -3602,7 +3606,8 @@ export class ChatService {
     }
     const accepted = await this.#withTurnAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
-      if (this.#sideTaskReports === undefined) {
+      const reports = this.#sideTaskReports;
+      if (reports === undefined) {
         throw new ChatServiceError(
           decodeChatFailure({
             category: "unsupported",
@@ -3656,7 +3661,7 @@ export class ChatService {
         { ...executionContext, turnId },
         undefined,
       );
-      this.#owedReportsFor(command.threadId, command.reportIds);
+      const admitted = this.#owedReportsFor(command.threadId, command.reportIds);
       const turn = beginChatTurn(prepared.executionThread, {
         turnId,
         attemptId: this.#uuid() as ChatAttempt["id"],
@@ -3688,6 +3693,13 @@ export class ChatService {
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       };
+      // The last step before the turn is journaled: nothing else can start on
+      // this thread meanwhile, and the provider has seen none of the report.
+      if (!reports.recordIngestion(String(thread.id), admitted)) {
+        throw new ChatServiceError(
+          decodeChatFailure({ category: "unavailable", message: SIDE_TASK_REPORT_MARK_REFUSAL }),
+        );
+      }
       this.#persistence.journal.append(
         {
           aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },

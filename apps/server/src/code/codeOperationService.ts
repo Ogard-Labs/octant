@@ -47,7 +47,10 @@ import {
   coveredAgentResultDeliveryMembers,
   validateAgentResultDelivery,
 } from "../agentRun/agentResultDeliveryBatch";
-import type { SideTaskReportStore } from "../sideTasks/sideTaskReportStore";
+import {
+  SIDE_TASK_REPORT_MARK_REFUSAL,
+  type SideTaskReportAdmission,
+} from "../sideTasks/sideTaskReports";
 import type { SelectedExtensionResolver } from "../extensions/selectedExtensions";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
@@ -1680,7 +1683,7 @@ export interface CodeOperationServiceOptions {
    * delivery the journal does not record. Absent means report claims are
    * refused.
    */
-  readonly sideTaskReports?: Pick<SideTaskReportStore, "reportsForParent">;
+  readonly sideTaskReports?: SideTaskReportAdmission;
 }
 
 /**
@@ -2338,6 +2341,13 @@ export class CodeOperationService {
                 }
                 if (admissionCurrent?.() === false) {
                   turnRefusal = admissionRefusal();
+                } else if (!this.#markSideTaskReports(command)) {
+                  turnRefusal = this.#failed(
+                    command.operationId,
+                    "unavailable",
+                    SIDE_TASK_REPORT_MARK_REFUSAL,
+                    "refused",
+                  );
                 } else {
                   this.#options.events.append({
                     threadId: command.threadId,
@@ -7905,6 +7915,23 @@ export class CodeOperationService {
     });
   }
 
+  /** Marks the thread before a turn carrying reports is journaled; see `SideTaskReportAdmission`. */
+  #markSideTaskReports(
+    command: Extract<CodeOperationCommand, { readonly kind: "start-provider-turn" }>,
+  ): boolean {
+    const mark = command.delivery;
+    if (mark?.kind !== "side-task-report") return true;
+    const admission = this.#options.sideTaskReports;
+    if (admission === undefined) return false;
+    const named = new Set(mark.reportIds.map(String));
+    return admission.recordIngestion(
+      String(command.threadId),
+      admission
+        .reportsForParent(String(command.threadId))
+        .filter((entry) => named.has(String(entry.report.reportId))),
+    );
+  }
+
   /**
    * The side-task report delivery a start-provider-turn claims, checked
    * against the journaled reports and the thread's own conversation turns: a
@@ -7989,17 +8016,22 @@ export class CodeOperationService {
           "invalid",
           "Provider turn identity does not match the requested side-task reports.",
         );
-      const active = new Set<string>();
-      for (const frame of history.frames) {
-        if (frame.event.kind === "conversation-turn-started") active.add(String(frame.operationId));
-        else if (
-          isTerminalSettlement(frame.event) ||
-          (frame.event.kind === "operation-result" &&
-            frame.event.result.kind === "operation-failed")
+      // Only the latest turn can still hold the thread. A turn that stopped at
+      // a rate limit stays `waiting` in the journal for good, so counting
+      // every start held reports back long after a newer turn had finished.
+      const latestStart = history.frames.findLast(
+        (frame) => frame.event.kind === "conversation-turn-started",
+      );
+      if (
+        latestStart !== undefined &&
+        !history.frames.some(
+          (frame) =>
+            String(frame.operationId) === String(latestStart.operationId) &&
+            (isTerminalSettlement(frame.event) ||
+              (frame.event.kind === "operation-result" &&
+                frame.event.result.kind === "operation-failed")),
         )
-          active.delete(String(frame.operationId));
-      }
-      if (active.size > 0)
+      )
         return this.#failed(
           command.operationId,
           "waiting",

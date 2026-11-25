@@ -68,6 +68,8 @@ export class SideTaskReportStore {
   readonly #actor: typeof EventActor.Type;
   readonly #clock: () => string;
   readonly #records = new Map<string, ChildRecord>();
+  /** Threads a purge erased while this host ran; no report may name one again. */
+  readonly #purged = new Set<string>();
 
   constructor(options: {
     readonly journal: JournalPort;
@@ -91,11 +93,15 @@ export class SideTaskReportStore {
    * Journals that one ended turn in the child is owed to the parent. A child
    * whose reporting the person stopped owes nothing, so the refusal is a
    * value rather than an event: nothing is journaled, nothing is delivered.
+   * The same holds once either thread was purged, so a turn still winding
+   * down cannot write back what the purge erased.
    */
   owe(
     childThreadId: string,
     report: Omit<SideTaskReportOwed, "reportId" | "owedAt">,
-  ): "owed" | "stopped" {
+  ): "owed" | "stopped" | "purged" {
+    if (this.#purged.has(childThreadId) || this.#purged.has(String(report.parentThreadId)))
+      return "purged";
     if (!this.reportingOn(childThreadId)) return "stopped";
     const record = this.#record(childThreadId);
     const full = {
@@ -212,9 +218,36 @@ export class SideTaskReportStore {
     for (const id of fresh) record.refused.add(id);
   }
 
-  setReporting(childThreadId: string, on: boolean): void {
+  /** Settles what a deleted child still owes: its words leave with its thread. */
+  refuseOwedFrom(childThreadId: string, detail: string): void {
+    const record = this.#records.get(childThreadId);
+    if (record === undefined) return;
+    this.markRefused(
+      childThreadId,
+      record.reports.map((report) => String(report.reportId)),
+      detail,
+    );
+  }
+
+  /**
+   * Drops what this projection holds of a purged thread, as a child and as a
+   * parent. The purge erases the same aggregates from the journal, so nothing
+   * is journaled here.
+   */
+  forgetPurgedThread(threadId: string): void {
+    this.#purged.add(threadId);
+    this.#records.delete(threadId);
+    for (const [childThreadId, record] of this.#records) {
+      if (record.reports.some((report) => String(report.parentThreadId) === threadId))
+        this.#records.delete(childThreadId);
+    }
+  }
+
+  /** A purged child's receipt outlives it on the parent; its switch writes nothing back. */
+  setReporting(childThreadId: string, on: boolean): "set" | "purged" {
+    if (this.#purged.has(childThreadId)) return "purged";
     const record = this.#record(childThreadId);
-    if (record.stopped === !on) return;
+    if (record.stopped === !on) return "set";
     const eventName = on
       ? THREAD_SIDE_TASK_REPORT_EVENT_NAMES.reportingResumed
       : THREAD_SIDE_TASK_REPORT_EVENT_NAMES.reportingStopped;
@@ -223,6 +256,7 @@ export class SideTaskReportStore {
       : ({ stoppedAt: decodeUtcTimestamp(this.#clock()) } satisfies SideTaskReportingStopped);
     this.#append(childThreadId, record, eventName, payload);
     record.stopped = !on;
+    return "set";
   }
 
   #record(childThreadId: string): ChildRecord {

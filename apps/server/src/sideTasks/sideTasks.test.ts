@@ -7,6 +7,9 @@ import {
   EventActor,
   MAX_CODE_PLANNER_PROPOSAL_INTENT_LENGTH,
   MAX_OPEN_SIDE_TASKS,
+  MAX_SIDE_TASK_VIEW_ENTRIES,
+  MAX_STARTED_SIDE_TASK_RECEIPTS,
+  type SideTaskChildState,
   type WindowId,
 } from "@octant/contracts";
 import type { CodePlannerToolPort } from "../code/codePlannerTools";
@@ -153,7 +156,7 @@ describe("side tasks", () => {
     ]);
   });
 
-  it("still names a started child's offer after newer offers push its receipt out of view", async () => {
+  it("keeps a started child's receipt, and its reporting switch, after newer offers push settled ones out", async () => {
     const connection = openConnection();
     const store = storeOn(connection);
     const ids = uuidFactory();
@@ -181,8 +184,7 @@ describe("side tasks", () => {
       { threadId, windowId, sideTaskId },
     );
 
-    // Enough later offers, each dismissed on arrival, to evict the started
-    // receipt from the capped view.
+    // Enough later offers, each dismissed on arrival, to fill the capped view.
     for (let index = 0; index < 12; index += 1) {
       await tools.execute({
         name: "octant_offer_side_task",
@@ -194,7 +196,12 @@ describe("side tasks", () => {
         { threadId, sideTaskId: String(newest?.offer.id) },
       );
     }
-    expect(store.read(threadId).tasks.some((task) => task.startedThreadId === child)).toBe(false);
+    // The child still reports, so the control that stops it stays in reach.
+    expect(store.read(threadId).tasks.some((task) => task.startedThreadId === child)).toBe(true);
+    expect(store.read(threadId).tasks.filter((task) => task.status === "dismissed")).toHaveLength(
+      MAX_SIDE_TASK_VIEW_ENTRIES,
+    );
+    expect(storeOn(connection).read(threadId)).toEqual(store.read(threadId));
 
     expect(store.startedOfferFor(threadId, child)).toMatchObject({
       title: offer.title,
@@ -1037,6 +1044,7 @@ describe("side tasks", () => {
           reports: {
             setReporting: (id: string, on: boolean) => {
               switches.set(id, on);
+              return "set" as const;
             },
             reportingOn: (id: string) => switches.get(id) !== false,
           },
@@ -1047,6 +1055,7 @@ describe("side tasks", () => {
         store: SideTaskStore,
         reports: ReturnType<typeof reportingFake>["reports"],
         authorized: () => boolean,
+        childState?: () => SideTaskChildState,
       ) {
         const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
         const windowAuthorityStore = new WindowAuthorityStore();
@@ -1059,6 +1068,7 @@ describe("side tasks", () => {
             windowAuthorityStore,
             authorizeThread: authorized,
             reports,
+            ...(childState === undefined ? {} : { childState }),
             now: () => 1,
           }),
         };
@@ -1120,6 +1130,77 @@ describe("side tasks", () => {
           sideTasks: { tasks: Array<{ reporting?: string }> };
         };
         expect(resumedBody.sideTasks.tasks[0]?.reporting).toBe("on");
+      });
+
+      it("still switches a started child whose receipt aged out of even the started ones", async () => {
+        const store = storeOn(openConnection());
+        const tools = toolsFor(store, "chat", uuidFactory());
+        const children: string[] = [];
+        for (let index = 0; index <= MAX_STARTED_SIDE_TASK_RECEIPTS; index += 1) {
+          await tools.execute({
+            name: "octant_offer_side_task",
+            inputJson: JSON.stringify(offer),
+          });
+          const sideTaskId = String(store.read(threadId).tasks.at(-1)?.offer.id);
+          const child = `00000000-0000-4000-8000-${String(900 + index).padStart(12, "0")}`;
+          children.push(child);
+          await startSideTask(
+            startDependencies(store, {
+              create: async () => ({
+                kind: "created",
+                created: {
+                  kind: "new-thread",
+                  mode: "chat",
+                  title: offer.title,
+                  threadId: child,
+                } as never,
+                onSuggestingModel: true,
+              }),
+            }),
+            { threadId, windowId, sideTaskId },
+          );
+        }
+        const [first] = children;
+        if (first === undefined) throw new Error("Expected a started child.");
+        const firstOffer = store.startedOfferFor(threadId, first);
+        expect(store.read(threadId).tasks.some((task) => task.startedThreadId === first)).toBe(
+          false,
+        );
+        const { reports, switches } = reportingFake();
+        const { capability, route } = routeFor(store, reports, () => true);
+        const response = await route(
+          new Request(`http://127.0.0.1/api/side-tasks/${threadId}/reporting`, {
+            method: "POST",
+            headers: { "x-octant-window-capability": capability },
+            body: JSON.stringify({ sideTaskId: firstOffer?.id, on: false }),
+          }),
+        );
+        expect(response?.status).toBe(200);
+        expect(switches.get(first)).toBe(false);
+      });
+
+      it("reads a started receipt's child state and its reporting switch together", async () => {
+        const { store, child } = await startedTask();
+        const { reports } = reportingFake();
+        reports.setReporting(child, false);
+        const { capability, route } = routeFor(
+          store,
+          reports,
+          () => true,
+          () => "attention",
+        );
+        const response = await route(
+          new Request(`http://127.0.0.1/api/side-tasks/${threadId}`, {
+            headers: { "x-octant-window-capability": capability },
+          }),
+        );
+        const body = (await response?.json()) as { sideTasks: { tasks: ReadonlyArray<unknown> } };
+        expect(body.sideTasks.tasks[0]).toMatchObject({
+          status: "started",
+          startedThreadId: child,
+          childState: "attention",
+          reporting: "stopped",
+        });
       });
 
       it("refuses the switch for a task that never started", async () => {

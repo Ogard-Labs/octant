@@ -11,10 +11,7 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { registerSideTaskReportEvents, SideTaskReportStore } from "./sideTaskReportStore";
-import {
-  SideTaskReportDeliveryService,
-  type OwedSideTaskReport,
-} from "./sideTaskReportDeliveryService";
+import { SideTaskReportDeliveryService } from "./sideTaskReportDeliveryService";
 import type { SideTaskReportDeliveryModePort } from "./sideTaskReportDeliveryPorts";
 import {
   fitSideTaskReportDeliveryBatch,
@@ -98,10 +95,6 @@ function fixture(
     readonly chat?: Partial<SideTaskReportDeliveryModePort>;
     readonly work?: Partial<SideTaskReportDeliveryModePort>;
     readonly code?: Partial<SideTaskReportDeliveryModePort>;
-    readonly recordIngestion?: (
-      parentThreadId: string,
-      reports: ReadonlyArray<OwedSideTaskReport>,
-    ) => boolean;
   } = {},
 ) {
   const connection = openConnection();
@@ -111,7 +104,6 @@ function fixture(
   const work = port(options.work);
   const code = port(options.code);
   const timers: Array<{ readonly at: number; readonly fire: () => void }> = [];
-  const recordIngestion = vi.fn(options.recordIngestion ?? (() => true));
   const service = new SideTaskReportDeliveryService({
     journal,
     reports,
@@ -122,7 +114,6 @@ function fixture(
       return timers[timers.length - 1];
     },
     unschedule: () => undefined,
-    recordIngestion,
   });
   const unsubscribe = journal.subscribeCommitted((append) => service.onCommittedAppend(append));
   const flush = async () => {
@@ -137,7 +128,6 @@ function fixture(
     work,
     code,
     timers,
-    recordIngestion,
     flush,
     unsubscribe,
     /** A host restart: a fresh store and service over the same journal. */
@@ -153,7 +143,6 @@ function fixture(
           return timers[timers.length - 1];
         },
         unschedule: () => undefined,
-        recordIngestion,
       });
       return { reports: restartedReports, service: restarted };
     },
@@ -292,36 +281,95 @@ describe("SideTaskReportDeliveryService", () => {
     f.service.stop();
   });
 
-  it("records the parent's taint before dispatching, and dispatches nothing when it cannot", async () => {
-    const order: string[] = [];
+  it("wakes a waiting delivery when the Work parent's own turn settles, not while it streams", async () => {
+    let busy = true;
     const f = fixture({
-      recordIngestion: () => {
-        order.push("ingestion");
-        return true;
-      },
-      chat: {
-        dispatch: vi.fn(async () => {
-          order.push("dispatch");
-          return { kind: "dispatched" as const };
-        }),
+      work: {
+        dispatch: vi.fn(async () =>
+          busy
+            ? { kind: "deferred" as const, detail: "mid-turn" }
+            : { kind: "dispatched" as const },
+        ),
       },
     });
     f.service.start();
-    f.reports.owe(child, completion("Tainted."));
+    f.reports.owe(child, { ...completion("Done."), parentMode: "work" });
     await f.flush();
-    expect(order).toEqual(["ingestion", "dispatch"]);
+    expect(f.work.dispatched).toHaveLength(1);
 
-    const refused = fixture({ recordIngestion: () => false });
-    refused.service.start();
-    refused.reports.owe(child, completion("Not tainted."));
-    await refused.flush();
-    expect(refused.chat.dispatched).toHaveLength(0);
-    expect(refused.reports.undelivered()).toHaveLength(1);
-    expect(refused.timers.length).toBeGreaterThan(0);
+    // A Work turn journals on its own aggregate, so its thread's never moves.
+    const turnUpdated = (status: "running" | "completed", threadId: string) =>
+      f.service.onCommittedAppend({
+        events: [
+          {
+            aggregateType: "work-turn",
+            aggregateId: "00000000-0000-4000-8000-0000000000f1",
+            eventName: "work.turn-updated@1",
+            payload: {
+              kind: "turn-updated",
+              requestId: "00000000-0000-4000-8000-0000000000f1",
+              threadId,
+              turnId: "00000000-0000-4000-8000-0000000000f2",
+              status,
+              updatedAt: now,
+            },
+          },
+        ],
+      } as never);
+    turnUpdated("running", parent);
+    turnUpdated("completed", "00000000-0000-4000-8000-0000000000f3");
+    await f.flush();
+    expect(f.work.dispatched).toHaveLength(1);
+
+    busy = false;
+    turnUpdated("completed", parent);
+    await f.flush();
+    expect(f.work.dispatched).toHaveLength(2);
+    expect(f.reports.undelivered()).toHaveLength(0);
     f.unsubscribe();
     f.service.stop();
-    refused.unsubscribe();
-    refused.service.stop();
+  });
+
+  it("never delivers a waiting report once its child's thread is purged or deleted", async () => {
+    let busy = true;
+    const f = fixture({
+      chat: {
+        dispatch: vi.fn(async () =>
+          busy
+            ? { kind: "deferred" as const, detail: "mid-turn" }
+            : { kind: "dispatched" as const },
+        ),
+      },
+    });
+    f.service.start();
+    f.reports.owe(child, completion("Purged."));
+    f.reports.owe(sibling, completion("Deleted."));
+    await f.flush();
+    const before = f.chat.dispatched.length;
+    f.service.onCommittedAppend({
+      events: [
+        {
+          aggregateType: "thread-retention",
+          aggregateId: "00000000-0000-4000-8000-0000000000f4",
+          eventName: "thread-retention.thread-purged@1",
+          payload: { kind: "thread-purged", mode: "chat", threadId: child, purgedAt: now },
+        },
+        {
+          aggregateType: "chat-thread",
+          aggregateId: sibling,
+          eventName: "chat.deleted@1",
+          payload: { kind: "deleted", threadId: sibling, deletedAt: now },
+        },
+      ],
+    } as never);
+
+    busy = false;
+    f.timers.at(-1)?.fire();
+    await f.flush();
+    expect(f.chat.dispatched).toHaveLength(before);
+    expect(f.reports.undelivered()).toHaveLength(0);
+    f.unsubscribe();
+    f.service.stop();
   });
 
   it("settles reports a parent refuses and never retries them after a restart", async () => {

@@ -415,6 +415,35 @@ describe("thread purge sweep", () => {
     expect(claudeResumeIdentitySessions(harness.connection)).toEqual([keptSession]);
   });
 
+  it("erases the replies a purged side task reported back and keeps another thread's", async () => {
+    const harness = openHarness();
+    seedControlThread(harness);
+    seedCodeProjection(harness, threads.code.id);
+    const offeringThread = "c3630000-0000-4000-8000-0000000000e3";
+    for (const [childThreadId, text] of [
+      [threads.code.id, threads.code.marker],
+      [controlThreadId, "kept reply"],
+    ] as const) {
+      // The report names its parent; the child is only the aggregate's id.
+      insertEvent(
+        harness.connection,
+        "thread-side-task-reports",
+        childThreadId,
+        { parentThreadId: offeringThread, title: "Fix stale install docs", text },
+        "side-task-report-owed@1",
+      );
+    }
+
+    await purgeThread(harness, "code", threads.code.id);
+
+    const remaining = harness.connection
+      .prepare(
+        `SELECT aggregate_id FROM event_journal WHERE aggregate_type = 'thread-side-task-reports'`,
+      )
+      .all() as ReadonlyArray<{ readonly aggregate_id: string }>;
+    expect(remaining.map((row) => row.aggregate_id)).toEqual([controlThreadId]);
+  });
+
   it("erases a purged thread's wake-ups and keeps another thread's", async () => {
     const harness = openHarness();
     seedControlThread(harness);

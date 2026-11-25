@@ -5,6 +5,7 @@ import {
   TOOL_EGRESS_PROJECT_AGGREGATE,
   TOOL_EGRESS_THREAD_AGGREGATE,
   THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE,
+  THREAD_SIDE_TASK_REPORTS_AGGREGATE_TYPE,
   TURN_METRICS_AGGREGATE_TYPE,
   decodeChatThread,
   decodeContextSubjectRef,
@@ -466,6 +467,9 @@ function collectOwnedAggregates(
   add(TOOL_EGRESS_THREAD_AGGREGATE, threadId);
   add(TURN_METRICS_AGGREGATE_TYPE, threadId);
   add(THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE, threadId);
+  // A side task's reports carry its replies and name only the parent they are
+  // owed to, so the child's are taken by the aggregate's id.
+  add(THREAD_SIDE_TASK_REPORTS_AGGREGATE_TYPE, threadId);
   // Coordinator wakes are journaled on the woken thread's id (coordinatorWakeJournal.ts).
   add("coordinator-wake", threadId);
   add("browser-remote-hold", threadId);

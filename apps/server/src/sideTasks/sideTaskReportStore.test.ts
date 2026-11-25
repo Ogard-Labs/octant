@@ -107,6 +107,35 @@ describe("SideTaskReportStore", () => {
     expect(storeOn(connection).owe(child, completion())).toBe("owed");
   });
 
+  it("forgets what a purged child reported and owes nothing that names a purged thread", () => {
+    const connection = openConnection();
+    const store = storeOn(connection);
+    store.owe(child, completion("From the purged child"));
+    store.owe(sibling, completion("From a sibling"));
+
+    store.forgetPurgedThread(child);
+    expect(store.undeliveredForParent(parent).map((entry) => entry.report.text)).toEqual([
+      "From a sibling",
+    ]);
+    // A turn that was still winding down when its thread was purged.
+    expect(store.owe(child, completion())).toBe("purged");
+    // Its receipt still sits on the parent; the switch must not write it back.
+    expect(store.setReporting(child, false)).toBe("purged");
+
+    store.forgetPurgedThread(parent);
+    expect(store.undelivered()).toHaveLength(0);
+    expect(store.owe(sibling, completion())).toBe("purged");
+  });
+
+  it("settles a deleted child's waiting reports for good", () => {
+    const connection = openConnection();
+    const store = storeOn(connection);
+    store.owe(child, completion());
+    store.refuseOwedFrom(child, "The side task's thread was deleted.");
+    expect(store.reportsForParent(parent)[0]?.state).toBe("refused");
+    expect(storeOn(connection).undelivered()).toHaveLength(0);
+  });
+
   it("does not deliver a report twice when the mark is replayed", () => {
     const connection = openConnection();
     const store = storeOn(connection);

@@ -15,7 +15,26 @@ import type {
   ExternalContentIngestionResult,
   RecordExternalContentIngestionInput,
 } from "../context/externalContentIngestionStore";
-import type { SideTaskReportStore } from "./sideTaskReportStore";
+import type { SideTaskReportEntry, SideTaskReportStore } from "./sideTaskReportStore";
+
+/**
+ * What a mode's turn admission needs to take owed reports: the journal's own
+ * answer to what the thread is owed, and the mark that the thread is about to
+ * read outside content. Admission records the mark itself, once nothing but
+ * journaling the turn is left: marking sooner changed a running turn's
+ * approvals for a report it never read, and marking later would let the
+ * provider read the report unmarked. Answers false when the mark could not be
+ * recorded, and the turn is then refused.
+ */
+export interface SideTaskReportAdmission extends Pick<SideTaskReportStore, "reportsForParent"> {
+  readonly recordIngestion: (
+    parentThreadId: string,
+    reports: ReadonlyArray<Pick<SideTaskReportEntry, "childThreadId" | "report">>,
+  ) => boolean;
+}
+
+export const SIDE_TASK_REPORT_MARK_REFUSAL =
+  "Could not record that a side task's report is outside content. Nothing was sent.";
 
 export type SideTaskReportDraft = Omit<SideTaskReportOwed, "reportId" | "owedAt">;
 

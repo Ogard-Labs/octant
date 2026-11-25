@@ -116,6 +116,10 @@ import { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore"
 import { ThreadFollowUpSuggestionStore } from "../followUps/threadFollowUpSuggestionStore";
 import { SideTaskStore } from "../sideTasks/sideTaskStore";
 import { SideTaskReportStore } from "../sideTasks/sideTaskReportStore";
+import {
+  recordSideTaskReportIngestion,
+  type SideTaskReportAdmission,
+} from "../sideTasks/sideTaskReports";
 import { ThreadFinishedReceiptStore } from "../finishedReceipts/finishedReceiptStore";
 import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
@@ -827,6 +831,16 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     clock: () => new Date().toISOString(),
     actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
   });
+  const sideTaskReportAdmission: SideTaskReportAdmission = {
+    reportsForParent: (parentThreadId) => sideTaskReports.reportsForParent(parentThreadId),
+    recordIngestion: (parentThreadId, reports) =>
+      recordSideTaskReportIngestion(
+        (input) => externalContentIngestionStore.record(input),
+        parentThreadId,
+        reports,
+        randomUUID,
+      ),
+  };
   const threadStandingAnswers = new ThreadStandingAnswerStore({
     journal: persistence.journal,
     connection: persistence.connection,
@@ -1785,6 +1799,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     runtimeOutsideContentMarks,
     sideTasks,
     sideTaskReports,
+    sideTaskReportAdmission,
     finishedReceipts,
     spendCeiling,
     spendCeilingHolder,
