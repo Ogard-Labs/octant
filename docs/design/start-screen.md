@@ -805,9 +805,19 @@ the folder's path as its tooltip and **New worktree** "own branch"; then
 list, opening beside the row); **Subfolder ›** (the working-folder field in a
 pop-out beside the row, which keeps what was typed when it closes); **Remember
 for this Project** as a check, where it can be recorded; and **Worktree
-options…**, a small dialog with "Start from origin", the Remote, what the
-source resolved to and the branch name the host will create, reachable once
-New worktree is chosen. The menu keeps one size in both states: the branch row
+options…**, a small dialog with the **Branch name** field (maintainer decision,
+2026-11-25), "Start from origin", the Remote and what the source resolved to,
+reachable once New worktree is chosen. The field shows the exact name the thread
+will get, the prefix and short id or words from the draft as Settings › Code ›
+Worktrees chose, numbered when the branch exists, and the person may edit it:
+a name Git would reject, or one that exists or sits above or below one that
+does, is refused in place, and clearing the field returns to the derived name.
+**Suggest name**, below it, is the only thing that calls a model: it says which
+model the draft goes to ("Sends your message to <model> for words to name the
+branch. Nothing is sent unless you press the button."), is off while the draft
+is empty, and drops the answer, with a line saying so, when the message, the
+Project or the model changed or the person typed a name meanwhile; a model that
+cannot answer leaves the name alone ("The model could not suggest a name."). The menu keeps one size in both states: the branch row
 swaps its words, never its place. It hangs above the chip, aligned to its
 start. Every start-row popup (base-branch list, Project, Create from…) keeps a
 fixed frame: the list scrolls inside, skeleton rows while loading, lists read
