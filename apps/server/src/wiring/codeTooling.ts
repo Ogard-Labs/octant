@@ -126,7 +126,7 @@ import type { FoundationsWiring } from "./foundations";
 import type { IntegrationsWiring } from "./integrations";
 import type { ProvidersWiring } from "./providers";
 import { windowCanAccessWorkProject } from "../windowCodeProjectAccess";
-import { providerCredentialPassThrough } from "../providers/providerOwnChannels";
+import { providerOwnChannelsFromSettings } from "../providers/providerOwnChannels";
 import { resolveProviderTerminal } from "../providers/providerTerminal";
 import { homedir } from "node:os";
 
@@ -371,7 +371,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                 ? deps.resolveProjectStrict(String(projectId))
                 : deps.resolveThreadStrict(workThreadId),
             terminals: sharedTerminals,
-            providerTerminal: ({ workThreadId, shell, strict }) => {
+            providerTerminal: ({ workThreadId, shell, strict, sandboxPolicySelected }) => {
               const thread = workThreadProjection.read(workThreadId);
               const access = thread === undefined ? undefined : workThreadAccessOf(thread.access);
               return resolveProviderTerminal({
@@ -381,9 +381,9 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                     : persistence.readProviderInstance(thread.providerInstanceId),
                 hostEnvironment: process.env,
                 homeDirectory: homedir(),
-                credentialPassThrough: (driverKind) =>
-                  providerCredentialPassThrough(
-                    persistence.readShellSettings()?.settings,
+                ownChannels: (driverKind) =>
+                  providerOwnChannelsFromSettings(
+                    persistence.readShellSettings()?.settings ?? defaultShellSettings(),
                     driverKind,
                   ),
                 platform: process.platform,
@@ -392,6 +392,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                 mode: "work",
                 ...(access === undefined ? {} : { executionPolicy: access.executionPolicy }),
                 fullAccessSandbox: thread?.fullAccessSandbox,
+                sandboxPolicySelected,
                 ...(deps.configuredDriverOptions.acpHome === undefined
                   ? {}
                   : { acpHome: deps.configuredDriverOptions.acpHome }),

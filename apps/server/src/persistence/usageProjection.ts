@@ -405,11 +405,43 @@ function rawUsageRecord(
     .get(reconciliationId) as UsageRecordProjectionRow | undefined;
 }
 
+/**
+ * The reasoning a row reported apart from its output; 0 for every other row.
+ * Reasoning is part of output on every row except the ones OpenCode wrote
+ * before its mapper added it there (`usage_reasoning_outside_output`,
+ * migration 111). Whatever totals output adds this to such a row.
+ */
+export const REASONING_OUTSIDE_OUTPUT_SQL =
+  "CASE WHEN reconciliation_id IN (SELECT reconciliation_id FROM usage_reasoning_outside_output) THEN COALESCE(reasoning_tokens, 0) ELSE 0 END";
+
+/**
+ * Ledger rows as anyone reading them means them: `output_tokens` includes
+ * reasoning on every row, however old. `clauses` is the query's own
+ * WHERE, ORDER BY and LIMIT.
+ */
+export function readUsageRows(
+  connection: SqliteConnection,
+  clauses: string,
+  params: ReadonlyArray<string | number>,
+): ReadonlyArray<UsageRecordProjectionRow> {
+  const rows = connection
+    .prepare(
+      `SELECT *, ${REASONING_OUTSIDE_OUTPUT_SQL} AS reasoning_outside_output FROM usage_record_projection ${clauses}`,
+    )
+    .all(...params) as ReadonlyArray<
+    UsageRecordProjectionRow & { readonly reasoning_outside_output: number }
+  >;
+  return rows.map(({ reasoning_outside_output, ...row }) => ({
+    ...row,
+    output_tokens: row.output_tokens + reasoning_outside_output,
+  }));
+}
+
 export function readUsageRecord(
   connection: SqliteConnection,
   reconciliationId: string,
 ): UsageRecord | undefined {
-  const row = rawUsageRecord(connection, reconciliationId);
+  const [row] = readUsageRows(connection, "WHERE reconciliation_id = ?", [reconciliationId]);
   if (row === undefined) return undefined;
   return decodeUsageRow(row);
 }
@@ -672,11 +704,10 @@ export function queryUsageRecords(
   }
 
   const where = conditions.join(" AND ");
-  const rows = connection
-    .prepare(
-      `SELECT * FROM usage_record_projection WHERE ${where} ORDER BY last_sequence ASC LIMIT ?`,
-    )
-    .all(...params, limit + 1) as ReadonlyArray<UsageRecordProjectionRow>;
+  const rows = readUsageRows(connection, `WHERE ${where} ORDER BY last_sequence ASC LIMIT ?`, [
+    ...params,
+    limit + 1,
+  ]);
 
   const included = rows.slice(0, limit);
   const last = included.at(-1);
@@ -731,10 +762,7 @@ export function usageModeCondition(
 }
 
 export function readAllUsageRecords(connection: SqliteConnection): ReadonlyArray<UsageRecord> {
-  const rows = connection
-    .prepare("SELECT * FROM usage_record_projection ORDER BY last_sequence ASC")
-    .all() as ReadonlyArray<UsageRecordProjectionRow>;
-  return rows.map(decodeUsageRow);
+  return readUsageRows(connection, "ORDER BY last_sequence ASC", []).map(decodeUsageRow);
 }
 
 export function countUsageRecords(connection: SqliteConnection): number {

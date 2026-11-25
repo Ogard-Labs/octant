@@ -1480,6 +1480,8 @@ export interface CodeOperationServiceOptions {
     readonly thread: CodeThread;
     readonly shell: string;
     readonly strict: boolean;
+    /** A turn of the thread holds a chosen sandbox policy. */
+    readonly sandboxPolicySelected: boolean;
   }) => ProviderTerminalLaunch;
   readonly repositoryTests: CodeOperationRepositoryTestPort;
   readonly scaffolds?: CodeOperationScaffoldPort;
@@ -4284,10 +4286,12 @@ export class CodeOperationService {
               "A provider terminal does not use the Browser.",
             );
           const strict = this.#options.threadStrict?.(thread) ?? true;
+          const sandboxPolicySelected = turnHoldsSandboxPolicy(String(thread.id));
           const launch = this.#options.providerTerminal?.({
             thread,
             shell: root.shell,
             strict,
+            sandboxPolicySelected,
           }) ?? {
             status: "refused",
             message: "This host does not open provider terminals.",
@@ -4300,7 +4304,7 @@ export class CodeOperationService {
             executionPolicy: thread.executionPolicy,
             strict,
             fullAccessSandbox: thread.fullAccessSandbox,
-            sandboxPolicySelected: turnHoldsSandboxPolicy(String(thread.id)),
+            sandboxPolicySelected,
             purpose: "session",
           });
         }

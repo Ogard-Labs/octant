@@ -306,8 +306,6 @@ export interface ChatTurnRunnerOptions {
  * One question a live attempt asked and is parked on, keyed by attempt id.
  * The answer command reaches the turn through this channel; the runner is the
  * single writer of the attempt, so it journals the answered question itself.
- * `abandon` is what keeps an answerer from waiting forever when the turn ends
- * without an answer.
  */
 interface OpenChatQuestion {
   readonly questionnaire?: Questionnaire;
@@ -316,7 +314,6 @@ interface OpenChatQuestion {
   readonly secret?: true;
   readonly deliver: (answer: string) => void;
   readonly answered: Promise<ChatAttempt>;
-  readonly abandon: (reason: string) => void;
 }
 
 export interface ChatTurnRunnerInput {
@@ -907,6 +904,10 @@ export class ChatTurnRunner {
             resolveAnswered = resolve;
             abandonAnswered = reject;
           });
+          // An interrupted turn rejects this with no answerer listening, and the
+          // host process exits on an unhandled rejection. An answerer that is
+          // awaiting it still gets the rejection.
+          void answered.catch(() => undefined);
           openQuestions.set(String(input.attempt.id), {
             ...(question.questionnaire === undefined
               ? {}
@@ -919,7 +920,6 @@ export class ChatTurnRunner {
               );
             },
             answered,
-            abandon: abandonAnswered,
           });
           openAnswerSettle = resolveAnswered;
           openAnswerAbandon = abandonAnswered;
@@ -983,11 +983,12 @@ export class ChatTurnRunner {
           }
           // A turn that ends without its question being answered — abort,
           // crash, interrupt — must not leave the answer channel reachable,
-          // and an answerer already parked on the promise must be let go.
-          const unanswered = openQuestions.get(String(input.attempt.id));
+          // and an answerer already parked on the promise must be let go. That
+          // includes one whose answer the turn took but never journalled: its
+          // entry has left the map, so only the abandon hook still reaches it.
           openQuestions.delete(String(input.attempt.id));
           forceStops.delete(String(input.attempt.id));
-          unanswered?.abandon("Chat turn ended before the answer was delivered.");
+          openAnswerAbandon?.("Chat turn ended before the answer was delivered.");
           const stopped = yield* connection.stop(input.attempt.providerSessionId).pipe(
             Effect.as(true),
             Effect.catchAll(() => Effect.succeed(false)),

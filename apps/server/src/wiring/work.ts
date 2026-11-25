@@ -2103,7 +2103,7 @@ export function wireWork(deps: WorkDependencies) {
             actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
           });
           // Work keeps its turns in memory; the journal rebuilds them at start.
-          if (scope.mode === "work") workTurnProjection.applySteeredMessage(record);
+          if (scope.mode === "work") workTurnService.showSteeredMessage(record);
           // The message is its own mark: it entered a turn the person did not
           // start with it, so only its own mark makes it their typed words.
           if (typedByPerson) {

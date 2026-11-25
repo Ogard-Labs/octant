@@ -1557,8 +1557,9 @@ telemetry). Octant adds no terminal mode to carry it. A person-operated
 [provider terminal](workspace.md) (maintainer decision, 2026-11-21) opens Claude
 Code's own interface in a Code thread with the environment that thread's turns
 launch with: under Strict Code Mode still does not start there, and outside
-Strict the terminal does not read that switch yet and keeps Octant's telemetry
-guard, so it does not start there either. Once the Agent SDK supports Code Mode, Octant offers it under the
+Strict the terminal follows that switch as the thread's turns do, so with the
+switch on it carries no `DISABLE_TELEMETRY` of Octant's, except for a thread
+that keeps or chose a sandbox. Once the Agent SDK supports Code Mode, Octant offers it under the
 same gate and level as Claude's other tools. The `REPL` tool, which runs code
 in Claude's own process, is already offered outside Plan under the shell's
 rules (see [Native plan capture](#native-plan-capture)).
@@ -3742,7 +3743,10 @@ switches say, as do an explicit sandbox and a Full access thread that keeps the
 sandbox. A version read always keeps every guard. A process kept warm across
 turns keeps the guards it started with; ACP and Pi runtimes do not reuse a warm
 process across a change, and an OpenCode 1.x server takes the change at its
-next start.
+next start. A [provider terminal](workspace.md) reads both switches by the same
+rule when its program starts, for Claude Code and for an ACP agent's
+environment guards; Google Antigravity's program runs bare there, so the
+`--disable-telemetry` argument is its turns' alone.
 
 | Runtime             | Telemetry guards (set while telemetry is off)                                                                                            | Self-update guards (set while self-update is off) |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |

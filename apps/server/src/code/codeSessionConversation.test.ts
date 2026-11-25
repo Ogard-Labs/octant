@@ -63,6 +63,48 @@ describe("reading a Code thread's conversation for a summary", () => {
     expect(sources.size).toBe(4);
   });
 
+  it("keeps what the person sent into a running turn, in order after that turn's prompt", () => {
+    const steeredMessages = [
+      { messageId: "message-1", body: "Skip the backfill.", steeredAt: "2026-11-21T10:00:00Z" },
+      { messageId: "message-2", body: "continue", steeredAt: "2026-11-21T10:01:00Z" },
+    ];
+    const page = {
+      turns: [
+        { ...turn(1, "completed", ["reply-1"]), steeredMessages },
+        // A turn that never finished still heard what the person sent into it.
+        { ...turn(2, "interrupted", []), steeredMessages: [steeredMessages[1]] },
+      ],
+      nextCursor: 2,
+      hasMore: false,
+    };
+    const text: Record<string, string> = {
+      "prompt-1": "Add the index.",
+      "reply-1": "Added it.",
+      "prompt-2": "continue",
+    };
+    const messages = readCodeSessionConversation(threadId, {
+      conversation: () => page as unknown as CodeConversationPage,
+      readEvidence: (reference) => text[String(reference.contentId)],
+    });
+    const first = page.turns[0]?.operationId;
+    const second = page.turns[1]?.operationId;
+    expect(
+      messages?.map((message) => [message.role, message.content, message.exchangeKey]),
+    ).toEqual([
+      ["user", "Add the index.", first],
+      ["user", "Skip the backfill.", first],
+      ["user", "continue", first],
+      ["assistant", "Added it.", first],
+      ["user", "continue", second],
+      ["user", "continue", second],
+    ]);
+    expect(messages?.[1]?.source).toEqual({
+      kind: "message",
+      referenceId: `${String(first)}:steered:message-1`,
+    });
+    expect(new Set(messages?.map((message) => message.source.referenceId)).size).toBe(6);
+  });
+
   it("reads nothing for a thread too long to read whole, or one the store refuses", () => {
     const endless = { turns: [turn(1, "completed", ["r"])], nextCursor: 0, hasMore: true };
     let cursor = 0;
