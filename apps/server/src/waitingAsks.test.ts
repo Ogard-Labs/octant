@@ -38,6 +38,7 @@ const none = {
   memoryProposals: [],
   routineProposals: [],
   serviceOffers: [],
+  threadSecrets: [],
 };
 
 describe("waiting asks", () => {
@@ -62,6 +63,30 @@ describe("waiting asks", () => {
         threadTitle: "Trip plan",
         requestedAt: offer.requestedAt,
         text: "Generate an image?",
+      },
+    ]);
+  });
+
+  it("names a secret's card by its kind and title, as an ask an older client can read", () => {
+    const waiting = {
+      askId: "00000000-0000-4000-8000-000000000b02",
+      threadId: workThread,
+      kind: "account-password" as const,
+      label: "Print service",
+      reason: "Restart it with sudo.",
+      requestedAt: "2026-11-25T08:02:00.000Z",
+    };
+    expect(waitingAsksFrom({ ...none, threadSecrets: [waiting] }, readThread)).toEqual([
+      {
+        kind: "tool-approval",
+        askId: waiting.askId,
+        mode: "work",
+        projectId,
+        threadId: workThread,
+        threadTitle: "Quarterly report",
+        requestedAt: waiting.requestedAt,
+        text: "Enter an account password: Print service",
+        detail: "Restart it with sudo.",
       },
     ]);
   });

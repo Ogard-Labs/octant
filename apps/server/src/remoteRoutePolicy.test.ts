@@ -1058,6 +1058,32 @@ describe("remote route policy", () => {
     }
   });
 
+  it("forwards a secret's card on a phone, and keeps the window's own path on the host", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    expect(inspect("/api/thread-secrets/paired", "POST")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+    expect(inspect("/api/thread-secrets/paired", "GET")).toMatchObject({ kind: "reject" });
+    for (const method of ["GET", "POST"] as const)
+      expect(inspect("/api/thread-secrets", method)).toMatchObject({ kind: "reject" });
+    expect(
+      classifyProductAction(new Request(`${origin}/api/thread-secrets/paired`, { method: "POST" })),
+    ).toBeUndefined();
+  });
+
   it("forwards a provider key on its way to the credential broker, and keeps the desktop bridge's own key routes on the host", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (path: string, method: "GET" | "POST") =>

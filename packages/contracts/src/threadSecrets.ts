@@ -416,6 +416,17 @@ export const ThreadSecretCommand = Schema.Union(
 );
 export type ThreadSecretCommand = typeof ThreadSecretCommand.Type;
 
+/** What a device the person paired may send: it reads a thread's cards and answers one. */
+export const PairedThreadSecretCommand = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("list"), threadId: ThreadId }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("answer"),
+    threadId: ThreadId,
+    answer: ThreadSecretAnswer,
+  }).annotations(strict),
+);
+export type PairedThreadSecretCommand = typeof PairedThreadSecretCommand.Type;
+
 export const ThreadSecretCommandResult = Schema.Union(
   Schema.Struct({ status: Schema.Literal("accepted") }).annotations(strict),
   /** The card stays open and shows why, so the person can try again. */
@@ -510,6 +521,8 @@ export type ThreadSecretMemoryRecord = typeof ThreadSecretMemoryRecord.Type;
 export const decodeThreadSecretMemoryRecord = Schema.decodeUnknownSync(ThreadSecretMemoryRecord);
 export const decodeThreadSecretRunInput = Schema.decodeUnknownEither(ThreadSecretRunInput);
 export const decodeThreadSecretRequestInput = Schema.decodeUnknownEither(ThreadSecretRequestInput);
+export const decodePairedThreadSecretCommand =
+  Schema.decodeUnknownEither(PairedThreadSecretCommand);
 export const decodeThreadSecretCommand = Schema.decodeUnknownEither(ThreadSecretCommand);
 export const decodeThreadSecretJournalRecord = Schema.decodeUnknownSync(ThreadSecretJournalRecord);
 export const decodeThreadSecretsView = Schema.decodeUnknownSync(ThreadSecretsView);

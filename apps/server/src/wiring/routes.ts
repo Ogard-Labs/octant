@@ -37,6 +37,7 @@ export type RoutesDependencies = {
   readonly pairedDeviceRoutes: (request: Request) => Promise<Response | undefined>;
   readonly credentialRequestRoutes: (request: Request) => Promise<Response | undefined>;
   readonly threadSecretRoutes: (request: Request) => Promise<Response | undefined>;
+  readonly pairedThreadSecretRoutes: (request: Request) => Promise<Response | undefined>;
   readonly providerCloudSessionRoutes: (request: Request) => Promise<Response | undefined>;
 } & Pick<ServerStart, "latencyStats" | "persistence"> &
   Pick<AgentRunsWiring, "agentRunRouteDependencies" | "agentRunSettingsRoutes"> &
@@ -190,6 +191,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     conversationInputRoutes,
     credentialRequestRoutes,
     threadSecretRoutes,
+    pairedThreadSecretRoutes,
     providerCloudSessionRoutes,
     agentMessageRoutes,
     agentProfileRoutes,
@@ -348,6 +350,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await integrationRoutes(request)) ??
     (await credentialRequestRoutes(request)) ??
     (await threadSecretRoutes(request)) ??
+    (await pairedThreadSecretRoutes(request)) ??
     (await githubCloneRoutes(request)) ??
     (await agentProfileRoutes(request)) ??
     (await folderBrowseRoutes(request)) ??
