@@ -3,6 +3,7 @@ import "../styles/browser-workspace.css";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useBrowserAccountProfiles } from "./useBrowserAccountProfiles";
 import {
+  browserProfileChoiceOf,
   browserProfileFromChoice,
   browserProfileKey,
   formatBrowserElementSnapshot,
@@ -276,6 +277,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const taskProfile = scopedTaskProfileRead?.selection;
   const taskProfileRead = scopedTaskProfileRead?.status ?? "pending";
   const [taskProfileRetry, setTaskProfileRetry] = useState(0);
+  // The profile a page a restart took was in, after the person chose to reopen
+  // it: the start page opens its next page there. It is this page's choice, so
+  // it never changes the task's saved default.
+  const [reopenChoice, setReopenChoice] = useState<BrowserProfileChoice>();
+  const [reopenNotice, setReopenNotice] = useState<string>();
+  const [reopenBusy, setReopenBusy] = useState(false);
   const [pendingTaskProfile, setPendingTaskProfile] = useState<BrowserProfileChoice>();
   const [selectingTaskProfile, setSelectingTaskProfile] = useState(false);
   const taskProfileSupported =
@@ -368,6 +375,11 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     useRef<BrowserActionRequest["expectedObservationRevision"]>(undefined);
   const remoteActionTail = useRef<Promise<void>>(Promise.resolve());
   const activeContext = snapshot?.context?.state === "active";
+  useEffect(() => {
+    if (!activeContext) return;
+    setReopenChoice(undefined);
+    setReopenNotice(undefined);
+  }, [activeContext]);
   // A tab that comes back bound to a page (the dock remembers it) did not open
   // that page in this mount, so it asks once which of the thread's pages it is.
   const shownContextId = snapshot?.context?.contextId;
@@ -775,9 +787,8 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   async function start(
     address: string = url,
     prepared?: LocalServerOpenTarget,
-    choice: BrowserProfileChoice = taskProfileApplies
-      ? (taskProfile?.profile ?? "private")
-      : profileChoice,
+    choice: BrowserProfileChoice = reopenChoice ??
+      (taskProfileApplies ? (taskProfile?.profile ?? "private") : profileChoice),
     explicitPrivate = false,
   ): Promise<void> {
     if (startInFlight.current) return;
@@ -1293,6 +1304,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   }
 
   async function chooseProfile(choice: BrowserProfileChoice): Promise<void> {
+    if (reopenChoice !== undefined && !activeContext) {
+      setReopenChoice(choice);
+      return;
+    }
     if (taskProfileApplies) {
       if (choice === taskProfile?.profile) return;
       if (activeContext) setPendingTaskProfile(choice);
@@ -1312,6 +1327,51 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       await start(address, undefined, choice);
     } finally {
       switchingProfile.current = false;
+    }
+  }
+
+  /**
+   * Answer the offer to reopen the page a restart took. A claim ends the offer
+   * on the host for every window, then the start page opens its next page in
+   * the profile the old one was in; the address is the person's to give, so the
+   * site is asked about as it always is. Nothing of the old page is restored.
+   */
+  async function answerReopenOffer(answer: "claim" | "dismiss"): Promise<void> {
+    const offer = snapshot?.reopenOffer;
+    const threadId = props.tab.threadId;
+    if (offer === undefined || threadId === undefined) return;
+    const input = { threadId, mode: props.tab.mode, pageId: offer.pageId };
+    setReopenBusy(true);
+    try {
+      const result =
+        answer === "claim"
+          ? await props.client.claimPageOffer?.(input)
+          : await props.client.dismissPageOffer?.(input);
+      if (result === undefined) return;
+      setSnapshot((previous) => {
+        if (previous === undefined) return previous;
+        const { reopenOffer: _answered, ...rest } = previous;
+        return rest;
+      });
+      if (result.status === "claimed") {
+        const choice = browserProfileChoiceOf(result.profile);
+        setReopenChoice(choice);
+        setReopenNotice(
+          `Enter an address to open a page in ${browserProfileLabel(choice, accounts)}.`,
+        );
+      } else if (result.status === "refused") {
+        setReopenNotice(
+          result.reason === "not-offered"
+            ? "That page was already reopened or dismissed."
+            : "This device cannot reopen that page.",
+        );
+      } else {
+        setReopenNotice(undefined);
+      }
+    } catch {
+      setReopenNotice("The page could not be reopened. Try again.");
+    } finally {
+      setReopenBusy(false);
     }
   }
 
@@ -1709,11 +1769,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   });
   const showsTrailing = (id: BrowserToolbarTrailing) =>
     trailing.some((item) => item.id === id) && !folded.has(id);
-  const shownProfile = taskProfileApplies
-    ? (taskProfile?.profile ?? "private")
-    : activeContext
-      ? profileChoiceOf(storedProfile)
-      : profileChoice;
+  const shownProfile =
+    reopenChoice !== undefined && !activeContext
+      ? reopenChoice
+      : taskProfileApplies
+        ? (taskProfile?.profile ?? "private")
+        : activeContext
+          ? profileChoiceOf(storedProfile)
+          : profileChoice;
   // The standalone profile button and the folded profile items share this: no
   // choice or sign-out while a page starts, the task's default is read or a
   // selection is in flight.
@@ -2074,6 +2137,46 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           {notice}
         </OctantAlert>
       )}
+      {!activeContext && snapshot?.reopenOffer !== undefined ? (
+        <OctantAlert
+          action={
+            <>
+              {snapshot.reopenOffer.status === "offered" ? (
+                <OctantButton
+                  disabled={reopenBusy}
+                  onClick={() => void answerReopenOffer("claim")}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Reopen page
+                </OctantButton>
+              ) : null}
+              <OctantButton
+                disabled={reopenBusy}
+                onClick={() => void answerReopenOffer("dismiss")}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Dismiss
+              </OctantButton>
+            </>
+          }
+          className="browser-workspace__message"
+          layout="row"
+          tone="neutral"
+        >
+          {snapshot.reopenOffer.status === "offered"
+            ? "Octant restarted and closed the page you had open."
+            : "Octant restarted and closed the page you had open, and the profile it was in no longer exists."}
+        </OctantAlert>
+      ) : null}
+      {!activeContext && snapshot?.reopenOffer === undefined && reopenNotice !== undefined ? (
+        <OctantAlert className="browser-workspace__message" layout="row" tone="neutral">
+          {reopenNotice}
+        </OctantAlert>
+      ) : null}
       {!activeContext ? (
         <div className="browser-workspace__start">
           {serverSuggestions.length > 0 ? (
@@ -2433,6 +2536,8 @@ function snapshotRevision(snapshot: BrowserAutomationSnapshot | undefined): stri
     snapshot.observation?.contentHash,
     snapshot.observation?.url,
     snapshot.evidence.length,
+    snapshot.reopenOffer?.pageId,
+    snapshot.reopenOffer?.status,
     snapshot.failure?.category,
     snapshot.failure?.message,
   ]);

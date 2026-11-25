@@ -2338,7 +2338,7 @@ describe("browser page offer routes", () => {
         inspectThread: () => emptySnapshot,
         releaseThread: async () => emptySnapshot,
       },
-      pageOffers,
+      pageOffers: pageOffers as never,
       authority: { canAccessWindow: () => true, resolve: () => authority },
       windowAuthorityStore: store,
       maxRequestBodySize: 64_000,

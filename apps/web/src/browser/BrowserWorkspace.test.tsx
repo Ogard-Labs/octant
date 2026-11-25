@@ -3144,3 +3144,97 @@ describe("BrowserWorkspace", () => {
 function enterAddress(value: string): void {
   fireEvent.change(screen.getByRole("textbox", { name: "Browser URL" }), { target: { value } });
 }
+
+describe("BrowserWorkspace reopening a page a restart took", () => {
+  const pageId = "61000000-0000-4000-8000-000000000001";
+  const tab = {
+    kind: "browser",
+    id: "90000000-0000-4000-8000-000000000001" as any,
+    mode: "work",
+    title: "Browser",
+    threadId: threadId as any,
+  } as const;
+  afterEach(() => globalThis.localStorage.clear());
+
+  function offered(status: "offered" | "profile-gone" = "offered") {
+    const browser = client();
+    browser.inspectThread = vi.fn(
+      async () =>
+        ({
+          status: "ready",
+          threadId,
+          evidence: [],
+          reopenOffer: { pageId, status, profile: { kind: "personal" } },
+        }) as any,
+    );
+    browser.claimPageOffer = vi.fn(async () => ({
+      status: "claimed" as const,
+      profile: { kind: "personal" as const },
+    }));
+    browser.dismissPageOffer = vi.fn(async () => ({ status: "dismissed" as const }));
+    return browser;
+  }
+
+  it("offers Reopen page on the start page when a restart took the page", async () => {
+    render(<BrowserWorkspace client={offered()} tab={tab} />);
+    expect(await screen.findByRole("button", { name: "Reopen page" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+  });
+
+  it("offers nothing when the host sent no offer", async () => {
+    const browser = client();
+    render(<BrowserWorkspace client={browser} tab={tab} />);
+    await waitFor(() => expect(browser.inspectThread).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Reopen page" })).not.toBeInTheDocument();
+  });
+
+  it("claims once, preselects the profile, and opens the next page there with the person's address", async () => {
+    const browser = offered();
+    render(<BrowserWorkspace client={browser} tab={tab} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Reopen page" }));
+    await waitFor(() =>
+      expect(browser.claimPageOffer).toHaveBeenCalledWith({ threadId, mode: "work", pageId }),
+    );
+    expect(browser.claimPageOffer).toHaveBeenCalledOnce();
+    expect(browser.create).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Enter an address to open a page in Personal/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Reopen page" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Browser URL"), {
+      target: { value: "https://example.com/" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
+    await waitFor(() => expect(browser.create).toHaveBeenCalledOnce());
+    expect(vi.mocked(browser.create).mock.calls[0]?.[0]).toMatchObject({
+      policy: { profile: { kind: "personal" } },
+    });
+  });
+
+  it("dismisses the offer without opening anything", async () => {
+    const browser = offered();
+    render(<BrowserWorkspace client={browser} tab={tab} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(browser.dismissPageOffer).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("button", { name: "Reopen page" })).not.toBeInTheDocument();
+    expect(browser.claimPageOffer).not.toHaveBeenCalled();
+    expect(browser.create).not.toHaveBeenCalled();
+  });
+
+  it("says the profile is gone instead of offering to reopen, and still lets the person dismiss", async () => {
+    render(<BrowserWorkspace client={offered("profile-gone")} tab={tab} />);
+    expect(await screen.findByText(/profile it was in no longer exists/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Reopen page" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+  });
+
+  it("says so when another window already reopened the page", async () => {
+    const browser = offered();
+    browser.claimPageOffer = vi.fn(async () => ({
+      status: "refused" as const,
+      reason: "not-offered" as const,
+    }));
+    render(<BrowserWorkspace client={browser} tab={tab} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Reopen page" }));
+    expect(await screen.findByText("That page was already reopened or dismissed.")).toBeVisible();
+    expect(browser.create).not.toHaveBeenCalled();
+  });
+});

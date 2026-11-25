@@ -62,6 +62,12 @@ import {
   type BrowserStepsCommand,
 } from "@octant/contracts/browser-capture";
 import {
+  BrowserPageClaimResult,
+  BrowserPageDismissResult,
+  decodeBrowserPageOfferCommand,
+  type BrowserPageOfferCommand,
+} from "@octant/contracts/browser-page-sessions";
+import {
   BrowserExtensionsResult,
   decodeBrowserExtensionsCommand,
   type BrowserExtensionsCommand,
@@ -113,6 +119,18 @@ export interface BrowserAutomationClient {
     command: BrowserCredentialCommand,
     signal?: AbortSignal,
   ): Promise<typeof BrowserCredentialResult.Type>;
+  /**
+   * Claim the page a restart took, once, and learn the profile to open a blank
+   * page in. Absent on a client that cannot.
+   */
+  claimPageOffer?(
+    input: BrowserPageOfferCommand,
+    signal?: AbortSignal,
+  ): Promise<typeof BrowserPageClaimResult.Type>;
+  dismissPageOffer?(
+    input: BrowserPageOfferCommand,
+    signal?: AbortSignal,
+  ): Promise<typeof BrowserPageDismissResult.Type>;
   resolve(input: BrowserThreadScopeRequest, signal?: AbortSignal): Promise<BrowserThreadScope>;
   create(
     input: BrowserContextCreateCommand,
@@ -263,6 +281,22 @@ export function createBrowserAutomationClient(
         "/api/browser/contexts/inspect",
         decodeBrowserContextInspectCommand(input),
         decodeHostAnswer(BrowserAutomationSnapshot),
+        signal,
+      ),
+    claimPageOffer: (input, signal) =>
+      post(
+        options,
+        "/api/browser/page-offer/claim",
+        decodeBrowserPageOfferCommand(input),
+        decodeHostAnswer(BrowserPageClaimResult),
+        signal,
+      ),
+    dismissPageOffer: (input, signal) =>
+      post(
+        options,
+        "/api/browser/page-offer/dismiss",
+        decodeBrowserPageOfferCommand(input),
+        decodeHostAnswer(BrowserPageDismissResult),
         signal,
       ),
     inspectThread: (input, signal) =>
