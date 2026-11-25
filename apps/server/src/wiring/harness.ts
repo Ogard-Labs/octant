@@ -151,6 +151,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "codeSessionAuthority"
     | "personMemory"
     | "conversationOwnershipSlot"
+    | "liveTurns"
     | "processAuthorityTime"
     | "toolEffectLedger"
     | "windowAuthorityStore"
@@ -1180,8 +1181,22 @@ export function wireHarness(deps: HarnessDependencies) {
             began: String(turn.acceptedAt),
           }),
         )
-        .map((turn) => turn.prompt)
+        .map((turn) => ({
+          id: String(turn.turnId),
+          at: String(turn.acceptedAt),
+          text: turn.prompt,
+          typed: personMemory.isTurnTyped({
+            mode: "work",
+            threadId,
+            turnId: String(turn.turnId),
+          }),
+        }))
         .slice(-limit),
+    workLastMessageAt: (threadId) =>
+      workTurnProjection
+        .listForThread(decodeWorkThreadId(threadId))
+        .filter((turn) => turn.delivery === undefined)
+        .at(-1)?.acceptedAt,
     codePersonMessages: (threadId, limit) =>
       codeBoardEventStore
         .personPromptTurnsForThread(decodeCodeThreadId(threadId), limit * 4)
@@ -1194,10 +1209,26 @@ export function wireHarness(deps: HarnessDependencies) {
           }),
         )
         .slice(-limit)
-        .flatMap(({ prompt }) => {
-          const text = codeEvidence.read(prompt);
-          return text === undefined ? [] : [text];
+        .flatMap((turn) => {
+          const text = codeEvidence.read(turn.prompt);
+          return text === undefined
+            ? []
+            : [
+                {
+                  id: turn.operationId,
+                  at: turn.began,
+                  text,
+                  typed: personMemory.isTurnTyped({
+                    mode: "code",
+                    threadId,
+                    turnId: turn.operationId,
+                  }),
+                },
+              ];
         }),
+    codeLastMessageAt: (threadId) =>
+      codeBoardEventStore.personPromptTurnsForThread(decodeCodeThreadId(threadId), 1).at(-1)?.began,
+    turnRunning: (threadId) => deps.liveTurns.read(threadId) !== undefined,
     resolveDriver: resolveConfiguredDriver,
     accountUnavailable: automaticModelAccountUnavailable,
     scratchRoot: harnessWorkDirectory,

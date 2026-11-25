@@ -18,7 +18,11 @@ import type { PersistenceService } from "../persistence/persistenceService";
 import { recordOneShotUsage } from "../shield/shieldUsageLedger";
 import { namesProtectedPath } from "./namesProtectedPath";
 import type { PersonMemoryStore } from "./personMemoryStore";
-import { PersonMemorySweep, type PersonMemoryThreadSource } from "./personMemorySweep";
+import {
+  PersonMemorySweep,
+  type PersonMemoryThreadSource,
+  type PersonMessage,
+} from "./personMemorySweep";
 
 /** The newest person messages a thread is distilled from; older ones are past the input cap anyway. */
 const PERSON_MESSAGE_LIMIT = 60;
@@ -42,12 +46,26 @@ export function chatPersonMessages(
   limit: number,
   /** Whether a turn's message is the person's own words, as the store reads marks. */
   counts: (turn: { readonly turnId: string; readonly began: string }) => boolean,
-): ReadonlyArray<string> {
+  /** Whether the host marked the turn's message typed by the person. */
+  typed: (turnId: string) => boolean = () => false,
+): ReadonlyArray<PersonMessage> {
   const bodies = new Map(view.contents.map((content) => [String(content.contentId), content.body]));
   return activeChatTurns(view.turns)
     .filter((turn) => turn.delivery === undefined)
     .filter((turn) => counts({ turnId: String(turn.id), began: turn.createdAt ?? "" }))
-    .flatMap((turn) => bodies.get(String(turn.userMessageRef.contentId)) ?? [])
+    .flatMap((turn) => {
+      const text = bodies.get(String(turn.userMessageRef.contentId));
+      return text === undefined
+        ? []
+        : [
+            {
+              id: String(turn.id),
+              at: turn.createdAt ?? "",
+              text,
+              typed: typed(String(turn.id)),
+            },
+          ];
+    })
     .slice(-limit);
 }
 
@@ -79,8 +97,14 @@ export function createPersonMemorySweep(input: {
       readonly completedAt?: string | undefined;
     }>;
   };
-  readonly workPersonMessages: (threadId: string, limit: number) => ReadonlyArray<string>;
-  readonly codePersonMessages: (threadId: string, limit: number) => ReadonlyArray<string>;
+  /** The newest messages the person wrote in a Work or Code thread that count as theirs. */
+  readonly workPersonMessages: (threadId: string, limit: number) => ReadonlyArray<PersonMessage>;
+  readonly codePersonMessages: (threadId: string, limit: number) => ReadonlyArray<PersonMessage>;
+  /** When the person last wrote to a Work or Code thread, whether it counts or not. */
+  readonly workLastMessageAt: (threadId: string) => string | undefined;
+  readonly codeLastMessageAt: (threadId: string) => string | undefined;
+  /** A turn is running or waiting in the thread. */
+  readonly turnRunning: (threadId: string) => boolean;
   readonly resolveDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
   /** Why the account the person chose cannot be asked now; undefined when it can. */
   readonly accountUnavailable: (providerInstanceId: ProviderInstanceId) => string | undefined;
@@ -105,9 +129,16 @@ export function createPersonMemorySweep(input: {
         projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
-        personMessages: chatPersonMessages(view, PERSON_MESSAGE_LIMIT, (turn) =>
-          input.store.countsAsPersonWords({ mode: "chat", threadId, ...turn }),
+        personMessages: chatPersonMessages(
+          view,
+          PERSON_MESSAGE_LIMIT,
+          (turn) => input.store.countsAsPersonWords({ mode: "chat", threadId, ...turn }),
+          (turnId) => input.store.isTurnTyped({ mode: "chat", threadId, turnId }),
         ),
+        lastMessageAt: activeChatTurns(view.turns)
+          .filter((turn) => turn.delivery === undefined)
+          .at(-1)?.createdAt,
+        running: input.turnRunning(threadId),
       };
     },
   };
@@ -123,6 +154,8 @@ export function createPersonMemorySweep(input: {
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
         personMessages: input.workPersonMessages(threadId, PERSON_MESSAGE_LIMIT),
+        lastMessageAt: input.workLastMessageAt(threadId),
+        running: input.turnRunning(threadId),
       };
     },
   };
@@ -140,6 +173,8 @@ export function createPersonMemorySweep(input: {
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
         personMessages: input.codePersonMessages(threadId, PERSON_MESSAGE_LIMIT),
+        lastMessageAt: input.codeLastMessageAt(threadId),
+        running: input.turnRunning(threadId),
       };
     },
   };

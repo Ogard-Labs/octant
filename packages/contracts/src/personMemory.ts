@@ -183,6 +183,7 @@ export const PERSON_MEMORY_ENTRY_RECORDED = "person-memory.entry-recorded@1";
 export const PERSON_MEMORY_ENTRY_SAVED = "person-memory.entry-saved@1";
 export const PERSON_MEMORY_THREAD_REMEMBERED = "person-memory.thread-remembered@1";
 export const PERSON_MEMORY_THREAD_UNTRACED = "person-memory.thread-untraced@1";
+export const PERSON_MEMORY_THREAD_DISTILLED = "person-memory.thread-distilled@1";
 export const PERSON_MEMORY_TURN_TYPED = "person-memory.turn-typed@1";
 /** Marks one thread keeps: the newest turns, so a long thread cannot grow the journal without bound. */
 export const PERSON_MEMORY_MAX_TYPED_TURNS_PER_THREAD = 200;
@@ -231,6 +232,24 @@ export const PersonMemoryThreadRemembered = Schema.Struct({
   digest: PersonMemoryThreadDigest,
 }).annotations(strict);
 export type PersonMemoryThreadRemembered = typeof PersonMemoryThreadRemembered.Type;
+
+/**
+ * A thread was learned from, up to one of its messages. It holds what
+ * `thread-remembered` held, and says where learning stopped, so a later pass
+ * sends only the messages after it and replaces the thread's digest. An old
+ * `thread-remembered` replays as learned to the thread's end. `threadId` sits
+ * at the top so a thread purge takes the digest with the thread.
+ */
+export const PersonMemoryThreadDistilled = Schema.Struct({
+  threadId: MentionableThreadId,
+  digest: PersonMemoryThreadDigest,
+  /** The last message learned from: its turn id, and when the person said it. */
+  lastMessage: Schema.Struct({
+    id: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+    at: UtcTimestamp,
+  }).annotations(strict),
+}).annotations(strict);
+export type PersonMemoryThreadDistilled = typeof PersonMemoryThreadDistilled.Type;
 
 export const PersonMemoryThreadUntraced = Schema.Struct({
   threadId: MentionableThreadId,

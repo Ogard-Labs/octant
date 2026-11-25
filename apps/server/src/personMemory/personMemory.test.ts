@@ -30,11 +30,17 @@ import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { BENCHMARKS_PROJECT_ID } from "../benchmarks/benchmarkChatPort";
 import { keepBenchmarksOutOfPersonMemory } from "../benchmarks/benchmarkMemory";
 import { createPersonMemoryAccess } from "./personMemoryAccess";
-import { PersonMemoryStore, registerPersonMemoryEvents } from "./personMemoryStore";
+import {
+  PersonMemoryStore,
+  personMemoryThreadAggregateId,
+  registerPersonMemoryEvents,
+} from "./personMemoryStore";
 import { chatPersonMessages } from "./personMemoryWiring";
 import {
   PersonMemorySweep,
+  type PersonMessage,
   type PersonMemoryModelAnswer,
+  type PersonMemoryModelPort,
   type PersonMemoryThreadSource,
 } from "./personMemorySweep";
 
@@ -62,7 +68,22 @@ interface FakeThread {
   completedAt?: string;
   readonly projectId?: string;
   readonly title: string;
-  readonly personMessages: ReadonlyArray<string>;
+  personMessages: ReadonlyArray<string>;
+  /** When each message was said; a message with no time was said at the start. */
+  messageTimes?: ReadonlyArray<string>;
+  /** The host marked the messages typed (an open thread learns from nothing else). */
+  typed?: boolean;
+  running?: boolean;
+}
+
+/** A fake thread's messages as the sweep reads them. */
+function personMessagesOf(thread: FakeThread): ReadonlyArray<PersonMessage> {
+  return thread.personMessages.map((text, index) => ({
+    id: `message-${String(index)}`,
+    at: thread.messageTimes?.[index] ?? START,
+    text,
+    typed: thread.typed ?? false,
+  }));
 }
 
 function harness(threads: FakeThread[]) {
@@ -117,12 +138,15 @@ function harness(threads: FakeThread[]) {
             projectId: thread.projectId,
             providerInstanceId: PROVIDER,
             modelId: "big-model" as ProviderModelId,
-            personMessages: thread.personMessages,
+            personMessages: personMessagesOf(thread),
+            lastMessageAt: thread.messageTimes?.at(-1) ?? START,
+            running: thread.running === true,
           };
     },
   };
   const sweep = new PersonMemorySweep({
     store,
+    clock: () => now,
     sources: [source],
     model: {
       resolve: ({ thread }) => ({
@@ -145,14 +169,44 @@ function harness(threads: FakeThread[]) {
     )
       .map((row) => row.payload_json)
       .join("\n");
+  /** A second sweep over the same threads with some of the model port replaced. */
+  const sweepWith = (
+    port: Partial<{
+      readonly resolve: PersonMemoryModelPort["resolve"];
+      readonly complete: PersonMemoryModelPort["complete"];
+    }>,
+  ) =>
+    new PersonMemorySweep({
+      store,
+      clock: () => now,
+      sources: [source],
+      model: {
+        resolve: ({ thread }) => ({
+          model: { providerInstanceId: thread.providerInstanceId, modelId: SMALL },
+          driverKind: "fake",
+        }),
+        complete: async ({ prompt }) => {
+          prompts.push(prompt);
+          return reply;
+        },
+        recordUsage: ({ threadId, model }) => usage.push(`${threadId}:${String(model.modelId)}`),
+        ...port,
+      },
+      namesProtectedPath: (text) => text.includes("~/.ssh"),
+    });
   return {
     connection,
     journal,
     store,
     sweep,
+    sweepWith,
     prompts,
     usage,
     journalText,
+    reply: () => reply,
+    setThreads: (next: FakeThread[]) => {
+      threads.splice(0, threads.length, ...next);
+    },
     setReply: (next: PersonMemoryModelAnswer) => {
       reply = next;
     },
@@ -235,7 +289,7 @@ describe("person memory", () => {
       60,
       () => true,
     );
-    expect(messages).toEqual(["Compare the two exports"]);
+    expect(messages.map((message) => message.text)).toEqual(["Compare the two exports"]);
   });
 
   it("gives a new thread the entries older than it, labelled as data, and none when switched off", async () => {
@@ -466,7 +520,8 @@ function sourceOf(): PersonMemoryThreadSource {
       title: threadId === THREAD_1 ? "Keys" : "Web",
       providerInstanceId: PROVIDER,
       modelId: SMALL,
-      personMessages: ["text"],
+      personMessages: [{ id: "message-0", at: START, text: "text", typed: false }],
+      running: false,
     }),
   };
 }
@@ -930,7 +985,8 @@ describe("person memory under timing and volume", () => {
             title: "Invoices",
             providerInstanceId: PROVIDER,
             modelId: SMALL,
-            personMessages: ["CSV"],
+            personMessages: [{ id: "message-0", at: START, text: "CSV", typed: false }],
+            running: false,
           }),
         },
       ],
@@ -1604,7 +1660,7 @@ describe("which turns the person typed", () => {
       h.store.countsAsPersonWords({ mode: "chat", threadId: THREAD_1, ...turn }),
     );
 
-    expect(messages).toEqual(["I typed this", "Said before marks"]);
+    expect(messages.map((message) => message.text)).toEqual(["I typed this", "Said before marks"]);
   });
 
   it("reads an old journal's turns as before, and starts counting marks from the first start that follows", () => {
@@ -1697,5 +1753,248 @@ describe("which turns the person typed", () => {
     ).map((row) => row.event_name);
     expect(names).toEqual(["person-memory.entry-saved@1"]);
     expect(restart(h).view().entries).toHaveLength(1);
+  });
+});
+
+describe("learning from threads still open", () => {
+  const MSG_AT = "2026-11-01T10:30:00.000Z";
+  const QUIET = "2026-11-01T11:10:00.000Z";
+  const open = (overrides: Partial<FakeThread> = {}): FakeThread => ({
+    id: THREAD_1,
+    title: "Invoices",
+    personMessages: ["Export invoices as CSV."],
+    messageTimes: [MSG_AT],
+    typed: true,
+    ...overrides,
+  });
+  const begin = (threads: FakeThread[]) => {
+    const h = harness(threads);
+    // Memory began at START: what the person says after it can be learned.
+    h.store.since();
+    return h;
+  };
+  const ref = (threadId = THREAD_1) => ({ mode: "chat" as const, threadId: threadId as never });
+
+  it("learns an idle open thread once and not again until the person writes more", async () => {
+    const thread = open();
+    const h = begin([thread]);
+    h.advance(QUIET);
+
+    const first = await h.sweep.pass();
+    const second = await h.sweep.pass();
+
+    expect(first).toEqual([{ mode: "chat", threadId: THREAD_1, outcome: "remembered" }]);
+    expect(second).toEqual([]);
+    expect(h.prompts).toHaveLength(1);
+    expect(h.store.learnedThrough(ref())).toMatchObject({ id: "message-0", at: MSG_AT });
+    expect(h.store.view().entries.map((entry) => entry.content)).toContain(
+      "Prefers CSV over spreadsheets.",
+    );
+
+    // More typed messages, but the six hours are not over: nothing is read.
+    thread.personMessages = [...thread.personMessages, "Also add a totals row."];
+    thread.messageTimes = [MSG_AT, "2026-11-01T11:20:00.000Z"];
+    h.advance("2026-11-01T14:00:00.000Z");
+    expect(await h.sweep.pass()).toEqual([]);
+    expect(h.prompts).toHaveLength(1);
+
+    // Six hours after the first learning, only the newer message goes.
+    h.advance("2026-11-01T17:30:00.000Z");
+    h.setReply({
+      status: "answered",
+      text: JSON.stringify({ summary: "Added totals.", entries: [] }),
+    });
+    expect(await h.sweep.pass()).toEqual([
+      { mode: "chat", threadId: THREAD_1, outcome: "remembered" },
+    ]);
+    expect(h.prompts).toHaveLength(2);
+    expect(h.prompts[1]).toContain("Also add a totals row.");
+    expect(h.prompts[1]).not.toContain("Export invoices as CSV.");
+    // The digest is the later pass's.
+    expect(h.store.search({ mode: "chat", threadId: "none" }, "totals")).toHaveLength(1);
+  });
+
+  it("reads nothing from a thread whose turn is running or whose person wrote lately", async () => {
+    const thread = open({ running: true });
+    const h = begin([thread]);
+    h.advance(QUIET);
+    expect(await h.sweep.pass()).toEqual([]);
+
+    thread.running = false;
+    h.advance("2026-11-01T10:50:00.000Z");
+    expect(await h.sweep.pass()).toEqual([]);
+    expect(h.prompts).toHaveLength(0);
+  });
+
+  it("learns nothing from messages the host did not mark typed or that came before memory began", async () => {
+    const unmarked = open({ typed: false });
+    const before = open({
+      id: THREAD_2,
+      messageTimes: ["2026-10-31T09:00:00.000Z"],
+    });
+    const h = begin([unmarked, before]);
+    h.advance(QUIET);
+
+    expect(await h.sweep.pass()).toEqual([]);
+    expect(h.prompts).toHaveLength(0);
+  });
+
+  it("stores nothing from a call still running when the person forgot everything", async () => {
+    const h = begin([open()]);
+    h.advance(QUIET);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const answer = h.sweepWith({
+      complete: async () => {
+        await held;
+        return h.reply();
+      },
+    });
+
+    const running = answer.pass();
+    await Promise.resolve();
+    h.store.change(decodePersonMemoryCommand({ kind: "forget-person-memory", confirmed: true }));
+    h.advance("2026-11-01T11:20:00.000Z");
+    release();
+    await running;
+
+    expect(h.store.view().entries).toEqual([]);
+    expect(h.store.learnedThrough(ref())).toBeUndefined();
+  });
+
+  it("learns from threads put away first, makes at most ten calls a pass, and each thread at most once in six hours", async () => {
+    const finished: FakeThread[] = Array.from({ length: 4 }, (_, index) => ({
+      id: `aaaaaaaa-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`,
+      title: `Done ${String(index)}`,
+      completedAt: QUIET,
+      personMessages: [`Finished message ${String(index)}`],
+    }));
+    const opened: FakeThread[] = Array.from({ length: 9 }, (_, index) => ({
+      ...open(),
+      id: `aaaaaaaa-0000-4000-8000-0000000002${String(index).padStart(2, "0")}`,
+      title: `Open ${String(index)}`,
+      personMessages: [`Open message ${String(index)}`],
+    }));
+    const h = begin([...opened, ...finished]);
+    h.advance(QUIET);
+
+    const first = await h.sweep.pass();
+
+    expect(first).toHaveLength(10);
+    expect(first.slice(0, 4).map((result) => result.threadId)).toEqual(
+      finished.map((thread) => thread.id),
+    );
+    expect(h.prompts).toHaveLength(10);
+    // The next pass learns the three left over, and no thread twice.
+    const second = await h.sweep.pass();
+    expect(second).toHaveLength(3);
+    expect(h.prompts).toHaveLength(13);
+  });
+
+  it("tries a failed thread again on a later pass, and never on another account", async () => {
+    const h = begin([open()]);
+    h.advance(QUIET);
+    h.setReply({ status: "unavailable" });
+
+    expect(await h.sweep.pass()).toEqual([
+      { mode: "chat", threadId: THREAD_1, outcome: "unavailable" },
+    ]);
+    expect(h.store.learnedThrough(ref())).toBeUndefined();
+
+    h.advance("2026-11-01T12:10:00.000Z");
+    h.setReply({
+      status: "answered",
+      text: JSON.stringify({ summary: "Export.", entries: [] }),
+    });
+    expect(await h.sweep.pass()).toEqual([
+      { mode: "chat", threadId: THREAD_1, outcome: "remembered" },
+    ]);
+    const unavailable = h.sweepWith({ resolve: () => undefined });
+    h.advance("2026-11-02T12:10:00.000Z");
+    h.setThreads([open({ personMessages: ["Newer"], messageTimes: ["2026-11-02T10:00:00.000Z"] })]);
+    expect(await unavailable.pass()).toEqual([
+      { mode: "chat", threadId: THREAD_1, outcome: "unavailable" },
+    ]);
+  });
+
+  it("sends a thread put away only what was said after what was learned, and makes no call when nothing is newer", async () => {
+    const thread = open({ typed: true });
+    const h = begin([thread]);
+    h.advance(QUIET);
+    await h.sweep.pass();
+    expect(h.prompts).toHaveLength(1);
+
+    // Put away with nothing new: no call.
+    thread.completedAt = "2026-11-01T11:30:00.000Z";
+    h.advance("2026-11-01T11:40:00.000Z");
+    expect(await h.sweep.pass()).toEqual([]);
+    expect(h.prompts).toHaveLength(1);
+
+    // Reopened, said one more thing, put away again: only that thing goes.
+    thread.personMessages = [...thread.personMessages, "Use semicolons."];
+    thread.messageTimes = [MSG_AT, "2026-11-01T11:35:00.000Z"];
+    thread.completedAt = "2026-11-01T11:50:00.000Z";
+    h.advance("2026-11-01T12:00:00.000Z");
+    expect((await h.sweep.pass()).map((result) => result.outcome)).toEqual(["remembered"]);
+    expect(h.prompts).toHaveLength(2);
+    expect(h.prompts[1]).toContain("Use semicolons.");
+    expect(h.prompts[1]).not.toContain("Export invoices as CSV.");
+  });
+
+  it("replays a mark from before as learned to its end, and the new mark as learned to its message", async () => {
+    const h = begin([open()]);
+    h.advance(QUIET);
+    await h.sweep.pass();
+    const restarted = new PersonMemoryStore({
+      connection: h.connection,
+      journal: h.journal,
+      uuid: () => crypto.randomUUID(),
+      clock: () => decodeUtcTimestamp(QUIET),
+      actor,
+    });
+    expect(restarted.learnedThrough(ref())).toMatchObject({ id: "message-0", at: MSG_AT });
+    expect(restarted.view().rememberedThreads).toBe(1);
+
+    // An old mark: the digest as it was written before, with no message named.
+    h.journal.append({
+      aggregate: {
+        aggregateType: "person-memory-thread",
+        aggregateId: personMemoryThreadAggregateId("thread", { mode: "chat", threadId: THREAD_2 }),
+      },
+      expectedVersion: 0,
+      events: [
+        {
+          eventId: crypto.randomUUID(),
+          eventName: "person-memory.thread-remembered@1",
+          eventVersion: 1,
+          correlationId: crypto.randomUUID(),
+          actor,
+          occurredAt: later,
+          payload: {
+            threadId: THREAD_2,
+            digest: {
+              source: {
+                mode: "chat",
+                threadId: THREAD_2,
+                title: "Old",
+                providerInstanceId: PROVIDER,
+                endedAt: later,
+              },
+              summary: "Before.",
+            },
+          },
+        },
+      ],
+    });
+    const again = new PersonMemoryStore({
+      connection: h.connection,
+      journal: h.journal,
+      uuid: () => crypto.randomUUID(),
+      clock: () => decodeUtcTimestamp(QUIET),
+      actor,
+    });
+    expect(again.learnedThrough(ref(THREAD_2))).toMatchObject({ id: "thread-end", at: later });
+    restarted.close();
+    again.close();
   });
 });

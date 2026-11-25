@@ -774,6 +774,7 @@ export function startOctantServer(
       cloudMachineServers,
       personMemory,
       conversationOwnershipSlot,
+      liveTurns,
       safeNetworkStore,
       projectService,
       agentRunInteractions,

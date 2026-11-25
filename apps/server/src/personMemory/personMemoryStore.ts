@@ -16,6 +16,7 @@ import {
   PERSON_MEMORY_SETTINGS_AGGREGATE_TYPE,
   PERSON_MEMORY_SETTINGS_CHANGED,
   PERSON_MEMORY_THREAD_AGGREGATE_TYPE,
+  PERSON_MEMORY_THREAD_DISTILLED,
   PERSON_MEMORY_THREAD_REMEMBERED,
   PERSON_MEMORY_THREAD_UNTRACED,
   PERSON_MEMORY_TURN_TYPED,
@@ -25,6 +26,7 @@ import {
   PersonMemoryEntryRecorded,
   PersonMemoryEntrySaved,
   PersonMemorySettingsChanged,
+  PersonMemoryThreadDistilled,
   PersonMemoryThreadRemembered,
   PersonMemoryThreadUntraced,
   PersonMemoryTurnTyped,
@@ -69,6 +71,7 @@ const decodeSettingsChanged = Schema.decodeUnknownSync(PersonMemorySettingsChang
 const decodeEntryRecorded = Schema.decodeUnknownSync(PersonMemoryEntryRecorded);
 const decodeEntrySaved = Schema.decodeUnknownSync(PersonMemoryEntrySaved);
 const decodeThreadRemembered = Schema.decodeUnknownSync(PersonMemoryThreadRemembered);
+const decodeThreadDistilled = Schema.decodeUnknownSync(PersonMemoryThreadDistilled);
 const decodeThreadUntraced = Schema.decodeUnknownSync(PersonMemoryThreadUntraced);
 const decodeTurnTyped = Schema.decodeUnknownSync(PersonMemoryTurnTyped);
 
@@ -78,6 +81,7 @@ export function registerPersonMemoryEvents(registry: EventRegistry): EventRegist
     .register(PERSON_MEMORY_ENTRY_RECORDED, 1, PersonMemoryEntryRecorded)
     .register(PERSON_MEMORY_ENTRY_SAVED, 1, PersonMemoryEntrySaved)
     .register(PERSON_MEMORY_THREAD_REMEMBERED, 1, PersonMemoryThreadRemembered)
+    .register(PERSON_MEMORY_THREAD_DISTILLED, 1, PersonMemoryThreadDistilled)
     .register(PERSON_MEMORY_THREAD_UNTRACED, 1, PersonMemoryThreadUntraced)
     .register(PERSON_MEMORY_TURN_TYPED, 1, PersonMemoryTurnTyped);
 }
@@ -136,6 +140,8 @@ export class PersonMemoryStore {
   #settingsVersion = 0;
   readonly #entries = new Map<string, PersonMemoryEntry>();
   readonly #digests = new Map<string, PersonMemoryThreadDigest>();
+  /** Per remembered thread: the last message learned from, and when it was learned. */
+  readonly #learned = new Map<string, LearnedThrough>();
   readonly #untraced = new Map<string, PersonMemoryUntracedThread & { readonly version: number }>();
   /** Entries first kept at once from an open thread; a rewrite keeps that event. */
   readonly #savedEntryIds = new Set<string>();
@@ -298,6 +304,17 @@ export class PersonMemoryStore {
     return this.#digests.has(threadKey(thread));
   }
 
+  /**
+   * How far the thread was learned from, or `undefined` when it never was. An
+   * old `thread-remembered` reads as learned to the thread's end.
+   */
+  learnedThrough(thread: {
+    readonly mode: OctantMode;
+    readonly threadId: string;
+  }): LearnedThrough | undefined {
+    return this.#learned.get(threadKey(thread));
+  }
+
   leavesNoTrace(thread: { readonly mode: OctantMode; readonly threadId: string }): boolean {
     return this.#untraced.has(threadKey(thread));
   }
@@ -366,36 +383,56 @@ export class PersonMemoryStore {
   }
 
   /**
-   * Records what one ended thread taught: its digest, new entries, and new
-   * sources on entries learned again. Nothing is written for a thread that
-   * was remembered already or no longer takes part.
+   * Records what a thread taught up to one of its messages: its digest (which
+   * replaces the thread's earlier one), new entries, and new sources on entries
+   * learned again. Nothing is written for a thread that no longer takes part,
+   * or when nothing in it is newer than what was learned before.
    */
   remember(input: {
     readonly source: PersonMemorySource;
     readonly summary: string;
     readonly entries: ReadonlyArray<{ readonly kind: PersonMemoryKind; readonly content: string }>;
+    /** The last message learned from; absent, the thread's end (`source.endedAt`). */
+    readonly lastMessage?: { readonly id: string; readonly at: UtcTimestamp };
   }): "remembered" | "skipped" {
     const thread = { mode: input.source.mode, threadId: input.source.threadId };
-    if (this.isRemembered(thread)) return "skipped";
+    const key = threadKey(thread);
+    const lastMessage = input.lastMessage ?? { id: THREAD_END_MESSAGE, at: input.source.endedAt };
+    const before = this.#learned.get(key);
+    if (before !== undefined && lastMessage.at <= before.at) return "skipped";
     // The answer may arrive after the person forgot everything, switched
     // memory off and on, or erased this thread: it then stays unwritten.
-    if (this.#gone.has(threadKey(thread))) return "skipped";
+    if (this.#gone.has(key)) return "skipped";
     if (this.#since !== undefined && input.source.endedAt < this.#since) return "skipped";
     if (!this.threadTakesPart({ ...thread, projectId: input.source.projectId })) return "skipped";
-    const digest: PersonMemoryThreadDigest = { source: input.source, summary: input.summary };
+    const earlier = this.#digests.get(key);
+    // A reply with nothing to say about the new messages leaves what the
+    // digest said about the earlier ones.
+    const digest: PersonMemoryThreadDigest = {
+      source: input.source,
+      summary:
+        input.summary.length === 0 && earlier !== undefined ? earlier.summary : input.summary,
+    };
+    const aggregateId = personMemoryThreadAggregateId("thread", thread);
+    // The thread's digest is replaced, not added to: only the newest stays.
+    if (earlier !== undefined) {
+      this.#erase([{ aggregateType: PERSON_MEMORY_THREAD_AGGREGATE_TYPE, aggregateId }]);
+    }
+    let learnedAt: UtcTimestamp;
     try {
-      this.#append(
+      learnedAt = this.#append(
         PERSON_MEMORY_THREAD_AGGREGATE_TYPE,
-        personMemoryThreadAggregateId("thread", thread),
+        aggregateId,
         0,
-        PERSON_MEMORY_THREAD_REMEMBERED,
-        { threadId: input.source.threadId, digest },
-      );
+        PERSON_MEMORY_THREAD_DISTILLED,
+        { threadId: input.source.threadId, digest, lastMessage },
+      ).occurredAt;
     } catch (error) {
       if (error instanceof ConcurrencyConflict) return "skipped";
       throw error;
     }
-    this.#digests.set(threadKey(thread), digest);
+    this.#digests.set(key, digest);
+    this.#learned.set(key, { ...lastMessage, learnedAt });
     const merged = mergePersonMemory({
       existing: [...this.#entries.values()],
       distilled: input.entries,
@@ -552,6 +589,7 @@ export class PersonMemoryStore {
   ): void {
     const key = threadKey(thread);
     this.#eraseTyped(thread);
+    this.#learned.delete(key);
     if (this.#digests.delete(key)) {
       this.#erase([
         {
@@ -604,6 +642,7 @@ export class PersonMemoryStore {
     this.#erase([...aggregates, ...typed]);
     this.#entries.clear();
     this.#digests.clear();
+    this.#learned.clear();
     this.#typedTurns.clear();
     this.#savedEntryIds.clear();
     this.#writeSettings(this.#settings, "restart", actor);
@@ -785,6 +824,21 @@ export class PersonMemoryStore {
         case PERSON_MEMORY_THREAD_REMEMBERED: {
           const { digest } = decodeThreadRemembered(envelope.payload);
           this.#digests.set(threadKey(digest.source), digest);
+          // Learned to the thread's end, as it stood when it was put away.
+          this.#learned.set(threadKey(digest.source), {
+            id: THREAD_END_MESSAGE,
+            at: digest.source.endedAt,
+            learnedAt: envelope.occurredAt,
+          });
+          break;
+        }
+        case PERSON_MEMORY_THREAD_DISTILLED: {
+          const { digest, lastMessage } = decodeThreadDistilled(envelope.payload);
+          this.#digests.set(threadKey(digest.source), digest);
+          this.#learned.set(threadKey(digest.source), {
+            ...lastMessage,
+            learnedAt: envelope.occurredAt,
+          });
           break;
         }
         case PERSON_MEMORY_TURN_TYPED: {
@@ -817,6 +871,16 @@ export class PersonMemoryStore {
     }
   }
 }
+
+/** How far a thread was learned from, and when. */
+export interface LearnedThrough {
+  readonly id: string;
+  readonly at: string;
+  readonly learnedAt: string;
+}
+
+/** The marker an old `thread-remembered` reads as: learned to the thread's end. */
+const THREAD_END_MESSAGE = "thread-end";
 
 function threadKey(thread: { readonly mode: string; readonly threadId: string }): string {
   return `${thread.mode}:${String(thread.threadId)}`;

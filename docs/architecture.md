@@ -2208,18 +2208,31 @@ except where a bullet says otherwise.
   duplicate). The person can read, edit, and delete each entry and see its
   sources in Settings › Memory, and Forget everything erases all entries and
   digests at once.
-- **When it is written.** After a thread ends: a Chat, Work, or Code thread
-  the person completed (settled) after memory was turned on. A sweep of the
-  three modes' completed threads runs five minutes after start and then
-  hourly, and distills
-  each such thread at most once, so a thread that was reopened and completed
-  again is not distilled twice. Threads completed before memory existed are
-  never back-filled, so turning it on never starts a burst of model calls.
-  Forgetting everything, switching memory back on, letting a Project back
-  in, or allowing a thread again moves that start to the moment of the
-  change, so nothing that ended while memory was off, kept out, or just
-  forgotten is learned afterwards. A
-  thread with nothing the person wrote is recorded as remembered without a
+- **When it is written.** After a thread ends, and while one is still open. A
+  sweep of the three modes' threads runs five minutes after start and then
+  hourly. A Chat, Work, or Code thread the person completed (settled) after
+  memory was turned on is learned from once, from everything they wrote in it;
+  if it is reopened and completed again, only what they wrote after what was
+  learned goes to the model, and none means no call. A thread still open is
+  learned from when no turn is running in it, the person has not written for
+  30 minutes, they typed something (a message the host marked, never one
+  older than the marks) after memory began and after what was learned before,
+  and it was last learned from over 6 hours ago. The two share one budget of
+  10 model calls a pass, threads put away first, so a busy day never turns into
+  a burst, and a thread that could not be read (the chosen account is off, not
+  ready, at its limit, or the call failed) is tried again on a later pass, on
+  the same account. What was learned is recorded as
+  `person-memory.thread-distilled@1` (the thread, its digest, and the last
+  message learned from); an old `person-memory.thread-remembered@1` replays as
+  learned to the thread's end. A later pass replaces the thread's digest, and
+  its entries merge as before. Threads completed before memory existed are never
+  back-filled, and nothing said before memory began is read from an open
+  thread, so turning it on never starts a burst of model calls. Forgetting
+  everything, switching memory back on, letting a Project back in, or allowing a
+  thread again moves that start to the moment of the change, so nothing that
+  ended while memory was off, kept out, or just forgotten is learned afterwards,
+  and a call that was running when the person forgot everything stores nothing.
+  A thread with nothing the person wrote is recorded as remembered without a
   call.
 - **Saving at once.** Telling an agent "remember that I prefer X" does not wait
   for the sweep (maintainer decision, 2026-11-16). `octant_remember_person` is a
@@ -2364,7 +2377,8 @@ except where a bullet says otherwise.
   events from the journal, not only from the view. Purging or deleting a
   thread erases its digest, removes it from every entry's sources, and erases
   each entry that came only from it.
-- **Storage.** Entries, digests, settings, typed-turn marks, and Leave-no-trace marks are
+- **Storage.** Entries, digests (with how far each thread was learned from), settings,
+  typed-turn marks, and Leave-no-trace marks are
   journal events (`person-memory-*` aggregates) held in host memory and
   rebuilt from the journal at start, so they are local, owner-only, and in no
   diagnostics or telemetry. A thread's digest names the thread as `threadId`,
