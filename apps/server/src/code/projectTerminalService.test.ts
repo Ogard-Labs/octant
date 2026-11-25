@@ -2384,6 +2384,49 @@ describe("Work task provider terminal", () => {
     }
   });
 
+  it("starts nothing when the provider is switched off while a chosen sandbox policy is prepared", async () => {
+    const ended = vi.fn();
+    const selection = {
+      context: { root: "/approved/notes", sessionId: "provider-terminal-policy" },
+      policy: { filesystem: { readWriteRoots: [] } },
+    } as unknown as SandboxPolicySelection;
+    configureSandboxRestrictionsAuthority({
+      validateSelection: () => true,
+      registerCleanup: () => () => undefined,
+      storageDirectory: () => undefined,
+      beginTurn: () => ({
+        status: "admitted",
+        turn: { selection, summary: "", current: () => true, end: ended },
+      }),
+      active: () => undefined,
+      deny: () => undefined,
+    });
+    const f = providerHarness({
+      strict: false,
+      network: { start: async () => ({ status: "unrouted" }) } as unknown as NonNullable<
+        ConstructorParameters<typeof ProjectTerminalService>[0]["network"]
+      >,
+    });
+    const resolve = f.providerTerminal.getMockImplementation();
+    f.providerTerminal.mockImplementation((input) =>
+      input.sandboxPolicySelected || resolve === undefined
+        ? { status: "refused", message: "This thread's provider is switched off." }
+        : resolve(input),
+    );
+    try {
+      expect(await f.service.execute(windowId, "local-window", providerStart())).toMatchObject({
+        kind: "project-terminal-refused",
+        reason: "unavailable",
+        message: "This thread's provider is switched off.",
+      });
+      expect(f.terminals.launches).toHaveLength(0);
+      expect(ended).toHaveBeenCalled();
+    } finally {
+      configureSandboxRestrictionsAuthority(undefined);
+      f.connection.close();
+    }
+  });
+
   it("refuses a provider terminal for a remote session, a Plan task, and a Project terminal with no task", async () => {
     const f = providerHarness();
     const plan = providerHarness({ executionPolicy: "plan" });

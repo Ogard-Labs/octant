@@ -1040,7 +1040,16 @@ export class ProjectTerminalService {
           strict,
           sandboxPolicySelected: true,
         });
-        if (confined?.status === "resolved") providerProgram = confined;
+        // Refused now (the provider was just switched off): never start with
+        // the environment resolved before the policy was known.
+        if (confined?.status !== "resolved") {
+          await prepared.end();
+          return refused(
+            "unavailable",
+            confined?.message ?? "This host does not open provider terminals.",
+          );
+        }
+        providerProgram = confined;
       }
       // The program runs the way the task's turns do (maintainer decision,
       // 2026-11-21), by the rule a Code thread's provider terminal follows:

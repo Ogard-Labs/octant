@@ -49,11 +49,11 @@ export interface CredentialLaunchPosture {
  * Whether a launch of this driver kind and posture takes the person's
  * pass-through list, as each driver builds its environment. A provider
  * terminal reads the same answer for the telemetry and self-update switches,
- * which close wherever this refuses. Strict never does. Claude Code and the ACP agents also build the Strict environment for
- * a thread that keeps or chose a sandbox (`claudeDriver` closes its own
- * channels there; `acpProcess` sets `environmentStrict`), an ACP agent only
- * at Full access, where its driver passes the kept sandbox on. Codex and Pi
- * read only Strict.
+ * which close wherever this refuses. Strict never does. Claude Code and the
+ * ACP agents also build the Strict environment for a thread that keeps or
+ * chose a sandbox (`claudeDriver` closes its own channels there; `acpProcess`
+ * sets `environmentStrict`), an ACP agent only at Full access, where its
+ * driver passes the kept sandbox on. Codex and Pi read only Strict.
  */
 export function credentialPassThroughApplies(
   driverKind: string,
