@@ -552,6 +552,18 @@ describe("managed worktree Node ports", () => {
       expect(await sparse.state()).toBe("ready");
     });
 
+    it("keeps a folder that has settings of its own, which the recorded branch and commit cannot give back", async () => {
+      const w = await readyWorktree();
+      await w.git("-C", w.fixture.repository, "config", "extensions.worktreeConfig", "true");
+      await w.git("-C", w.created.targetPath, "config", "--worktree", "user.signingkey", "ABC123");
+      await expect(w.reclaim()).resolves.toEqual({
+        status: "refused",
+        reason: "unsupported-checkout",
+      });
+      expect(await w.ports.filesystem.pathExists(w.created.targetPath, signal)).toBe(true);
+      expect(await w.state()).toBe("ready");
+    });
+
     it("keeps a folder with a submodule or an operation under way, before the receipt leaves ready", async () => {
       const withSubmodule = await readyWorktree();
       const library = join(withSubmodule.fixture.root, "library");

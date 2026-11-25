@@ -180,7 +180,8 @@ const OPERATION_MARKERS = [
  * Finds what makes removing a clean-looking worktree lose work or fail: a file
  * marked skip-worktree or assume-unchanged (an edit to it is invisible to
  * status and to removal), a sparse checkout, a submodule, or a merge, rebase,
- * cherry-pick, revert or bisect under way. Any read that fails, or whose output
+ * cherry-pick, revert or bisect under way, or settings of its own
+ * (`config.worktree`) that a restore would not bring back. Any read that fails, or whose output
  * does not fit the bound, is a failure, never an all clear.
  */
 export async function readCleanupHazard(
@@ -223,7 +224,10 @@ export async function readCleanupHazard(
   if (directory.exitCode !== 0) return { status: "failed" };
   const gitDirectory = directory.stdout.trim();
   if (gitDirectory.length === 0) return { status: "failed" };
-  for (const marker of OPERATION_MARKERS) {
+  // Settings kept only for this checkout (`config.worktree`) are not in the
+  // receipt, which holds the branch and the commit: a restore would not bring
+  // them back, so the folder stays.
+  for (const marker of [...OPERATION_MARKERS, "config.worktree"]) {
     try {
       await lstat(join(gitDirectory, marker));
       return { status: "observed", hazard: "unsupported" };
