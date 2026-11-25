@@ -883,8 +883,8 @@ export function wireContext(deps: ContextDependencies) {
               ...command,
               ...(custody === undefined ? {} : { flowRun: custody }),
             }),
-          releaseThread: (owner, threadId) =>
-            browserAutomationService.releaseThread(owner, threadId),
+          releaseThread: (owner, threadId, endedBy, actor) =>
+            browserAutomationService.releaseThread(owner, threadId, endedBy, actor),
           snapshotRefs: (owner, threadId) => browserAutomationService.snapshotRefs(owner, threadId),
         },
       });

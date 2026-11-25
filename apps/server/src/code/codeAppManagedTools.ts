@@ -599,9 +599,12 @@ export interface CodeAppManagedToolsOptions {
         }
       | { readonly status: "refused"; readonly error: string }
     >;
+    /** `actor` is the agent whose Stop this is, for the record of a page it ends. */
     readonly releaseThread: (
       windowId: WindowId,
       threadId: BrowserThreadId,
+      endedBy?: "person" | "agent",
+      actor?: EventActor,
     ) => Promise<BrowserAutomationSnapshot>;
     /** What the latest snapshot's refs name; flows read it to describe and find elements. */
     readonly snapshotRefs?: (windowId: WindowId, threadId: BrowserThreadId) => BrowserFlowRefs;
@@ -1392,7 +1395,12 @@ async function browserToolOne(
       options.browserApproval?.forget(String(context.contextId));
       options.browserProfiles?.forgetBinding(String(context.contextId));
     }
-    const released = await options.browser.releaseThread(options.windowId, threadId);
+    const released = await options.browser.releaseThread(
+      options.windowId,
+      threadId,
+      "agent",
+      browserFlowAgentActor(authority, String(threadId)),
+    );
     return browserToolResult(released);
   }
   const postureFailure = browserAuthorityFailure(options, input.operation);
