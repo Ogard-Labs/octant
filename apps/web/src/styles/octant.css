@@ -10111,10 +10111,18 @@ html[data-octant-native-host="true"]
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
-  /* the spinner keeps turning — a frozen spinner reads as a hung app —
-     but slowly enough not to trigger anyone */
-  .octant-spinner {
+  /* The spinner keeps turning, slowly enough to trouble nobody: a frozen
+     spinner reads as a hung app. It says so above every other rule, because a
+     surface that stills all of its own motion (the remote shell and pairing
+     set one iteration on everything inside them) would otherwise stop it
+     after a single turn. */
+  html .octant-spinner {
     animation-duration: var(--oct-motion-spin-slow) !important;
+    animation-iteration-count: infinite !important;
+  }
+  /* A live dot holds still: the word beside it already says it is live. */
+  html .octant-status-dot[data-live="true"] {
+    animation: none !important;
   }
   .skeleton::after {
     display: none;

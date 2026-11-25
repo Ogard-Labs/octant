@@ -61,6 +61,24 @@ describe("the three small marks", () => {
     ]);
   });
 
+  // A feature places a mark through a class of its own. Reaching for the
+  // adapter's class from a feature stylesheet is how one mark becomes seven
+  // again, so only the system stylesheet may name these three.
+  it("lets no stylesheet but the system's paint or animate the adapters' own classes", () => {
+    const paint =
+      /(?:^|[\s;])(?:color|background(?:-color)?|font(?:-family|-size|-weight)?|border(?:-radius|-color|-width)?|padding|line-height|width|height|animation(?:-[a-z-]+)?|opacity)\s*:/;
+    const repainted: string[] = [];
+    for (const { name, rules } of stylesheets) {
+      if (name === "styles/octant.css") continue;
+      for (const block of rules.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const selector = (block[1] ?? "").trim();
+        if (!/\.octant-(?:spinner|kbd|status-dot)(?![a-z0-9_-])/.test(selector)) continue;
+        if (paint.test(block[2] ?? "")) repainted.push(`${name}: ${selector}`);
+      }
+    }
+    expect(repainted).toEqual([]);
+  });
+
   it("draws every keyboard hint with OctantKbd", () => {
     const raw = files(
       webRoot,
