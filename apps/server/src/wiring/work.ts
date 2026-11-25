@@ -160,6 +160,10 @@ import { attachedImageSources, workspaceImageSources } from "../image/threadImag
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { describeTurnImages, type ImageDescriber } from "../harness/imageDescription";
 import { lookToolForThread } from "../image/lookTool";
+import { prepareProjectTerminalProtections } from "../code/projectTerminalProtections";
+import { terminalShellFor } from "../code/terminalShell";
+import type { ProviderRuntimeNetworkPort } from "../network/providerRuntimeNetwork";
+import { createWorkTerminalTools, workAgentTerminalId } from "../work/workAgentTerminal";
 import { providerTakesFileNatively, supportsConversationInput } from "./conversationInputs";
 import { modelLabelOf } from "./imageDescriber";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
@@ -193,6 +197,8 @@ import type { WorkRequestStateWiring } from "./workRequestState";
 import { workTurnToolLevel } from "../work/workTurnToolLevel";
 
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
+  /** The network a chosen sandbox policy routes a terminal through. */
+  readonly providerRuntimeNetwork?: ProviderRuntimeNetworkPort;
   /** The member's Act item, which holds a hub-introduced device's queued Code turns. */
   readonly hubActScopeSlot: HubActScopeSlot;
   /** Sees images; absent on a host started without one. */
@@ -302,7 +308,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "resolveFeedbackThread"
     | "windowHoldsProject"
   > &
-  Pick<CodeRuntimeWiring, "codeService" | "routeCodeService"> &
+  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService" | "routeCodeService"> &
   Pick<
     HarnessWiring,
     | "runtimeForgeChanges"
@@ -1278,6 +1284,72 @@ export function wireWork(deps: WorkDependencies) {
               uuid: randomUUID,
               clock: () => new Date().toISOString(),
             });
+        // The thread's own shell, at its level and confinement. A routine's run
+        // has nobody to ask, so it is offered none.
+        const workTerminals = deps.codeOperationRuntime?.terminals;
+        const terminalTools =
+          !browserSupported ||
+          workTerminals === undefined ||
+          folder === undefined ||
+          input.routineRun !== undefined ||
+          isRoutineHostScope(input.windowId)
+            ? undefined
+            : createWorkTerminalTools({
+                threadId: String(input.thread.id),
+                projectId: String(input.thread.projectId),
+                terminals: workTerminals,
+                folder: currentRoot,
+                posture: () =>
+                  workThreadAccessOf(
+                    runningWorkTurns.get(String(input.thread.id))?.access ?? input.thread.access,
+                  ).executionPolicy,
+                current: () => workThreadProjection.read(input.thread.id)?.lifecycle === "active",
+                ask: async (summary, signal) => {
+                  const outcome = await nativeHarnessApprovals.ask({
+                    threadId: String(input.thread.id),
+                    mode: "work",
+                    projectId: input.thread.projectId,
+                    lead: {
+                      hostId: LOCAL_HOST_ID,
+                      providerInstanceId: input.thread.providerInstanceId,
+                      modelId: input.thread.modelId,
+                    },
+                    toolName: "provider-action",
+                    summary,
+                    approvalClass: "terminal",
+                    // Each command is its own answer, as in a Code thread's terminal.
+                    singleUse: true,
+                    signal,
+                  });
+                  return outcome === "approved" || outcome === "cancelled" ? outcome : "denied";
+                },
+                protections: async (root, executionPolicy) => {
+                  const prepared = await prepareProjectTerminalProtections(
+                    {
+                      terminalId: workAgentTerminalId(String(input.thread.id)),
+                      projectId: String(input.thread.projectId),
+                      root,
+                      mode: "work",
+                      executionPolicy,
+                      workThreadId: String(input.thread.id),
+                    },
+                    deps.providerRuntimeNetwork,
+                  );
+                  return prepared.status === "refused"
+                    ? { refused: prepared.message }
+                    : { launch: prepared.launch, end: prepared.end };
+                },
+                platform: process.platform,
+                strict: () => resolveThreadStrict(String(input.thread.id)),
+                shell: () =>
+                  terminalShellFor({
+                    platform: process.platform,
+                    windowsShell: persistence.readCodeSettings()?.settings.windowsTerminalShell,
+                  }),
+                recordExternalContentIngestion: (mark) =>
+                  externalContentIngestionStore.record(mark),
+                uuid: randomUUID,
+              });
         const secretTools = !browserSupported
           ? undefined
           : createCredentialTool({
@@ -1300,6 +1372,7 @@ export function wireWork(deps: WorkDependencies) {
           projectMemoryTools === undefined &&
           reportFinishedTools === undefined &&
           secretTools === undefined &&
+          terminalTools === undefined &&
           native === undefined &&
           browser === undefined &&
           sideTaskTools === undefined &&
@@ -1333,6 +1406,7 @@ export function wireWork(deps: WorkDependencies) {
           projectMemoryTools,
           reportFinishedTools,
           secretTools,
+          terminalTools,
         );
       },
       nativeHarness: nativeHarnessHooks,

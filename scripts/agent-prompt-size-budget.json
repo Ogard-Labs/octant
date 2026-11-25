@@ -5,7 +5,7 @@
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 48721,
+      "firstPromptBytes": 49434,
       "laterTurnBytes": 0
     },
     "code": {
@@ -31,7 +31,7 @@
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 48912,
+      "firstPromptBytes": 49643,
       "laterTurnBytes": 0
     },
     "code": {
@@ -57,7 +57,7 @@
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 49927,
+      "firstPromptBytes": 50695,
       "laterTurnBytes": 0
     },
     "code": {
@@ -83,8 +83,8 @@
       "laterTurnBytes": 4870
     },
     "work": {
-      "firstPromptBytes": 49927,
-      "laterTurnBytes": 7880
+      "firstPromptBytes": 50695,
+      "laterTurnBytes": 8121
     },
     "code": {
       "firstPromptBytes": 67535,
@@ -109,7 +109,7 @@
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 49927,
+      "firstPromptBytes": 50695,
       "laterTurnBytes": 0
     },
     "code": {
@@ -135,8 +135,8 @@
       "laterTurnBytes": 43231
     },
     "work": {
-      "firstPromptBytes": 62402,
-      "laterTurnBytes": 62402
+      "firstPromptBytes": 63145,
+      "laterTurnBytes": 63145
     },
     "code": {
       "firstPromptBytes": 80893,
