@@ -367,7 +367,8 @@ describe("when a long-lived thread sees newer entries", () => {
       const watched = new Proxy(f.connection, {
         get(target, property) {
           const value = Reflect.get(target, property) as unknown;
-          if (property !== "prepare") return typeof value === "function" ? value.bind(target) : value;
+          if (property !== "prepare")
+            return typeof value === "function" ? value.bind(target) : value;
           return (sql: string) => {
             const statement = target.prepare(sql);
             return new Proxy(statement, {
@@ -411,7 +412,9 @@ describe("when a long-lived thread sees newer entries", () => {
     expect(long.statements.filter((sql) => /OFFSET/i.test(sql))).toEqual([]);
     // Every step searches an index; none scans the table or sorts the thread's rows.
     expect(long.plans.length).toBeGreaterThan(5);
-    expect(long.plans.every((detail) => detail.startsWith("SEARCH") && detail.includes("USING INDEX"))).toBe(true);
+    expect(
+      long.plans.every((detail) => detail.startsWith("SEARCH") && detail.includes("USING INDEX")),
+    ).toBe(true);
     expect(long.plans.filter((detail) => /SCAN|TEMP B-TREE/.test(detail))).toEqual([]);
   });
 
@@ -515,14 +518,26 @@ describe("when a thread was last active", () => {
       kind: "attempt-updated",
       attempt: { providerSessionId: "session-a" },
     });
-    f.insert("code-operation", crypto.randomUUID(), "code.operation-event-recorded@1", "2026-11-01T10:40:00.000Z", {
-      threadId: THREAD,
-      event: { kind: "turn-finished" },
-    });
-    f.insert("code-operation", crypto.randomUUID(), "code.operation-event-recorded@1", "2026-11-01T10:50:00.000Z", {
-      threadId: "bbbbbbbb-0000-4000-8000-000000000002",
-      event: { kind: "turn-finished" },
-    });
+    f.insert(
+      "code-operation",
+      crypto.randomUUID(),
+      "code.operation-event-recorded@1",
+      "2026-11-01T10:40:00.000Z",
+      {
+        threadId: THREAD,
+        event: { kind: "turn-finished" },
+      },
+    );
+    f.insert(
+      "code-operation",
+      crypto.randomUUID(),
+      "code.operation-event-recorded@1",
+      "2026-11-01T10:50:00.000Z",
+      {
+        threadId: "bbbbbbbb-0000-4000-8000-000000000002",
+        event: { kind: "turn-finished" },
+      },
+    );
 
     expect(
       latestEventAt(f.connection, {
@@ -531,9 +546,9 @@ describe("when a thread was last active", () => {
         eventName: "chat.turn-created@1",
       }),
     ).toBe("2026-11-01T10:30:00.000Z");
-    expect(
-      latestEventAt(f.connection, { aggregateType: "chat-thread", aggregateId: THREAD }),
-    ).toBe("2026-11-01T11:00:00.000Z");
+    expect(latestEventAt(f.connection, { aggregateType: "chat-thread", aggregateId: THREAD })).toBe(
+      "2026-11-01T11:00:00.000Z",
+    );
     expect(latestEventAt(f.connection, { aggregateType: "code-operation", threadId: THREAD })).toBe(
       "2026-11-01T10:40:00.000Z",
     );

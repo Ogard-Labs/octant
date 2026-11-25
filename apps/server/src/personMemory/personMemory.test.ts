@@ -194,9 +194,7 @@ function harness(threads: FakeThread[]) {
       .map((row) => row.payload_json)
       .join("\n");
   /** A second sweep over the same threads with some of the model port replaced. */
-  const sweepWith = (
-    port: Partial<PersonMemoryModelPort>,
-  ) =>
+  const sweepWith = (port: Partial<PersonMemoryModelPort>) =>
     new PersonMemorySweep({
       store,
       clock: () => now,
@@ -1606,12 +1604,22 @@ describe("which turns the person typed", () => {
     const began = h.store.typedSince();
     const after = "2026-11-01T11:00:00.000Z";
     expect(
-      h.store.countsAsPersonWords({ mode: "chat", threadId: THREAD_1, turnId: "turn-a", began: after }),
+      h.store.countsAsPersonWords({
+        mode: "chat",
+        threadId: THREAD_1,
+        turnId: "turn-a",
+        began: after,
+      }),
     ).toBe(true);
 
     // The branch copies the turn under its own thread; marks belong to a thread.
     expect(
-      h.store.countsAsPersonWords({ mode: "chat", threadId: THREAD_2, turnId: "turn-a", began: after }),
+      h.store.countsAsPersonWords({
+        mode: "chat",
+        threadId: THREAD_2,
+        turnId: "turn-a",
+        began: after,
+      }),
     ).toBe(false);
     expect(began < after).toBe(true);
   });

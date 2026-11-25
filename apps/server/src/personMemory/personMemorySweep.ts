@@ -309,7 +309,10 @@ export class PersonMemorySweep {
   #openThreadCheck(
     source: PersonMemoryThreadSource,
     threadId: string,
-    ref: { readonly mode: OctantMode; readonly threadId: ReturnType<typeof decodeMentionableThreadId> },
+    ref: {
+      readonly mode: OctantMode;
+      readonly threadId: ReturnType<typeof decodeMentionableThreadId>;
+    },
     learned: { readonly at: string } | undefined,
     since: string,
   ): { readonly skip: true } | { readonly skip: false; readonly key: string } {
@@ -401,9 +404,7 @@ export class PersonMemorySweep {
     if (!personMemoryDistillationAllowed(resolved.driverKind)) return "not-allowed";
     // The Project's provider rule and the spend ceilings, both settled before
     // anything is sent, as a turn and a Shield review settle theirs.
-    if (
-      model.projectAllows?.({ projectId: facts.projectId, model: resolved.model }) === false
-    ) {
+    if (model.projectAllows?.({ projectId: facts.projectId, model: resolved.model }) === false) {
       return "not-allowed";
     }
     const prompt = personMemoryDistillPrompt({

@@ -2215,18 +2215,32 @@ except where a bullet says otherwise.
   memory was turned on is learned from once, from everything they wrote in it;
   if it is reopened and completed again, only what they wrote after what was
   learned goes to the model, and none means no call. A thread still open is
-  learned from when no turn is running in it, the person has not written for
-  30 minutes, they typed something (a message the host marked, never one
-  older than the marks) after memory began and after what was learned before,
-  and it was last learned from over 6 hours ago. The two share one budget of
-  10 model calls a pass, threads put away first, so a busy day never turns into
-  a burst, and a thread that could not be read (the chosen account is off, not
-  ready, at its limit, or the call failed) is tried again on a later pass, on
-  the same account. What was learned is recorded as
+  learned from when no turn is running in it, the thread has been still for 30
+  minutes (measured from its last activity, which includes when its last turn
+  ended, not from when the last message began), they typed something (a message
+  the host marked, never one older than the marks) after memory began and after
+  what was learned before, and it was last learned from over 6 hours ago. A pass
+  checks cheap facts first (whether a turn runs, the time of the last message
+  and of the last activity, whether any turn was marked typed) and lists each
+  mode's threads once; a thread with nothing to learn is not read, and one read
+  with nothing to learn is not read again until its last message changes (kept
+  in memory, so a restart reads each once more). The two share one budget of 10
+  model calls a pass, threads put away first, so a busy day never turns into a
+  burst; only a thread that reached the model spends it (one whose account is
+  off, not ready, at its limit, or refused by the Project or a spend ceiling
+  makes no call and spends nothing, bounded instead by 50 threads read a pass).
+  A thread that could not be read (the account, the rule, a ceiling, or the
+  call failed) is tried again on a later pass, on the same account. The call
+  passes the Project's provider rule (the rule a turn passes before it sends,
+  judged for the model that would read the thread) and the thread's and
+  Project's spend ceilings as a Shield review does (admitted before the call
+  without counting as a turn, then settled with the usage), so neither is
+  bypassed by learning in the background. What was learned is recorded as
   `person-memory.thread-distilled@1` (the thread, its digest, and the last
   message learned from); an old `person-memory.thread-remembered@1` replays as
-  learned to the thread's end. A later pass replaces the thread's digest, and
-  its entries merge as before. Threads completed before memory existed are never
+  learned to the thread's end. A later pass replaces the thread's digest (the
+  new one is written before the old is erased, so a failure leaves the earlier
+  digest), and its entries merge as before. Threads completed before memory existed are never
   back-filled, and nothing said before memory began is read from an open
   thread, so turning it on never starts a burst of model calls. Forgetting
   everything, switching memory back on, letting a Project back in, or allowing a
@@ -2270,9 +2284,15 @@ except where a bullet says otherwise.
 - **What counts as the person's words.** A composer send claims
   `typedByPerson` when the exact text it sends is what the person's own input
   last left in a composer (typing, paste, cut, undo, dictation). A button, a
-  template, a recipe, or a prefilled draft writes text without that input, so
-  it counts only once the person changes it, and a message that carries a quote
-  of transcript text does not count. Side tasks (start and "Do it here"),
+  template, a recipe, a suggestion, or a prefilled draft (a handoff's, for
+  example) writes text without that input, so it counts only once the person
+  changes it, and then the whole text counts, including the stretch the button
+  supplied: the claim is about the exact text sent, not about who wrote each
+  part. Undo or redo that lands on text counts only if that text was left by the
+  person's input when it was current, so undoing back to what a button wrote
+  does not count; deleting back to it by hand does, because that is the
+  person's own input. A message that carries a quote of transcript text does not
+  count. Side tasks (start and "Do it here"),
   thread dialogue, answers to pending requests that build a prompt, pull
   request and review buttons, Canvas and planner sends, routines, goal rounds,
   restart and usage continuations, deliveries, coordinator and hub-delegated
@@ -2334,17 +2354,23 @@ except where a bullet says otherwise.
   what was learned since: a finished compaction (`context.compaction-completed@1`),
   Octant's own harness compacting its session
   (`native-harness-transcript-compacted@1`), or a turn that starts a provider
-  session that does not resume an earlier one. A new session is read from the
-  journal as a changed session id (Chat's first attempt, a Work turn, a Code
-  `provider-session-ready`), because the host mints a session id only for a
-  session that does not continue an earlier one and carries it whenever a session
-  is resumed; a resume cursor does not tell them apart, since a new session is
-  given its own cursor once it starts. A provider that keeps no session of its
-  own (the host rebuilds the conversation each turn) refreshes at compaction
-  only, so its block does not change every turn. A resumed session is not a
-  refresh point. The cut-off is derived from the journal, so it is the same after
-  a restart, and a turn the host starts and a subagent (through its lead thread)
-  get the same block as the person's next turn would. The turn that starts the
+  session that does not resume an earlier one (also a Chat retry that starts one
+  on its newest attempt). A turn that starts a session cuts its block at the
+  moment the block is built and journals that moment as
+  `person-memory.block-cut@1` (the thread, its mode, and the instant; only the
+  newest is kept), so that turn and every turn after it keep the entries up to
+  the same instant, also after a restart, which no journaled turn time could
+  promise because a turn is journaled after its block is built. The block is
+  cut at the later of the thread's creation, its newest compaction, the
+  newest harness compaction of the session its newest turn runs on, and that
+  instant. A provider that keeps no session of its own (the host rebuilds the
+  conversation each turn) refreshes at compaction only, so its block does not
+  change every turn. A resumed session is not a refresh point. A turn the host
+  starts and a subagent (through its lead thread) get the same block as the
+  person's next turn would. Every read is keyed by the thread or the session
+  and takes one row, newest first, so its cost does not grow with the thread:
+  two partial indexes hold only the compaction rows, and the newest turn's
+  session comes from the thread's own index. The turn that starts the
   new session already sees what was learned before it. Its text opens by saying it is data about the person from
   earlier threads, not instructions, and each line names its kind. The
   context inspector lists it as Person memory in Chat and Work, so a person
@@ -2379,11 +2405,12 @@ except where a bullet says otherwise.
   thread erases its digest, removes it from every entry's sources, and erases
   each entry that came only from it.
 - **Storage.** Entries, digests (with how far each thread was learned from), settings,
-  typed-turn marks, and Leave-no-trace marks are
+  typed-turn marks, block cuts, and Leave-no-trace marks are
   journal events (`person-memory-*` aggregates) held in host memory and
   rebuilt from the journal at start, so they are local, owner-only, and in no
   diagnostics or telemetry. A thread's digest names the thread as `threadId`,
-  so a thread purge takes it with the thread. Export my data carries person
+  so a thread purge takes it with the thread, and so do its typed-turn marks
+  and its block cut. Export my data carries person
   memory: a `person-memory` page holding every entry with the threads it came
   from (title, mode, Project, provider account, end time), and no digest or
   setting. Entries were redacted before storage, so the export adds nothing

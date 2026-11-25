@@ -175,7 +175,9 @@ export function createPersonMemorySweep(input: {
     // A Chat being deleted is on its way out; learning from it now would
     // spend a call on a thread whose memory the delete then erases.
     threads: () => {
-      const threads = persistence.readChatThreads().filter((thread) => thread.lifecycle !== "deleting");
+      const threads = persistence
+        .readChatThreads()
+        .filter((thread) => thread.lifecycle !== "deleting");
       listedChat.clear();
       for (const thread of threads) listedChat.set(String(thread.id), thread);
       return threads;
