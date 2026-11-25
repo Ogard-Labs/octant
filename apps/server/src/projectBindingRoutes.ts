@@ -107,7 +107,13 @@ export function createProjectBindingRouteHandler(dependencies: ProjectBindingRou
       }
       if (isAuthorityRoute) {
         const body = decodeAuthorityRevocation(decoded.value);
-        dependencies.windowAuthorityStore.revoke(body.windowId);
+        // Only the desktop's bridge secret reaches this route, so only the
+        // desktop can say its app is quitting; a window the host revokes on
+        // its own (a lapsed capability) carries no such statement.
+        dependencies.windowAuthorityStore.revoke(body.windowId, {
+          requestedBy: "desktop",
+          appQuitting: body.desktopQuitAccepted,
+        });
         dependencies.onWindowRevoked?.(body.windowId);
         return new Response(null, { status: 204 });
       }
@@ -196,9 +202,24 @@ function decodeAuthorityRegistration(value: unknown): {
   };
 }
 
-function decodeAuthorityRevocation(value: unknown): { windowId: WindowId } {
-  requireKeys(value, ["windowId"]);
-  return { windowId: decodeWindowId(value.windowId) };
+/**
+ * `desktopQuitAccepted` is optional so a desktop that predates it keeps
+ * working, and a desktop that sends it to a host that predates it falls back
+ * to the plain body.
+ */
+function decodeAuthorityRevocation(value: unknown): {
+  windowId: WindowId;
+  desktopQuitAccepted: boolean;
+} {
+  if (!isRecord(value)) throw new Error("invalid");
+  const { desktopQuitAccepted, ...rest } = value;
+  requireKeys(rest, ["windowId"]);
+  if (desktopQuitAccepted !== undefined && typeof desktopQuitAccepted !== "boolean")
+    throw new Error("invalid");
+  return {
+    windowId: decodeWindowId(rest.windowId),
+    desktopQuitAccepted: desktopQuitAccepted === true,
+  };
 }
 
 function decodeReceiptRequest(value: unknown): {

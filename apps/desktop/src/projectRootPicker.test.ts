@@ -66,6 +66,43 @@ describe("Project window authority", () => {
     expect(JSON.stringify(fetch.mock.calls)).not.toContain("path");
   });
 
+  it("tells the host its app is quitting on the revoke made while it quits, and only then", async () => {
+    let quitting = false;
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const authority = await createProjectWindowAuthority({
+      desktopBridgeSecret,
+      fetch,
+      serverUrl,
+      windowId,
+      appQuitting: () => quitting,
+    });
+    await authority.revoke();
+    quitting = true;
+    await authority.revoke();
+    const bodies = fetch.mock.calls.slice(1).map(([, init]) => init.body);
+    expect(bodies).toEqual([
+      JSON.stringify({ windowId }),
+      JSON.stringify({ windowId, desktopQuitAccepted: true }),
+    ]);
+  });
+
+  it("revokes plainly when a host that predates the quit statement refuses it", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 400 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const authority = await createProjectWindowAuthority({
+      desktopBridgeSecret,
+      fetch,
+      serverUrl,
+      windowId,
+      appQuitting: () => true,
+    });
+    await authority.revoke();
+    expect(fetch.mock.calls[2]?.[1].body).toBe(JSON.stringify({ windowId }));
+  });
+
   it("does not expose a capability when registration fails or leak credentials in the error", async () => {
     const capability = Buffer.alloc(32, 9).toString("base64url");
     const fetch = vi

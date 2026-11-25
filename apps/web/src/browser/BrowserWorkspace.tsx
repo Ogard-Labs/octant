@@ -3,6 +3,7 @@ import "../styles/browser-workspace.css";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useBrowserAccountProfiles } from "./useBrowserAccountProfiles";
 import {
+  browserProfileChoiceOf,
   browserProfileFromChoice,
   browserProfileKey,
   formatBrowserElementSnapshot,
@@ -167,6 +168,20 @@ export interface BrowserWorkspaceProps {
   readonly dockTabId?: string;
 }
 
+interface HeldReopen {
+  readonly pageId: BrowserContextId;
+  readonly choice: BrowserProfileChoice;
+}
+
+/**
+ * The page a restart took that this window reserved, by thread, so the chosen
+ * profile survives a thread switch and one thread's choice never shows in
+ * another. Lost on a reload, which is safe: the host still offers the page to
+ * this window, and Reopen reserves it again.
+ */
+const heldReopens = new Map<string, HeldReopen>();
+const heldReopenKey = (mode: string, threadId: unknown) => `${mode}:${String(threadId)}`;
+
 export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const [url, setUrl] = useState("");
   // A server suggestion fills the address only until the person types one.
@@ -276,6 +291,48 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const taskProfile = scopedTaskProfileRead?.selection;
   const taskProfileRead = scopedTaskProfileRead?.status ?? "pending";
   const [taskProfileRetry, setTaskProfileRetry] = useState(0);
+  // The profile a page a restart took was in, after the person chose to reopen
+  // it: the start page opens its next page there. It is this thread's choice,
+  // kept across a thread switch, and it never changes the task's saved default.
+  const reopenKey =
+    props.tab.threadId === undefined
+      ? undefined
+      : heldReopenKey(props.tab.mode, props.tab.threadId);
+  const [, setHeldRevision] = useState(0);
+  const held = reopenKey === undefined ? undefined : heldReopens.get(reopenKey);
+  const reopenChoice = held?.choice;
+  const holdReopen = (next: HeldReopen | undefined) => {
+    if (reopenKey === undefined) return;
+    if (next === undefined) heldReopens.delete(reopenKey);
+    else heldReopens.set(reopenKey, next);
+    setHeldRevision((revision) => revision + 1);
+  };
+  const [reopenNoticeRead, setReopenNotice] = useState<{ key: string; text: string }>();
+  const reopenNotice = reopenNoticeRead?.key === reopenKey ? reopenNoticeRead?.text : undefined;
+  const [reopenBusy, setReopenBusy] = useState(false);
+  // The thread whose reserved open just failed: its offer line carries the
+  // failure, so the one notice row still shows the offer that is left.
+  const [reopenFailedKey, setReopenFailedKey] = useState<string>();
+  // The thread's offer, read from the thread (never from the page this pane
+  // shows) whenever this pane shows no live page: a saved tab whose page is
+  // gone, a tab added fresh, or a pane with no page yet.
+  const [offerReadState, setOfferRead] = useState<{
+    key: string;
+    offer: BrowserAutomationSnapshot["reopenOffer"];
+  }>();
+  const rememberOffer = (key: string, offer: BrowserAutomationSnapshot["reopenOffer"]) =>
+    setOfferRead((previous) =>
+      previous?.key === key && JSON.stringify(previous.offer) === JSON.stringify(offer)
+        ? previous
+        : { key, offer },
+    );
+  const reopenKeyNow = useRef(reopenKey);
+  reopenKeyNow.current = reopenKey;
+  const addressInput = useRef<HTMLInputElement>(null);
+  const [focusAddress, setFocusAddress] = useState(0);
+  useEffect(() => {
+    if (focusAddress > 0) addressInput.current?.focus();
+  }, [focusAddress]);
   const [pendingTaskProfile, setPendingTaskProfile] = useState<BrowserProfileChoice>();
   const [selectingTaskProfile, setSelectingTaskProfile] = useState(false);
   const taskProfileSupported =
@@ -368,6 +425,20 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     useRef<BrowserActionRequest["expectedObservationRevision"]>(undefined);
   const remoteActionTail = useRef<Promise<void>>(Promise.resolve());
   const activeContext = snapshot?.context?.state === "active";
+  // The offer the host shows is this thread's: a read that arrived for another
+  // thread is not shown here.
+  const offerIsThreads = offerReadState?.key === reopenKey;
+  const reopenOffer = offerIsThreads ? offerReadState?.offer : undefined;
+  const offerRead = offerIsThreads && reopenOffer === undefined;
+  useEffect(() => {
+    // A page is open, or the host no longer offers the page this window held
+    // (it ended another way): the held choice has nothing left to reopen.
+    if (reopenKey === undefined || heldReopens.get(reopenKey) === undefined) return;
+    if (activeContext || (offerRead && !starting)) {
+      heldReopens.delete(reopenKey);
+      setHeldRevision((revision) => revision + 1);
+    }
+  }, [activeContext, offerRead, reopenKey, starting]);
   // A tab that comes back bound to a page (the dock remembers it) did not open
   // that page in this mount, so it asks once which of the thread's pages it is.
   const shownContextId = snapshot?.context?.contextId;
@@ -643,7 +714,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   }, [props.tab.threadId]);
 
   useEffect(() => {
-    if (props.tab.threadId === undefined) return;
+    const readThreadId = props.tab.threadId;
+    if (readThreadId === undefined) return;
+    const offerKey = heldReopenKey(props.tab.mode, readThreadId);
     const contextId = replacementContextId ?? props.tab.contextId ?? ownedContextId;
     const fresh = props.startFresh === true && contextId === undefined;
     const controller = new AbortController();
@@ -687,10 +760,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         // A fresh tab reads only the thread's admission fact. Its current page
         // belongs to another tab until this one creates its own context.
         if (fresh) {
+          rememberOffer(offerKey, next.reopenOffer);
           setThreadHasSharedPage(sharedPageIsLive(next));
           setStatus("ready");
           return;
         }
+        // The thread read carries the offer (the host sends none while a page
+        // is open); a read of this pane's own page carries none to keep.
+        rememberOffer(offerKey, contextId === undefined ? next.reopenOffer : undefined);
         if (changed) {
           currentSnapshotRevision.current = revision;
           currentObservationRevision.current = next.observation?.revision;
@@ -731,6 +808,13 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           setSnapshot(undefined);
           setStatus("ready");
           setMessage(undefined);
+          // With no page, the thread may still offer the one a restart took.
+          // Only its offer is kept: another tab's live page is not adopted.
+          const thread = await props.client
+            .inspectThread({ threadId: readThreadId, freshPicture: false }, controller.signal)
+            .catch(() => undefined);
+          if (active && !controller.signal.aborted && thread !== undefined)
+            rememberOffer(offerKey, thread.reopenOffer);
           return;
         }
         applyFailure(error, setStatus, setMessage);
@@ -775,9 +859,8 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   async function start(
     address: string = url,
     prepared?: LocalServerOpenTarget,
-    choice: BrowserProfileChoice = taskProfileApplies
-      ? (taskProfile?.profile ?? "private")
-      : profileChoice,
+    choice: BrowserProfileChoice = reopenChoice ??
+      (taskProfileApplies ? (taskProfile?.profile ?? "private") : profileChoice),
     explicitPrivate = false,
   ): Promise<void> {
     if (startInFlight.current) return;
@@ -795,6 +878,11 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       return;
     }
     startInFlight.current = true;
+    // The page a restart took, reserved for this window: the open below names
+    // it, and the host ends the old record only when this open succeeds.
+    const reserved = held;
+    let reservedAttempted = false;
+    let reservedOpened = false;
     localFailure.current = false;
     setStarting(true);
     setStatus("waiting");
@@ -816,9 +904,11 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         setMessage("This thread has no Project profile.");
         return;
       }
+      reservedAttempted = true;
       const next = await props.client.create({
         threadId: props.tab.threadId!,
         action,
+        ...(reserved === undefined ? {} : { reopenPageId: reserved.pageId }),
         policy: {
           profileMode: "isolated",
           ...(profile === undefined ? {} : { profile }),
@@ -852,6 +942,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             ? { dedicated: true }
             : {}),
       });
+      reservedOpened = next.failure === undefined && next.context?.state === "active";
       // The host chose; the tab asks which page it now holds.
       if (props.startFresh === true) setOwnPage(undefined);
       setScope(resolved);
@@ -886,6 +977,20 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     } finally {
       startInFlight.current = false;
       setStarting(false);
+      if (reserved !== undefined && reservedAttempted) {
+        // An open that failed or was declined gives the reservation back, so
+        // the offer stays for another try; one that opened is the reopen.
+        holdReopen(undefined);
+        setReopenFailedKey(reservedOpened ? undefined : reopenKey);
+        if (!reservedOpened && props.tab.threadId !== undefined)
+          void props.client
+            .releasePageOffer?.({
+              threadId: props.tab.threadId,
+              mode: props.tab.mode,
+              pageId: reserved.pageId,
+            })
+            .catch(() => undefined);
+      }
     }
   }
 
@@ -1293,6 +1398,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   }
 
   async function chooseProfile(choice: BrowserProfileChoice): Promise<void> {
+    if (held !== undefined && !activeContext) {
+      holdReopen({ ...held, choice });
+      return;
+    }
     if (taskProfileApplies) {
       if (choice === taskProfile?.profile) return;
       if (activeContext) setPendingTaskProfile(choice);
@@ -1312,6 +1421,59 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       await start(address, undefined, choice);
     } finally {
       switchingProfile.current = false;
+    }
+  }
+
+  /**
+   * Answer the offer to reopen the page a restart took. Reopen reserves the page
+   * for this window and preselects the profile it was in; the address is the
+   * person's to give, so the site is asked about as it always is. Nothing ends
+   * until the open succeeds, so a failed or declined open leaves the offer.
+   * Nothing of the old page is restored.
+   */
+  async function answerReopenOffer(answer: "claim" | "dismiss"): Promise<void> {
+    const offer = reopenOffer;
+    const threadId = props.tab.threadId;
+    if (offer === undefined || threadId === undefined || reopenKey === undefined) return;
+    const input = { threadId, mode: props.tab.mode, pageId: offer.pageId };
+    const noticeFor = (text: string | undefined) =>
+      setReopenNotice(text === undefined ? undefined : { key: reopenKey, text });
+    setReopenBusy(true);
+    try {
+      const result =
+        answer === "claim"
+          ? await props.client.claimPageOffer?.(input)
+          : await props.client.dismissPageOffer?.(input);
+      if (result === undefined) return;
+      if (result.status === "claimed") {
+        holdReopen({ pageId: offer.pageId, choice: browserProfileChoiceOf(result.profile) });
+        setReopenFailedKey(undefined);
+        noticeFor(undefined);
+        if (reopenKeyNow.current === reopenKey) setFocusAddress((revision) => revision + 1);
+        return;
+      }
+      // The answer may land after a thread switch: only this thread's offer is
+      // the one that was answered.
+      setOfferRead((previous) =>
+        previous?.key === reopenKey ? { key: reopenKey, offer: undefined } : previous,
+      );
+      if (result.status === "refused") {
+        noticeFor(
+          result.reason === "not-offered"
+            ? "That page was already reopened or dismissed."
+            : result.reason === "profile-gone"
+              ? "The profile that page was in no longer exists."
+              : "This device cannot reopen that page.",
+        );
+      } else {
+        holdReopen(undefined);
+        noticeFor(undefined);
+      }
+      if (reopenKeyNow.current === reopenKey) setFocusAddress((revision) => revision + 1);
+    } catch {
+      noticeFor("The page could not be reopened. Try again.");
+    } finally {
+      setReopenBusy(false);
     }
   }
 
@@ -1359,7 +1521,25 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     }
   }
 
-  const notice = message ?? elementPicking.message ?? captureNotice;
+  const failedReopen =
+    reopenFailedKey !== undefined &&
+    reopenFailedKey === reopenKey &&
+    reopenOffer !== undefined &&
+    held === undefined &&
+    !activeContext;
+  const notice = (failedReopen ? undefined : message) ?? elementPicking.message ?? captureNotice;
+  // The line about a page a restart took takes the pane's one notice row, so it
+  // yields to any other notice and the grid keeps its row count.
+  const reopenLine =
+    !activeContext && notice === undefined
+      ? reopenOffer !== undefined
+        ? held?.pageId === reopenOffer.pageId
+          ? "held"
+          : "offer"
+        : reopenNotice !== undefined
+          ? "notice"
+          : undefined
+      : undefined;
   const showFeedback =
     feedback.available &&
     (snapshot?.context !== undefined ||
@@ -1709,11 +1889,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   });
   const showsTrailing = (id: BrowserToolbarTrailing) =>
     trailing.some((item) => item.id === id) && !folded.has(id);
-  const shownProfile = taskProfileApplies
-    ? (taskProfile?.profile ?? "private")
-    : activeContext
-      ? profileChoiceOf(storedProfile)
-      : profileChoice;
+  const shownProfile =
+    reopenChoice !== undefined && !activeContext
+      ? reopenChoice
+      : taskProfileApplies
+        ? (taskProfile?.profile ?? "private")
+        : activeContext
+          ? profileChoiceOf(storedProfile)
+          : profileChoice;
   // The standalone profile button and the folded profile items share this: no
   // choice or sign-out while a page starts, the task's default is read or a
   // selection is in flight.
@@ -1827,7 +2010,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   return (
     <section
       aria-label="Browser automation"
-      className={`browser-workspace${notice === undefined ? "" : " browser-workspace--message"}${showFeedback || annotateTools.length > 0 ? " browser-workspace--feedback" : ""}`}
+      className={`browser-workspace${notice === undefined && reopenLine === undefined ? "" : " browser-workspace--message"}${showFeedback || annotateTools.length > 0 ? " browser-workspace--feedback" : ""}`}
     >
       <OctantDialogPresence>
         {pendingTaskProfile === undefined ? null : (
@@ -1913,6 +2096,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             <span className="browser-workspace__address">
               <OctantInput
                 aria-label="Browser URL"
+                ref={addressInput}
                 onChange={(event) => {
                   setAddressTyped(true);
                   setUrl(event.target.value);
@@ -2074,6 +2258,52 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           {notice}
         </OctantAlert>
       )}
+      {(reopenLine === "offer" || reopenLine === "held") && reopenOffer !== undefined ? (
+        <OctantAlert
+          action={
+            <>
+              {reopenLine === "offer" && reopenOffer.status !== "profile-gone" ? (
+                <OctantButton
+                  disabled={reopenBusy}
+                  onClick={() => void answerReopenOffer("claim")}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Reopen page
+                </OctantButton>
+              ) : null}
+              <OctantButton
+                disabled={reopenBusy}
+                onClick={() => void answerReopenOffer("dismiss")}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Dismiss
+              </OctantButton>
+            </>
+          }
+          className="browser-workspace__message"
+          layout="row"
+          tone="neutral"
+        >
+          {reopenLine === "held" && held !== undefined
+            ? `Enter an address to open a page in ${browserProfileLabel(held.choice, accounts)}.`
+            : failedReopen
+              ? `${message ?? "The page could not be opened."} The page you had open can still be reopened.`
+              : reopenOffer.status === "offered"
+                ? "Octant restarted and closed the page you had open."
+                : reopenOffer.status === "profile-unchecked"
+                  ? "Octant restarted and closed the page you had open. The profile it was in could not be checked now."
+                  : "Octant restarted and closed the page you had open, and the profile it was in no longer exists."}
+        </OctantAlert>
+      ) : null}
+      {reopenLine === "notice" ? (
+        <OctantAlert className="browser-workspace__message" layout="row" tone="neutral">
+          {reopenNotice}
+        </OctantAlert>
+      ) : null}
       {!activeContext ? (
         <div className="browser-workspace__start">
           {serverSuggestions.length > 0 ? (

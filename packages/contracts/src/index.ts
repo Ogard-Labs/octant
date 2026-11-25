@@ -63,6 +63,7 @@ export * from "./browserAutomationRpc";
 export * from "./browserProfiles";
 export * from "./browserExtensions";
 export * from "./browserCapture";
+export * from "./browserPageSessions";
 export * from "./browserDownload";
 export * from "./browserFlows";
 export * from "./canvas";
