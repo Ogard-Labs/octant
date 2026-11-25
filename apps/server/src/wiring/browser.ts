@@ -62,6 +62,8 @@ import {
 import { createBrowserCookieReader } from "../browser/cookieImport/browserCookieReader";
 import { readKeychainPasswordWithSecurityTool } from "../browser/cookieImport/keychainPassword";
 import { ProjectBrowserService } from "../browser/projectBrowserService";
+import { BrowserPageOffers } from "../browser/browserPageOffers";
+import { BrowserPageSessions } from "../browser/browserPageSessions";
 import { OCTANT_LOCAL_ACTOR_ID, ShellServiceError, type ShellService } from "../shellService";
 import type { PersistenceService } from "../persistence/persistenceService";
 import {
@@ -708,7 +710,27 @@ export function wireBrowser(deps: BrowserDependencies) {
       }
     });
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeProjectBrowserAuthority));
+    // The pages the person had open when the last run ended, settled before any
+    // command is served: a page whose thread can no longer open a Browser is
+    // ended, and the newest page of each other thread stays offered.
+    const pageSessions = new BrowserPageSessions({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const offeredPageIds = pageSessions.settleAtStart(
+      (page) =>
+        browserAuthority.resolve(decodeBrowserThreadId(page.threadId), page.mode) !== undefined,
+    );
+    onThreadArchived((threadId) => {
+      for (const page of pageSessions.open()) {
+        if (page.threadId === threadId) pageSessions.ended(page.pageId, threadId, "thread-ended");
+      }
+    });
     const browserAutomationService = new BrowserAutomationService({
+      pageSessions,
       runtime: browserRuntime,
       pageScriptPolicy: (windowId, threadId, mode) => {
         if (
@@ -770,6 +792,14 @@ export function wireBrowser(deps: BrowserDependencies) {
       now: Date.now,
     });
     onWindowRevoked((windowId) => void browserAutomationService.revokeWindow(windowId));
+    const browserPageOffers = new BrowserPageOffers({
+      sessions: pageSessions,
+      offeredAtStart: offeredPageIds,
+      canOpenBrowser: (windowId, threadId, mode) =>
+        browserAuthority.canAccessWindow(windowId, threadId, mode),
+      hasOpenPage: (threadId) => browserAutomationService.hasOpenPage(threadId),
+      profileExists: (profile) => browserAutomationService.profileExists(profile),
+    });
     const credentialMetadataBroker =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
@@ -1043,6 +1073,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       terminalBrowserTools,
       browserDelegatedChildren,
       browserAutomationService,
+      browserPageOffers,
       browserCredentialUseService,
       browserExtensionService,
       browserFlowService,

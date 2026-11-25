@@ -123,6 +123,9 @@ function harness(
     readonly sharedRuntime?: boolean;
     readonly describePoint?: BrowserRuntimePort["describePoint"];
     readonly wrapRuntime?: (runtime: BrowserRuntimePort) => BrowserRuntimePort;
+    readonly pageSessions?: ConstructorParameters<
+      typeof BrowserAutomationService
+    >[0]["pageSessions"];
   } = {},
 ) {
   const contexts = new Set<BrowserContextId>();
@@ -209,6 +212,7 @@ function harness(
     ...(options.waitLimitMs === undefined ? {} : { waitLimitMs: () => options.waitLimitMs ?? 0 }),
     ...(options.strict === undefined ? {} : { strict: options.strict }),
     ...(options.downloads === undefined ? {} : { downloads: options.downloads }),
+    ...(options.pageSessions === undefined ? {} : { pageSessions: options.pageSessions }),
     ...(options.unattended === true ? { isUnattendedScope: () => true } : {}),
     ...(options.delegatedProfileIsCurrent === undefined
       ? {}
@@ -4343,4 +4347,133 @@ it("carries the held download's source receipt to its per-file review without su
     await rm(heldFolder, { recursive: true, force: true });
     await rm(workspace, { recursive: true, force: true });
   }
+});
+
+describe("Browser session recording", () => {
+  const recorder = () => ({ opened: vi.fn(), ended: vi.fn(() => true) });
+  const open = async (
+    f: ReturnType<typeof harness>,
+    extra: Partial<Parameters<BrowserAutomationService["create"]>[0]> = {},
+  ) => f.service.create({ windowId, threadId: threadOne, action: action(), policy, ...extra });
+
+  it("records the person's page by kind and Project, with nothing of the page", async () => {
+    const pageSessions = recorder();
+    const f = harness({ pageSessions });
+    await open(f);
+    expect(pageSessions.opened).toHaveBeenCalledTimes(1);
+    expect(pageSessions.opened).toHaveBeenCalledWith({
+      pageId: contextOne,
+      threadId: threadOne,
+      windowId,
+      mode: "work",
+      projectId: authorityOne.projectId,
+      profileKind: "private",
+    });
+    await f.service.close();
+  });
+
+  it("records a stored profile's kind and an account's id and nothing else", async () => {
+    const pageSessions = recorder();
+    const f = harness({ pageSessions });
+    await open(f, { policy: { ...policy, profile: { kind: "personal" } } });
+    expect(pageSessions.opened).toHaveBeenCalledWith(
+      expect.objectContaining({ profileKind: "personal" }),
+    );
+    await f.service.close();
+  });
+
+  it("records no page for a routine, a dedicated Open, or a terminal grant", async () => {
+    const unattended = recorder();
+    const routine = harness({ unattended: true, pageSessions: unattended });
+    await open(routine);
+    const dedicatedSessions = recorder();
+    const dedicated = harness({ pageSessions: dedicatedSessions });
+    await open(dedicated, { dedicated: true });
+    const grantSessions = recorder();
+    const grant = harness({ pageSessions: grantSessions });
+    await open(grant, { profileCaller: "terminal-grant" });
+    for (const sessions of [unattended, dedicatedSessions, grantSessions]) {
+      expect(sessions.opened).not.toHaveBeenCalled();
+    }
+    await Promise.all([routine.service.close(), dedicated.service.close(), grant.service.close()]);
+  });
+
+  it("writes the end for the person closing, the agent closing, and a cleared profile", async () => {
+    const byPerson = recorder();
+    const person = harness({ pageSessions: byPerson });
+    await open(person);
+    await person.service.stop(windowId, threadOne, contextOne);
+    expect(byPerson.ended).toHaveBeenCalledWith(contextOne, threadOne, "closed-by-person");
+
+    const byAgent = recorder();
+    const agent = harness({ pageSessions: byAgent });
+    await open(agent);
+    await agent.service.releaseThread(windowId, threadOne);
+    expect(byAgent.ended).toHaveBeenCalledWith(contextOne, threadOne, "closed-by-agent");
+
+    const cleared = recorder();
+    const profile = harness({ pageSessions: cleared });
+    await open(profile, { policy: { ...policy, profile: { kind: "personal" } } });
+    await profile.service.closeProfile({ kind: "personal" });
+    expect(cleared.ended).toHaveBeenCalledWith(contextOne, threadOne, "profile-removed");
+    await Promise.all([person.service.close(), agent.service.close(), profile.service.close()]);
+  });
+
+  it("writes the end when the thread's authority ends, the page expires, or the runtime is lost", async () => {
+    const revoked = recorder();
+    const authority = harness({ pageSessions: revoked });
+    await open(authority);
+    authority.revoke(threadOne);
+    authority.service.inspect(windowId, threadOne, contextOne);
+    expect(revoked.ended).toHaveBeenCalledWith(contextOne, threadOne, "authority-ended");
+
+    const expiredSessions = recorder();
+    const expired = harness({ pageSessions: expiredSessions });
+    await open(expired);
+    expired.advance(policy.sessionTimeoutMs);
+    expired.expire();
+    await vi.waitFor(() =>
+      expect(expiredSessions.ended).toHaveBeenCalledWith(contextOne, threadOne, "expired"),
+    );
+
+    const lostSessions = recorder();
+    const lost = harness({ pageSessions: lostSessions });
+    await open(lost);
+    lost.processExit();
+    expect(lostSessions.ended).toHaveBeenCalledWith(contextOne, threadOne, "runtime-lost");
+    await Promise.all([authority.service.close(), expired.service.close(), lost.service.close()]);
+  });
+
+  it("writes no end when a window is revoked or the host shuts down, so a Quit's page is offered back", async () => {
+    const windowSessions = recorder();
+    const window = harness({ pageSessions: windowSessions });
+    await open(window);
+    await window.service.revokeWindow(windowId);
+    expect(windowSessions.ended).not.toHaveBeenCalled();
+
+    const hostSessions = recorder();
+    const host = harness({ pageSessions: hostSessions });
+    await open(host);
+    await host.service.close();
+    expect(hostSessions.ended).not.toHaveBeenCalled();
+  });
+
+  it("writes one end for a page however many ways it ends", async () => {
+    const pageSessions = recorder();
+    const f = harness({ pageSessions });
+    await open(f);
+    await f.service.stop(windowId, threadOne, contextOne);
+    await f.service.close();
+    expect(pageSessions.ended).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports whether the thread has a page open, in any window", async () => {
+    const f = harness({ pageSessions: recorder() });
+    expect(f.service.hasOpenPage(threadOne)).toBe(false);
+    await open(f);
+    expect(f.service.hasOpenPage(threadOne)).toBe(true);
+    await f.service.stop(windowId, threadOne, contextOne);
+    expect(f.service.hasOpenPage(threadOne)).toBe(false);
+    await f.service.close();
+  });
 });

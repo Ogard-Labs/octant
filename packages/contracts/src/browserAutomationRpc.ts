@@ -21,6 +21,7 @@ import {
   ToolApprovalId,
   ToolEvidence,
 } from "./toolActions";
+import { BrowserPageReopenOffer } from "./browserPageSessions";
 import { BrowserProfileChoice } from "./projectBrowser";
 import { PairedBrowserLeaseId, PairedBrowserTarget } from "./pairedBrowserControl";
 import { AggregateVersion } from "./events";
@@ -232,6 +233,11 @@ export const BrowserAutomationSnapshot = Schema.Struct({
   ),
   evidence: Schema.Array(ToolEvidence),
   failure: Schema.optional(BrowserAutomationFailure),
+  /**
+   * A page a restart or crash took, offered back. Present only on the thread's
+   * own read, for the host's person, while the thread has no page open.
+   */
+  reopenOffer: Schema.optional(BrowserPageReopenOffer),
   /**
    * The page is the person's and every agent Browser call on it is held:
    * `sign-in` when the agent handed it over to sign in (a window showing the

@@ -572,7 +572,12 @@ describe("browser automation routes", () => {
         }),
       );
       expect(response?.status).toBe(200);
-      expect(method).toHaveBeenCalledWith(windowId, threadId, contextId);
+      // The route is the person's own pane, so what it ends is ended by the person.
+      expect(method).toHaveBeenCalledWith(
+        ...(path === "stop"
+          ? [windowId, threadId, contextId, "person"]
+          : [windowId, threadId, contextId]),
+      );
     }
   });
 
@@ -592,7 +597,9 @@ describe("browser automation routes", () => {
         }),
       );
       expect(response?.status).toBe(200);
-      expect(method).toHaveBeenCalledWith(windowId, threadId);
+      expect(method).toHaveBeenCalledWith(
+        ...(path === "release" ? [windowId, threadId, "person"] : [windowId, threadId]),
+      );
     }
   });
 
@@ -2296,5 +2303,116 @@ describe("browser automation routes", () => {
       expect(await response?.json()).toEqual({ status: "refused", reason: "authority-ended" });
       expect(execute).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("browser page offer routes", () => {
+  const pageId = "26000000-0000-4000-8000-000000000001";
+  const offer = {
+    pageId,
+    status: "offered" as const,
+    profile: { kind: "private" as const },
+  };
+  const command = { threadId, mode: "work", pageId };
+  const emptySnapshot: BrowserAutomationSnapshot = {
+    status: "ready",
+    threadId: threadId as never,
+    evidence: [],
+  };
+
+  function routes() {
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: Date.now() });
+    const pageOffers = {
+      read: vi.fn(async () => offer),
+      claim: vi.fn(async () => ({ status: "claimed" as const, profile: offer.profile })),
+      dismiss: vi.fn(() => ({ status: "dismissed" as const })),
+    };
+    const handler = createBrowserAutomationRouteHandler({
+      service: {
+        create: async () => emptySnapshot,
+        act: async () => emptySnapshot,
+        cancel: async () => emptySnapshot,
+        stop: async () => emptySnapshot,
+        inspect: () => emptySnapshot,
+        inspectThread: () => emptySnapshot,
+        releaseThread: async () => emptySnapshot,
+      },
+      pageOffers,
+      authority: { canAccessWindow: () => true, resolve: () => authority },
+      windowAuthorityStore: store,
+      maxRequestBodySize: 64_000,
+    });
+    const call = (
+      path: string,
+      payload: unknown,
+      device?: { readonly admittedBy?: "host-person" | "hub-roster"; readonly level?: string },
+    ) => {
+      const request = new Request(`http://127.0.0.1${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+        body: JSON.stringify(payload),
+      });
+      if (device !== undefined) {
+        bindPrincipalRouteContext(request, {
+          principal: createRemoteDevicePrincipal({
+            hostId: "local" as never,
+            deviceId: "90000000-0000-4000-8000-000000000001" as never,
+            credentialGeneration: 1,
+            origin: "https://octant.example",
+            protocolVersion: 1,
+            capabilityDigest: "a".repeat(64),
+            sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+            ...(device.admittedBy === undefined ? {} : { admittedBy: device.admittedBy }),
+            ...(device.level === undefined ? {} : { accessLevel: device.level as never }),
+          }),
+          scopeId: windowId,
+        });
+      }
+      return handler(request);
+    };
+    return { call, pageOffers };
+  }
+
+  it("shows the offer on the thread's Browser read and claims and dismisses it for a local window", async () => {
+    const { call, pageOffers } = routes();
+    const read = await call("/api/browser/contexts/current", { threadId });
+    expect(await read?.json()).toMatchObject({ reopenOffer: offer });
+    const claimed = await call("/api/browser/page-offer/claim", command);
+    expect(await claimed?.json()).toEqual({ status: "claimed", profile: offer.profile });
+    const dismissed = await call("/api/browser/page-offer/dismiss", command);
+    expect(await dismissed?.json()).toEqual({ status: "dismissed" });
+    expect(pageOffers.claim).toHaveBeenCalledOnce();
+    expect(pageOffers.dismiss).toHaveBeenCalledOnce();
+  });
+
+  it("follows the open rule for a device the host's own person paired at Full", async () => {
+    const { call } = routes();
+    const device = { admittedBy: "host-person" as const };
+    const read = await call("/api/browser/contexts/current", { threadId }, device);
+    expect(await read?.json()).toMatchObject({ reopenOffer: offer });
+    const claimed = await call("/api/browser/page-offer/claim", command, device);
+    expect(await claimed?.json()).toMatchObject({ status: "claimed" });
+  });
+
+  it.each([
+    [
+      "a device paired below Full",
+      { admittedBy: "host-person" as const, level: "approve-and-steer" },
+    ],
+    ["a read-only device", { admittedBy: "host-person" as const, level: "read-only" }],
+    ["a hub-introduced device", { admittedBy: "hub-roster" as const }],
+    ["a restricted device", {}],
+  ])("gives %s neither the offer nor the action, and touches no record", async (_name, device) => {
+    const { call, pageOffers } = routes();
+    const read = await call("/api/browser/contexts/current", { threadId }, device);
+    expect(JSON.stringify(await read?.json())).not.toContain("reopenOffer");
+    for (const action of ["claim", "dismiss"]) {
+      const refused = await call(`/api/browser/page-offer/${action}`, command, device);
+      expect(await refused?.json()).toEqual({ status: "refused", reason: "not-allowed" });
+    }
+    expect(pageOffers.read).not.toHaveBeenCalled();
+    expect(pageOffers.claim).not.toHaveBeenCalled();
+    expect(pageOffers.dismiss).not.toHaveBeenCalled();
   });
 });

@@ -63,6 +63,7 @@ import {
   type BrowserAutomationFailure,
   type BrowserThreadId,
 } from "@octant/contracts/browser-automation";
+import { decodeBrowserPageOfferCommand } from "@octant/contracts/browser-page-sessions";
 import {
   decodeBrowserCaptureImage,
   decodeBrowserCaptureImageCommand,
@@ -78,6 +79,7 @@ import type {
   BrowserTaskProfileCommit,
 } from "./browser/browserAutomationService";
 import type { BrowserCaptureService } from "./browser/browserCaptureService";
+import type { BrowserPageOffers } from "./browser/browserPageOffers";
 import { remoteBrowserActionReach } from "@octant/domain";
 import {
   decodeProjectAgentPages,
@@ -152,6 +154,8 @@ export interface BrowserAutomationRouteDependencies {
     readonly windowCanOpenProject: (windowId: WindowId, projectId: string) => Promise<boolean>;
     readonly threadTitle: (threadId: BrowserThreadId, mode: "work" | "code") => string | undefined;
   };
+  /** The page a restart took, offered back; absent on a host that records none. */
+  readonly pageOffers?: Pick<BrowserPageOffers, "read" | "claim" | "dismiss">;
   /** The thread's kept screenshots; absent on a host that keeps none. */
   readonly captures?: Pick<BrowserCaptureService, "list" | "read" | "listSteps">;
   /**
@@ -1013,8 +1017,34 @@ export function createBrowserAutomationRouteHandler(
           dependencies.service.peekThread === undefined || input.freshPicture === false
             ? dependencies.service.inspectThread(windowId, input.threadId)
             : await dependencies.service.peekThread(windowId, input.threadId, request.signal);
+        // The offer is the host's person's: a below-Full, restricted or
+        // hub-introduced device is shown none.
+        const reopenOffer = actsAsHostPerson
+          ? await dependencies.pageOffers?.read(windowId, input.threadId)
+          : undefined;
         return success(
-          shown(decodeBrowserAutomationSnapshot(withAvailability(windowId, snapshot))),
+          shown(
+            decodeBrowserAutomationSnapshot({
+              ...withAvailability(windowId, snapshot),
+              ...(reopenOffer === undefined ? {} : { reopenOffer }),
+            }),
+          ),
+          origin,
+        );
+      }
+      if (
+        url.pathname === "/api/browser/page-offer/claim" ||
+        url.pathname === "/api/browser/page-offer/dismiss"
+      ) {
+        const input = decodeBrowserPageOfferCommand(decoded.value);
+        // Refused before any record is read or changed.
+        if (!actsAsHostPerson || dependencies.pageOffers === undefined) {
+          return success({ status: "refused", reason: "not-allowed" }, origin);
+        }
+        return success(
+          url.pathname === "/api/browser/page-offer/claim"
+            ? await dependencies.pageOffers.claim(windowId, input)
+            : dependencies.pageOffers.dismiss(windowId, input),
           origin,
         );
       }
@@ -1115,7 +1145,7 @@ export function createBrowserAutomationRouteHandler(
         const input = decodeBrowserThreadContextCommand(decoded.value);
         return success(
           decodeBrowserAutomationSnapshot(
-            await dependencies.service.releaseThread(windowId, input.threadId),
+            await dependencies.service.releaseThread(windowId, input.threadId, "person"),
           ),
           origin,
         );
@@ -1285,7 +1315,7 @@ export function createBrowserAutomationRouteHandler(
         const input = decodeBrowserContextStopCommand(decoded.value);
         return success(
           decodeBrowserAutomationSnapshot(
-            await dependencies.service.stop(windowId, input.threadId, input.contextId),
+            await dependencies.service.stop(windowId, input.threadId, input.contextId, "person"),
           ),
           origin,
         );
