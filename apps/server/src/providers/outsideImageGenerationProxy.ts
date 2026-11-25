@@ -531,16 +531,21 @@ function isValidProseUrlTerminator(
   openParens: number,
   openBrackets: number,
 ): boolean {
-  if (openParens !== 0 || openBrackets !== 0) return false;
   if (prev === '"') return stopChar === '"' || stoppedAtWhitespace;
   if (prev === "'") return stopChar === "'" || stoppedAtWhitespace;
   if (prev === "`") return stopChar === "`" || stoppedAtWhitespace;
-  if (prev === "(") return stopChar === ")" || stoppedAtWhitespace;
-  if (prev === "[") return stopChar === "]" || stoppedAtWhitespace;
+  if (prev === "(") return openParens === 0 && (stopChar === ")" || stoppedAtWhitespace);
+  if (prev === "[") return openBrackets === 0 && (stopChar === "]" || stoppedAtWhitespace);
   if (prev === "{") return stopChar === "}" || stoppedAtWhitespace;
   if (stopChar === "") return complete;
   if (stoppedAtWhitespace) return true;
-  if (stopChar === ")" || stopChar === "]" || stopChar === "}") {
+  if (stopChar === ")") {
+    return openParens === 0 && (nextChar === "" || /[\s.,;:!?)\]}"']/.test(nextChar));
+  }
+  if (stopChar === "]") {
+    return openBrackets === 0 && (nextChar === "" || /[\s.,;:!?)\]}"']/.test(nextChar));
+  }
+  if (stopChar === "}") {
     return nextChar === "" || /[\s.,;:!?)\]}"']/.test(nextChar);
   }
   return false;
@@ -611,18 +616,21 @@ function scanProseAddresses(
       continue;
     }
 
+    const unwrapped = prev === "" || /\s/.test(prev);
+    const trackParens = prev === "(" || unwrapped;
+    const trackBrackets = prev === "[" || unwrapped;
     let end = schemeEnd;
     let openParens = 0;
     let openBrackets = 0;
     while (end < text.length) {
       const code = text.charCodeAt(end);
       if (isAsciiWhitespace(code) || (code > 127 && /\s/.test(text[end] ?? ""))) break;
-      if (code === 40) {
+      if (trackParens && code === 40) {
         openParens += 1;
         end += 1;
         continue;
       }
-      if (code === 41) {
+      if (trackParens && code === 41) {
         if (openParens > 0) {
           openParens -= 1;
           end += 1;
@@ -630,12 +638,12 @@ function scanProseAddresses(
         }
         break;
       }
-      if (code === 91) {
+      if (trackBrackets && code === 91) {
         openBrackets += 1;
         end += 1;
         continue;
       }
-      if (code === 93) {
+      if (trackBrackets && code === 93) {
         if (openBrackets > 0) {
           openBrackets -= 1;
           end += 1;

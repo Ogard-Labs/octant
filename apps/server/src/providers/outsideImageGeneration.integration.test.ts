@@ -946,10 +946,12 @@ describe("an outside image driver's later fixes", () => {
 
   it("refuses a URL prefix from a Markdown destination with balanced parentheses", async () => {
     const full = "https://cdn.images.example.test/out/a(1)/1.png";
+    const bracketed = "https://cdn.images.example.test/out/image[.png";
     const prefix = "https://cdn.images.example.test/out/a(1";
     const imageFetch = vi.fn(() => new Response(png, { status: 200 }));
     for (const [payload, requested, expectedStatus] of [
       [`data: [View image](${full})\n\n`, full, "completed"],
+      [`data: [View image](${bracketed})\n\n`, bracketed, "completed"],
       [`data: [View image](${full})\n\n`, prefix, "failed"],
       [
         `data: [View image](https://cdn.images.example.test/out/a(1)`,
@@ -980,8 +982,9 @@ describe("an outside image driver's later fixes", () => {
         expect(job.failure?.category).toBe("unauthorized");
       }
     }
-    expect(imageFetch).toHaveBeenCalledTimes(1);
-    expect(imageFetch).toHaveBeenCalledWith(full);
+    expect(imageFetch).toHaveBeenCalledTimes(2);
+    expect(imageFetch).toHaveBeenNthCalledWith(1, full);
+    expect(imageFetch).toHaveBeenNthCalledWith(2, bracketed);
   });
 
   it("refuses a URL prefix that has not yet been delimited in an open stream", async () => {
