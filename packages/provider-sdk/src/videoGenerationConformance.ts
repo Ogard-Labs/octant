@@ -33,6 +33,7 @@ export interface VideoGenerationConformanceFixture {
 
 export interface VideoGenerationConformanceEvidence {
   readonly declaredModelsDecode: true;
+  readonly discoveryStopsWhenCancelled: true;
   readonly cancelledBeforeAnyCall: true;
   readonly emptyPromptRefusedBeforeAnyCall: true;
   readonly outsideDeclarationRefusedBeforeAnyCall: true;
@@ -62,6 +63,8 @@ export function looksLikeMp4(bytes: Uint8Array): boolean {
 }
 
 const MAX_CONFORMANCE_POLLS = 20;
+/** How long a cancelled discovery may take to end. */
+const CANCELLED_DISCOVERY_MS = 1_000;
 
 interface RecordingPorts {
   readonly ports: VideoGenerationPorts;
@@ -151,7 +154,8 @@ function outsideDeclaration(
 
 /**
  * Proves a video driver keeps the seam's promises with ports the harness
- * controls: its declared models decode; it stops before calling out when
+ * controls: its declared models decode; a discovery that reads them from the
+ * provider ends when it is cancelled; it stops before calling out when
  * cancelled, given an empty prompt, or asked for an option its model does not
  * declare; it records an unreachable provider and an unexpected error as
  * failures; it returns only bytes the host's MP4 check accepted; it calls only
@@ -187,6 +191,40 @@ export async function runVideoGenerationConformance(
   assertConformance(
     models.some((model) => String(model.modelId) === String(fixture.request.modelId)),
     "the fixture's model is not one the profile declares",
+  );
+
+  // A catalog the driver declares itself asks for nothing, so there is nothing to cancel.
+  const discovery = new AbortController();
+  const asked = Promise.withResolvers<void>();
+  const stalled = recordingPorts({
+    request: (request) => {
+      asked.resolve();
+      return new Promise((_resolve, reject) => {
+        const stop = () => reject(videoFailure("interrupted", "The read was cancelled."));
+        if (request.signal?.aborted === true) stop();
+        else request.signal?.addEventListener("abort", stop, { once: true });
+      });
+    },
+    approvedVideoBytes,
+    sniff: sniffMp4,
+  });
+  const discovered = build(stalled.ports)
+    .models(discovery.signal)
+    .then(
+      () => true,
+      () => true,
+    );
+  await Promise.race([discovered, asked.promise]);
+  discovery.abort();
+  const asking = stalled.calls();
+  const ended = await Promise.race([
+    discovered,
+    new Promise<false>((resolve) => setTimeout(() => resolve(false), CANCELLED_DISCOVERY_MS)),
+  ]);
+  assertConformance(ended, "a cancelled discovery did not end");
+  assertConformance(
+    stalled.calls() === asking,
+    "a cancelled discovery made another call to the provider",
   );
 
   // The host always reads a profile's models before it starts a job, and a
@@ -338,6 +376,7 @@ export async function runVideoGenerationConformance(
 
   return {
     declaredModelsDecode: true,
+    discoveryStopsWhenCancelled: true,
     cancelledBeforeAnyCall: true,
     emptyPromptRefusedBeforeAnyCall: true,
     outsideDeclarationRefusedBeforeAnyCall: true,

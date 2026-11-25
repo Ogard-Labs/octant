@@ -10,7 +10,7 @@ import {
   THREAD_VIDEO_ARCHIVE_QUERY,
   type ThreadExportOutcome,
 } from "@octant/contracts/thread-export";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   createThreadExportRouteHandler,
   createThreadHandOffRouteHandler,
@@ -317,15 +317,21 @@ describe("thread exports with video files", () => {
     // Read through the system tar so this round-trip checks a standard archive
     // and works in the Node-run unit suite as well as in Bun.
     const input = Buffer.from(contents);
+    // GNU tar adds the options a shell exports to every call, which would
+    // change what is listed and read back.
+    vi.stubEnv("TAR_OPTIONS", "--exclude=*.mp4");
+    onTestFinished(() => void vi.unstubAllEnvs());
+    const { TAR_OPTIONS: _exported, ...env } = process.env;
+    const tar = (...args: ReadonlyArray<string>) => execFileSync("tar", args, { input, env });
     const clipPath = `video/${clipId}.mp4`;
-    const paths = execFileSync("tar", ["-tf", "-"], { input, encoding: "utf8" });
+    const paths = tar("-tf", "-").toString("utf8");
     expect(paths.trim().split(/\r?\n/)).toEqual(["manifest.json", clipPath]);
     const manifest = decodeThreadVideoArchiveManifest(
-      JSON.parse(execFileSync("tar", ["-xOf", "-", "manifest.json"], { input, encoding: "utf8" })),
+      JSON.parse(tar("-xOf", "-", "manifest.json").toString("utf8")),
     );
     expect(manifest.thread).toEqual(exportBundle());
     expect(manifest.clips).toEqual([{ jobId: job.id, clipId, size: bytes.length, hash }]);
-    expect(Uint8Array.from(execFileSync("tar", ["-xOf", "-", clipPath], { input }))).toEqual(bytes);
+    expect(Uint8Array.from(tar("-xOf", "-", clipPath))).toEqual(bytes);
     expect((await handler(makeRequest(offer.url, { method: "GET" })))?.status).toBe(404);
   });
 

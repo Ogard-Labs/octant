@@ -1515,6 +1515,38 @@ describe("video jobs", () => {
     }
   });
 
+  it.each([0, 1, 2, 3, 4, 5, 6, 7, 8])(
+    "records nothing for a waiting clip when shutdown lands %i steps after the clip before it ends",
+    async (steps) => {
+      const poll = Promise.withResolvers<VideoAdapterPoll>();
+      const { service, calls, journal, instance } = harness({
+        poll: () => (calls.start === 1 ? poll.promise : new Promise(() => undefined)),
+      });
+      const first = await enqueue(service);
+      await vi.waitFor(() => expect(calls.poll).toBe(1));
+      await enqueue(service);
+      const waiting = await enqueue(service);
+      await vi.waitFor(() => expect(calls.poll).toBe(2));
+      // A waiting clip whose profile is gone fails the moment it is admitted,
+      // so admitting it after shutdown would write to a closed journal.
+      instance.current = undefined;
+      poll.resolve({
+        status: "refused",
+        safetyRefusal: "Blocked by the provider's filters.",
+      });
+      await service.whenTerminal(first.id);
+      // The slot is handed over a few microtasks after the first clip ends.
+      for (let step = 0; step < steps; step += 1) await Promise.resolve();
+      service.close();
+      const atClose = { version: service.getById(waiting.id)?.version, starts: calls.start };
+      const append = vi.spyOn(journal, "append");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(append).not.toHaveBeenCalled();
+      expect(service.getById(waiting.id)?.version).toBe(atClose.version);
+      expect(calls.start).toBe(atClose.starts);
+    },
+  );
+
   it("resumes a running job with a provider id after a restart and keeps its clip", async () => {
     const first = harness({
       polls: Array.from({ length: 50 }, () => ({ status: "running" as const })),
@@ -1711,6 +1743,21 @@ describe("video jobs", () => {
         "fal-ai/restored",
       ),
     );
+  });
+
+  it("offers a profile whose catalog read was rejected once the cooldown has passed", async () => {
+    const { service, calls, advance } = harness({ modelsFail: "once" });
+    expect(service.readyProfilesNow()).toEqual([]);
+    await vi.waitFor(() => expect(calls.models).toBe(1));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Inside the cooldown the provider is not asked again.
+    advance(59_000);
+    expect(service.readyProfilesNow()).toEqual([]);
+    expect(calls.models).toBe(1);
+    advance(2_000);
+    await vi.waitFor(() => expect(service.readyProfilesNow()).toHaveLength(1));
+    expect(calls.models).toBe(2);
+    service.close();
   });
 
   it("ends a sent job as interrupted when discovery cannot describe it after a restart", async () => {

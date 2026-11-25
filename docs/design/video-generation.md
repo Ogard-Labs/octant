@@ -737,6 +737,7 @@ The driver owns only the wire and its declared facts.
 A conformance harness checks every driver against fake transports:
 
 - the request shape for each declared option;
+- that reading models from the provider ends when the host cancels it;
 - that a request outside the declared capabilities is refused before sending;
 - polling to each terminal state;
 - `cancel` and `forget` where declared;
