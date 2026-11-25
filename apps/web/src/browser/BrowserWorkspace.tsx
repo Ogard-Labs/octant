@@ -714,7 +714,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   }, [props.tab.threadId]);
 
   useEffect(() => {
-    if (props.tab.threadId === undefined) return;
+    const readThreadId = props.tab.threadId;
+    if (readThreadId === undefined) return;
+    const offerKey = heldReopenKey(props.tab.mode, readThreadId);
     const contextId = replacementContextId ?? props.tab.contextId ?? ownedContextId;
     const fresh = props.startFresh === true && contextId === undefined;
     const controller = new AbortController();
@@ -758,17 +760,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         // A fresh tab reads only the thread's admission fact. Its current page
         // belongs to another tab until this one creates its own context.
         if (fresh) {
-          rememberOffer(heldReopenKey(props.tab.mode, props.tab.threadId!), next.reopenOffer);
+          rememberOffer(offerKey, next.reopenOffer);
           setThreadHasSharedPage(sharedPageIsLive(next));
           setStatus("ready");
           return;
         }
         // The thread read carries the offer (the host sends none while a page
         // is open); a read of this pane's own page carries none to keep.
-        rememberOffer(
-          heldReopenKey(props.tab.mode, props.tab.threadId!),
-          contextId === undefined ? next.reopenOffer : undefined,
-        );
+        rememberOffer(offerKey, contextId === undefined ? next.reopenOffer : undefined);
         if (changed) {
           currentSnapshotRevision.current = revision;
           currentObservationRevision.current = next.observation?.revision;
@@ -812,10 +811,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           // With no page, the thread may still offer the one a restart took.
           // Only its offer is kept: another tab's live page is not adopted.
           const thread = await props.client
-            .inspectThread({ threadId: props.tab.threadId!, freshPicture: false }, controller.signal)
+            .inspectThread({ threadId: readThreadId, freshPicture: false }, controller.signal)
             .catch(() => undefined);
           if (active && !controller.signal.aborted && thread !== undefined)
-            rememberOffer(heldReopenKey(props.tab.mode, props.tab.threadId!), thread.reopenOffer);
+            rememberOffer(offerKey, thread.reopenOffer);
           return;
         }
         applyFailure(error, setStatus, setMessage);

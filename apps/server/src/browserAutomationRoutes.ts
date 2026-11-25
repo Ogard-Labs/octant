@@ -155,7 +155,10 @@ export interface BrowserAutomationRouteDependencies {
     readonly threadTitle: (threadId: BrowserThreadId, mode: "work" | "code") => string | undefined;
   };
   /** The page a restart took, offered back; absent on a host that records none. */
-  readonly pageOffers?: Pick<BrowserPageOffers, "read" | "claim" | "dismiss" | "release" | "holdForOpen">;
+  readonly pageOffers?: Pick<
+    BrowserPageOffers,
+    "read" | "claim" | "dismiss" | "release" | "holdForOpen"
+  >;
   /** The thread's kept screenshots; absent on a host that keeps none. */
   readonly captures?: Pick<BrowserCaptureService, "list" | "read" | "listSteps">;
   /**

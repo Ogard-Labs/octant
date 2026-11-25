@@ -77,7 +77,9 @@ describe("Browser dock tab offering a page a restart took", () => {
   it("offers the page in a saved tab whose page is gone after the restart", async () => {
     const browser = client({ ...emptyThread, reopenOffer: offer });
     dock(browser, { browserContextId: savedContextId });
-    expect(await screen.findByRole("button", { name: "Reopen page" }, { timeout: 8000 })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Reopen page" }, { timeout: 8000 }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
     expect(browser.claimPageOffer).not.toHaveBeenCalled();
   });
@@ -85,13 +87,23 @@ describe("Browser dock tab offering a page a restart took", () => {
   it("offers the page in a tab added after the restart", async () => {
     const browser = client({ ...emptyThread, reopenOffer: offer });
     dock(browser, { utilityTabId: "90000000-0000-4000-8000-0000000000a2" });
-    expect(await screen.findByRole("button", { name: "Reopen page" }, { timeout: 8000 })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Reopen page" }, { timeout: 8000 }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
   });
 
   it("shows no offer and adopts no page in a tab while another tab of the thread has a live page", async () => {
-    const live = { status: "running", threadId, context: liveContext(otherContextId), evidence: [] };
-    for (const extra of [{ browserContextId: savedContextId }, { utilityTabId: "90000000-0000-4000-8000-0000000000a2" }]) {
+    const live = {
+      status: "running",
+      threadId,
+      context: liveContext(otherContextId),
+      evidence: [],
+    };
+    for (const extra of [
+      { browserContextId: savedContextId },
+      { utilityTabId: "90000000-0000-4000-8000-0000000000a2" },
+    ]) {
       const browser = client(live);
       dock(browser, extra);
       await waitFor(() => expect(browser.inspectThread).toHaveBeenCalled());

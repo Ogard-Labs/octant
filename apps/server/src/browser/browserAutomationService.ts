@@ -260,7 +260,7 @@ interface OwnedContext {
    * A reserved reopen records its page only once its first navigation succeeds,
    * so an open that fails before any address loads leaves the offer it was for.
    */
-  recordPage?: () => void;
+  recordPage?: (() => void) | undefined;
   /**
    * A context created for one Open of its own rather than as the thread's
    * shared Browser context. It is deliberately invisible to

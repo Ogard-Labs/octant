@@ -3246,11 +3246,19 @@ describe("BrowserWorkspace reopening a page a restart took", () => {
           status: "failed",
           threadId,
           evidence: [],
-          failure: { category: "unavailable", message: "Another window or device is reopening it." },
+          failure: {
+            category: "unavailable",
+            message: "Another window or device is reopening it.",
+          },
         }) as any,
     );
     // A thread of its own: a held choice is kept per thread across mounts.
-    render(<BrowserWorkspace client={browser} tab={{ ...tab, threadId: "21000000-0000-4000-8000-0000000000cc" as any }} />);
+    render(
+      <BrowserWorkspace
+        client={browser}
+        tab={{ ...tab, threadId: "21000000-0000-4000-8000-0000000000cc" as any }}
+      />,
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Reopen page" }));
     await screen.findByText(/Enter an address to open a page in Personal/);
     fireEvent.change(screen.getByLabelText("Browser URL"), {
@@ -3285,7 +3293,9 @@ describe("BrowserWorkspace reopening a page a restart took", () => {
       target: { value: "https://example.com/typed" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
-    expect(await screen.findByText(/Another window or device is reopening this page/)).toBeVisible();
+    expect(
+      await screen.findByText(/Another window or device is reopening this page/),
+    ).toBeVisible();
     expect(screen.getByLabelText("Browser URL")).toHaveValue("https://example.com/typed");
     expect(await screen.findByRole("button", { name: "Reopen page" })).toBeInTheDocument();
   });

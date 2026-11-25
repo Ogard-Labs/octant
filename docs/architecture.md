@@ -6382,10 +6382,19 @@ flowchart LR
   release or dismiss one, checked on the host before any record is read. A claim
   is a short exclusive reservation in memory for one window or device: of two
   windows only one holds the page, and it is given back when the open it was for
-  fails or is declined, when the window goes away, or after two minutes (a remote device's session ending leaves its reservation to lapse that way). The
-  offer ends only when the reserved open succeeds, which ends the old record as
-  reopened, or on dismiss, archive, delete or purge, and the next start does not
-  offer it again. Reopening never restores the page: it names the profile, the
+  fails or is declined, when the window goes away, or after two minutes (a remote device's session ending leaves its reservation to lapse that way). An
+  open that names the page after its reservation lapsed takes it again in one
+  step unless another window or device holds it, which refuses that open with
+  a reason the pane shows and keeps what the person typed. The offer ends only
+  when the reserved open's first navigation succeeds, which records the new page,
+  ends the old record as reopened and supersedes the thread's other older
+  offers, or on dismiss, archive, delete or purge. A reserved page that has
+  loaded no address records nothing, so a failed first address, a page that
+  ends first, or a crash in between leaves exactly the old offer, and the next
+  start offers that one alone. The thread's Browser
+  read carries the offer while no page of the thread is open, and a dock tab
+  reads it from the thread when its saved page is gone or it is added fresh,
+  without taking another tab's page. Reopening never restores the page: it names the profile, the
   start page preselects it, and the person's address goes through the ordinary
   open with its site approval. A profile that no longer exists is said so
   instead of offered; a profile list that cannot be read now keeps the offer and

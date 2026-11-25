@@ -183,10 +183,17 @@ open in a thread's Browser pane. The pane offers it back (maintainer decision,
   as always. The preselection is this thread's choice, kept if the person
   switches threads and back, and never shown in another thread. It never
   changes the task's saved default or the per-Project preference.
-- Nothing ends until the reserved open succeeds. A declined approval, a failed
-  open or a reload gives the page back, the line says the open failed and the
-  offer is still there, and Reopen page reserves it again. The page opened by the
-  reserved open ends the old record as reopened.
+- Nothing ends until the reserved open's first address has loaded. A declined
+  approval, a failed open, an address that fails to load, a reload, or a page
+  that ends before any address loaded leaves the offer: the line says the open
+  failed and the offer is still there, and Reopen page reserves it again. The
+  first address that loads ends the old record as reopened. A reservation lapses
+  after two minutes; the open that names the page then takes it again, or, when
+  another window or device holds it now, says so and keeps the address the
+  person typed.
+- The offer shows in the thread's Browser wherever it appears: the pane, and a
+  dock tab whose saved page is gone or that was just added. A tab beside another
+  tab's live page shows no offer and does not take that page.
 - Dismiss ends the offer and moves focus to the address field, the start page's
   first control.
 - The offer exists only while the thread has no page open. A local window and a
