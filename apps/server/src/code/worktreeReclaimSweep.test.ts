@@ -90,7 +90,7 @@ function setup(
       const name = names.find((candidate) => ids[candidate] === threadId);
       return name === undefined ? undefined : options.activity?.[name];
     },
-    turnInProgress: (threadId) => options.working?.some((name) => ids[name] === threadId) === true,
+    threadHasWork: (threadId) => options.working?.some((name) => ids[name] === threadId) === true,
     reclaim: reclaim as never,
     abandon: abandon as never,
     clock: () => now,

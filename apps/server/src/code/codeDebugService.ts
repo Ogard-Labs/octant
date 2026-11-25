@@ -453,6 +453,11 @@ export class CodeDebugService {
     }
   }
 
+  /** Whether any session of the thread is starting, running or ending; the host's own bookkeeping, for no caller. */
+  hasSession(threadId: CodeThreadId): boolean {
+    return [...this.#sessions.values()].some((record) => sameThread(record, threadId));
+  }
+
   /** The thread's one running session, for a caller that may reach the thread. */
   threadSession(
     caller: CodeDebugCaller,

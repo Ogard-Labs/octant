@@ -177,6 +177,15 @@ export class ThreadMessageQueueService {
       return act(inspection.tail?.unconfirmed === true ? "unconfirmed" : "idle");
     });
   }
+  /**
+   * Whether a message waits in the thread's queue. The host asks this for its
+   * own housekeeping, with no window involved, so it reads the stored queue
+   * and nothing else.
+   */
+  hasQueued(scope: ThreadMessageQueueScope): boolean {
+    return this.#store.state(scope).items.length > 0;
+  }
+
   async execute(
     windowId: WindowId,
     raw: ThreadMessageQueueCommand,

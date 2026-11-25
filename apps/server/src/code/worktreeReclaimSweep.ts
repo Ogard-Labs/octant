@@ -25,8 +25,12 @@ export interface WorktreeReclaimSweepOptions {
   readonly loadReceipt: (receiptId: string) => Promise<ManagedWorktreeReceipt | undefined>;
   /** Epoch milliseconds of the thread's latest journaled activity, when it has any. */
   readonly lastActivityAt: (threadId: CodeThreadId) => number | undefined;
-  /** A turn is starting, running, or waiting on the person. */
-  readonly turnInProgress: (threadId: CodeThreadId) => boolean;
+  /**
+   * Anything the host tracks may still be working in the thread's folder: a
+   * turn, a child run, a debug session, a Project shell, a queued message or a
+   * wake-up. Read again after the cleanup begins.
+   */
+  readonly threadHasWork: (threadId: CodeThreadId) => boolean;
   readonly reclaim: (
     input: Readonly<{
       receiptId: string;
@@ -125,7 +129,7 @@ export class WorktreeReclaimSweep {
           else skipped.push({ threadId: thread.id, reason: "waiting" });
           continue;
         }
-        if (this.#options.turnInProgress(thread.id)) {
+        if (this.#options.threadHasWork(thread.id)) {
           skipped.push({ threadId: thread.id, reason: "working" });
           continue;
         }
@@ -133,7 +137,7 @@ export class WorktreeReclaimSweep {
           {
             receiptId: receipt.receiptId,
             trigger,
-            isIdle: () => !this.#options.turnInProgress(thread.id),
+            isIdle: () => !this.#options.threadHasWork(thread.id),
           },
           this.#abort.signal,
         );

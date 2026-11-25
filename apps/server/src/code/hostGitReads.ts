@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { lstat } from "node:fs/promises";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { createGitCommandEnvironment } from "../gitEnvironmentPort";
 
@@ -150,6 +152,142 @@ export async function readUntrackedAndIgnored(
   return {
     status: "observed",
     changedPaths: listed.stdout.split("\0").filter((entry) => entry.length > 0).length,
+  };
+}
+
+export type CleanupHazardReading =
+  | Readonly<{
+      status: "observed";
+      /**
+       * `hidden-edits`: Git was told not to look at some files, so an edit to
+       * them shows in neither status nor a refusing removal. `unsupported`: a
+       * sparse checkout, a submodule or an operation under way, none of which a
+       * plain removal and restore can give back whole.
+       */
+      hazard?: "hidden-edits" | "unsupported";
+    }>
+  | Readonly<{ status: "failed" }>;
+
+/** Files Git keeps in a worktree's own directory while one of these operations runs. */
+const OPERATION_MARKERS = [
+  "MERGE_HEAD",
+  "CHERRY_PICK_HEAD",
+  "REVERT_HEAD",
+  "BISECT_LOG",
+  "BISECT_START",
+  "rebase-merge",
+  "rebase-apply",
+  "sequencer",
+] as const;
+
+/**
+ * Finds what makes removing a clean-looking worktree lose work or fail: a file
+ * marked skip-worktree or assume-unchanged (an edit to it is invisible to
+ * status and to removal), a sparse checkout, a submodule, or a merge, rebase,
+ * cherry-pick, revert or bisect under way. Any read that fails, or whose output
+ * does not fit the bound, is a failure, never an all clear.
+ */
+export async function readCleanupHazard(
+  worktreePath: string,
+  signal: AbortSignal,
+): Promise<CleanupHazardReading> {
+  const sparse = await runHostGit(
+    ["-C", worktreePath, "config", "--type=bool", "--get", "core.sparseCheckout"],
+    signal,
+  );
+  if (sparse.exitCode === 0 && sparse.stdout.trim() === "true") {
+    return { status: "observed", hazard: "unsupported" };
+  }
+  if (sparse.exitCode !== 0 && sparse.exitCode !== 1) return { status: "failed" };
+
+  const tagged = await runHostGit(["-C", worktreePath, "ls-files", "-v", "-z"], signal);
+  if (tagged.exitCode !== 0) return { status: "failed" };
+  // Each entry is a one-letter tag, a space and the path; `S` is skip-worktree
+  // and a lowercase tag is assume-unchanged.
+  if (tagged.stdout.split("\0").some((entry) => /^[a-zS] /.test(entry))) {
+    return { status: "observed", hazard: "hidden-edits" };
+  }
+
+  const staged = await runHostGit(["-C", worktreePath, "ls-files", "-s", "-z"], signal);
+  if (staged.exitCode !== 0) return { status: "failed" };
+  if (staged.stdout.split("\0").some((entry) => entry.startsWith("160000 "))) {
+    return { status: "observed", hazard: "unsupported" };
+  }
+  const modules = await runHostGit(
+    ["-C", worktreePath, "ls-files", "-z", "--", ".gitmodules"],
+    signal,
+  );
+  if (modules.exitCode !== 0) return { status: "failed" };
+  if (modules.stdout.length > 0) return { status: "observed", hazard: "unsupported" };
+
+  const directory = await runHostGit(
+    ["-C", worktreePath, "rev-parse", "--absolute-git-dir"],
+    signal,
+  );
+  if (directory.exitCode !== 0) return { status: "failed" };
+  const gitDirectory = directory.stdout.trim();
+  if (gitDirectory.length === 0) return { status: "failed" };
+  for (const marker of OPERATION_MARKERS) {
+    try {
+      await lstat(join(gitDirectory, marker));
+      return { status: "observed", hazard: "unsupported" };
+    } catch (error) {
+      if ((error as { code?: unknown }).code !== "ENOENT") return { status: "failed" };
+    }
+  }
+  return { status: "observed" };
+}
+
+export type RemovalDamageReading =
+  | Readonly<{
+      status: "observed";
+      /** Tracked files gone from the folder and from nothing else: the index still holds them. */
+      missingTrackedFiles: number;
+      /** Every other change: edits, staged changes, files no commit holds. */
+      otherChanges: number;
+    }>
+  | Readonly<{ status: "runs-filters" | "failed" }>;
+
+/**
+ * What a removal that stopped part way left in the folder. Like the status
+ * read, it runs nothing the repository configured. Empty folders are not
+ * counted, since a removal leaves them behind.
+ */
+export async function readRemovalDamage(
+  worktreePath: string,
+  signal: AbortSignal,
+): Promise<RemovalDamageReading> {
+  const config = await runHostGit(
+    ["-C", worktreePath, "config", "--list", "--show-scope", "-z"],
+    signal,
+  );
+  if (config.exitCode !== 0) return { status: "failed" };
+  if (repositoryFilterCommands(config.stdout).length > 0) return { status: "runs-filters" };
+  const status = await runHostGit(
+    [
+      "-C",
+      worktreePath,
+      "status",
+      "--porcelain=v1",
+      "-z",
+      "--untracked-files=no",
+      "--ignore-submodules=dirty",
+    ],
+    signal,
+  );
+  if (status.exitCode !== 0) return { status: "failed" };
+  const entries = status.stdout.split("\0").filter((entry) => entry.length > 0);
+  const missing = entries.filter((entry) => entry.startsWith(" D ")).length;
+  const loose = await runHostGit(
+    ["-C", worktreePath, "ls-files", "--others", "--directory", "--no-empty-directory", "-z"],
+    signal,
+  );
+  if (loose.exitCode !== 0) return { status: "failed" };
+  const untracked = loose.stdout.split("\0").filter((entry) => entry.length > 0).length;
+  return {
+    status: "observed",
+    missingTrackedFiles: missing,
+    otherChanges: entries.length - missing + untracked,
   };
 }
 

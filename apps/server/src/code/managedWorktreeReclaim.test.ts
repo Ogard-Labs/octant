@@ -76,6 +76,12 @@ async function world(
     dirty: false,
     unrecoverable: false as boolean | "unavailable",
     restoreRejected: false,
+    removeRejected: false,
+    placeOnReject: false,
+    /** Holds Git's removal and restore until a test lets them go. */
+    gate: undefined as Promise<void> | undefined,
+    hazard: undefined as undefined | "hidden-edits" | "unsupported",
+    damage: { missingTrackedFiles: 0, otherChanges: 0 },
     delivered: true,
     authorityCheckout: checkoutId as string,
     calls: [] as string[],
@@ -129,13 +135,19 @@ async function world(
     fetchRemote: async () => ({ status: "failed" }),
     addWorktree: async () => ({ status: "rejected" }),
     isDirty: async () => ({ status: "observed", dirty: state.dirty }),
-    removeWorktree: async (input) =>
-      failing("removeWorktree", () => {
-        if (input.force === true) throw new Error("reclaim never forces");
+    removeWorktree: async (input) => {
+      state.calls.push("removalStarted");
+      await state.gate;
+      return failing("removeWorktree", () => {
+        if (state.removeRejected) return { status: "rejected" as const };
+        if (input.force === true && state.damage.missingTrackedFiles === 0) {
+          throw new Error("only a half-deleted folder is removed with force");
+        }
         state.worktrees.delete(input.targetPath);
         state.disk.delete(input.targetPath);
         return { status: "removed" as const };
-      }),
+      });
+    },
     isDelivered: async () => ({ status: "observed", delivered: state.delivered }),
     deleteBranch: async () => {
       state.calls.push("deleteBranch");
@@ -152,14 +164,27 @@ async function world(
               ? { status: "unavailable" as const }
               : { status: "observed" as const, found: state.unrecoverable === true },
         }),
+    findCleanupHazard: async () => ({
+      status: "observed" as const,
+      ...(state.hazard === undefined ? {} : { hazard: state.hazard }),
+    }),
+    readRemovalDamage: async () => ({ status: "observed" as const, ...state.damage }),
     resolveBranchHead: async (input) =>
       failing("resolveBranchHead", () => {
         const tip = state.branchHeads.get(input.branch);
         return { status: "observed" as const, ...(tip === undefined ? {} : { head: tip }) };
       }),
-    restoreWorktree: async (input) =>
-      failing("restoreWorktree", () => {
+    restoreWorktree: async (input) => {
+      await state.gate;
+      return failing("restoreWorktree", () => {
         if (state.restoreRejected || [...state.holders.values()].includes(input.branch)) {
+          if (state.placeOnReject) {
+            state.worktrees.set(input.targetPath, {
+              branch: `refs/heads/${input.branch}`,
+              head: state.branchHeads.get(input.branch) ?? head,
+            });
+            state.disk.add(input.targetPath);
+          }
           return { status: "rejected" as const };
         }
         state.worktrees.set(input.targetPath, {
@@ -168,7 +193,8 @@ async function world(
         });
         state.disk.add(input.targetPath);
         return { status: "created" as const };
-      }),
+      });
+    },
   };
   const options_ = {
     receipts,
@@ -417,6 +443,55 @@ describe("restorable cleanup of a managed worktree", () => {
     await expect(plain.abandon()).resolves.toMatchObject({ status: "restored" });
   });
 
+  it("hands a folder Git refused to remove back to the thread, but never a half-deleted one", async () => {
+    const whole = await world();
+    whole.state.removeRejected = true;
+    await expect(whole.reclaim()).resolves.toMatchObject({ status: "waiting" });
+    expect((await whole.current()).state).toBe("ready");
+    expect(whole.state.disk.has(target)).toBe(true);
+
+    const damaged = await world();
+    damaged.state.removeRejected = true;
+    damaged.state.damage = { missingTrackedFiles: 2, otherChanges: 0 };
+    await expect(damaged.reclaim()).resolves.toMatchObject({ status: "waiting" });
+    expect((await damaged.current()).state).toBe("cleanup-pending");
+  });
+
+  it("finishes a cut-short removal on the next pass, and leaves one with other changes alone", async () => {
+    const cut = await world();
+    cut.state.failures.add("removeWorktree");
+    await cut.reclaim();
+    cut.state.damage = { missingTrackedFiles: 3, otherChanges: 0 };
+    await expect(cut.reclaim()).resolves.toMatchObject({ status: "reclaimed" });
+    expect(cut.state.disk.has(target)).toBe(false);
+
+    const mixed = await world();
+    mixed.state.failures.add("removeWorktree");
+    await mixed.reclaim();
+    mixed.state.damage = { missingTrackedFiles: 3, otherChanges: 1 };
+    await expect(mixed.reclaim()).resolves.toEqual({ status: "refused", reason: "dirty" });
+    await expect(mixed.abandon()).resolves.toEqual({ status: "refused", reason: "dirty" });
+    expect((await mixed.current()).state).toBe("cleanup-pending");
+    expect(mixed.state.disk.has(target)).toBe(true);
+  });
+
+  it("refuses a checkout with hidden edits or an unsupported shape, and a port that cannot tell", async () => {
+    const hidden = await world();
+    hidden.state.hazard = "hidden-edits";
+    await expect(hidden.reclaim()).resolves.toEqual({
+      status: "refused",
+      reason: "unrecoverable-files",
+    });
+    const unsupported = await world();
+    unsupported.state.hazard = "unsupported";
+    await expect(unsupported.reclaim()).resolves.toEqual({
+      status: "refused",
+      reason: "unsupported-checkout",
+    });
+    expect((await hidden.current()).state).toBe("ready");
+    expect((await unsupported.current()).state).toBe("ready");
+  });
+
   it("returns an interrupted cleanup to ready when the thread starts working again, so it can take turns", async () => {
     const w = await world();
     w.state.failures.add("removeWorktree");
@@ -507,6 +582,49 @@ describe("restoring a cleaned worktree", () => {
     });
     expect(wrong.state.disk.has(target)).toBe(false);
     expect((await wrong.current()).state).toBe("reclaimed");
+  });
+
+  it("lets two restores of one cleaned-up checkout overlap without leaving it stuck", async () => {
+    const w = await reclaimed();
+    let release: () => void = () => undefined;
+    w.state.gate = new Promise<void>((resolve) => (release = resolve));
+    const first = w.restore();
+    const second = w.restore();
+    release();
+    const results = await Promise.all([first, second]);
+    expect(results.map((result) => result.status)).toEqual(["restored", "restored"]);
+    expect(w.state.calls.filter((call) => call === "restoreWorktree")).toHaveLength(1);
+    expect((await w.current()).state).toBe("ready");
+    expect(w.state.disk.has(target)).toBe(true);
+  });
+
+  it("keeps a restore that Git refused over a folder that is there and matches", async () => {
+    const w = await reclaimed();
+    w.state.restoreRejected = true;
+    w.state.placeOnReject = true;
+    await expect(w.restore()).resolves.toMatchObject({ status: "restored" });
+    expect((await w.current()).state).toBe("ready");
+  });
+
+  it("makes a restore of a row still cleaning up wait for the removal, then restore what it left", async () => {
+    const w = await world();
+    let release: () => void = () => undefined;
+    w.state.gate = new Promise<void>((resolve) => (release = resolve));
+    const cleaning = w.reclaim();
+    await vi.waitFor(() => expect(w.state.calls).toContain("removalStarted"));
+    let settled = false;
+    const abandoning = w.abandon().then((result) => {
+      settled = true;
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    release();
+    await expect(cleaning).resolves.toMatchObject({ status: "reclaimed" });
+    await expect(abandoning).resolves.toMatchObject({ status: "reclaimed" });
+    expect((await w.current()).state).toBe("reclaimed");
+    expect(w.state.disk.has(target)).toBe(false);
+    await expect(w.restore()).resolves.toMatchObject({ status: "restored" });
   });
 
   it("goes back to cleaned up when Git cannot make the folder", async () => {

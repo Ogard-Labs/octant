@@ -37,6 +37,7 @@ import {
   decodeCodeRelativePath,
   decodeCodeRepositoryId,
   decodeCodeThreadId,
+  type CodeThreadId,
   decodeWindowId,
   type ProjectId,
   type ProviderInstance,
@@ -721,6 +722,10 @@ export function wireCode(deps: CodeDependencies) {
     // The Code runtime is built after this area, so the turn check reads the
     // runtime the service is built with; before that no turn can run.
     let archivedWorktreeTurns: CodeOperationRuntime | undefined;
+    // Everything the host tracks that may be working in a thread's folder is
+    // wired after this, so until it is the answer is that work is going on.
+    let threadWorkCheck: ((threadId: CodeThreadId) => boolean) | undefined;
+    const threadHasWork = (threadId: CodeThreadId): boolean => threadWorkCheck?.(threadId) ?? true;
     const archivedWorktrees = createArchivedWorktrees({
       readCodeThreads: () => persistence.readCodeThreads(),
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
@@ -728,7 +733,11 @@ export function wireCode(deps: CodeDependencies) {
       loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
       turnInProgress: (threadId) =>
         archivedWorktreeTurns?.turnInProgress?.(String(threadId)) === true,
-      cleanup: (input, signal) => managedWorktreeService.cleanup(input, signal),
+      // One receipt changes one step at a time: a restore waits for this.
+      cleanup: (input, signal) =>
+        managedWorktreeReclaim.exclusive(input.receiptId, () =>
+          managedWorktreeService.cleanup(input, signal),
+        ),
       cleanupOnArchive: () =>
         persistence.readCodeSettings()?.settings.worktrees?.cleanup?.onArchive !== false,
     });
@@ -772,8 +781,7 @@ export function wireCode(deps: CodeDependencies) {
           | undefined;
         return typeof row?.occurred_at === "string" ? Date.parse(row.occurred_at) : undefined;
       },
-      turnInProgress: (threadId) =>
-        archivedWorktreeTurns?.turnInProgress?.(String(threadId)) === true,
+      threadHasWork: (threadId) => threadHasWork(threadId),
       reclaim: (input, signal) => managedWorktreeReclaim.reclaim(input, signal),
       abandon: (receiptId, signal) => managedWorktreeReclaim.abandon({ receiptId }, signal),
     });
@@ -1440,6 +1448,9 @@ export function wireCode(deps: CodeDependencies) {
       agentProfileRoutes,
       archivedWorktreeRoutes,
       worktreeReclaimSweep,
+      setThreadWorkCheck: (check: (threadId: CodeThreadId) => boolean) => {
+        threadWorkCheck = check;
+      },
       buildCodeService,
       diskCleanupRoutes,
       canAccessCodeProject,

@@ -164,7 +164,10 @@ import { createWorkThreadMoveHost } from "../hub/workThreadMoveHost";
 import { workThreadFolderOf } from "../hub/workThreadMoveFolder";
 import { threadMoveHostsByMode } from "../hub/threadMoveHostsByMode";
 import type { MovedThreadHistory } from "../hub/movedThreadHistory";
-import type { ManagedWorktreeReceiptStore } from "../code/managedWorktreeReceiptStore";
+import {
+  readyWorktreePath,
+  type ManagedWorktreeReceiptStore,
+} from "../code/managedWorktreeReceiptStore";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { createThreadMoveJournal } from "../hub/threadMoveJournal";
@@ -1658,8 +1661,9 @@ export function wireRemote(deps: RemoteDependencies) {
     if (thread === undefined) return undefined;
     const checkout = persistence.readCodeCheckout(thread.checkoutId);
     if (checkout?.kind === "managed-worktree") {
-      return (await deps.managedWorktreeReceipts.load(String(checkout.ownershipReceiptId)))
-        ?.canonicalWorktreePath;
+      return readyWorktreePath(
+        await deps.managedWorktreeReceipts.load(String(checkout.ownershipReceiptId)),
+      );
     }
     if (checkout?.kind !== "existing-worktree") return undefined;
     const project = persistence.readProject(thread.projectId);
@@ -3147,6 +3151,7 @@ export function wireRemote(deps: RemoteDependencies) {
     accessActivityRoutes,
   ]);
   return {
+    childWorkGoing,
     defaultTodoListHost: () => {
       const status = spokeLinkService.status();
       return status.membership === "member"

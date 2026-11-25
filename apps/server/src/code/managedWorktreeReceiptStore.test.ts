@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ManagedWorktreeReceiptStore,
+  readyWorktreePath,
   type CreateManagedWorktreeReceiptInput,
 } from "./managedWorktreeReceiptStore";
 
@@ -315,5 +316,22 @@ describe("ManagedWorktreeReceiptStore", () => {
         await expect(receipts.load(receiptId)).rejects.toThrow("invalid managed worktree receipt");
       }
     });
+  });
+});
+
+describe("the folder a receipt lets a thread use", () => {
+  it("is the worktree only while the receipt is ready", () => {
+    const path = input.canonicalWorktreePath;
+    expect(readyWorktreePath({ state: "ready", canonicalWorktreePath: path })).toBe(path);
+    for (const state of [
+      "creating",
+      "cleanup-pending",
+      "reclaimed",
+      "restoring",
+      "removed",
+    ] as const) {
+      expect(readyWorktreePath({ state, canonicalWorktreePath: path }), state).toBeUndefined();
+    }
+    expect(readyWorktreePath(undefined)).toBeUndefined();
   });
 });
