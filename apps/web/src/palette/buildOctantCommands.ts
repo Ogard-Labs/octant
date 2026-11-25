@@ -1,6 +1,10 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ReplyDetailLevel } from "@octant/contracts/shell";
 import type { DockBarItem } from "../shell/dockBarControls";
+import type { ThreadRestRowActions } from "../app/threadRestRowActions";
+import { threadRowRestState } from "../projects/threadRowRest";
+import type { ChatThreadNavigationItem } from "../shell/navigationModel";
+import { resolveSnoozePresets } from "@octant/domain";
 import { nextReplyDetailLevel } from "@octant/domain/reply-detail-policy";
 import {
   REPLY_DETAIL_DESCRIPTIONS,
@@ -56,6 +60,12 @@ export interface OctantCommandSources {
   readonly onOpenTodos?: () => void;
   /** Opens quick add for a new to-do over the current page. */
   readonly onNewTodo?: () => void;
+  /**
+   * The thread in front, as its sidebar row holds it, with that row's own rest
+   * and pin actions. Absent on drafts, on pages that cover the workspace, and
+   * for a thread the window has no row for.
+   */
+  readonly frontThread?: CommandFrontThread;
   readonly threads: ReadonlyArray<CommandThread>;
   readonly onOpenThread: (thread: CommandThread) => void;
   readonly projects: ReadonlyArray<CommandProject>;
@@ -105,6 +115,15 @@ export interface CommandSettingsPage {
 export interface CommandDockTool {
   readonly id: string;
   readonly label: string;
+}
+
+export interface CommandFrontThread {
+  readonly thread: Pick<
+    ChatThreadNavigationItem,
+    "threadId" | "navigationId" | "title" | "pinned" | "completedAt" | "markedDone" | "snooze"
+  >;
+  /** An absent action offers no command, as it renders no row menu item. */
+  readonly actions: ThreadRestRowActions;
 }
 
 export interface CommandProjectAction {
@@ -239,6 +258,10 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
       keywords: ["review", "finished", "unread", "triage", "to review"],
       action: { kind: "run", run: sources.onOpenReview },
     });
+  }
+  // Ahead of the thread list: an empty search shows only the first commands.
+  if (sources.frontThread !== undefined) {
+    commands.push(...frontThreadCommands(sources.frontThread));
   }
   for (const thread of sources.threads.slice(0, MAX_NAVIGATION_ENTRIES)) {
     commands.push({
@@ -464,5 +487,57 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
     });
   }
 
+  return commands;
+}
+
+/**
+ * Pin, settle and snooze for the thread in front, under the row menu's labels
+ * and conditions. The snooze times are flat, one command each, because the
+ * palette has no submenu.
+ */
+function frontThreadCommands(front: CommandFrontThread): ReadonlyArray<OctantCommand> {
+  const { actions, thread } = front;
+  const threadId = thread.navigationId ?? thread.threadId;
+  const { pinned, closed, reopenLabel, snoozed } = threadRowRestState(thread);
+  const commands: Array<OctantCommand> = [];
+  const offer = (id: string, title: string, run: () => void, detail = thread.title): void => {
+    commands.push({
+      id: `thread:front:${id}`,
+      title,
+      group: "Threads",
+      detail,
+      keywords: ["this thread", "current thread", thread.title],
+      action: { kind: "run", run },
+    });
+  };
+  const { onPinThread, onCompleteThread, onReopenThread, onSnoozeThread, onWakeThread } = actions;
+  if (onPinThread !== undefined) {
+    offer("pin", pinned ? "Unpin" : "Pin", () => onPinThread(threadId, !pinned));
+  }
+  if (closed) {
+    if (onReopenThread !== undefined) {
+      offer("reopen", reopenLabel, () => onReopenThread(threadId));
+    }
+  } else if (onCompleteThread !== undefined) {
+    offer("settle", "Settle", () => onCompleteThread(threadId));
+  }
+  if (snoozed) {
+    if (onWakeThread !== undefined) offer("wake", "Wake", () => onWakeThread(threadId));
+  } else if (onSnoozeThread !== undefined) {
+    for (const preset of resolveSnoozePresets(new Date())) {
+      offer(
+        `snooze:${preset.id}`,
+        `Snooze · ${preset.label}`,
+        () => {
+          // The list may have been built a while before it is run, so the wake
+          // time is worked out again. A time of day that has since stopped
+          // being offered keeps the one listed, and the host decides.
+          const now = resolveSnoozePresets(new Date()).find((entry) => entry.id === preset.id);
+          onSnoozeThread(threadId, (now ?? preset).until);
+        },
+        preset.whenLabel,
+      );
+    }
+  }
   return commands;
 }

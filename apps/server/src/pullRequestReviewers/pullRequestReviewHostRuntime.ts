@@ -12,6 +12,7 @@ import {
   decodeCodeOperationId,
   decodeCodeRelativePath,
   decodePullRequestReviewDiffSnapshot,
+  personalSignInRefusals,
   type CodeOperationCommand,
   type CodeOperationResult,
   type CodeProjectPullRequestRow,
@@ -394,6 +395,14 @@ export function createPullRequestReviewHostRuntime(
           reason: "no-account",
           detail:
             "The configured reviewer provider account is missing or disabled. Octant will not fall back silently.",
+        };
+      }
+      const backgroundRefusal = personalSignInRefusals(instance)?.refusesBackgroundModelCalls;
+      if (backgroundRefusal !== undefined) {
+        return {
+          status: "refused",
+          reason: "route-refused",
+          detail: backgroundRefusal,
         };
       }
       const state = options.observedProviderState(instance.id);

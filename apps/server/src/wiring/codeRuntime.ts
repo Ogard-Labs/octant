@@ -1,3 +1,4 @@
+import { cleanedUpWorktreeOf } from "../code/cleanedUpWorktrees";
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { ownPullRequestsFromHistory } from "../code/codeThreadMetadataService";
 import { splitRepositoryName } from "../code/pullRequestLinkService";
@@ -174,7 +175,7 @@ import type { CanvasWiring } from "./canvas";
 import { sessionNativeSetup } from "../providers/providerNativeSetup";
 import {
   launchCredentialsKey,
-  providerCredentialPassThrough,
+  providerOwnChannelsFromSettings,
 } from "../providers/providerOwnChannels";
 import { resolveProviderTerminal } from "../providers/providerTerminal";
 import { homedir } from "node:os";
@@ -196,7 +197,7 @@ export function withCodeOperationRuntime(
   return {
     bootstrap: (windowId) => service.bootstrap(windowId),
     navigation: (windowId) => service.navigation(windowId),
-    read: (windowId, threadId) => service.read(windowId, threadId),
+    read: (windowId, threadId, reads) => service.read(windowId, threadId, reads),
     execute: (windowId, command, signal, context) =>
       service.execute(windowId, command, signal, context),
     executeOperation: (windowId, command, options) => runtime.execute(windowId, command, options),
@@ -278,7 +279,7 @@ export function withCodeBoard(
   return {
     bootstrap: (windowId) => service.bootstrap(windowId),
     navigation: (windowId) => service.navigation(windowId),
-    read: (windowId, threadId) => service.read(windowId, threadId),
+    read: (windowId, threadId, reads) => service.read(windowId, threadId, reads),
     execute: (windowId, command, signal, context) =>
       service.execute(windowId, command, signal, context),
     subscribe: (windowId, threadId, afterSequence, signal) =>
@@ -1090,8 +1091,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               browserAutomationService.inspectThread(windowId, threadId),
             create: (input) => browserAutomationService.create(input),
             act: (input) => browserAutomationService.act(input),
-            releaseThread: (windowId, threadId) =>
-              browserAutomationService.releaseThread(windowId, threadId),
+            releaseThread: (windowId, threadId, endedBy, actor) =>
+              browserAutomationService.releaseThread(windowId, threadId, endedBy, actor),
             holdForAsk: (windowId, threadId) =>
               browserAutomationService.holdForAsk(windowId, threadId),
           },
@@ -1240,19 +1241,23 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         liveTurns,
         activeTurns: codeActiveTurns,
         terminalBrowserGrants: grants,
-        providerTerminal: ({ thread, shell, strict }) =>
+        providerTerminal: ({ thread, shell, strict, sandboxPolicySelected }) =>
           resolveProviderTerminal({
             instance: persistence.readProviderInstance(thread.providerInstanceId),
             hostEnvironment: process.env,
             homeDirectory: homedir(),
-            credentialPassThrough: (driverKind) =>
-              providerCredentialPassThrough(persistence.readShellSettings()?.settings, driverKind),
+            ownChannels: (driverKind) =>
+              providerOwnChannelsFromSettings(
+                persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+                driverKind,
+              ),
             platform: process.platform,
             shell,
             strict,
             mode: "code",
             executionPolicy: thread.executionPolicy,
             fullAccessSandbox: thread.fullAccessSandbox,
+            sandboxPolicySelected,
             ...(configuredDriverOptions.acpHome === undefined
               ? {}
               : { acpHome: configuredDriverOptions.acpHome }),
@@ -1309,6 +1314,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             providerInstanceId: thread.providerInstanceId,
             modelId: thread.modelId,
           }),
+        cleanedUpWorktree: cleanedUpWorktreeOf((id) => deps.managedWorktreeReceipts.load(id)),
         windowAccess: {
           canAccessProject: canAccessCodeProject,
           currentProjectAccess: (windowId, projectId) =>
@@ -1671,8 +1677,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           create: (input) => browserAutomationService.create(input),
           act: (input) => browserAutomationService.act(input),
           saveDownload: (input) => browserAutomationService.saveDownload(input),
-          releaseThread: (windowId, threadId) =>
-            browserAutomationService.releaseThread(windowId, threadId),
+          releaseThread: (windowId, threadId, endedBy, actor) =>
+            browserAutomationService.releaseThread(windowId, threadId, endedBy, actor),
           holdForPerson: (windowId, threadId) =>
             browserAutomationService.holdForPerson(windowId, threadId),
           holdForAsk: (windowId, threadId) =>

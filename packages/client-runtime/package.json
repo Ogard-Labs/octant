@@ -22,6 +22,7 @@
     "./computer-use-client": "./src/computerUseClient.ts",
     "./code-client": "./src/codeClient.ts",
     "./coordinator-proposal-approval": "./src/coordinatorProposalApproval.ts",
+    "./taken-branch-names": "./src/takenBranchNames.ts",
     "./work-mutation-client": "./src/workMutationClient.ts",
     "./work-file-listing-client": "./src/workFileListingClient.ts",
     "./work-promotion-client": "./src/workPromotionClient.ts",

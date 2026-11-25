@@ -1,4 +1,8 @@
-import type { ProviderFailure, ProviderUsageLimitsEntry } from "@octant/contracts";
+import type {
+  ProviderFailure,
+  ProviderRateLimitOverage,
+  ProviderUsageLimitsEntry,
+} from "@octant/contracts";
 
 /** How long a provider whose request failed for availability counts as down. */
 export const PROVIDER_DOWN_MS = 5 * 60_000;
@@ -33,16 +37,29 @@ export function providerAvailabilityFromFailure(
 }
 
 /**
+ * Extra usage beyond the included window. Allowed or warning overage means
+ * the account can still run after the included share is spent.
+ * `disabledReason` is why extra usage is off, except Vibe's billing label
+ * "Pay as you go on", which names extra usage as available.
+ */
+export function overageAllowsContinuedUse(overage: ProviderRateLimitOverage | undefined): boolean {
+  if (overage === undefined || overage.status === "exhausted") return false;
+  const reason = overage.disabledReason;
+  return reason === undefined || reason === "Pay as you go on";
+}
+
+/**
  * Whether the host's last plan-usage reading for an account says its limit
  * is reached: a window the provider flagged exhausted, or one at 100%, whose
- * reset has not come yet; the account's quota flagged exhausted with no
- * window; or a request or token bucket with nothing left before its reset.
- * The account counts as at its limit until the latest such reset. A reached
- * limit with no reset named holds for {@link PROVIDER_DOWN_MS} from the
- * reading's own time, like an availability mark, and then the next start
- * tries the account again: a reading the host keeps for hours must not keep a
- * model out for hours. A window below its limit never counts, and a window
- * whose reset has passed says nothing about the account now.
+ * reset has not come yet, unless extra usage is still allowed; the account's
+ * quota flagged exhausted with no window; or a request or token bucket with
+ * nothing left before its reset. The account counts as at its limit until the
+ * latest such reset. A reached limit with no reset named holds for
+ * {@link PROVIDER_DOWN_MS} from the reading's own time, like an availability
+ * mark, and then the next start tries the account again: a reading the host
+ * keeps for hours must not keep a model out for hours. A window below its
+ * limit never counts, and a window whose reset has passed says nothing about
+ * the account now.
  */
 export function usageLimitFromReading(
   entry: ProviderUsageLimitsEntry | undefined,
@@ -66,7 +83,8 @@ export function usageLimitFromReading(
     (window) =>
       future(window.resetsAt) &&
       (window.status === "exhausted" ||
-        (window.utilization !== undefined && window.utilization >= 1)),
+        (window.utilization !== undefined && window.utilization >= 1)) &&
+      !overageAllowsContinuedUse(window.overage),
   );
   // The same signals the automatic-model account check counts: the
   // aggregate quota flag when no window explains it, and an HTTP bucket

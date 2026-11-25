@@ -26,6 +26,11 @@ export interface ShellFrameProps {
   readonly onCommitSidebarWidth: (width: number) => void;
   readonly onPreviewSidebarWidth: (width: number) => void;
   /**
+   * Lets a drag of the sidebar's edge hide it and pull it back out. While it
+   * is hidden the edge stays grabbable wherever the sidebar can be resized.
+   */
+  readonly onSidebarCollapsedChange?: (collapsed: boolean) => void;
+  /**
    * The workspace's width (everything right of the sidebar), told on mount and
    * whenever it changes. The caller decides what fits in it; it should keep
    * only the answer, since this runs on every frame of a window resize.
@@ -226,6 +231,15 @@ function useWorkspaceWidthVariable(
   }, [layer, present]);
 }
 
+/** The sidebar column as the stylesheet resolved it: a dock can squeeze it below its setting. */
+function renderedSidebarWidth(frame: HTMLElement | null): number | undefined {
+  if (frame === null) return undefined;
+  const width = Number.parseFloat(
+    getComputedStyle(frame).getPropertyValue("--octant-rendered-sidebar-width"),
+  );
+  return Number.isFinite(width) && width > 0 ? width : undefined;
+}
+
 export function ShellFrame(props: ShellFrameProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const workspaceLayerRef = useRef<HTMLDivElement | null>(null);
@@ -333,10 +347,24 @@ export function ShellFrame(props: ShellFrameProps) {
             {props.backdrop}
             {props.welcomeGround}
             {props.sidebarCollapsed && props.sidebarRail !== true ? null : props.sidebar}
-            {props.sidebarResizable && !props.sidebarCollapsed ? (
+            {/*
+              One element through a drag that hides or shows the sidebar: a
+              remounted handle would lose the pointer it captured.
+            */}
+            {props.sidebarResizable &&
+            (!props.sidebarCollapsed || props.onSidebarCollapsedChange !== undefined) ? (
               <ShellResizeHandle
                 accessibleName="Resize navigation sidebar"
                 className="shell-frame__sidebar-resize window-no-drag"
+                {...(props.onSidebarCollapsedChange === undefined
+                  ? {}
+                  : {
+                      collapse: {
+                        collapsed: props.sidebarCollapsed === true,
+                        onCollapsedChange: props.onSidebarCollapsedChange,
+                        drawnValue: () => renderedSidebarWidth(shellRef.current),
+                      },
+                    })}
                 edge="trailing"
                 maximum={MAX_SIDEBAR_WIDTH}
                 minimum={MIN_SIDEBAR_WIDTH}

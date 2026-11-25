@@ -1,9 +1,11 @@
-import type {
-  ProviderInstance,
-  ProviderInstanceId,
-  ProviderReadiness,
-  ProviderUsageLimitsSnapshot,
+import {
+  personalSignInRefusals,
+  type ProviderInstance,
+  type ProviderInstanceId,
+  type ProviderReadiness,
+  type ProviderUsageLimitsSnapshot,
 } from "@octant/contracts";
+import { overageAllowsContinuedUse } from "@octant/domain";
 import { automaticModelUnavailableReason } from "@octant/domain/automatic-model-policy";
 
 /**
@@ -20,7 +22,7 @@ export function createAutomaticModelAccountCheck(input: {
   const nowMs = input.nowMs ?? Date.now;
   return (providerInstanceId) => {
     const instance = input.readProviderInstance(providerInstanceId);
-    return automaticModelUnavailableReason({
+    const reason = automaticModelUnavailableReason({
       instance:
         instance === undefined
           ? undefined
@@ -28,6 +30,8 @@ export function createAutomaticModelAccountCheck(input: {
       readiness: input.readiness(providerInstanceId),
       atLimit: instance !== undefined && atLimit(input.limits(), providerInstanceId, nowMs()),
     });
+    if (reason !== undefined) return reason;
+    return personalSignInRefusals(instance)?.refusesBackgroundModelCalls;
   };
 }
 
@@ -46,7 +50,14 @@ function atLimit(
   const windows = limits.rateLimitWindows ?? [];
   // A window's reset time decides when its exhaustion ends; the aggregate
   // quota flag has none, so it counts only when no window explains it.
-  if (windows.some((window) => window.status === "exhausted" && future(window.resetsAt))) {
+  if (
+    windows.some(
+      (window) =>
+        window.status === "exhausted" &&
+        future(window.resetsAt) &&
+        !overageAllowsContinuedUse(window.overage),
+    )
+  ) {
     return true;
   }
   if (windows.length === 0 && limits.quota === "exhausted") return true;

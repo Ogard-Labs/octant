@@ -1,7 +1,8 @@
 import { ACCESS_LEVEL_RENDERERS } from "./accessLevelScenes";
 import { DEFAULT_THEME_SETTINGS, type ThemeSettings } from "@octant/contracts/theme";
 import type { ProjectId } from "@octant/contracts/projects";
-import { defaultShellSettings } from "@octant/domain/shell-policy";
+import { decodeWindowId } from "@octant/contracts/shell";
+import { defaultShellSettings, defaultWindowWorkspace } from "@octant/domain/shell-policy";
 import type { ReactNode } from "react";
 import { ChildResultCards } from "../agents/ChildResultCards";
 import { SubagentsTray } from "../agents/ComposerSubagentsTray";
@@ -20,21 +21,26 @@ import { CodeThreadEnvironment } from "../environment/CodeThreadEnvironment";
 import { ComposerProjectSelector } from "../projects/ComposerProjectSelector";
 import { SettingsView } from "../shell/SettingsView";
 import { RailAccount } from "../shell/SidebarProfile";
+import { ShellFrame } from "../shell/ShellFrame";
+import { ShellSidebar } from "../shell/ShellSidebar";
 import { SidebarRail } from "../shell/SidebarRail";
+import { ProjectSidebarSection } from "../projects/ProjectSidebarSection";
 import type { ThemeController } from "../theme/useThemeController";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
+import { RailUsage } from "../usage/RailUsage";
 import { SCENE_LIST, type SceneMeta } from "./sceneList";
 import {
   agentRunClient,
   ARTIFACT_LISTING,
   automationCatalog,
   automationClient,
-  CLAUDE_ACCOUNT,
   CODE_PROJECT,
   CODE_TAB,
   codeProjectClient,
   localUsageHistoryFixture,
   planUsageClient,
+  RAIL_ACCOUNTS,
+  SIDEBAR_THREADS,
   threadRoutinesClient,
   threadUsageClient,
   SUBAGENT_RESULT_DELIVERY,
@@ -53,6 +59,8 @@ export interface VisualScene extends SceneMeta {
 }
 
 const noop = (): void => undefined;
+
+const WINDOW_ID = "00000000-0000-4000-8000-000000000301";
 
 const PROJECT_ENTRIES = [
   {
@@ -168,22 +176,26 @@ function HomeScene() {
   );
 }
 
+const PROFILE = { ...defaultShellSettings().userProfile, displayName: "Ada Lovelace" };
+
+/** The rail a hidden sidebar leaves, with the places the app gives it. */
 function RailScene() {
-  const profile = { ...defaultShellSettings().userProfile, displayName: "Ada Lovelace" };
   return (
-    <PlanUsageProvider client={planUsageClient()} instances={[CLAUDE_ACCOUNT]}>
-      <div style={{ height: "100%", width: 48, display: "flex" }}>
+    <PlanUsageProvider client={planUsageClient()} instances={RAIL_ACCOUNTS}>
+      <div className="visual-check__rail">
         <SidebarRail
-          account={<RailAccount onOpenNavigator={noop} onOpenSettings={noop} profile={profile} />}
+          account={<RailAccount onOpenNavigator={noop} onOpenSettings={noop} profile={PROFILE} />}
           activeMode="code"
           destinations={[
-            { id: "agents", label: "Agents", onSelect: noop, active: false },
-            { id: "automations", label: "Automations", onSelect: noop, active: false },
+            { id: "thread-board", label: "Board", onSelect: noop, active: false },
+            { id: "todos", label: "To-dos", onSelect: noop, active: false, count: 2 },
+            { id: "pull-requests", label: "Pull requests", onSelect: noop, active: false },
           ]}
           home={{ onOpen: noop, active: true }}
           modes={["chat", "work", "code"]}
           nativeHost={false}
           newThread={{ label: "New task", onSelect: noop }}
+          onOpenProjects={noop}
           onOpenSearch={noop}
           onOpenSettings={noop}
           onSelectMode={noop}
@@ -193,14 +205,72 @@ function RailScene() {
           ]}
           placement="collapsed"
           projects={[{ id: "p3", name: "Field notes", active: false, onOpen: noop }]}
-          tiles={[
-            { id: "inbox", count: 3, onSelect: noop },
-            { id: "running", count: 1, onSelect: noop },
-            { id: "review", count: 2, onSelect: noop },
-            { id: "done", count: 4, onSelect: noop },
-          ]}
+          tiles={[{ id: "inbox", count: 3, onSelect: noop }]}
+          usage={<RailUsage onOpenUsage={noop} />}
         />
       </div>
+    </PlanUsageProvider>
+  );
+}
+
+/**
+ * The rail beside the open sidebar, as the window draws them: plan usage and
+ * the person's face at the rail's foot, Working and Settled at the sidebar's.
+ */
+function RailBesideScene() {
+  const actions = {
+    "new-code-thread": noop,
+    inbox: noop,
+    "thread-board": noop,
+    "pull-requests": noop,
+    projects: noop,
+    plugins: noop,
+  };
+  return (
+    <PlanUsageProvider client={planUsageClient()} instances={RAIL_ACCOUNTS}>
+      <ShellFrame
+        chrome={<header className="window-chrome" />}
+        contextSidebarWidth={360}
+        material="opaque"
+        onCommitSidebarWidth={noop}
+        onPreviewSidebarWidth={noop}
+        sidebar={
+          <ShellSidebar
+            codeNavigation={{ actions }}
+            inboxCount={3}
+            onAddFolder={noop}
+            onOpenArchive={noop}
+            onOpenNavigator={noop}
+            onOpenSettings={noop}
+            onSelectMode={noop}
+            projectSection={
+              <ProjectSidebarSection
+                activityMode="code"
+                archivedProjects={[]}
+                availabilityByProject={new Map()}
+                now={new Date(VISUAL_NOW)}
+                onArchive={noop}
+                onMove={noop}
+                onProjectOpen={noop}
+                onReorder={noop}
+                onRestore={noop}
+                onSelectThread={noop}
+                projects={[CODE_PROJECT]}
+                threads={SIDEBAR_THREADS}
+              />
+            }
+            railBeside
+            settings={{ ...defaultShellSettings(), userProfile: PROFILE }}
+            settingsShortcut="⌘,"
+            workspace={{ ...defaultWindowWorkspace(decodeWindowId(WINDOW_ID)), activeMode: "code" }}
+          />
+        }
+        sidebarRailBeside
+        sidebarResizable={false}
+        sidebarWidth={280}
+        wideContextOpen={false}
+        workspace={<main className="workspace-layer" />}
+      />
     </PlanUsageProvider>
   );
 }
@@ -431,6 +501,7 @@ const RENDERERS: ReadonlyArray<{ readonly id: string; readonly render: () => Rea
     ),
   },
   { id: "rail", render: () => <RailScene /> },
+  { id: "rail-beside", render: () => <RailBesideScene /> },
   { id: "subagent-progress", render: () => <SubagentProgressScene /> },
 ];
 

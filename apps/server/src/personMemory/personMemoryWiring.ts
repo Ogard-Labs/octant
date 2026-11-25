@@ -5,6 +5,7 @@ import {
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeProviderSessionId,
+  personalSignInRefusals,
   PERSON_MEMORY_REQUEST_SHAPE,
   PERSON_MEMORY_USAGE_AGGREGATE_TYPE,
   type ProviderInstanceId,
@@ -163,6 +164,11 @@ export function createPersonMemorySweep(input: {
           })();
         const instance = persistence.readProviderInstance(model.providerInstanceId);
         if (instance === undefined || !instance.enabled) return undefined;
+        // Skip accounts whose personal sign-in refuses background model calls
+        // (both when defaulted from the thread's own account and when chosen).
+        if (personalSignInRefusals(instance)?.refusesBackgroundModelCalls !== undefined) {
+          return undefined;
+        }
         // A chosen account that is not ready or is at its limit makes the
         // thread wait for a later pass; it is never distilled on another.
         if (chosen !== undefined && input.accountUnavailable(chosen.providerInstanceId)) {

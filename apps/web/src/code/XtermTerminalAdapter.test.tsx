@@ -1,6 +1,7 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { describe, expect, it, vi } from "vitest";
+import { TerminalShellContext, TerminalSlot } from "../shell/terminalSlot";
 import { ThemeSettingsProvider } from "../theme/ThemeSettingsProvider";
 import {
   XtermTerminalAdapter,
@@ -8,13 +9,17 @@ import {
   type XtermAdapterSession,
 } from "./XtermTerminalAdapter";
 
+/** The cycle a shell's terminals share, standing in for the real walk. */
+const shared = vi.hoisted(() => ({ cycle: vi.fn(), register: vi.fn(() => () => undefined) }));
+vi.mock("../shell/terminalCycle", () => ({ terminalCycleFor: () => shared }));
+
 describe("XtermTerminalAdapter", () => {
   describe("leaving the terminal from the keyboard", () => {
-    async function mountBetweenControls() {
+    async function mountBetweenControls(slot?: string) {
       const mount = vi.fn<XtermAdapterRuntime["mount"]>(() => session());
       const onData = vi.fn();
       const loadRuntime = vi.fn(async () => ({ mount }));
-      render(
+      const controls = (
         <>
           <button type="button">Before</button>
           <XtermTerminalAdapter
@@ -26,7 +31,12 @@ describe("XtermTerminalAdapter", () => {
             output=""
           />
           <button type="button">After</button>
-        </>,
+        </>
+      );
+      render(
+        <TerminalShellContext.Provider value={{ current: undefined }}>
+          <TerminalSlot slot={slot}>{controls}</TerminalSlot>
+        </TerminalShellContext.Provider>,
       );
       await act(async () => void (await loadRuntime.mock.results[0]?.value));
       const interceptKey = mount.mock.calls[0]![1].interceptKey!;
@@ -49,6 +59,39 @@ describe("XtermTerminalAdapter", () => {
       expect(interceptKey(press("Escape", { ctrlKey: true, shiftKey: true }))).toBe(true);
       expect(screen.getByRole("button", { name: "Before" })).toHaveFocus();
       expect(onData).not.toHaveBeenCalled();
+    });
+
+    it("claims the terminal cycle chords and asks for the next terminal, not a way out", async () => {
+      const { interceptKey, onData } = await mountBetweenControls("dock:terminal");
+      await waitFor(() => expect(shared.register).toHaveBeenCalled());
+      const terminal = screen.getByRole("region", { name: "Repository terminal" });
+      terminal.focus();
+
+      const next = press("ArrowDown", { ctrlKey: true, shiftKey: true });
+      expect(interceptKey(next)).toBe(true);
+      expect(next.defaultPrevented).toBe(true);
+      expect(interceptKey(press("ArrowUp", { ctrlKey: true, shiftKey: true }))).toBe(true);
+      expect(
+        interceptKey(
+          new KeyboardEvent("keyup", { key: "ArrowDown", ctrlKey: true, shiftKey: true }),
+        ),
+      ).toBe(true);
+
+      expect(shared.cycle.mock.calls).toEqual([
+        ["dock:terminal", "next"],
+        ["dock:terminal", "previous"],
+      ]);
+      expect(terminal).toHaveFocus();
+      expect(onData).not.toHaveBeenCalled();
+    });
+
+    it("keeps the cycle chord from the shell where there is nothing to cycle", async () => {
+      const { interceptKey } = await mountBetweenControls();
+      const terminal = screen.getByRole("region", { name: "Repository terminal" });
+      terminal.focus();
+
+      expect(interceptKey(press("ArrowDown", { ctrlKey: true, shiftKey: true }))).toBe(true);
+      expect(terminal).toHaveFocus();
     });
 
     it("claims the chord's release too, without moving focus a second time", async () => {

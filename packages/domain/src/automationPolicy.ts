@@ -988,6 +988,7 @@ export type AutomationRunNowDecision =
 
 const ACTIVE_AUTOMATION_RUN_LIFECYCLES = new Set<AutomationRunLifecycle>([
   "queued",
+  "awaiting-confirmation",
   "dispatching",
   "recovering-dispatch",
   "running",

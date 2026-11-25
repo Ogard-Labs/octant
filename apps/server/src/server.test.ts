@@ -2140,6 +2140,107 @@ describe("startOctantServer", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("gives a thread no checkout root, so no turn can start, while its worktree is being cleaned up, is cleaned up, or is being restored", async () => {
+    const projectId = "00000000-0000-4000-8000-000000001421";
+    const revisionId = "00000000-0000-4000-8000-000000001422";
+    const threadId = "00000000-0000-4000-8000-000000001423";
+    const checkoutId = "00000000-0000-4000-8000-000000001424";
+    const receiptId = "00000000-0000-4000-8000-000000001425";
+    const repositoryId = `repo_${"e".repeat(64)}` as `repo_${string}`;
+    const repositoryRoot = "/private/authorized-project";
+    const worktreeRoot = "/private/managed-worktrees/issue-488";
+    const head = "f".repeat(40);
+    const receipt = {
+      version: 1 as const,
+      receiptId,
+      repositoryId,
+      threadId,
+      checkoutId,
+      canonicalRepositoryPath: repositoryRoot,
+      canonicalWorktreePath: worktreeRoot,
+      branchIntent: "feature/issue-488",
+      refIntent: "refs/heads/development",
+      expectedHead: head,
+      state: "ready" as const,
+      createdAt: "2026-07-31T22:00:00.000Z",
+      updatedAt: "2026-07-31T22:00:00.000Z",
+    };
+    const present = (path: string, branch: string) => ({
+      status: "present" as const,
+      canonicalPath: path,
+      reportedPath: path,
+      head,
+      branch,
+      detached: false,
+    });
+    const observation = {
+      status: "available" as const,
+      repositoryId,
+      repositoryRoot,
+      commonDirectory: "/private/git",
+      objectDirectory: "/private/git/objects",
+      checkout: present(repositoryRoot, "refs/heads/development"),
+      worktrees: [present(worktreeRoot, "refs/heads/feature/issue-488")],
+    };
+    let state: "ready" | "cleanup-pending" | "reclaimed" | "restoring" = "ready";
+    const authority = createExistingWorktreeCodeFileRootAuthority({
+      projects: {
+        bootstrap: vi.fn(
+          async () =>
+            ({
+              active: [{ id: projectId, type: "code", binding: { canonicalRoot: repositoryRoot } }],
+              archived: [],
+              availability: [],
+              memory: [],
+            }) as never,
+        ),
+      },
+      readProject: vi.fn(
+        () =>
+          ({
+            id: projectId,
+            type: "code",
+            lifecycle: "active",
+            binding: { canonicalRoot: repositoryRoot },
+            bindingHistory: [{ revisionId, currentBinding: { canonicalRoot: repositoryRoot } }],
+          }) as never,
+      ),
+      repository: { observe: vi.fn(async () => observation) },
+      managedReceipts: { load: vi.fn(async () => ({ ...receipt, state })) },
+      statIdentity: vi.fn(async () => ({ device: "9", inode: "10" })),
+    });
+    const thread = {
+      id: threadId,
+      projectId,
+      bindingRevisionId: revisionId,
+      repositoryId,
+    } as never;
+    const checkout = {
+      id: checkoutId,
+      kind: "managed-worktree",
+      repositoryId,
+      availability: "available",
+      ownershipReceiptId: receiptId,
+      head: { kind: "branch", name: "feature/issue-488", oid: head },
+    } as never;
+    const resolve = () =>
+      authority.resolve(
+        "00000000-0000-4000-8000-000000001426" as never,
+        thread,
+        checkout,
+        "src/file.ts" as never,
+      );
+
+    await expect(resolve()).resolves.toMatchObject({ rootPath: worktreeRoot });
+    for (const blocked of ["cleanup-pending", "reclaimed", "restoring"] as const) {
+      state = blocked;
+      await expect(resolve(), blocked).resolves.toBeUndefined();
+    }
+    // Only a restore that verified the checkout makes the folder usable again.
+    state = "ready";
+    await expect(resolve()).resolves.toMatchObject({ rootPath: worktreeRoot });
+  });
+
   it("prepares only the authenticated Project's current unlocked checkout", async () => {
     const projectId = "00000000-0000-4000-8000-000000001311";
     const revisionId = "00000000-0000-4000-8000-000000001312";

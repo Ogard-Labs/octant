@@ -1,4 +1,5 @@
 import {
+  decodeAutomationCancelRunRequestId,
   decodeAutomationCommand,
   automationFileActivityWindowLimit,
   decodeAutomationDefinition,
@@ -41,6 +42,7 @@ import type { AutomationProjection } from "./automationProjection";
 import {
   automationRunIdForOccurrence,
   buildAutomationRunForOccurrence,
+  deterministicAutomationUuid,
 } from "./automationRunIdentity";
 
 export interface AutomationCommandServiceOptions {
@@ -50,6 +52,7 @@ export interface AutomationCommandServiceOptions {
     | "appendDefinitionUpdated"
     | "appendDefinitionLifecycleChanged"
     | "appendRunCreated"
+    | "appendRunStatusChanged"
     | "appendRunCancellation"
     | "appendOccurrenceLedger"
     | "appendFileSourceWindowChanged"
@@ -169,6 +172,8 @@ export class AutomationCommandService {
           return this.#changeLifecycle(command, "archived", "automation-archived");
         case "run-now-automation":
           return this.#runNow(command);
+        case "confirm-automation-run":
+          return this.#confirmRun(command);
         case "cancel-current-automation-run":
           return this.#cancelCurrentRun(command);
       }
@@ -541,6 +546,7 @@ export class AutomationCommandService {
       blockedRunId: _blockedRun,
       ...base
     } = current;
+    const now = this.#now();
     const changed = validateAutomationDefinition(
       decodeAutomationDefinition({
         ...base,
@@ -548,7 +554,7 @@ export class AutomationCommandService {
         ...(lifecycle === "enabled" ? this.#dueState(current.trigger) : { nextDueAt: null }),
         updatedBy: command.principal,
         version: current.version + 1,
-        updatedAt: this.#now(),
+        updatedAt: now,
       }),
     );
     this.#store.appendDefinitionLifecycleChanged({
@@ -557,6 +563,32 @@ export class AutomationCommandService {
       previousLifecycle: current.lifecycle,
       expectedVersion: current.version,
     });
+    // Archiving a follow-up cancels any held run that never launched a turn,
+    // so an awaiting-confirmation follow-up does not stay pending forever.
+    if (lifecycle === "archived" && current.targetPolicy === "same-thread") {
+      const held = this.#projection.activeRun(current.id);
+      if (
+        held !== undefined &&
+        held.lifecycle === "awaiting-confirmation" &&
+        held.cancellationTombstone === undefined &&
+        held.firstTurnAcceptance === undefined
+      ) {
+        this.#store.appendRunCancellation({
+          ...personActor(command.principal),
+          automationId: current.id,
+          runId: held.id,
+          previousLifecycle: held.lifecycle,
+          tombstone: {
+            requestId: decodeAutomationCancelRunRequestId(
+              deterministicAutomationUuid(`automation-follow-up-archived:${String(held.id)}`),
+            ),
+            cancelledAt: now as UtcTimestamp,
+          },
+          expectedVersion: held.version,
+          updatedAt: now as UtcTimestamp,
+        });
+      }
+    }
     return { kind: resultKind, automation: changed };
   }
 
@@ -656,6 +688,64 @@ export class AutomationCommandService {
       throw error;
     }
     return { kind: "automation-run-accepted", run };
+  }
+
+  /**
+   * Explicitly confirms a run that paused in `awaiting-confirmation` (for
+   * example, a routine targeting a personal sign-in that does not permit
+   * unattended runs). Moves it to `dispatching` with the person's actor so the
+   * dispatcher can launch its first turn under the confirming window.
+   */
+  #confirmRun(
+    command: Extract<AutomationCommand, { readonly kind: "confirm-automation-run" }>,
+  ): AutomationCommandResult {
+    const run = this.#projection.getRun(command.runId);
+    if (run === undefined || String(run.automationId) !== String(command.automationId)) {
+      return failure("not-found", "Automation run does not exist for this Automation.", {
+        automationId: command.automationId,
+        runId: command.runId,
+      });
+    }
+    const definition = this.#projection.getDefinition(command.automationId);
+    const gate = this.#gateDefinitionMutation(definition, command);
+    if (gate !== undefined) return gate;
+    if (command.expectedRunVersion !== run.version) {
+      return failure("stale-version", "Automation run expected version is stale.", {
+        automationId: command.automationId,
+        runId: run.id,
+      });
+    }
+    if (run.lifecycle !== "awaiting-confirmation") {
+      return failure("invalid", "Only a run waiting for confirmation can be confirmed.", {
+        automationId: command.automationId,
+        runId: run.id,
+      });
+    }
+    if (run.cancellationTombstone !== undefined || run.firstTurnAcceptance !== undefined) {
+      return failure("terminal", "Automation run can no longer be confirmed.", {
+        automationId: command.automationId,
+        runId: run.id,
+      });
+    }
+    const now = this.#now();
+    this.#store.appendRunStatusChanged({
+      ...personActor(command.principal),
+      automationId: command.automationId,
+      runId: run.id,
+      previousLifecycle: run.lifecycle,
+      lifecycle: "dispatching",
+      version: run.version + 1,
+      expectedVersion: run.version,
+      updatedAt: now,
+    });
+    const confirmed = this.#projection.getRun(run.id);
+    if (confirmed === undefined) {
+      return failure("invalid", "Confirmed Automation run is missing from the projection.", {
+        automationId: command.automationId,
+        runId: run.id,
+      });
+    }
+    return { kind: "automation-run-confirmed", run: confirmed };
   }
 
   #cancelCurrentRun(

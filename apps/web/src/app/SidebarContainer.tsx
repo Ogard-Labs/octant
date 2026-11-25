@@ -5,7 +5,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
 import { decodeChatThreadId, type ChatThreadId } from "@octant/contracts/chat";
 import { decodeCodeThreadId, type CodeThreadId } from "@octant/contracts/code";
-import { decodeUtcTimestamp, decodeWorkThreadId } from "@octant/contracts";
+import { decodeWorkThreadId } from "@octant/contracts";
 import { decodePersonMemoryCommand } from "@octant/contracts/person-memory";
 import type { EnvironmentSelection } from "@octant/client-runtime/environment-selection";
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
@@ -20,6 +20,7 @@ import { deliverComposerThreadDrop } from "../chat/composerThreadDrop";
 import { projectViewEnvironmentOptionsFromHosts } from "../code/codeProjectViewModel";
 import type { CodeReadCursorStore, CodeThreadRestOutcome } from "../code/useCodeController";
 import { codeThreadCoordinatorActions } from "./codeThreadCoordinatorActions";
+import { threadRestRowActions } from "./threadRestRowActions";
 import { mergeThreadRowActions } from "../projects/mergeThreadRowActions";
 import { ProjectSidebarSection } from "../projects/ProjectSidebarSection";
 import { useServerCodeProjects } from "../projects/serverProjectEntries";
@@ -33,6 +34,8 @@ import {
   isThreadBoardAvailable,
   resolveSidebarDestinationContributions,
 } from "../shell/contributionRegistry";
+import { describeChord } from "@octant/domain";
+import { isApplePlatform } from "../platform";
 import { useFirstPartyPluginsEffective } from "../shell/firstPartyPluginsEffective";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import type { SidebarNavigationDescriptorId } from "../shell/navigationModel";
@@ -381,6 +384,8 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
         });
       };
     };
+    // Settle, reopen, snooze, wake and pin are shared with the command palette.
+    const rest = threadRestRowActions(actions);
     const noteCodeThreadRest = (outcome: CodeThreadRestOutcome): void => {
       if (outcome.status === "refused") actions.setThreadExportNotice(outcome.message);
     };
@@ -427,16 +432,9 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       ...(exportCodeThread === undefined ? {} : { onExportThread: exportCodeThread }),
       ...(handOffCodeThread === undefined ? {} : { onHandOffThread: handOffCodeThread }),
       onArchiveThread: (threadId) => void actions.archiveCodeThread(decodeCodeThreadId(threadId)),
-      onCompleteThread: (threadId) =>
-        void actions.completeCodeThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
-      onReopenThread: (threadId) =>
-        void actions.reopenCodeThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
+      ...rest.code,
       onMarkThreadDone: (threadId) =>
         void actions.markCodeThreadDone(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
-      onSnoozeThread: (threadId, until) =>
-        void actions.snoozeCodeThread(decodeCodeThreadId(threadId), until).then(noteCodeThreadRest),
-      onWakeThread: (threadId) =>
-        void actions.wakeCodeThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
       onCompleteFollowUp: (threadId) =>
         void actions.completeCodeFollowUp(decodeCodeThreadId(threadId)),
       onMarkFollowUp: (threadId) => void actions.markCodeFollowUp(decodeCodeThreadId(threadId)),
@@ -446,8 +444,6 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       onAttachAsContext: (threadId) => {
         void deliverComposerThreadDrop({ threadId });
       },
-      onPinThread: (threadId, pinned) =>
-        void actions.pinCodeThread(decodeCodeThreadId(threadId), pinned),
       ...codeThreadCoordinatorActions(actions),
       onOpenPullRequest: actions.selectProjectPullRequestIdentity,
       onOpenPullRequestOnGithub: (identity) => {
@@ -464,14 +460,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       ...leaveNoTraceFromRow("chat"),
       ...(exportChatThread === undefined ? {} : { onExportThread: exportChatThread }),
       ...(handOffChatThread === undefined ? {} : { onHandOffThread: handOffChatThread }),
-      onCompleteThread: (threadId) =>
-        void actions.completeChatThread(decodeChatThreadId(threadId)).then(noteChatThreadRest),
-      onReopenThread: (threadId) =>
-        void actions.reopenChatThread(decodeChatThreadId(threadId)).then(noteChatThreadRest),
-      onSnoozeThread: (threadId, until) =>
-        void actions.snoozeChatThread(decodeChatThreadId(threadId), until).then(noteChatThreadRest),
-      onWakeThread: (threadId) =>
-        void actions.wakeChatThread(decodeChatThreadId(threadId)).then(noteChatThreadRest),
+      ...rest.chat,
       onSetRestartContinuation: (threadId, continueAfterRestart) =>
         void actions
           .setChatThreadRestartContinuation(decodeChatThreadId(threadId), continueAfterRestart)
@@ -489,31 +478,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       ...leaveNoTraceFromRow("work"),
       ...(exportWorkThread === undefined ? {} : { onExportThread: exportWorkThread }),
       ...(handOffWorkThread === undefined ? {} : { onHandOffThread: handOffWorkThread }),
-      onCompleteThread: (threadId) =>
-        void actions.runWorkRestCommand(threadId, (expectedVersion) => ({
-          kind: "complete-work-thread",
-          threadId: decodeWorkThreadId(threadId),
-          expectedVersion,
-        })),
-      onReopenThread: (threadId) =>
-        void actions.runWorkRestCommand(threadId, (expectedVersion) => ({
-          kind: "reopen-work-thread",
-          threadId: decodeWorkThreadId(threadId),
-          expectedVersion,
-        })),
-      onSnoozeThread: (threadId, until) =>
-        void actions.runWorkRestCommand(threadId, (expectedVersion) => ({
-          kind: "snooze-work-thread",
-          threadId: decodeWorkThreadId(threadId),
-          expectedVersion,
-          until: decodeUtcTimestamp(until),
-        })),
-      onWakeThread: (threadId) =>
-        void actions.runWorkRestCommand(threadId, (expectedVersion) => ({
-          kind: "wake-work-thread",
-          threadId: decodeWorkThreadId(threadId),
-          expectedVersion,
-        })),
+      ...rest.work,
       onSetRestartContinuation: (threadId, continueAfterRestart) =>
         void actions.runWorkRestCommand(threadId, (expectedVersion) => ({
           kind: "set-work-thread-restart-continuation",
@@ -637,6 +602,13 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     [serverProjectIds],
   );
   const workThreadRowActions = rowActions.work;
+
+  // Settings' key belongs to the Mac app's own menu; a browser has none, so it
+  // is named only where it works.
+  const settingsShortcut =
+    hostBridge !== undefined && isApplePlatform()
+      ? describeChord({ key: ",", mod: true, alt: false, shift: false }, true)
+      : undefined;
 
   return (
     <>
@@ -768,9 +740,8 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
               },
             }
           : {})}
-        {...(sidebarRailBeside
-          ? { railBeside: { onOpenActivity: () => openSidebarList("activity") } }
-          : {})}
+        railBeside={sidebarRailBeside}
+        {...(settingsShortcut === undefined ? {} : { settingsShortcut })}
         {...(whatsNew.card === undefined
           ? {}
           : {
@@ -783,7 +754,6 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
         {...(sidebarRail
           ? {
               rail: {
-                onOpenActivity: () => openSidebarList("activity"),
                 projects: (workSide ? workSideProjects : projects).map((project) => ({
                   id: String(project.id),
                   name: project.name,

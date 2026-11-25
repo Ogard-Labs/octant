@@ -2873,6 +2873,145 @@ describe("ChatTurnRunner", () => {
     expect(updates.at(-1)?.pendingQuestion).toBeUndefined();
   });
 
+  describe("a turn that ends while a question is open", () => {
+    // A turn parked on one provider question, with `answerUserInput` under the
+    // test's control.
+    async function parkedTurn(
+      answerUserInput: () => Effect.Effect<void>,
+      drive: (turn: {
+        readonly runner: ChatTurnRunner;
+        readonly stop: () => void;
+        readonly settled: () => Promise<unknown>;
+      }) => Promise<void>,
+    ) {
+      const queue = Effect.runSync(Queue.unbounded<never>());
+      const connection = {
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
+        start: () => Effect.succeed({ sessionId }),
+        send: () =>
+          Queue.offer(queue, {
+            kind: "user-input-request",
+            sessionId,
+            requestId: "q1",
+            prompt: "Proceed?",
+            options: [{ label: "Yes" }],
+          } as never),
+        answerUserInput,
+        interrupt: () => Effect.void,
+        stop: () => Effect.void,
+        answerApproval: () => Effect.void,
+        answerTool: () => Effect.void,
+      };
+      const { scheduler, reservation } = makeScheduler();
+      const runner = new ChatTurnRunner({
+        capacityScheduler: scheduler,
+        contextHarness: makeHarness(),
+        researchRouter: new ResearchRouter({
+          webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+          providerNativeExecute: async () => ({
+            query: "x",
+            backend: "provider-native",
+            results: [],
+          }),
+        }),
+      });
+      const controller = new AbortController();
+      let parked = false;
+      const unhandled: unknown[] = [];
+      const record = (reason: unknown) => {
+        unhandled.push(reason);
+      };
+      process.on("unhandledRejection", record);
+      try {
+        const turn = Effect.runPromiseExit(
+          Effect.scoped(
+            runner.run({
+              thread: thread(),
+              attempt: attempt(),
+              prompt: "hello",
+              scratchRoot: "/tmp/octant-scratch/thread",
+              driver: { acquire: () => Effect.succeed(connection) } as never,
+              providerInstanceId,
+              serviceLimits: serviceLimits(),
+              contextSubject: subject,
+              contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+              requestShape: "chat-turn",
+              varianceReserve: 20,
+              reservationId: reservation,
+              estimatedTokens: 100,
+              researchRoute: researchRoute({ kind: "disabled" }),
+              attachments: [],
+              signal: controller.signal,
+              persistAttempt: (next) => {
+                if (next.pendingQuestion !== undefined) parked = true;
+                return Effect.void;
+              },
+              persistAppendedResponse: () => Effect.void,
+              persistResponse: () =>
+                Effect.succeed({
+                  contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                  digest: "b".repeat(64),
+                  byteLength: 5,
+                }),
+            }),
+          ),
+        );
+        await vi.waitFor(() => expect(parked).toBe(true));
+        // The question is registered in the step after its journal write.
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        await drive({ runner, stop: () => controller.abort(), settled: () => turn });
+        // Node reports an unheard rejection once the microtask queue drains.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      } finally {
+        process.off("unhandledRejection", record);
+      }
+      return unhandled;
+    }
+
+    it("leaves no unhandled rejection when the person interrupts a turn waiting on them", async () => {
+      const unhandled = await parkedTurn(
+        () => Effect.void,
+        async ({ stop, settled }) => {
+          stop();
+          await settled();
+        },
+      );
+
+      expect(unhandled).toEqual([]);
+    });
+
+    it("tells an answerer the answer was not taken when the turn ends before it is journalled", async () => {
+      let answerSent = false;
+      let outcome: string | undefined;
+      const unhandled = await parkedTurn(
+        // A provider that never returns from taking the answer.
+        () =>
+          Effect.suspend(() => {
+            answerSent = true;
+            return Effect.never;
+          }),
+        async ({ runner, stop, settled }) => {
+          const delivery = runner
+            .deliverQuestionAnswer({ attemptId: String(attemptId), requestId: "q1", answer: "Yes" })
+            .then(
+              () => "accepted",
+              (reason: unknown) => String(reason),
+            );
+          await vi.waitFor(() => expect(answerSent).toBe(true));
+          stop();
+          await settled();
+          outcome = await Promise.race([
+            delivery,
+            new Promise<string>((resolve) => setTimeout(() => resolve("still waiting"), 500)),
+          ]);
+        },
+      );
+
+      expect(outcome).toBe("Chat turn ended before the answer was delivered.");
+      expect(unhandled).toEqual([]);
+    });
+  });
+
   it("refuses a late answer once the question was already answered", async () => {
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {

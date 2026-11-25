@@ -1,5 +1,6 @@
 import { createCredentialTool } from "../credentials/credentialTool";
 import { workThreadSecrets, type ThreadSecretTurnFacts } from "./threadSecrets";
+import { cleanedUpWorktreeOf } from "../code/cleanedUpWorktrees";
 import type { HubActScopeSlot } from "../hub/hubActScope";
 import { eventActorForPrincipal } from "../principalEventActor";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
@@ -37,6 +38,7 @@ import {
   decodeWorkTurnUpdated,
   decodeWorkTurnRequestId,
   LOCAL_HOST_ID,
+  personalSignInRefusals,
   type AutomationRunReference,
   RUNTIME_STARTED_TURN_PROMPT,
   type OctantMode,
@@ -615,7 +617,7 @@ export function wireWork(deps: WorkDependencies) {
           mode: "work" as const,
           projectId: String(input.thread.projectId),
         },
-        isAutomationOrigin: isRoutineHostScope(input.windowId),
+        isAutomationOrigin: input.routineRun !== undefined || isRoutineHostScope(input.windowId),
         now: Date.now,
       };
       // The running turn's level; with no turn running, none.
@@ -814,8 +816,8 @@ export function wireWork(deps: WorkDependencies) {
                 create: (command) => browserAutomationService.create(command),
                 act: (command) => browserAutomationService.act(command),
                 saveDownload: (command) => browserAutomationService.saveDownload(command),
-                releaseThread: (ownerWindowId, threadId) =>
-                  browserAutomationService.releaseThread(ownerWindowId, threadId),
+                releaseThread: (ownerWindowId, threadId, endedBy, actor) =>
+                  browserAutomationService.releaseThread(ownerWindowId, threadId, endedBy, actor),
                 holdForPerson: (ownerWindowId, threadId) =>
                   browserAutomationService.holdForPerson(ownerWindowId, threadId),
                 holdForAsk: (ownerWindowId, threadId) =>
@@ -1599,12 +1601,16 @@ export function wireWork(deps: WorkDependencies) {
       readiness: (providerInstanceId) => {
         const instance = persistence.readProviderInstance(providerInstanceId);
         if (instance === undefined || !instance.enabled) return undefined;
+        if (personalSignInRefusals(instance)?.refusesBackgroundModelCalls !== undefined)
+          return undefined;
         return providerRuntimeRegistry.observedState(providerInstanceId)?.readiness;
       },
       complete: makeThreadHandOffCompletion({
         resolveDriver: (providerInstanceId) => {
           const instance = persistence.readProviderInstance(providerInstanceId);
           if (instance === undefined || !instance.enabled) return undefined;
+          if (personalSignInRefusals(instance)?.refusesBackgroundModelCalls !== undefined)
+            return undefined;
           try {
             return makeConfiguredProviderDriver(instance, configuredDriverOptions);
           } catch {
@@ -1989,6 +1995,7 @@ export function wireWork(deps: WorkDependencies) {
     });
     const threadMessageQueuePort = createThreadMessageQueuePort({
       persistence,
+      cleanedUpWorktree: cleanedUpWorktreeOf((id) => managedWorktreeReceipts.load(id)),
       journal: persistence.journal,
       chat: chatService,
       work: {
@@ -2078,7 +2085,7 @@ export function wireWork(deps: WorkDependencies) {
             actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
           });
           // Work keeps its turns in memory; the journal rebuilds them at start.
-          if (scope.mode === "work") workTurnProjection.applySteeredMessage(record);
+          if (scope.mode === "work") workTurnService.showSteeredMessage(record);
         },
       },
     });

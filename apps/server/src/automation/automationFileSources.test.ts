@@ -988,6 +988,7 @@ describe("file input reconciliation on the host routine owner", () => {
           appendDefinitionLifecycleChanged: (input) =>
             host.store.appendDefinitionLifecycleChanged(input),
           appendRunCreated: (input) => host.store.appendRunCreated(input),
+          appendRunStatusChanged: (input) => host.store.appendRunStatusChanged(input),
           appendRunCancellation: (input) => host.store.appendRunCancellation(input),
           appendFileSourceWindowChanged: (input) => host.store.appendFileSourceWindowChanged(input),
           appendOccurrenceLedger: () => {

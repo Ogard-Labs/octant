@@ -6,6 +6,7 @@ import {
   threadRowPullRequestDestinations,
   type ThreadRowPullRequestDestination,
 } from "./threadRowPullRequests";
+import { threadRowRestState } from "./threadRowRest";
 import {
   Archive,
   BellRing,
@@ -224,18 +225,13 @@ export function ThreadRowMenu(props: {
   readonly thread: ChatThreadNavigationItem;
 }) {
   const threadId = props.thread.navigationId ?? props.thread.threadId;
-  const pinned = props.thread.pinned === true;
+  const { pinned, closed, reopenLabel, snoozed } = threadRowRestState(props.thread);
   const pullRequestDestinations = threadRowPullRequestDestinations(props.thread, props.actions);
   const hasPlacementActions =
     props.actions.onPinInPane !== undefined ||
     props.actions.onPinThread !== undefined ||
     props.actions.onStartRenameThread !== undefined;
   const hasCoordinatorActions = threadCoordinatorMenuOffers(props.thread, props.actions);
-  // One action undoes either way the thread closed: settled, or marked Done.
-  // It says Un-settle when the thread settled, and Reopen for a Code thread
-  // marked Done while Settle threads when they're done is off.
-  const closed = props.thread.completedAt !== undefined || props.thread.markedDone === true;
-  const reopenLabel = props.thread.completedAt === undefined ? "Reopen" : "Un-settle";
   const readStateAction =
     props.thread.unread === true
       ? props.actions.onMarkThreadRead
@@ -244,9 +240,7 @@ export function ThreadRowMenu(props: {
     readStateAction !== undefined ||
     (closed ? props.actions.onReopenThread : props.actions.onCompleteThread) !== undefined ||
     (props.thread.markedDone !== true && props.actions.onMarkThreadDone !== undefined) ||
-    (props.thread.snooze === undefined
-      ? props.actions.onSnoozeThread
-      : props.actions.onWakeThread) !== undefined;
+    (snoozed ? props.actions.onWakeThread : props.actions.onSnoozeThread) !== undefined;
   return (
     <OctantContextMenuContent
       aria-label={`Actions for ${props.thread.title}`}
@@ -338,7 +332,7 @@ export function ThreadRowMenu(props: {
                 <MenuContent icon={Check}>Settle</MenuContent>
               </OctantContextMenuItem>
             )}
-            {props.thread.snooze !== undefined ? (
+            {snoozed ? (
               props.actions.onWakeThread === undefined ? null : (
                 <OctantContextMenuItem
                   className="thread-row-context-menu__item"

@@ -295,6 +295,10 @@ import {
   ImageJobQueued,
   ImageJobStatusChanged,
   BROWSER_CAPTURE_KEPT,
+  BROWSER_PAGE_CLOSED,
+  BROWSER_PAGE_OPENED,
+  BrowserPageClosed,
+  BrowserPageOpened,
   BROWSER_STEP_RECORDED,
   BrowserCaptureKept,
   BROWSER_DOWNLOAD_EVENT_NAMES,
@@ -489,6 +493,7 @@ import {
   PRODUCT_FEEDBACK_DISCARDED,
   ProductFeedbackProjection,
 } from "./productFeedbackProjection";
+import { BrowserPageProjection } from "./browserPageProjection";
 import { ProjectTerminalProjection } from "./projectTerminalProjection";
 import { RemoteServerGrantProjection } from "./remoteServerGrantProjection";
 import { AgentAccessProjection } from "./agentAccessProjection";
@@ -1039,6 +1044,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(VIDEO_JOB_STATUS_CHANGED, 1, VideoJobStatusChanged)
     .register(VIDEO_JOB_PROVIDER_COPY_CHANGED, 1, VideoJobProviderCopyChanged)
     .register(BROWSER_CAPTURE_KEPT, 1, BrowserCaptureKept)
+    .register(BROWSER_PAGE_OPENED, 1, BrowserPageOpened)
+    .register(BROWSER_PAGE_CLOSED, 1, BrowserPageClosed)
     .register(BROWSER_DOWNLOAD_EVENT_NAMES.saved, 1, BrowserDownloadSaved)
     .register(BROWSER_DOWNLOAD_EVENT_NAMES.selectedSaved, 1, BrowserDownloadSelectedSaved)
     .register(BROWSER_DOWNLOAD_EVENT_NAMES.refused, 1, BrowserDownloadRefused)
@@ -1170,6 +1177,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ActivityHistoryProjection())
       .register(new ProductFeedbackProjection())
       .register(new ProjectTerminalProjection())
+      .register(new BrowserPageProjection())
       .register(new RemoteServerGrantProjection())
       .register(new AgentAccessProjection())
       .register(new ThreadRetentionProjection())

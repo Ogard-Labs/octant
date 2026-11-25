@@ -163,6 +163,52 @@ Missing or invalid native metadata refuses creation/use without removing stores.
   Octant makes, or the diagnostics export. A profile holds sign-ins, which are
   credentials.
 
+### Reopening a page a restart took
+
+A restart or crash of the host ends every Browser page, and the person had one
+open in a thread's Browser pane. The pane offers it back (maintainer decision,
+2026-11-25); the rules for what is recorded and who may reopen are in
+[Architecture: Browser sessions](../architecture.md#browser-sessions).
+
+- The thread's Browser pane shows, in place of a page, a line that Octant
+  restarted and closed the page the person had open, with **Reopen page** and
+  **Dismiss**. If the profile that page was in no longer exists (a named account
+  that was removed), the line says so and offers only Dismiss. If the host
+  cannot read the profile list just now, the line says the profile could not be
+  checked and keeps both controls; the open itself then finds out.
+- Reopen page reserves the page for this window or device, moves focus to the
+  address field, and shows the start page with that page's profile preselected.
+  It opens no page and restores nothing: the person enters an address, and the
+  page opens through the ordinary open, which asks for the site in that profile
+  as always. The preselection is this thread's choice, kept if the person
+  switches threads and back, and never shown in another thread. It never
+  changes the task's saved default or the per-Project preference.
+- Nothing ends until the reserved open's first address has loaded. A declined
+  approval, a failed open, an address that fails to load, a reload, or a page
+  that ends before any address loaded leaves the offer: the line says the open
+  failed and the offer is still there, and Reopen page reserves it again. The
+  first address that loads ends the old record as reopened. A reservation lapses
+  after two minutes; the open that names the page then takes it again, or, when
+  another window or device holds it now, says so and keeps the address the
+  person typed.
+  A first load that failed and then came back through the desktop's own Reload is
+  not seen by the host as a navigation, so the old record stays: closing that page
+  offers the profile again, and Dismiss ends it.
+- The offer shows in the thread's Browser wherever it appears: the pane, and a
+  dock tab whose saved page is gone or that was just added. A tab beside another
+  tab's live page shows no offer and does not take that page.
+- Dismiss ends the offer and moves focus to the address field, the start page's
+  first control.
+- The offer exists only while the thread has no page open. A local window and a
+  device the host's own person paired at Full see it; a device paired below
+  Full, a restricted device, and a hub-introduced device see no offer and get no
+  action. The phone and paired browser add no control of their own.
+- Reopen page reserves the page for one window or device at a time and Dismiss
+  ends the offer for every window; archiving or deleting the thread ends it
+  too. A thread whose mode is switched off or whose Project is archived keeps
+  its offer, unseen, until it can open a Browser again. A restart that follows
+  an ended offer does not offer it again.
+
 ### Signing out and clearing
 
 - The profile control's menu has "Sign out of this profile…". After a

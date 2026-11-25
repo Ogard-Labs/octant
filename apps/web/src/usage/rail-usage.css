@@ -1,0 +1,87 @@
+/* The rail's usage rings and their cards, loaded with them after the window. The
+   arc is the meta ink, so a healthy plan is as quiet as the rail's icons. */
+.rail-usage-ring {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke-width: 2;
+  transform: rotate(-90deg);
+}
+
+.rail-usage-ring__track {
+  stroke: color-mix(in oklab, var(--oct-fg) 12%, transparent);
+}
+
+.rail-usage-ring__arc {
+  stroke: color-mix(in oklab, var(--oct-fg) 50%, transparent);
+  stroke-linecap: round;
+}
+
+.rail-usage-ring[data-level="near"] .rail-usage-ring__arc {
+  stroke: var(--oct-warn-fg);
+}
+
+/* Held back, so an empty ring cannot read as a full one. */
+.rail-usage-ring[data-level="spent"] .rail-usage-ring__track {
+  stroke: color-mix(in oklab, var(--oct-danger-fg) 55%, transparent);
+}
+
+.rail-usage-card {
+  display: grid;
+  min-width: 232px;
+  /* An account can report a window per model; past the room beside the rail
+     (less the popup's own padding) they scroll. */
+  max-height: calc(var(--available-height, 100vh) - 2 * var(--oct-space-3));
+  overflow-y: auto;
+  gap: var(--oct-space-3);
+}
+
+.rail-usage-card__title {
+  margin: 0;
+  font-weight: var(--oct-weight-strong);
+}
+
+.rail-usage-card__window {
+  --rail-usage-level: color-mix(in oklab, var(--oct-fg) 50%, transparent);
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.rail-usage-card__window[data-level="near"] {
+  --rail-usage-level: var(--oct-warn-fg);
+}
+
+.rail-usage-card__window[data-level="spent"] {
+  --rail-usage-level: var(--oct-danger-fg);
+}
+
+.rail-usage-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.rail-usage-card__left {
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-usage-card__window:not([data-level="ok"]) .rail-usage-card__left {
+  color: var(--rail-usage-level);
+}
+
+.rail-usage-card__bar {
+  display: block;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--oct-radius-pill);
+  background: color-mix(in oklab, var(--oct-fg) 12%, transparent);
+}
+
+.rail-usage-card__bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--rail-usage-level);
+}

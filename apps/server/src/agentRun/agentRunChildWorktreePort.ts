@@ -14,9 +14,10 @@ import {
   type ChildWorktreeSnapshot,
 } from "@octant/contracts";
 import { deriveManagedWorktreeCheckoutId } from "../code/managedCodeThreadCreation";
-import type {
-  ManagedWorktreeReceipt,
-  ManagedWorktreeReceiptLookup,
+import {
+  readyWorktreePath,
+  type ManagedWorktreeReceipt,
+  type ManagedWorktreeReceiptLookup,
 } from "../code/managedWorktreeReceiptStore";
 import {
   managedTargetPath,
@@ -43,6 +44,7 @@ export async function resolveAgentRunCodeWorkspaceContext(input: {
     | {
         readonly canonicalRepositoryPath: string;
         readonly canonicalWorktreePath: string;
+        readonly state: ManagedWorktreeReceipt["state"];
       }
     | undefined
   >;
@@ -54,8 +56,9 @@ export async function resolveAgentRunCodeWorkspaceContext(input: {
   let parentCheckoutRoot = input.repositoryRoot;
   if (checkout.kind === "managed-worktree") {
     const receipt = await input.loadManagedReceipt(String(checkout.ownershipReceiptId));
-    if (receipt === undefined) return undefined;
-    parentCheckoutRoot = receipt.canonicalWorktreePath;
+    const ready = readyWorktreePath(receipt);
+    if (ready === undefined) return undefined;
+    parentCheckoutRoot = ready;
   }
   const sourceBranch = checkout.head.kind === "branch" ? checkout.head.name : "HEAD";
   return {

@@ -35,6 +35,7 @@ import { BenchmarkService } from "../benchmarks/benchmarkService";
 import { extractReply } from "../chat/threadDialogueService";
 import type { CodeRouteService } from "../codeRoutes";
 import type { BenchmarkCheckCommandPort } from "../benchmarks/benchmarkCheckCommand";
+import type { ManagedWorktreeReclaimService } from "../code/managedWorktreeReclaim";
 import type { ManagedWorktreeService } from "../code/managedWorktreeService";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -78,6 +79,8 @@ export type BenchmarksDependencies = Pick<ServerStart, "persistence"> &
     /** The confined, network-less launcher check commands run through, with a private folder per cell. */
     readonly benchmarkCheckCommands: BenchmarkCheckCommandPort;
     readonly managedWorktreeService: Pick<ManagedWorktreeService, "cleanup">;
+    /** A discarding cleanup takes the receipt's turn, like every other change to its folder. */
+    readonly managedWorktreeReclaim: Pick<ManagedWorktreeReclaimService, "exclusive">;
     readonly managedWorktreeReceipts: {
       readonly load: (
         receiptId: string,
@@ -105,6 +108,7 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
     codeEvidence,
     benchmarkCheckCommands,
     managedWorktreeReceipts,
+    managedWorktreeReclaim,
     managedWorktreeService,
     roots,
     routeCodeService,
@@ -187,9 +191,11 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
     // The existing managed-worktree cleanup, asked to discard changes. The
     // service accepts that only for this exact benchmark branch on the
     // checkout derived from its own thread, and removes only that branch.
-    const result = await managedWorktreeService.cleanup(
-      { receiptId, confirmedByLocalUser: true, discardChanges: { branch } },
-      new AbortController().signal,
+    const result = await managedWorktreeReclaim.exclusive(receiptId, () =>
+      managedWorktreeService.cleanup(
+        { receiptId, confirmedByLocalUser: true, discardChanges: { branch } },
+        new AbortController().signal,
+      ),
     );
     if (result.status === "removed") return "removed";
     return {

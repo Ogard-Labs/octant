@@ -2555,7 +2555,295 @@ lists and removes them, and a hub-introduced or restricted device is refused
 both, because the list names folders on this
 computer and removal deletes from its disk). The receipt's
 `cleanup-pending` and `removed` states record each removal, as they do for the
-other cleanup callers.
+other cleanup callers. Cleanup on archive is on unless a person turns it off in
+Settings › Code › Worktrees.
+
+_Restorable cleanup (maintainer decision, 2026-11-25)._ A managed worktree folder can also be removed so that it can be brought back
+(`ManagedWorktreeReclaimService`). It runs for a person's choices in
+`worktrees.cleanup`: **inactivity** (a number of days without a turn or change,
+off by default; open and archived threads alike; a restore, or a cleanup the
+person's choices abandoned, counts as a change, through the receipt's
+`readyAgainAt`, so a worktree just restored is not removed again by the next
+pass) and **merged** (a day after the
+last activity, once the branch has a commit of its own that is pushed or merged;
+a worktree nobody committed to is only eligible for inactivity; off by default).
+With neither on the host removes nothing, and the timer reads no thread's
+activity: it looks at the receipts once at startup, to settle a cleanup a restart
+cut short, and then only while a cleanup it began is unsettled. The person's
+choices are read for each worktree, not once for the pass, and again right
+before a removal starts, together with the idle check: one turned off during a
+pass stops the folders not yet begun, while a removal Git already started is
+settled as below. The service removes a folder only when
+all of these hold, each read fresh from the server: the receipt is Octant's own
+and `ready` (or an interrupted restorable cleanup of the same record); the thread
+and checkout it names are the host's and the folder is the one derived for that
+thread; the repository identity, branch and head match; the receipt's own worktrees
+are unambiguous (its folder and any worktree holding one of its branches are not
+locked, prunable or detached; a locked, missing or prunable worktree of
+something else in the repository never refuses it); nothing the host tracks for the
+thread is working (the idle check below), asked before and again after the
+receipt leaves `ready`, and the branch, commit, changes, ignored files and hidden
+edits are read once more, right before Git is asked (a commit, checkout or edit in a terminal outside
+Octant in between gives the worktree back, so the recorded commit never differs
+from the folder's); the folder is clean; it holds nothing a branch cannot
+give back, meaning no untracked file, ignored file or empty folder; and Git is
+not hiding anything: no file marked skip-worktree or assume-unchanged (an edit
+to one shows in neither status nor removal), no sparse checkout, no submodule or
+gitlink, no merge, rebase, cherry-pick, revert or bisect under way in the
+worktree's own Git directory, and no `config.worktree` there: settings kept only
+for that checkout are not in the receipt, which holds the branch and the commit,
+so a restore would not bring them back and the folder stays. These are read without running anything the
+repository configured; a repository whose config names a filter command, a
+read that fails or whose output does not fit its bound, and a Git port that
+cannot look are all refused, never taken as clear. The idle check is one
+predicate (`threadHasWork`) over what the host itself tracks, with no process
+scanning: a turn starting, running or waiting on the person; a live turn; a child
+run or a task handed to another member; a debug session; a terminal of the Code
+thread itself, starting or running (counted from the moment the start is asked
+for, before it resolves its checkout, and an owner only while its process runs);
+a running shell or
+development server of the thread's Project (a shell records its Project, not a
+folder, so any of the Project's running shells holds every one of its worktrees);
+a queued message, paused and held ones included, since it is a person's unsent
+work; and a waiting wake-up. A read that cannot answer counts as work. Removal
+on archive makes the same check, except that it does not count a shell
+somewhere in the Project: the host cannot say which folder a shell is in (it can
+move between the Project's folders), and archive has never waited for one. A
+language server the host started for the folder is not stopped by cleanup,
+because the host has no per-folder stop; it ends with its own idle sweep, and
+the host's own dev-server listings only observe a server, so neither is counted
+as work or made to register before it resolves a folder: neither writes a
+person's files. A shell or a debug session does, so each counts as work from the
+first line of its start, before it resolves any folder: a start that resolved
+the folder just before the receipt left `ready` and spawns after the second idle
+check is therefore seen by that check, and one that resolves after finds the
+receipt not `ready` and is refused. Removal on archive asks the idle check again
+once it has the receipt's lock, since a restore or another cleanup may have held
+it while work began. It
+uses `git worktree remove` without force and never deletes a branch or
+releases checkpoint refs, so the thread's history and checkpoints survive. Git
+is not stopped once it has started deleting: the host's stop does not reach the
+removal. A removal Git rejects while the folder is still whole returns the
+receipt to `ready`. A cut-short removal is settled by what it left,
+and never leaves the thread without a way back. A folder with tracked files
+missing and nothing else changed is finished with force on the next pass (the
+recorded branch and commit hold every file), but only after a removal of this
+host's was started: the receipt's record notes that just before Git is asked
+(`reclaim.removalStarted`, in the receipt, not the journal), because before it a
+missing file is one the person deleted while the cleanup sat pending, and that
+folder is handed back as it is with their deletion left alone. That forced removal, the only one
+the service makes, is proven fresh each time: the folder is still registered on
+the recorded branch and commit, no hidden flag, sparse checkout, submodule or
+operation is present, the thread is idle, and, read last, right before the
+removal, only tracked files are missing; any failing proof hands the folder back
+instead. A folder with other changes
+beside the missing files, or with a hidden flag, is handed back whole: the
+missing tracked files are put back from the folder's own index with
+`checkout-index`, which replaces no existing file, the cleanup is dropped and the
+receipt is `ready`; nothing is deleted. Handing back never leaves the receipt
+`cleanup-pending`: when nothing is missing it goes straight to `ready`, and when
+putting files back fails it still goes to `ready` (the thread has its folder)
+and the person is told what to do (`git checkout -- .` in the folder). A person's Restore of a cleanup still
+pending does the same and never forces a removal. A removal that stopped after
+Git deleted the folder's `.git` file, or while it was deleting the registration's own
+admin directory, leaves the receipt's own registration: its path with the
+recorded branch and commit, or with no branch, a detached HEAD or an all-zero
+head, listed as prunable. An entry at the receipt's own path is matched on that
+path alone and its branch and head are taken from the receipt. If the folder is gone, that
+one registration is dropped with `git worktree remove` on its path, which deletes
+that admin entry and nothing else (never the repository-wide `git worktree
+prune`, which would also drop other worktrees' entries), and the cleanup
+finishes. If the folder remains and the entry is the recorded branch and commit, its `.git`
+file is written back, naming the registration's own admin directory (found the
+way worktree discovery finds it, so relative paths and Windows separators and
+case match) and replacing nothing, so Git lists it as the
+worktree it was and any file the commit does not hold is an ordinary change;
+the rules above then decide between finishing and handing back. A folder Octant
+cannot relink asks the person to move it away. So does a pending cleanup whose
+registration is gone (someone ran `git worktree prune`) while its folder is
+still there: Restore refuses with a message naming the folder, and works once
+the folder is moved. Every Git call made under a receipt's lock is bounded and the lock is
+released only after the child's whole process group is gone: SIGTERM to the
+group, a two-second grace, then SIGKILL, and the call settles only when the
+group is confirmed absent, however the direct child and its pipes ended (a
+helper that ignores SIGTERM and closed its pipes is still found and killed). A
+group still there ten seconds after SIGKILL (a process stuck in the kernel)
+settles the call so it cannot hang, but is kept in a registry that is looked
+at and killed again every quarter second, under the receipt whose operation
+started that Git. That receipt's lock neither starts nor releases an operation
+while the registry holds one of its groups: a restore that has to wait is told
+a cleanup still holds the receipt, and nothing writes in the folder while that
+helper might. Other receipts are not held up by it. Once killed, a group counts as
+gone when it has no running process: one that has exited and that its parent
+never reaps (a container without an init) writes nothing and cannot be killed. A process
+list that cannot be read counts the group as still there. Windows has no process groups: the tree is
+ended with `taskkill /T /F` at the stop, while the root still names it, and
+only the root is confirmed gone. Reads stop at two
+minutes and a removal, forced removal, leftover drop, `git worktree add`, the
+removal of a folder a restore made itself, an archive removal and a Benchmarks discard at fifteen, and a
+stopped call is interrupted, not failed, so the next pass settles it. A person's
+Restore waits at most 10 seconds in all, however many are queued, and says
+whether a cleanup or another restore holds the receipt; the ones that gave up
+do not run later. The receipt records the branch and commit (`reclaim`) when the
+cleanup starts and ends `reclaimed`; `cleanup-pending` with a record is an
+interrupted restorable cleanup, which the sweep resumes while its choice still
+stands, or returns to a working checkout when it does not and the folder is
+whole, and which the plain cleanup refuses to finish as a removal. One receipt
+changes one step at a time: cleanup, resume, abandon and restore, and the
+archive cleanup of the same receipt, take turns on one in-memory lock per
+receipt in the service, so a restore of a row still cleaning up waits for the
+removal and then restores what it left. A restore never demotes `restoring` to
+`reclaimed` while a matching folder is there. Erasing a thread and a
+Benchmarks discard take the same lock, so a restore in flight cannot recreate a
+folder and branch for a thread being erased. The erase takes the locks of all
+the thread's receipts before it stops, releases or deletes anything, and holds
+them until it is done. It takes them in receipt order, every other operation
+holds one receipt and waits for no second, and it waits at most 30 seconds for
+each, so no two can wait for each other; a wait that gives up leaves the thread
+whole to be purged again. A turn cannot start between the `ready` read and the receipt
+leaving `ready`: a turn holds its thread as starting before it reads any
+receipt, and the second idle check, made after the receipt has left `ready`,
+sees that hold or the live turn it became, while a turn that reads the receipt
+after that finds it not `ready` and is refused. The checkout root resolves only for a `ready` receipt, and every
+reader of a managed receipt's folder (turns, tools, terminals, child runs,
+mentions, Files) checks that state, so a thread takes no turn while its cleanup
+is under way, once it is cleaned up, and while a restore is under way. The
+thread says so: `CodeThreadView.worktreeCleanup` (sent only to a client that
+reads the thread with `?reads=worktree-cleanup`, because an earlier client's
+strict view decoder refuses a key it does not know; it sees the unavailable
+checkout it always saw; an earlier host answers 400 to any query, so a client
+reads again without it and remembers that for the host, while a 400 the plain
+read shares is shown as it is) makes the thread view show "This thread's worktree was cleaned up…" with
+**Restore worktree** and hold sending, and the host's refusal of a turn, a
+queued message or a wake-up that fires names the same sentence. **Restore
+worktree** (the thread's notice and Settings › Code › Worktrees › Cleaned-up
+worktrees) recreates the folder with `git worktree add` on the recorded branch
+and makes the receipt `ready` only after the new folder reports that branch and
+commit and its own index exists, no `index.lock` is left and status is clean;
+a branch that moved or was deleted (the refusal names the recorded branch and
+commit, so the person can put the branch back; Restore then works), a branch
+another worktree holds, or a folder that is already there refuses it. `git
+worktree add` runs with `core.hooksPath` pointing nowhere, so no hook the
+repository or the person's config names (a `post-checkout` that writes a file)
+runs, and the restore recreates only the recorded checkout. A folder found at
+the path that is not on the recorded branch and commit is never removed: Git
+deletes ignored files even without force, and the folder may be the person's
+after an interrupted restore, so it is kept, the checkout stays cleaned up and
+Restore names the folder to move away. Only a folder this very call made, and
+only when every file in it is the commit it landed on, is taken away again. A restore killed during `git worktree add` leaves its entry locked
+`initializing` with a partial folder, an `index.lock` and no index: it is
+recognised as this service's own on its path and recorded branch, discarded
+(`git worktree remove --force --force`) only when every file in the folder is
+the recorded commit's file, byte for byte, and added again once. A folder with
+anything else is kept, nothing is deleted, and the person is told to move it
+away; a checkout filter that changes file bytes also keeps the folder. A refusal that needs the person says what to do (move or
+unlock the folder, look at the repository's worktrees); "try again in a moment"
+is said only where waiting can help. A restore a restart interrupted resumes the same way. The
+setup recipe is not run again by a restore; it stays under its existing explicit
+recovery controls. Listing and restoring follow the archived list's admission: a
+window on this computer, or a device the host's own person paired, whose
+browser restores over its session (`/api/code/cleaned-up-worktrees/restore` is
+forwarded with a one-thread body limit); a hub-introduced or restricted device
+reads the sentence and gets neither the button nor the route. The notice goes
+with the host's answer, and a worktree another window already restored counts
+as back. A cleanup writes no journal event, so an open managed-worktree thread
+reads its standing again on the navigation refresh already running, at most
+every 30 seconds and only for that kind of thread, in both directions (cleaned
+up under it, restored from another window). A window the desktop opens on a
+person-paired computer's thread gets the same restore over that session. A
+warning from a restore that handed the folder back with files missing stays on
+screen after its row or card is gone, until it is dismissed or the next restore. No new journal event is involved: the choices ride on the Code
+settings event and the record lives in the receipt.
+
+_Version skew._ `worktrees` is an optional field of `CodeSettings` and
+`worktreeCleanup` an optional field of the thread view. A client reads a host's
+answer through `decodeHostAnswer`, which drops a field its build does not know,
+so an earlier client reads the settings without the worktree choices and keeps
+the stored choice when it saves (an update without `worktrees` keeps them). The
+host's own decodes stay strict, so an earlier host rejects an update that names
+`worktrees.cleanup`: a host that has cleanup therefore always answers with a
+`cleanup` object (empty for the defaults, though storage keeps none, and
+whatever naming choices are stored), and a window shows the naming controls on
+every host and the cleanup controls only for an answer that carries one. A receipt in a state or with a `reclaim` record an earlier host does not
+know fails that host's strict receipt decode, so the receipt reads as invalid
+and the thread takes no turn rather than running in a folder that is gone.
+
+_Branch naming (maintainer decision, 2026-11-25)._ A new managed worktree's
+delivery branch is a configurable prefix (`octant/` unless changed in Settings ›
+Code › Worktrees) and either a short id, the default, or words from the person's
+own prompt (`deriveDeliveryBranch` in the domain, derived on this computer). The
+words are conservative, because a branch name is pushed: after a word that says
+a secret follows (password, passwd, pass, secret, token, key, credential,
+bearer, auth, pin, login code, compounds such as `DB_PASS` and `API_KEY`, and the
+Norwegian passord, hemmelig, nøkkel and kode) the rest of that clause is dropped;
+so is every word with `=`, every URL, path, email and host, every word that
+mixes letters and digits beyond an ordinary shape (`v2`, `utf8`, `h264`,
+`oauth2`, issue numbers such as `#123` stay), long digit runs and protected
+names (`.env`, `.ssh`, `id_rsa`). A clause ends at a sentence stop or a line end.
+When a line ends inside a clause that named a secret, the lines after it are left
+out too, up to a blank line, since the value is often pasted there.
+The text is redacted first, so a token shaped like a key never gets this far.
+At most 40 characters are kept, and with fewer than two words left the id name
+is used. Windows reserved names (`con`, `prn`, `aux`, `nul`, `com1` to `com9`,
+`lpt1` to `lpt9`, with or without an extension) are never produced and are
+refused when typed or used as a prefix segment. A name is always a valid Git ref
+and never the base branch (a prefix that is not one is ignored). A branch or tag
+named like the prefix, or like a part of it, blocks every name below it, so the
+prefix's slashes then become dashes (`feature/` with a `feature` branch gives
+`feature-abc123`). The phone's start, which shows the
+name in its delivery target sheet, and the starts that show none (a paired
+browser, a worker) read the taken names too when the person chose a prefix; a
+host that cannot say leaves the name to its own check.
+
+A name is numbered (`-2`, `-3`) when a branch of that name, or one above or below
+it, exists, compared without case, against every name the host lists with
+`list-code-worktree-branch-names`: local branches, remote branches with the
+remote's name removed, and tags. That read is names only, apart from the
+200-entry display list the Where picker shows, and returns at most 20,000
+names; a repository with more, a host that cannot read them, and a Project on a
+server (whose refs this host cannot read) answer `truncated`, and the composer
+then falls back to the id name, since nothing proves a worded name is free. The
+composer shows the name in Worktree options before Send and sends exactly it. The
+host holds creation to the same rule (the same names, case-insensitive, above and
+below) before it makes the worktree, and when the previewed name was taken in the
+meantime it refuses with a message and does not choose another name; the composer
+reads the names again after a refused creation, so the name shown is the one
+that would be tried next. The host keeps its exact local-branch check when the
+listing is cut short or fails. A choice (typed or suggested) belongs to the
+Project and base branch it was made for, and is forgotten when either changes.
+A typed name that is refused is not shown as if it would be used: the field
+returns to the name Send will create and says why.
+
+A model is asked for words only when the person presses **Suggest name**:
+`suggest-code-worktree-branch` carries the draft and the model the composer has
+selected, and nothing else about the Project or checkout. The client sends the
+draft after redaction and after the reduction above, so no dropped clause is
+sent, and at most 2,000 characters, so a long draft works. The host redacts and
+reduces it again, checks the Project's provider rules, sign-in and spend ceilings
+(the request is not a turn and is reserved against token ceilings as 4,000
+tokens, or refused where a monetary ceiling cannot price it), runs one short
+request, and reduces the reply with the same word rules. What a sent request used
+is recorded under the Code Project on the usage ledger before its reservation is
+released (a `worktree-branch-suggestion` request on its own
+`worktree-branch-suggestion-usage` aggregate, whose id is the Project's, since no
+thread exists yet), so the Project's ceilings and the usage view count it. A sent
+request that got no answer is recorded as unreported usage, as a stopped turn is;
+one that was never sent gives its reservation back. The call stops when the composer goes away, when the
+Project changes, or when the person types a name; a window has at most one
+suggestion in flight on the host, and a second is declined as busy. A refused,
+failed or outdated answer changes nothing and the local name stays. A device the host's own person paired
+may ask for one; a hub-introduced or agent-gated caller may not.
+
+The prefix applies wherever a person starts a new Code thread: the composer on
+the host's start screen, a paired browser's thread start, the phone's thread
+start, and a worker approved from a paired browser or the phone or started by a
+coordinator on the host. Follow-up suggestion, checkpoint, automation,
+delegation, benchmark and other host-made threads keep their own names
+(`octant/<short id>` and the like). The words of a prompt are used only on the
+host's start screen, where the taken names are known; the other starts use the
+prefix and an id. The `settings.worktrees` field is read by older clients as a
+host answer, which ignores a field it does not know, so they keep working
+without showing the choices.
 
 The host reads a worktree's changes outside any sandbox, so it runs nothing a
 repository configured: Git starts with `core.fsmonitor=false`,
@@ -6336,6 +6624,77 @@ flowchart LR
   built yet, a paired device that can open the thread,
   added to a pull request body only when the person chooses, and never in
   telemetry. Detail is in [Browser captures](design/browser-captures.md).
+- **Browser sessions.** A Browser session is the person's open page in a
+  thread's Browser pane in a Work or Code thread (maintainer decision,
+  2026-11-25). The host journals its start as `browser.page-opened@1` and its
+  end as `browser.page-closed@1`, one aggregate per page, so a start with no end
+  when the host next starts is what a restart, a crash or a Quit took. A record
+  names the page id, the thread, the window, the mode, the profile kind
+  (Private, Project, Personal, or a named account by its stored profile id,
+  never a site account or an email) and the thread's Project, and never an
+  address, a title, or page content. Only the person's own open route records a
+  page: it says the person opened it, and an agent, a subagent, a routine, a
+  saved flow, a terminal grant and a page the host runs for its own owner open
+  pages in the same context without saying so, so none is recorded, nor is a
+  page opened for one Open of its own, and Chat has no Browser. Every ordinary
+  ending writes the end, with the actor of the request that caused it (the
+  device at any access level, the local person for a window, the agent whose
+  Browser stop it was): the person closing the page, the agent stopping its
+  Browser, the window closing, a remote device's session ending, the thread's
+  authority ending, a cleared or removed profile, a profile switch (which
+  records the replacement page and ends the old record as superseded), the page
+  expiring, and the Browser runtime being lost; the last two are the host's own
+  doing and carry the host's actor. Only a Quit and the host's own shutdown
+  keep the record open. The desktop says on the window-revoke request itself
+  that its app is quitting (`desktopQuitAccepted`, set once the quit was
+  accepted, whether the person, the system, a signal or an update asked for it,
+  and for a Quit that closes the windows and leaves a host running for other
+  clients); the host reads it per request, holds that window's pages' records,
+  and offers them again at once from the running host as well as at the next
+  start. Only the desktop's bridge secret reaches that route, so no paired
+  device can use the field, and a desktop or host that predates it keeps
+  working (the desktop asks again without the field when a host refuses it).
+  After a quit is accepted the desktop stops reporting pages gone to the host,
+  so its windows closing is not recorded as a lost Browser runtime. A person
+  closing a window while the app keeps running writes the end. A crash or a power
+  loss revokes nothing and
+  offers the page. The start settles what is left: a page whose thread is
+  archived or deleted is ended, a page whose thread is live but cannot open a
+  Browser now (its mode switched off, its Project archived) is held and not
+  shown until it can, only the newest page of each thread stays, and no more
+  than 25 pages stay in all. The projection holds only the pages open now. A run
+  deletes nothing from the journal: the persistence start removes the events of
+  ended pages before it records the journal verification watermark, as it does
+  for superseded checkout observations. A whole ended page leaves with both of
+  its events, so the rows that stay are the rows the scan decoded, and that
+  start records the watermark again at the head that is left. A thread purge takes a thread's records
+  and a Project erase takes a Project's, and no export, replica sync, usage or
+  activity view, or support bundle carries them beyond the event name in the
+  bundle's recent-event list and the kind-name count in Journal growth. The
+  thread's Browser read carries the offer for the host's person only: a local
+  window, or a device the person paired at Full; a device paired below Full, a
+  restricted device, and a hub-introduced device see no offer and cannot claim,
+  release or dismiss one, checked on the host before any record is read. A claim
+  is a short exclusive reservation in memory for one window or device: of two
+  windows only one holds the page, and it is given back when the open it was for
+  fails or is declined, when the window goes away, or after two minutes (a remote device's session ending leaves its reservation to lapse that way). An
+  open that names the page after its reservation lapsed takes it again in one
+  step unless another window or device holds it, which refuses that open with
+  a reason the pane shows and keeps what the person typed. The offer ends only
+  when the reserved open's first navigation succeeds, which records the new page,
+  ends the old record as reopened and supersedes the thread's other older
+  offers, or on dismiss, archive, delete or purge. A reserved page that has
+  loaded no address records nothing, so a failed first address, a page that
+  ends first, or a crash in between leaves exactly the old offer, and the next
+  start offers that one alone. The thread's Browser
+  read carries the offer while no page of the thread is open, and a dock tab
+  reads it from the thread when its saved page is gone or it is added fresh,
+  without taking another tab's page. Reopening never restores the page: it names the profile, the
+  start page preselects it, and the person's address goes through the ordinary
+  open with its site approval. A profile that no longer exists is said so
+  instead of offered; a profile list that cannot be read now keeps the offer and
+  says it could not be checked. Detail is in
+  [Browser profiles: Reopening a page a restart took](design/browser-profiles.md#reopening-a-page-a-restart-took).
 - **Browser flows.** An agent's Browser run can be saved as a named flow in the
   thread's Work or Code Project and replayed by name with no model turn between
   steps, each step admitted like a call of its own. The host keeps up to 50 flows
@@ -7308,10 +7667,19 @@ ls-remote` against the thread's remote and the GitHub reads they already
   "Sent while the turn ran", on the desktop and the phone alike. Its journal
   append invalidates the turn's mode on the change feed (`work-navigation` or
   `code-navigation`), as any turn change does, so readers of the thread list
-  and of a transcript read afresh see it at once. A desktop transcript
-  already open follows its turn's stream, which carries no steered message,
-  and shows it when the turn settles or the transcript is read again;
-  carrying it on the turn stream is a follow-up. When the running turn is
+  and of a transcript read afresh see it at once. An open desktop Work
+  transcript follows its turn's stream, which carries no steered message, so
+  the host also sends that stream `snapshot-required`: the view reads the
+  transcript again while the turn runs and shows the message. That read
+  holds the reply, tool steps and task list streamed so far, so none is
+  rolled back. A retry notice it does not hold is cleared until the next one
+  is announced. The subscription stays open after this frame, because no
+  frame was lost and a goal-loop round on the same feed still waits for the
+  turn to settle; a feed that did lose its place ends as before. A separate
+  frame for the message was rejected because an older client cannot decode a
+  frame kind it does not know. An open desktop Code transcript shows the
+  message when the turn settles or the transcript is read again; showing it
+  there at once is a follow-up. When the running turn is
   one the queue admitted itself, that message stays at the head as
   `accepted` until its turn settles, and the message behind it is offered to
   that turn under the same checks, one at a time, in order. A message
@@ -7340,7 +7708,10 @@ ls-remote` against the thread's remote and the GitHub reads they already
   re-read unchanged data each second. A provider-switch handoff, a child's parent
   context and a thread export carry each steered message as a user message
   of its turn, after that turn's prompt, with the time it was sent, under the
-  same limits and redaction as the turn's other messages. The message is not marked as dispatching
+  same limits and redaction as the turn's other messages. The conversation a
+  Code compaction's handover summary reads carries them too, in the order
+  they were sent, after their turn's prompt, each under a source of its own
+  that names the turn and the message. The message is not marked as dispatching
   before the steer: a restart while the runtime takes it also ends the turn
   that took it, and the still-queued message then follows the ordinary
   restart rules rather than being lost. Which runtimes steer is the provider
@@ -7768,9 +8139,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   Claude and Codex plan usage limits (rolling windows, per-model weekly,
   overage) come only from the provider's own process: session
   `rate-limit-window` events, or a process reading a person asks for.
-  Devin and OpenCode Go have no such channel in their runtimes, so their
-  plan windows come from the account usage endpoint under the
-  account usage endpoint rule in
+  Devin, OpenCode Go, and Mistral Vibe have no such channel in their
+  runtimes, so their plan windows come from the account usage endpoint
+  under the account usage endpoint rule in
   [Security and authority](#security-and-authority). The Claude
   reading starts
   the provider's process, so it is made only on an explicit refresh
@@ -7796,7 +8167,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   refresh keeps the last snapshot and shows its age. Every provider
   instance's last plan-limit reading, whatever its source, is also saved
   in `providers/usage-readings.json` (owner-only, listed in the host data
-  map), so the rail's account face shows it after a host restart as a past
+  map), so the rail's usage rings show it after a host restart as a past
   observation with its original `observedAt`. A restored reading is
   never refreshed by starting a provider: the launch pass and the
   schedule leave it as it is, and the first fresh evidence (a turn's
@@ -10598,7 +10969,10 @@ sum, so no request counts twice. A token ceiling sums input and output:
 reasoning is part of output for every runtime, OpenCode's included, whose
 mapper adds the reasoning it reports apart into output; the rows OpenCode
 wrote before that are kept by id at the upgrade
-(`usage_reasoning_outside_output`) and their reasoning is added. A Code row carries the same reasoning and
+(`usage_reasoning_outside_output`) and their reasoning is added, by the
+ceiling's sum and by every read of the ledger (the Usage dashboard, the usage
+list and the exports), so an output total means the same for old and new rows.
+A Code row carries the same reasoning and
 cache read and write tokens a Chat or Work row does, NULL where the report
 named none; Code rows projected before they were filled stay NULL, since a
 purged thread's operation events are gone and a rebuild would drop its spend.
@@ -20675,9 +21049,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   deleted, and a request the plan route's profile cannot express is refused
   before send. The wire details are in
   [Provider runtimes](design/provider-runtimes.md#subscription-sign-in-dialects).
-- **Account usage endpoints.** Devin and OpenCode Go report plan windows only from an account endpoint, so the
-  host reads the sign-in their own CLI saved and asks that endpoint. Devin:
-  `windsurf_api_key` (and an `https` `api_server_url`, else
+- **Account usage endpoints.** Devin, OpenCode Go, and Mistral Vibe report plan windows only from an account endpoint, so the
+  host reads a credential already on this computer and asks that endpoint.
+  Devin: `windsurf_api_key` (and an `https` `api_server_url`, else
   `server.codeium.com`) from `~/.local/share/devin/credentials.toml`, sent in
   the body of a Connect `POST` to
   `SeatManagementService/GetUserStatus`; daily and weekly remaining
@@ -20687,14 +21061,28 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `~/.local/share/opencode`), opened read-only with no pragmas, else
   `auth.json` when no database keeps sign-ins; sent as a bearer token to
   `GET opencode.ai/zen/go/v1/usage`, whose 5-hour, weekly, and monthly
-  used percentages become windows. The reads run in the host process, only
+  used percentages become windows. Mistral Vibe: the Mistral API key Settings
+  already holds for that instance, sent as a bearer token to
+  `GET api.mistral.ai/v1/billing/budget`; `vibe_budget.usage_percentage`
+  becomes the monthly window, `reset_at` its reset, and `payg_enabled` (or a
+  best-effort `GET /v1/billing/subscription` `vibe_payg_enabled`) a label on
+  that window, not a second bar. A spent included window with pay-as-you-go
+  on stays an available account: remaining capacity shows 0% left and the
+  PAYG label, and automatic calls and coordinator selection keep using it.
+  Pay-as-you-go off at 100% is an account limit until reset. Octant never reads Vibe's Keychain item
+  `ai.mistral.vibe` / `MISTRAL_API_KEY`, never scans `~/.vibe/.env` or a host
+  `MISTRAL_API_KEY`, and never scrapes `admin.mistral.ai`. A missing
+  `vibe_budget`, a zero `initial_budget`, or a key without usage permission
+  (HTTP 403) is plan limits not applying, never 0% used; a missing key or an
+  instance not on API-key authentication is not ready, with the existing Vibe
+  sign-in guidance. The reads run in the host process, only
   for an enabled instance of that provider. Only a refresh a person asks for
   waits on the endpoint. Every other caller, the limits service's
   five-minute schedule and the service-limits read before each Chat turn,
   gets the last reading at once and starts at most one background read per
   five minutes, so a turn never waits on the endpoint and frequent turns
   never multiply the calls. The request sends nothing else and follows no
-  redirect. Octant never writes, copies, or stores either key. It
+  redirect. Octant never writes, copies, or stores the key. It
   stays out of logs, the journal, snapshots, and errors: every failure carries
   a fixed message. A missing sign-in reads as not ready, an OpenCode sign-in
   without Go as plan limits not applying, a refused key as unauthenticated,
@@ -21990,10 +22378,12 @@ documents its authority, privacy, and release boundaries):
   ([process topology](#process-topology)), the desktop keeps local crash
   records (an unwatched host keeps its own at its next start), the next
   start's notice names them, and the recovery screen saves a support bundle.
-  Not built yet: one-click reopening of a Browser session a restart ended.
-  Code thread and Project terminals, debug sessions and saved Project action
-  runs a restart ended are offered back through their ordinary start
-  ([Decisions and requirements](design/decisions.md#recovering-after-a-crash-without-the-terminal)).
+  Code thread and Project terminals, debug sessions, saved Project action runs
+  and the person's Browser page a restart ended are offered back: the first four
+  through their ordinary start, the page through a **Reopen page** control that
+  opens a blank page in the same profile
+  ([Browser sessions](#browser-sessions);
+  [Decisions and requirements](design/decisions.md#recovering-after-a-crash-without-the-terminal)).
 - Public Canvas links, under
   [Canvas public links](design/canvas-public-links.md), served by the
   self-hostable reference app at `apps/share` in this repository. Ogard Labs

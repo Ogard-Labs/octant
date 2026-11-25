@@ -11,6 +11,7 @@ import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { openSqlite, type SqliteConnection } from "./persistence/sqlitePort";
 import { USAGE_PROJECTION_SCHEMA_VERSION } from "./persistence/usagePersistenceSchema";
 import { readUsageDashboard } from "./usageDashboardService";
+import { queryUsageRecords } from "./persistence/usageProjection";
 import type { UsageProjectScope } from "./usageProjectScope";
 
 /**
@@ -177,6 +178,36 @@ describe("readUsageDashboard", () => {
     expect(dashboard.summary.excludedRecordCount).toBe(0);
   });
 
+  it("counts thinking inside output the same way for rows written before and after OpenCode added it there", () => {
+    const connection = connect();
+    const older = "67000000-0000-4000-8000-0000000000b1";
+    const newer = "67000000-0000-4000-8000-0000000000b2";
+    // The same turn twice: 50 tokens of answer and 20 of thinking.
+    seedUsageRow(connection, { reconciliationId: older, sequence: 1 });
+    seedUsageRow(connection, { reconciliationId: newer, sequence: 2 });
+    connection.prepare("UPDATE usage_record_projection SET reasoning_tokens = 20").run();
+    connection
+      .prepare("UPDATE usage_record_projection SET output_tokens = 70 WHERE reconciliation_id = ?")
+      .run(newer);
+    connection
+      .prepare("INSERT INTO usage_reasoning_outside_output (reconciliation_id) VALUES (?)")
+      .run(older);
+
+    const dashboard = read(connection);
+    expect(dashboard.detail.map((row) => [row.outputTokens, row.reasoningTokens])).toEqual([
+      [70, 20],
+      [70, 20],
+    ]);
+    expect(dashboard.summary.totals).toMatchObject({
+      totalOutputTokens: 140,
+      totalReasoningTokens: 40,
+    });
+
+    // The usage list and both exports read the same rows.
+    const { records } = queryUsageRecords(connection, {}, 10, 0, unfiledScope);
+    expect(records.map((record) => record.outputTokens)).toEqual([70, 70]);
+  });
+
   it("resolves Project attribution from the durable chat thread projection", () => {
     const connection = connect();
     seedChatThread(connection, ids.project);
@@ -226,6 +257,19 @@ describe("readUsageDashboard", () => {
     expect(
       dashboard.dimensionSources.find((source) => source.dimension === "project")?.status,
     ).toBe("recorded");
+  });
+
+  it("shows a suggested branch name under its Code Project, and not as unfiled", () => {
+    const connection = connect();
+    seedUsageRow(connection, { subjectType: "code-project", subjectId: ids.project });
+
+    const scope = { kind: "projects", projectIds: [ids.project] } as const;
+    const dashboard = read(connection, { filter: { mode: "code" } }, scope);
+    expect(dashboard.detail[0]).toMatchObject({ projectId: ids.project, mode: "code" });
+    expect(read(connection).summary.totals.totalRequests).toBe(0);
+    expect(read(connection, { filter: { mode: "chat" } }, scope).summary.totals.totalRequests).toBe(
+      0,
+    );
   });
 
   it("shows a child run's usage under its parent thread's Project", () => {

@@ -34,7 +34,7 @@ export function SidebarMore(props: SidebarMoreProps) {
       {props.presentation === "rail" ? (
         // Named beside the rail on hover and keyboard focus, like every other
         // rail control; a native title shows on hover only.
-        <OctantTooltip label="More" side="right">
+        <OctantTooltip align="center" compact label="More" side="right">
           <OctantMenuTrigger
             aria-current={holdsActive ? "page" : undefined}
             aria-label="More destinations"

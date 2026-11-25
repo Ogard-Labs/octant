@@ -429,6 +429,39 @@ describe("AutomationCenter detail disclosure", () => {
     );
   });
 
+  it("shows confirmation guidance and confirms an awaiting-confirmation run via Send now", async () => {
+    const waitingRun = automationRunFixture(definition, {
+      id: AUTOMATION_UI_TEST_IDS.otherRun,
+      lifecycle: "awaiting-confirmation",
+      threadId: undefined,
+      dispatchIntent: undefined,
+      firstTurnAcceptance: undefined,
+    } as never);
+    const client = fakeClient({
+      get: vi.fn(async () => ({
+        kind: "automation-detail" as const,
+        automation: definition,
+        runs: [waitingRun],
+      })),
+    });
+    renderCenter({ client });
+    const detail = await openDetail();
+
+    expect(
+      within(detail).getByText(/This run is waiting for your confirmation before starting/i),
+    ).toBeVisible();
+    await userEvent.click(within(detail).getByRole("button", { name: "Send now" }));
+    await waitFor(() =>
+      expect(client.execute).toHaveBeenLastCalledWith({
+        kind: "confirm-automation-run",
+        automationId: definition.id,
+        expectedVersion: definition.version,
+        runId: waitingRun.id,
+        expectedRunVersion: waitingRun.version,
+      }),
+    );
+  });
+
   it("names a blocked definition's typed reason as plain text", async () => {
     const blocked = automationDefinitionFixture({
       lifecycle: "paused",
@@ -867,5 +900,28 @@ describe("AutomationCenter arranging", () => {
     expect(empty).toHaveClass("surface-empty");
     expect(empty).toHaveTextContent("No automations match these filters");
     expect(screen.getByRole("button", { name: "Clear filters" })).toBeVisible();
+  });
+
+  it("includes an enabled routine awaiting confirmation under the Needs attention filter", async () => {
+    const waitingSummary = automationSummaryFixture({
+      id: "aa000000-0000-4000-8000-000000000099" as never,
+      displayName: "Needs confirm",
+      latestRunLifecycle: "awaiting-confirmation",
+    });
+    renderCenter({
+      client: fakeClient({
+        list: vi.fn(async () => ({
+          kind: "automation-list" as const,
+          items: [workSummary, waitingSummary],
+        })),
+      } as Partial<AutomationClient>),
+    });
+    await screen.findByRole("list", { name: "Automations" });
+
+    await chooseFilter("Status", "Needs attention");
+
+    const rows = screen.getByRole("list", { name: "Automations" });
+    expect(within(rows).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(rows).getByRole("listitem", { name: "Needs confirm" })).toBeVisible();
   });
 });

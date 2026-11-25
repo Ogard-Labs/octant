@@ -27,7 +27,9 @@ function Window(props: GuidedTourProps & { readonly withTools?: boolean }) {
     <>
       <button aria-label="New chat" ref={placed(box(240, 8, 28, 28))} type="button" />
       <nav aria-label="Projects" ref={placed(box(52, 56, 312, 600))}>
-        <div className="project-nav__toolbar" ref={placed(box(52, 56, 312, 32))} />
+        <div className="project-nav__list">
+          <div className="project-nav__toolbar" ref={placed(box(52, 56, 312, 32))} />
+        </div>
       </nav>
       {withTools ? (
         <div aria-label="Tools" ref={placed(box(700, 4, 196, 36))} role="toolbar" />

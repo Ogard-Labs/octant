@@ -8,6 +8,8 @@ import { CodeSettingsView, type CodeSettingsUpdate } from "./CodeSettingsView";
 const settings = {
   defaultExecutionPolicy: "approval-gated",
   defaultPermissionPersistence: "current-session",
+  // A host that has the cleanup choices always answers with them, empty for the defaults.
+  worktrees: { cleanup: {} },
   version: 1,
   updatedAt: "2026-07-21T12:00:00.000Z",
 } as const;
@@ -62,6 +64,70 @@ describe("CodeSettingsView", () => {
         defaultModel: { providerInstanceId: providerId, modelId: "model-a" },
       }),
     );
+  });
+
+  it("shows today's worktree behaviour for a default install and saves a prefix, naming and cleanup choices whole", async () => {
+    const update = vi.fn(async (_input: CodeSettingsUpdate) => true);
+    render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
+    const user = userEvent.setup();
+    expect(screen.getByRole("textbox", { name: "Branch prefix" })).toHaveValue("octant/");
+    expect(
+      screen.getByRole("switch", { name: "Clean up when a thread is archived" }),
+    ).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Clean up merged worktrees" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Clean up after inactivity" })).not.toBeChecked();
+    expect(screen.queryByRole("textbox", { name: "Days of inactivity" })).toBeNull();
+
+    const prefix = screen.getByRole("textbox", { name: "Branch prefix" });
+    await user.clear(prefix);
+    await user.type(prefix, "henrik/");
+    await user.tab();
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ worktrees: { branchPrefix: "henrik/", cleanup: {} } }),
+    );
+
+    await user.click(screen.getByRole("switch", { name: "Clean up after inactivity" }));
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ worktrees: { cleanup: { inactivityDays: 30 } } }),
+    );
+  });
+
+  it("shows the naming controls on any host and the cleanup controls only on one that has cleanup", () => {
+    const { worktrees: _worktrees, ...noChoices } = settings;
+    for (const host of [noChoices, { ...settings, worktrees: { branchPrefix: "team/" } }]) {
+      const { unmount } = render(
+        <CodeSettingsView onUpdate={vi.fn(async () => true)} settings={host as never} />,
+      );
+      expect(screen.getByRole("textbox", { name: "Branch prefix" })).toBeInTheDocument();
+      expect(
+        screen.queryByRole("switch", { name: "Clean up when a thread is archived" }),
+      ).toBeNull();
+      expect(screen.queryByRole("switch", { name: "Clean up after inactivity" })).toBeNull();
+      unmount();
+    }
+  });
+
+  it("goes to the worktree naming choice a settings search picked", () => {
+    const { container } = render(
+      <CodeSettingsView
+        focusedSetting="code-worktree-branch-prefix"
+        onUpdate={vi.fn(async () => true)}
+        settings={settings as never}
+      />,
+    );
+    expect(container.querySelector('[data-focused="true"]')).toHaveTextContent("Branch prefix");
+  });
+
+  it("refuses a branch prefix Git would reject without saving it", async () => {
+    const update = vi.fn(async (_input: CodeSettingsUpdate) => true);
+    render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
+    const user = userEvent.setup();
+    const prefix = screen.getByRole("textbox", { name: "Branch prefix" });
+    await user.clear(prefix);
+    await user.type(prefix, "bad prefix/");
+    await user.tab();
+    expect(update).not.toHaveBeenCalled();
+    expect(screen.getByText(/cannot use that prefix/)).toBeVisible();
   });
 
   it("offers the terminal shell on a Windows host, Windows PowerShell first, and saves the choice", async () => {
@@ -304,10 +370,11 @@ describe("CodeSettingsView", () => {
     expect(screen.getByRole("heading", { name: "Coordinators" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Editor" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Devices" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Worktrees" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "External editor" })).toBeVisible();
     expect(container.querySelector(".code-settings [data-slot='card']")).toBeNull();
     expect(container.querySelectorAll(".code-settings .settings-card-section--open")).toHaveLength(
-      6,
+      7,
     );
     // The five-way mode choice is a select like the Agents posture.
     expect(screen.getByRole("combobox", { name: "Default mode" })).toBeVisible();

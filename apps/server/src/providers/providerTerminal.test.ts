@@ -94,9 +94,9 @@ describe("provider terminal", () => {
     const launch = resolve(instance("claude"), "darwin", "/bin/zsh", false);
     if (launch.status !== "resolved") throw new Error("expected a launch");
     expect(launch.environment.CLAUDE_CONFIG_DIR).toBe("/Users/person/.octant/claude-work");
-    // Outside Strict telemetry is off until the person turns it on, and the
-    // terminal does not read that switch yet, so the guard stays.
+    // With no settings to read, both of the provider's channels stay closed.
     expect(launch.environment.DISABLE_TELEMETRY).toBe("1");
+    expect(launch.environment.DISABLE_AUTOUPDATER).toBe("1");
     expect(launch.environment.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
@@ -110,7 +110,11 @@ describe("provider terminal", () => {
           platform: "darwin",
           shell: "/bin/zsh",
           strict: false,
-          credentialPassThrough: (driverKind) => (driverKind === kind ? credentialPassThrough : []),
+          ownChannels: (driverKind) => ({
+            telemetry: false,
+            selfUpdate: false,
+            ...(driverKind === kind ? { credentialPassThrough } : {}),
+          }),
         });
         if (launch.status !== "resolved") throw new Error("expected a launch");
         return launch.environment;
@@ -118,6 +122,60 @@ describe("provider terminal", () => {
       expect(open([]).GH_TOKEN, kind).toBeUndefined();
       expect(open(["GH_TOKEN"]).GH_TOKEN, kind).toBe("gh-canary");
       expect(open(["GH_TOKEN"]).NPM_TOKEN, kind).toBeUndefined();
+    }
+  });
+
+  const bothOn = () => ({ telemetry: true, selfUpdate: true });
+
+  function openClaude(
+    posture: Partial<Parameters<typeof resolveProviderTerminal>[0]> = {},
+  ): Readonly<Record<string, string>> {
+    const launch = resolveProviderTerminal({
+      instance: instance("claude"),
+      hostEnvironment: HOST,
+      homeDirectory: "/Users/person",
+      platform: "darwin",
+      shell: "/bin/zsh",
+      strict: false,
+      mode: "code",
+      executionPolicy: "approval-gated",
+      ownChannels: bothOn,
+      ...posture,
+    });
+    if (launch.status !== "resolved") throw new Error("expected a launch");
+    return launch.environment;
+  }
+
+  it("lets Claude Code send its own telemetry and update itself outside Strict when the person turned both on", () => {
+    const environment = openClaude();
+    expect(environment.DISABLE_TELEMETRY).toBeUndefined();
+    expect(environment.DISABLE_ERROR_REPORTING).toBeUndefined();
+    expect(environment.DISABLE_AUTOUPDATER).toBeUndefined();
+  });
+
+  it("follows each of the two provider switches on its own in Claude Code's terminal", () => {
+    const telemetryOnly = openClaude({
+      ownChannels: () => ({ telemetry: true, selfUpdate: false }),
+    });
+    expect(telemetryOnly.DISABLE_TELEMETRY).toBeUndefined();
+    expect(telemetryOnly.DISABLE_AUTOUPDATER).toBe("1");
+    const selfUpdateOnly = openClaude({
+      ownChannels: () => ({ telemetry: false, selfUpdate: true }),
+    });
+    expect(selfUpdateOnly.DISABLE_TELEMETRY).toBe("1");
+    expect(selfUpdateOnly.DISABLE_AUTOUPDATER).toBeUndefined();
+  });
+
+  it("keeps Claude Code's channels closed under Strict, a kept sandbox or a chosen sandbox policy, whatever the switches say", () => {
+    for (const posture of [
+      { strict: true },
+      { executionPolicy: "full-access", fullAccessSandbox: true },
+      { fullAccessSandbox: true },
+      { sandboxPolicySelected: true },
+    ] as const) {
+      const environment = openClaude(posture);
+      expect(environment.DISABLE_TELEMETRY, JSON.stringify(posture)).toBe("1");
+      expect(environment.DISABLE_AUTOUPDATER, JSON.stringify(posture)).toBe("1");
     }
   });
 
@@ -176,7 +234,7 @@ describe("ACP agent terminal", () => {
 
   function resolveAcp(
     candidate: ProviderInstance,
-    options: { readonly strict?: boolean; readonly fullAccessSandbox?: boolean } = {},
+    options: Partial<Parameters<typeof resolveProviderTerminal>[0]> = {},
   ) {
     const managedRoot = mkdtempSync(join(tmpdir(), "octant-acp-terminal-"));
     directories.push(managedRoot);
@@ -186,12 +244,10 @@ describe("ACP agent terminal", () => {
       homeDirectory: "/Users/person",
       platform: "darwin",
       shell: "/bin/zsh",
-      strict: options.strict ?? true,
+      strict: true,
       mode: "work",
       executionPolicy: "approval-gated",
-      ...(options.fullAccessSandbox === undefined
-        ? {}
-        : { fullAccessSandbox: options.fullAccessSandbox }),
+      ...options,
       acpHome: (kind, instanceId) => join(managedRoot, kind, instanceId),
     });
     return {
@@ -269,6 +325,30 @@ describe("ACP agent terminal", () => {
         mode: "work",
       }).NO_COLOR,
     ).toBe("1");
+  });
+
+  it("lets an ACP agent's CLI update itself outside Strict only when the person turned that on", () => {
+    const guard = (options: Parameters<typeof resolveAcp>[1]) => {
+      const { launch } = resolveAcp(acpInstance("antigravity"), options);
+      if (launch.status !== "resolved") throw new Error("expected a launch");
+      return launch.environment.AGY_CLI_DISABLE_AUTO_UPDATE;
+    };
+    const on = () => ({ telemetry: true, selfUpdate: true });
+    expect(guard({ strict: false, ownChannels: on })).toBeUndefined();
+    expect(guard({ strict: false })).toBe("1");
+    expect(
+      guard({ strict: false, ownChannels: () => ({ telemetry: true, selfUpdate: false }) }),
+    ).toBe("1");
+    expect(guard({ strict: true, ownChannels: on })).toBe("1");
+    expect(
+      guard({
+        strict: false,
+        ownChannels: on,
+        executionPolicy: "full-access",
+        fullAccessSandbox: true,
+      }),
+    ).toBe("1");
+    expect(guard({ strict: false, ownChannels: on, sandboxPolicySelected: true })).toBe("1");
   });
 
   it("keeps a person's own NO_COLOR in an ACP agent's terminal", () => {

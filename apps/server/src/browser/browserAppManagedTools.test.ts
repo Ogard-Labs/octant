@@ -130,6 +130,33 @@ describe("createBrowserAppManagedTools", () => {
     expect(create).toHaveBeenCalledOnce();
   });
 
+  it("names the agent as the actor when its Browser stop ends a page", async () => {
+    const releaseThread = vi.fn(async () => snapshot());
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "code",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map(),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => authority,
+      browser: { inspectThread: () => snapshot(), create: vi.fn(), act: vi.fn(), releaseThread },
+      approvals: { request: vi.fn() } as never,
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "stop" }),
+    });
+    expect(releaseThread).toHaveBeenCalledWith(
+      windowId,
+      threadId,
+      "agent",
+      expect.objectContaining({ kind: "agent", threadId: String(threadId) }),
+    );
+  });
+
   it("opens a remembered origin in a new context without asking again", async () => {
     const create = vi.fn(async () =>
       snapshot({

@@ -217,6 +217,7 @@ export function automationNotificationKindForLifecycle(
   lifecycle: AutomationRunLifecycle,
 ): AutomationNotificationKind | undefined {
   switch (lifecycle) {
+    case "awaiting-confirmation":
     case "waiting":
       return "waiting";
     case "completed":

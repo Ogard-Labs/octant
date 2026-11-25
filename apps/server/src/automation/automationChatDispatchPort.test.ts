@@ -85,30 +85,32 @@ function chatService(options: { readonly existing?: boolean; readonly model?: st
       }
     : undefined;
   const sent: Array<unknown> = [];
-  const execute = vi.fn(async (command: unknown, _context?: { readonly hostRun: true }) => {
-    const { kind } = command as { kind: string };
-    if (kind === "send-chat-turn") sent.push(command);
-    if (kind === "create-chat-thread") {
-      thread = {
-        id: threadId,
-        version: 1,
-        providerInstanceId: "default-instance",
-        modelId: "default-model",
-      };
-      return { kind: "thread-created" };
-    }
-    if (kind === "change-chat-provider" && thread !== undefined) {
-      const change = command as { providerInstanceId: string; modelId: string };
-      thread = {
-        ...thread,
-        version: thread.version + 1,
-        providerInstanceId: change.providerInstanceId,
-        modelId: change.modelId,
-      };
-      return { kind: "thread-updated" };
-    }
-    return { kind: "turn-created" };
-  });
+  const execute = vi.fn(
+    async (command: unknown, _context?: Parameters<AutomationChatService["execute"]>[1]) => {
+      const { kind } = command as { kind: string };
+      if (kind === "send-chat-turn") sent.push(command);
+      if (kind === "create-chat-thread") {
+        thread = {
+          id: threadId,
+          version: 1,
+          providerInstanceId: "default-instance",
+          modelId: "default-model",
+        };
+        return { kind: "thread-created" };
+      }
+      if (kind === "change-chat-provider" && thread !== undefined) {
+        const change = command as { providerInstanceId: string; modelId: string };
+        thread = {
+          ...thread,
+          version: thread.version + 1,
+          providerInstanceId: change.providerInstanceId,
+          modelId: change.modelId,
+        };
+        return { kind: "thread-updated" };
+      }
+      return { kind: "turn-created" };
+    },
+  );
   const service = {
     read: (id: ChatThreadId) => {
       if (thread === undefined || id !== thread.id) throw new Error("Chat thread is missing.");
@@ -281,6 +283,26 @@ describe("createAutomationChatDispatchPort", () => {
     expect(await port.createThread({ run: workRun, threadId, title: "Morning" })).toMatchObject({
       kind: "failed",
       reason: "thread-creation-failed",
+    });
+  });
+
+  it("keeps hostRun set alongside the confirming window when a person confirms a Chat routine", async () => {
+    const { service, execute } = chatService({ existing: true });
+    const port = createAutomationChatDispatchPort({ chat: service, clock: () => now });
+    const run = chatRun();
+    const windowId = "00000000-0000-4000-8000-000000000099" as never;
+
+    await port.startOrRecoverFirstTurn({
+      run,
+      threadId,
+      firstTurnRequestId: run.firstTurnRequestId,
+      promptDigest: "unused" as never,
+      windowId,
+    });
+
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "send-chat-turn" }), {
+      hostRun: true,
+      windowId,
     });
   });
 });

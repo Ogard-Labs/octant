@@ -1151,6 +1151,8 @@ describe("ShellSidebar", () => {
     // stays one icon wide.
     expect(within(rail).queryByRole("button", { name: "Show sidebar" })).toBeNull();
     expect(within(rail).queryByRole("button", { name: "Back" })).toBeNull();
+    // How the list is arranged is the list's own choice, not a place to go.
+    expect(within(rail).queryByRole("button", { name: "Activity feed" })).toBeNull();
     // The menu-only destinations have left the account menu, so the collapsed
     // rail still reaches them through More, named on keyboard focus too.
     const more = within(rail).getByRole("button", { name: "More destinations" });
@@ -1171,7 +1173,7 @@ describe("ShellSidebar", () => {
         onOpenSettings={vi.fn()}
         onSelectMode={vi.fn()}
         projectSection={<nav aria-label="Projects">Project navigation</nav>}
-        railBeside={{}}
+        railBeside
         settings={defaultShellSettings()}
         whatsNew={{
           content: { version: "1.2.0", headline: "Quieter rail" },
@@ -1211,7 +1213,7 @@ describe("ShellSidebar", () => {
         onOpenSettings={vi.fn()}
         onSelectMode={vi.fn()}
         projectSection={<nav aria-label="Projects">Project navigation</nav>}
-        railBeside={{}}
+        railBeside
         settings={defaultShellSettings()}
         workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
       />,
@@ -1225,6 +1227,7 @@ describe("ShellSidebar", () => {
     // The rail does not repeat what the sidebar beside it already offers.
     expect(within(rail).queryByRole("button", { name: "Show sidebar" })).toBeNull();
     expect(within(rail).queryByRole("button", { name: "Code" })).toBeNull();
+    expect(within(rail).queryByRole("button", { name: "Activity feed" })).toBeNull();
     // And the sidebar does not repeat the rail's places and counts.
     expect(within(sidebar).queryByRole("button", { name: "Pull requests" })).toBeNull();
     expect(within(sidebar).queryByRole("button", { name: /^Inbox/ })).toBeNull();
@@ -1235,6 +1238,28 @@ describe("ShellSidebar", () => {
     expect(within(sidebar).queryByRole("button", { name: "Projects" })).toBeNull();
     expect(within(rail).getByRole("button", { name: "More destinations" })).toBeInTheDocument();
     expect(within(sidebar).queryByRole("button", { name: "More destinations" })).toBeNull();
+  });
+
+  it("lights Projects on the collapsed rail while the Projects page shows", () => {
+    render(
+      <ShellSidebar
+        activeDestination="projects"
+        codeNavigation={{ actions: { "new-code-thread": vi.fn(), projects: vi.fn() } }}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        rail={{ projects: [] }}
+        settings={defaultShellSettings()}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+    const rail = screen.getByRole("complementary", { name: "Octant sidebar, collapsed" });
+    expect(within(rail).getByRole("button", { name: "Projects" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("draws a pinned Project in the rail beside the sidebar and in the collapsed rail, and leaves More as it was", async () => {
@@ -1265,7 +1290,7 @@ describe("ShellSidebar", () => {
       settings: defaultShellSettings(),
       workspace: { ...defaultWindowWorkspace(windowId), activeMode: "code" as const },
     };
-    const { unmount } = render(<ShellSidebar {...common} railBeside={{}} />);
+    const { unmount } = render(<ShellSidebar {...common} railBeside />);
     const beside = screen.getByRole("complementary", { name: "Destinations" });
     await user.click(within(beside).getByRole("button", { name: "Harbor" }));
     expect(onOpen).toHaveBeenCalledOnce();

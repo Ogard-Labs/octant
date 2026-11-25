@@ -13,6 +13,8 @@ import {
   SHIELD_REVIEW_USAGE_AGGREGATE_TYPE,
   THREAD_TITLE_REQUEST_SHAPE,
   THREAD_TITLE_USAGE_AGGREGATE_TYPE,
+  WORKTREE_BRANCH_SUGGESTION_REQUEST_SHAPE,
+  WORKTREE_BRANCH_SUGGESTION_USAGE_AGGREGATE_TYPE,
   PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE,
   decodeCodeOperationEventFrame,
   decodeContextUsageReconciled,
@@ -43,6 +45,8 @@ export function deriveModeFromSubjectType(subjectType: string): string | undefin
     case "work-thread":
       return "work";
     case "code-thread":
+    // Spend of a Code Project that no thread made, such as a suggested branch name.
+    case "code-project":
       return "code";
     default:
       return undefined;
@@ -73,6 +77,7 @@ export class UsageProjection implements Projection {
       event.aggregateType !== DECISION_REVIEW_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== THREAD_TITLE_USAGE_AGGREGATE_TYPE &&
+      event.aggregateType !== WORKTREE_BRANCH_SUGGESTION_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE
     )
       return;
@@ -103,16 +108,18 @@ export class UsageProjection implements Projection {
         event.aggregateType === PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE ||
         event.aggregateType === PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE
           ? "code-thread"
-          : event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE
-            ? "agent-run"
-            : event.aggregateType === SHIELD_REVIEW_USAGE_AGGREGATE_TYPE
-              ? shieldReviewedThreadType(connection, event.aggregateId)
-              : event.aggregateType === PERSON_MEMORY_USAGE_AGGREGATE_TYPE ||
-                  event.aggregateType === DECISION_REVIEW_USAGE_AGGREGATE_TYPE ||
-                  event.aggregateType === IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE ||
-                  event.aggregateType === THREAD_TITLE_USAGE_AGGREGATE_TYPE
-                ? distilledThreadType(connection, event.aggregateId)
-                : event.aggregateType,
+          : event.aggregateType === WORKTREE_BRANCH_SUGGESTION_USAGE_AGGREGATE_TYPE
+            ? "code-project"
+            : event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE
+              ? "agent-run"
+              : event.aggregateType === SHIELD_REVIEW_USAGE_AGGREGATE_TYPE
+                ? shieldReviewedThreadType(connection, event.aggregateId)
+                : event.aggregateType === PERSON_MEMORY_USAGE_AGGREGATE_TYPE ||
+                    event.aggregateType === DECISION_REVIEW_USAGE_AGGREGATE_TYPE ||
+                    event.aggregateType === IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE ||
+                    event.aggregateType === THREAD_TITLE_USAGE_AGGREGATE_TYPE
+                  ? distilledThreadType(connection, event.aggregateId)
+                  : event.aggregateType,
       aggregateId: event.aggregateId,
     };
     // A reconciled request whose subject thread (or child run) was purged keeps
@@ -233,6 +240,7 @@ export class UsageProjection implements Projection {
           reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE ||
           reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE ||
           reconciliation.requestShape === THREAD_TITLE_REQUEST_SHAPE ||
+          reconciliation.requestShape === WORKTREE_BRANCH_SUGGESTION_REQUEST_SHAPE ||
           reconciliation.requestShape === PULL_REQUEST_REVIEW_REQUEST_SHAPE
           ? 0
           : 1,
@@ -397,11 +405,43 @@ function rawUsageRecord(
     .get(reconciliationId) as UsageRecordProjectionRow | undefined;
 }
 
+/**
+ * The reasoning a row reported apart from its output; 0 for every other row.
+ * Reasoning is part of output on every row except the ones OpenCode wrote
+ * before its mapper added it there (`usage_reasoning_outside_output`,
+ * migration 111). Whatever totals output adds this to such a row.
+ */
+export const REASONING_OUTSIDE_OUTPUT_SQL =
+  "CASE WHEN reconciliation_id IN (SELECT reconciliation_id FROM usage_reasoning_outside_output) THEN COALESCE(reasoning_tokens, 0) ELSE 0 END";
+
+/**
+ * Ledger rows as anyone reading them means them: `output_tokens` includes
+ * reasoning on every row, however old. `clauses` is the query's own
+ * WHERE, ORDER BY and LIMIT.
+ */
+export function readUsageRows(
+  connection: SqliteConnection,
+  clauses: string,
+  params: ReadonlyArray<string | number>,
+): ReadonlyArray<UsageRecordProjectionRow> {
+  const rows = connection
+    .prepare(
+      `SELECT *, ${REASONING_OUTSIDE_OUTPUT_SQL} AS reasoning_outside_output FROM usage_record_projection ${clauses}`,
+    )
+    .all(...params) as ReadonlyArray<
+    UsageRecordProjectionRow & { readonly reasoning_outside_output: number }
+  >;
+  return rows.map(({ reasoning_outside_output, ...row }) => ({
+    ...row,
+    output_tokens: row.output_tokens + reasoning_outside_output,
+  }));
+}
+
 export function readUsageRecord(
   connection: SqliteConnection,
   reconciliationId: string,
 ): UsageRecord | undefined {
-  const row = rawUsageRecord(connection, reconciliationId);
+  const [row] = readUsageRows(connection, "WHERE reconciliation_id = ?", [reconciliationId]);
   if (row === undefined) return undefined;
   return decodeUsageRow(row);
 }
@@ -484,6 +524,7 @@ function projectBearingSubjectTerms(
   includeImageJobs: boolean,
 ): Array<string> {
   return [
+    `(subject_type = 'code-project' AND ${match("subject_id")})`,
     ...PROJECT_THREADS.map(
       ({ subjectType, threads }) => `(subject_type = '${subjectType}'
     AND subject_id IN (${threads(match)}))`,
@@ -663,11 +704,10 @@ export function queryUsageRecords(
   }
 
   const where = conditions.join(" AND ");
-  const rows = connection
-    .prepare(
-      `SELECT * FROM usage_record_projection WHERE ${where} ORDER BY last_sequence ASC LIMIT ?`,
-    )
-    .all(...params, limit + 1) as ReadonlyArray<UsageRecordProjectionRow>;
+  const rows = readUsageRows(connection, `WHERE ${where} ORDER BY last_sequence ASC LIMIT ?`, [
+    ...params,
+    limit + 1,
+  ]);
 
   const included = rows.slice(0, limit);
   const last = included.at(-1);
@@ -700,7 +740,7 @@ export function usageModeCondition(
   // its thread's mode for the dashboard only.
   const imageJobs = options.includeImageJobs === true;
   return {
-    sql: `(subject_type = ?${
+    sql: `(subject_type = ?${mode === "code" ? " OR subject_type = 'code-project'" : ""}${
       imageJobs
         ? `
     OR (subject_type IN ('image-job', 'video-job') AND subject_id IN (
@@ -722,10 +762,7 @@ export function usageModeCondition(
 }
 
 export function readAllUsageRecords(connection: SqliteConnection): ReadonlyArray<UsageRecord> {
-  const rows = connection
-    .prepare("SELECT * FROM usage_record_projection ORDER BY last_sequence ASC")
-    .all() as ReadonlyArray<UsageRecordProjectionRow>;
-  return rows.map(decodeUsageRow);
+  return readUsageRows(connection, "ORDER BY last_sequence ASC", []).map(decodeUsageRow);
 }
 
 export function countUsageRecords(connection: SqliteConnection): number {

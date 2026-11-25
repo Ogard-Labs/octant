@@ -724,6 +724,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   function renderShelf(shelf: typeof snoozedShelf | typeof settledShelf) {
     const select = onSelectThread;
     if (select === undefined) return null;
+    const inFoot = showLiveDock && shelf.key === "completed";
     return shelf.threads.length === 0 ? null : (
       <OctantCollapsible
         className="project-archive project-shelf"
@@ -742,10 +743,18 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             : undefined
         }
         summary={
-          <>
-            <span className="project-archive__label">{shelf.label}</span>
-            <span>{shelf.threads.length}</span>
-          </>
+          inFoot ? (
+            // Beside Working it is a group heading: label, chevron, count.
+            <>
+              <span className="order-first">{shelf.label}</span>
+              <span className="ml-auto text-xs">{shelf.threads.length}</span>
+            </>
+          ) : (
+            <>
+              <span className="project-archive__label">{shelf.label}</span>
+              <span>{shelf.threads.length}</span>
+            </>
+          )
         }
       >
         <div className="project-threads">
@@ -824,188 +833,179 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     ) : undefined;
   return (
     <SidebarRowPropertiesContext.Provider value={rowProperties.projects}>
-      <nav
-        aria-label="Projects"
-        className="project-nav window-no-drag"
-        // A column only while the foot shows, so its auto top margin can hold
-        // it at the bottom of a short list; the Project tree keeps block flow.
-        style={showLiveDock ? { display: "flex", flexDirection: "column" } : undefined}
-      >
-        {/* Views sort and filter Projects; with none yet the row only said
+      <nav aria-label="Projects" className="project-nav window-no-drag">
+        <div className="project-nav__list">
+          {/* Views sort and filter Projects; with none yet the row only said
             "All Projects" over a heading that said "Projects" again. The
             Projects/Activity switch shares the row so the list's two
             questions, which Projects and which arrangement, sit together.
             The row stands in the same place in every arrangement: when the
             Project tree moved it into its heading, pressing the switch threw
             the switch itself 62px left and 20px down from under the pointer. */}
-        {listTools}
-        <OctantDialogPresence>
-          {projectViewEditor === undefined || projectViewState === undefined ? null : (
-            <CodeProjectViewEditorDialog
-              mode={projectViewEditor.mode}
-              onClose={() => setProjectViewEditor(undefined)}
-              onSave={(input) => {
-                persistProjectViewState(
-                  projectViewEditor.mode === "create"
-                    ? createCodeProjectView(projectViewState, input)
-                    : updateCodeProjectView(projectViewState, input),
-                );
-                setProjectViewEditor(undefined);
-              }}
-              projects={props.projects}
-              {...(editingView === undefined ? {} : { view: editingView })}
-            />
-          )}
-        </OctantDialogPresence>
-        {props.threadStatus === "loading" || props.threadStatus === "unavailable" ? (
-          <ProjectThreadStatus
-            {...(props.threadErrorMessage === undefined
-              ? {}
-              : { errorMessage: props.threadErrorMessage })}
-            {...(props.onRetryThreads === undefined ? {} : { onRetry: props.onRetryThreads })}
-            status={props.threadStatus}
-          />
-        ) : null}
-        {showFilteredThreadsEmpty ? (
-          <p className="project-nav__empty" role="status">
-            {FILTERED_THREADS_EMPTY_MESSAGE}
-          </p>
-        ) : null}
-        {showFilteredThreadsEmpty ? null : nestThreads && activityView ? (
-          // With every thread running, the foot lists them all; the empty
-          // list above would otherwise say there are no threads yet.
-          activity.groups.length === 0 && activity.working.length > 0 ? null : (
-            <SidebarRowPropertiesContext.Provider value={rowProperties.activity}>
-              <ActivityThreadList
-                {...(props.activeThreadId === undefined
-                  ? {}
-                  : { activeThreadId: props.activeThreadId })}
-                {...(props.openThreadIds === undefined
-                  ? {}
-                  : { openThreadIds: props.openThreadIds })}
-                {...(props.openThreadIds === undefined
-                  ? {}
-                  : { openThreadIds: props.openThreadIds })}
-                {...(filteringThreads && threadsReady
-                  ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE }
-                  : {})}
-                actions={props.threadActions ?? {}}
-                counted={arrangement === "status"}
-                groups={activity.groups}
-                mode={activityMode}
-                lineageThreads={everyListedThread ?? []}
-                onSelectThread={props.onSelectThread!}
-                searching={searching}
+          {listTools}
+          <OctantDialogPresence>
+            {projectViewEditor === undefined || projectViewState === undefined ? null : (
+              <CodeProjectViewEditorDialog
+                mode={projectViewEditor.mode}
+                onClose={() => setProjectViewEditor(undefined)}
+                onSave={(input) => {
+                  persistProjectViewState(
+                    projectViewEditor.mode === "create"
+                      ? createCodeProjectView(projectViewState, input)
+                      : updateCodeProjectView(projectViewState, input),
+                  );
+                  setProjectViewEditor(undefined);
+                }}
+                projects={props.projects}
+                {...(editingView === undefined ? {} : { view: editingView })}
               />
-            </SidebarRowPropertiesContext.Provider>
-          )
-        ) : (
-          <>
-            {/* Grouping builds no sections when this mode has no Projects, so
+            )}
+          </OctantDialogPresence>
+          {props.threadStatus === "loading" || props.threadStatus === "unavailable" ? (
+            <ProjectThreadStatus
+              {...(props.threadErrorMessage === undefined
+                ? {}
+                : { errorMessage: props.threadErrorMessage })}
+              {...(props.onRetryThreads === undefined ? {} : { onRetry: props.onRetryThreads })}
+              status={props.threadStatus}
+            />
+          ) : null}
+          {showFilteredThreadsEmpty ? (
+            <p className="project-nav__empty" role="status">
+              {FILTERED_THREADS_EMPTY_MESSAGE}
+            </p>
+          ) : null}
+          {showFilteredThreadsEmpty ? null : nestThreads && activityView ? (
+            // With every thread running, the foot lists them all; the empty
+            // list above would otherwise say there are no threads yet.
+            activity.groups.length === 0 && activity.working.length > 0 ? null : (
+              <SidebarRowPropertiesContext.Provider value={rowProperties.activity}>
+                <ActivityThreadList
+                  {...(props.activeThreadId === undefined
+                    ? {}
+                    : { activeThreadId: props.activeThreadId })}
+                  {...(props.openThreadIds === undefined
+                    ? {}
+                    : { openThreadIds: props.openThreadIds })}
+                  {...(props.openThreadIds === undefined
+                    ? {}
+                    : { openThreadIds: props.openThreadIds })}
+                  {...(filteringThreads && threadsReady
+                    ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE }
+                    : {})}
+                  actions={props.threadActions ?? {}}
+                  counted={arrangement === "status"}
+                  groups={activity.groups}
+                  mode={activityMode}
+                  lineageThreads={everyListedThread ?? []}
+                  onSelectThread={props.onSelectThread!}
+                  searching={searching}
+                />
+              </SidebarRowPropertiesContext.Provider>
+            )
+          ) : (
+            <>
+              {/* Grouping builds no sections when this mode has no Projects, so
                 the empty affordance — and the Code-mode hint — would disappear.
                 A saved view can hide every Project while the mode still has
                 some; that is not "No Projects yet." */}
-            {viewGrouping === "project" || props.projects.length === 0
-              ? [
-                  renderProjectGroup("Pinned", pinned),
-                  renderProjectGroup("Projects", ordinary, {
-                    allowAdd: true,
-                  }),
-                ]
-              : groupedViewProjects.map((group) => renderProjectGroup(group.label, group.projects))}
-            {unfiled.length > 0 && props.onSelectThread !== undefined ? (
-              <section aria-label={unfiledLabel} className="project-block project-block--unfiled">
-                <div
-                  className="project-row"
-                  data-folder-state={unfiledExpanded ? "open" : "closed"}
-                >
-                  <OctantButton
-                    aria-controls={unfiledExpanded ? unfiledThreadsId : undefined}
-                    aria-expanded={unfiledExpanded}
-                    aria-label={`${unfiledExpanded ? "Collapse" : "Expand"} ${unfiledLabel}`}
-                    className="project-row__select justify-start window-no-drag"
-                    onClick={() => setUnfiledCollapsed((collapsed) => !collapsed)}
-                    type="button"
-                    variant="bare"
-                  >
-                    <Folder aria-hidden="true" size={16} />
-                    <span className="project-row__copy">{unfiledLabel}</span>
-                  </OctantButton>
-                  {unfiledExpanded ? null : (
-                    <ProjectStatusRollup projectName={unfiledLabel} threads={unfiled} />
+              {viewGrouping === "project" || props.projects.length === 0
+                ? [
+                    renderProjectGroup("Pinned", pinned),
+                    renderProjectGroup("Projects", ordinary, {
+                      allowAdd: true,
+                    }),
+                  ]
+                : groupedViewProjects.map((group) =>
+                    renderProjectGroup(group.label, group.projects),
                   )}
-                </div>
-                {unfiledExpanded ? (
-                  <div className="project-threads" id={unfiledThreadsId}>
-                    <ProjectThreadRows
-                      {...(props.threadActions === undefined
-                        ? {}
-                        : { actions: props.threadActions })}
-                      {...(props.activeThreadId === undefined
-                        ? {}
-                        : { activeThreadId: props.activeThreadId })}
-                      {...(props.onRenameThread === undefined
-                        ? {}
-                        : { onRenameThread: props.onRenameThread })}
-                      collapsedLimit={SIDEBAR_THREAD_LIMIT}
-                      onSelectThread={props.onSelectThread}
-                      projectNameForThread={projectNameForThread}
-                      {...(props.openThreadIds === undefined
-                        ? {}
-                        : { openThreadIds: props.openThreadIds })}
-                      threads={unfiledRows}
-                    />
+              {unfiled.length > 0 && props.onSelectThread !== undefined ? (
+                <section aria-label={unfiledLabel} className="project-block project-block--unfiled">
+                  <div
+                    className="project-row"
+                    data-folder-state={unfiledExpanded ? "open" : "closed"}
+                  >
+                    <OctantButton
+                      aria-controls={unfiledExpanded ? unfiledThreadsId : undefined}
+                      aria-expanded={unfiledExpanded}
+                      aria-label={`${unfiledExpanded ? "Collapse" : "Expand"} ${unfiledLabel}`}
+                      className="project-row__select justify-start window-no-drag"
+                      onClick={() => setUnfiledCollapsed((collapsed) => !collapsed)}
+                      type="button"
+                      variant="bare"
+                    >
+                      <Folder aria-hidden="true" size={16} />
+                      <span className="project-row__copy">{unfiledLabel}</span>
+                    </OctantButton>
+                    {unfiledExpanded ? null : (
+                      <ProjectStatusRollup projectName={unfiledLabel} threads={unfiled} />
+                    )}
                   </div>
-                ) : null}
-              </section>
-            ) : null}
-          </>
-        )}
-        {onSelectThread === undefined ? null : renderShelf(snoozedShelf)}
-        {onSelectThread === undefined || (nestThreads && activityView)
-          ? null
-          : renderShelf(settledShelf)}
-        {(currentFilters === undefined || currentFilters.lifecycle === "active") &&
-        props.archivedProjects.length > 0 ? (
-          <OctantCollapsible
-            className="project-archive"
-            summary={
-              <>
-                <span className="project-archive__label">Archive</span>
-                <span>{props.archivedProjects.length}</span>
-              </>
-            }
-          >
-            {props.archivedProjects.map((project) => (
-              <div className="project-row project-row--archived" key={project.id}>
-                <span className="project-row__archived-name">{project.name}</span>
-                <OctantButton
-                  aria-label={`Restore ${project.name}`}
-                  className="project-row__action window-no-drag"
-                  onClick={() => props.onRestore(project.id)}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  Restore
-                </OctantButton>
-              </div>
-            ))}
-          </OctantCollapsible>
-        ) : null}
+                  {unfiledExpanded ? (
+                    <div className="project-threads" id={unfiledThreadsId}>
+                      <ProjectThreadRows
+                        {...(props.threadActions === undefined
+                          ? {}
+                          : { actions: props.threadActions })}
+                        {...(props.activeThreadId === undefined
+                          ? {}
+                          : { activeThreadId: props.activeThreadId })}
+                        {...(props.onRenameThread === undefined
+                          ? {}
+                          : { onRenameThread: props.onRenameThread })}
+                        collapsedLimit={SIDEBAR_THREAD_LIMIT}
+                        onSelectThread={props.onSelectThread}
+                        projectNameForThread={projectNameForThread}
+                        {...(props.openThreadIds === undefined
+                          ? {}
+                          : { openThreadIds: props.openThreadIds })}
+                        threads={unfiledRows}
+                      />
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+            </>
+          )}
+          {onSelectThread === undefined ? null : renderShelf(snoozedShelf)}
+          {onSelectThread === undefined || (nestThreads && activityView)
+            ? null
+            : renderShelf(settledShelf)}
+          {(currentFilters === undefined || currentFilters.lifecycle === "active") &&
+          props.archivedProjects.length > 0 ? (
+            <OctantCollapsible
+              className="project-archive"
+              summary={
+                <>
+                  <span className="project-archive__label">Archive</span>
+                  <span>{props.archivedProjects.length}</span>
+                </>
+              }
+            >
+              {props.archivedProjects.map((project) => (
+                <div className="project-row project-row--archived" key={project.id}>
+                  <span className="project-row__archived-name">{project.name}</span>
+                  <OctantButton
+                    aria-label={`Restore ${project.name}`}
+                    className="project-row__action window-no-drag"
+                    onClick={() => props.onRestore(project.id)}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Restore
+                  </OctantButton>
+                </div>
+              ))}
+            </OctantCollapsible>
+          ) : null}
+        </div>
         {showLiveDock ? (
           // Running and settled threads sit at the foot of Status and the
           // Activity feed, where they stay in sight however far the list
           // above scrolls, and do not move its rows as their turns start and
           // end. Each thread is listed once: here, or in the list above.
-          <div
-            aria-label="Working and settled"
-            className="sidebar-live-dock"
-            role="group"
-            // It scrolls inside itself, so as a column child it could shrink
-            // to nothing under a long list; its own cap bounds it instead.
-            style={{ flexShrink: 0 }}
-          >
+          <div aria-label="Working and settled" className="sidebar-live-dock" role="group">
             {activity.working.length === 0 ? null : (
               <SidebarRowPropertiesContext.Provider value={rowProperties.activity}>
                 <ActivityThreadList

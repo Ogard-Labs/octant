@@ -207,7 +207,16 @@ the focused pane's named bar controls — every button, menu row and view
 option the bar offers, folded or not — and each palette command runs the
 exact callback the bar's own control invokes; state lines and tool-drawn
 controls are not commands, and a disabled control is absent there as it is
-on the bar. In the Activity feed the
+on the bar. For the thread in front it also lists that thread's sidebar row
+choices under the row menu's own words and conditions: **Pin** or **Unpin**
+(Code only), **Settle**, or **Un-settle** or **Reopen** once the thread is
+closed, and **Wake** on a snoozed thread or else one **Snooze · <time>**
+command for each wake time the row menu offers, since the palette has no
+submenu. They run the row menu's own actions, so a refusal reads where the
+row's does, and a wake time is worked out when its command runs. A draft, a
+page or Settings covering the workspace, and a thread this window has no row
+for leave no thread in front, so none are listed. **Mark done** stays on the
+row menu. In the Activity feed the
 newest group is open, so a feed whose only group is Earlier is never a blank
 column. Group headings in the sidebar are 12px in the meta ink with a 14px
 chevron and the count as a right-aligned number.
@@ -389,7 +398,11 @@ In Status and the Activity feed, **Working** (threads whose turn is running)
 and **Settled** sit together at the foot of the sidebar, below the list and
 the Archive. The foot stays in sight while the list above scrolls, takes at
 most 40% of the sidebar's height and scrolls inside itself beyond that, with a
-hairline above it. A running thread is listed only there, with its live
+hairline above it and no ground of its own: the list scrolls above it, never
+under it, because an opaque ground drew a slab on the translucent sidebar (the
+narrow drawer scrolls as one column, so there the foot sticks and paints the
+drawer's opaque ground). Both headings have one form: the label, a trailing
+chevron and the count at the right edge. A running thread is listed only there, with its live
 "Working 4m"; one waiting on an approval or an answer is not working and stays
 at the top under Needs you, with its state in words. A pinned thread and a
 coordinator keep their place among the pins, and in the Activity feed a thread
@@ -1259,8 +1272,8 @@ under rules.
   quiet text button. A GitHub or Linear source still loading is one quiet
   skeleton row, never a sentence that reads as an error; empty and failed are
   one sentence in their card.
-- The Inbox shows no plan usage: that reading lives in the account menu and the
-  rail's ring, the start screen's composer line and Settings › Usage (maintainer
+- The Inbox shows no plan usage: that reading lives in the rail's usage rings
+  (the account menu where no rail shows), the start screen's composer line and Settings › Usage (maintainer
   request, 2026-11-18).
 - **Inset.** A card's label, its rows' glyphs and text and its notes stand on one
   16px inset, and a row's trailing items end 16px in, on the filters' right edge.
@@ -1746,8 +1759,10 @@ run there) and for a thread that kept its sandbox. A Work task's runs by the
 same rule at the task's own level.
 An ACP agent's program keeps every guard its turns set except the ones that
 only keep the piped ACP stream clean (`NO_COLOR`), since the terminal is a TTY:
-its self-update, telemetry and configuration guards hold, and a person's own
-`NO_COLOR` stays. A Work task's Zen card records that it runs the provider
+its self-update, telemetry and configuration guards hold (the first two lifted
+outside Strict by the person's provider switches, as for a turn; Google
+Antigravity's `--disable-telemetry` is a launch argument, which the bare program
+does not take), and a person's own `NO_COLOR` stays. A Work task's Zen card records that it runs the provider
 program, as the host says when the card is pinned, so restarting the card
 after the program ends or the host restarts asks for the program again (still
 decided by the host at that start, for the window's current Work task), and
@@ -1755,7 +1770,7 @@ the terminal's start in the journal records `program: "provider"`.
 Not built yet: the other ACP agents (offered once a CLI's interactive mode is
 confirmed), an added ACP agent, and the other providers with a command-line
 program.
-A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). A focused Browser page does not trap the window's shortcuts either: at their default chords the command palette (`Mod+K`), sidebar (`Mod+\`), dock (`Mod+Shift+J`) and focus composer (`Ctrl+Escape`) are held back from the page and handed to the window, and Settings (`Mod+,`) stays a menu accelerator; Zen's `Mod+Shift+E` stays with the page, as the renderer leaves it to a focused text field. **Minimised tools.** A thread's Browser and Terminal can be minimised into small
+A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything (moving between a thread's terminals is a separate pair, under [Cycling between terminals](#cycling-between-terminals)), the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). A focused Browser page does not trap the window's shortcuts either: at their default chords the command palette (`Mod+K`), sidebar (`Mod+\`), dock (`Mod+Shift+J`) and focus composer (`Ctrl+Escape`) are held back from the page and handed to the window, and Settings (`Mod+,`) stays a menu accelerator; Zen's `Mod+Shift+E` stays with the page, as the renderer leaves it to a focused text field. **Minimised tools.** A thread's Browser and Terminal can be minimised into small
 live cards on a shelf at the foot of the dock, so a page or a shell can be
 watched, and seen to answer, while another tool or only the dock's overview is
 in front. A floating preview of the Browser, drawn over the thread, covered the
@@ -1940,7 +1955,12 @@ they were reached (address bar, server row, conversation link, or a navigation
 inside the page), newest first. It is kept in the renderer's local storage,
 which the computer's windows share like a browser's history, and never sent
 to the host; a running server's address is not repeated there, and choosing a row
-opens it. With neither, the start page invites an address. **Browser profiles.**
+opens it. With neither, the start page invites an address. After a restart or crash that
+took the page the person had open, a line above it offers **Reopen page**, which
+reserves that page for this window, moves focus to the address field and
+preselects the page's profile for the next address, and **Dismiss**, which
+moves focus to the address field too
+([Browser profiles](browser-profiles.md#reopening-a-page-a-restart-took)). **Browser profiles.**
 A page is Private unless the person picks the Project or Personal profile from
 the profile icon after the address field, which names a signed-in profile beside
 itself (a Private page stays an icon) and whose menu also signs out of a
@@ -2532,11 +2552,11 @@ Project overviews retain loaded content during same-Project refreshes
 on the same client connection. Changing Project or client clears retained
 content; disconnect and authorization failures remain explicit unavailable
 states. Project memory lives on every mode's Project Overview. Navigator is one host-owned conversation opened
-as an app-wide popover from the bottom-left profile and Settings control, and
+as an app-wide popover from the account menu, and
 opening it never changes the active Project or thread. Zen is a separate
 presentation aggregate inside the same window, not a split-tree tab and not a
 fourth authority mode. Zen is a bundled plugin that is on by default. While it
-is off, the Zen keyboard chord does nothing, the profile menu has no Zen row,
+is off, the Zen keyboard chord does nothing, the account menu has no Zen row,
 the command palette has no Zen entry, no Pin in Zen or Add to Zen action is
 offered, the recovery banner is hidden, and a Zen that was open closes back to
 the workspace; the host refuses the Zen routes and the assistant gets no Zen
@@ -2771,7 +2791,7 @@ whatever the width; it holds no strip, Add tool, Show another tool or quick
 tools (the bottom panel keeps its strip and Add tool). At 960px and under the
 dock is a modal drawer over an inert band, so the same row stands in the
 drawer's header, a press replaces the one tool shown, and there is no dragging. Zen
-remains in the bottom-left identity menu.
+remains in the account menu.
 
 ### Content tabs
 
@@ -2840,6 +2860,21 @@ left corners and clip follow without a notch (they leave at the start of an
 opening and arrive after the slide has landed when it shuts). The title band's
 drag strip and the traffic-light reserve do not move. The slide is for opening and shutting only: dragging the sidebar's edge or resizing the window follows the pointer exactly. The sidebar keeps its full width through the slide and its column clips it, so its contents travel with the edge. There is no motion under
 the system's reduced-motion setting or the app's own.
+Dragging the sidebar's edge also hides and shows it, with the same one hidden
+state as **Hide sidebar** and **Show sidebar**, in whichever collapsed form the
+Icon rail setting names, and with the same slide. A drag past the minimum width stops at the minimum;
+64px further it hides the sidebar while the pointer is still down. Hiding this
+way keeps the width from before the drag. While the sidebar is hidden, its edge
+(the window's left edge, or the icon rail's right edge) stays grabbable: pulling
+it 64px out shows the sidebar, no narrower than the minimum, and the width on
+release is saved; a click or a shorter pull does nothing. Escape, losing the
+window's focus, or a cancelled pointer puts back the state and width the drag
+started with. Hiding or showing the sidebar another way while its edge is held
+ends the drag there, with no width saved. The edge stays one separator in both states. While hidden it
+reports 0 and "Hidden"; the arrow that widens it shows the sidebar at its saved
+width, and Home and End show it at the minimum and maximum. No key hides it from
+the separator. At 960px and narrower, the phone drawer included, there is no
+edge to drag.
 The directory provides search and All, Chat, Work, and Code filters. Project
 detail is thread-first, with memory, provider access, and canvases in compact
 expandable rows below the primary work; its layout is in
@@ -2977,10 +3012,12 @@ active mode. The destinations a person placed under Menu
 only wait in a More row that closes the destination list (the rail's More
 button when the rail stands beside the sidebar) — an ellipsis opening a popup
 beside the rail with those destinations and Customize sidebar; the
-setting that turns the More row off returns them to the bottom-left identity
-menu. The identity menu owns Settings, Navigator, Agents, Providers, Usage,
-Plugins, Automations, Artifacts, and Zen entry points. The account menu opens
-above its identity row, aligned to the
+setting that turns the More row off returns them to the account menu. The
+account menu leads with Settings (its key, ⌘, in the Mac app, stands at the
+row's end; a browser has no such key and names none), Usage, Providers and
+Customize sidebar, then the destinations that wait in it, then Navigator,
+Archive, Zen mode and the tour. It opens beside the rail from the account face,
+or, where no rail shows, above the sidebar's profile row, aligned to the
 row’s leading edge. Search is a compact in-place filter for the current mode's visible
 threads: the header's Search icon opens a Filter threads field under the
 header, Escape or its close control clears and hides it, and Settings ›
@@ -3019,14 +3056,14 @@ success ink after the PR number.
 ### Icon rail and title band navigation
 
 **Icon rail foot.** The rail's destinations scroll, with the same short fade at
-their edges and no scrollbar, above a foot (usage, Settings) that stays on
-screen. One column that scrolled as a whole put Settings out of reach in a short
+their edges and no scrollbar, above a foot (plan usage, then the account face)
+that stays on screen. One column that scrolled as a whole put Settings out of reach in a short
 window and cut the last destination through its icon at the window's edge.
 
 **Icon rail.** By default (Settings › Sidebar › Icon rail: Always) an icon
 rail stands in its own column in front of the open sidebar. It is exactly as
-wide as the title band is tall (38px), open or collapsed, so the frame's two
-arms match. It stands on the window's own ground with no fill and no line of its
+wide open as collapsed (52px, [DESIGN.md: Window frame](../../DESIGN.md#window-frame)).
+It stands on the window's own ground with no fill and no line of its
 own; the framed panel (the sidebar and the stage, one outline) begins at its
 right edge. In the desktop app the traffic lights sit in the title band above
 it, and the sidebar's head, or with the sidebar hidden the window chrome,
@@ -3039,12 +3076,15 @@ look-alike count icons made the rail the busiest column in the window; they
 stay as tiles in a sidebar with no rail beside it, maintainer request,
 2026-11-17), the destination
 rows the person keeps shown (Settings › Sidebar › Sidebar destinations decides
-which and in what order, for the rail as for the sidebar), the Activity feed,
+which and in what order, for the rail as for the sidebar),
 Projects, a tile for each Project the person pinned (its icon or initial on the
 same 32px face, after the divider; a context menu on the tile unpins it; the
 collapsed rail lists pinned Projects first and draws six Project tiles at most
-so the account face stays in the window), More (the menu-only destinations and Customize sidebar), and the
-account face. The sidebar keeps its header (modes, search, new thread,
+so the places above them stay in the window), More (the menu-only destinations and Customize sidebar), and the
+foot. The Activity feed is not a rail place: it is one of the list's three
+arrangements, chosen on the list itself, and its rail button changed how the
+list was drawn while looking like a page (and opened a hidden sidebar to do it;
+maintainer request, 2026-11-25). The sidebar keeps its header (modes, search, new thread,
 hide), the Project list with its view, filter, and Activity controls, and the
 threads; its profile row is not drawn beside the rail, whose account face is
 the same control, so nothing is offered twice. Rail icons are 16px on a 36px face, and a selected place keeps its glyph and takes the
@@ -3054,7 +3094,7 @@ have their own marks: Inbox a tray, Running a spinner, To review a checked
 clipboard, Done today a double check, Board a kanban, Issues the issue dot,
 Pull requests the pull-request arrow, Linear a checklist, Projects stacked
 folders, Agents a bot, Automations a calendar clock, Artifacts layers, Image
-generator images, Plugins blocks, and the Activity feed a pulse line.
+generator images, and Plugins blocks.
 To-dos is a circle whose check runs out past it, so it does not read as the
 ticked circle of Done today ([To-dos](todos.md#the-to-dos-destination)).
 
@@ -3066,20 +3106,31 @@ under the tray instead of sliding beneath it. The tray's row stays first at the
 top of the sidebar, and the header keeps its full wrapped height however long
 the thread list is, so the list always starts under both rows.
 
-**Account face.** The foot of either rail is one round face: the person's
+**Account face.** The last thing in either rail is one round face: the person's
 picture, else the initials of the name they gave, else a person glyph (24px).
-A thin ring around it shows what is left of their tightest plan window across
-every provider that reports one, in the meta ink, or the danger ink when that
-window is near or at its limit; with no reported figure there is no ring,
-because an empty ring would claim a limit nobody reported. Its accessible name
-says the share left. It opens the account menu, the same one the sidebar's
-profile row opens, beside the rail: a Plan usage group first (each account that
-reports a window, with its lowest window's share and when it resets; a row
-opens Settings › Usage), then the Workspace and Octant groups (Settings among
-them). It replaced a Settings gear and one ring per provider, two kinds of
-thing at the foot where one does (maintainer request, 2026-11-17). The reading
-is the host's last observation, the one the start screen's composer line reads, never
-a fresh provider call, and it survives a restart.
+It opens the account menu beside the rail, headed by their name, with Settings
+first; the rail has no Settings gear of its own, because the face and a gear
+side by side offered Settings twice. While its menu is open the face stays
+held, as More does, and its focus ring is the circle it is.
+
+**Plan usage.** Above the face stands one 26px ring for each account that
+reports a plan window, the provider's mark inside it: the arc is what is left
+of the window with the least left, in the meta ink, or the warning ink close to
+its limit; a spent window is an empty ring in the danger ink and says "limit
+reached" in place of a share, whatever the provider left unused, and it comes
+before any window with room. An account with no
+reported figure has no ring, because an empty ring would claim a limit nobody
+reported. Pointing at a ring or focusing it opens a card with every window, its
+share left, its reset, and the reading's age when it is hours old; its
+accessible name says each window's standing, and pressing it opens Settings ›
+Usage. The card scrolls inside the room beside the rail. The rail draws the
+three accounts with the least left, in the person's own account order;
+with more than three, and wherever no rail shows, the account menu carries a
+Plan usage group with every account. The one ring the avatar carried before
+(2026-11-17) showed the tightest window of all accounts without saying whose it
+was, so the menu had to be opened to find out (maintainer request, 2026-11-25).
+The reading is the host's last observation, the one the start screen's composer
+line reads, never a fresh provider call, and it survives a restart.
 
 **Back and forward.** Back and Forward sit in the title band beside the
 sidebar control (beside Show sidebar while the sidebar is hidden, with or
@@ -3097,7 +3148,7 @@ disabled, at its end of the history.
 **Hiding the sidebar.** Hide sidebar, or Mod+\ (rebindable, "Show or hide
 the sidebar", answered in text fields too and leaving focus where it was),
 collapses the sidebar to the rail alone, which then also shows New thread and
-Search at the top, the modes (with the same marks as the sidebar's mode switcher, so Work keeps one icon), and up to six Project letters (outlined at icon
+Search at the top, the modes (one tray with the same marks as the sidebar's mode switcher, so Work keeps one icon, and the mode that is on does not read as a second current place), and up to six Project letters (outlined at icon
 size in the icons' muted ink) with a Projects button for the rest; Show sidebar, Back, and Forward move into the
 title band, so the rail stays one icon wide. Icon rail: When hidden shows the
 rail only in that state; Never removes the sidebar completely when hidden and
@@ -4101,7 +4152,7 @@ at 28px (the line-number buttons set the row) and 22px.
 ### What's new card and announcement
 
 After an update the person chose finishes applying, the full sidebar shows one
-small flat card above the profile row. A 64px band carries the Octant
+small flat card at its foot, above the profile row where one shows. A 64px band carries the Octant
 aperture on a soft wash of the theme's ink with a hint of the accent, so the
 card is depth and not an accent banner. Under it sit a "New · v{version}" line,
 the notes' first line as a one-line strong headline, the next paragraph as a
@@ -4349,6 +4400,35 @@ output only while it holds the keyboard (the row keeps its height, so
 focusing never moves the output) and always lists it in the terminal's
 accessible description. Tab, Shift+Tab, a bare Escape and function keys still
 reach the shell.
+
+### Cycling between terminals
+
+With several terminals open for one thread, `Mod+Shift+ArrowDown`
+(`terminal-cycle-next`) and `Mod+Shift+ArrowUp` (`terminal-cycle-previous`),
+pressed in a terminal, put the caret in the next or previous one, wrapping at
+the ends. Both are remappable under Settings › Keyboard shortcuts, send nothing
+to the shell, and never move focus out of the terminals; with one terminal they
+do nothing. The order is the panes as laid out, then the bottom panel's
+Terminal, then the dock's Terminal sessions in tab order. Provider program
+terminals take part like shells. Choosing a session behind another brings it to
+the front of its own region and focuses it once it has attached; if the person
+clicks or moves focus elsewhere first, or it has not attached within 15 seconds,
+the caret stays where it is. Left out: other threads' terminals, anything a focused pane, narrow window, covering content
+view, or closed dock or panel hides, a dock Terminal
+minimised to its card, a pane whose shell is not running, the card's read-only
+preview, Zen's cards and Project terminals, which belong to no thread view.
+Only Code threads have thread terminals. The commands are keyboard only: the
+command palette lists no terminal focus command.
+
+The defaults were chosen because shells read the arrows alone, with Alt or with
+Control, and bind none with both Mod and Shift, and no browser, desktop menu or
+system chord holds Mod+Shift with Up or Down. Rejected: Mod+Alt with arrows or
+brackets (desktop workspace switching, browser tab switching, AltGr, the focus
+space chords, and Option rewriting the printed key on Apple hardware),
+Mod+Shift with brackets, Page Up or Down (browser tab switching, and keys Apple
+laptops lack), Mod+Shift with Left or Right (word selection in a Windows
+shell), and Mod+Shift with a letter (the control code the shell would read, or a
+browser's own command).
 
 ### Quitting
 

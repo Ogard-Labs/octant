@@ -363,6 +363,88 @@ describe("code client", () => {
     );
   });
 
+  it("asks for a thread's cleaned-up worktree standing and reads it, and a standing it does not know leaves the view readable", async () => {
+    const checkout = {
+      id: ids.checkout,
+      repositoryId,
+      kind: "plain-folder",
+      availability: "available",
+      head: { kind: "none" },
+      observedAt: now,
+    };
+    const view = { thread, checkout, lastSequence: 3 };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ ...view, worktreeCleanup: "cleaned-up" }))
+      .mockResolvedValueOnce(Response.json({ ...view, worktreeCleanup: "somewhere-new" }))
+      .mockResolvedValueOnce(Response.json(view));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.thread(ids.thread as never)).resolves.toMatchObject({
+      worktreeCleanup: "cleaned-up",
+    });
+    // The query is how the host knows this build reads the field; an older
+    // build never sends it, and its strict decoder is never shown the key.
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      `${baseUrl}/api/code/threads/${ids.thread}?reads=worktree-cleanup`,
+    );
+    expect(await client.thread(ids.thread as never)).not.toHaveProperty("worktreeCleanup");
+    expect(await client.thread(ids.thread as never)).not.toHaveProperty("worktreeCleanup");
+  });
+
+  it("reads a thread from a host that refuses the cleaned-up worktree query, and asks it once", async () => {
+    const checkout = {
+      id: ids.checkout,
+      repositoryId,
+      kind: "plain-folder",
+      availability: "available",
+      head: { kind: "none" },
+      observedAt: now,
+    };
+    const view = { thread, checkout, lastSequence: 3 };
+    const refusal = () =>
+      Response.json({ category: "invalid", message: "Code request is invalid." }, { status: 400 });
+    const fetch = vi.fn(async (url: string) =>
+      url.includes("?") ? refusal() : Response.json(view),
+    );
+    const client = createCodeClient({
+      baseUrl,
+      fetch: fetch as never,
+      windowCapability: capability,
+    });
+
+    await expect(client.thread(ids.thread as never)).resolves.toMatchObject({ lastSequence: 3 });
+    await expect(client.thread(ids.thread as never)).resolves.toMatchObject({ lastSequence: 3 });
+    expect(fetch.mock.calls.map(([url]) => String(url).includes("?"))).toEqual([
+      true,
+      false,
+      false,
+    ]);
+  });
+
+  it("shows a real 400 on a thread read instead of hiding it behind the older-host retry", async () => {
+    const refusal = () =>
+      Response.json({ category: "invalid", message: "Code request is invalid." }, { status: 400 });
+    const fetch = vi.fn(async (_url: string) => refusal());
+    const client = createCodeClient({
+      baseUrl,
+      fetch: fetch as never,
+      windowCapability: capability,
+    });
+
+    await expect(client.thread(ids.thread as never)).rejects.toMatchObject({
+      category: "invalid",
+    });
+    // The host was not marked older, so the next read still sends the query.
+    await expect(client.thread(ids.thread as never)).rejects.toMatchObject({ category: "invalid" });
+    expect(fetch.mock.calls.map(([url]) => String(url).includes("?"))).toEqual([
+      true,
+      false,
+      true,
+      false,
+    ]);
+  });
+
   it("queries the Code Thread Board and decodes the resolved view", async () => {
     const view = {
       version: 1,
