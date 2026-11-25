@@ -225,15 +225,32 @@ interface PendingCall {
   /** Receives each `image/chunk` the driver streams for this call; absent refuses them. */
   readonly onImageChunk: ((image: number, data: string) => void) | undefined;
   readonly onProviderResponse: (() => void) | undefined;
+  readonly observer: OutsideDriverBrokerObserver | undefined;
   /** Whether to abort any still-open brokered HTTP streams when the call settles normally. */
   readonly closeBrokeredOnSettle: boolean;
+}
+
+/** What the host itself sees of one call's brokered requests, whatever the driver says of them. */
+export interface OutsideDriverBrokerObserver {
+  /** The request is about to be handed to the network. */
+  readonly sent: (method: OutsideDriverHttpRequestParams["method"]) => void;
+  /** The provider answered with this status and these headers. */
+  readonly answered: (method: OutsideDriverHttpRequestParams["method"], response: Response) => void;
 }
 
 type BrokeredRequest = (
   params: OutsideDriverHttpRequestParams,
   signal: AbortSignal,
-  onProviderResponse?: () => void,
+  observer?: OutsideDriverBrokerObserver,
 ) => Promise<Response>;
+
+/** The calls only a video driver is asked; a brokered `PUT` or `DELETE` may serve only one of them. */
+const VIDEO_METHODS: ReadonlySet<string> = new Set([
+  OUTSIDE_DRIVER_METHODS.videoStart,
+  OUTSIDE_DRIVER_METHODS.videoPoll,
+  OUTSIDE_DRIVER_METHODS.videoCancel,
+  OUTSIDE_DRIVER_METHODS.videoForget,
+]);
 
 /**
  * The JSON-RPC conversation with one driver. It numbers the host's calls,
@@ -245,6 +262,7 @@ class OutsideDriverLink {
   readonly #limits: OutsideDriverLimits;
   readonly #broker: BrokeredRequest;
   readonly #onStopped: (failure: ProviderFailure) => void;
+  readonly #ownedRequestsOnly: boolean;
   readonly #pending = new Map<number, PendingCall>();
   readonly #http = new Map<number, AbortController>();
   /**
@@ -261,11 +279,18 @@ class OutsideDriverLink {
     readonly limits: OutsideDriverLimits;
     readonly broker: BrokeredRequest;
     readonly onStopped: (failure: ProviderFailure) => void;
+    /**
+     * Stops a driver whose brokered request names no call of the host's. A
+     * family whose spend is accounted from what the host saw a call send sets
+     * it, so nothing billable can travel outside a call.
+     */
+    readonly ownedRequestsOnly?: boolean;
   }) {
     this.#channel = input.channel;
     this.#limits = input.limits;
     this.#broker = input.broker;
     this.#onStopped = input.onStopped;
+    this.#ownedRequestsOnly = input.ownedRequestsOnly === true;
     input.channel.onLine((line) => this.#receive(line));
     // A driver that exits answers nothing more, so its calls fail now rather
     // than at their deadlines, which for a send is ten minutes away.
@@ -288,6 +313,7 @@ class OutsideDriverLink {
       readonly onRelayedResponseEnd?: (httpId: number, completedNormally: boolean) => void;
       readonly onImageChunk?: (image: number, data: string) => void;
       readonly onProviderResponse?: () => void;
+      readonly observer?: OutsideDriverBrokerObserver;
       readonly closeBrokeredOnSettle?: boolean;
     },
   ): {
@@ -299,6 +325,7 @@ class OutsideDriverLink {
     const owns =
       method === OUTSIDE_DRIVER_METHODS.sessionSend ||
       method === OUTSIDE_DRIVER_METHODS.imageGenerate ||
+      VIDEO_METHODS.has(method) ||
       method.startsWith("cloud/");
     if (owns) this.#sends.add(id);
     const cancelMethod =
@@ -333,6 +360,7 @@ class OutsideDriverLink {
         onRelayedResponseEnd: options.onRelayedResponseEnd,
         onImageChunk: options.onImageChunk,
         onProviderResponse: options.onProviderResponse,
+        observer: options.observer,
         closeBrokeredOnSettle: options.closeBrokeredOnSettle === true,
       });
       this.#write({ jsonrpc: "2.0", id, method, params });
@@ -437,6 +465,7 @@ class OutsideDriverLink {
     if (params.requestId !== undefined && !this.#sends.has(params.requestId)) {
       return this.#violate();
     }
+    if (params.requestId === undefined && this.#ownedRequestsOnly) return this.#violate();
     if (this.#http.size >= this.#limits.httpConcurrency) {
       this.#refuseHttp(httpId, failure("rate-limited", "Too many provider requests are open."));
       return;
@@ -445,6 +474,12 @@ class OutsideDriverLink {
     if (params.requestId !== undefined && owner === undefined) {
       this.#refuseHttp(httpId, interrupted());
       return;
+    }
+    if (
+      (params.method === "PUT" || params.method === "DELETE") &&
+      (owner === undefined || !VIDEO_METHODS.has(owner.method))
+    ) {
+      return this.#violate();
     }
     if (isOpenAiAgentsRequest(params.url) && owner?.cloudPorts === undefined) {
       this.#refuseHttp(
@@ -490,7 +525,15 @@ class OutsideDriverLink {
           ...(params.headers === undefined ? {} : { headers: Object.fromEntries(params.headers) }),
           signal: controller.signal,
         });
-      } else response = await this.#broker(params, controller.signal, owner?.onProviderResponse);
+      } else {
+        response = await this.#broker(params, controller.signal, {
+          sent: (method) => owner?.observer?.sent(method),
+          answered: (method, answer) => {
+            owner?.onProviderResponse?.();
+            owner?.observer?.answered(method, answer);
+          },
+        });
+      }
     } catch (error) {
       this.#refuseHttp(httpId, closed(error));
       return;
@@ -669,7 +712,7 @@ function makeBroker(input: {
   readonly fetch: OutsideDriverFetch;
   readonly limits: OutsideDriverLimits;
 }): BrokeredRequest {
-  return async (params, signal, onProviderResponse) => {
+  return async (params, signal, observer) => {
     if (input.origin === undefined) {
       throw failure("invalid-configuration", "The provider address is not a valid endpoint.");
     }
@@ -746,6 +789,7 @@ function makeBroker(input: {
     const connecting = setTimeout(abort, input.limits.httpConnectionTimeoutMs);
     let response: Response;
     try {
+      observer?.sent(params.method);
       response = await input.fetch(params.url, {
         method: params.method,
         headers,
@@ -759,7 +803,7 @@ function makeBroker(input: {
     } finally {
       clearTimeout(connecting);
     }
-    onProviderResponse?.();
+    observer?.answered(params.method, response);
     if (response.status >= 300 && response.status < 400) {
       response.body?.cancel().catch(() => undefined);
       throw failure("invalid-configuration", "The configured endpoint returned a redirect.");
@@ -1249,4 +1293,5 @@ export {
   closed as outsideDriverClosedFailure,
   driverStopped as outsideDriverStopped,
   noAgreedProtocol as outsideDriverNoAgreedProtocol,
+  DRIVER_FAILURE_MESSAGES as OUTSIDE_DRIVER_FAILURE_MESSAGES,
 };

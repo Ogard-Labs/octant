@@ -6,6 +6,7 @@ import {
   type OutsideDriverProviderInstance,
   type OutsideHarnessEndpointProviderInstance,
   type OutsideImageProviderInstance,
+  type OutsideVideoProviderInstance,
   isOutsideDriverProviderInstance,
   OutsideProviderDriverReference,
   type ProviderFailure,
@@ -17,13 +18,16 @@ import type { ExtensionEffectiveState, ExtensionPackageState } from "@octant/con
 import {
   outsideDriverHostLaunch,
   outsideImageDriverModels,
-  resolveOutsideDriverActivation,
+  outsideVideoDriverModels,
   resolveOutsideDriverRebind,
+  resolveOutsideHarnessEndpointActivation,
   resolveOutsideImageDriverActivation,
+  resolveOutsideVideoDriverActivation,
   type OutsideDriverActivationTarget,
 } from "@octant/plugin-host/activation";
 import type { HarnessEndpointDriver } from "@octant/provider-sdk/harness-endpoint";
 import type { ImageGenerationAdapter } from "@octant/provider-sdk/image-generation";
+import type { VideoGenerationAdapter } from "@octant/provider-sdk/video-generation";
 import { Effect, Schema } from "effect";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import {
@@ -47,6 +51,11 @@ import {
   makeOutsideImageGenerationProxy,
   type OutsideImageJobPorts,
 } from "./outsideImageGenerationProxy";
+import {
+  makeOutsideVideoGenerationProxy,
+  type OutsideVideoClipPorts,
+  type OutsideVideoSends,
+} from "./outsideVideoGenerationProxy";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 
 /**
@@ -153,6 +162,10 @@ type RunningProxy =
   | {
       readonly family: "image";
       readonly adapter: ReturnType<typeof makeOutsideImageGenerationProxy>;
+    }
+  | {
+      readonly family: "video";
+      readonly adapter: ReturnType<typeof makeOutsideVideoGenerationProxy>;
     };
 
 interface RunningDriver {
@@ -204,8 +217,8 @@ export class OutsideDriverAdmission {
 
   /**
    * Where the instance's driver stands on the activation ladder, at its bound
-   * digest. An image profile's driver must also still declare image
-   * generation there, so neither family can run the other's package.
+   * digest. A media profile's driver must also still declare its media there,
+   * so no family can run another's package.
    */
   activation(instance: OutsideDriverProviderInstance): ExtensionEffectiveState {
     const packageState = this.#packageOf(instance.configuration.driver);
@@ -216,12 +229,14 @@ export class OutsideDriverAdmission {
       strict: this.#strict(),
       driver: activationTarget(instance.configuration.driver),
     };
-    if (instance.driverKind === "outside-image") return resolveOutsideImageDriverActivation(input);
-    const state = resolveOutsideDriverActivation(input);
-    // A package that generates images speaks no harness endpoint protocol.
-    return state.kind === "effective" && outsideImageDriverModels(input) !== undefined
-      ? { kind: "blocked", reason: "incompatible" }
-      : state;
+    switch (instance.driverKind) {
+      case "outside-image":
+        return resolveOutsideImageDriverActivation(input);
+      case "outside-video":
+        return resolveOutsideVideoDriverActivation(input);
+      case "outside-harness-endpoint":
+        return resolveOutsideHarnessEndpointActivation(input);
+    }
   }
 
   isAdmitted(instance: OutsideDriverProviderInstance): boolean {
@@ -236,6 +251,19 @@ export class OutsideDriverAdmission {
     driver: OutsideProviderDriverReference,
   ): ReturnType<typeof outsideImageDriverModels> {
     return outsideImageDriverModels({
+      packageState: this.#packageOf(driver),
+      driver: activationTarget(driver),
+    });
+  }
+
+  /**
+   * The models, prices and job facts a video driver's package declares at
+   * exactly the digest named, or nothing. Reading them starts nothing.
+   */
+  videoDriverModels(
+    driver: OutsideProviderDriverReference,
+  ): ReturnType<typeof outsideVideoDriverModels> {
+    return outsideVideoDriverModels({
       packageState: this.#packageOf(driver),
       driver: activationTarget(driver),
     });
@@ -289,10 +317,13 @@ export class OutsideDriverAdmission {
           driver: activationTarget(driver),
         };
         const imageModels = outsideImageDriverModels(input);
+        const videoModels = outsideVideoDriverModels(input);
         const state =
-          imageModels === undefined
-            ? resolveOutsideDriverActivation(input)
-            : resolveOutsideImageDriverActivation(input);
+          imageModels !== undefined
+            ? resolveOutsideImageDriverActivation(input)
+            : videoModels !== undefined
+              ? resolveOutsideVideoDriverActivation(input)
+              : resolveOutsideHarnessEndpointActivation(input);
         if (state.kind !== "effective") return [];
         // A listing that does not decode is left out rather than breaking the registry.
         const listing = decodeListing({
@@ -311,6 +342,17 @@ export class OutsideDriverAdmission {
             ? { hostConfinement: "unconfined" }
             : {}),
           ...(imageModels === undefined ? {} : { imageGeneration: { models: imageModels } }),
+          ...(videoModels === undefined
+            ? {}
+            : {
+                videoGeneration: {
+                  models: videoModels.map(({ modelId, displayName, price }) => ({
+                    modelId,
+                    displayName,
+                    publishesPrice: price.kind !== "unpublished",
+                  })),
+                },
+              }),
         });
         return listing._tag === "Right" ? [listing.right] : [];
       }),
@@ -422,6 +464,85 @@ export class OutsideDriverAdmission {
           return { status: "failed", providerFailure: notAdmitted() };
         }
         return running.adapter.generate(request, ports, onProviderResponse);
+      },
+    };
+  }
+
+  /**
+   * The adapter the video job service runs for one outside video profile. Its
+   * models are the package's declaration, answered without a process; its
+   * process starts at the profile's first clip, or when a restart resumes one.
+   *
+   * A clip outlives the moment it was asked for, so every call asks again
+   * whether the profile is still the one the clip was started on: on, bound to
+   * the same driver and address, and admitted. When it is not, nothing more is
+   * sent, and a clip the provider already accepted is counted as billed,
+   * because no one can say any longer how it ended.
+   */
+  videoAdapter(
+    instance: OutsideVideoProviderInstance,
+    current: () => ProviderInstance | undefined,
+    ports: OutsideVideoClipPorts,
+    sends: OutsideVideoSends,
+  ): VideoGenerationAdapter {
+    const binding = JSON.stringify(instance.configuration);
+    const driver = async () => {
+      const now = current();
+      if (
+        now === undefined ||
+        now.driverKind !== "outside-video" ||
+        !now.enabled ||
+        JSON.stringify(now.configuration) !== binding
+      ) {
+        throw notAdmitted();
+      }
+      const running = await this.#ensure(now);
+      if (running.family !== "video") throw notAdmitted();
+      return running.adapter;
+    };
+    const ended = (error: unknown) => {
+      const providerFailure = asFailure(error);
+      // A process that could not start says nothing about the clip; a driver
+      // no longer admitted will never answer for it.
+      return providerFailure.reason === "driver-not-admitted"
+        ? ({ status: "failed", providerFailure, billed: true } as const)
+        : ({ status: "failed", providerFailure } as const);
+    };
+    return {
+      models: async () => {
+        const listed = new Set(instance.configuration.modelAllowlist.map(String));
+        return (this.videoDriverModels(instance.configuration.driver) ?? []).filter((model) =>
+          listed.has(String(model.modelId)),
+        );
+      },
+      start: async (request) => {
+        sends.reached(request.signal);
+        try {
+          return await (await driver()).start(request, sends);
+        } catch (error) {
+          return { status: "failed", providerFailure: asFailure(error), notStarted: true };
+        }
+      },
+      poll: async (remoteId, signal) => {
+        try {
+          return await (await driver()).poll(remoteId, signal, ports);
+        } catch (error) {
+          return ended(error);
+        }
+      },
+      cancel: async (remoteId, signal) => {
+        try {
+          return await (await driver()).cancel(remoteId, signal, ports);
+        } catch (error) {
+          return ended(error);
+        }
+      },
+      forget: async (remoteId) => {
+        try {
+          return await (await driver()).forget(remoteId);
+        } catch (error) {
+          return { status: "failed", providerFailure: asFailure(error) };
+        }
       },
     };
   }
@@ -573,6 +694,15 @@ export class OutsideDriverAdmission {
       proxy = {
         family: "image",
         adapter: makeOutsideImageGenerationProxy({
+          ...shared,
+          modelIds: instance.configuration.modelAllowlist,
+          ...(this.#resolve === undefined ? {} : { resolve: this.#resolve }),
+        }),
+      };
+    } else if (instance.driverKind === "outside-video") {
+      proxy = {
+        family: "video",
+        adapter: makeOutsideVideoGenerationProxy({
           ...shared,
           modelIds: instance.configuration.modelAllowlist,
           ...(this.#resolve === undefined ? {} : { resolve: this.#resolve }),
