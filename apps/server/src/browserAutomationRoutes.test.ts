@@ -895,7 +895,7 @@ describe("browser automation routes", () => {
         body: JSON.stringify(payload),
       });
 
-    function asPairedDevice(request: Request): Request {
+    function asPairedDevice(request: Request, admittedBy?: "host-person" | "hub-roster"): Request {
       bindPrincipalRouteContext(request, {
         principal: createRemoteDevicePrincipal({
           hostId: "local" as never,
@@ -905,6 +905,7 @@ describe("browser automation routes", () => {
           protocolVersion: 1,
           capabilityDigest: "a".repeat(64),
           sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
         }),
         scopeId: windowId,
       });
@@ -1029,6 +1030,22 @@ describe("browser automation routes", () => {
       ).toBe(403);
       expect(captures.list).not.toHaveBeenCalled();
       expect(captures.read).not.toHaveBeenCalled();
+    });
+
+    it("lists and serves captures and steps to a device the host's own person paired, and refuses a hub-introduced device", async () => {
+      const { captures, handler: capturing } = withCaptures();
+      const person = (path: string, payload: unknown) =>
+        asPairedDevice(post(path, payload), "host-person");
+      const hub = (path: string, payload: unknown) =>
+        asPairedDevice(post(path, payload), "hub-roster");
+      expect((await capturing(person("", { threadId })))?.status).toBe(200);
+      expect((await capturing(person("/image", { threadId, captureId })))?.status).toBe(200);
+      expect(captures.list).toHaveBeenCalledOnce();
+      expect(captures.read).toHaveBeenCalledOnce();
+      expect((await capturing(hub("", { threadId })))?.status).toBe(403);
+      expect((await capturing(hub("/image", { threadId, captureId })))?.status).toBe(403);
+      expect(captures.list).toHaveBeenCalledOnce();
+      expect(captures.read).toHaveBeenCalledOnce();
     });
 
     it("does not serve a capture id the thread does not own", async () => {
