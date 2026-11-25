@@ -1,3 +1,4 @@
+import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import type { AgentGrantClient } from "@octant/client-runtime/agent-grant-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { PairedDeviceAdministrationClient } from "@octant/client-runtime/paired-device-administration-client";
@@ -21,6 +22,8 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { RemotePairedDevices } from "./RemotePairedDevices";
 import type { RemoteProductPort } from "./remoteProductClients";
 
+const RemoteDiagnostics = lazy(() => import("./RemoteDiagnostics"));
+
 // Loaded when the Claude and Codex tab is opened, from the desktop Settings view it is made of.
 const LazyProviderTooling = lazy(async () => ({
   default: (await import("../shell/SettingsView")).RemoteProviderTooling,
@@ -31,7 +34,13 @@ const LazyRemoteHostPermissions = lazy(async () => ({
   default: (await import("../shell/SettingsView")).RemoteHostPermissions,
 }));
 
-type HostSettingsSection = "extensions" | "providers" | "devices" | "agents" | "permissions";
+type HostSettingsSection =
+  | "extensions"
+  | "providers"
+  | "devices"
+  | "agents"
+  | "permissions"
+  | "diagnostics";
 
 const SECTIONS: ReadonlyArray<{
   readonly id: HostSettingsSection;
@@ -47,6 +56,7 @@ const SECTIONS: ReadonlyArray<{
   { id: "devices", label: "Paired devices", surface: "device-management" },
   { id: "agents", label: "Agent access", surface: "agent-access" },
   { id: "permissions", label: "Permissions" },
+  { id: "diagnostics", label: "Diagnostics", surface: "diagnostics" },
 ];
 
 export interface RemoteHostSettingsProps {
@@ -59,6 +69,8 @@ export interface RemoteHostSettingsProps {
   readonly pairedDevices: PairedDeviceAdministrationClient;
   /** Outside agents' grants, made, changed and revoked over the session. */
   readonly agentGrants: AgentGrantClient;
+  /** The diagnostics bundle, failure report and journal growth over the session. */
+  readonly diagnosticsClient: DiagnosticsExportClient;
   /** The host's Projects, which a grant names. */
   readonly projectClient: Pick<ProjectClient, "bootstrap">;
   /** The host's address as this browser reached it. */
@@ -127,6 +139,11 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
       ) : null}
       {open === "agents" ? (
         <RemoteAgentAccess client={props.agentGrants} projectClient={props.projectClient} />
+      ) : null}
+      {open === "diagnostics" && props.reachable.has("diagnostics") ? (
+        <Suspense fallback={null}>
+          <RemoteDiagnostics client={props.diagnosticsClient} />
+        </Suspense>
       ) : null}
       {open === "permissions" && props.personPort !== undefined ? (
         <Suspense fallback={null}>

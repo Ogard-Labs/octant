@@ -3,6 +3,7 @@ import {
   decodeStopWorkLiveTasks,
   decodeWorkThreadId,
   type AdoptWorkNativeSessionResult,
+  type EventActor,
   type ProviderNativeSessionId,
   type WindowId,
   type WorkLiveTasks,
@@ -10,7 +11,8 @@ import {
   type WorkThreadId,
 } from "@octant/contracts";
 import { allowedOrigin, headers, response } from "../code/codeSessionRoutes";
-import { authenticateRouteWindowId } from "../principalRouteContext";
+import { eventActorForPrincipal } from "../principalEventActor";
+import { authenticateRoutePrincipal } from "../principalRouteContext";
 import type { LiveTasks } from "../providers/outlivingSessions";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -49,6 +51,7 @@ export interface WorkSessionRouteDependencies {
     windowId: WindowId,
     threadId: WorkThreadId,
     nativeSessionId: ProviderNativeSessionId,
+    actor: EventActor,
   ) => Promise<AdoptWorkNativeSessionResult>;
   readonly now?: () => number;
 }
@@ -80,12 +83,15 @@ export function createWorkSessionRouteHandler(deps: WorkSessionRouteDependencies
     if (!readTasks && !stopTasks && !readSessions && !adopt)
       return response({ error: "Session method is not supported." }, 405, origin);
     let windowId: WindowId;
+    let actor: EventActor;
     try {
-      windowId = authenticateRouteWindowId({
+      const context = authenticateRoutePrincipal({
         request,
         store: deps.windowAuthorityStore,
         now: (deps.now ?? Date.now)(),
       });
+      windowId = context.scopeId;
+      actor = eventActorForPrincipal(context.principal);
     } catch (error) {
       return response(
         { error: "Session request is unauthorized." },
@@ -149,7 +155,7 @@ export function createWorkSessionRouteHandler(deps: WorkSessionRouteDependencies
       return response({ error: "Session command is invalid." }, 400, origin);
     }
     return response(
-      await deps.adoptNativeSession(windowId, command.threadId, command.nativeSessionId),
+      await deps.adoptNativeSession(windowId, command.threadId, command.nativeSessionId, actor),
       200,
       origin,
     );

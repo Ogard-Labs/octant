@@ -21,7 +21,7 @@ import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { createProjectBindingRouteHandler } from "./projectBindingRoutes";
 import { createDiscoveryRouteHandler } from "./providers/discoveryRoutes";
 import { createProviderCredentialRouteHandler } from "./providers/providerCredentialRoutes";
-import { createSupportBundleRouteHandler } from "./supportBundleRoutes";
+import { createSupportBundleSaveRouteHandler } from "./supportBundleRoutes";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const secret = randomBytes(32).toString("base64url");
@@ -497,7 +497,7 @@ describe("Native main admission to brokered host routes", () => {
     it("reaches the support bundle save request check", async () => {
       const f = fixture();
       const sources = vi.fn();
-      const handle = createSupportBundleRouteHandler({
+      const handle = createSupportBundleSaveRouteHandler({
         windowAuthorityStore: f.store,
         desktopBridgeSecret: secret,
         now: () => 1_000,
