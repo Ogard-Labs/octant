@@ -24,6 +24,7 @@ import { ApprovalDeferralSheet } from "../approvals/ApprovalDeferralSheet";
 import { MemoryProposalCard, RoutineProposalCard } from "../surfaces/AgentProposalCards";
 import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
+import { BrowserApprovalCard } from "../surfaces/BrowserApprovalCard";
 import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard";
 import { ServiceOfferCard } from "../surfaces/ServiceOfferCard";
 import { ThreadVideoClips } from "../surfaces/ThreadVideoClips";
@@ -586,6 +587,14 @@ export function ThreadScreen(props: ThreadScreenProps) {
           ) : null}
           {fullView ? null : (
             <>
+              {offlineDemo || transport === undefined ? null : (
+                <BrowserApprovalCard
+                  actsAsHostPerson={standing.actsAsHostPerson}
+                  threadId={selected.threadId}
+                  transport={transport}
+                  watchingOnly={watchingOnly}
+                />
+              )}
               {offlineDemo || transport === undefined ? null : (
                 <ExtensionToolApprovalCard
                   actsAsHostPerson={standing.actsAsHostPerson}

@@ -18705,7 +18705,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
     Full uses the notice routes on its own session. The change feed's
     `access-activity` and `change-notices` topics refresh both without a
     reload. Notices stay in the app: none is sent to a phone's push path or
-    by email.
+    by email. The phone app reads both over its own device session while it
+    is in front of the person and shows them in each paired computer's
+    Settings panel to a session the host says acts as its own person, with
+    Undo, Revoke or End access, and Dismiss as the host offers them (a revoke
+    asks first and is confirmed on the phone), and shows nothing to any other
+    session.
   - **What a person-paired device does.** As a local window does, with no
     owner unlock: sets a thread, a Project, or the default to Full access and
     starts a Work or Code thread there; changes a Project's access, actions,

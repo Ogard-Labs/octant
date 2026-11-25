@@ -50,7 +50,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Authority and approvals](#authority-and-approvals)                                   | 8         | 7       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 18        | 10      | 7            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 10        | 6       | 4            | 0                   |
-| [Remote access and pairing](#remote-access-and-pairing)                               | 14        | 6       | 8            | 0                   |
+| [Remote access and pairing](#remote-access-and-pairing)                               | 14        | 7       | 7            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 8         | 4       | 4            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **301**   | **181** | **116**      | **4**               |
+| **All areas**                                                                         | **301**   | **182** | **115**      | **4**               |
 
 ## Principles and hard lines
 
@@ -2604,7 +2604,7 @@ Status: Partly built. Since: —. Detail: [Architecture: Security and authority,
 Each thread surface (conversation, host browser, terminal output, simulator screenshot, canvas, file preview) names one action that reads it and a separate action that acts on it.
 
 - A companion client derives each surface's reach (unavailable, read-only or interactive) from the host's catalog and never declares it. _Here only._
-- A device the host's own person paired raises a thread to Full access or starts one there and answers every approval, profile site approvals included, with no owner-device requirement and no unlock (maintainer decision, 2026-11-12). Not built yet: no device answers a profile site approval. An owner device on a host that knows it only through the hub's roster is not such a device there: it has no per-action unlock for these (removed by maintainer decision, 2026-11-13) and raises a thread's level only through owner posture recovery. Its approval answers ride the five-minute unlock session by default, and per-answer unlock is a setting (maintainer request, 2026-11-12; built) ([Hub failover and owner devices](#hub-failover-and-owner-devices)).
+- A device the host's own person paired raises a thread to Full access or starts one there and answers every approval, profile site approvals included, with no owner-device requirement and no unlock (maintainer decision, 2026-11-12; built: such a device lists and answers every Browser approval for a thread it can open, a profile site approval, a sign-in, an upload and a download included, the first answer settles it, and the phone's thread screen draws each one with the site, profile, direction, files and reason and offers only the answers the host keeps for its session). An owner device on a host that knows it only through the hub's roster is not such a device there: it has no per-action unlock for these (removed by maintainer decision, 2026-11-13) and raises a thread's level only through owner posture recovery. Its approval answers ride the five-minute unlock session by default, and per-answer unlock is a setting (maintainer request, 2026-11-12; built) ([Hub failover and owner devices](#hub-failover-and-owner-devices)).
 - A companion says when its picture is stale and offers only surfaces it can fill. _Here only._
 - A paired client the host's own person did not pair may click, hover, scroll and press keys in the host's agent browser and list its tabs, but may not navigate, type, choose a list option, drag, upload, or open, switch or close a tab, and cannot take it to a new origin. The host's navigation guards and site approvals apply to a device as to a window.
 
@@ -2761,9 +2761,9 @@ The person sees who changed access to this computer, and is told in the app when
 - Notices show on windows and on devices paired at Full, other than the device that made the change. Dismissing one is journaled, so it stays dismissed across a restart and on every client.
 - Undo sets the thread back to its previous level through the thread's own level command, or removes exactly the key that was added, each as whoever pressed it; it is refused once the thread's level or the provider's keys changed again. A replaced key has no Undo, since the earlier key is not kept, and the notice says so. **Revoke that device** revokes the paired device, or ends the agent's grant, through their existing revoke paths. From a window, a key's Undo and the revoke keep the bar of the routes they stand in for: the desktop bridge secret, so a desktop window runs a key's Undo through the notice's own Undo and the revoke through its own device and grant controls after a fresh read shows the notice still current, and a window capability alone is refused.
 - In the app only: no notice goes to a phone's push path or by email.
-- Built: the host's reads and actions, Settings' list and notices on a window, the newest notice in a window's notice stack, and the notices in a browser paired at Full. Not built yet: the phone app shows neither.
+- Built: the host's reads and actions, Settings' list and notices on a window, the newest notice in a window's notice stack, the notices in a browser paired at Full, and the phone app, which in Settings shows each paired computer's access activity and notices (Undo, Revoke or End access, and Dismiss, as the host offers them; a revoke asks first and confirms on the phone) to a session the host says acts as its own person, and shows nothing to any other session. The phone reads them while it is in front of the person and has no push path for them.
 
-Status: Partly built. Since: 2026-11-22. Detail: [Architecture: Security and authority, Remote clients](../architecture.md#security-and-authority) and [Settings: Remote access](settings.md).
+Status: Built. Since: 2026-11-22. Detail: [Architecture: Security and authority, Remote clients](../architecture.md#security-and-authority) and [Settings: Remote access](settings.md).
 
 ## Credentials and sign-in
 
