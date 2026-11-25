@@ -4,10 +4,11 @@ import { ThreadSecretRequestInput } from "@octant/contracts/thread-secrets";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { classifyProductAction } from "../authenticatedProductRoutes";
+import { createRemoteDevicePrincipal } from "../clientPrincipal";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { RememberedThreadSecrets } from "./rememberedThreadSecrets";
-import { createThreadSecretRoutes } from "./threadSecretRoutes";
+import { createPairedThreadSecretRoutes, createThreadSecretRoutes } from "./threadSecretRoutes";
 import { ThreadSecretService, type ThreadSecretServiceOptions } from "./threadSecretService";
 
 const THREAD = "00000000-0000-4000-8000-000000000009";
@@ -17,9 +18,15 @@ afterEach(() => {
   for (const service of services.splice(0)) service.close();
 });
 
+const DEVICE = "73000000-0000-4000-8000-000000000060";
+
 function setup(
   over: {
+    readonly mayAnswer?: ThreadSecretServiceOptions["mayAnswer"];
+    readonly sessionCurrent?: () => boolean;
+    readonly records?: unknown[];
     readonly storeFails?: boolean;
+    readonly whileStoring?: () => Promise<void>;
     readonly browse?: ThreadSecretServiceOptions["browse"];
   } = {},
 ) {
@@ -30,8 +37,14 @@ function setup(
   const service = new ThreadSecretService({
     uuid: () => crypto.randomUUID(),
     now: () => 0,
-    journal: { record: () => undefined, history: () => ({ open: [], lastLifetimes: new Map() }) },
+    journal: {
+      record: (_threadId, records, actor) => {
+        over.records?.push({ records, actor });
+      },
+      history: () => ({ open: [], lastLifetimes: new Map() }),
+    },
     hold: () => () => undefined,
+    ...(over.mayAnswer === undefined ? {} : { mayAnswer: over.mayAnswer }),
     threadTitle: () => "Publish",
     ...(over.browse === undefined
       ? {}
@@ -46,7 +59,7 @@ function setup(
       },
       store: {
         resolve: async () => "old-value",
-        set: async () => undefined,
+        set: async () => over.whileStoring?.(),
         delete: async () => {
           if (over.storeFails === true) throw new Error("locked");
         },
@@ -99,7 +112,36 @@ function setup(
       ...over,
     },
   });
-  return { asked, route, call, answer, windowId, service };
+  const pairedRoute = createPairedThreadSecretRoutes(service, {
+    sessionCurrent: over.sessionCurrent ?? (() => true),
+  });
+  const fromDevice = (
+    body: unknown,
+    admittedBy: "host-person" | "hub-roster" | undefined = "host-person",
+    init: RequestInit = {},
+  ) => {
+    const request = new Request("http://127.0.0.1/api/thread-secrets/paired", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      ...init,
+    });
+    bindPrincipalRouteContext(request, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "73000000-0000-4000-8000-000000000059" as never,
+        deviceId: DEVICE as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "73000000-0000-4000-8000-000000000061" as never,
+        ...(admittedBy === undefined ? {} : { admittedBy }),
+      }),
+      scopeId: DEVICE as never,
+    });
+    return pairedRoute(request);
+  };
+  return { asked, route, call, answer, windowId, service, pairedRoute, fromDevice };
 }
 
 describe("thread secret routes", () => {
@@ -231,5 +273,128 @@ describe("thread secret routes", () => {
     }
     expect((await h.route(h.call("x".repeat(300_000))))?.status).toBe(413);
     expect((await h.route(h.call(undefined, { query: "?threadId=a&other=b" })))?.status).toBe(400);
+  });
+});
+
+describe("a thread secret's card on a phone", () => {
+  const anywhere = { mayAnswer: () => true, browse: async () => ({ status: "locked" as const }) };
+
+  it("is shown and answered there with a typed value, journaled as that device", async () => {
+    const records: unknown[] = [];
+    const h = setup({ ...anywhere, records });
+    const listed = await h.fromDevice({ kind: "list", threadId: THREAD });
+    const view = (await listed?.json()) as { requests: ReadonlyArray<Record<string, unknown>> };
+    expect(view).toMatchObject({
+      active: [],
+      requests: [{ name: "TOKEN", sources: ["pasted"], remembered: [] }],
+    });
+    expect(listed?.headers.get("cache-control")).toBe("no-store");
+    const answered = await h.fromDevice(h.answer());
+    expect(await answered?.text()).toBe('{"status":"accepted"}');
+    expect(await h.asked).toMatchObject({ status: "saved" });
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        actor: { kind: "remote-device", actorId: DEVICE, deviceId: DEVICE },
+      }),
+    );
+    expect(JSON.stringify(records)).not.toContain("private-value");
+  });
+
+  it("refuses a 1Password answer from there, and keeps the card for this computer", async () => {
+    const h = setup(anywhere);
+    const reference = {
+      name: "TOKEN",
+      source: "onepassword",
+      store: "onepassword",
+      reference: "op://Private/Deploy/credential",
+      freshEachUse: false,
+    };
+    const answered = await h.fromDevice(h.answer({ fields: [reference] }));
+    expect(await answered?.json()).toEqual({ status: "refused", failure: "not-linked" });
+    expect(await (await h.route(h.call()))?.json()).toMatchObject({
+      requests: [{ state: "pending", sources: expect.arrayContaining(["onepassword"]) }],
+    });
+  });
+
+  it("keeps a linked store out of a card that has been answered", async () => {
+    const h = setup(anywhere);
+    await h.route(h.call(h.answer()));
+    const listed = await h.fromDevice({ kind: "list", threadId: THREAD });
+    expect(await listed?.json()).toMatchObject({
+      requests: [{ state: "saved", sources: ["pasted"], remembered: [] }],
+    });
+  });
+
+  it.each(["signed out", "held below Full"] as const)(
+    "grants nothing to a device %s while its answer was kept, and leaves the card here",
+    async (how) => {
+      let lost = false;
+      const h = setup({
+        ...anywhere,
+        mayAnswer: () => !(lost && how === "held below Full"),
+        sessionCurrent: () => !(lost && how === "signed out"),
+        whileStoring: async () => {
+          lost = true;
+        },
+      });
+      const answered = await h.fromDevice(h.answer({ lifetime: "remember" }));
+      expect(await answered?.json()).toEqual({ status: "gone" });
+      expect(h.service.active(THREAD)).toEqual([]);
+      expect(h.service.hostView().remembered.map(({ name }) => name)).toEqual(["OLD"]);
+      const here = (await (await h.route(h.call()))?.json()) as {
+        readonly requests: ReadonlyArray<Record<string, unknown>>;
+      };
+      expect(here.requests).toMatchObject([{ state: "pending" }]);
+      expect(here.requests[0]).not.toHaveProperty("failure");
+    },
+  );
+
+  it("takes neither a listing of the store nor a revoke or forget", async () => {
+    const h = setup(anywhere);
+    const { id } = h.answer().answer;
+    for (const body of [
+      { kind: "browse", threadId: THREAD, requestId: id, step: { kind: "vaults" } },
+      { kind: "revoke", threadId: THREAD, secretId: id },
+      { kind: "forget", id: REMEMBERED },
+    ])
+      expect((await h.fromDevice(body))?.status).toBe(400);
+  });
+
+  it("refuses every other principal, a signed-out device and a malformed request", async () => {
+    const h = setup(anywhere);
+    const list = { kind: "list", threadId: THREAD };
+    for (const admittedBy of ["hub-roster" as const])
+      expect((await h.fromDevice(list, admittedBy))?.status).toBe(403);
+    const unbound = new Request("http://127.0.0.1/api/thread-secrets/paired", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(list),
+    });
+    expect((await h.pairedRoute(unbound))?.status).toBe(403);
+    expect((await h.fromDevice(list, "host-person", { body: "{" }))?.status).toBe(400);
+    expect((await h.fromDevice(list, "host-person", { body: "x".repeat(300_000) }))?.status).toBe(
+      413,
+    );
+    const gone = setup({ ...anywhere, sessionCurrent: () => false });
+    expect((await gone.fromDevice(gone.answer()))?.status).toBe(401);
+    expect(gone.service.active(THREAD)).toEqual([]);
+  });
+
+  it("shows a thread's cards nowhere else unless the host admits that reader", async () => {
+    const h = setup({ mayAnswer: () => false });
+    const listed = await h.fromDevice({ kind: "list", threadId: THREAD });
+    expect(await listed?.json()).toEqual({ requests: [], active: [] });
+    expect(await (await h.fromDevice(h.answer()))?.json()).toEqual({ status: "gone" });
+    expect(h.service.waiting(DEVICE, { paired: true })).toEqual([]);
+    expect(h.service.waiting(String(h.windowId), { paired: false })).toEqual([
+      {
+        askId: h.answer().answer.id,
+        threadId: THREAD,
+        kind: "token",
+        label: "Token",
+        reason: "Read the account.",
+        requestedAt: "1970-01-01T00:00:00.000Z",
+      },
+    ]);
   });
 });

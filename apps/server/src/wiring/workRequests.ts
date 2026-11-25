@@ -77,9 +77,11 @@ import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { HarnessStateWiring } from "./harnessState";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
+import type { ThreadSecretService } from "../threadSecrets/threadSecretService";
 import type { WorkFilesWiring } from "./workFiles";
 
 export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
+  readonly threadSecrets: Pick<ThreadSecretService, "waiting">;
   /** The member's Act item for its hub, bound by the hub side after this is built. */
   readonly hubActScopeSlot: HubActScopeSlot;
   /** The model side of a decision's second opinion, built where the configured drivers are. */
@@ -464,6 +466,9 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
             reader.principal,
             imageOffersOnly,
           ),
+          threadSecrets: deps.threadSecrets.waiting(String(reader.scopeId), {
+            paired: reader.kind === "person-paired-device",
+          }),
         },
         readWaitingAskThread,
       ),
@@ -500,6 +505,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
             memoryProposals: [],
             routineProposals: [],
             serviceOffers: offers,
+            threadSecrets: [],
           },
           readWaitingAskThread,
         );
