@@ -2843,6 +2843,7 @@ Plan limits for providers that report them only from an account endpoint are rea
 - Only a refresh the person asks for waits on the endpoint; every other caller gets the last reading and at most one background read starts per five minutes.
 - Failures carry a fixed message, a changed response shape keeps the last reading, and the key stays out of logs, journal, snapshots and errors.
 - Vibe remaining quota never reads Vibe's Keychain item or `~/.vibe/.env`, and never scrapes `admin.mistral.ai`. A missing allowance or a key without usage permission is unavailable or plan limits not applying, never 0% used.
+- A spent Vibe included window with pay-as-you-go on is not an account limit; pay-as-you-go off at 100% is.
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Account usage endpoints](../architecture.md#security-and-authority).
 

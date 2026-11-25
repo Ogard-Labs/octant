@@ -20573,7 +20573,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `GET api.mistral.ai/v1/billing/budget`; `vibe_budget.usage_percentage`
   becomes the monthly window, `reset_at` its reset, and `payg_enabled` (or a
   best-effort `GET /v1/billing/subscription` `vibe_payg_enabled`) a label on
-  that window, not a second bar. Octant never reads Vibe's Keychain item
+  that window, not a second bar. A spent included window with pay-as-you-go
+  on stays an available account: remaining capacity shows 0% left and the
+  PAYG label, and automatic calls and coordinator selection keep using it.
+  Pay-as-you-go off at 100% is an account limit until reset. Octant never reads Vibe's Keychain item
   `ai.mistral.vibe` / `MISTRAL_API_KEY`, never scans `~/.vibe/.env` or a host
   `MISTRAL_API_KEY`, and never scrapes `admin.mistral.ai`. A missing
   `vibe_budget`, a zero `initial_budget`, or a key without usage permission

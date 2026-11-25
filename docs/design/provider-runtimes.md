@@ -307,6 +307,8 @@ that ACP usage update: when the instance uses API-key authentication,
 Octant reads the monthly window from Mistral's billing endpoint with the
 key Settings already holds, under the
 [account usage endpoint](../architecture.md#security-and-authority) rule.
+Pay-as-you-go on at a spent included window is extra usage, not an account
+stop.
 Native review remains unimplemented. Supplementary file-review
 reads have a candidate integration behind an empty verified-version allowlist:
 no production profile declares the read capability until signed-in 3.0.3

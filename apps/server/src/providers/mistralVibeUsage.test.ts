@@ -80,6 +80,59 @@ describe("Mistral Vibe plan usage", () => {
     expect(new Headers(http.requests[0]?.init.headers).get("accept")).toBe("application/json");
   });
 
+  it("keeps the account available when the included allowance is spent and PAYG is on", async () => {
+    const http = recordingFetch(() =>
+      Response.json({
+        vibe_budget: {
+          usage_percentage: 100,
+          initial_budget: 25,
+          reset_at: "2026-12-01T00:00:00Z",
+          payg_enabled: true,
+        },
+      }),
+    );
+
+    const outcome = await observe(facts({ authentication: "api-key", fetch: http.fetch }));
+
+    expect(outcome._tag).toBe("Right");
+    if (outcome._tag !== "Right") return;
+    expect(outcome.right.quota).toBe("available");
+    expect(outcome.right.rateLimitWindows).toEqual([
+      {
+        window: "monthly",
+        status: "exhausted",
+        utilization: 1,
+        resetsAt: "2026-12-01T00:00:00.000Z",
+        observedAt: clock(),
+        overage: { status: "allowed", disabledReason: "Pay as you go on" },
+      },
+    ]);
+  });
+
+  it("marks the account spent when the included allowance is spent and PAYG is off", async () => {
+    const http = recordingFetch(() =>
+      Response.json({
+        vibe_budget: {
+          usage_percentage: 100,
+          initial_budget: 25,
+          reset_at: "2026-12-01T00:00:00Z",
+          payg_enabled: false,
+        },
+      }),
+    );
+
+    const outcome = await observe(facts({ authentication: "api-key", fetch: http.fetch }));
+
+    expect(outcome._tag).toBe("Right");
+    if (outcome._tag !== "Right") return;
+    expect(outcome.right.quota).toBe("exhausted");
+    expect(outcome.right.rateLimitWindows?.[0]).toMatchObject({
+      status: "exhausted",
+      utilization: 1,
+      overage: { status: "allowed", disabledReason: "Pay as you go off" },
+    });
+  });
+
   it("fills PAYG from the subscription endpoint only when the budget omits it", async () => {
     const http = recordingFetch((url) =>
       url.endsWith("/subscription")

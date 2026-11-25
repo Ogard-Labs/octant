@@ -7,6 +7,7 @@ import {
   type ProviderServiceLimits,
   type UtcTimestamp,
 } from "@octant/contracts";
+import { overageAllowsContinuedUse } from "@octant/domain";
 import { parseRetryAfter } from "@octant/provider-sdk/image-generation";
 import { Effect, Either } from "effect";
 
@@ -199,7 +200,11 @@ export function accountWindowLimits(
     tokens: { status: "unavailable" },
     concurrency: { status: "unavailable" },
     retry: { status: "inactive" },
-    quota: windows.some((window) => window.status === "exhausted") ? "exhausted" : "available",
+    quota: windows.some(
+      (window) => window.status === "exhausted" && !overageAllowsContinuedUse(window.overage),
+    )
+      ? "exhausted"
+      : "available",
     source: "runtime-reported",
     confidence: "high",
     updatedAt,
