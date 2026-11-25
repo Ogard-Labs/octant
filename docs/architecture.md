@@ -7904,7 +7904,12 @@ ls-remote` against the thread's remote and the GitHub reads they already
   running turn, is sending one itself, or is still on its first read, so it
   never opens a second stream or reopens a turn it settled; a turn waiting on
   the person does not stop it looking, and a look that fails is tried again
-  five seconds later, since a settled thread's activity may not move again. The steered messages are held apart from the transcript and only ever grow, so the read
+  five seconds later, since a settled thread's activity may not move again;
+  a first read of the thread that failed leaves its activity to be looked at
+  too. Any read of the conversation while this window's own send streams a
+  turn, such as the one a rename from another window brings, keeps that turn's
+  rows and tool steps as shown, because the send's stream writes the reply
+  row it created and a second stream of the turn is refused. The steered messages are held apart from the transcript and only ever grow, so the read
   cannot roll back the reply, tool steps or tasks the stream is writing, and
   a slower read of the conversation cannot take a shown message away. Reading
   on every `code-navigation` notice was rejected because most of those say

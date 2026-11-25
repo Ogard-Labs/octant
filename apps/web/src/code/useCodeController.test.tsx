@@ -3502,8 +3502,8 @@ describe("useCodeController", () => {
       unmount();
     });
 
-    it("opens no second stream for a turn this window sent when a thread event arrives while it runs", async () => {
-      const { client, host } = runningThread();
+    it("keeps streaming the reply of a turn this window sent, in one stream, when a thread event arrives while it runs", async () => {
+      const { client, emit, host, say } = runningThread();
       host.threads[String(ids.thread)]?.turns.splice(0, 1);
       let renamed = () => {};
       const rename = new Promise<void>((resolve) => {
@@ -3548,6 +3548,23 @@ describe("useCodeController", () => {
       await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
       void result.current.sendFollowUp("Add the index");
       await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      act(() => say(1, "part-1"));
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({ text: "First half" }),
+      );
+      act(() =>
+        emit(2, {
+          kind: "tool-activity",
+          toolCallId: "call-1",
+          toolName: "Read",
+          state: "completed",
+          summary: "src/index.ts",
+        }),
+      );
+      await waitFor(() =>
+        expect(result.current.turnActivity.get(sentTurns[0] ?? "")).toBeDefined(),
+      );
+      const activity = result.current.turnActivity.get(sentTurns[0] ?? "");
       const reads = vi.mocked(host.client.conversationWindow).mock.calls.length;
       // Another window renames the thread while this window's turn runs.
       renamed();
@@ -3555,6 +3572,19 @@ describe("useCodeController", () => {
         expect(vi.mocked(host.client.conversationWindow).mock.calls.length).toBeGreaterThan(reads),
       );
       await act(async () => undefined);
+      // The reload neither takes back what streamed nor stops what follows.
+      expect(reply(result.current.conversation)).toMatchObject({ text: "First half" });
+      expect(result.current.turnActivity.get(sentTurns[0] ?? "")).toBe(activity);
+      act(() => say(3, "part-2"));
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({
+          text: "First half, second half",
+          status: "incomplete",
+        }),
+      );
+      expect(
+        result.current.conversation.filter((message) => message.role === "assistant"),
+      ).toHaveLength(1);
       const streamsOfSent = vi
         .mocked(client.subscribeOperation)
         .mock.calls.filter(([, operationId]) => String(operationId) === sentTurns[0]);

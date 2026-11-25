@@ -626,6 +626,23 @@ describe("CodeThreadControllerSlots", () => {
       );
     }, 12_000);
 
+    it("looks again when the read that opened the thread failed, though the list never moves", async () => {
+      const { api, conversationWindow } = host([providerTurn(asked, "completed")]);
+      conversationWindow.mockRejectedValueOnce(new Error("offline"));
+      const settled: CodeBootstrap = {
+        ...bootstrap(),
+        activity: [{ threadId: threadA, lastSequence: 4 }] as never,
+      };
+      const { registry } = open(api, settled);
+      await waitFor(
+        () => {
+          expect(registry.get(threadA)?.conversation.at(-1)).toMatchObject({ operationId: asked });
+          expect(registry.get(threadA)?.conversationHistory).toBe("loaded");
+        },
+        { timeout: 8_000 },
+      );
+    }, 12_000);
+
     it("streams the queued turn that follows the one this view followed", async () => {
       let finishFirst = () => {};
       const firstEnds = new Promise<void>((resolve) => {
