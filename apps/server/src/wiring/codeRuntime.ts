@@ -962,6 +962,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         projectId: String(thread.projectId),
         createdAt: thread.createdAt,
         windowId,
+        title: thread.title,
+        providerInstanceId: thread.providerInstanceId,
+        // The person's newest prompt: what the model may quote to have it
+        // remembered at once.
+        personMessages: () =>
+          codeBoardEventStore.personPromptsForThread(thread.id, 1).flatMap((prompt) => {
+            const text = codeEvidence.read(prompt);
+            return text === undefined ? [] : [text];
+          }),
       }),
     );
     contributeCodeTools(({ windowId, thread, readThread, folders, operationId, askPerson }) => {

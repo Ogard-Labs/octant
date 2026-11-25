@@ -83,7 +83,7 @@ import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "../scaffold/curatedScaf
 import { resolveAvailableTools } from "../scaffold/scaffoldFilesystem";
 import { hydrateAgentMessageProjectionFromJournal } from "../agentMessage/agentMessageProjection";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
-import { defaultShellSettings, findWorkspacePresetTarget } from "@octant/domain";
+import { activeChatTurns, defaultShellSettings, findWorkspacePresetTarget } from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import type { AppManagedToolSet } from "../chat/chatTurnRunner";
@@ -788,6 +788,23 @@ export function wireChat(deps: ChatDependencies) {
                   projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
                   createdAt: thread.createdAt,
                   windowId,
+                  title: thread.title,
+                  providerInstanceId: thread.providerInstanceId,
+                  // The person's newest message: what the model may quote to
+                  // have it remembered at once.
+                  personMessages: () => {
+                    const view = persistence.readChatThreadView(thread.id);
+                    if (view === undefined) return [];
+                    const bodies = new Map(
+                      view.contents.map((content) => [String(content.contentId), content.body]),
+                    );
+                    const newest = activeChatTurns(view.turns).at(-1);
+                    const body =
+                      newest === undefined
+                        ? undefined
+                        : bodies.get(String(newest.userMessageRef.contentId));
+                    return body === undefined ? [] : [body];
+                  },
                 }),
                 // Outside the taint wrapper too: it returns Project memory the
                 // person approved, and a Chat thread outside a Project gets no

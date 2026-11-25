@@ -54,8 +54,10 @@ import { decodeUtcTimestamp } from "@octant/contracts";
 import {
   applyProtectedFilesChoice,
   configureSecretGuardLocations,
+  isProtectedSecretPath,
   secretGuardPlatform,
 } from "../process/secretGuard";
+import { namesProtectedPath } from "../personMemory/namesProtectedPath";
 import { createPersonMemoryAccess } from "../personMemory/personMemoryAccess";
 import { createPersonMemoryRouteHandler } from "../personMemory/personMemoryRoutes";
 import { readReceivedDelegationThreadIds } from "../hub/delegationJournal";
@@ -308,6 +310,10 @@ export function wireAuthority(deps: AuthorityDependencies) {
     isRestrictedDeviceScope,
     isThreadWithheld: (threadId) => peerDelegatedThreads.has(threadId),
     projectLabel: (projectId) => persistence.readProject(decodeProjectId(projectId))?.name,
+    save: {
+      namesProtectedPath: (text) => namesProtectedPath(text, isProtectedSecretPath),
+      isHostScope: isRoutineHostScope,
+    },
   });
   // The asks these services hold are not journaled when raised, so each says
   // so here and the paired phones' notifications, wired later, listen.

@@ -1147,6 +1147,16 @@ export function wireWork(deps: WorkDependencies) {
               projectId: String(input.thread.projectId),
               createdAt: input.thread.createdAt,
               windowId: input.windowId,
+              title: input.thread.title,
+              providerInstanceId: input.thread.providerInstanceId,
+              // The person's newest prompt, leaving out a turn the host
+              // accepted to deliver a subagent's result.
+              personMessages: () =>
+                workTurnProjection
+                  .listForThread(input.thread.id)
+                  .filter((turn) => turn.delivery === undefined)
+                  .slice(-1)
+                  .map((turn) => turn.prompt),
             });
         // Plan reads Project memory and refuses every write to it; elsewhere
         // the turn's level and the Project's setting decide whether one asks.
