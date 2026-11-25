@@ -94,6 +94,11 @@ export function slugifyPrompt(prompt: string): string {
   return slug;
 }
 
+/** Whether a branch of this name, or one above or below it, already exists (ignoring case). */
+export function branchNameTaken(candidate: string, existing: ReadonlyArray<string>): boolean {
+  return conflicts(candidate, new Set(existing.map((name) => name.toLowerCase())));
+}
+
 export interface DeliveryBranchInput {
   readonly baseBranch: string;
   readonly shortId: string;

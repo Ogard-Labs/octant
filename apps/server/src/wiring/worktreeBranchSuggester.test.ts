@@ -1,0 +1,89 @@
+import { describe, expect, it, vi } from "vitest";
+import { createHostWorktreeBranchSuggester } from "./worktreeBranchSuggester";
+
+// The driver would start a real provider; what is under test is who may reach it.
+vi.mock("./providers", () => ({ makeConfiguredProviderDriver: () => ({}) }));
+
+const provider = "00000000-0000-4000-8000-000000000001" as never;
+const model = "model-a" as never;
+
+function suggester(
+  overrides: {
+    readonly readiness?: string;
+    readonly allowed?: boolean;
+    readonly enabled?: boolean;
+    readonly projectType?: "code" | "chat";
+    readonly admit?: () => { status: "refused" } | { status: "admitted" };
+  } = {},
+) {
+  const admit = vi.fn(overrides.admit ?? (() => ({ status: "admitted" as const })));
+  const port = createHostWorktreeBranchSuggester({
+    persistence: {
+      readProviderInstance: () => ({
+        id: provider,
+        enabled: overrides.enabled ?? true,
+        driverKind: "codex",
+        configuration: { kind: "codex-cli", binaryPath: "codex" },
+        displayName: "Account",
+      }),
+      readProviderCatalog: () => ({ models: [{ id: model }] }),
+      readProject: () => ({
+        type: overrides.projectType ?? "code",
+        lifecycle: "active",
+      }),
+    } as never,
+    providerRuntimeRegistry: {
+      observedState: () => ({ readiness: overrides.readiness ?? "ready" }),
+    } as never,
+    isProjectPolicyTargetAllowed: () => overrides.allowed ?? true,
+    configuredDriverOptions: () => ({}) as never,
+    providerDataDirectory: "/data",
+    spendCeiling: { admit, settle: vi.fn(), abandon: vi.fn() } as never,
+  });
+  return { port, admit };
+}
+
+const input = {
+  projectId: "00000000-0000-4000-8000-0000000000a1" as never,
+  providerInstanceId: provider,
+  modelId: model,
+  draft: "Fix the login redirect",
+};
+
+describe("createHostWorktreeBranchSuggester", () => {
+  it("declines without a model call when the provider is not ready, disabled, or not allowed for the Project", async () => {
+    for (const overrides of [
+      { readiness: "needs-authentication" },
+      { enabled: false },
+      { allowed: false },
+      { projectType: "chat" as const },
+    ]) {
+      const { port, admit } = suggester(overrides);
+      const result = await port.suggest(input);
+      expect(result.status, JSON.stringify(overrides)).toBe("refused");
+      expect(admit).not.toHaveBeenCalled();
+    }
+  });
+
+  it("declines as spend-limited when the Project's ceilings refuse the request", async () => {
+    const { port } = suggester({ admit: () => ({ status: "refused" }) });
+    await expect(port.suggest(input)).resolves.toEqual({
+      status: "refused",
+      reason: "spend-limited",
+    });
+  });
+
+  it("asks for the reservation against the Project with a bounded token estimate that is not a turn", async () => {
+    const { port, admit } = suggester();
+    await port.suggest(input).catch(() => undefined);
+    expect(admit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: String(input.projectId),
+        threadType: "code-thread",
+        countsAsTurn: false,
+        estimatedCostUsdMicros: "unknown",
+        turnUpperBoundTokens: 4_000,
+      }),
+    );
+  });
+});

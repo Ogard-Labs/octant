@@ -129,6 +129,7 @@ import {
   type TerminalSessionImportRequest,
   type ProviderExecutionPolicy,
   type ProviderInstance,
+  type ProviderInstanceId,
   type ProviderModelId,
   type ProviderModelOptionValues,
   type ProviderProbeResult,
@@ -154,6 +155,7 @@ import {
 } from "@octant/domain/agent-profile-policy";
 import { ACCESS_POSTURE_RANK, authorizeCodeOperation } from "@octant/domain/code-policy";
 import { deriveDeliveryBranch } from "@octant/domain/code-worktree-naming";
+import type { WorktreeBranchSuggestion } from "./worktreeBranchSuggestion";
 import { evaluateCodeDeliveryOutcomeProposal } from "@octant/domain/delivery-target-policy";
 import {
   completedThreadArchiveDue,
@@ -541,6 +543,17 @@ export interface CodeWorktreeRefsPort {
   ) => Promise<ReadonlyArray<CodeWorktreeRef>>;
 }
 
+export interface CodeWorktreeBranchSuggestionPort {
+  readonly suggest: (
+    input: Readonly<{
+      projectId: ProjectId;
+      providerInstanceId: ProviderInstanceId;
+      modelId: ProviderModelId;
+      draft: string;
+    }>,
+  ) => Promise<WorktreeBranchSuggestion>;
+}
+
 export interface ManagedCodeThreadCreationInput {
   readonly authenticatedWindowId: WindowId;
   readonly projectId: ProjectId;
@@ -831,6 +844,7 @@ export interface CodeServiceOptions {
   readonly sessionAuthority?: CodeSessionAuthorityStore;
   readonly worktreeSourcePreview?: CodeWorktreeSourcePreviewPort;
   readonly worktreeRefs?: CodeWorktreeRefsPort;
+  readonly worktreeBranchSuggestion?: CodeWorktreeBranchSuggestionPort;
   readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
   /** Where a fork starts; without it a fork refuses as unavailable. */
   readonly forkPoints?: CodeForkPointPort;
@@ -1162,6 +1176,7 @@ export class CodeService {
   readonly #sessionAuthority: CodeSessionAuthorityStore;
   readonly #worktreeSourcePreview: CodeWorktreeSourcePreviewPort | undefined;
   readonly #worktreeRefs: CodeWorktreeRefsPort | undefined;
+  readonly #worktreeBranchSuggestion: CodeWorktreeBranchSuggestionPort | undefined;
   readonly #managedThreadCreation: ManagedCodeThreadCreationPort | undefined;
   readonly #forkPoints: CodeForkPointPort | undefined;
   readonly #forkMergeBack: CodeServiceOptions["forkMergeBack"];
@@ -1232,6 +1247,7 @@ export class CodeService {
     this.#sessionAuthority = options.sessionAuthority ?? new CodeSessionAuthorityStore();
     this.#worktreeSourcePreview = options.worktreeSourcePreview;
     this.#worktreeRefs = options.worktreeRefs;
+    this.#worktreeBranchSuggestion = options.worktreeBranchSuggestion;
     this.#managedThreadCreation = options.managedThreadCreation;
     this.#forkPoints = options.forkPoints;
     this.#forkMergeBack = options.forkMergeBack;
@@ -2235,6 +2251,43 @@ export class CodeService {
           refs = [];
         }
         return { kind: "worktree-refs-listed", projectId: command.projectId, refs };
+      }
+      if (command.kind === "suggest-code-worktree-branch") {
+        // A model call is the person's explicit request, from a window that may
+        // act on this Project; it never runs because a draft changed.
+        if (!(await this.#access.canAccessProject(authenticatedWindowId, command.projectId))) {
+          throw this.#failure("unauthorized", "Code Project branch suggestions are unauthorized.");
+        }
+        const declined = (
+          reason: Extract<
+            CodeCommandResult,
+            { kind: "worktree-branch-suggestion-declined" }
+          >["reason"],
+        ) => ({
+          kind: "worktree-branch-suggestion-declined" as const,
+          projectId: command.projectId,
+          reason,
+        });
+        if (this.#worktreeBranchSuggestion === undefined) return declined("provider-unavailable");
+        let suggestion: WorktreeBranchSuggestion;
+        try {
+          suggestion = await this.#worktreeBranchSuggestion.suggest({
+            projectId: command.projectId,
+            providerInstanceId: command.providerInstanceId,
+            modelId: command.modelId,
+            draft: command.draft,
+          });
+        } catch {
+          return declined("failed");
+        }
+        if (suggestion.status === "suggested") {
+          return {
+            kind: "worktree-branch-suggested",
+            projectId: command.projectId,
+            words: suggestion.words,
+          };
+        }
+        return declined(suggestion.status === "refused" ? suggestion.reason : "failed");
       }
       if (command.kind === "update-code-settings") {
         const current = this.#persistence.readCodeSettings()?.settings ?? this.#defaultSettings();

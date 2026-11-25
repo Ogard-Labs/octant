@@ -1044,6 +1044,22 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          // A branch-name suggestion is a request to a model on the person's
+          // own account, made by the person asking for one.
+          if (
+            command?.kind === "suggest-code-worktree-branch" &&
+            (callerAuthority !== "local-window" || agentGrantSession)
+          ) {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message:
+                  "Only you, from a window or a device you paired, can ask for a branch name.",
+              },
+              403,
+              origin,
+            );
+          }
           // Which account a thread runs on, now or when its account hits its
           // usage limit, is the person's own choice; a device that acts on
           // this host without the person's powers may not make it.
