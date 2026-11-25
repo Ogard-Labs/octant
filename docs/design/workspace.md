@@ -822,19 +822,22 @@ malformed or unavailable storage falls back to the current visible surface. Clos
 observation, while only Cancel job cancels generation on the host. Editor cursor/scroll state is restored only for the same thread, checkout, file
 identity and digest. Review retains its selected file and scroll for the exact
 captured diff; an absent selected file stays explicit rather than retargeting.
-Transcript offsets require the same first loaded row and viewport width. A
-window keeps in memory the conversation of the eight Code threads that left its
-panes last, so coming back to one draws its conversation in the first frame,
-never an empty transcript or the previous thread's text. A kept conversation
-has no stream, poll or read behind it, marks nothing as read, and takes no
-pending approval, question, draft or refresh; opening the thread reads it again
-from the journal, and until that read lands nothing treats what is drawn as the
-thread's current state. A thread the host no longer lists, or a change of host,
-lets it go. The first open of a thread in a window still loads. These
+Transcript offsets require the same first loaded row and viewport width. These
 presentation references share the endpoint/window/context boundary, retain at
 most 64 entries and 128 KiB, and write no document text, native process identity,
 approval or authority. They never take focus or perform a host operation during
 restore. Composer drafts retain their existing durable storage. Editor drafts use the local recovery store described under [File editing](#file-editing); approval requests keep their explicit controls.
+
+A window keeps in memory what the eight Code threads that left its panes last
+showed, so coming back to one draws its conversation in the first frame, never
+an empty transcript or the previous thread's text. Leaving a thread still stops
+its controller: what is kept is its transcript and figures, with no stream,
+poll or read behind it, no pending approval or question, and no turn status. It
+marks nothing as read. Opening the thread again reads it from the journal, and
+until that read lands nothing treats what is drawn as the thread's current
+state. A thread the host no longer lists, or a change of host, lets it go. The
+first open of a thread in a window still loads.
+
 Thread titles appear once in the title row, and the row shows the thread's
 current title: a pane stores the title the thread had when it opened, so the
 shell reads the title from the navigation rows instead, and a rename made in

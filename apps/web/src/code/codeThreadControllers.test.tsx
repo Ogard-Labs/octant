@@ -436,7 +436,7 @@ describe("CodeThreadControllerSlots", () => {
 });
 
 /** A host that holds each thread's answers back until the test lets them through. */
-function conversingHost(replies: Map<string, string>) {
+function conversingHost(replies: Map<string, string>, host: "windowed" | "whole" = "windowed") {
   const codeClient = client();
   const gate = { held: false, release: () => undefined as void };
   let open = Promise.resolve();
@@ -450,6 +450,24 @@ function conversingHost(replies: Map<string, string>) {
     });
   };
   const read = codeClient.thread;
+  const turnOf = (threadId: CodeThreadId) => {
+    const evidence = (part: string) => ({
+      contentId: String(threadId).replace(/^1/, part),
+      digest: "a".repeat(64),
+      byteLength: 10,
+    });
+    return {
+      operationId: String(threadId).replace(/^1/, "7"),
+      providerInstanceId: "50000000-0000-4000-8000-000000000001",
+      modelId: "model-a",
+      sessionId: String(threadId).replace(/^1/, "8"),
+      prompt: evidence("5"),
+      assistant: [evidence("6")],
+      status: "completed" as const,
+      startedAt: now,
+      updatedAt: now,
+    };
+  };
   Object.assign(codeClient, {
     thread: vi.fn(async (threadId: CodeThreadId) => {
       await open;
@@ -457,32 +475,22 @@ function conversingHost(replies: Map<string, string>) {
     }),
     conversation: vi.fn(async (threadId: CodeThreadId) => {
       await open;
-      const operationId = String(threadId).replace(/^1/, "7");
-      const evidence = (part: string) => ({
-        contentId: String(threadId).replace(/^1/, part),
-        digest: "a".repeat(64),
-        byteLength: 10,
-      });
       return {
         version: 3 as const,
         threadId,
-        turns: [
-          {
-            operationId,
-            providerInstanceId: "50000000-0000-4000-8000-000000000001",
-            modelId: "model-a",
-            sessionId: String(threadId).replace(/^1/, "8"),
-            prompt: evidence("5"),
-            assistant: [evidence("6")],
-            status: "completed" as const,
-            startedAt: now,
-            updatedAt: now,
-          },
-        ],
+        turns: [turnOf(threadId)],
         nextCursor: 1,
         hasMore: false,
       };
     }),
+    ...(host === "whole"
+      ? {}
+      : {
+          conversationWindow: vi.fn(async (threadId: CodeThreadId) => {
+            await open;
+            return { version: 1 as const, threadId, turns: [turnOf(threadId)], hasEarlier: false };
+          }),
+        }),
     operationContent: vi.fn(async (threadId: CodeThreadId, _operation: unknown, id: unknown) =>
       new TextEncoder().encode(
         String(id).startsWith("5") ? "What is here?" : (replies.get(String(threadId)) ?? ""),
@@ -573,12 +581,12 @@ describe("switching between Code threads the window has loaded", () => {
     await import("./CodeWorkspace");
   }, 60_000);
 
-  async function openBoth() {
+  async function openBoth(kind: "windowed" | "whole" = "windowed") {
     const replies = new Map([
       [String(threadA), "Reply from the first thread"],
       [String(threadB), "Reply from the second thread"],
     ]);
-    const host = conversingHost(replies);
+    const host = conversingHost(replies, kind);
     const registry = createCodeThreadControllers();
     const readCursorStore = createCodeReadCursorStore();
     const frames: DrawnFrame[] = [];
@@ -599,26 +607,48 @@ describe("switching between Code threads the window has loaded", () => {
     return { frames, host, readCursorStore, registry, replies, show };
   }
 
-  it("draws the incoming conversation in the first frame while the host is still answering", async () => {
+  it.each(["windowed", "whole"] as const)(
+    "draws the incoming conversation in the first frame while a %s host is still answering",
+    async (kind) => {
+      const opened = await openBoth(kind);
+      opened.host.hold();
+      opened.show(threadA);
+
+      expect(opened.frames.length).toBeGreaterThan(0);
+      for (const frame of opened.frames) {
+        expect(frame.text).not.toContain("Reply from the second thread");
+        expect(frame.text).not.toMatch(/Loading conversation|Preparing this Code thread/);
+      }
+
+      // The transcript measures itself within the same commit, before anything is painted.
+      expect(screen.getByText("Reply from the first thread")).toBeInTheDocument();
+
+      // The journal still has the last word on what the thread holds.
+      opened.replies.set(String(threadA), "Reply the thread got meanwhile");
+      opened.host.release();
+      expect(await screen.findByText("Reply the thread got meanwhile")).toBeInTheDocument();
+      expect(screen.queryByText("Reply from the first thread")).toBeNull();
+      expect(opened.registry.get(threadA)?.conversationHistory).toBe("loaded");
+    },
+  );
+
+  it("still draws a thread at once after a quick switch there and back", async () => {
     const opened = await openBoth();
     opened.host.hold();
-    opened.show(threadA);
-
-    expect(opened.frames.length).toBeGreaterThan(0);
-    for (const frame of opened.frames) {
-      expect(frame.text).not.toContain("Reply from the second thread");
-      expect(frame.text).not.toMatch(/Loading conversation|Preparing this Code thread/);
+    for (const id of [threadA, threadB, threadA, threadB]) {
+      opened.frames.length = 0;
+      opened.show(id);
+      for (const frame of opened.frames) {
+        expect(frame.text).not.toMatch(/Loading conversation|Preparing this Code thread/);
+      }
+      expect(
+        screen.getByText(
+          id === threadA ? "Reply from the first thread" : "Reply from the second thread",
+        ),
+      ).toBeInTheDocument();
     }
-
-    // The transcript measures itself within the same commit, before anything is painted.
-    expect(screen.getByText("Reply from the first thread")).toBeInTheDocument();
-
-    // The journal still has the last word on what the thread holds.
-    opened.replies.set(String(threadA), "Reply the thread got meanwhile");
     opened.host.release();
-    expect(await screen.findByText("Reply the thread got meanwhile")).toBeInTheDocument();
-    expect(screen.queryByText("Reply from the first thread")).toBeNull();
-    expect(opened.registry.get(threadA)?.conversationHistory).toBe("loaded");
+    await waitFor(() => expect(opened.registry.get(threadB)?.conversationHistory).toBe("loaded"));
   });
 
   it("does not call a kept transcript loaded before the host has answered again", async () => {
@@ -630,26 +660,62 @@ describe("switching between Code threads the window has loaded", () => {
     await waitFor(() => expect(opened.registry.get(threadA)?.conversationHistory).toBe("loaded"));
   });
 
-  it("keeps no stream open and delivers nothing to a thread that left every pane", async () => {
+  it("runs nothing for a thread that left every pane, not even after a command it left waiting", async () => {
     const opened = await openBoth();
-    const subscribed = vi.mocked(opened.host.client.subscribe).mock.calls;
-    const signals = subscribed
-      .filter(([threadId]) => String(threadId) === String(threadA))
-      .map(([, , signal]) => signal);
-    expect(signals.length).toBeGreaterThan(0);
-    expect(signals.every((signal) => signal?.aborted)).toBe(true);
-    expect(opened.registry.get(threadA)).toBeUndefined();
-    expect(opened.registry.shown(threadA)?.conversation).toHaveLength(2);
+    let answer: (result: unknown) => void = () => undefined;
+    vi.mocked(opened.host.client.execute).mockImplementation(
+      () => new Promise((resolve) => (answer = resolve as typeof answer)),
+    );
+    act(() => void opened.registry.get(threadB)?.renameThread(threadB, "Renamed"));
+    await waitFor(() => expect(opened.host.client.execute).toHaveBeenCalled());
+    const marked = vi.spyOn(opened.readCursorStore, "mark");
+    const markedDeferred = vi.spyOn(opened.readCursorStore, "markDeferred");
+    opened.show(threadA);
+    await waitFor(() => expect(opened.registry.get(threadA)?.conversationHistory).toBe("loaded"));
 
-    const reads = vi.mocked(opened.host.client.thread).mock.calls.length;
-    await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
-    expect(vi.mocked(opened.host.client.thread).mock.calls).toHaveLength(reads);
+    expect(opened.registry.get(threadB)).toBeUndefined();
+    const streams = vi
+      .mocked(opened.host.client.subscribe)
+      .mock.calls.filter(([id]) => String(id) === String(threadB));
+    expect(streams.every(([, , signal]) => signal?.aborted)).toBe(true);
+    await act(async () => {
+      answer({ kind: "thread-updated", thread: thread(threadB, checkoutB, "Renamed") });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(
+      vi
+        .mocked(opened.host.client.subscribe)
+        .mock.calls.filter(([id]) => String(id) === String(threadB)),
+    ).toHaveLength(streams.length);
+    for (const spy of [marked, markedDeferred]) {
+      expect(spy.mock.calls.filter(([id]) => String(id) === String(threadB))).toEqual([]);
+    }
   });
 
-  it("delivers a prompt queued for a parked thread once it is opened", async () => {
+  it("offers nothing to answer, stop or retry on what a left thread last showed", async () => {
+    const opened = await openBoth();
+    const left = opened.registry.shown(threadA);
+    expect(left?.conversation).toHaveLength(2);
+    expect(left).toMatchObject({
+      conversationHistory: "loading",
+      providerRequests: [],
+      turnStatus: "idle",
+      turnError: undefined,
+    });
+    opened.host.hold();
+    opened.show(threadA);
+    for (const frame of opened.frames) {
+      expect(frame).toMatchObject({ requests: 0, turnStatus: "idle" });
+    }
+    opened.host.release();
+    await waitFor(() => expect(opened.registry.get(threadA)?.conversationHistory).toBe("loaded"));
+  });
+
+  it("delivers a prompt queued while a thread was away, even once its text was let go", async () => {
     const opened = await openBoth();
     opened.registry.restoreDraft(threadA, "Bounced prompt");
-    expect(opened.registry.shown(threadA)?.pendingDraft).toBe("");
+    opened.registry.keepOnly(opened.host.client, []);
+    expect(opened.registry.shown(threadA)).toBeUndefined();
     opened.show(threadA);
     await waitFor(() => expect(opened.registry.get(threadA)?.pendingDraft).toBe("Bounced prompt"));
     act(() => opened.registry.get(threadA)?.setPendingDraft(""));
@@ -671,20 +737,13 @@ describe("switching between Code threads the window has loaded", () => {
       { length: 12 },
       (_, index) => `10000000-0000-4000-8000-0000000001${String(index + 10)}` as CodeThreadId,
     );
-    const props = {
-      client: client(),
-      navigationBootstrap: undefined,
-      readCursorStore: createCodeReadCursorStore(),
-      registry,
-    };
-    const view = render(<CodeThreadControllerSlots {...props} threadIds={ids.slice(0, 1)} />);
-    for (const id of ids.slice(1)) {
-      view.rerender(<CodeThreadControllerSlots {...props} threadIds={[id]} />);
+    for (const id of ids) {
+      registry.publish(id, {
+        keepThread: () => ({ view: { thread: { id } }, conversation: [] }),
+      } as never);
+      registry.release(id);
     }
-    expect(ids.map((id) => registry.shown(id) !== undefined)).toEqual([
-      ...Array.from({ length: 3 }, () => false),
-      ...Array.from({ length: 9 }, () => true),
-    ]);
+    expect(ids.filter((id) => registry.shown(id) !== undefined)).toEqual(ids.slice(-8));
   });
 
   it.each([
@@ -695,7 +754,7 @@ describe("switching between Code threads the window has loaded", () => {
       }),
     ],
     ["the window moves to another host", () => ({ client: conversingHost(new Map()).client })],
-  ])("lets go of a parked thread when %s", async (_, change) => {
+  ])("lets go of what a left thread showed when %s", async (_, change) => {
     const opened = await openBoth();
     expect(opened.registry.shown(threadA)).toBeDefined();
     opened.show(threadB, change());
