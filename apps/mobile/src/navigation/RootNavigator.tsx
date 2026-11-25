@@ -42,6 +42,7 @@ import { mobilePushRegistrationBook } from "../notifications/mobilePushRegistrat
 import { usePhoneNotificationRotation } from "../notifications/usePhoneNotificationRotation";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { TodosScreen } from "../todos/TodosScreen";
+import { hasLiquidGlass } from "../ui/systemVersion";
 import {
   mobileTodoDraftAfterHostChange,
   type MobileStartedThread,
@@ -218,14 +219,15 @@ function PlaceStack(props: { readonly place: "home" | "threads" | "inbox" }) {
         headerTitleStyle: { color: colors.textPrimary },
         headerLargeTitleStyle: { color: colors.textPrimary },
         headerBackButtonDisplayMode: "minimal",
+        headerShadowVisible: false,
       }}
     >
       {props.place === "home" ? (
-        <Stack.Screen component={HomeRoute} name="homeRoot" options={ROOT_OPTIONS} />
+        <Stack.Screen component={HomeRoute} name="homeRoot" options={PLACE_OPTIONS} />
       ) : props.place === "threads" ? (
-        <Stack.Screen component={ThreadsRoute} name="threadsRoot" options={ROOT_OPTIONS} />
+        <Stack.Screen component={ThreadsRoute} name="threadsRoot" options={PLACE_OPTIONS} />
       ) : (
-        <Stack.Screen component={InboxRoute} name="inboxRoot" options={ROOT_OPTIONS} />
+        <Stack.Screen component={InboxRoute} name="inboxRoot" options={PLACE_OPTIONS} />
       )}
       <Stack.Screen component={CountedRoute} name="counted" />
       <Stack.Screen component={ThreadRoute} name="thread" />
@@ -237,6 +239,11 @@ function PlaceStack(props: { readonly place: "home" | "threads" | "inbox" }) {
 }
 
 const ROOT_OPTIONS = { headerLargeTitleEnabled: true } as const;
+// On Liquid Glass a place's list runs under its bar and fades there; its name
+// is in the bar (ScreenHeader). Older systems keep the large title.
+const PLACE_OPTIONS = hasLiquidGlass()
+  ? ({ headerTransparent: true, scrollEdgeEffects: { top: "soft" } } as const)
+  : ROOT_OPTIONS;
 const HomeStack = () => <PlaceStack place="home" />;
 const ThreadsStack = () => <PlaceStack place="threads" />;
 const InboxStack = () => <PlaceStack place="inbox" />;

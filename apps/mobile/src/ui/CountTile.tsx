@@ -29,10 +29,10 @@ export function CountTile(props: CountTileProps) {
       StyleSheet.create({
         pressable: { flex: 1, borderRadius: 16 },
         face: {
-          minHeight: 86,
+          minHeight: 74,
           justifyContent: "space-between",
           paddingHorizontal: 12,
-          paddingVertical: 12,
+          paddingVertical: 10,
           borderRadius: 16,
           borderWidth: StyleSheet.hairlineWidth,
           overflow: "hidden",

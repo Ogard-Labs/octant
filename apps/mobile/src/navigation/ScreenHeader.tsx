@@ -8,6 +8,7 @@ import type {
 import type { ParamListBase } from "@react-navigation/native";
 import { ToolbarButton } from "../ui/NativeChrome";
 import type { MobileIconName } from "../ui/IconButton";
+import { hasLiquidGlass } from "../ui/systemVersion";
 import { systemSymbol } from "../ui/symbols";
 import { typography, useTheme } from "../../design-system";
 
@@ -26,10 +27,13 @@ export interface ScreenHeaderAction {
 /**
  * A screen's part of the system navigation bar: its title, a second line when
  * it has one, its actions and its search field. The bar, Back and the
- * collapsing large title are the platform's own.
+ * collapsing large title are the platform's own. A place's name stands on the
+ * bar's own line at the leading edge, so its list starts right under it.
  */
 export function ScreenHeader(props: {
   readonly title: string;
+  /** Set on the first screen of a place. */
+  readonly place?: boolean;
   readonly subtitle?: string | undefined;
   readonly actions?: ReadonlyArray<ScreenHeaderAction>;
   readonly search?: {
@@ -40,6 +44,7 @@ export function ScreenHeader(props: {
   const navigation = useNavigation<NativeStackNavigationProp<ParamListBase>>();
   const { colors } = useTheme();
   const { title, subtitle, actions, search } = props;
+  const leading = props.place === true && hasLiquidGlass();
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -48,6 +53,7 @@ export function ScreenHeader(props: {
           fontSize: typography.pageTitle.fontSize,
           fontWeight: typography.pageTitle.fontWeight,
         },
+        place: { color: colors.textPrimary, fontSize: 28, fontWeight: "700", letterSpacing: -0.4 },
         subtitle: { color: colors.textSecondary, fontSize: typography.meta.fontSize },
         titles: { maxWidth: 230 },
         actions: { flexDirection: "row", alignItems: "center" },
@@ -76,6 +82,28 @@ export function ScreenHeader(props: {
       handlers.current.actions?.find((current) => current.label === label)?.onPress();
     const options: NativeStackNavigationOptions = {
       title,
+      ...(leading
+        ? {
+            headerTitle: "",
+            unstable_headerLeftItems: () => [
+              {
+                type: "custom" as const,
+                // A name is not a control, so it stands on no glass of its own.
+                hidesSharedBackground: true,
+                element: (
+                  <Text
+                    accessibilityRole="header"
+                    maxFontSizeMultiplier={BAR_TEXT_SCALE}
+                    numberOfLines={1}
+                    style={styles.place}
+                  >
+                    {title}
+                  </Text>
+                ),
+              },
+            ],
+          }
+        : {}),
       ...(Platform.OS === "ios"
         ? {
             unstable_headerRightItems: () =>
@@ -139,6 +167,11 @@ export function ScreenHeader(props: {
         : {
             headerSearchBarOptions: {
               placeholder: search.placeholder,
+              // A round button in the bar that opens into the field. The system
+              // would otherwise put it in a bottom bar, where the places are.
+              ...(leading
+                ? { placement: "integratedButton" as const, allowToolbarIntegration: false }
+                : {}),
               onChangeText: (event) =>
                 handlers.current.search?.onChangeText(event.nativeEvent.text),
               onCancelButtonPress: () => handlers.current.search?.onChangeText(""),
@@ -147,6 +180,6 @@ export function ScreenHeader(props: {
     };
     navigation.setOptions(options);
     // `shown` stands for every value the options draw.
-  }, [navigation, shown, styles]);
+  }, [leading, navigation, shown, styles]);
   return null;
 }

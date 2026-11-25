@@ -6,7 +6,7 @@ import {
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
 import { CANVAS_HTML_IMPORT_MAX_BYTES, type CanvasHtmlImportResult } from "@octant/contracts";
-import { SegmentedControl } from "../ui/NativeChrome";
+import { SegmentedControl } from "../ui/SegmentedControl";
 import { useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 import { BottomSheet } from "../ui/BottomSheet";

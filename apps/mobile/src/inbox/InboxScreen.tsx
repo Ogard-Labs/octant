@@ -10,6 +10,7 @@ import { useMobileSession } from "../session/MobileSessionContext";
 import { FilterChips } from "../ui/FilterChips";
 import { inboxFilterCounts, MOBILE_INBOX_FILTERS, rowsForInboxFilter } from "./inboxFilters";
 import type { MobileInboxFilter } from "./inboxFilters";
+import { EmptyPlace } from "../ui/EmptyPlace";
 import { useMobileThreads } from "./MobileThreadsContext";
 import { ThreadListNotices } from "./ThreadListNotices";
 import { ThreadGroup } from "./ThreadGroup";
@@ -37,24 +38,18 @@ export function InboxScreen(props: { readonly onOpenThread: (row: MobileInboxRow
     () =>
       StyleSheet.create({
         content: { paddingBottom: NEW_BUTTON_CLEARANCE, flexGrow: 1 },
-        empty: {
-          color: colors.textSecondary,
-          fontSize: typography.detail.fontSize,
-          lineHeight: 18,
-          padding: space.md,
-          textAlign: "center",
-        },
       }),
     [colors],
   );
   const empty =
     transports.length === 0
       ? MOBILE_COPY.inboxEmpty
-      : MOBILE_INBOX_FILTERS.find((option) => option.id === filter)?.empty;
+      : (MOBILE_INBOX_FILTERS.find((option) => option.id === filter)?.empty ?? "");
   return (
     <View style={{ flex: 1 }} testID="mobile-inbox">
       <ScreenHeader
         search={{ placeholder: MOBILE_COPY.searchInbox, onChangeText: setQuery }}
+        place
         title={MOBILE_SCREEN_TITLES.inbox}
       />
       <ScrollView
@@ -81,9 +76,10 @@ export function InboxScreen(props: { readonly onOpenThread: (row: MobileInboxRow
             rows={shown}
           />
         ) : loading && rows.length === 0 ? null : (
-          <Text style={styles.empty}>
-            {query.trim().length > 0 ? MOBILE_COPY.searchNone : empty}
-          </Text>
+          <EmptyPlace
+            icon="file-tray-outline"
+            text={query.trim().length > 0 ? MOBILE_COPY.searchNone : empty}
+          />
         )}
       </ScrollView>
     </View>

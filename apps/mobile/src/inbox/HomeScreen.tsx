@@ -61,8 +61,7 @@ export function HomeScreen(props: HomeScreenProps) {
           flexDirection: "row",
           gap: 10,
           paddingHorizontal: space.md,
-          marginTop: space.xs,
-          marginBottom: space.lg,
+          marginTop: space.sm,
         },
         firstRun: {
           gap: space.md,
@@ -155,6 +154,7 @@ export function HomeScreen(props: HomeScreenProps) {
             testID: "mobile-home-settings",
           },
         ]}
+        place
         title={MOBILE_SCREEN_TITLES.home}
       />
       <ScrollView

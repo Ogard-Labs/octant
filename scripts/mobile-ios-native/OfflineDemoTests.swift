@@ -41,7 +41,7 @@ final class OfflineDemoTests: XCTestCase {
 
     /// Every place in the system's bar, photographed and left on Home again.
     @MainActor
-    private func visitPlaces() {
+    private func visitPlaces(_ scheme: String) {
         for (tab, screen) in [
             ("Threads", "mobile-threads"),
             ("Inbox", "mobile-inbox"),
@@ -51,10 +51,34 @@ final class OfflineDemoTests: XCTestCase {
             tap(app.tabBars.buttons[tab])
             XCTAssertTrue(element(screen).waitForExistence(timeout: 15))
             let evidence = XCTAttachment(screenshot: app.screenshot())
-            evidence.name = "Place \(screen)"
+            evidence.name = "Place \(screen) \(scheme)"
             evidence.lifetime = .keepAlways
             add(evidence)
+            // Rows pass under the place's bar, which has to keep its name readable.
+            app.swipeUp()
+            let scrolled = XCTAttachment(screenshot: app.screenshot())
+            scrolled.name = "Place \(screen) \(scheme) scrolled"
+            scrolled.lifetime = .keepAlways
+            add(scrolled)
+            app.swipeDown()
         }
+    }
+
+    /// The filter's own menu, photographed open and left as it was.
+    @MainActor
+    private func openFilterMenu() {
+        tap(app.tabBars.buttons["Threads"])
+        let filter = element("mobile-threads-filter-host")
+        tap(filter)
+        let host = app.buttons["Studio Mac"].firstMatch
+        let opened = host.waitForExistence(timeout: 15)
+        let evidence = XCTAttachment(screenshot: app.screenshot())
+        evidence.name = "Filter menu"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+        XCTAssertTrue(opened)
+        tap(host)
+        tap(app.tabBars.buttons["Home"])
     }
 
     @MainActor
@@ -152,9 +176,13 @@ final class OfflineDemoTests: XCTestCase {
 
     @MainActor
     func testColdDemoReplyForegroundAndReset() {
+        XCUIDevice.shared.appearance = .light
         app.launch()
         enterDemo()
-        visitPlaces()
+        visitPlaces("light")
+        XCUIDevice.shared.appearance = .dark
+        visitPlaces("dark")
+        openFilterMenu()
         createReply("Native iOS sample reply")
         XCUIDevice.shared.press(.home)
         app.activate()
@@ -173,9 +201,10 @@ final class OfflineDemoTests: XCTestCase {
 
     @MainActor
     func testLargeTextEntryAndReply() {
+        XCUIDevice.shared.appearance = .light
         app.launch()
         enterDemo()
-        visitPlaces()
+        visitPlaces("light")
         createReply("Native iOS large text reply")
         tap(element("mobile-demo-leave"))
         XCTAssertTrue(element("mobile-entry-demo").waitForExistence(timeout: 15))

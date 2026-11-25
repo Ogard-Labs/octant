@@ -1,12 +1,11 @@
 import { useMemo, useState } from "react";
-import { ActionSheetIOS, Platform, Pressable, StyleSheet, Text } from "react-native";
+import { Pressable, StyleSheet, Text } from "react-native";
 import { Icon } from "./Icon";
 import { radii, space, typography, useTheme } from "../../design-system";
 import { BottomSheet } from "./BottomSheet";
 import { ListRow, ListSection } from "./NativeChrome";
 
-/** A filter as a pill that names its choice; pressing it offers the others. */
-export function ChoicePill<Id extends string>(props: {
+export interface ChoicePillProps<Id extends string> {
   readonly title: string;
   readonly options: ReadonlyArray<{ readonly id: Id; readonly label: string }>;
   readonly selected: Id;
@@ -14,8 +13,11 @@ export function ChoicePill<Id extends string>(props: {
   readonly neutral?: Id | undefined;
   readonly onSelect: (id: Id) => void;
   readonly testID: string;
-}) {
-  const { colors, scheme } = useTheme();
+}
+
+/** A filter as a pill that names its choice; pressing it offers the others. */
+export function ChoicePill<Id extends string>(props: ChoicePillProps<Id>) {
+  const { colors } = useTheme();
   const [open, setOpen] = useState(false);
   const styles = useMemo(
     () =>
@@ -41,30 +43,12 @@ export function ChoicePill<Id extends string>(props: {
   );
   const chosen = props.options.find((option) => option.id === props.selected);
   const on = props.neutral !== undefined && props.selected !== props.neutral;
-  const offer = () => {
-    if (Platform.OS !== "ios") {
-      setOpen(true);
-      return;
-    }
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title: props.title,
-        options: [...props.options.map((option) => option.label), "Cancel"],
-        cancelButtonIndex: props.options.length,
-        userInterfaceStyle: scheme,
-      },
-      (index) => {
-        const option = props.options[index];
-        if (option !== undefined) props.onSelect(option.id);
-      },
-    );
-  };
   return (
     <>
       <Pressable
         accessibilityLabel={`${props.title}, ${chosen?.label ?? ""}`}
         accessibilityRole="button"
-        onPress={offer}
+        onPress={() => setOpen(true)}
         style={({ pressed }) => [
           styles.pill,
           on ? styles.on : null,

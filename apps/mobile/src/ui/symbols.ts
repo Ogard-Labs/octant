@@ -5,7 +5,7 @@ export type MobileIconName = keyof typeof Ionicons.glyphMap;
 export type SystemSymbol = Extract<SymbolViewProps["name"], string>;
 
 /** The system's own symbol for each icon the app draws, by the app's name for it. */
-export const SYSTEM_SYMBOLS: Readonly<Partial<Record<MobileIconName, SystemSymbol>>> = {
+export const SYSTEM_SYMBOLS: Readonly<Partial<Record<MobileIconName, SystemSymbol | undefined>>> = {
   add: "plus",
   "alarm-outline": "alarm",
   "alert-circle-outline": "exclamationmark.circle",
@@ -50,8 +50,10 @@ export const SYSTEM_SYMBOLS: Readonly<Partial<Record<MobileIconName, SystemSymbo
   "flask-outline": "flask",
   "folder-outline": "folder",
   "git-branch-outline": "arrow.triangle.branch",
-  "git-pull-request": "arrow.triangle.pull",
-  "git-pull-request-outline": "arrow.triangle.pull",
+  // The system's own pull symbol is a filled arrowhead that reads as a figure
+  // at a row's size, so a pull request keeps the glyph developers know.
+  "git-pull-request": undefined,
+  "git-pull-request-outline": undefined,
   "globe-outline": "globe",
   "grid-outline": "sidebar.right",
   home: "house.fill",

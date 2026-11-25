@@ -44,7 +44,10 @@ function AppShell(props: {
         },
         mockBanner: {
           alignSelf: "center",
-          marginTop: 6,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+          marginTop: 2,
           marginBottom: 2,
           borderRadius: 999,
           borderWidth: StyleSheet.hairlineWidth,
@@ -53,7 +56,7 @@ function AppShell(props: {
           paddingHorizontal: 12,
           paddingVertical: 5,
         },
-        demoExit: { minHeight: 44, justifyContent: "center", paddingHorizontal: 12 },
+        demoExit: { color: colors.accent, fontWeight: "600" },
         mockBannerText: {
           color: colors.textSecondary,
           fontSize: 12,
@@ -77,11 +80,11 @@ function AppShell(props: {
             {props.onLeaveDemo === undefined ? null : (
               <Pressable
                 accessibilityRole="button"
-                style={styles.demoExit}
+                hitSlop={{ top: 10, bottom: 10, left: 8, right: 16 }}
                 onPress={props.onLeaveDemo}
                 testID="mobile-demo-leave"
               >
-                <Text maxFontSizeMultiplier={1.3} style={styles.mockBannerText}>
+                <Text maxFontSizeMultiplier={1.3} style={[styles.mockBannerText, styles.demoExit]}>
                   Leave demo
                 </Text>
               </Pressable>

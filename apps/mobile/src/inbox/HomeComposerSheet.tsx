@@ -4,7 +4,7 @@ import { Icon } from "../ui/Icon";
 import { radii, space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 import { BottomSheet } from "../ui/BottomSheet";
-import { SegmentedControl } from "../ui/NativeChrome";
+import { SegmentedControl } from "../ui/SegmentedControl";
 import { ComposerVoiceButton } from "../ui/ComposerVoiceButton";
 import { IconButton, type MobileIconName } from "../ui/IconButton";
 import type { ComposerVoice } from "../voice/useVoiceDictation";

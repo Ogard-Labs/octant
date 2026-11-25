@@ -84,33 +84,37 @@ export function ThreadRow(props: {
     () =>
       StyleSheet.create({
         row: {
-          minHeight: 64,
+          minHeight: 54,
           flexDirection: "row",
           paddingLeft: space.md,
         },
         pressed: { backgroundColor: colors.controlHover },
         badge: {
-          width: 26,
-          height: 26,
-          marginTop: 11,
-          marginRight: 12,
-          borderRadius: 7,
+          width: 20,
+          height: 20,
+          marginTop: 8,
+          marginRight: 10,
+          borderRadius: 5,
           alignItems: "center",
           justifyContent: "center",
         },
-        letters: { fontSize: 11, fontWeight: "700", letterSpacing: 0.2 },
-        body: { flex: 1, paddingVertical: 11, paddingRight: space.md, gap: 4 },
-        separated: {
+        letters: { fontSize: 9.5, fontWeight: "700" },
+        body: { flex: 1, paddingVertical: 8, paddingRight: space.md, gap: 2 },
+        separator: {
+          position: "absolute",
+          left: space.md,
+          right: 0,
+          bottom: 0,
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: colors.hairline,
         },
-        quiet: { opacity: 0.62 },
+        quiet: { opacity: 0.55 },
         line: { flexDirection: "row", alignItems: "center", gap: space.sm },
-        title: { flex: 1, color: colors.textPrimary, fontSize: 17, fontWeight: "500" },
+        title: { flex: 1, color: colors.textPrimary, fontSize: 16, fontWeight: "500" },
         state: { flexDirection: "row", alignItems: "center", gap: 4 },
         stateWord: { fontSize: typography.detail.fontSize, fontWeight: "600" },
         place: { flex: 1, flexDirection: "row", alignItems: "center", gap: 5 },
-        placeText: { flexShrink: 1, color: colors.textTertiary, fontSize: 14 },
+        placeText: { flexShrink: 1, color: colors.textTertiary, fontSize: 13 },
         pullRequest: { flexDirection: "row", alignItems: "center", gap: 3 },
         pullRequestText: { fontSize: typography.detail.fontSize, fontVariant: ["tabular-nums"] },
       }),
@@ -154,14 +158,14 @@ export function ThreadRow(props: {
           ]}
         >
           {letters === "" ? (
-            <Icon color={hue} name={threadModeIcon(row.mode)} size={14} />
+            <Icon color={hue} name={threadModeIcon(row.mode)} size={12} />
           ) : (
             <Text allowFontScaling={false} style={[styles.letters, { color: hue }]}>
               {letters}
             </Text>
           )}
         </View>
-        <View style={[styles.body, props.last ? null : styles.separated]}>
+        <View style={styles.body}>
           <View style={[styles.line, quiet ? styles.quiet : null]}>
             {row.pinned === true ? <Icon color={colors.textTertiary} name="pin" size={13} /> : null}
             <Text numberOfLines={1} style={styles.title}>
@@ -191,6 +195,7 @@ export function ThreadRow(props: {
             )}
           </View>
         </View>
+        {props.last ? null : <View pointerEvents="none" style={styles.separator} />}
       </Pressable>
       {actionsOpen ? (
         <ThreadRowActionsSheet

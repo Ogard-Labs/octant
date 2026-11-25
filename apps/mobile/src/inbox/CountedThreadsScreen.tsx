@@ -7,16 +7,33 @@ import { space, typography, useTheme } from "../../design-system";
 import type { CountedThreads } from "../navigation/routes";
 import { ScreenHeader } from "../navigation/ScreenHeader";
 import { inboxCountedRows } from "./inboxWorkPresentation";
+import { EmptyPlace } from "../ui/EmptyPlace";
+import type { MobileIconName } from "../ui/symbols";
 import { useMobileThreads } from "./MobileThreadsContext";
 import { ThreadListNotices } from "./ThreadListNotices";
 import { ThreadGroup } from "./ThreadGroup";
 
 const COUNTED: Readonly<
-  Record<CountedThreads, { readonly title: string; readonly empty: string }>
+  Record<
+    CountedThreads,
+    { readonly title: string; readonly empty: string; readonly icon: MobileIconName }
+  >
 > = {
-  attention: { title: MOBILE_COPY.needsAttention, empty: MOBILE_COPY.countedNoneNeedsYou },
-  working: { title: MOBILE_COPY.working, empty: MOBILE_COPY.countedNoneWorking },
-  review: { title: MOBILE_COPY.inReview, empty: MOBILE_COPY.countedNoneInReview },
+  attention: {
+    title: MOBILE_COPY.needsAttention,
+    empty: MOBILE_COPY.countedNoneNeedsYou,
+    icon: "file-tray-outline",
+  },
+  working: {
+    title: MOBILE_COPY.working,
+    empty: MOBILE_COPY.countedNoneWorking,
+    icon: "play-outline",
+  },
+  review: {
+    title: MOBILE_COPY.inReview,
+    empty: MOBILE_COPY.countedNoneInReview,
+    icon: "eye-outline",
+  },
 };
 
 /** What one of Home's counts counted, thread for thread. */
@@ -35,13 +52,7 @@ export function CountedThreadsScreen(props: {
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        content: { paddingTop: space.sm, paddingBottom: space.xl },
-        empty: {
-          color: colors.textSecondary,
-          fontSize: typography.detail.fontSize,
-          padding: space.md,
-          textAlign: "center",
-        },
+        content: { paddingTop: space.sm, paddingBottom: space.xl, flexGrow: 1 },
       }),
     [colors],
   );
@@ -53,7 +64,7 @@ export function CountedThreadsScreen(props: {
         {counted.length > 0 ? (
           <ThreadGroup onOpen={props.onOpenThread} rows={counted} />
         ) : loading ? null : (
-          <Text style={styles.empty}>{COUNTED[props.view].empty}</Text>
+          <EmptyPlace icon={COUNTED[props.view].icon} text={COUNTED[props.view].empty} />
         )}
       </ScrollView>
     </View>

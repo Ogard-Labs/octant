@@ -15,7 +15,8 @@ import {
   type SurfaceStylePreference,
 } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
-import { ListRow, ListSection, SegmentedControl } from "../ui/NativeChrome";
+import { ListRow, ListSection } from "../ui/NativeChrome";
+import { SegmentedControl } from "../ui/SegmentedControl";
 import { useAppearance } from "./AppearanceContext";
 import { persistWallpaperFile } from "./wallpaperFile";
 

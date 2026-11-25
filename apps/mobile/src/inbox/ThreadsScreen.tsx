@@ -15,6 +15,7 @@ import { useMobileSession } from "../session/MobileSessionContext";
 import { ChoicePill } from "../ui/ChoicePill";
 import { ListRow, ListSection } from "../ui/NativeChrome";
 import { searchHitsBesideList } from "./agentsListPresentation";
+import { EmptyPlace } from "../ui/EmptyPlace";
 import { useMobileThreads } from "./MobileThreadsContext";
 import { ThreadListNotices } from "./ThreadListNotices";
 import { ThreadGroup } from "./ThreadGroup";
@@ -120,12 +121,6 @@ export function ThreadsScreen(props: {
           paddingBottom: space.sm,
         },
         pillRow: { flexGrow: 0 },
-        empty: {
-          color: colors.textSecondary,
-          fontSize: typography.detail.fontSize,
-          padding: space.md,
-          textAlign: "center",
-        },
       }),
     [colors],
   );
@@ -136,6 +131,7 @@ export function ThreadsScreen(props: {
     <View style={{ flex: 1 }} testID="mobile-threads">
       <ScreenHeader
         search={{ placeholder: MOBILE_COPY.searchThreads, onChangeText: setQuery }}
+        place
         title={MOBILE_SCREEN_TITLES.threads}
       />
       <ScrollView
@@ -206,13 +202,16 @@ export function ThreadsScreen(props: {
         </ScrollView>
         {loading && rows.length === 0 ? <ActivityIndicator color={colors.accent} /> : null}
         {!(loading && rows.length === 0) && groups.length === 0 && threadHits.length === 0 ? (
-          <Text style={styles.empty}>
-            {transports.length === 0
-              ? MOBILE_COPY.inboxEmpty
-              : query.trim().length > 0 || filtered || props.mode !== "all"
-                ? MOBILE_COPY.searchNone
-                : MOBILE_COPY.threadsNone}
-          </Text>
+          <EmptyPlace
+            icon="chatbubbles-outline"
+            text={
+              transports.length === 0
+                ? MOBILE_COPY.inboxEmpty
+                : query.trim().length > 0 || filtered || props.mode !== "all"
+                  ? MOBILE_COPY.searchNone
+                  : MOBILE_COPY.threadsNone
+            }
+          />
         ) : null}
         {threadHits.length > 0 ? (
           <ListSection testID="mobile-agents-message-hits" title={MOBILE_COPY.searchMessages}>

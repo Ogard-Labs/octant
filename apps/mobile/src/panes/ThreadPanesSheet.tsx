@@ -22,7 +22,8 @@ import { radii, space, typography, useTheme, withAlpha } from "../../design-syst
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { BottomSheet } from "../ui/BottomSheet";
 import type { MobileIconName } from "../ui/IconButton";
-import { ListNote, ListRow, ListSection, SegmentedControl } from "../ui/NativeChrome";
+import { ListNote, ListRow, ListSection } from "../ui/NativeChrome";
+import { SegmentedControl } from "../ui/SegmentedControl";
 import {
   contextMeterPresentation,
   diffstatText,
