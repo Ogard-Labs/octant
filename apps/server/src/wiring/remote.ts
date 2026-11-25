@@ -3101,6 +3101,7 @@ export function wireRemote(deps: RemoteDependencies) {
                   ),
                 }
               : {}),
+            speechModelDownloads: options.speechHelperPath !== undefined,
             listProjects: () =>
               persistence.readProjects().map((project) => ({
                 id: String(project.id),

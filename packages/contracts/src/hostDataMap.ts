@@ -71,6 +71,7 @@ export const HostDataMapOutboundCategoryId = Schema.Literal(
   "provider-calls",
   "update-checks",
   "marketplace-fetches",
+  "speech-model-downloads",
 );
 export type HostDataMapOutboundCategoryId = typeof HostDataMapOutboundCategoryId.Type;
 

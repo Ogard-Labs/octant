@@ -37,6 +37,21 @@ export function parseCodeFileHelperPath(value: string | undefined): string | und
   return value;
 }
 
+/**
+ * Only the desktop app carries the speech helper: it is signed with the app,
+ * and what it transcribes is spoken at the Mac the app runs on.
+ */
+export function parseSpeechHelperPath(
+  value: string | undefined,
+  serviceMode: string | undefined,
+): string | undefined {
+  if (value === undefined || serviceMode !== "desktop") return undefined;
+  if (!isAbsolute(value)) {
+    throw new Error("OCTANT_SPEECH_HELPER_PATH must be an absolute path");
+  }
+  return value;
+}
+
 /** A Browser-granted terminal reads only its scoped CLI and the Node runtime it uses. */
 export function parseTerminalLauncher(
   value: string | undefined,
@@ -125,6 +140,7 @@ export type ServerLaunchEnvironment = Readonly<Record<string, string | undefined
 
 export interface ServerLaunchConfig {
   readonly codeFileHelperPath?: string;
+  readonly speechHelperPath?: string;
   readonly terminalLauncher?: TerminalLauncher;
   readonly ghExecutable?: string;
   readonly credentialBrokerToken?: string;
@@ -171,6 +187,10 @@ export function parseServerLaunchConfig(
   const isPackagedRuntime = packagedRuntime === "1" || environment.ELECTRON_RUN_AS_NODE === "1";
   const instanceId = parseServerInstanceId(environment.OCTANT_SERVER_INSTANCE_ID);
   const codeFileHelperPath = parseCodeFileHelperPath(environment.OCTANT_CODE_FILE_HELPER_PATH);
+  const speechHelperPath = parseSpeechHelperPath(
+    environment.OCTANT_SPEECH_HELPER_PATH,
+    environment.OCTANT_HOST_SERVICE_MODE,
+  );
   const terminalLauncher = parseTerminalLauncher(environment.OCTANT_TERMINAL_LAUNCHER_DIRECTORY, {
     packaged: isPackagedRuntime,
     ...runtime,
@@ -199,6 +219,7 @@ export function parseServerLaunchConfig(
     port: parseServerPort(environment.OCTANT_SERVER_PORT),
     hostServiceMode: parseHostServiceMode(environment.OCTANT_HOST_SERVICE_MODE),
     ...(codeFileHelperPath === undefined ? {} : { codeFileHelperPath }),
+    ...(speechHelperPath === undefined ? {} : { speechHelperPath }),
     ...(terminalLauncher === undefined ? {} : { terminalLauncher }),
     ...(ghExecutable === undefined ? {} : { ghExecutable }),
     ...(instanceId === undefined ? {} : { instanceId }),

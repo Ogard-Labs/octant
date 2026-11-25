@@ -103,6 +103,8 @@ export interface ComposeHostDataMapInput {
   readonly credentialStore?: HostDataMapCredentialStoreInput;
   /** Absolute folder of the desktop app's Browser profile stores, when it has one. */
   readonly browserProfilesDirectory?: string;
+  /** Whether this host carries the on-device speech helper. */
+  readonly speechModelDownloads?: boolean;
   readonly projects?: ReadonlyArray<HostDataMapProjectInput>;
 }
 
@@ -146,7 +148,7 @@ export function composeHostDataMap(input: ComposeHostDataMapInput): HostDataMap 
       artifacts: namedLocations(store, ARTIFACT_DIRECTORIES),
       caches: hostCaches,
       credentials,
-      outbound: composeOutbound(kind),
+      outbound: composeOutbound(kind, input.speechModelDownloads === true),
     },
     projects:
       input.projects === undefined
@@ -227,7 +229,10 @@ function composeCredentials(
   return { kind: "known", backend: store.backend, entries };
 }
 
-function composeOutbound(kind: HostDataMapHostKind): ReadonlyArray<HostDataMapOutboundCategory> {
+function composeOutbound(
+  kind: HostDataMapHostKind,
+  speechModelDownloads: boolean,
+): ReadonlyArray<HostDataMapOutboundCategory> {
   const provider: HostDataMapOutboundCategory = {
     kind: "known",
     category: "provider-calls",
@@ -254,7 +259,14 @@ function composeOutbound(kind: HostDataMapHostKind): ReadonlyArray<HostDataMapOu
           leavesMachine: false,
           purpose: "This headless host does not check for desktop app updates.",
         };
-  return [provider, updates, marketplace];
+  const speechModel: HostDataMapOutboundCategory = {
+    kind: "known",
+    category: "speech-model-downloads",
+    leavesMachine: true,
+    purpose:
+      "When you press Download in Voice settings, macOS fetches Apple's speech model for your language from Apple. No audio and no text is sent.",
+  };
+  return [provider, updates, marketplace, ...(speechModelDownloads ? [speechModel] : [])];
 }
 
 function namedLocations(

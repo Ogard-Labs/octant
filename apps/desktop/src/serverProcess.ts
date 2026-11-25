@@ -42,6 +42,7 @@ interface ServerSpawnSpecOptions {
   readonly serveAvdBrokerToken?: string;
   readonly serveAvdBrokerUrl?: string;
   readonly sandboxScopePath?: string;
+  readonly speechHelperPath?: string;
   readonly codeFileHelperPath?: string;
   /**
    * The packaged app's terminal launcher folder (`octant mcp` only), which the
@@ -113,6 +114,7 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
   delete inherited.OCTANT_CREDENTIAL_BROKER_URL;
   delete inherited.OCTANT_CREDENTIAL_BROKER_TOKEN;
   delete inherited.OCTANT_TERMINAL_LAUNCHER_DIRECTORY;
+  delete inherited.OCTANT_SPEECH_HELPER_PATH;
   const env = {
     ...inherited,
     OCTANT_BROWSER_BROKER_TOKEN: options.browserBrokerToken,
@@ -142,6 +144,9 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
     ...(options.sandboxScopePath === undefined
       ? {}
       : { OCTANT_SANDBOX_SCOPE_PATH: options.sandboxScopePath }),
+    ...(options.speechHelperPath === undefined
+      ? {}
+      : { OCTANT_SPEECH_HELPER_PATH: options.speechHelperPath }),
     ...(options.codeFileHelperPath === undefined
       ? {}
       : { OCTANT_CODE_FILE_HELPER_PATH: options.codeFileHelperPath }),

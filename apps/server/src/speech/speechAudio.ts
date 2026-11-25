@@ -1,4 +1,9 @@
-import type { SpeechAudioMediaType, SpeechSynthesisFormat } from "@octant/contracts";
+import {
+  SPEECH_LOCAL_SAMPLE_RATE,
+  SPEECH_LOCAL_WAV_HEADER_BYTES,
+  type SpeechAudioMediaType,
+  type SpeechSynthesisFormat,
+} from "@octant/contracts";
 
 /**
  * Identify uploaded audio by its bytes, never by the declared type. A renderer
@@ -58,4 +63,30 @@ function ascii(bytes: Uint8Array, start: number, end: number): string {
   let out = "";
   for (let index = start; index < end; index += 1) out += String.fromCharCode(bytes[index] ?? 0);
   return out;
+}
+
+/**
+ * The PCM of a clip in the one shape the on-device engine takes, or
+ * `undefined`. Every header field is checked against that shape, so nothing
+ * here follows a length or an offset the sender chose.
+ */
+export function readLocalSpeechPcm(bytes: Uint8Array): Uint8Array | undefined {
+  if (bytes.byteLength <= SPEECH_LOCAL_WAV_HEADER_BYTES) return undefined;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const audioBytes = bytes.byteLength - SPEECH_LOCAL_WAV_HEADER_BYTES;
+  const expected =
+    ascii(bytes, 0, 4) === "RIFF" &&
+    view.getUint32(4, true) === bytes.byteLength - 8 &&
+    ascii(bytes, 8, 16) === "WAVEfmt " &&
+    view.getUint32(16, true) === 16 &&
+    view.getUint16(20, true) === 1 &&
+    view.getUint16(22, true) === 1 &&
+    view.getUint32(24, true) === SPEECH_LOCAL_SAMPLE_RATE &&
+    view.getUint32(28, true) === SPEECH_LOCAL_SAMPLE_RATE * 2 &&
+    view.getUint16(32, true) === 2 &&
+    view.getUint16(34, true) === 16 &&
+    ascii(bytes, 36, 40) === "data" &&
+    view.getUint32(40, true) === audioBytes &&
+    audioBytes % 2 === 0;
+  return expected ? bytes.subarray(SPEECH_LOCAL_WAV_HEADER_BYTES) : undefined;
 }

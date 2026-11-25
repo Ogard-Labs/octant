@@ -338,6 +338,7 @@ import {
 import {
   CODE_FILE_HELPER_FILENAME,
   SANDBOX_SCOPE_FILENAME,
+  SPEECH_HELPER_FILENAME,
   CODE_APPROVAL_PRELOAD_FILENAME,
   DESKTOP_PRELOAD_FILENAME,
   EXTENSION_BRIDGE_PRELOAD_FILENAME,
@@ -2236,6 +2237,14 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           resourcesPath: process.resourcesPath,
           moduleUrl: import.meta.url,
         });
+        const speechHelperPath = resolveDesktopNativeHelperPath(
+          {
+            packaged: app.isPackaged,
+            resourcesPath: process.resourcesPath,
+            moduleUrl: import.meta.url,
+          },
+          SPEECH_HELPER_FILENAME,
+        );
         const terminalLauncherDirectory = resolveTerminalLauncherDirectory({
           packaged: app.isPackaged,
           resourcesPath: process.resourcesPath,
@@ -2259,6 +2268,9 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
             : {}),
           ...(process.platform === "darwin" && existsSync(codeFileHelperPath)
             ? { codeFileHelperPath }
+            : {}),
+          ...(process.platform === "darwin" && existsSync(speechHelperPath)
+            ? { speechHelperPath }
             : {}),
           ...(process.platform === "darwin" &&
           terminalLauncherDirectory !== undefined &&
