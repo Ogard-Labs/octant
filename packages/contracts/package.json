@@ -50,6 +50,7 @@
     "./pending-requests": "./src/pendingRequests.ts",
     "./agent-access": "./src/agentAccess.ts",
     "./fleet-activity": "./src/fleetActivity.ts",
+    "./active-work": "./src/activeWork.ts",
     "./work-research": "./src/workResearch.ts",
     "./work-threads": "./src/workThreads.ts",
     "./work-turns": "./src/workTurns.ts",

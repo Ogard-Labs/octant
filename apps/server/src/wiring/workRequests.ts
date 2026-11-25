@@ -12,7 +12,10 @@ import {
   type AgentRun,
   type AgentRunId,
   type PendingRequest,
+  type ProjectSummary,
   type ServiceOffer,
+  type WorkThread,
+  type WorkThreadId,
 } from "@octant/contracts";
 import type { ClientPrincipal } from "../clientPrincipal";
 import { createWorkOverviewRouteHandler } from "../workOverviewRoutes";
@@ -20,6 +23,7 @@ import { createDesignSystemRouteHandler } from "../designSystemRoutes";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import {
   composeWorkBoardEvidence,
+  type WorkBoardRuntimeActivity,
   type WorkBoardThread,
   WorkThreadBoardService,
 } from "../work/workThreadBoardService";
@@ -32,6 +36,9 @@ import { WorkPromotionService } from "../work/workPromotionService";
 import { createWorkPromotionRouteHandler } from "../workPromotionRoutes";
 import { WorkRequestApplicationService } from "../work/workRequestApplicationService";
 import { createWorkRequestRouteHandler } from "../workRequestRoutes";
+import { createActiveWorkRouteHandler } from "../activeWork/activeWorkRoutes";
+import { activeWorkProject, chatActiveWork, workActiveWork } from "../activeWork/activeWorkRow";
+import { ActiveWorkService } from "../activeWork/activeWorkService";
 import { createFleetActivityRouteHandler } from "../fleetActivityRoutes";
 import {
   FleetActivityService,
@@ -59,6 +66,8 @@ import { DecisionReviews, type DecisionReviewDependencies } from "../turnDecisio
 import { replyBeforeTurnDecision } from "@octant/domain/turn-decision-policy";
 import { defaultShellSettings, workProjectKeepsStatusFile } from "@octant/domain";
 import {
+  authorizeAgentRunCancellation,
+  authorizeAgentRunParentThread,
   resolveAgentRunParentThreadTitle,
   resolveHarnessThreadFacts,
   type AgentRunsWiring,
@@ -117,7 +126,11 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
   Pick<ProvidersWiring, "providerDataDirectory"> &
   Pick<
     CodeRuntimeWiring,
-    "baseRouteCodeService" | "codeOperationRuntime" | "codeTurnDecisions" | "routeCodeService"
+    | "baseRouteCodeService"
+    | "codeActiveWorkForWindow"
+    | "codeOperationRuntime"
+    | "codeTurnDecisions"
+    | "routeCodeService"
   > &
   Pick<
     HarnessStateWiring,
@@ -154,6 +167,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     projectMemoryAccess,
     routineProposalService,
     chatService,
+    codeActiveWorkForWindow,
     codeOperationRuntime,
     codeTurnDecisions,
     gitObservationPort,
@@ -538,6 +552,134 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     },
     windowAuthorityStore,
   });
+  const observeWorkBoardRuntime = (threadId: WorkThreadId): WorkBoardRuntimeActivity => {
+    const activity = observeWorkThreadRuntime(threadId) ?? {
+      executing: false,
+      awaitingInput: false,
+      interrupted: false,
+    };
+    const thread = workThreadProjection.read(threadId);
+    return thread === undefined
+      ? activity
+      : {
+          ...activity,
+          decisionPending:
+            workTurnDecision(thread, workTurnProjection.listForThread(threadId)) !== undefined,
+        };
+  };
+  const workBoardThread = (
+    thread: WorkThread,
+    project: ProjectSummary | undefined,
+    followUp: boolean,
+  ): WorkBoardThread => {
+    const currentRevisionId = project?.type === "work" ? project.bindingRevisionId : undefined;
+    return {
+      thread,
+      project: { id: thread.projectId, name: project?.name ?? thread.title },
+      projectProjectionPresent: project !== undefined,
+      bindingRevisionCurrent:
+        thread.bindingRevisionId === undefined ||
+        (currentRevisionId !== undefined &&
+          String(currentRevisionId) === String(thread.bindingRevisionId)),
+      followUp,
+    };
+  };
+  // Every mode's own sidebar list with the board's own state, for a window or
+  // a paired device to see what is going on here.
+  const activeWorkRoutes = createActiveWorkRouteHandler({
+    service: new ActiveWorkService({
+      readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+      code: codeActiveWorkForWindow,
+      work: async (windowId) => {
+        const [navigation, projects] = await Promise.all([
+          workThreadServiceWithWorkflows.navigation(windowId),
+          projectService.bootstrap(windowId),
+        ]);
+        const projectById = new Map(
+          projects.active.map((project) => [String(project.id), project] as const),
+        );
+        const threads = new Map(
+          navigation.threads
+            .filter((thread) => thread.completedAt === undefined)
+            .map((thread) => [String(thread.id), thread] as const),
+        );
+        const board = await new WorkThreadBoardService({
+          threads: {
+            list: () =>
+              [...threads.values()].map((thread) =>
+                workBoardThread(thread, projectById.get(String(thread.projectId)), false),
+              ),
+          },
+          // The card's evidence decides no state, and the rows show none of it.
+          evidence: {
+            forThread: () =>
+              composeWorkBoardEvidence({
+                turns: [],
+                pendingRequests: [],
+                artifacts: [],
+                citations: [],
+                goal: null,
+                childRuns: [],
+              }),
+          },
+          runtime: { observe: observeWorkBoardRuntime },
+        }).query({ version: 1 });
+        return board.cards.flatMap((card) => {
+          const thread = threads.get(String(card.threadId));
+          return thread === undefined
+            ? []
+            : [
+                workActiveWork({
+                  card,
+                  updatedAt: thread.updatedAt,
+                  ...activeWorkProject(projectById.get(String(thread.projectId))),
+                }),
+              ];
+        });
+      },
+      chat: () =>
+        chatService.navigation().threads.map((thread) => {
+          const named =
+            thread.projectId === undefined ? undefined : persistence.readProject(thread.projectId);
+          const project =
+            named === undefined ? {} : { project: { id: String(named.id), name: named.name } };
+          return {
+            threadId: String(thread.id),
+            title: thread.title,
+            ...project,
+            facts: chatActiveWork(thread, project.project),
+          };
+        }),
+      subagents: () =>
+        agentRunPersistence
+          .listCenterCandidates({ status: "active", mode: "all" })
+          .map(({ run }) => ({
+            runId: String(run.id),
+            parentThreadId: String(run.parentThreadId),
+            mode: run.routingReceipt.mode,
+            task: run.task,
+            lifecycleStatus: run.lifecycleStatus,
+            updatedAt: run.updatedAt,
+            readableBy: (windowId) =>
+              authorizeAgentRunCancellation({ persistence, workThreadProjection, run, windowId }) &&
+              authorizeAgentRunParentThread({
+                persistence,
+                workThreadProjection,
+                parentThreadId: run.parentThreadId,
+                windowId,
+              }),
+          })),
+      routineThreadIds: () =>
+        new Set(
+          persistence.automationProjection.listDefinitions().flatMap((definition) => {
+            const run = persistence.automationProjection.activeRun(definition.id);
+            return run?.threadId === undefined ? [] : [String(run.threadId)];
+          }),
+        ),
+      hubActScope: hubActScopeSlot.current,
+    }),
+    windowAuthorityStore,
+  });
   const workThreadRoutes = createWorkThreadRouteHandler({
     hubActScope: hubActScopeSlot.current,
     service: {
@@ -583,25 +725,14 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
             newestByProject.set(key, String(thread.id));
           }
         }
-        const boardThreads: WorkBoardThread[] = openThreads.map((thread) => {
-          const project = projectById.get(String(thread.projectId));
-          const currentRevisionId =
-            project !== undefined && project.type === "work"
-              ? project.bindingRevisionId
-              : undefined;
-          return {
+        const boardThreads = openThreads.map((thread) =>
+          workBoardThread(
             thread,
-            project: { id: thread.projectId, name: project?.name ?? thread.title },
-            projectProjectionPresent: project !== undefined,
-            bindingRevisionCurrent:
-              thread.bindingRevisionId === undefined ||
-              (currentRevisionId !== undefined &&
-                String(currentRevisionId) === String(thread.bindingRevisionId)),
-            followUp:
-              dueByProject.get(String(thread.projectId)) === true &&
+            projectById.get(String(thread.projectId)),
+            dueByProject.get(String(thread.projectId)) === true &&
               newestByProject.get(String(thread.projectId)) === String(thread.id),
-          };
-        });
+          ),
+        );
         const board = new WorkThreadBoardService({
           threads: { list: () => boardThreads },
           finishedReceipts: {
@@ -631,24 +762,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
                 ),
               }),
           },
-          runtime: {
-            observe: (threadId) => {
-              const activity = observeWorkThreadRuntime(threadId) ?? {
-                executing: false,
-                awaitingInput: false,
-                interrupted: false,
-              };
-              const thread = workThreadProjection.read(threadId);
-              return thread === undefined
-                ? activity
-                : {
-                    ...activity,
-                    decisionPending:
-                      workTurnDecision(thread, workTurnProjection.listForThread(threadId)) !==
-                      undefined,
-                  };
-            },
-          },
+          runtime: { observe: observeWorkBoardRuntime },
           clock: () => new Date().toISOString(),
         });
         return board.query(query);
@@ -683,6 +797,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     currentAppBackground: () => persistence.readThemeSettings()?.settings.appBackground ?? null,
   });
   return {
+    activeWorkRoutes,
     designSystemRoutes,
     fleetActivityRoutes,
     pendingRequestRoutes,

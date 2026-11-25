@@ -29,6 +29,8 @@ export interface LocalWindowReadRouteOptions<T> {
     request: Request,
     principal: ClientPrincipal,
   ) => Promise<T>;
+  /** Who may make the read, when it is more than the host's own person. */
+  readonly admits?: (principal: ClientPrincipal) => boolean;
   readonly decodeFailure: (failure: LocalWindowReadFailure) => unknown;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
@@ -39,7 +41,8 @@ export interface LocalWindowReadRouteOptions<T> {
  * window, or on a device that person paired (maintainer decision,
  * 2026-11-12). These reads span every Project the caller's own scope can
  * reach, so a hub-introduced device or an agent grant, whose reach is
- * narrower, is refused here even when its request arrives.
+ * narrower, is refused here even when its request arrives. A read that
+ * narrows its own answer to the caller names who it admits instead.
  */
 export function createLocalWindowReadRoute<T>(options: LocalWindowReadRouteOptions<T>) {
   const now = options.now ?? Date.now;
@@ -88,7 +91,7 @@ export function createLocalWindowReadRoute<T>(options: LocalWindowReadRouteOptio
       });
       principal = context.principal;
       reader = principalAuthorityKind(principal);
-      if (!principalActsAsHostPerson(principal)) {
+      if (!(options.admits ?? principalActsAsHostPerson)(principal)) {
         return fail(
           { code: "unauthorized", message: `${options.plural} are read at a local window.` },
           403,

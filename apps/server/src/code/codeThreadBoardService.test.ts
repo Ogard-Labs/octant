@@ -112,6 +112,9 @@ function boardThread(
       }),
     projectProjectionPresent: overrides.projectProjectionPresent ?? true,
     followUp: overrides.followUp ?? false,
+    ...(overrides.withoutDelivery === undefined
+      ? {}
+      : { withoutDelivery: overrides.withoutDelivery }),
   };
 }
 
@@ -492,6 +495,22 @@ describe("CodeThreadBoardService derivation", () => {
       status: "done",
       statusReason: "delivery-satisfied",
     });
+  });
+
+  it("never files a thread that delivers nothing as Done or as waiting for its delivery", async () => {
+    const board = service({
+      threads: allThreads.map((entry) => ({ ...entry, withoutDelivery: true })),
+      runtime: (threadId) => ({
+        executing: threadId === ids.executing,
+        awaitingInput: false,
+        interrupted: false,
+      }),
+    });
+
+    const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
+    expect(cardFor(view.cards, ids.done).statusReason).toBe("idle-unmet-delivery");
+    expect(cardFor(view.cards, ids.waiting).statusReason).toBe("idle-unmet-delivery");
+    expect(cardFor(view.cards, ids.executing).statusReason).toBe("executing");
   });
 
   it("does not describe a stopped thread's waiting delivery as a check in progress", async () => {

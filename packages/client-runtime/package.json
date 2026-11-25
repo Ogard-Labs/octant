@@ -28,6 +28,7 @@
     "./work-promotion-client": "./src/workPromotionClient.ts",
     "./work-request-client": "./src/workRequestClient.ts",
     "./pending-request-client": "./src/pendingRequestClient.ts",
+    "./active-work-client": "./src/activeWorkClient.ts",
     "./work-thread-client": "./src/workThreadClient.ts",
     "./work-turn-client": "./src/workTurnClient.ts",
     "./typed-claim": "./src/typedClaim.ts",

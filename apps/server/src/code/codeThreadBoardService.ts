@@ -42,6 +42,8 @@ export interface CodeBoardThread {
   readonly checkout: CodeCheckoutIdentity | undefined;
   readonly projectProjectionPresent: boolean;
   readonly followUp: boolean;
+  /** A coordinator delivers nothing, so no delivery evidence files it as Done or as waiting. */
+  readonly withoutDelivery?: boolean;
 }
 
 export interface CodeBoardThreadSource {
@@ -342,7 +344,8 @@ function buildCard(
     snapshot: pullRequestSnapshot,
   });
   const derivation = deriveThreadBoardStatus({
-    deliverySatisfaction: metadata.deliverySatisfaction,
+    deliverySatisfaction:
+      entry.withoutDelivery === true ? "pending" : metadata.deliverySatisfaction,
     executing: activity.executing,
     awaitingInput: activity.awaitingInput,
     interrupted: activity.interrupted,

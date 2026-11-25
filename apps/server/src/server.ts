@@ -1068,6 +1068,7 @@ export function startOctantServer(
       codeCompletedThreadSource,
       codeOperationRuntime,
       codeService,
+      codeActiveWorkForWindow,
       codeTurnDecisions,
       mergedThreadPutAway,
       contributeCodeTools,
@@ -1733,6 +1734,7 @@ export function startOctantServer(
     waitingAskAnnouncement.notify = (ask) => threadNotifications.notifyWaitingAsk(ask);
     const {
       designSystemRoutes,
+      activeWorkRoutes,
       fleetActivityRoutes,
       pendingRequestRoutes,
       sidebarBackgroundRoutes,
@@ -1759,6 +1761,7 @@ export function startOctantServer(
       baseRouteCodeService,
       chatService,
       codeOperationRuntime,
+      codeActiveWorkForWindow,
       codeTurnDecisions,
       gitObservationPort,
       goalService,
@@ -2124,6 +2127,7 @@ export function startOctantServer(
       extensionRoutes,
       providerToolingRoutes,
       fileMentionRoutes,
+      activeWorkRoutes,
       fleetActivityRoutes,
       folderBrowseRoutes,
       repositoryBootstrapRoutes,

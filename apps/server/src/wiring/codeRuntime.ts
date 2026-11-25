@@ -41,6 +41,7 @@ import {
   LOCAL_TOOL_HOST_ID,
   THREAD_RETENTION_EVENT_NAMES,
   type CodeOperationId,
+  type CodeCheckoutIdentity,
   type CodeThread,
   type WindowId,
 } from "@octant/contracts";
@@ -152,6 +153,11 @@ import {
   isNativeHarnessDriverKind,
   projectExtraFolderRoots,
 } from "@octant/domain";
+import {
+  activeWorkProject,
+  codeActiveWork,
+  type ActiveWorkFacts,
+} from "../activeWork/activeWorkRow";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { type CodeWiring, stableCodeFileId } from "./code";
 import {
@@ -2865,6 +2871,66 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     onPullRequestSnapshotRefreshed((rows) => {
       void failingChecksFollowUps.observe(rows);
     });
+    const codeBoardOf = (windowId: WindowId, boardThreads: ReadonlyArray<CodeBoardThread>) =>
+      new CodeThreadBoardService({
+        threads: { list: () => boardThreads },
+        metadata: codeThreadMetadataService,
+        runtime: {
+          observe: (threadId) => {
+            const thread = persistence.readCodeThread(threadId);
+            return {
+              ...boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId), {
+                turnParkedOnPerson:
+                  codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true ||
+                  threadAwaitsHarnessApproval(String(threadId)),
+              }),
+              decisionPending:
+                thread !== undefined && codeTurnDecisions.forThread(thread) !== undefined,
+            };
+          },
+        },
+        pullRequests: {
+          snapshot: () => projectPullRequestService.boardSnapshot(windowId),
+        },
+        planProgress: codeBoardPlanProgressSource,
+        finishedReceipts: {
+          read: (threadId) => finishedReceipts.boardMark(String(threadId)),
+        },
+        outsideContent: {
+          read: (threadId) => {
+            if (
+              !readThreadExternalContentTaint(persistence.connection, String(threadId))
+                .externalContentIngested
+            ) {
+              return undefined;
+            }
+            return readShieldWatcherLabels(persistence.connection, String(threadId)).length > 0
+              ? "flagged"
+              : "read";
+          },
+        },
+        clock: () => new Date().toISOString(),
+      });
+    const codeBoardThread = (
+      thread: CodeThread,
+      projectName: string | undefined,
+      checkout: CodeCheckoutIdentity | undefined,
+    ): CodeBoardThread => ({
+      thread,
+      project: { id: thread.projectId, name: projectName ?? thread.title },
+      checkout,
+      // A temporarily missing Project projection keeps the thread visible
+      // in a recovery state instead of dropping the card.
+      projectProjectionPresent: projectName !== undefined,
+      // Follow-up is the durable, journal-rebuildable obligation.
+      // Client unread is overlaid by each renderer and never stored on
+      // the server card.
+      followUp: codeFollowUpService.read(thread.id).followUp?.state === "open",
+    });
+    // The designated planner reads as a coordinator.
+    const readsAsCoordinator = (thread: CodeThread, plannerThreadIds: ReadonlySet<string>) =>
+      thread.coordinator === true ||
+      (thread.coordinatorThreadId === undefined && plannerThreadIds.has(String(thread.id)));
     const boardRouteCodeService: CodeRouteService = withCodeBoard(
       baseRouteCodeService,
       async (windowId, query) => {
@@ -2877,76 +2943,72 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           bootstrap.checkouts.map((checkout) => [String(checkout.id), checkout] as const),
         );
         const plannerThreadIds = new Set((bootstrap.plannerThreadIds ?? []).map(String));
-        const boardThreads: CodeBoardThread[] = bootstrap.threads
+        const boardThreads = bootstrap.threads
           // A coordinator is never a board card: it has no delivery and no
-          // Done. The designated planner reads as a coordinator, so it is left
-          // out too.
+          // Done.
           .filter(
             (thread) =>
               thread.lifecycle !== "archived" &&
               thread.completedAt === undefined &&
-              thread.coordinator !== true &&
-              !(
-                thread.coordinatorThreadId === undefined && plannerThreadIds.has(String(thread.id))
-              ),
+              !readsAsCoordinator(thread, plannerThreadIds),
           )
-          .map((thread) => {
-            const project = projectById.get(String(thread.projectId));
-            return {
+          .map((thread) =>
+            codeBoardThread(
               thread,
-              project: { id: thread.projectId, name: project?.name ?? thread.title },
-              checkout: checkoutById.get(String(thread.checkoutId)),
-              // A temporarily missing Project projection keeps the thread visible
-              // in a recovery state instead of dropping the card.
-              projectProjectionPresent: project !== undefined,
-              // Follow-up is the durable, journal-rebuildable obligation.
-              // Client unread is overlaid by each renderer and never stored on
-              // the server card.
-              followUp: codeFollowUpService.read(thread.id).followUp?.state === "open",
-            };
-          });
-        const board = new CodeThreadBoardService({
-          threads: { list: () => boardThreads },
-          metadata: codeThreadMetadataService,
-          runtime: {
-            observe: (threadId) => {
-              const thread = persistence.readCodeThread(threadId);
-              return {
-                ...boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId), {
-                  turnParkedOnPerson:
-                    codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true ||
-                    threadAwaitsHarnessApproval(String(threadId)),
-                }),
-                decisionPending:
-                  thread !== undefined && codeTurnDecisions.forThread(thread) !== undefined,
-              };
-            },
-          },
-          pullRequests: {
-            snapshot: () => projectPullRequestService.boardSnapshot(windowId),
-          },
-          planProgress: codeBoardPlanProgressSource,
-          finishedReceipts: {
-            read: (threadId) => finishedReceipts.boardMark(String(threadId)),
-          },
-          outsideContent: {
-            read: (threadId) => {
-              if (
-                !readThreadExternalContentTaint(persistence.connection, String(threadId))
-                  .externalContentIngested
-              ) {
-                return undefined;
-              }
-              return readShieldWatcherLabels(persistence.connection, String(threadId)).length > 0
-                ? "flagged"
-                : "read";
-            },
-          },
-          clock: () => new Date().toISOString(),
-        });
-        return board.query(query);
+              projectById.get(String(thread.projectId))?.name,
+              checkoutById.get(String(thread.checkoutId)),
+            ),
+          );
+        return codeBoardOf(windowId, boardThreads).query(query);
       },
     );
+    // The same derivation over the sidebar's own thread list, coordinators
+    // included: a navigation read, so no checkout is observed for it.
+    const codeActiveWorkForWindow = async (
+      windowId: WindowId,
+    ): Promise<ReadonlyArray<ActiveWorkFacts>> => {
+      const [navigation, projects] = await Promise.all([
+        baseRouteCodeService.navigation(windowId),
+        projectService.bootstrap(windowId),
+      ]);
+      const projectById = new Map(
+        projects.active.map((project) => [String(project.id), project] as const),
+      );
+      const plannerThreadIds = new Set((navigation.plannerThreadIds ?? []).map(String));
+      const runtimeByThread = new Map(
+        navigation.runtime.map((entry) => [String(entry.threadId), entry] as const),
+      );
+      const threads = new Map(
+        navigation.threads
+          .filter((thread) => thread.lifecycle === "active" && thread.completedAt === undefined)
+          .map((thread) => [String(thread.id), thread] as const),
+      );
+      const board = await codeBoardOf(
+        windowId,
+        [...threads.values()].map((thread) => ({
+          ...codeBoardThread(
+            thread,
+            projectById.get(String(thread.projectId))?.name,
+            persistence.readCodeCheckout(thread.checkoutId),
+          ),
+          withoutDelivery: readsAsCoordinator(thread, plannerThreadIds),
+        })),
+      ).query({ version: 1 });
+      return board.cards.flatMap((card) => {
+        const thread = threads.get(String(card.threadId));
+        if (thread === undefined) return [];
+        const runtime = runtimeByThread.get(String(card.threadId));
+        return [
+          codeActiveWork({
+            card,
+            updatedAt: thread.updatedAt,
+            coordinator: readsAsCoordinator(thread, plannerThreadIds),
+            ...activeWorkProject(projectById.get(String(thread.projectId))),
+            ...(runtime === undefined ? {} : { runtime }),
+          }),
+        ];
+      });
+    };
     // Merge when ready and Auto-fix reuse `pullRequestSwitchForge` created above.
     const pullRequestSwitchService = new CodeProjectPullRequestSwitchService({
       localWindows: () => deps.windowAuthorityStore.listWindowIds(),
@@ -3336,6 +3398,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeCompletedThreadSource,
       codeOperationRuntime,
       codeService,
+      codeActiveWorkForWindow,
       codeTurnDecisions,
       mergedThreadPutAway,
       contributeCodeTools,

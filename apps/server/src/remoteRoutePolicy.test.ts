@@ -1272,6 +1272,28 @@ describe("remote route policy", () => {
     expect(inspect("/api/pending-requests/defer", "POST")).toMatchObject({ maxBodyBytes: 1_024 });
   });
 
+  it("forwards the active-work read, without a query and never as a change", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    expect(inspect("/api/active-work", "GET")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+    expect(inspect("/api/active-work", "POST")).toMatchObject({ kind: "reject" });
+    expect(inspect("/api/active-work?projectId=x", "GET")).toMatchObject({ kind: "reject" });
+  });
+
   it("forwards the cleaned-up worktree list and a restore with a one-thread body, and leaves both without a catalogued action", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (path: string, method: "GET" | "POST") =>
