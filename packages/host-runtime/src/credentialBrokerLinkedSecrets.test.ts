@@ -134,6 +134,24 @@ describe("credential broker linked secret stores", { timeout: 30_000 }, () => {
     await h.post("/v1/secret-stores/unlink", { store: "onepassword" });
     expect(JSON.parse((await h.post(path, reference)).text)).toEqual({ status: "not-linked" });
   });
+  it("lists names for a signed-in host alone, and takes no argument but ids", async () => {
+    const h = await harness();
+    const path = "/v1/secret-stores/browse";
+    const body = { store: "onepassword", step: { kind: "vaults" } };
+    const unauthenticated = await h.broker.fetchForTest(
+      new Request(new URL(path, h.broker.url), { method: "POST", body: JSON.stringify(body) }),
+    );
+    expect(unauthenticated.status).toBe(401);
+    expect(JSON.parse((await h.post(path, body)).text)).toEqual({ status: "not-linked" });
+    for (const wrong of [
+      { ...body, extra: true },
+      { store: "other", step: { kind: "vaults" } },
+      { store: "onepassword", step: { kind: "items", vaultId: "--reveal" } },
+      { store: "onepassword", step: { kind: "vaults", vaultId: "x" } },
+    ])
+      expect((await h.post(path, wrong)).status).toBe(400);
+  });
+
   it("discards a late card lookup after the store is unlinked and linked again", async () => {
     const read = Promise.withResolvers<{ status: "read"; value: string }>();
     const started = Promise.withResolvers<void>();

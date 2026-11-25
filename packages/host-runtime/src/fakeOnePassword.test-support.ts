@@ -13,6 +13,8 @@ export interface FakeOnePassword {
   readonly env: NodeJS.ProcessEnv;
   readonly setMode: (mode: "ready" | "locked" | "broken") => void;
   readonly addItem: (reference: string, value: string) => void;
+  /** What a `vault` or `item` call with these arguments prints. */
+  readonly addList: (args: ReadonlyArray<string>, output: string) => void;
   /** One line per call: its arguments, then how many OCTANT_ variables it could see. */
   readonly calls: () => ReadonlyArray<string>;
 }
@@ -34,6 +36,15 @@ case "$1" in
     echo "URL: fixture.example"
     exit 0
     ;;
+  vault | item)
+    list="$state/lists/$(printf %s "$*" | tr '/: ' '___')"
+    if [ -f "$list" ]; then
+      cat "$list"
+      exit 0
+    fi
+    echo "[ERROR] 2026/10/31 isn't a vault in this account." >&2
+    exit 1
+    ;;
   read)
     shift
     if [ "$1" = "--no-newline" ]; then shift; fi
@@ -53,6 +64,7 @@ export function makeFakeOnePassword(): FakeOnePassword {
   const root = mkdtempSync(join(tmpdir(), "octant-fake-op-"));
   const state = join(root, "state");
   mkdirSync(join(state, "items"), { recursive: true });
+  mkdirSync(join(state, "lists"), { recursive: true });
   writeFileSync(join(state, "mode"), "ready");
   writeFileSync(join(state, "calls"), "");
   const executablePath = join(root, "op");
@@ -64,6 +76,8 @@ export function makeFakeOnePassword(): FakeOnePassword {
     setMode: (mode) => writeFileSync(join(state, "mode"), mode),
     addItem: (reference, value) =>
       writeFileSync(join(state, "items", reference.replace(/[/: ]/g, "_")), value),
+    addList: (args, output) =>
+      writeFileSync(join(state, "lists", args.join(" ").replace(/[/: ]/g, "_")), output),
     calls: () =>
       readFileSync(join(state, "calls"), "utf8")
         .split("\n")

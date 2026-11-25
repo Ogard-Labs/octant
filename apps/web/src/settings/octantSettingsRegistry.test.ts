@@ -261,6 +261,8 @@ describe("octantSettingsRegistry", () => {
       "secret-store-google-cli-email",
       "secret-store-google-cli-reference",
       "secret-store-google-cli-scopes",
+      "thread-secrets-active",
+      "thread-secrets-remembered",
     ]);
     expect(section("data")?.label).toBe("Data & storage");
     expect(section("data")?.scope).toBe("host");

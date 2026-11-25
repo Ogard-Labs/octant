@@ -429,7 +429,9 @@ import { ProviderKeyJournalRecord } from "@octant/contracts/provider-key-journal
 import { SecretStoreJournalRecord } from "@octant/contracts/secret-stores";
 import {
   THREAD_SECRET_EVENT_NAME,
+  THREAD_SECRET_MEMORY_EVENT_NAME,
   ThreadSecretJournalRecord,
+  ThreadSecretMemoryRecord,
 } from "@octant/contracts/thread-secrets";
 import {
   REMOTE_ACCESS_EVENT_NAMES,
@@ -710,6 +712,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("decision-review.recorded@1", 1, DecisionReviewRecorded)
     .register("secret-store.recorded@1", 1, SecretStoreJournalRecord)
     .register(THREAD_SECRET_EVENT_NAME, 1, ThreadSecretJournalRecord)
+    .register(THREAD_SECRET_MEMORY_EVENT_NAME, 1, ThreadSecretMemoryRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)
     .register(NATIVE_SESSION_HISTORY_IMPORTED_EVENT, 1, NativeSessionHistoryImported)

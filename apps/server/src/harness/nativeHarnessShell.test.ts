@@ -108,6 +108,23 @@ describe.skipIf(process.platform !== "darwin")("native harness shell under Seatb
     expect(run.output).toBe(`${checkout}|absent|1`);
   });
 
+  it("gives one command its variables and the next command none of them", async () => {
+    const { shell, checkout } = harnessShell("none");
+    const value = `two words "quoted" $HOME 'single'`;
+    const command =
+      'printf "%s" "${OCTANT_SECRET_TOKEN:-absent}"; ps -o args= -p $$ | grep -c quoted || true';
+    const given = await shell.run({
+      command,
+      cwd: checkout,
+      timeoutMs: 10_000,
+      environment: { OCTANT_SECRET_TOKEN: value },
+    });
+    expect(given).toMatchObject({ status: "ran" });
+    expect(given.output.startsWith(value)).toBe(true);
+    const next = await shell.run({ command, cwd: checkout, timeoutMs: 10_000 });
+    expect(next.output.startsWith("absent")).toBe(true);
+  });
+
   it("reads and writes an extra folder of the Project but not a folder beside it", async () => {
     const { shell, checkout } = harnessShell("none");
     const extra = join(checkout, "..", "extra");

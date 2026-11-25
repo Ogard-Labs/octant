@@ -58,6 +58,11 @@ private let pushPlatformCredentialNamespace = "push-platform-credential"
 // own. A person may replace one.
 private let webSearchCredentialService = services + "web-search-credentials.v1"
 private let webSearchCredentialNamespace = "web-search-credential"
+// A secret a person asked Octant to remember for a thread's agent lives in a
+// service of its own, keyed by an opaque secret id, so no other credential can
+// share its id. A person may replace one.
+private let threadSecretCredentialService = services + "thread-secret-credentials.v1"
+private let threadSecretCredentialNamespace = "thread-secret-credential"
 // The SSH sign-in keys Octant made for registered servers live in a service of
 // their own. The broker makes each key and signs with it; no route reads one
 // back, and a set never replaces a key: a server's key is deleted when the
@@ -111,6 +116,7 @@ private let octantOwnedServices = [
     appStoreConnectKeyService,
     pushPlatformCredentialService,
     webSearchCredentialService,
+    threadSecretCredentialService,
     ownerUnlockService,
 ]
 
@@ -156,6 +162,11 @@ private let separateNamespaces: [String: SeparateNamespace] = [
     webSearchCredentialNamespace: SeparateNamespace(
         service: webSearchCredentialService,
         idField: "credentialRef",
+        replaceable: true
+    ),
+    threadSecretCredentialNamespace: SeparateNamespace(
+        service: threadSecretCredentialService,
+        idField: "secretId",
         replaceable: true
     ),
     sshKeyNamespace: SeparateNamespace(

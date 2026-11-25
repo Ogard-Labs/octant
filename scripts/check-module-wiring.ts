@@ -677,10 +677,6 @@ export function findUnregisteredRouteModules(
  */
 export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
   [
-    "/api/thread-secrets",
-    "The thread-secret service, served ahead of the card that calls it (docs/architecture.md, Thread secrets). Remove once the card reads and answers it.",
-  ],
-  [
     "/api/code/language/documents",
     "Language services' document sync, served by the host since 2026-10-26 ahead of the editor that calls it (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor syncs its open documents.",
   ],

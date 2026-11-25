@@ -124,6 +124,18 @@ export function makeWebSearchCredentialBrokerClient(
   return makeBrokerCredentialClient(options, "/v1/web-search-credentials/", "credentialRef");
 }
 
+/**
+ * Secrets a person chose to have Octant remember for a thread's agent, through
+ * the broker's own routes for them, keyed by an opaque secret id. They sit
+ * apart from every other credential, so a provider, connector or search key
+ * with the same UUID can never read, replace or delete one.
+ */
+export function makeThreadSecretCredentialBrokerClient(
+  options: CredentialBrokerClientOptions,
+): ProviderCredentialStore {
+  return makeBrokerCredentialClient(options, "/v1/thread-secret-credentials/", "secretId");
+}
+
 function makeBrokerCredentialClient(
   options: CredentialBrokerClientOptions,
   routePrefix:
@@ -134,7 +146,8 @@ function makeBrokerCredentialClient(
     | "/v1/mcp-server-credentials/"
     | "/v1/desktop-provider-credentials/"
     | "/v1/push-platform-credentials/"
-    | "/v1/web-search-credentials/",
+    | "/v1/web-search-credentials/"
+    | "/v1/thread-secret-credentials/",
   field: "providerInstanceId" | "instanceId" | "credentialRef" | "secretId",
 ): ProviderCredentialStore {
   const fetch = options.fetch ?? globalThis.fetch;

@@ -39,11 +39,6 @@ import {
 import type { NarrationForTurn } from "./speech/narrationTool";
 import type { TranscriptionForTurn } from "./speech/transcriptionTool";
 import { CredentialRequests } from "./credentials/credentialRequests";
-import { holdSecretValue } from "./process/secretRedaction";
-import { createThreadSecretFiles } from "./threadSecrets/threadSecretFiles";
-import { createThreadSecretRoutes } from "./threadSecrets/threadSecretRoutes";
-import { threadSecretsJournal } from "./threadSecrets/threadSecretsJournal";
-import { ThreadSecretService } from "./threadSecrets/threadSecretService";
 import { createCredentialRequestRoutes } from "./credentials/credentialRequestRoutes";
 import { registeredCredentialOperations } from "./credentials/credentialRequestTools";
 import { createCredentialTool } from "./credentials/credentialTool";
@@ -110,6 +105,11 @@ import { wireBrowser } from "./wiring/browser";
 import { wireCodeRuntime } from "./wiring/codeRuntime";
 import { wireDevices } from "./wiring/devices";
 import { wireCodeTooling } from "./wiring/codeTooling";
+import {
+  codeThreadSecrets,
+  wireThreadSecrets,
+  type ThreadSecretTurnFacts,
+} from "./wiring/threadSecrets";
 import { wireHarness } from "./wiring/harness";
 import { wireChat } from "./wiring/chat";
 import { wireWork } from "./wiring/work";
@@ -700,7 +700,30 @@ export function startOctantServer(
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
           }),
       });
+    const commandBroker =
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : makeSecretStoreBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          });
+    const { threadSecrets, threadSecretRoutes } = wireThreadSecrets({
+      options,
+      persistence,
+      machineChangeFeed,
+      onThreadArchived,
+      onWaitingAsk,
+      onWindowRevoked,
+      processAuthorityTime,
+      windowAuthorityStore,
+      workThreadProjection,
+      readReference: commandBroker?.requestCardRead,
+      browse: commandBroker?.browse,
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(() => threadSecrets.close()));
     const {
+      threadKeepsSandbox,
+      isHarnessProvider,
       readHarnessProcessReceipts,
       beginGoogleCliChange,
       recoverGoogleCliCommands,
@@ -736,6 +759,7 @@ export function startOctantServer(
       observeTurnEnded,
       threadWork,
     } = wireHarness({
+      threadSecrets,
       hubActScopeSlot,
       threadMoveHolds,
       resolveThreadStrict,
@@ -1309,6 +1333,15 @@ export function startOctantServer(
       workThreadService: (): WorkThreadService => workThreadService,
       workTurnService: (): WorkTurnService => workTurnService,
     });
+    const threadSecretFacts: ThreadSecretTurnFacts = {
+      service: threadSecrets,
+      composition: nativeHarnessComposition,
+      resolveStrict: resolveThreadStrict,
+      keepsSandbox: threadKeepsSandbox,
+      isHarnessProvider,
+      windowCurrent: (windowId) =>
+        windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
+    };
     const {
       fileMentionRoutes,
       fileMentionService,
@@ -1330,6 +1363,7 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      threadSecretFacts,
       narrationForTurn,
       hubActScopeSlot,
       transcriptionForTurn,
@@ -1739,13 +1773,6 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
-    const commandBroker =
-      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
-        ? undefined
-        : makeSecretStoreBrokerClient({
-            url: options.credentialBrokerUrl,
-            token: options.credentialBrokerToken,
-          });
     const commandJournal = secretStoresJournal({
       journal: persistence.journal,
       connection: persistence.connection,
@@ -1806,28 +1833,6 @@ export function startOctantServer(
         : { resolveLinked: commandBroker.requestCardRead },
     );
     yield* Effect.addFinalizer(() => Effect.sync(() => credentialRequests.close()));
-    const readLinkedSecret = commandBroker?.requestCardRead;
-    const threadSecrets = new ThreadSecretService({
-      uuid: randomUUID,
-      now: processAuthorityTime,
-      journal: threadSecretsJournal({
-        journal: persistence.journal,
-        connection: persistence.connection,
-        uuid: randomUUID,
-        now: () => new Date().toISOString(),
-      }),
-      ...(options.threadSecretsDirectory === undefined
-        ? {}
-        : { files: createThreadSecretFiles({ root: options.threadSecretsDirectory }) }),
-      hold: holdSecretValue,
-      ...(readLinkedSecret === undefined ? {} : { readReference: readLinkedSecret }),
-      onAsked: onWaitingAsk,
-      onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
-    });
-    onThreadArchived((threadId) => threadSecrets.withdrawThread(threadId));
-    onWindowRevoked((window) => threadSecrets.revokeWindow(String(window)));
-    yield* Effect.addFinalizer(() => Effect.sync(() => threadSecrets.close()));
-    const threadSecretRoutes = createThreadSecretRoutes(threadSecrets, windowAuthorityStore);
     yield* Effect.addFinalizer(() => Effect.sync(() => projectMemoryAccess.proposals.close()));
     // Plan reads Project memory and refuses every write to it.
     contributeCodeTools(({ windowId, thread, readThread }) =>
@@ -1877,11 +1882,19 @@ export function startOctantServer(
     });
     // One credential tool, composed from two sides that each keep their own
     // authority check: registered integration operations and saved commands.
-    contributeCodeTools(({ windowId, thread, readThread }) => {
+    contributeCodeTools(({ windowId, thread, readThread, folders, operationId, routineRun }) => {
       const providerVersion = persistence.readProviderInstance(thread.providerInstanceId)?.version;
       const windowCurrent = () =>
         windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId));
       return createCredentialTool({
+        secrets: codeThreadSecrets(threadSecretFacts, {
+          windowId,
+          thread,
+          readThread,
+          folders,
+          operationId,
+          routineRun: routineRun !== undefined,
+        }),
         registered: registeredCredentialOperations({
           service: credentialRequests,
           windowId: String(windowId),

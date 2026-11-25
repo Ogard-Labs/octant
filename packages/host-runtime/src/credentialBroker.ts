@@ -1,6 +1,7 @@
 import { nodeAwsProfilePorts, type AwsProfilePorts } from "./awsProfileCredentials";
 import { Schema } from "effect";
 import { CredentialRequestReference } from "@octant/contracts/credential-request";
+import { decodeSecretStoreBrowseStep } from "@octant/contracts/secret-stores";
 import { decodeCommandCredentialHostRequest } from "@octant/contracts/command-credentials";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
@@ -58,6 +59,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const ROUTES = new Set([
   "/v1/secret-stores/command-use",
   "/v1/secret-stores/request-card-read",
+  "/v1/secret-stores/browse",
   "/v1/credentials/has",
   "/v1/credentials/resolve",
   "/v1/credentials/set",
@@ -91,6 +93,10 @@ const ROUTES = new Set([
   "/v1/web-search-credentials/resolve",
   "/v1/web-search-credentials/set",
   "/v1/web-search-credentials/delete",
+  "/v1/thread-secret-credentials/has",
+  "/v1/thread-secret-credentials/resolve",
+  "/v1/thread-secret-credentials/set",
+  "/v1/thread-secret-credentials/delete",
   "/v1/ssh-keys/ensure",
   "/v1/ssh-keys/public",
   "/v1/ssh-keys/sign",
@@ -139,6 +145,7 @@ const MCP_SERVER_CREDENTIAL_PREFIX = "/v1/mcp-server-credentials/";
 const DESKTOP_PROVIDER_CREDENTIAL_PREFIX = "/v1/desktop-provider-credentials/";
 const PUSH_PLATFORM_CREDENTIAL_PREFIX = "/v1/push-platform-credentials/";
 const WEB_SEARCH_CREDENTIAL_PREFIX = "/v1/web-search-credentials/";
+const THREAD_SECRET_CREDENTIAL_PREFIX = "/v1/thread-secret-credentials/";
 const SSH_KEY_PREFIX = "/v1/ssh-keys/";
 /** A login request an SSH client asks to sign, base64: a few hundred bytes. */
 const MAX_SSH_SIGN_DATA_BYTES = 8 * 1_024;
@@ -250,6 +257,14 @@ export async function startCredentialBroker(
    * reach one, and a search backend can reach no other.
    */
   webSearchCredentials?: CredentialStore,
+  /**
+   * The secrets a person chose to have Octant remember for a thread's agent,
+   * in a credential namespace of their own. They are served only on
+   * `/v1/thread-secret-credentials/*`, keyed by an opaque secret id, so no
+   * provider, connector, search key or other secret with the same UUID can
+   * read, replace or delete one.
+   */
+  threadSecretCredentials?: CredentialStore,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
@@ -321,6 +336,7 @@ export async function startCredentialBroker(
       linked,
       sshKeys,
       webSearchCredentials,
+      threadSecretCredentials,
     ).then(
       ({ destroyIncoming, response }) => {
         const headers: Record<string, string> = {};
@@ -407,6 +423,7 @@ export async function startCredentialBroker(
         linked,
         sshKeys,
         webSearchCredentials,
+        threadSecretCredentials,
       ),
   });
 }
@@ -428,6 +445,7 @@ async function handleIncoming(
   linked: LinkedBrokerStores | undefined,
   sshKeys: CredentialStore | undefined,
   webSearchCredentials: CredentialStore | undefined,
+  threadSecretCredentials: CredentialStore | undefined,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
   const headers = requestHeaders(incoming.headers);
@@ -467,6 +485,7 @@ async function handleIncoming(
         linked,
         sshKeys,
         webSearchCredentials,
+        threadSecretCredentials,
       ),
     ),
   };
@@ -489,6 +508,7 @@ async function handleBrokerRequest(
   linked: LinkedBrokerStores | undefined,
   sshKeys: CredentialStore | undefined,
   webSearchCredentials: CredentialStore | undefined,
+  threadSecretCredentials: CredentialStore | undefined,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAuthorized(peerAddress, request.headers, token)) {
@@ -682,6 +702,16 @@ async function handleBrokerRequest(
       "credentialRef",
       request,
       webSearchCredentials,
+    );
+  }
+
+  if (url.pathname.startsWith(THREAD_SECRET_CREDENTIAL_PREFIX)) {
+    if (threadSecretCredentials === undefined) return failure("not-found", 404);
+    return handleNamespacedRoute(
+      url.pathname.slice(THREAD_SECRET_CREDENTIAL_PREFIX.length),
+      "secretId",
+      request,
+      threadSecretCredentials,
     );
   }
 
@@ -936,6 +966,20 @@ async function handleSecretStoreRoute(
       version: result.version,
       websiteOrigins: result.websiteOrigins,
       storeRevision: result.storeRevision,
+    });
+  }
+
+  if (operation === "browse") {
+    if (keys !== "step,store" || !isLinkedSecretStoreKind(store))
+      return failure("invalid-request", 400);
+    let step;
+    try {
+      step = decodeSecretStoreBrowseStep(value.step);
+    } catch {
+      return failure("invalid-request", 400);
+    }
+    return Response.json((await linked.browse?.(store, step)) ?? { status: "unavailable" }, {
+      headers: { "cache-control": "no-store" },
     });
   }
 

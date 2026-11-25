@@ -53,6 +53,12 @@ export const SECRET_SERVICE_PUSH_PLATFORM_CREDENTIAL_ATTRIBUTE =
 export const SECRET_SERVICE_SSH_KEY_ATTRIBUTE = "octant.ssh-keys.v1";
 /** The API keys a person gives a web search backend. A person may replace one. */
 export const SECRET_SERVICE_WEB_SEARCH_CREDENTIAL_ATTRIBUTE = "octant.web-search-credentials.v1";
+/**
+ * The secrets a person asked Octant to remember for a thread's agent, keyed by
+ * an opaque secret id. A person may replace one.
+ */
+export const SECRET_SERVICE_THREAD_SECRET_CREDENTIAL_ATTRIBUTE =
+  "octant.thread-secret-credentials.v1";
 const NAMESPACES = {
   provider: { attribute: SECRET_SERVICE_ATTRIBUTE, label: "Octant provider credential" },
   "replica-device-key": {
@@ -86,6 +92,10 @@ const NAMESPACES = {
   "web-search-credential": {
     attribute: SECRET_SERVICE_WEB_SEARCH_CREDENTIAL_ATTRIBUTE,
     label: "Octant web search key",
+  },
+  "thread-secret-credential": {
+    attribute: SECRET_SERVICE_THREAD_SECRET_CREDENTIAL_ATTRIBUTE,
+    label: "Octant thread secret",
   },
 } as const;
 export type SecretServiceNamespace = keyof typeof NAMESPACES;

@@ -2,21 +2,24 @@
  * Thread secrets: a secret an agent asks the person for in a Code or Work
  * thread, kept as long as the person chooses.
  *
- * A value appears in exactly two types here, both private to the host: the
- * answer the card submits, and the tool input that moves a secret the person
- * already pasted into chat. Every other type (the card, the tool's result, the
+ * A value appears in exactly one type here, private to the host: the answer the
+ * card submits. Every other type (the request, the card, the tool's result, the
  * active list, the journal record) has no field for one and refuses a field it
- * does not name.
+ * does not name. An agent can never hand Octant a value: the person enters it in
+ * the card, every time (maintainer decision, 2026-11-24).
  */
 
 import { Schema } from "effect";
 import { AutomationThreadMode } from "./automation";
-import { SecretStoreItemReference, SecretStoreKind } from "./secretStores";
+import { SecretStoreBrowseStep, SecretStoreItemReference, SecretStoreKind } from "./secretStores";
 import { WindowId } from "./shell";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const MAX_THREAD_SECRET_FIELDS = 8;
+export const MAX_REMEMBERED_THREAD_SECRETS = 128;
+/** The newest are listed; one thread holds at most 64. */
+export const MAX_THREAD_SECRETS_LISTED = 512;
 /** The variable a command reads a secret from is this and the secret's name. */
 export const THREAD_SECRET_ENVIRONMENT_PREFIX = "OCTANT_SECRET_";
 
@@ -70,7 +73,7 @@ export const ThreadSecretDelivery = Schema.Literal(
   "handle",
   "file-and-environment",
   "environment",
-  "op-run",
+  "each-use",
 );
 export type ThreadSecretDelivery = typeof ThreadSecretDelivery.Type;
 export const ThreadSecretFailure = Schema.Literal(
@@ -163,18 +166,64 @@ export const ThreadSecretRequestInput = Schema.Struct({
     ),
   ),
   delivery: Schema.optional(ThreadSecretRequestedDelivery),
-  /** A secret the person already pasted in chat. It is saved with no card. */
-  value: Schema.optional(ThreadSecretValue),
   /** Asking again with the same key returns the same card and the same answer. */
   clientRequestId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+}).annotations(strict);
+export type ThreadSecretRequestInput = typeof ThreadSecretRequestInput.Type;
+
+/** Short enough that whoever approves the command sees all of it. */
+export const MAX_THREAD_SECRET_COMMAND_LENGTH = 1_500;
+
+/** The `run-with-secret` operation's input: one command, and the secrets it is given. */
+export const ThreadSecretRunInput = Schema.Struct({
+  operation: Schema.Literal("run-with-secret"),
+  command: Schema.String.pipe(
+    Schema.minLength(1),
+    Schema.maxLength(MAX_THREAD_SECRET_COMMAND_LENGTH),
+    Schema.filter((value) => value.trim() !== "" && !value.includes("\u0000"), {
+      message: () => "A command is text.",
+    }),
+  ),
+  /** The names saved results gave, without the variable's prefix. */
+  secrets: Schema.Array(DeliveredName).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(MAX_THREAD_SECRET_FIELDS),
+    Schema.filter((names) => new Set(names).size === names.length, {
+      message: () => "Each secret is named once.",
+    }),
+  ),
+  timeoutMs: Schema.optional(Schema.Int.pipe(Schema.between(1_000, 600_000))),
 })
   .annotations(strict)
   .pipe(
-    Schema.filter((input) => input.value === undefined || input.fields === undefined, {
-      message: () => "A pasted value is one secret and takes no fields.",
-    }),
+    Schema.filter(
+      ({ command, secrets }) =>
+        command.length + secrets.reduce((total, name) => total + name.length, 0) <=
+        MAX_THREAD_SECRET_COMMAND_LENGTH,
+      { message: () => "The command and its secrets' names are too long to show whole." },
+    ),
   );
-export type ThreadSecretRequestInput = typeof ThreadSecretRequestInput.Type;
+export type ThreadSecretRunInput = typeof ThreadSecretRunInput.Type;
+
+/** What the agent reads of a command it ran with a secret. Its output is redacted. */
+export const ThreadSecretRunResult = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("ran", "timed-out", "cancelled"),
+    exitCode: Schema.optional(Schema.Int),
+    output: Schema.String,
+    truncated: Schema.Boolean,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    /** A secret's own failure, or why the command was not run. */
+    failure: Schema.Union(
+      ThreadSecretFailure,
+      Schema.Literal("plan", "not-approved", "no-shell", "server-project"),
+    ),
+    note: Note,
+  }).annotations(strict),
+);
+export type ThreadSecretRunResult = typeof ThreadSecretRunResult.Type;
 
 const saved = { status: Schema.Literal("saved"), name: ThreadSecretName } as const;
 const FieldHandles = Schema.Record({ key: ThreadSecretFieldName, value: Schema.UUID });
@@ -208,7 +257,7 @@ export const ThreadSecretRequestResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     ...saved,
-    delivery: Schema.Literal("environment", "op-run"),
+    delivery: Schema.Literal("environment", "each-use"),
     env: Schema.Union(EnvironmentName, FieldVariables),
   }).annotations(strict),
   Schema.Struct({
@@ -329,6 +378,20 @@ export const ThreadSecretsView = Schema.Struct({
 }).annotations(strict);
 export type ThreadSecretsView = typeof ThreadSecretsView.Type;
 
+/** Every thread's active secrets and everything remembered, for Settings on this host. */
+export const ThreadSecretsHostView = Schema.Struct({
+  active: Schema.Array(
+    Schema.Struct({
+      ...ActiveThreadSecret.fields,
+      threadTitle: Schema.optional(Schema.String),
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(MAX_THREAD_SECRETS_LISTED)),
+  remembered: Schema.Array(RememberedThreadSecret).pipe(
+    Schema.maxItems(MAX_REMEMBERED_THREAD_SECRETS),
+  ),
+}).annotations(strict);
+export type ThreadSecretsHostView = typeof ThreadSecretsHostView.Type;
+
 /** Private submission only, like the answer it carries. */
 export const ThreadSecretCommand = Schema.Union(
   Schema.Struct({
@@ -341,6 +404,15 @@ export const ThreadSecretCommand = Schema.Union(
     threadId: ThreadId,
     secretId: Schema.UUID,
   }).annotations(strict),
+  /** Lists names in the linked store for one waiting card, so the person can pick an item. */
+  Schema.Struct({
+    kind: Schema.Literal("browse"),
+    threadId: ThreadId,
+    requestId: Schema.UUID,
+    step: SecretStoreBrowseStep,
+  }).annotations(strict),
+  /** Removes a remembered secret. Threads that hold it keep it for their own time. */
+  Schema.Struct({ kind: Schema.Literal("forget"), id: Schema.UUID }).annotations(strict),
 );
 export type ThreadSecretCommand = typeof ThreadSecretCommand.Type;
 
@@ -383,7 +455,7 @@ export const ThreadSecretJournalRecord = Schema.Union(
   Schema.Struct({
     name: Schema.Literal("thread-secret.used"),
     ...journaled,
-    use: Schema.Literal("command", "handle", "op-run"),
+    use: Schema.Literal("command", "handle"),
   }).annotations(strict),
   Schema.Struct({ name: Schema.Literal("thread-secret.expired"), ...journaled }).annotations(
     strict,
@@ -404,8 +476,42 @@ export const ThreadSecretJournalRecord = Schema.Union(
 );
 export type ThreadSecretJournalRecord = typeof ThreadSecretJournalRecord.Type;
 
+export const THREAD_SECRET_MEMORY_EVENT_NAME = "thread-secret-memory.recorded@1";
+export const THREAD_SECRET_MEMORY_AGGREGATE_TYPE = "thread-secret-memory";
+
+/**
+ * What the host remembers across threads: a name, and where its value is. A
+ * value the person typed is in the system's credential store under the id; a
+ * linked item is its address. No thread is named, so a thread's purge leaves
+ * what the person asked to keep.
+ */
+export const ThreadSecretMemoryRecord = Schema.Union(
+  Schema.Struct({
+    name: Schema.Literal("thread-secret.remembered"),
+    id: Schema.UUID,
+    secretName: DeliveredName,
+    source: Schema.Literal("pasted"),
+  }).annotations(strict),
+  Schema.Struct({
+    name: Schema.Literal("thread-secret.remembered"),
+    id: Schema.UUID,
+    secretName: DeliveredName,
+    source: Schema.Literal("onepassword"),
+    store: SecretStoreKind,
+    reference: SecretStoreItemReference,
+  }).annotations(strict),
+  Schema.Struct({
+    name: Schema.Literal("thread-secret.forgotten"),
+    id: Schema.UUID,
+  }).annotations(strict),
+);
+export type ThreadSecretMemoryRecord = typeof ThreadSecretMemoryRecord.Type;
+
+export const decodeThreadSecretMemoryRecord = Schema.decodeUnknownSync(ThreadSecretMemoryRecord);
+export const decodeThreadSecretRunInput = Schema.decodeUnknownEither(ThreadSecretRunInput);
 export const decodeThreadSecretRequestInput = Schema.decodeUnknownEither(ThreadSecretRequestInput);
 export const decodeThreadSecretCommand = Schema.decodeUnknownEither(ThreadSecretCommand);
 export const decodeThreadSecretJournalRecord = Schema.decodeUnknownSync(ThreadSecretJournalRecord);
 export const decodeThreadSecretsView = Schema.decodeUnknownSync(ThreadSecretsView);
+export const decodeThreadSecretsHostView = Schema.decodeUnknownSync(ThreadSecretsHostView);
 export const decodeThreadSecretCommandResult = Schema.decodeUnknownSync(ThreadSecretCommandResult);
