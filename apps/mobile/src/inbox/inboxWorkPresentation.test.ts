@@ -57,17 +57,18 @@ describe("Inbox work presentation", () => {
         row("code", "waiting for approval", "code-attention"),
         row("code", "archived", "code-recent"),
       ]),
-    ).toEqual({ all: 3, working: 1, needsAttention: 1, inReview: 0 });
+    ).toEqual({ all: 3, working: 1, needsAttention: 1, toReview: 0 });
   });
 
-  it("uses the server-authoritative Code review state for the review count", () => {
-    const reviewed = { ...row("code", "active", "code-review"), reviewState: "approved" as const };
-    expect(inboxStatusCounts([reviewed])).toEqual({
-      all: 1,
-      working: 0,
-      needsAttention: 0,
-      inReview: 1,
-    });
+  it("counts a finished turn to review wherever it runs, and a pull request's review never", () => {
+    const now = new Date("2026-08-10T10:00:00.000Z");
+    const counts = (fields: Partial<MobileInboxRow>) =>
+      inboxStatusCounts([{ ...row("chat", "active", "thread"), ...fields }], now).toReview;
+    expect(counts({ unread: true })).toBe(1);
+    expect(counts({ mode: "code", unread: true })).toBe(1);
+    expect(counts({ mode: "code", reviewState: "approved" })).toBe(0);
+    expect(counts({ unread: true, live: "working" })).toBe(0);
+    expect(counts({ unread: true, completedAt: "2026-08-10T09:45:00.000Z" })).toBe(0);
   });
 
   it("counts exactly the threads each of Home's counts lists", () => {
@@ -75,12 +76,12 @@ describe("Inbox work presentation", () => {
       row("code", "active", "working", "working"),
       row("work", "active", "waiting", "needs-input"),
       row("chat", "active", "quiet chat", "working"),
-      { ...row("code", "active", "in review"), reviewState: "pending" as const },
+      { ...row("code", "active", "finished"), unread: true },
     ];
     const counts = inboxStatusCounts(rows);
     expect(inboxCountedRows(rows, "working").map((item) => item.threadId)).toEqual(["working"]);
     expect(counts.working).toBe(inboxCountedRows(rows, "working").length);
     expect(counts.needsAttention).toBe(inboxCountedRows(rows, "attention").length);
-    expect(counts.inReview).toBe(inboxCountedRows(rows, "review").length);
+    expect(counts.toReview).toBe(inboxCountedRows(rows, "review").length);
   });
 });

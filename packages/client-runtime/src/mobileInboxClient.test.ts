@@ -273,7 +273,45 @@ describe("mobileInboxClient", () => {
     expect(rows).toHaveLength(3);
     expect(rows[0]?.mode).toBe("work");
     expect(rows.find((row) => row.mode === "code")).toMatchObject({ reviewState: "approved" });
-    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenCalledTimes(5);
+    // This computer answers no Chat run states, and still lists its Chats.
+    expect(rows.find((row) => row.mode === "chat")?.lastSequence).toBeUndefined();
+  });
+
+  it("gives a Chat and a Code row the position and run state its computer reports", async () => {
+    const answers: Readonly<Record<string, unknown>> = {
+      "/api/chat/bootstrap": { settings: chatSettings, threads: [chatThread] },
+      "/api/chat/navigation": {
+        threads: [
+          {
+            id: chatThread.id,
+            title: chatThread.title,
+            providerInstanceId: chatThread.providerInstanceId,
+            updatedAt: chatThread.updatedAt,
+            lastSequence: 31,
+            followUpOpen: false,
+            executing: true,
+          },
+        ],
+      },
+      "/api/work/threads/bootstrap": { threads: [] },
+      "/api/code/bootstrap": {
+        settings: codeSettings,
+        threads: [codeThread],
+        checkouts: [codeCheckout],
+        activity: [{ threadId: codeThread.id, lastSequence: 44 }],
+      },
+      "/api/code/board": codeBoard,
+    };
+    const rows = await listMobileInbox({
+      hostId,
+      authenticatedFetch: async ({ path }) => Response.json(answers[path]),
+    });
+    expect(rows.find((row) => row.mode === "chat")).toMatchObject({
+      lastSequence: 31,
+      live: "working",
+    });
+    expect(rows.find((row) => row.mode === "code")?.lastSequence).toBe(44);
   });
 
   it("surfaces an unavailable authoritative Code Board instead of discarding it", async () => {

@@ -241,6 +241,24 @@ describe("the phone's navigation", () => {
     expect(seen("mobile-tab-bar")).toBeDefined();
   });
 
+  it("counts a finished turn under To review until its thread is opened, with what it does while open", async () => {
+    context.rows = [row("turn", { lastSequence: 4 })];
+    await render();
+    // What the computer had already finished when the phone first saw it is read.
+    expect(seen("mobile-tile-review")?.textContent).toBe("0");
+    context.rows = [row("turn", { lastSequence: 9 })];
+    await press("mobile-tab-threads");
+    await press("mobile-tab-home");
+    expect(seen("mobile-tile-review")?.textContent).toBe("1");
+    await press("mobile-tile-review");
+    await press("mobile-home-thread-row-code-turn");
+    context.rows = [row("turn", { lastSequence: 15 })];
+    await back();
+    expect(seen("mobile-counted-threads")?.textContent).toContain("No finished turns waiting.");
+    await back();
+    expect(seen("mobile-tile-review")?.textContent).toBe("0");
+  });
+
   it("keeps each place where the person left it", async () => {
     await render();
     await press("mobile-tile-attention");

@@ -1,7 +1,14 @@
 import type { MobileInboxRow, MobileRowPullRequests } from "@octant/client-runtime";
 import { inboxWorkStatus } from "./inboxWorkPresentation";
 
-export type ThreadRowKind = "waiting" | "failed" | "review" | "working" | "idle" | "settled";
+export type ThreadRowKind =
+  | "waiting"
+  | "failed"
+  | "finished"
+  | "review"
+  | "working"
+  | "idle"
+  | "settled";
 
 export interface ThreadRowState {
   readonly kind: ThreadRowKind;
@@ -37,6 +44,9 @@ export function threadRowState(row: MobileInboxRow, now: Date): ThreadRowState {
   if (row.reviewState === "changes-requested") return said("waiting", "Changes requested");
   const age = compactAge(row.freshness, now);
   if (row.live === "working") return { kind: "working", word: age, spoken: `Working, ${age}` };
+  // A finished turn nobody has looked at since says so before its review does.
+  if (row.unread === true && !/fail|error|interrupt/i.test(row.status))
+    return said("finished", "Finished");
   if (row.reviewState === "pending") return said("review", "In review");
   if (row.reviewState === "approved") return said("review", "Approved");
   const status = inboxWorkStatus(row.status, row.reviewState, row.live);

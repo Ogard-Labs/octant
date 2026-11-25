@@ -20,6 +20,7 @@ import {
 const STATE_ICON: Readonly<Record<ThreadRowKind, MobileIconName | undefined>> = {
   waiting: "alert-circle-outline",
   failed: "close-circle-outline",
+  finished: "checkmark-circle-outline",
   review: "eye-outline",
   working: "ellipse-outline",
   idle: undefined,
@@ -32,6 +33,8 @@ function stateInk(kind: ThreadRowKind, colors: ThemeColors): string {
       return colors.warning;
     case "failed":
       return colors.danger;
+    case "finished":
+      return colors.success;
     case "review":
       return colors.palettePurple;
     case "working":

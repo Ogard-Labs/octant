@@ -20,6 +20,8 @@ import {
   type MobileProviderDirectoryEntry,
 } from "@octant/client-runtime";
 import { useMobileSession } from "../session/MobileSessionContext";
+import { isUnread, markRead, parseReadCursors, seedHosts } from "./readCursors";
+import { keepReadCursors, loadReadCursors } from "./readCursorFile";
 import { createRequestGuard } from "./requestGuard";
 
 /**
@@ -33,6 +35,8 @@ export interface MobileThreads {
   readonly error: string | undefined;
   readonly loading: boolean;
   readonly refresh: () => Promise<void>;
+  /** The person has this thread open, or (with none) has left it. */
+  readonly reading: (row: MobileInboxRow | undefined) => void;
   readonly hostLabel: (hostId: string) => string;
   readonly projectName: (row: MobileInboxRow) => string | undefined;
   /** Who answers a thread; unknown until its computer's directory is read. */
@@ -56,12 +60,54 @@ export function useMobileThreads(): MobileThreads {
 }
 
 export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
-  const { transports, hosts } = useMobileSession();
-  const [rows, setRows] = useState<ReadonlyArray<MobileInboxRow>>([]);
+  const { transports, hosts, environment } = useMobileSession();
+  const [held, setRows] = useState<ReadonlyArray<MobileInboxRow>>([]);
   const [failures, setFailures] = useState<ReadonlyArray<MobileInboxHostFailure>>([]);
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const requestGuard = useRef(createRequestGuard()).current;
+
+  // Sample threads are read and forgotten with the demo.
+  const keeps = environment.kind === "live";
+  const [cursors, setCursors] = useState(() => parseReadCursors(keeps ? loadReadCursors() : null));
+  useEffect(() => {
+    if (keeps) keepReadCursors(JSON.stringify(cursors));
+  }, [cursors, keeps]);
+  // The thread on screen. What it did while it was read is read as well, which
+  // the first list after it is left still has to know.
+  const open = useRef<MobileInboxRow | undefined>(undefined);
+  const left = useRef<MobileInboxRow | undefined>(undefined);
+  const reading = useCallback((row: MobileInboxRow | undefined) => {
+    if (row === undefined) left.current = open.current;
+    open.current = row;
+    if (row !== undefined) setCursors((current) => markRead(current, row));
+  }, []);
+  const readThrough = useCallback(
+    (result: ReadonlyArray<MobileInboxRow>, failed: ReadonlySet<string>) => {
+      const seen = [open.current, left.current].filter((row) => row !== undefined);
+      left.current = undefined;
+      setCursors((current) =>
+        result
+          .filter((row) =>
+            seen.some(
+              (entry) =>
+                entry.hostId === row.hostId &&
+                entry.mode === row.mode &&
+                entry.threadId === row.threadId,
+            ),
+          )
+          // A computer read in part would start from too early a position.
+          .reduce(
+            markRead,
+            seedHosts(
+              current,
+              result.filter((row) => !failed.has(row.hostId)),
+            ),
+          ),
+      );
+    },
+    [],
+  );
 
   const refresh = useCallback(async () => {
     // A slower, older fetch must not overwrite what a newer one already showed.
@@ -80,6 +126,7 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
       if (!requestGuard.isCurrent(request)) return;
       setRows(result.rows);
       setFailures(result.failures);
+      readThrough(result.rows, new Set(result.failures.map((failure) => failure.hostId)));
     } catch (cause) {
       if (!requestGuard.isCurrent(request)) return;
       setFailures([]);
@@ -91,7 +138,7 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
     } finally {
       if (requestGuard.isCurrent(request)) setLoading(false);
     }
-  }, [requestGuard, transports]);
+  }, [readThrough, requestGuard, transports]);
 
   useEffect(() => {
     void refresh();
@@ -150,6 +197,10 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
     };
   }, [transports]);
 
+  const rows = useMemo(
+    () => held.map((row) => (isUnread(cursors, row) ? { ...row, unread: true } : row)),
+    [cursors, held],
+  );
   const value = useMemo<MobileThreads>(() => {
     const labels = new Map(hosts.map((host) => [host.hostId, host.label]));
     const names = new Map(
@@ -161,6 +212,7 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
       error,
       loading,
       refresh,
+      reading,
       projects,
       hostLabel: (hostId) => labels.get(hostId) ?? hostId.slice(0, 8),
       provider: (row) =>
@@ -170,7 +222,7 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
       projectName: (row) =>
         row.projectId === undefined ? undefined : names.get(`${row.hostId}:${row.projectId}`),
     };
-  }, [error, failures, hosts, loading, projects, providers, refresh, rows]);
+  }, [error, failures, hosts, loading, projects, providers, reading, refresh, rows]);
 
   return <Context.Provider value={value}>{props.children}</Context.Provider>;
 }

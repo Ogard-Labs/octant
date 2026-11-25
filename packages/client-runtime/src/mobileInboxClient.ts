@@ -10,6 +10,7 @@ import {
   type WorkThread,
   ChatBootstrap,
   ChatCommandResult,
+  ChatNavigation,
   CodeBootstrap,
   WorkThreadBootstrap,
   decodeHostAnswer,
@@ -83,6 +84,10 @@ export interface MobileInboxRow {
   readonly providerInstanceId?: string;
   readonly pinned?: boolean;
   readonly live?: MobileThreadLiveState;
+  /** How far the thread's own activity has come, as its computer's journal position. */
+  readonly lastSequence?: number;
+  /** Activity past what this phone has read: the phone's own, no computer sends it. */
+  readonly unread?: boolean;
   /** The oldest approval, question or other ask the host says waits on the person here. */
   readonly waitingAsk?: MobileWaitingAsk;
   /** The thread's aggregate version, which a row action sends as its expected version. */
@@ -179,7 +184,12 @@ async function decodeJson<T>(
   }
 }
 
-function chatRow(hostId: string, thread: ChatThread): MobileInboxRow {
+function chatRow(
+  hostId: string,
+  thread: ChatThread,
+  live?: MobileThreadLiveState,
+  lastSequence?: number,
+): MobileInboxRow {
   return {
     hostId,
     mode: "chat",
@@ -190,6 +200,8 @@ function chatRow(hostId: string, thread: ChatThread): MobileInboxRow {
     providerInstanceId: String(thread.providerInstanceId),
     ...restFields(thread),
     ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
+    ...(live === undefined ? {} : { live }),
+    ...(lastSequence === undefined ? {} : { lastSequence }),
   };
 }
 
@@ -213,6 +225,7 @@ function codeRow(
   thread: CodeThread,
   reviewState?: MobileCodeReviewState,
   live?: MobileThreadLiveState,
+  lastSequence?: number,
 ): MobileInboxRow {
   return {
     hostId,
@@ -227,6 +240,7 @@ function codeRow(
     ...(thread.pinned === true ? { pinned: true } : {}),
     ...(reviewState === undefined ? {} : { reviewState }),
     ...(live === undefined ? {} : { live }),
+    ...(lastSequence === undefined ? {} : { lastSequence }),
   };
 }
 
@@ -237,6 +251,10 @@ interface MobileInboxBootstrapRows {
   readonly codeThreads: ReadonlyArray<CodeThread>;
   readonly workRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
   readonly codeRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
+  readonly chatRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
+  /** Journal positions by thread id; a thread with none has reported no activity. */
+  readonly chatActivity?: ReadonlyMap<string, number>;
+  readonly codeActivity?: ReadonlyMap<string, number>;
   readonly failure?: MobileInboxFailure;
 }
 
@@ -259,13 +277,23 @@ export function normalizeMobileInbox(input: {
   readonly codeReviewStates?: ReadonlyMap<string, MobileCodeReviewState>;
   readonly workRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
   readonly codeRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
+  readonly chatRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
+  readonly chatActivity?: ReadonlyMap<string, number>;
+  readonly codeActivity?: ReadonlyMap<string, number>;
 }): ReadonlyArray<MobileInboxRow> {
   const reportFor = (
     reports: ReadonlyArray<MobileThreadRuntimeReport> | undefined,
     threadId: string,
   ) => reports?.find((report) => String(report.threadId) === threadId);
   return sortMobileInboxRows([
-    ...input.chatThreads.map((thread) => chatRow(input.hostId, thread)),
+    ...input.chatThreads.map((thread) =>
+      chatRow(
+        input.hostId,
+        thread,
+        mobileThreadLiveState(reportFor(input.chatRuntime, String(thread.id))),
+        input.chatActivity?.get(String(thread.id)),
+      ),
+    ),
     ...input.workThreads.map((thread) =>
       workRow(
         input.hostId,
@@ -279,6 +307,7 @@ export function normalizeMobileInbox(input: {
         thread,
         input.codeReviewStates?.get(String(thread.id)),
         mobileThreadLiveState(reportFor(input.codeRuntime, String(thread.id))),
+        input.codeActivity?.get(String(thread.id)),
       ),
     ),
   ]);
@@ -305,6 +334,7 @@ async function fetchMobileInboxBootstrapRows(
     transport.authenticatedFetch({ method: "GET", path: "/api/chat/bootstrap" }),
     transport.authenticatedFetch({ method: "GET", path: "/api/work/threads/bootstrap" }),
     transport.authenticatedFetch({ method: "GET", path: "/api/code/bootstrap" }),
+    transport.authenticatedFetch({ method: "GET", path: "/api/chat/navigation" }),
   ]);
   const failures: MobileInboxFailure[] = [];
   const decodeBootstrap = async <T>(
@@ -340,6 +370,10 @@ async function fetchMobileInboxBootstrapRows(
     "Code bootstrap failed over the remote session.",
   );
 
+  // The run state and position of each Chat, which its bootstrap leaves out. A
+  // computer that answers without them still lists its Chats, quiet.
+  const chatNavigation = await chatNavigationThreads(settled[3]);
+
   return {
     hostId: transport.hostId,
     chatThreads: chat?.threads ?? [],
@@ -347,8 +381,28 @@ async function fetchMobileInboxBootstrapRows(
     codeThreads: code?.threads ?? [],
     workRuntime: work?.runtime ?? [],
     codeRuntime: code?.runtime ?? [],
+    chatRuntime: chatNavigation.map((thread) => ({
+      threadId: thread.id,
+      executing: thread.executing,
+      ...(thread.awaitingInput === undefined ? {} : { awaitingInput: thread.awaitingInput }),
+    })),
+    chatActivity: new Map(chatNavigation.map((thread) => [String(thread.id), thread.lastSequence])),
+    codeActivity: new Map(
+      (code?.activity ?? []).map((entry) => [String(entry.threadId), entry.lastSequence]),
+    ),
     ...(failures[0] === undefined ? {} : { failure: failures[0] }),
   };
+}
+
+async function chatNavigationThreads(
+  result: PromiseSettledResult<Response> | undefined,
+): Promise<ChatNavigation["threads"]> {
+  if (result === undefined || result.status === "rejected" || !result.value.ok) return [];
+  try {
+    return decodeHostAnswer(ChatNavigation)(await result.value.json()).threads;
+  } catch {
+    return [];
+  }
 }
 
 function rowsFromMobileInboxBootstrap(

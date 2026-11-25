@@ -30,8 +30,8 @@ const COUNTED: Readonly<
     icon: "play-outline",
   },
   review: {
-    title: MOBILE_COPY.inReview,
-    empty: MOBILE_COPY.countedNoneInReview,
+    title: MOBILE_COPY.toReview,
+    empty: MOBILE_COPY.countedNoneToReview,
     icon: "eye-outline",
   },
 };

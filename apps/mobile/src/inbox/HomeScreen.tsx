@@ -196,10 +196,10 @@ export function HomeScreen(props: HomeScreenProps) {
                 testID="mobile-tile-working"
               />
               <CountTile
-                count={counts.inReview}
+                count={counts.toReview}
                 hue={colors.palettePurple}
                 icon="eye"
-                label={MOBILE_COPY.inReview}
+                label={MOBILE_COPY.toReview}
                 onPress={() => props.onOpenCounted("review")}
                 testID="mobile-tile-review"
               />

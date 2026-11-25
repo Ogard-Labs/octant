@@ -1,8 +1,9 @@
 import type { MobileInboxRow } from "@octant/client-runtime";
+import { rowsToReview } from "./inboxWorkPresentation";
 import { sectionForAgentRow } from "./agentsListPresentation";
 import { mobileThreadShelf } from "./threadArrangement";
 
-export type MobileInboxFilter = "all" | "urgent" | "decide" | "stuck";
+export type MobileInboxFilter = "all" | "urgent" | "decide" | "stuck" | "finished";
 
 /** The desktop Inbox's filters and words, over what the host says waits. */
 export const MOBILE_INBOX_FILTERS: ReadonlyArray<{
@@ -18,6 +19,7 @@ export const MOBILE_INBOX_FILTERS: ReadonlyArray<{
   { id: "urgent", label: "Urgent", empty: "Nothing urgent." },
   { id: "decide", label: "Decide", empty: "No decisions waiting." },
   { id: "stuck", label: "Stuck", empty: "Nothing stuck." },
+  { id: "finished", label: "Finished", empty: "No finished turns waiting." },
 ];
 
 function waits(row: MobileInboxRow, now: Date): boolean {
@@ -25,7 +27,7 @@ function waits(row: MobileInboxRow, now: Date): boolean {
 }
 
 /** Stuck is every wait that is not a decision, as on the desktop. */
-function matches(row: MobileInboxRow, filter: MobileInboxFilter): boolean {
+function matches(row: MobileInboxRow, filter: Exclude<MobileInboxFilter, "finished">): boolean {
   switch (filter) {
     case "all":
       return true;
@@ -43,6 +45,8 @@ export function rowsForInboxFilter(
   filter: MobileInboxFilter,
   now: Date = new Date(),
 ): ReadonlyArray<MobileInboxRow> {
+  // A finished turn waits on nothing, so it lists here alone and not under All.
+  if (filter === "finished") return rowsToReview(rows, now);
   return rows.filter((row) => waits(row, now) && matches(row, filter));
 }
 
@@ -56,5 +60,6 @@ export function inboxFilterCounts(
     urgent: count("urgent"),
     decide: count("decide"),
     stuck: count("stuck"),
+    finished: count("finished"),
   };
 }

@@ -16,6 +16,7 @@ import {
   NavigationContainer,
   StackActions,
   type ParamListBase,
+  useFocusEffect,
 } from "@react-navigation/native";
 import {
   createNativeStackNavigator,
@@ -30,7 +31,7 @@ import { HostsScreen } from "../hosts/HostsScreen";
 import { CountedThreadsScreen } from "../inbox/CountedThreadsScreen";
 import { HomeScreen } from "../inbox/HomeScreen";
 import { InboxScreen } from "../inbox/InboxScreen";
-import { MobileThreadsProvider } from "../inbox/MobileThreadsContext";
+import { MobileThreadsProvider, useMobileThreads } from "../inbox/MobileThreadsContext";
 import { NewThreadProvider, useNewThread } from "../inbox/NewThreadContext";
 import type { MobileThreadArrangement } from "../inbox/threadArrangement";
 import type { MobileThreadFilter } from "../inbox/threadFilters";
@@ -144,6 +145,14 @@ function CountedRoute({ navigation, route }: ScreenProps<"counted">) {
 }
 
 function ThreadRoute({ navigation, route }: ScreenProps<"thread">) {
+  const { reading } = useMobileThreads();
+  const { row } = route.params;
+  useFocusEffect(
+    useCallback(() => {
+      reading(row);
+      return () => reading(undefined);
+    }, [reading, row]),
+  );
   return (
     <ThreadScreen
       focusTurnId={route.params.focusTurnId}

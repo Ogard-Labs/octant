@@ -38,6 +38,16 @@ describe("a thread row's state", () => {
     });
   });
 
+  it("says a turn finished until it is opened, unless the thread still waits or runs", () => {
+    expect(threadRowState(row({ unread: true, reviewState: "pending" }), now)).toMatchObject({
+      kind: "finished",
+      word: "Finished",
+    });
+    expect(threadRowState(row({ unread: true, live: "working" }), now).kind).toBe("working");
+    expect(threadRowState(row({ unread: true, live: "needs-input" }), now).kind).toBe("waiting");
+    expect(threadRowState(row({ unread: true, status: "failed" }), now).word).toBe("Failed");
+  });
+
   it("shows how long a turn has run, and is spoken as working", () => {
     expect(threadRowState(row({ live: "working" }), now)).toEqual({
       kind: "working",

@@ -23,7 +23,7 @@ distinctive implementation structures.
    free-floating text.
 3. **Home** — the large title with search and compose in the toolbar, one row
    of three count tiles (Needs you blue with a tray, Working orange with a play
-   circle, In review purple with an eye: the desktop's tiles and marks), the
+   circle, To review purple with an eye: the desktop's tiles and marks), the
    Work and Code threads that need the person first under Recent, then
    Computers. A tile is a solid hue face with white ink in light and a tint
    with a coloured count in dark, as on the desktop.

@@ -1,4 +1,5 @@
 import type { MobileInboxRow } from "@octant/client-runtime";
+import { mobileThreadShelf } from "./threadArrangement";
 
 export type InboxWorkSectionId = "attention" | "working" | "review" | "recent";
 
@@ -47,7 +48,7 @@ export interface InboxStatusCounts {
   readonly all: number;
   readonly working: number;
   readonly needsAttention: number;
-  readonly inReview: number;
+  readonly toReview: number;
 }
 
 /** A Chat counts only while it waits on the person, as Home has always counted it. */
@@ -60,16 +61,35 @@ function countedSection(row: MobileInboxRow): InboxWorkSectionId | undefined {
 export function inboxCountedRows(
   rows: ReadonlyArray<MobileInboxRow>,
   section: "attention" | "working" | "review",
+  now: Date = new Date(),
 ): ReadonlyArray<MobileInboxRow> {
+  if (section === "review") return rowsToReview(rows, now);
   return rows.filter((row) => countedSection(row) === section);
 }
 
-export function inboxStatusCounts(rows: ReadonlyArray<MobileInboxRow>): InboxStatusCounts {
+/**
+ * The desktop's To review: finished turns not opened since, on no shelf. A Work
+ * thread reports no position yet, so it never counts.
+ */
+export function rowsToReview(
+  rows: ReadonlyArray<MobileInboxRow>,
+  now: Date,
+): ReadonlyArray<MobileInboxRow> {
+  return rows.filter(
+    (row) =>
+      row.unread === true && row.live !== "working" && mobileThreadShelf(row, now) === "active",
+  );
+}
+
+export function inboxStatusCounts(
+  rows: ReadonlyArray<MobileInboxRow>,
+  now: Date = new Date(),
+): InboxStatusCounts {
   return {
     all: rows.filter((row) => countedSection(row) !== undefined).length,
     working: inboxCountedRows(rows, "working").length,
     needsAttention: inboxCountedRows(rows, "attention").length,
-    inReview: inboxCountedRows(rows, "review").length,
+    toReview: inboxCountedRows(rows, "review", now).length,
   };
 }
 

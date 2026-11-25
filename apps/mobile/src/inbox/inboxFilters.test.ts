@@ -25,6 +25,9 @@ const rows = [
   row("working", { live: "working" }),
   row("failed", { status: "failed" }),
   row("in review", { reviewState: "pending" }),
+  row("finished", { unread: true }),
+  row("finished and put away", { unread: true, completedAt: "2026-11-25T08:30:00.000Z" }),
+  row("running again", { unread: true, live: "working" }),
 ];
 const ids = (filter: Parameters<typeof rowsForInboxFilter>[1]) =>
   rowsForInboxFilter(rows, filter).map((item) => item.threadId);
@@ -32,6 +35,10 @@ const ids = (filter: Parameters<typeof rowsForInboxFilter>[1]) =>
 describe("Inbox", () => {
   it("lists what waits on the person, and nothing that is only working or in review", () => {
     expect(ids("all")).toEqual(["approval", "decision", "urgent", "failed"]);
+  });
+
+  it("lists a finished turn under Finished alone, until it runs again or is put away", () => {
+    expect(ids("finished")).toEqual(["finished"]);
   });
 
   it("puts a decision under Decide, an urgent one under Urgent too, and every other wait under Stuck", () => {
