@@ -59,6 +59,11 @@ export function createWorkTerminalTools(input: {
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
   readonly uuid: () => string;
+  /** Where the thread's shell was started, kept between turns; nothing while none runs. */
+  readonly startedIn: {
+    readonly get: () => string | undefined;
+    readonly set: (folder: string | undefined) => void;
+  };
 }): AppManagedToolSet {
   const stale = () =>
     !input.current()
@@ -76,7 +81,11 @@ export function createWorkTerminalTools(input: {
       const executionPolicy = input.posture();
       const prepared = await input.protections(folder, executionPolicy);
       if ("refused" in prepared) return prepared;
+      input.startedIn.set(folder);
       return {
+        // Checked again as the shell spawns: an archive or a move to Plan
+        // while the sandbox was prepared starts nothing.
+        admit: () => stale() === undefined,
         shell: input.shell(),
         cwd: folder,
         stateScope: `work:${input.threadId}`,
@@ -89,7 +98,7 @@ export function createWorkTerminalTools(input: {
     },
   });
   const { ask } = input;
-  return createAgentTerminalTools({
+  const tools = createAgentTerminalTools({
     terminal: terminal.port,
     uuid: input.uuid,
     authorityFailure: stale,
@@ -106,4 +115,26 @@ export function createWorkTerminalTools(input: {
         uuid: input.uuid,
       }),
   });
+  return {
+    ...tools,
+    execute: async (call) => {
+      // A shell started in another folder (the working directory or the
+      // Project moved) is ended rather than reused: the turn's commands now
+      // run elsewhere, and so must this one.
+      const started = input.startedIn.get();
+      if (started !== undefined && started !== (await input.folder())) {
+        await terminal.close();
+        input.startedIn.set(undefined);
+        return {
+          result: {
+            error: "terminal-folder-changed",
+            message:
+              "This thread's folder changed, so its terminal was stopped. Start it again to run in the new folder.",
+          },
+          isError: true,
+        };
+      }
+      return tools.execute(call);
+    },
+  };
 }

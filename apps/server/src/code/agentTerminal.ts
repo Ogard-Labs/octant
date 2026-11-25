@@ -22,6 +22,8 @@ export function createAgentTerminal(options: {
 }): { readonly port: AgentTerminalPort; readonly close: () => Promise<void> } {
   const { terminals, terminalId } = options;
   let closed = false;
+  // Each close begins a new generation; a start that began before it starts nothing.
+  let generation = 0;
   let launching: Promise<unknown> | undefined;
   const answer = (error: string, message?: string) => ({
     result: { error, ...(message === undefined ? {} : { message }) },
@@ -40,9 +42,10 @@ export function createAgentTerminal(options: {
     port: {
       read,
       start: async () => {
+        const began = generation;
         const launch = await options.launch();
         if ("refused" in launch) return answer("terminal-unavailable", launch.refused);
-        if (closed) return answer("tool-closed");
+        if (closed || began !== generation) return answer("tool-closed");
         try {
           const starting = terminals.launch({
             ...launch,
@@ -84,6 +87,7 @@ export function createAgentTerminal(options: {
     },
     close: async () => {
       closed = true;
+      generation += 1;
       // A shell still starting as the caller ends is stopped once it has.
       try {
         await launching?.catch(() => undefined);
