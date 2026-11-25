@@ -973,8 +973,13 @@ function composeIssueSearchQuery(input: {
   if (input.scope === "issue-titles") prefix.push("type:issue");
   if (input.state === "open") prefix.push("is:open");
   if (input.state === "closed") prefix.push("is:closed");
+  // Choosing a reason must not cut a title that fits without one, and GitHub
+  // leaves qualifiers out of its own query limit.
+  let limit = MAX_SEARCH_QUERY_CHARS;
   if (input.closedReason !== undefined) {
-    prefix.push(input.closedReason === "completed" ? "reason:completed" : 'reason:"not planned"');
+    const reason = input.closedReason === "completed" ? "reason:completed" : 'reason:"not planned"';
+    prefix.push(reason);
+    limit += reason.length + 1;
   }
   // Search has its own vocabulary for the REST `assignee=none` filter, so a
   // narrowed read stays narrowed when the caller also passes a search term.
@@ -992,7 +997,7 @@ function composeIssueSearchQuery(input: {
   let addedUserTerm = false;
   for (const term of userTerms) {
     const candidate = `${parts.join(" ")} ${term}`;
-    if (candidate.length > MAX_SEARCH_QUERY_CHARS) break;
+    if (candidate.length > limit) break;
     parts.push(term);
     addedUserTerm = true;
   }

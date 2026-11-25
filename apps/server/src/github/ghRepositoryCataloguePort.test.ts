@@ -296,6 +296,34 @@ describe("why an issue was closed", () => {
     ]);
   });
 
+  it("keeps a long pasted title and its scope when a closed reason is chosen", async () => {
+    const { port, run } = portReturning([[]]);
+    const owner = "o".repeat(30);
+    const name = "n".repeat(30);
+    const title = "t".repeat(140);
+    const ask = async (closedReason?: "not-planned"): Promise<string> => {
+      await port.listIssues(
+        {
+          owner,
+          name,
+          pageSize: 20,
+          state: "closed",
+          search: title,
+          ...(closedReason === undefined ? {} : { closedReason }),
+        },
+        new AbortController().signal,
+      );
+      const path = String((run.mock.lastCall as unknown as [string[]])[0][1]);
+      return decodeURIComponent(path.slice("search/issues?q=".length).split("&")[0] ?? "");
+    };
+    const plain = await ask();
+    expect(plain.length).toBeGreaterThan(256 - ' reason:"not planned"'.length);
+    expect(plain).toContain(`"${title}" in:title`);
+    expect(await ask("not-planned")).toBe(
+      plain.replace("is:closed", 'is:closed reason:"not planned"'),
+    );
+  });
+
   it("answers an empty list when every search term was dropped, reason or not", async () => {
     const { port, run } = portReturning([[]]);
     expect(
