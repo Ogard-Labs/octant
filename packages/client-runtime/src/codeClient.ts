@@ -90,6 +90,7 @@ import {
   CodeRepositoryTestStatus,
   type CodeThreadId,
   type CodeThreadView,
+  CodeThreadViewCleanup,
   MAX_CODE_OPERATION_EVIDENCE_BYTES,
   MAX_CODE_ATTACHMENT_BYTES,
   MAX_CODE_OPERATION_TEXT_BYTES,
@@ -443,6 +444,8 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
   const fetch = bindFetchPort(options.fetch);
   validateLoopbackBaseUrl(options.baseUrl);
   const headers = { "x-octant-window-capability": options.windowCapability };
+  /** False once this host has refused the cleaned-up worktree query, so later reads send one request. */
+  let hostReadsWorktreeCleanup = true;
   /** A merge route: sent once, and again with an owner unlock when the host asks for one. */
   const mergeRequest = <T extends { readonly status: string }>(
     path: string,
@@ -498,13 +501,26 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         decodeHostAnswer(CodeTranscriptSearch),
       );
     },
-    thread(threadId, signal) {
-      return request(
-        fetch,
-        new URL(`/api/code/threads/${encodeURIComponent(threadId)}`, options.baseUrl).toString(),
-        { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
-        decodeThreadView,
-      );
+    async thread(threadId, signal) {
+      const path = `/api/code/threads/${encodeURIComponent(threadId)}`;
+      const init = { method: "GET", headers, ...(signal === undefined ? {} : { signal }) };
+      if (hostReadsWorktreeCleanup) {
+        // Says this client reads the cleaned-up worktree field, which an older
+        // client's strict view decoder would refuse.
+        const response = await requestRaw(
+          fetch,
+          new URL(`${path}?reads=worktree-cleanup`, options.baseUrl).toString(),
+          init,
+        );
+        // A host built before the query answers 400 to any query. A 400 that
+        // the plain read shares is a real one and is shown as it is.
+        if (response.status !== 400) return readJsonAnswer(response, decodeThreadView);
+        await response.body?.cancel().catch(() => undefined);
+        const plain = await requestRaw(fetch, new URL(path, options.baseUrl).toString(), init);
+        if (plain.ok) hostReadsWorktreeCleanup = false;
+        return readJsonAnswer(plain, decodeThreadView);
+      }
+      return request(fetch, new URL(path, options.baseUrl).toString(), init, decodeThreadView);
     },
     async execute(command, signal, onWorktreeProgress) {
       let validated: CodeCommand;
@@ -1903,7 +1919,13 @@ function decodeBootstrap(value: unknown): CodeBootstrap {
 }
 
 function decodeThreadView(value: unknown): CodeThreadView {
-  if (!isRecord(value) || !exactKeys(value, ["thread", "checkout", "lastSequence"])) {
+  if (
+    !isRecord(value) ||
+    !(
+      exactKeys(value, ["thread", "checkout", "lastSequence"]) ||
+      exactKeys(value, ["thread", "checkout", "lastSequence", "worktreeCleanup"])
+    )
+  ) {
     throw new Error("invalid");
   }
   if (
@@ -1917,7 +1939,21 @@ function decodeThreadView(value: unknown): CodeThreadView {
     thread: decodeHostAnswer(CodeThread)(value.thread),
     checkout: decodeHostAnswer(CodeCheckoutIdentity)(value.checkout),
     lastSequence: value.lastSequence as CodeThreadView["lastSequence"],
+    ...cleanupOf(value.worktreeCleanup),
   };
+}
+
+/** A standing this build does not know is left out: the thread still reads, as it did before. */
+function cleanupOf(value: unknown): {
+  readonly worktreeCleanup?: CodeThreadView["worktreeCleanup"];
+} {
+  try {
+    return value === undefined
+      ? {}
+      : { worktreeCleanup: decodeHostAnswer(CodeThreadViewCleanup)(value) };
+  } catch {
+    return {};
+  }
 }
 
 function invalidCommand(): CodeClientFailure {

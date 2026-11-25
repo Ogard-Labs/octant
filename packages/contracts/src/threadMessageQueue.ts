@@ -190,6 +190,8 @@ export const ThreadMessageQueueResult = Schema.Union(
     status: Schema.Literal("refused"),
     requestId: ThreadMessageQueueRequestId,
     reason: ThreadMessageQueueRefusalReason,
+    /** What the host tells the person when the reason alone would not: the thread's worktree was cleaned up. */
+    message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
   }).annotations(strict),
 );
 export type ThreadMessageQueueResult = typeof ThreadMessageQueueResult.Type;

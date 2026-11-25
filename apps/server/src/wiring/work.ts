@@ -1,5 +1,6 @@
 import { createCredentialTool } from "../credentials/credentialTool";
 import { workThreadSecrets, type ThreadSecretTurnFacts } from "./threadSecrets";
+import { cleanedUpWorktreeOf } from "../code/cleanedUpWorktrees";
 import type { HubActScopeSlot } from "../hub/hubActScope";
 import { eventActorForPrincipal } from "../principalEventActor";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
@@ -2007,6 +2008,7 @@ export function wireWork(deps: WorkDependencies) {
     });
     const threadMessageQueuePort = createThreadMessageQueuePort({
       persistence,
+      cleanedUpWorktree: cleanedUpWorktreeOf((id) => managedWorktreeReceipts.load(id)),
       journal: persistence.journal,
       chat: chatService,
       work: {

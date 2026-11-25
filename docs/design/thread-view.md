@@ -41,6 +41,35 @@ rather than on every turn; a launch outside Strict shows nothing. It is the
 same meta-ink note as a provider handoff's (`role="note"`), not a page banner
 or a card. `strictKeptSentence` in `@octant/domain` is the one wording.
 
+## Cleaned-up worktree
+
+When the host has removed a Code thread's managed worktree folder to save space
+(or an interrupted cleanup or restore left it that way), the thread view says so
+in one neutral card above the composer, in the settled thread's place and wording
+family: "This thread's worktree was cleaned up to save space. The branch and the
+thread are kept, and the thread takes no new turn until the worktree is
+restored." (`cleanedUpWorktreeSentence` in `@octant/domain`, with its two
+variants for a cleanup or a restore still under way). The card carries
+**Restore worktree**, which asks the host's existing restore route and then
+reads the thread again; the card goes with the host's answer, even when that
+read fails and waits for the next refresh, and a worktree another window already
+restored counts as back. That answer belongs to the thread and to the cleanup it
+answered: moving to another thread while a restore runs never hides that
+thread's card, and a later cleanup of the same thread shows its card again. A refusal, such as a branch that moved, shows as a
+second quiet line (naming what to do where waiting would not help) and the card
+stays; a warning that the host handed the folder back with some files missing
+stays on its line after the card is gone, with **Dismiss**. An open thread reads
+its cleanup standing again on the navigation refresh, so the card appears when
+a cleanup happens under it and goes when another window restores it. Sending is held while the card shows: the
+send button is disabled, Enter sends nothing, and the draft stays. The files and
+terminal surfaces of that thread say the same in place of "This checkout can't
+be read" and do not offer to move the thread to the Project's checkout. The host
+answers a send, a queued message or a wake-up that fires for such a thread with
+the same sentence. A window on this computer or a device the host's own person
+paired gets the button, a paired browser's over its session; a hub-introduced or restricted device reads the sentence
+without it. `cleanedUpWorktreeNotice` in `apps/web/src/composer/` is the one
+recipe, and `CodeThreadView.worktreeCleanup` is what the host reports.
+
 ## Context handoffs
 
 When a thread changes provider, moves to another account, switches models, or

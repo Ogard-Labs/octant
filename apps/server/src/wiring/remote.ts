@@ -167,7 +167,10 @@ import { createWorkThreadMoveHost } from "../hub/workThreadMoveHost";
 import { workThreadFolderOf } from "../hub/workThreadMoveFolder";
 import { threadMoveHostsByMode } from "../hub/threadMoveHostsByMode";
 import type { MovedThreadHistory } from "../hub/movedThreadHistory";
-import type { ManagedWorktreeReceiptStore } from "../code/managedWorktreeReceiptStore";
+import {
+  readyWorktreePath,
+  type ManagedWorktreeReceiptStore,
+} from "../code/managedWorktreeReceiptStore";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { createThreadMoveJournal } from "../hub/threadMoveJournal";
@@ -260,6 +263,8 @@ import type { AutomationWiring } from "./automation";
 import type { RoutesWiring } from "./routes";
 import { HUB_ACT_WITHDRAWN_REASON } from "../remoteCredentialLifecycleService";
 
+/** How long a thread purge waits for a worktree cleanup or restore before it fails and is tried again. */
+const PURGE_RECEIPT_WAIT_MS = 30_000;
 /** How often a hub member looks for the hub; the failover time itself is the hub's setting in the roster. */
 const FAILOVER_LOOK_MS = 15_000;
 /** How often the hub looks for an occurrence to wake a spoke for, and a spoke for a changed routine time to report. */
@@ -321,6 +326,7 @@ export type RemoteDependencies = {
     | "generatedImageStore"
     | "videoJobService"
     | "imageJobService"
+    | "managedWorktreeReclaim"
     | "providerDataDirectory"
     | "providerService"
   > &
@@ -1661,8 +1667,9 @@ export function wireRemote(deps: RemoteDependencies) {
     if (thread === undefined) return undefined;
     const checkout = persistence.readCodeCheckout(thread.checkoutId);
     if (checkout?.kind === "managed-worktree") {
-      return (await deps.managedWorktreeReceipts.load(String(checkout.ownershipReceiptId)))
-        ?.canonicalWorktreePath;
+      return readyWorktreePath(
+        await deps.managedWorktreeReceipts.load(String(checkout.ownershipReceiptId)),
+      );
     }
     if (checkout?.kind !== "existing-worktree") return undefined;
     const project = persistence.readProject(thread.projectId);
@@ -2907,25 +2914,43 @@ export function wireRemote(deps: RemoteDependencies) {
       void debugService.endProject(decodeProjectId(projectId)).catch(() => undefined);
     },
     purgeThreadArtifacts: async ({ mode, threadId }) => {
-      // A running debug session ends before the purge takes its records and
-      // its checkout, so nothing it writes as it ends outlives the purge.
-      if (mode === "code") await debugService.endThread(decodeCodeThreadId(String(threadId)));
-      // Remote children the thread started are stopped while this host still
-      // knows where they run, then what it kept of them (a result included)
-      // goes with the thread.
-      await delegatingSpoke.cancelParent(String(threadId)).catch(() => undefined);
-      delegatingSpoke.forgetParent(String(threadId));
-      const released = await threadMessageQueue.purgeThread(
-        decodeThreadMessageQueueScope({ mode, threadId }),
-      );
-      if (released.status !== "released")
-        throw new Error("Queued attachments could not be purged.");
+      // Nothing is deleted or stopped until the thread's worktree receipts are
+      // held (see `whileReceiptIdle`), so a wait that gives up leaves the thread
+      // whole: its queue, its debug session and its remote children included.
       await purgeThreadArtifacts({
+        beforeRemoval: async () => {
+          // A running debug session ends before the purge takes its records and
+          // its checkout, so nothing it writes as it ends outlives the purge.
+          if (mode === "code") await debugService.endThread(decodeCodeThreadId(String(threadId)));
+          // Remote children the thread started are stopped while this host still
+          // knows where they run, then what it kept of them (a result included)
+          // goes with the thread.
+          await delegatingSpoke.cancelParent(String(threadId)).catch(() => undefined);
+          delegatingSpoke.forgetParent(String(threadId));
+          const released = await threadMessageQueue.purgeThread(
+            decodeThreadMessageQueueScope({ mode, threadId }),
+          );
+          if (released.status !== "released")
+            throw new Error("Queued attachments could not be purged.");
+        },
         connection: persistence.connection,
         dataDirectory: persistence.dataDirectory,
         mode,
         threadId: String(threadId),
         managedWorktreeRootPath: managedWorktreeRoot,
+        // A cleanup or restore holds a receipt for as long as one Git call may
+        // run; the purge waits a little, then fails the way its other steps do
+        // and is retried, and its removal never runs once it has given up.
+        whileReceiptIdle: async (receiptId, run) => {
+          const ran = await deps.managedWorktreeReclaim.exclusiveWithin(
+            receiptId,
+            PURGE_RECEIPT_WAIT_MS,
+            run,
+          );
+          if (ran.status === "busy") {
+            throw new Error("A worktree cleanup or restore is still running; try the purge again.");
+          }
+        },
         purgeChatAttachments: (id) => chatAttachmentStore.purgeThread(decodeChatThreadId(id)),
         purgeWorkAttachments: (id) => workAttachments.purgeThread(decodeWorkThreadId(id)),
         purgeCodeAttachments: (id) => codeAttachments.purgeThread(decodeCodeThreadId(id)),
@@ -3156,6 +3181,7 @@ export function wireRemote(deps: RemoteDependencies) {
     accessActivityRoutes,
   ]);
   return {
+    childWorkGoing,
     defaultTodoListHost: () => {
       const status = spokeLinkService.status();
       return status.membership === "member"

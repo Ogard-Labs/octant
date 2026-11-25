@@ -85,6 +85,7 @@ export * from "./protectedFiles";
 export * from "./strictNotice";
 export * from "./turnLoopNotice";
 export * from "./archivedWorktrees";
+export * from "./cleanedUpWorktrees";
 export * from "./diskCleanup";
 export * from "./computerUse";
 export * from "./diagnostics";

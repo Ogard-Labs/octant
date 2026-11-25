@@ -476,14 +476,27 @@ line; a device the host's own person paired uses the section as a local window
 does, from Permissions in the paired browser's Host settings (maintainer
 decision, 2026-11-12; the server refuses hub-introduced devices)
 ([rules](../architecture.md#modes-chat-work-and-code)).
-The same section starts with the choices for new worktrees: **Branch prefix** (a
-text field, `octant/` unless changed, checked as a branch prefix when it loses
-focus; a segment Windows reserves is refused) and **Branch name** (a select:
+The same section starts with the choices for new and kept worktrees (the
+naming ones on every host, the cleanup ones only for a host that answers with a
+`cleanup` object, since an earlier host would reject the update): **Branch
+prefix** (a text field, `octant/` unless changed, checked as a branch prefix when
+it loses focus; a segment Windows reserves is refused), **Branch name** (a select:
 prefix and short id, or prefix and words from the prompt, which leave out secrets
-and paths; the host's start screen uses the words only when it could read every
-taken name). Each saves as it changes. A person-paired device may change these
-choices; a hub-introduced device may not
-([rules](../architecture.md#modes-chat-work-and-code)).
+and paths), **Clean up when a thread is archived** (a switch, on),
+**Clean up merged worktrees** and **Clean up after inactivity** (switches, off),
+and, with inactivity on, **Days of inactivity** (1 to 365, 30 when first turned
+on). Each saves as it changes. **Cleaned-up worktrees** follows the archived
+list and appears only when the host has cleaned one up: a row per thread with
+the Project, the branch in mono and what state it is in (cleaned up, cleanup
+interrupted, restore interrupted), and **Restore worktree**, which restores at
+once, since it only recreates the folder and the host checks the branch first. A
+refusal, such as a branch that moved (it names the recorded branch and commit to put it back at) or a pruned registration whose folder is still there (it names the folder), a cleanup or another restore still
+running (it says which), or a folder a cut-short restore left with files the
+branch does not hold (it says to move it away), is said in the feedback line and
+the row stays. Search lists the three Worktrees lists (kept after archiving,
+cleaned up, on this computer) only in a window that draws them. A person-paired device may change these choices and restore; a
+hub-introduced device may not. The same restore is offered in the thread itself
+(see [Thread view](thread-view.md#cleaned-up-worktree)).
 **Worktrees on this computer** follows it: a first row says when the host last
 scanned ("Not scanned since Octant started" until then) and how many it found,
 with **Scan** and, when any qualify, **Remove N merged or gone**, which asks

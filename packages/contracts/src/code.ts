@@ -659,15 +659,37 @@ export const CodeBranchPrefix = Schema.String.pipe(
   ),
 );
 
+/**
+ * When the host removes a managed worktree folder. Every field is optional;
+ * absent is what the host did before the setting existed.
+ */
+export const CodeWorktreeCleanupSettings = Schema.Struct({
+  /** Remove a clean, delivered worktree when its thread is archived. Absent is on. */
+  onArchive: Schema.optional(Schema.Boolean),
+  /**
+   * Also remove, from a thread still open, a clean worktree whose commit is
+   * contained in another local branch. The checkout can be restored. Absent
+   * is off.
+   */
+  whenMerged: Schema.optional(Schema.Boolean),
+  /**
+   * Remove a clean worktree nobody has worked in for this many days, from an
+   * open or archived thread. The checkout can be restored. Absent is off.
+   */
+  inactivityDays: Schema.optional(Schema.Int.pipe(Schema.between(1, 365))),
+}).annotations(strict);
+export type CodeWorktreeCleanupSettings = typeof CodeWorktreeCleanupSettings.Type;
+
 export const CodeWorktreeNaming = Schema.Literal("short-id", "prompt");
 export type CodeWorktreeNaming = typeof CodeWorktreeNaming.Type;
 
-/** Settings › Code › Worktrees: how new worktrees are named. */
+/** Settings › Code › Worktrees: how new worktrees are named and when they are cleaned up. */
 export const CodeWorktreeSettings = Schema.Struct({
   /** Absent is `octant/`. */
   branchPrefix: Schema.optional(CodeBranchPrefix),
   /** Absent is `short-id`: the prefix and a short id, with no words from the prompt. */
   branchNaming: Schema.optional(CodeWorktreeNaming),
+  cleanup: Schema.optional(CodeWorktreeCleanupSettings),
 }).annotations(strict);
 export type CodeWorktreeSettings = typeof CodeWorktreeSettings.Type;
 
@@ -1742,10 +1764,23 @@ export const CodeCommandResult = Schema.Union(
 );
 export type CodeCommandResult = typeof CodeCommandResult.Type;
 
+/** Where the cleanup of a thread's managed worktree stands; see `CodeThreadView`. */
+export const CodeThreadViewCleanup = Schema.Literal("cleaned-up", "cleaning-up", "restoring");
+
 export const CodeThreadView = Schema.Struct({
   thread: CodeThread,
   checkout: CodeCheckoutIdentity,
   lastSequence: GlobalSequence,
+  /**
+   * Present while the host has removed the thread's managed worktree folder
+   * (or is part way through removing or restoring it). The thread keeps its
+   * branch but takes no turn, and the thread view offers a restore. An earlier
+   * client's strict view decoder refuses a key it does not know, so the host
+   * sends this only to a client that asks for it (`?reads=worktree-cleanup`
+   * on the thread read); an earlier client sees the unavailable checkout it
+   * always saw.
+   */
+  worktreeCleanup: Schema.optional(CodeThreadViewCleanup),
 }).annotations(strict);
 export type CodeThreadView = typeof CodeThreadView.Type;
 

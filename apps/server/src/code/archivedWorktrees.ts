@@ -21,13 +21,36 @@ export interface ArchivedWorktreesDependencies {
   readonly readCodeThread: (threadId: CodeThreadId) => CodeThread | undefined;
   readonly readCodeCheckout: (checkoutId: CodeCheckoutId) => CodeCheckoutIdentity | undefined;
   readonly loadReceipt: (receiptId: string) => Promise<ManagedWorktreeReceipt | undefined>;
-  readonly cleanup: ManagedWorktreeService["cleanup"];
+  /**
+   * The cleanup, run when the receipt is free. `stillIdle` is asked once more
+   * after the wait for the receipt, inside it: a turn, a shell or a debug
+   * session may have started while this waited behind a restore or another
+   * cleanup, and the checks made before the wait do not cover it.
+   */
+  readonly cleanup: (
+    input: Parameters<ManagedWorktreeService["cleanup"]>[0],
+    signal: AbortSignal,
+    stillIdle?: () => boolean,
+  ) => ReturnType<ManagedWorktreeService["cleanup"]>;
   /**
    * Whether a turn on the thread is starting, running, or waiting on the
    * person. Archiving does not stop one, and its commands still use the
    * worktree, so neither removal touches the folder while it does.
    */
   readonly turnInProgress: (threadId: CodeThreadId) => boolean;
+  /**
+   * Whether anything else the host tracks (a child run, a debug session, a
+   * waiting message or wake-up) may still be working in the thread's folder;
+   * the same check the reclaim path makes. Only removal on archive asks, and
+   * a shell somewhere in the Project does not count, as before. Absent counts
+   * nothing.
+   */
+  readonly workGoing?: (threadId: CodeThreadId) => boolean;
+  /**
+   * Whether archiving a thread removes its clean, delivered worktree. Absent is
+   * on: a person turns it off in Settings › Code › Worktrees.
+   */
+  readonly cleanupOnArchive?: () => boolean;
   /** Override for tests; production walks the folder. */
   readonly measure?: (path: string) => Promise<FolderSize | undefined>;
 }
@@ -90,6 +113,7 @@ export function createArchivedWorktrees(dependencies: ArchivedWorktreesDependenc
       const result = await dependencies.cleanup(
         { receiptId: receipt.receiptId, confirmedByLocalUser: true },
         new AbortController().signal,
+        () => !dependencies.turnInProgress(threadId),
       );
       if (result.status === "removed") return { kind: "archived-worktree-removed", threadId };
       if (result.status !== "refused") return refused("busy");
@@ -107,14 +131,18 @@ export function createArchivedWorktrees(dependencies: ArchivedWorktreesDependenc
     async reclaimOnArchive(threadId: CodeThreadId): Promise<void> {
       const thread = dependencies.readCodeThread(threadId);
       if (thread?.lifecycle !== "archived") return;
+      if (dependencies.cleanupOnArchive?.() === false) return;
       // A turn still running keeps its worktree; it stays listed in Settings.
-      if (dependencies.turnInProgress(threadId)) return;
+      if (dependencies.turnInProgress(threadId) || dependencies.workGoing?.(threadId) === true)
+        return;
       const receipt = await ownedReceipt(thread);
       if (receipt?.state !== "ready") return;
       await dependencies
         .cleanup(
           { receiptId: receipt.receiptId, confirmedByLocalUser: false, onArchive: true },
           new AbortController().signal,
+          () =>
+            !dependencies.turnInProgress(threadId) && dependencies.workGoing?.(threadId) !== true,
         )
         .catch(() => undefined);
     },

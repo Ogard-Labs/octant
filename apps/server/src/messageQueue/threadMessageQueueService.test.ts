@@ -214,6 +214,17 @@ describe("durable ordinary thread queue", () => {
     expect(f.p.admit.mock.calls[0]?.[0].messageId).toBe(queued.items[0]?.messageId);
   });
 
+  it("passes the host's sentence on when it refuses a message the thread cannot take", async () => {
+    const p = port();
+    p.setInspection({ status: "held", reason: "thread-unavailable", message: "Cleaned up." });
+    const f = fixture(p);
+    await expect(f.service.execute(windowId, enqueue())).resolves.toMatchObject({
+      status: "refused",
+      reason: "thread-unavailable",
+      message: "Cleaned up.",
+    });
+  });
+
   it("lifts a restart hold for the continuation without a review of the messages behind it", async () => {
     const before = fixture();
     await before.service.execute(windowId, enqueue());

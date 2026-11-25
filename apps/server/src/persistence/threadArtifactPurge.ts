@@ -22,6 +22,16 @@ export interface ThreadArtifactPurgeInput {
    * a worktree this sweep may delete.
    */
   readonly managedWorktreeRootPath: (repositoryRoot: string, repositoryId: string) => string;
+  /**
+   * Runs the purge while it holds each of the thread's worktree receipts, with
+   * no cleanup or restore of one in flight, so a restore cannot recreate a
+   * folder and branch for a thread the purge is erasing. The turns are taken
+   * before anything is deleted: one that is not granted throws, and the thread
+   * is left whole for the purge to be tried again. Absent runs it at once.
+   */
+  readonly whileReceiptIdle?: (receiptId: string, run: () => Promise<void>) => Promise<void>;
+  /** Runs once the receipts are held, before the first deletion. */
+  readonly beforeRemoval?: () => Promise<void>;
   readonly purgeChatAttachments: (threadId: string) => Promise<void>;
   readonly purgeWorkAttachments: (threadId: string) => Promise<void>;
   readonly purgeCodeAttachments: (threadId: string) => Promise<void>;
@@ -38,6 +48,27 @@ export interface ThreadArtifactPurgeInput {
 }
 
 export async function purgeThreadArtifacts(input: ThreadArtifactPurgeInput): Promise<void> {
+  const receipts = await readWorktreeReceipts(input);
+  const idle = input.whileReceiptIdle ?? ((_receiptId, run) => run());
+  // Always in the same order, so two purges of one thread cannot each hold a
+  // receipt the other waits for.
+  const ours = receipts
+    .filter((receipt) => receipt.threadId === input.threadId && receipt.deletable)
+    .sort((left, right) => (left.receiptId < right.receiptId ? -1 : 1));
+  const hold = (index: number): Promise<void> => {
+    const receipt = ours[index];
+    return receipt === undefined
+      ? purgeHeld(input, receipts)
+      : idle(receipt.receiptId, () => hold(index + 1));
+  };
+  await hold(0);
+}
+
+async function purgeHeld(
+  input: ThreadArtifactPurgeInput,
+  receipts: ReadonlyArray<StoredWorktreeReceipt>,
+): Promise<void> {
+  await input.beforeRemoval?.();
   const anchors = listThreadFileAnchors(input.connection, input.mode, input.threadId);
   await removeMirrorFiles(input.connection, anchors.canvasIds);
   await input.purgeChatAttachments(input.threadId);
@@ -58,7 +89,7 @@ export async function purgeThreadArtifacts(input: ThreadArtifactPurgeInput): Pro
       input.dataDirectory,
     );
   }
-  await removeOwnedWorktrees(input);
+  await removeOwnedWorktrees(input, receipts);
 }
 
 /**
@@ -154,36 +185,47 @@ function projectCheckoutRoot(connection: SqliteConnection, projectId: unknown): 
 
 interface StoredWorktreeReceipt {
   readonly file: string;
+  readonly receiptId: string;
   readonly threadId?: string;
   readonly path?: string;
   /** A receipt the sweep cannot trust to name a managed worktree blocks it. */
   readonly deletable: boolean;
 }
 
-async function removeOwnedWorktrees(input: ThreadArtifactPurgeInput): Promise<void> {
+async function readWorktreeReceipts(
+  input: ThreadArtifactPurgeInput,
+): Promise<ReadonlyArray<StoredWorktreeReceipt>> {
   const directory = join(input.dataDirectory, "managed-worktree-receipts");
   const receipts: Array<StoredWorktreeReceipt> = [];
   for (const name of await readNames(directory)) {
     if (!name.endsWith(".json")) continue;
     const file = join(directory, name);
     const parsed = parseRecord(await readFile(file, "utf8").catch(() => ""));
-    receipts.push({ file, ...worktreeReceiptEvidence(parsed, input) });
+    receipts.push({
+      file,
+      receiptId: name.slice(0, -".json".length),
+      ...worktreeReceiptEvidence(parsed, input),
+    });
   }
-  const owned: string[] = [];
+  return receipts;
+}
+
+/** Runs with the thread's receipts held; see `whileReceiptIdle`. */
+async function removeOwnedWorktrees(
+  input: ThreadArtifactPurgeInput,
+  receipts: ReadonlyArray<StoredWorktreeReceipt>,
+): Promise<void> {
   const kept = new Set<string>();
   for (const receipt of receipts) {
-    if (receipt.path === undefined) continue;
-    if (receipt.threadId === input.threadId) owned.push(receipt.path);
-    else kept.add(receipt.path);
+    if (receipt.path !== undefined && receipt.threadId !== input.threadId) kept.add(receipt.path);
   }
   const blocked = receipts.some((receipt) => !receipt.deletable);
   for (const receipt of receipts) {
-    if (receipt.threadId === input.threadId && receipt.deletable)
-      await rm(receipt.file, { force: true });
-  }
-  if (blocked) return;
-  for (const path of owned) {
-    if (!kept.has(path)) await removeDirectory(path, input.dataDirectory);
+    if (receipt.threadId !== input.threadId || !receipt.deletable) continue;
+    await rm(receipt.file, { force: true });
+    if (!blocked && receipt.path !== undefined && !kept.has(receipt.path)) {
+      await removeDirectory(receipt.path, input.dataDirectory);
+    }
   }
 }
 

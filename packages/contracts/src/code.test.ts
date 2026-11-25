@@ -172,6 +172,7 @@ describe("Code aggregate contracts", () => {
     const worktrees = {
       branchPrefix: "feat/team-a/",
       branchNaming: "prompt",
+      cleanup: { onArchive: false, whenMerged: true, inactivityDays: 14 },
     } as const;
     expect(decodeCodeSettings({ ...settings, worktrees })).toMatchObject({ worktrees });
     for (const branchPrefix of [
@@ -187,6 +188,11 @@ describe("Code aggregate contracts", () => {
       expect(
         () => decodeCodeSettings({ ...settings, worktrees: { branchPrefix } }),
         branchPrefix,
+      ).toThrow();
+    }
+    for (const inactivityDays of [0, 366, 1.5]) {
+      expect(() =>
+        decodeCodeSettings({ ...settings, worktrees: { cleanup: { inactivityDays } } }),
       ).toThrow();
     }
   });
@@ -223,6 +229,49 @@ describe("Code aggregate contracts", () => {
     // The strict decoder is the host's own and for what a person sends it.
     expect(() => Schema.decodeUnknownSync(olderSettings)(settings)).toThrow();
     expect(decodeCodeSettings(settings)).toMatchObject({ worktrees: settings.worktrees });
+  });
+
+  it("lets a client that decodes a host's answer leniently read settings and a field it has not heard of", () => {
+    const settings = {
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      version: 1,
+      updatedAt: now,
+      worktrees: { cleanup: { whenMerged: true, laterField: 1 } },
+      laterTopLevelField: true,
+    };
+    // The host's own decode stays strict, so a stray field never reaches the journal.
+    expect(() => decodeCodeSettings(settings)).toThrow();
+    // A client's answer decode drops what its build does not know: an earlier
+    // build meets `worktrees` the way this one meets a later field.
+    expect(decodeHostAnswer(codeContracts.CodeSettings)(settings)).toMatchObject({
+      worktrees: { cleanup: { whenMerged: true } },
+    });
+  });
+
+  it("is accepted by a lenient reader built before the thread view named a cleaned-up worktree", () => {
+    const olderView = codeContracts.CodeThreadView.omit("worktreeCleanup").annotations({
+      parseOptions: { onExcessProperty: "error" },
+    });
+    const view = {
+      thread,
+      checkout: {
+        id: ids.checkout,
+        repositoryId,
+        kind: "plain-folder",
+        availability: "available",
+        head: { kind: "none" },
+        observedAt: now,
+      },
+      lastSequence: 3,
+      worktreeCleanup: "cleaned-up",
+    };
+    // The phone and the command line read host answers this way.
+    expect(decodeHostAnswer(olderView)(view)).not.toHaveProperty("worktreeCleanup");
+    expect(() => Schema.decodeUnknownSync(olderView)(view)).toThrow();
+    expect(Schema.decodeUnknownSync(codeContracts.CodeThreadView)(view)).toMatchObject({
+      worktreeCleanup: "cleaned-up",
+    });
   });
 
   it("decodes shell-free Code settings and rejects raw checkout/file paths", () => {

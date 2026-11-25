@@ -420,6 +420,13 @@ export interface CodeControllerOptions {
    * background would show no unread mark until something else reloaded.
    */
   readonly navigationRefreshMs?: number;
+  /**
+   * How often the open thread's cleanup standing is read again, on the
+   * navigation refresh. Cleanup and restore write no journal event, so no
+   * stream tells an open thread that its worktree folder was removed or
+   * brought back.
+   */
+  readonly worktreeStandingRefreshMs?: number;
   readonly changeRevision?: number;
   readonly reconnectDelayMs?: number;
   readonly serverUrl?: string;
@@ -430,6 +437,7 @@ export function useCodeController(options: CodeControllerOptions) {
   const ownsNavigation = options.navigation === undefined;
   const reconnectDelayMs = options.reconnectDelayMs ?? 250;
   const navigationRefreshMs = options.navigationRefreshMs ?? 2_000;
+  const worktreeStandingRefreshMs = options.worktreeStandingRefreshMs ?? 30_000;
   const readCursorStore = useMemo(
     () => options.readCursorStore ?? createCodeReadCursorStore(),
     [options.readCursorStore],
@@ -459,6 +467,9 @@ export function useCodeController(options: CodeControllerOptions) {
   const bootstrapRef = useRef(bootstrap);
   bootstrapRef.current = bootstrap;
   const [activeView, setActiveView] = useState<CodeThreadView>();
+  const activeViewRef = useRef(activeView);
+  activeViewRef.current = activeView;
+  const lastStandingRead = useRef(0);
   const [errorCategory, setErrorCategory] = useState<CodeFailure["category"]>();
   const [errorMessage, setErrorMessage] = useState<string>();
   const composerDraft = useComposerThreadDraft({
@@ -2238,6 +2249,37 @@ export function useCodeController(options: CodeControllerOptions) {
     ],
   );
 
+  /**
+   * Cleanup and restore of a managed worktree write no journal event and the
+   * navigation read carries no cleanup standing, so the open thread would keep
+   * a stale one for ever. On the navigation timer already running, a managed
+   * worktree thread's view is read again at most once per interval and only
+   * its standing is taken from it; every other thread costs nothing.
+   */
+  const refreshWorktreeStanding = useCallback(async () => {
+    const open = activeViewRef.current;
+    if (open === undefined || open.checkout.kind !== "managed-worktree") return;
+    const at = Date.now();
+    if (at - lastStandingRead.current < worktreeStandingRefreshMs) return;
+    lastStandingRead.current = at;
+    try {
+      const read = await client.thread(open.thread.id);
+      if (!mounted.current || String(activeThreadId.current) !== String(read.thread.id)) return;
+      setActiveView((current) => {
+        if (current === undefined || String(current.thread.id) !== String(read.thread.id)) {
+          return current;
+        }
+        if (current.worktreeCleanup === read.worktreeCleanup) return current;
+        const { worktreeCleanup: _previous, ...rest } = current;
+        return read.worktreeCleanup === undefined
+          ? rest
+          : { ...rest, worktreeCleanup: read.worktreeCleanup };
+      });
+    } catch {
+      // The next interval reads it again.
+    }
+  }, [client, worktreeStandingRefreshMs]);
+
   // Only the thread in view streams, so the list is re-read on a timer to keep
   // titles, lifecycle, and access current for threads nobody is watching.
   //
@@ -2259,6 +2301,7 @@ export function useCodeController(options: CodeControllerOptions) {
         const next = await client.navigation();
         if (cancelled || !mounted.current) return;
         applyNavigationRefresh(next, read);
+        void refreshWorktreeStanding();
       } catch {
         // A refresh that fails leaves the last list on screen; the stream and
         // the retry path are what report a host that has actually gone away.
@@ -2271,7 +2314,13 @@ export function useCodeController(options: CodeControllerOptions) {
       cancelled = true;
       stop();
     };
-  }, [applyNavigationRefresh, client, navigationRefreshMs, nextNavigationRead]);
+  }, [
+    applyNavigationRefresh,
+    client,
+    navigationRefreshMs,
+    nextNavigationRead,
+    refreshWorktreeStanding,
+  ]);
 
   useEffect(() => {
     if (
@@ -2607,6 +2656,24 @@ export function useCodeController(options: CodeControllerOptions) {
       return result?.kind === "fork-context-merge" ? result.outcome : undefined;
     },
     [execute],
+  );
+
+  /**
+   * Reads the open thread's view from the host again, for a fact that changes
+   * with no journal event of its own, such as its worktree being restored.
+   * A read that fails is read again by the next navigation refresh.
+   */
+  const reloadThreadView = useCallback(
+    async (threadId: CodeThreadId): Promise<void> => {
+      try {
+        const view = await client.thread(threadId);
+        if (!mounted.current || String(activeThreadId.current) !== String(view.thread.id)) return;
+        installView(view);
+      } catch {
+        // The next navigation refresh reads it again.
+      }
+    },
+    [client, installView],
   );
 
   /**
@@ -3769,6 +3836,7 @@ export function useCodeController(options: CodeControllerOptions) {
     setThreadMessageWake,
     setThreadRestartContinuation,
     rebindThreadCheckout,
+    reloadThreadView,
     renameThread,
     providerRequests,
     providerAnswerRefusal,

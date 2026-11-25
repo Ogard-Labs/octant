@@ -41,6 +41,8 @@ function setup(options: {
   readonly receiptState?: "ready" | "cleanup-pending" | "removed";
   readonly cleanup?: CleanupResult;
   readonly turnRunning?: boolean;
+  readonly workGoing?: boolean;
+  readonly cleanupOnArchive?: () => boolean;
 }) {
   const thread = {
     id: threadId,
@@ -60,6 +62,10 @@ function setup(options: {
     loadReceipt: async () => receipt(options.receiptState ?? "ready"),
     cleanup,
     turnInProgress: () => options.turnRunning === true,
+    workGoing: () => options.workGoing === true,
+    ...(options.cleanupOnArchive === undefined
+      ? {}
+      : { cleanupOnArchive: options.cleanupOnArchive }),
     measure: async () => ({ bytes: 2_048, complete: true }),
   });
   return { worktrees, cleanup };
@@ -95,7 +101,40 @@ describe("archived worktrees", () => {
     expect(cleanup).toHaveBeenCalledWith(
       { receiptId, confirmedByLocalUser: true },
       expect.any(AbortSignal),
+      expect.any(Function),
     );
+  });
+
+  it("asks again whether the thread is idle once the cleanup has the receipt, so a start during the wait is seen", async () => {
+    let going = false;
+    const thread = {
+      id: threadId,
+      projectId: "76000000-0000-4000-8000-000000000003",
+      checkoutId: "76000000-0000-4000-8000-000000000004",
+      title: "Fix the sidebar",
+      lifecycle: "archived",
+    };
+    const asked: Array<() => boolean> = [];
+    const worktrees = createArchivedWorktrees({
+      readCodeThreads: () => [thread] as never,
+      readCodeThread: () => thread as never,
+      readCodeCheckout: () =>
+        ({ kind: "managed-worktree", ownershipReceiptId: receiptId }) as never,
+      loadReceipt: async () => receipt("ready"),
+      cleanup: async (_input, _signal, stillIdle) => {
+        if (stillIdle !== undefined) asked.push(stillIdle);
+        return { status: "removed", receipt: receipt("ready") };
+      },
+      turnInProgress: () => false,
+      workGoing: () => going,
+      measure: async () => ({ bytes: 1, complete: true }),
+    });
+    await worktrees.reclaimOnArchive(threadId);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.()).toBe(true);
+    // Work began while the cleanup waited for the receipt.
+    going = true;
+    expect(asked[0]?.()).toBe(false);
   });
 
   it("refuses to remove a worktree with uncommitted changes, or one whose thread is active", async () => {
@@ -115,7 +154,20 @@ describe("archived worktrees", () => {
     expect(cleanup).toHaveBeenCalledWith(
       { receiptId, confirmedByLocalUser: false, onArchive: true },
       expect.any(AbortSignal),
+      expect.any(Function),
     );
+  });
+
+  it("leaves an archived thread's worktree alone when a person turned archive cleanup off, and removes it again when they turn it on", async () => {
+    let on = false;
+    const { worktrees, cleanup } = setup({ cleanupOnArchive: () => on });
+    await worktrees.reclaimOnArchive(threadId);
+    expect(cleanup).not.toHaveBeenCalled();
+    // It stays listed, so a person can still remove it by hand.
+    await expect(worktrees.list()).resolves.toHaveLength(1);
+    on = true;
+    await worktrees.reclaimOnArchive(threadId);
+    expect(cleanup).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the worktree of a thread archived while its turn still runs", async () => {
@@ -128,6 +180,14 @@ describe("archived worktrees", () => {
       reason: "turn-running",
     });
     expect(running.cleanup).not.toHaveBeenCalled();
+  });
+
+  it("keeps the worktree of a thread archived while the host still tracks other work for it", async () => {
+    const going = setup({ workGoing: true });
+    await going.worktrees.reclaimOnArchive(threadId);
+    expect(going.cleanup).not.toHaveBeenCalled();
+    // It stays listed, so a person who knows nothing runs can still remove it.
+    await expect(going.worktrees.list()).resolves.toHaveLength(1);
   });
 
   it("measures a folder without following links and reports a missing one as absent", async () => {

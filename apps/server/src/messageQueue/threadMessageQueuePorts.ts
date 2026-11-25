@@ -5,6 +5,7 @@ import {
   decodeCodeOperationEventFrame,
   decodeCodeThreadId,
   decodeWorkThreadId,
+  type CodeCheckoutIdentity,
   type CodeThread,
   type OctantMode,
   type ProjectId,
@@ -17,7 +18,12 @@ import {
   type WorkTurnLookupResult,
   type WorkTurnState,
 } from "@octant/contracts";
-import { activeChatTurns, parkedStopReleased } from "@octant/domain";
+import {
+  activeChatTurns,
+  cleanedUpWorktreeSentence,
+  parkedStopReleased,
+  type CleanedUpWorktreeStanding,
+} from "@octant/domain";
 import { Effect } from "effect";
 import type { ChatService, ChatServiceExecutionContext } from "../chat/chatService";
 import type { CodeRouteService } from "../codeRoutes";
@@ -69,6 +75,14 @@ export interface ThreadMessageQueuePortDependencies {
     intent: ThreadMessageQueueInspectionInput["intent"],
   ) => boolean;
   readonly effectiveCodeThread?: (windowId: WindowId, thread: CodeThread) => CodeThread;
+  /**
+   * Where a Code thread's managed worktree stands when the host removed its
+   * folder. A message for such a thread is refused with the host's sentence
+   * about it, not a bare "unavailable".
+   */
+  readonly cleanedUpWorktree?: (
+    checkout: CodeCheckoutIdentity,
+  ) => Promise<CleanedUpWorktreeStanding | undefined>;
   /**
    * Whether the thread's session is being compacted. Every turn is refused
    * meanwhile, so a queued message waits it out as it waits out a running turn.
@@ -467,7 +481,30 @@ export function createThreadMessageQueuePort(
         };
 
   return {
-    inspect: async (input) => inspect(input),
+    inspect: async (input) => {
+      const inspected = inspect(input);
+      if (
+        inspected.status === "held" ||
+        input.scope.mode !== "code" ||
+        input.intent === "read" ||
+        input.intent === "pause" ||
+        input.intent === "remove" ||
+        deps.cleanedUpWorktree === undefined
+      ) {
+        return inspected;
+      }
+      const thread = deps.persistence.readCodeThread(decodeCodeThreadId(input.scope.threadId));
+      const checkout =
+        thread === undefined ? undefined : deps.persistence.readCodeCheckout(thread.checkoutId);
+      const standing = checkout === undefined ? undefined : await deps.cleanedUpWorktree(checkout);
+      return standing === undefined
+        ? inspected
+        : {
+            status: "held",
+            reason: "thread-unavailable",
+            message: cleanedUpWorktreeSentence(standing),
+          };
+    },
     reconcile,
     ...(steer === undefined ? {} : { steer }),
     retain: deps.attachments.retain,

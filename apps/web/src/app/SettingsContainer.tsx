@@ -3,6 +3,7 @@ import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { ServerProject } from "@octant/contracts/server-projects";
+import { createArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
 import { memo, Suspense, useMemo } from "react";
 import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
@@ -134,7 +135,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     newDeviceAlertsClient,
     blockedToolsClient,
     sandboxRestrictionsClient,
-    archivedWorktreesClient,
+    archivedWorktreesPort,
     diskCleanupClient,
     personMemoryClient,
     octantInstructionsClient,
@@ -154,6 +155,10 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     benchmarksClient,
     chatClient,
   } = props.clients;
+  const archivedWorktreesClient = useMemo(
+    () => createArchivedWorktreesClient(archivedWorktreesPort),
+    [archivedWorktreesPort],
+  );
   const selectLocalPluginFolder = props.hostBridge?.selectLocalPluginFolder;
   const selectSkillFolder = props.hostBridge?.selectSkillFolder;
   const pickSkillFolder = useMemo(

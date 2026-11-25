@@ -27,7 +27,11 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
-import { canvasClientFor, type RemoteProductClients } from "./remoteProductClients";
+import {
+  canvasClientFor,
+  type RemoteProductClients,
+  type RemoteProductPort,
+} from "./remoteProductClients";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import {
   ComposerStashScopeContext,
@@ -69,6 +73,12 @@ export interface RemoteWorkspaceProps {
   readonly readOnly?: boolean;
   /** Shows each thread its waiting tool prompts; absent, none is shown. */
   readonly extensionClient?: ExtensionClient;
+  /**
+   * The session's port, for the thread's Restore worktree, which the host
+   * takes only from a device its own person paired. The restore client is
+   * built where it is used, so a first load carries none.
+   */
+  readonly worktreePort?: RemoteProductPort;
 }
 
 /**
@@ -257,6 +267,7 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
       surface = (
         <RemoteCodeSurface
           clients={props.clients}
+          {...(props.worktreePort === undefined ? {} : { worktreePort: props.worktreePort })}
           initialThread={props.initialThread}
           connected={props.connected}
           actsAsHostPerson={props.actsAsHostPerson === true}
@@ -536,6 +547,7 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
 }
 
 export interface RemoteCodeSurfaceProps extends Omit<RemoteSurfaceProps, "clients"> {
+  readonly worktreePort?: RemoteProductPort;
   /** Canvas is absent where its routes do not reach the host (a desktop window's paired computer). */
   readonly clients: Pick<RemoteProductClients, "code" | "project"> & {
     readonly desktop?: RemoteProductClients["desktop"];
@@ -689,6 +701,7 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
               ? {}
               : { extensionClient: props.extensionClient })}
             pairedDevice
+            {...(props.worktreePort === undefined ? {} : { worktreePort: props.worktreePort })}
             readOnly={props.readOnly === true}
             threadId={activeThreadId}
             providerGroups={props.providerGroups}

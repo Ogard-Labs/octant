@@ -177,6 +177,15 @@ export class ThreadMessageQueueService {
       return act(inspection.tail?.unconfirmed === true ? "unconfirmed" : "idle");
     });
   }
+  /**
+   * Whether a message waits in the thread's queue. The host asks this for its
+   * own housekeeping, with no window involved, so it reads the stored queue
+   * and nothing else.
+   */
+  hasQueued(scope: ThreadMessageQueueScope): boolean {
+    return this.#store.state(scope).items.length > 0;
+  }
+
   async execute(
     windowId: WindowId,
     raw: ThreadMessageQueueCommand,
@@ -188,10 +197,14 @@ export class ThreadMessageQueueService {
       return { status: "refused", requestId: raw.requestId, reason: "invalid-payload" };
     }
     return this.#serial(command.scope, async () => {
-      const refused = (reason: ThreadMessageQueueRefusalReason): ThreadMessageQueueResult => ({
+      const refused = (
+        reason: ThreadMessageQueueRefusalReason,
+        message?: string,
+      ): ThreadMessageQueueResult => ({
         status: "refused",
         requestId: command.requestId,
         reason,
+        ...(message === undefined ? {} : { message }),
       });
       const result = (status: "applied" | "duplicate" | "conflict"): ThreadMessageQueueResult => ({
         status,
@@ -212,7 +225,7 @@ export class ThreadMessageQueueService {
         intent: receipt !== undefined || previous !== undefined ? "read" : command.kind,
         ...(command.kind === "enqueue" ? { payload: command.payload } : {}),
       });
-      if (inspection.status === "held") return refused(inspection.reason);
+      if (inspection.status === "held") return refused(inspection.reason, inspection.message);
       if (this.#purging.has(queueId(command.scope)) || this.#store.purged(command.scope))
         return refused("thread-unavailable");
       const id = queueId(command.scope);

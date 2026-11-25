@@ -706,6 +706,24 @@ describe("Project terminal actions", () => {
     expect(terminals.writes).toEqual([]);
   });
 
+  it("counts a shell as running from the moment it starts resolving its folder, so a cleanup that checks then waits for it", async () => {
+    let release: (folder: string) => void = () => undefined;
+    const { service } = harness({
+      projects: withActions("."),
+      resolveRoot: () => new Promise<string>((resolve) => (release = resolve)),
+    });
+    expect(service.hasRunning(projectId)).toBe(false);
+    const starting = service.execute(windowId, "local-window", start());
+    await vi.waitFor(() => expect(service.hasRunning(projectId)).toBe(true));
+    release(root);
+    await starting;
+    expect(service.hasRunning(projectId)).toBe(true);
+    // A start that is refused leaves nothing counted behind.
+    const refused = harness({ projects: withActions("."), root: undefined });
+    await refused.service.execute(windowId, "local-window", start());
+    expect(refused.service.hasRunning(projectId)).toBe(false);
+  });
+
   it("refuses an action the Project did not save, and a paired device, and types nothing", async () => {
     const { service, terminals } = harness({ projects: withActions(".") });
     await service.execute(windowId, "local-window", start());

@@ -1,3 +1,4 @@
+import { cleanedUpWorktreeSentence } from "@octant/domain";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1161,6 +1162,77 @@ describe("a turn parked on a usage limit after the thread moved to another accou
       status: "ready",
       tail: { id: stopId, status: "failed", ordinaryFailure: true },
     });
+  });
+
+  it("refuses a message for a Code thread whose worktree was cleaned up, in the host's words", async () => {
+    const { deps } = setup();
+    const checkoutId = "92000000-0000-4000-8000-000000000012";
+    const repositoryId = `repo_${"b".repeat(64)}`;
+    const code = (extra: object) =>
+      decodeCodeThread({
+        ...fields,
+        ...extra,
+        checkoutId,
+        repositoryId,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        deliveryTarget: {
+          branchIntent: "feature/limited-work",
+          remoteName: "origin",
+          proposedBaseRepository: "octant/octant",
+          proposedBaseBranch: "main",
+          outcomeKind: "local-implementation",
+          confirmedAt: now,
+        },
+      });
+    let codeThread = code({});
+    let standing: Parameters<typeof cleanedUpWorktreeSentence>[0] | undefined;
+    const port = createThreadMessageQueuePort({
+      ...deps,
+      cleanedUpWorktree: async () => standing,
+      persistence: {
+        ...deps.persistence,
+        readProject: () => project("code"),
+        readCodeThread: () => codeThread,
+        readCodeRuntimeWorks: () => [
+          {
+            work: decodeCodeRuntimeWork({
+              id: stopId,
+              threadId,
+              kind: "provider-turn",
+              state: "waiting",
+              updatedAt: now,
+            }),
+            firstSequence: 1,
+          },
+        ],
+        readCodeCheckout: () =>
+          decodeCodeCheckoutIdentity({
+            id: checkoutId,
+            repositoryId,
+            kind: "plain-folder",
+            availability: "available",
+            head: { kind: "none" },
+            observedAt: now,
+          }),
+      },
+    });
+    const input = { scope: { mode: "code", threadId }, windowId, intent: "dispatch" } as const;
+
+    expect(await port.inspect(input)).toMatchObject({ status: "busy" });
+    standing = "cleaned-up";
+    for (const intent of ["enqueue", "dispatch", "resume"] as const) {
+      expect(await port.inspect({ ...input, intent }), intent).toEqual({
+        status: "held",
+        reason: "thread-unavailable",
+        message: cleanedUpWorktreeSentence("cleaned-up"),
+      });
+    }
+    // What the queue already holds stays readable and removable.
+    expect(await port.inspect({ ...input, intent: "read" })).toMatchObject({ status: "busy" });
+    standing = undefined;
+    codeThread = code(moved);
+    expect(await port.inspect(input)).toMatchObject({ status: "ready" });
   });
 });
 
