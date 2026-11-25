@@ -582,9 +582,10 @@ Gemini Omni Flash, for example, declares 3–15 s (up to 10 s with both frames);
 16:9 and 9:16; audio `always`; up to six reference images; a per-token price;
 and `cancel: "running"`, `removal: delete`, with a resume window of 55 days.
 xAI would declare `cancel: "none"`, which puts the Stop line on the card.
-A model priced `per-clip` is offered only at the combinations of duration,
-resolution and audio it has a rate for, so the card never multiplies a flat
-fee by seconds. A rate that omits `audio` applies to both audio choices, and
+A model that publishes a price is offered only at the combinations of duration,
+resolution and audio it has a rate for, whichever way it is priced. The card
+never shows a missing rate as an unpublished price, and never multiplies a flat
+`per-clip` fee by seconds. A rate that omits `audio` applies to both audio choices, and
 a rate that names the chosen audio wins over it. The default is a whole
 combination that has a rate, never each field chosen on its own. Candidates are
 ranked by these rules, in order:
@@ -596,7 +597,8 @@ ranked by these rules, in order:
 
 The card and
 a call that skips the card use the same lookup. A call whose combination has
-no rate is refused before anything is reserved or sent.
+no rate is refused before anything is reserved or sent, and before the card
+can keep "Don't ask again".
 
 Bundled drivers state prices from the provider's own published pages, checked
 when the driver is built or updated. An aggregator driver (fal) reads each
