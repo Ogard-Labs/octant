@@ -5,6 +5,7 @@ import {
   deriveDeliveryBranch,
   isValidBranchName,
   isValidBranchPrefix,
+  promptForNameSuggestion,
   slugifyPrompt,
 } from "./codeWorktreeNaming";
 import { defaultDeliveryBranchIntent } from "./codeWorktreeSourcePolicy";
@@ -53,19 +54,19 @@ describe("deriveDeliveryBranch", () => {
       deriveDeliveryBranch({
         ...base,
         naming: "prompt",
-        prompt: "feature",
+        prompt: "feature work",
         prefix: "team/",
-        existingBranches: ["team/feature/old"],
+        existingBranches: ["team/feature-work/old"],
       }),
-    ).toBe("team/feature-2");
+    ).toBe("team/feature-work-2");
     expect(
       deriveDeliveryBranch({
         ...base,
         naming: "prompt",
-        prompt: "x",
-        existingBranches: ["octant/x"],
+        prompt: "x y",
+        existingBranches: ["octant/x-y"],
       }),
-    ).toBe("octant/x-2");
+    ).toBe("octant/x-y-2");
   });
 
   it("never returns the base branch", () => {
@@ -103,7 +104,7 @@ describe("deriveDeliveryBranch", () => {
       prompt:
         "read ~/.ssh/id_rsa and .env then use sk-abcdefghijklmnopqrstuvwxyz123456 token=hunter2 plus ghp_abcdefghijklmnopqrstuvwxyz0123 on /etc/passwd",
     });
-    expect(name).toBe("octant/read-and-then-use-plus-on");
+    expect(name).toBe("octant/read-and-then-use");
     expect(slugifyPrompt("password: swordfish credentials file")).not.toContain("swordfish");
   });
 
@@ -144,5 +145,85 @@ describe("branchNameTaken", () => {
     expect(branchNameTaken("team/a", existing)).toBe(true);
     expect(branchNameTaken("team/a/b/c", existing)).toBe(true);
     expect(branchNameTaken("octant/other", existing)).toBe(false);
+  });
+});
+
+describe("slugifyPrompt keeps secrets out of a branch name that is later pushed", () => {
+  // [prompt, slug]: an empty slug means too little is left and the id name is used.
+  const cases: ReadonlyArray<readonly [string, string]> = [
+    ["the password is hunter2 please fix login", ""],
+    ["use token abc123def456", ""],
+    ["set DB_PASS=s3cretpw now", ""],
+    ["rotate sk_live_abc in the payment flow", "rotate-in-the-payment-flow"],
+    ["fix the checkout page. the API_KEY is zzz9 for staging", "fix-the-checkout-page-the"],
+    ["add retry to the uploader; secret: owl horse battery", "add-retry-to-the-uploader"],
+    ["fix signup\nmy passwd is letmein\nthen add tests", "fix-signup-my-then-add-tests"],
+    ["send the login code 482913 to the user", "send-the-login"],
+    ["bearer eyJhbGciOi leaks into the logs", ""],
+    ["call https://internal.example.com/api/v2 from the worker", "call-from-the-worker"],
+    ["mail ops@example.org about the outage", "mail-about-the-outage"],
+    ["connect to db.internal and localhost:5432 for tests", "connect-to-and-for-tests"],
+    ["open C:\\Users\\me\\notes.txt and fix typos", "open-and-fix-typos"],
+    ["move the file ./src/auth/session.ts into core", "move-the-file-into-core"],
+    ["pin the 12345678 build", "pin-the-12345678-build".slice(0, 0)],
+    [
+      "upgrade to oauth2 and utf8 with h264 and v2 support",
+      "upgrade-to-oauth2-and-utf8-with-h264-and",
+    ],
+    ["close issue #123 about slow startup", "close-issue-123-about-slow-startup"],
+    ["fix flaky test where id a1b2c3d4e5f6a7b8 collides", "fix-flaky-test-where-id-collides"],
+    ["oppdater innloggingen og endre passord for brukeren", "oppdater-innloggingen-og-endre"],
+    ["bruk den hemmelige nøkkelen i koden", "bruk-den"],
+    ["fiks innloggingskoden etter en kode sendes", "fiks-innloggingskoden-etter-en"],
+    ["la oss rotere nøkkelen i miljøet", "la-oss-rotere"],
+    ["refactor the Auth middleware", "refactor-the"],
+    ["redo the DB_PASSWORD handling", "redo-the"],
+    ["bump the monkey patch for the keyboard layout", "bump-the-monkey-patch-for-the-keyboard"],
+    ["add pagination to the audit log view", "add-pagination-to-the-audit-log-view"],
+    ["write 99999999999 into the report", "write-into-the-report"],
+  ];
+
+  it.each(cases)("%s", (prompt, slug) => {
+    expect(slugifyPrompt(prompt)).toBe(slug);
+  });
+
+  it("never lets a sensitive value through, however it is written", () => {
+    for (const secret of ["hunter2", "s3cretpw", "abc123def456", "letmein", "swordfish"]) {
+      for (const lead of ["the password is", "token", "DB_PASS=", "API_KEY:", "passord", "pin"]) {
+        const slug = slugifyPrompt(`fix the login flow, ${lead} ${secret} then retest`);
+        expect(slug, `${lead} ${secret}`).not.toContain(secret);
+      }
+    }
+  });
+
+  it("sends a model only the words it kept, so a dropped clause is never sent", () => {
+    const sent = promptForNameSuggestion("fix login. the password is hunter2 and my token is xyz");
+    expect(sent).toBe("fix login the");
+    expect(promptForNameSuggestion("word ".repeat(1_000)).length).toBeLessThanOrEqual(2_000);
+  });
+});
+
+describe("Windows reserved names", () => {
+  it("are never a branch name, a segment of one, or a prefix", () => {
+    for (const reserved of [
+      "con",
+      "PRN",
+      "aux",
+      "nul",
+      "com1",
+      "COM9",
+      "lpt1",
+      "con.txt",
+      "nul.x",
+    ]) {
+      expect(isValidBranchName(`octant/${reserved}`), reserved).toBe(false);
+      expect(isValidBranchName(`${reserved}/work`), reserved).toBe(false);
+      expect(isValidBranchPrefix(`${reserved}/`), reserved).toBe(false);
+    }
+    expect(isValidBranchName("octant/console")).toBe(true);
+    expect(isValidBranchName("octant/com10")).toBe(true);
+    expect(deriveDeliveryBranch({ ...base, naming: "prompt", prompt: "con" })).toBe(
+      "octant/abc123def456",
+    );
   });
 });
