@@ -64,7 +64,7 @@ final class OfflineDemoTests: XCTestCase {
         }
     }
 
-    /// The filter's own menu, photographed open and left as it was.
+    /// The filter's and a row's own menus, photographed open.
     @MainActor
     private func openFilterMenu() {
         tap(app.tabBars.buttons["Threads"])
@@ -78,6 +78,21 @@ final class OfflineDemoTests: XCTestCase {
         add(evidence)
         XCTAssertTrue(opened)
         tap(host)
+        let row = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "mobile-home-thread-row-code")
+        ).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        row.press(forDuration: 1.2)
+        let settle = app.buttons["Settle"].firstMatch
+        let offered = settle.waitForExistence(timeout: 15)
+        let menu = XCTAttachment(screenshot: app.screenshot())
+        menu.name = "Row menu"
+        menu.lifetime = .keepAlways
+        add(menu)
+        XCTAssertTrue(offered)
+        // Outside the menu and the lifted row, which closes it and changes nothing.
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)).tap()
+        XCTAssertTrue(settle.waitForNonExistence(timeout: 15))
         tap(app.tabBars.buttons["Home"])
     }
 

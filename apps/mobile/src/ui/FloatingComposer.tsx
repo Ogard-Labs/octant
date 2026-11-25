@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Icon } from "./Icon";
-import { GlassSurface, radii, space, typography, useTheme } from "../../design-system";
+import { radii, space, typography, useTheme } from "../../design-system";
 import type { ComposerVoice } from "../voice/useVoiceDictation";
+import { ComposerSurface } from "./ComposerSurface";
 import { ComposerVoiceButton } from "./ComposerVoiceButton";
 import { hapticSend } from "./haptics";
 import { IconButton } from "./IconButton";
@@ -110,7 +111,7 @@ export function FloatingComposer(props: FloatingComposerProps) {
 
   return (
     <View style={styles.wrap} testID={props.testID ?? "mobile-floating-composer"}>
-      <GlassSurface contentStyle={styles.card} material="thick" radius={24}>
+      <ComposerSurface contentStyle={styles.card}>
         {props.onPressAttach !== undefined ? (
           <IconButton
             accessibilityLabel="Add attachment"
@@ -190,7 +191,7 @@ export function FloatingComposer(props: FloatingComposerProps) {
             variant="send"
           />
         ) : null}
-      </GlassSurface>
+      </ComposerSurface>
       {props.voice?.notice !== undefined ? (
         <Text style={styles.footerHint} testID="mobile-composer-voice-notice">
           {props.voice.notice}
