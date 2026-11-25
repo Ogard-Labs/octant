@@ -231,4 +231,89 @@ describe("ManagedWorktreeReceiptStore", () => {
     expect((await stat(receipts)).mode & 0o777).toBe(0o700);
     expect((await stat(receiptPath(directory))).mode & 0o777).toBe(0o600);
   });
+
+  describe("a cleanup that can be undone", () => {
+    const record = { branch: "octant/thread", head: "c".repeat(40) };
+
+    it("keeps how to restore across a restart and spends it once the checkout is back", async () => {
+      const directory = await dataDirectory();
+      const receipts = store(directory);
+      await receipts.create(input);
+      await receipts.transition(receiptId, "ready");
+      const pending = await receipts.beginReclaim(receiptId, record);
+      expect(pending).toMatchObject({ state: "cleanup-pending", reclaim: record });
+      // Repeating it with the same record continues an interrupted cleanup.
+      await expect(receipts.beginReclaim(receiptId, record)).resolves.toEqual(pending);
+
+      const afterRestart = store(directory);
+      await afterRestart.transition(receiptId, "reclaimed");
+      expect(await store(directory).load(receiptId)).toMatchObject({
+        state: "reclaimed",
+        reclaim: record,
+      });
+      await afterRestart.transition(receiptId, "restoring");
+      expect(await afterRestart.load(receiptId)).toMatchObject({
+        state: "restoring",
+        reclaim: record,
+      });
+      const restored = await afterRestart.transition(receiptId, "ready");
+      expect(restored.state).toBe("ready");
+      expect(restored.reclaim).toBeUndefined();
+      expect(JSON.parse(await readFile(receiptPath(directory), "utf8"))).not.toHaveProperty(
+        "reclaim",
+      );
+    });
+
+    it("refuses a different record for a cleanup already under way, and any step that skips one", async () => {
+      const directory = await dataDirectory();
+      const receipts = store(directory);
+      await receipts.create(input);
+      await receipts.transition(receiptId, "ready");
+      await receipts.beginReclaim(receiptId, record);
+      await expect(
+        receipts.beginReclaim(receiptId, { ...record, head: "d".repeat(40) }),
+      ).rejects.toThrow("invalid managed worktree receipt transition");
+      await expect(receipts.transition(receiptId, "restoring")).rejects.toThrow(
+        "invalid managed worktree receipt transition",
+      );
+      await receipts.transition(receiptId, "reclaimed");
+      await expect(receipts.transition(receiptId, "removed")).rejects.toThrow(
+        "invalid managed worktree receipt transition",
+      );
+      await expect(receipts.transition(receiptId, "ready")).rejects.toThrow(
+        "invalid managed worktree receipt transition",
+      );
+    });
+
+    it("returns an abandoned cleanup to ready, and only an abandoned one", async () => {
+      const directory = await dataDirectory();
+      const receipts = store(directory);
+      await receipts.create(input);
+      await receipts.transition(receiptId, "ready");
+      await expect(receipts.abortReclaim(receiptId)).rejects.toThrow(
+        "invalid managed worktree receipt transition",
+      );
+      await receipts.beginReclaim(receiptId, record);
+      const back = await receipts.abortReclaim(receiptId);
+      expect(back.state).toBe("ready");
+      expect(back.reclaim).toBeUndefined();
+    });
+
+    it("fails closed on a receipt whose restore record is malformed", async () => {
+      const directory = await dataDirectory();
+      const receipts = store(directory);
+      await receipts.create(input);
+      const path = receiptPath(directory);
+      const stored = JSON.parse(await readFile(path, "utf8"));
+      for (const reclaim of [
+        { branch: "x" },
+        { branch: "x", head: "nope" },
+        "x",
+        { branch: "x", head: "c".repeat(40), extra: 1 },
+      ]) {
+        await writeFile(path, JSON.stringify({ ...stored, state: "reclaimed", reclaim }));
+        await expect(receipts.load(receiptId)).rejects.toThrow("invalid managed worktree receipt");
+      }
+    });
+  });
 });

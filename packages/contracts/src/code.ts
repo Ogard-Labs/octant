@@ -1651,8 +1651,7 @@ export const CodeWorktreeBranchSuggestionDeclined = Schema.Struct({
   projectId: ProjectId,
   reason: Schema.Literal("provider-unavailable", "not-allowed", "spend-limited", "failed"),
 }).annotations(strict);
-export type CodeWorktreeBranchSuggestionDeclined =
-  typeof CodeWorktreeBranchSuggestionDeclined.Type;
+export type CodeWorktreeBranchSuggestionDeclined = typeof CodeWorktreeBranchSuggestionDeclined.Type;
 export const CodeWorktreeRefsListed = Schema.Struct({
   kind: Schema.Literal("worktree-refs-listed"),
   projectId: ProjectId,

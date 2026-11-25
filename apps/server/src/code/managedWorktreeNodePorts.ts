@@ -15,7 +15,7 @@ import type {
   ManagedWorktreeRepositoryPort,
 } from "./managedWorktreeService";
 import { childProcessEnvironment } from "../childProcessEnvironment";
-import { readWorktreeStatus } from "./hostGitReads";
+import { readUntrackedAndIgnored, readWorktreeStatus } from "./hostGitReads";
 
 const execFileAsync = promisify(execFile);
 // Git runs hooks and configured programs from the repository it is pointed at,
@@ -229,6 +229,44 @@ export function createManagedWorktreeNodePorts(): {
         return { status: "observed", dirty: reading.changedPaths > 0 };
       }
       return reading.status === "runs-filters" ? { status: "unavailable" } : { status: "failed" };
+    },
+    hasUnrecoverableFiles: async (targetPath, signal) => {
+      const reading = await readUntrackedAndIgnored(targetPath, signal);
+      if (reading.status === "observed") {
+        return { status: "observed", found: reading.changedPaths > 0 };
+      }
+      return reading.status === "runs-filters" ? { status: "unavailable" } : { status: "failed" };
+    },
+    resolveBranchHead: async (input, signal) => {
+      const validation = await run("git", ["check-ref-format", "--branch", input.branch], signal);
+      if (validation.exitCode !== 0) return { status: "failed" };
+      const result = await run(
+        "git",
+        [
+          "-C",
+          input.repositoryRoot,
+          "rev-parse",
+          "--verify",
+          "--quiet",
+          `refs/heads/${input.branch}^{commit}`,
+        ],
+        signal,
+      );
+      if (result.exitCode === 1) return { status: "observed" };
+      const head = result.stdout.trim();
+      return result.exitCode === 0 && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(head)
+        ? { status: "observed", head }
+        : { status: "failed" };
+    },
+    restoreWorktree: async (input, signal) => {
+      const validation = await run("git", ["check-ref-format", "--branch", input.branch], signal);
+      if (validation.exitCode !== 0) return { status: "rejected" };
+      const result = await run(
+        "git",
+        ["-C", input.repositoryRoot, "worktree", "add", "--", input.targetPath, input.branch],
+        signal,
+      );
+      return { status: result.exitCode === 0 ? "created" : "rejected" };
     },
     isDelivered: async (input, signal) => {
       const result = await run(

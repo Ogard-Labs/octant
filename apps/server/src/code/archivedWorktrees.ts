@@ -28,6 +28,11 @@ export interface ArchivedWorktreesDependencies {
    * worktree, so neither removal touches the folder while it does.
    */
   readonly turnInProgress: (threadId: CodeThreadId) => boolean;
+  /**
+   * Whether archiving a thread removes its clean, delivered worktree. Absent is
+   * on: a person turns it off in Settings › Code › Worktrees.
+   */
+  readonly cleanupOnArchive?: () => boolean;
   /** Override for tests; production walks the folder. */
   readonly measure?: (path: string) => Promise<FolderSize | undefined>;
 }
@@ -107,6 +112,7 @@ export function createArchivedWorktrees(dependencies: ArchivedWorktreesDependenc
     async reclaimOnArchive(threadId: CodeThreadId): Promise<void> {
       const thread = dependencies.readCodeThread(threadId);
       if (thread?.lifecycle !== "archived") return;
+      if (dependencies.cleanupOnArchive?.() === false) return;
       // A turn still running keeps its worktree; it stays listed in Settings.
       if (dependencies.turnInProgress(threadId)) return;
       const receipt = await ownedReceipt(thread);

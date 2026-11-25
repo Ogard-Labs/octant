@@ -122,6 +122,37 @@ export async function readWorktreeStatus(
   };
 }
 
+/**
+ * Counts the files a worktree holds that no commit does: untracked files and
+ * ignored ones alike, and empty folders, which Git cannot keep. These are what
+ * removing the folder would lose for good. Like the status read, it runs
+ * nothing the repository configured and refuses a repository whose own config
+ * names a filter command.
+ */
+export async function readUntrackedAndIgnored(
+  worktreePath: string,
+  signal: AbortSignal,
+): Promise<WorktreeStatusReading> {
+  const config = await runHostGit(
+    ["-C", worktreePath, "config", "--list", "--show-scope", "-z"],
+    signal,
+  );
+  if (config.exitCode !== 0) return { status: "failed" };
+  const filters = repositoryFilterCommands(config.stdout);
+  if (filters.length > 0) return { status: "runs-filters", filters };
+  // With no exclude option nothing is left out, so ignored files are listed
+  // with the rest; `--directory` keeps a large ignored folder to one entry.
+  const listed = await runHostGit(
+    ["-C", worktreePath, "ls-files", "--others", "--directory", "-z"],
+    signal,
+  );
+  if (listed.exitCode !== 0) return { status: "failed" };
+  return {
+    status: "observed",
+    changedPaths: listed.stdout.split("\0").filter((entry) => entry.length > 0).length,
+  };
+}
+
 export interface ListedWorktree {
   readonly path: string;
   readonly head?: string;

@@ -23,7 +23,14 @@ const RECEIPT_VERSION = 1;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const REPOSITORY_ID_PATTERN = /^repo_[a-f0-9]{64}$/;
 const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-const RECEIPT_STATES = ["creating", "ready", "cleanup-pending", "removed"] as const;
+const RECEIPT_STATES = [
+  "creating",
+  "ready",
+  "cleanup-pending",
+  "removed",
+  "reclaimed",
+  "restoring",
+] as const;
 
 export type ManagedWorktreeReceiptState = (typeof RECEIPT_STATES)[number];
 
@@ -51,6 +58,16 @@ export interface CreateManagedWorktreeReceiptInput {
 
 export type ManagedWorktreeReceiptLookup = Omit<CreateManagedWorktreeReceiptInput, "expectedHead">;
 
+/**
+ * What a restorable cleanup recorded before it removed the folder: the branch
+ * the worktree held and the commit it sat on. A restore brings the folder back
+ * only while that branch still points at that commit.
+ */
+export interface ManagedWorktreeReclaim {
+  readonly branch: string;
+  readonly head: string;
+}
+
 export interface ManagedWorktreeReceipt extends CreateManagedWorktreeReceiptInput {
   readonly version: 1;
   readonly receiptId: string;
@@ -64,6 +81,12 @@ export interface ManagedWorktreeReceipt extends CreateManagedWorktreeReceiptInpu
    */
   readonly currentBranch?: string;
   readonly currentHead?: string;
+  /**
+   * Present from the moment a restorable cleanup begins until the checkout is
+   * restored. `cleanup-pending` with it set is an interrupted restorable
+   * cleanup, which only the reclaim path may finish; it is never a removal.
+   */
+  readonly reclaim?: ManagedWorktreeReclaim;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -148,11 +171,21 @@ function isSource(value: unknown): value is ManagedWorktreeSourceProvenance {
   return value.fetchedAt === undefined || isTimestamp(value.fetchedAt);
 }
 
+function isReclaim(value: unknown): value is ManagedWorktreeReclaim {
+  return (
+    isRecord(value) &&
+    Object.keys(value).length === 2 &&
+    isIntent(value.branch, 255) &&
+    typeof value.head === "string" &&
+    /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value.head)
+  );
+}
+
 function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
   if (
     !isRecord(value) ||
     Object.keys(value).length < requiredReceiptFields.length ||
-    Object.keys(value).length > requiredReceiptFields.length + 5 ||
+    Object.keys(value).length > requiredReceiptFields.length + 6 ||
     requiredReceiptFields.some((field) => !(field in value)) ||
     Object.keys(value).some(
       (field) =>
@@ -161,7 +194,8 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
         field !== "setupRecipe" &&
         field !== "seed" &&
         field !== "currentBranch" &&
-        field !== "currentHead",
+        field !== "currentHead" &&
+        field !== "reclaim",
     ) ||
     value.version !== RECEIPT_VERSION ||
     !isUuid(value.receiptId) ||
@@ -179,6 +213,7 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
     !isTimestamp(value.createdAt) ||
     !isTimestamp(value.updatedAt) ||
     (value.source !== undefined && !isSource(value.source)) ||
+    (value.reclaim !== undefined && !isReclaim(value.reclaim)) ||
     (value.currentBranch !== undefined && !isIntent(value.currentBranch, 255)) ||
     (value.currentHead !== undefined &&
       (typeof value.currentHead !== "string" ||
@@ -208,6 +243,7 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
     ...(value.source === undefined
       ? {}
       : { source: value.source as ManagedWorktreeSourceProvenance }),
+    ...(value.reclaim === undefined ? {} : { reclaim: value.reclaim as ManagedWorktreeReclaim }),
     ...(value.currentBranch === undefined ? {} : { currentBranch: value.currentBranch as string }),
     ...(value.currentHead === undefined ? {} : { currentHead: value.currentHead as string }),
   };
@@ -221,7 +257,11 @@ function canTransition(
     current === next ||
     (current === "creating" && (next === "ready" || next === "cleanup-pending")) ||
     (current === "ready" && next === "cleanup-pending") ||
-    (current === "cleanup-pending" && next === "removed")
+    (current === "cleanup-pending" && next === "removed") ||
+    // A restorable cleanup ends in a checkout that can come back, not a removal.
+    (current === "cleanup-pending" && next === "reclaimed") ||
+    (current === "reclaimed" && next === "restoring") ||
+    (current === "restoring" && (next === "ready" || next === "reclaimed"))
   );
 }
 
@@ -312,16 +352,68 @@ export class ManagedWorktreeReceiptStore {
     }
     if (current.state === state) return current;
 
-    const next = decodeReceipt({ ...current, state, updatedAt: this.#clock() });
+    // Once the checkout is back, or gone for good, the record of how to bring
+    // it back is spent.
+    const { reclaim: _spent, ...rest } = current;
+    const kept = state === "ready" || state === "removed" ? rest : current;
+    const next = decodeReceipt({ ...kept, state, updatedAt: this.#clock() });
+    await this.#write(next);
+    return next;
+  }
+
+  /**
+   * Starts a restorable cleanup: the receipt leaves `ready`, so no turn can
+   * resolve the folder, and records the branch and commit a restore must find
+   * again. Repeating it with the same record continues an interrupted cleanup.
+   */
+  async beginReclaim(
+    receiptId: string,
+    reclaim: ManagedWorktreeReclaim,
+  ): Promise<ManagedWorktreeReceipt> {
+    const current = await this.load(receiptId);
+    const sameRecord =
+      current?.reclaim?.branch === reclaim.branch && current.reclaim.head === reclaim.head;
+    if (
+      current === undefined ||
+      !(current.state === "ready" || (current.state === "cleanup-pending" && sameRecord))
+    ) {
+      throw new Error("invalid managed worktree receipt transition");
+    }
+    if (current.state === "cleanup-pending") return current;
+    const next = decodeReceipt({
+      ...current,
+      state: "cleanup-pending",
+      reclaim,
+      updatedAt: this.#clock(),
+    });
+    await this.#write(next);
+    return next;
+  }
+
+  /**
+   * Returns an interrupted or abandoned restorable cleanup to `ready` while
+   * its folder is still there, so the thread can take turns again.
+   */
+  async abortReclaim(receiptId: string): Promise<ManagedWorktreeReceipt> {
+    const current = await this.load(receiptId);
+    if (current?.state !== "cleanup-pending" || current.reclaim === undefined) {
+      throw new Error("invalid managed worktree receipt transition");
+    }
+    const { reclaim: _spent, ...rest } = current;
+    const next = decodeReceipt({ ...rest, state: "ready", updatedAt: this.#clock() });
+    await this.#write(next);
+    return next;
+  }
+
+  async #write(next: ManagedWorktreeReceipt): Promise<void> {
     await this.#ensureRoot();
     const temporaryPath = await this.#writeTemporary(next);
     try {
-      await rename(temporaryPath, this.#receiptPath(receiptId));
+      await rename(temporaryPath, this.#receiptPath(next.receiptId));
       await this.#syncRoot();
     } finally {
       await unlink(temporaryPath).catch(() => undefined);
     }
-    return next;
   }
 
   /**
