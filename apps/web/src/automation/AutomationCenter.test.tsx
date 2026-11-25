@@ -904,6 +904,7 @@ describe("AutomationCenter arranging", () => {
 
   it("includes an enabled routine awaiting confirmation under the Needs attention filter", async () => {
     const waitingSummary = automationSummaryFixture({
+      id: "aa000000-0000-4000-8000-000000000099" as never,
       displayName: "Needs confirm",
       latestRunLifecycle: "awaiting-confirmation",
     });
