@@ -1,10 +1,8 @@
 import "../styles/code-thread.css";
 import { settledThreadNotice } from "../composer/settledThreadNotice";
 import { cleanedUpWorktreeNotice } from "../composer/cleanedUpWorktreeNotice";
-import {
-  createArchivedWorktreesClient,
-  type ArchivedWorktreesClient,
-} from "@octant/client-runtime/archived-worktrees-client";
+import { createArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
+import type { RemoteProductPort } from "../remote/remoteProductClients";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
@@ -403,7 +401,7 @@ export interface CodeThreadWorkspaceProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   /** Restores the thread's cleaned-up worktree where there is no window capability, over a device's session. */
-  readonly worktreeClient?: ArchivedWorktreesClient;
+  readonly worktreePort?: RemoteProductPort;
   readonly messageQueueClient?: ThreadMessageQueueClient;
   /** The thread's wake-ups; absent builds one from the server address. */
   readonly wakeupClient?: ThreadWakeupClient;
@@ -451,18 +449,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // one, reads the sentence and nothing more.
   const hostWorktreeCleanup = view?.worktreeCleanup;
   const mayRestoreWorktree = props.pairedDevice !== true || props.actsAsHostPerson === true;
-  const { worktreeClient: sessionWorktreeClient } = props;
+  const { worktreePort: sessionWorktreePort } = props;
   const worktreeClient = useMemo(
     () =>
-      sessionWorktreeClient ??
-      (props.serverUrl === undefined || props.windowCapability === undefined
-        ? undefined
-        : createArchivedWorktreesClient({
-            baseUrl: props.serverUrl,
-            fetch: globalThis.fetch,
-            windowCapability: props.windowCapability,
-          })),
-    [sessionWorktreeClient, props.serverUrl, props.windowCapability],
+      sessionWorktreePort !== undefined
+        ? createArchivedWorktreesClient(sessionWorktreePort)
+        : props.serverUrl === undefined || props.windowCapability === undefined
+          ? undefined
+          : createArchivedWorktreesClient({
+              baseUrl: props.serverUrl,
+              fetch: globalThis.fetch,
+              windowCapability: props.windowCapability,
+            }),
+    [sessionWorktreePort, props.serverUrl, props.windowCapability],
   );
   const [restoringWorktree, setRestoringWorktree] = useState(false);
   const [restoreProblem, setRestoreProblem] = useState<string>();

@@ -25,10 +25,6 @@ import {
   type ExtensionClient,
 } from "@octant/client-runtime/extension-client";
 import {
-  createArchivedWorktreesClient,
-  type ArchivedWorktreesClient,
-} from "@octant/client-runtime/archived-worktrees-client";
-import {
   createBrowserAutomationClient,
   type BrowserAutomationClient,
 } from "@octant/client-runtime/browser-automation-client";
@@ -193,11 +189,6 @@ export interface RemoteProductClients {
   readonly projectBrowser: ProjectBrowserClient;
   /** Server Projects catalog, setup checks, relayed previews, and cloud machines. */
   readonly serverProjects?: ServerProjectsClient;
-  /**
-   * Restoring a thread's cleaned-up worktree, which the host takes only from a
-   * device its own person paired; the thread offers it to no other session.
-   */
-  readonly worktrees?: ArchivedWorktreesClient;
 }
 
 // The Work and Code clients refuse a non-loopback base URL because the window
@@ -376,6 +367,5 @@ export function createRemoteProductClients(
     // Listing what a server serves is a window-on-this-computer read the remote
     // gateway refuses, so a paired browser is not offered it.
     serverProjects: withoutServerListeners(serverProjects),
-    worktrees: createArchivedWorktreesClient(port),
   };
 }

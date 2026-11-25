@@ -31,10 +31,7 @@ import {
   createBlockedToolsClient,
   type BlockedToolsClient,
 } from "@octant/client-runtime/blocked-tools-client";
-import {
-  createArchivedWorktreesClient,
-  type ArchivedWorktreesClient,
-} from "@octant/client-runtime/archived-worktrees-client";
+import type { ArchivedWorktreesClientOptions } from "@octant/client-runtime/archived-worktrees-client";
 import {
   createDiskCleanupClient,
   type DiskCleanupClient,
@@ -280,7 +277,11 @@ export interface LaunchedShellClients {
   readonly accessActivityPort: AccessActivityPort;
   readonly blockedToolsClient: BlockedToolsClient;
   readonly sandboxRestrictionsClient: SandboxRestrictionsClient;
-  readonly archivedWorktreesClient: ArchivedWorktreesClient;
+  /**
+   * What Settings builds its worktree client from. The client is made there, in
+   * the lazily loaded Settings, so a first load carries none of it.
+   */
+  readonly archivedWorktreesPort: ArchivedWorktreesClientOptions;
   readonly diskCleanupClient: DiskCleanupClient;
   readonly personMemoryClient: PersonMemoryClient;
   readonly todoClient: TodoClient;
@@ -466,7 +467,7 @@ export function createLaunchedShellClients(
     accessActivityPort: port,
     blockedToolsClient: createBlockedToolsClient(port),
     sandboxRestrictionsClient: createSandboxRestrictionsClient(port),
-    archivedWorktreesClient: createArchivedWorktreesClient(port),
+    archivedWorktreesPort: port,
     diskCleanupClient: createDiskCleanupClient(port),
     personMemoryClient: createPersonMemoryClient(port),
     todoClient: options.todoClient ?? localTodos,

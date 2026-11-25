@@ -4,7 +4,6 @@ import { nativeFolderTransfer } from "../composer/folderDrop.test-fixture";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import { decodeThreadMentionCandidate, type ThreadMessageQueueResult } from "@octant/contracts";
 import type { ThreadMentionClient } from "@octant/client-runtime";
-import type { ArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
 import {
   decodeCodeAttachmentId,
   decodeCodeCheckoutId,
@@ -794,12 +793,19 @@ describe("CodeThreadWorkspace", () => {
       expect(screen.queryByRole("button", { name: "Restore worktree" })).not.toBeInTheDocument();
     });
 
-    const restoreClient = (answer: () => Promise<unknown>) =>
-      ({ restore: vi.fn(answer) }) as unknown as ArchivedWorktreesClient;
+    /** A session's port: what the host answers a restore sent over it. */
+    const restorePort = (answer: () => Promise<unknown>) => ({
+      baseUrl: "http://127.0.0.1",
+      windowCapability: "",
+      fetch: vi.fn(async (_input: unknown, _init?: unknown) => {
+        const value = await answer();
+        return value === undefined ? new Response(null, { status: 500 }) : Response.json(value);
+      }) as unknown as typeof globalThis.fetch,
+    });
 
     it("offers the button to a device the host's own person paired, over its session, and restores from it", async () => {
       const user = userEvent.setup();
-      const worktreeClient = restoreClient(async () => ({
+      const worktreePort = restorePort(async () => ({
         kind: "cleaned-up-worktree-restored",
         threadId,
       }));
@@ -814,11 +820,15 @@ describe("CodeThreadWorkspace", () => {
           pairedDevice
           providerGroups={[providerGroup()]}
           threadId={threadId}
-          worktreeClient={worktreeClient}
+          worktreePort={worktreePort}
         />,
       );
       await user.click(screen.getByRole("button", { name: "Restore worktree" }));
-      expect(worktreeClient.restore).toHaveBeenCalledWith(threadId);
+      expect(worktreePort.fetch).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(vi.mocked(worktreePort.fetch).mock.calls[0]?.[1]?.body))).toEqual({
+        threadId,
+        confirmed: true,
+      });
       // The notice goes with the host's answer even though the view reload failed.
       await waitFor(() =>
         expect(screen.queryByText(cleanedUpWorktreeSentence("cleaned-up"))).not.toBeInTheDocument(),
@@ -829,7 +839,7 @@ describe("CodeThreadWorkspace", () => {
     it("keeps another thread's notice when the person moves on during a restore, and shows a later cleanup of the same thread again", async () => {
       const user = userEvent.setup();
       let answer: (value: unknown) => void = () => undefined;
-      const worktreeClient = restoreClient(() => new Promise((resolve) => (answer = resolve)));
+      const worktreePort = restorePort(() => new Promise((resolve) => (answer = resolve)));
       const workspace = (controllerFor: CodeController, id: unknown) => (
         <CodeThreadWorkspace
           actsAsHostPerson
@@ -837,7 +847,7 @@ describe("CodeThreadWorkspace", () => {
           pairedDevice
           providerGroups={[providerGroup()]}
           threadId={id as never}
-          worktreeClient={worktreeClient}
+          worktreePort={worktreePort}
         />
       );
       const reloadThreadView = vi.fn(async () => undefined);
@@ -884,7 +894,7 @@ describe("CodeThreadWorkspace", () => {
           pairedDevice
           providerGroups={[providerGroup()]}
           threadId={threadId}
-          worktreeClient={restoreClient(async () => undefined)}
+          worktreePort={restorePort(async () => undefined)}
         />,
       );
       expect(screen.getByText(cleanedUpWorktreeSentence("cleaned-up"))).toBeVisible();
@@ -893,7 +903,7 @@ describe("CodeThreadWorkspace", () => {
 
     it("treats a worktree another window already restored as back, not as a refusal", async () => {
       const user = userEvent.setup();
-      const worktreeClient = restoreClient(async () => ({
+      const worktreePort = restorePort(async () => ({
         kind: "cleaned-up-worktree-refused",
         reason: "not-cleaned-up",
         message: "That thread's worktree was not cleaned up.",
@@ -903,7 +913,7 @@ describe("CodeThreadWorkspace", () => {
           controller={withCleanup({ reloadThreadView: vi.fn(async () => undefined) })}
           providerGroups={[providerGroup()]}
           threadId={threadId}
-          worktreeClient={worktreeClient}
+          worktreePort={worktreePort}
         />,
       );
       await user.click(screen.getByRole("button", { name: "Restore worktree" }));
