@@ -163,6 +163,33 @@ describe("suggestWorktreeBranchWords", () => {
     expect(abandon).toHaveBeenCalledTimes(1);
   });
 
+  it("records a request the provider failed after sending it, whatever the failure says", async () => {
+    const { value, settle, abandon } = ports({
+      open: () => ({
+        status: "ready",
+        driver: {
+          acquire: () =>
+            Effect.succeed({
+              start: () => Effect.void,
+              stop: () => Effect.void,
+              subscribe: Effect.succeed(
+                Stream.make({
+                  kind: "failed",
+                  sessionId: "00000000-0000-4000-8000-0000000000aa",
+                  failure: { category: "invalid-configuration", message: "Redirected." },
+                }),
+              ),
+              send: () => Effect.void,
+            }),
+        } as never,
+      }),
+    });
+    const { complete: _mocked, ...real } = value;
+    await expect(suggestWorktreeBranchWords(real, request)).resolves.toEqual({ status: "failed" });
+    expect(settle).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(abandon).not.toHaveBeenCalled();
+  });
+
   it("sends only the words a branch name may carry, and nothing from a clause about a secret", async () => {
     const { value, complete } = ports();
     await suggestWorktreeBranchWords(value, {
