@@ -18,6 +18,7 @@ import {
   type MobileAttachmentSource,
   type MobileInboxRow,
 } from "@octant/client-runtime";
+import { ScreenHeader } from "../navigation/ScreenHeader";
 import { useConnectionStatus } from "@octant/client-runtime/use-connection-status";
 import { presentStaleHostSecurity } from "@octant/domain";
 import type { RemoteThreadSurfaceKind } from "@octant/client-runtime";
@@ -35,7 +36,7 @@ import {
 } from "../surfaces/threadSurfacePresentation";
 import {
   MOBILE_COPY,
-  MOBILE_TAB_LABELS,
+  MOBILE_SCREEN_TITLES,
   mobileModelLabel,
   mobileThreadComposerCopy,
 } from "../copy";
@@ -49,8 +50,6 @@ import { mobileSpacing } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 import { AttachSourceSheet } from "../ui/AttachSourceSheet";
 import { FloatingComposer } from "../ui/FloatingComposer";
-import { IconButton } from "../ui/IconButton";
-import { NavBar } from "../ui/NativeChrome";
 import { ThreadPanesSheet, type ThreadTool } from "../panes/ThreadPanesSheet";
 import { listMobileThreadTools } from "../panes/threadPanesPresentation";
 import { CanvasHtmlImportSheet } from "../surfaces/CanvasHtmlImportSheet";
@@ -83,7 +82,6 @@ const RECONNECTING_COPY = "Reconnecting to the host…";
 
 export interface ThreadScreenProps {
   readonly selected: MobileInboxRow | undefined;
-  readonly onBack: () => void;
   /** Opens the thread a fork made. */
   readonly onOpenThread: (row: MobileInboxRow) => void;
   /** A Chat turn a message search matched; the thread opens scrolled to it. */
@@ -492,11 +490,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
   if (selected === undefined) {
     return (
       <View style={styles.shell}>
-        <NavBar
-          backTestID="mobile-thread-back"
-          onBack={props.onBack}
-          title={MOBILE_TAB_LABELS.thread}
-        />
+        <ScreenHeader title={MOBILE_SCREEN_TITLES.thread} />
         <Text style={styles.help}>{MOBILE_COPY.threadEmpty}</Text>
       </View>
     );
@@ -512,24 +506,21 @@ export function ThreadScreen(props: ThreadScreenProps) {
 
   return (
     <View style={styles.shell} testID="mobile-thread-screen">
-      <NavBar
-        backTestID="mobile-thread-back"
-        onBack={props.onBack}
+      <ScreenHeader
+        actions={
+          offlineDemo || transport === undefined
+            ? []
+            : [
+                {
+                  label: "Views and panes",
+                  icon: "grid-outline",
+                  onPress: () => setPanesOpen(true),
+                  testID: "mobile-thread-panes-open",
+                },
+              ]
+        }
         subtitle={hostLabel}
         title={title}
-        trailing={
-          offlineDemo || transport === undefined ? undefined : (
-            <IconButton
-              accessibilityLabel="Views and panes"
-              iconSize={19}
-              name="grid-outline"
-              onPress={() => setPanesOpen(true)}
-              size={34}
-              testID="mobile-thread-panes-open"
-              variant="ghost"
-            />
-          )
-        }
       />
 
       {/* A view replaces the transcript, so while one is open a single chip

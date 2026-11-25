@@ -223,7 +223,11 @@ describe("listAllHostsMobileInbox", () => {
       hostId: "studio",
       title: "Studio chat",
       live: "needs-input",
-      waitingAsk: { label: "Memory proposal", text: "Remember the deploy window" },
+      waitingAsk: {
+        label: "Memory proposal",
+        text: "Remember the deploy window",
+        decision: true,
+      },
     });
     expect(opened("work", workThreadId)).toMatchObject({
       hostId: "studio",

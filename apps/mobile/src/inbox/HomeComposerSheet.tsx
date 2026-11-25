@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { radii, space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
@@ -36,7 +36,10 @@ export function HomeComposerSheet(props: {
   readonly busy?: boolean;
   readonly editable?: boolean;
   readonly error?: string | undefined;
-  readonly availableModes?: ReadonlyArray<MobileCreateMode> | undefined;
+  /** The Projects this computer offers the chosen mode; a Chat has none. */
+  readonly projects?: ReadonlyArray<{ readonly id: string; readonly label: string }> | undefined;
+  readonly selectedProjectId?: string | undefined;
+  readonly onSelectProject?: ((projectId: string) => void) | undefined;
   readonly onChangePrompt: (value: string) => void;
   readonly onClose: () => void;
   readonly onPressModel: () => void;
@@ -134,15 +137,28 @@ export function HomeComposerSheet(props: {
           fontWeight: "500",
         },
         spacer: { flex: 1 },
+        projectScroll: { flexGrow: 0 },
+        projects: { gap: space.sm },
+        project: {
+          height: 32,
+          justifyContent: "center",
+          paddingHorizontal: 12,
+          borderRadius: radii.pill,
+          backgroundColor: colors.control,
+        },
+        projectSelected: { backgroundColor: colors.accent },
+        projectName: {
+          color: colors.textPrimary,
+          fontSize: typography.detail.fontSize,
+          fontWeight: "500",
+        },
+        projectNameSelected: { color: colors.sendLabel },
       }),
     [colors],
   );
 
   const editable = props.editable !== false && props.busy !== true;
   const canSubmit = editable && props.prompt.trim().length > 0;
-  const availableModes = MOBILE_CREATE_MODES.filter(
-    (mode) => props.availableModes === undefined || props.availableModes.includes(mode.id),
-  );
   const projectLabel =
     props.mode === "chat" ? "New conversation" : (props.projectLabel ?? "Choose on host");
 
@@ -183,14 +199,12 @@ export function HomeComposerSheet(props: {
         </View>
       </View>
 
-      {availableModes.length > 1 ? (
-        <SegmentedControl
-          onSelect={props.onSelectMode}
-          optionTestID={(id) => `mobile-home-composer-mode-${id}`}
-          options={availableModes}
-          selected={props.mode}
-        />
-      ) : null}
+      <SegmentedControl
+        onSelect={props.onSelectMode}
+        optionTestID={(id) => `mobile-home-composer-mode-${id}`}
+        options={MOBILE_CREATE_MODES}
+        selected={props.mode}
+      />
 
       <View style={styles.context} testID="mobile-home-composer-context">
         <View style={styles.contextItem}>
@@ -226,6 +240,34 @@ export function HomeComposerSheet(props: {
           </Text>
         </View>
       </View>
+
+      {props.projects === undefined || props.projects.length === 0 ? null : (
+        <ScrollView
+          contentContainerStyle={styles.projects}
+          horizontal
+          keyboardShouldPersistTaps="handled"
+          showsHorizontalScrollIndicator={false}
+          style={styles.projectScroll}
+        >
+          {props.projects.map((project) => {
+            const selected = project.id === props.selectedProjectId;
+            return (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                key={project.id}
+                onPress={() => props.onSelectProject?.(project.id)}
+                style={[styles.project, selected ? styles.projectSelected : null]}
+                testID={`mobile-home-project-${project.id}`}
+              >
+                <Text style={[styles.projectName, selected ? styles.projectNameSelected : null]}>
+                  {project.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      )}
 
       {props.sourceLabel === undefined ? null : (
         <View style={styles.context} testID="mobile-home-composer-source">

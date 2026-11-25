@@ -48,6 +48,10 @@ export interface MobileThreadRuntimeReport {
 export interface MobileWaitingAsk {
   readonly label: string;
   readonly text?: string;
+  /** A choice the person makes (a decision or a proposal); any other wait is absent here. */
+  readonly decision?: true;
+  /** The agent marked the decision urgent. */
+  readonly urgent?: true;
 }
 
 /** How a row's detail line names its waiting ask. */
@@ -461,7 +465,12 @@ function pendingRequestAsk(item: unknown): MobileListedAsk | undefined {
       request.mode === "code" && request.kind === "approval" && request.browserOrigin !== undefined
         ? WAITING_ASK_LABELS["browser-approval"]
         : PENDING_REQUEST_LABELS[request.kind];
-    return listedAsk(request, { label, text: request.text });
+    return listedAsk(request, {
+      label,
+      text: request.text,
+      ...(request.kind === "decision" ? { decision: true } : {}),
+      ...(request.kind === "decision" && request.urgent === true ? { urgent: true } : {}),
+    });
   } catch {
     return unknownAsk(item);
   }
@@ -470,7 +479,13 @@ function pendingRequestAsk(item: unknown): MobileListedAsk | undefined {
 function waitingAskItem(item: unknown): MobileListedAsk | undefined {
   try {
     const ask = decodeWaitingAskItem(item);
-    return listedAsk(ask, { label: WAITING_ASK_LABELS[ask.kind], text: ask.text });
+    return listedAsk(ask, {
+      label: WAITING_ASK_LABELS[ask.kind],
+      text: ask.text,
+      ...(ask.kind === "memory-proposal" || ask.kind === "routine-proposal"
+        ? { decision: true }
+        : {}),
+    });
   } catch {
     return unknownAsk(item);
   }

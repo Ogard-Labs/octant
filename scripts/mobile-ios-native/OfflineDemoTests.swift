@@ -41,8 +41,8 @@ final class OfflineDemoTests: XCTestCase {
 
     @MainActor
     private func createReply(_ prompt: String) {
-        // The home starts a thread from the compose button in its toolbar.
-        tap(element("mobile-home-compose"))
+        // New beside the bar starts a thread from every place.
+        tap(element("mobile-new-thread"))
         let input = element("mobile-home-composer-input")
         let keyboard = app.keyboards.firstMatch
         XCTAssertTrue(keyboard.waitForExistence(timeout: 15))

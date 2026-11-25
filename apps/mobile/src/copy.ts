@@ -4,16 +4,14 @@ import type { MobileHostHealthKind } from "./session/MobileHostSessionHub";
 export const MOBILE_PRODUCT_NAME = "Octant";
 export const MOBILE_PRODUCT_TAGLINE = "Your computers, from your phone";
 
-export const MOBILE_ROUTE_IDS = ["home", "agents", "thread", "hosts", "todos"] as const;
-export type MobileRouteId = (typeof MOBILE_ROUTE_IDS)[number];
-
-export const MOBILE_TAB_LABELS = {
-  home: "Inbox",
-  agents: "Agents",
+export const MOBILE_SCREEN_TITLES = {
+  home: "Octant",
+  threads: "Threads",
+  inbox: "Inbox",
   thread: "Thread",
-  hosts: "Settings",
+  settings: "Settings",
   todos: "To-dos",
-} as const satisfies Record<MobileRouteId, string>;
+} as const;
 
 export const MOBILE_HOST_HEALTH_LABELS = {
   ready: "Ready",
@@ -40,8 +38,16 @@ export function mobileModelLabel(
 export const MOBILE_COPY = {
   inboxEmpty: "Pair a computer to see your Chat, Work and Code threads.",
   inboxWelcome: "Pick up your threads from anywhere.",
-  inboxTitle: "Inbox",
-  inboxNoThreads: "No threads yet. Start one from the composer below.",
+  searchThreads: "Search threads",
+  searchInbox: "Search Inbox",
+  searchNone: "No threads match.",
+  countedNoneNeedsYou: "Nothing needs you right now.",
+  countedNoneWorking: "No thread is working.",
+  countedNoneInReview: "Nothing is in review.",
+  allModes: "All",
+  threadsNone: "No threads yet. Start one with New.",
+  allProjects: "All Projects",
+  newThread: "New thread",
   threadEmpty: "Select a thread from Inbox.",
   threadStart: "Start the conversation with your host.",
   threadStartHelp: "Follow-ups stream on the paired host. Pick a model, then send.",
@@ -50,11 +56,9 @@ export const MOBILE_COPY = {
   toolStatusDone: "Done",
   toolStatusFailed: "Failed",
   threadViewReturn: "Conversation",
-  workNoFolder: "No folder",
   searchMessages: "In threads",
   searchToolOutput: "Tool output",
   searchCanvas: "Canvas",
-  noProject: "No Project",
   threadViews: "Views",
   threadViewsAndPanes: "Views and panes",
   toolCallsOne: "1 tool call",
@@ -105,8 +109,6 @@ export const MOBILE_COPY = {
   placementMakeHere: "Make new threads go here",
   pairRevokeNote: "Other paired devices stay connected if you revoke later.",
   allHosts: "All hosts",
-  allAgents: "Agents",
-  todosTitle: "To-dos",
   todosNew: "Add a to-do",
   todosOpen: "Open",
   todosDone: "Done",
@@ -127,7 +129,6 @@ export const MOBILE_COPY = {
   todoStartProjectsUnread:
     "This computer's Projects could not be read, so this draft is a Chat. Go back to To-dos and press Start again to try once more.",
   homeRecent: "Recent",
-  statusAllShort: "All",
   homeSeeAll: "See all",
   placementSection: "New threads go to",
   workspaces: "Computers",
@@ -137,8 +138,6 @@ export const MOBILE_COPY = {
   composerWork: "Plan work in this project…",
   composerCode: "Describe a Code task…",
   composerFollowUp: "Reply…",
-  composerDisclaimerShort: "Threads live on your computer.",
-  newThreadsUse: "New threads use",
   modelHostOnly: "Host models",
   modelUnavailable: "No host models",
   working: "Working",
@@ -193,7 +192,6 @@ export const MOBILE_COPY = {
   attachFromFiles: "Choose file",
   needsAttention: "Needs you",
   inReview: "In review",
-  read: "Read",
   placementHint: "New threads go to the computer marked “New threads go here”.",
   createModeChat: "Chat",
   createModeWork: "Work",
@@ -368,7 +366,7 @@ export function collectMobileUserFacingCopy(): string {
   return [
     MOBILE_PRODUCT_NAME,
     MOBILE_PRODUCT_TAGLINE,
-    ...Object.values(MOBILE_TAB_LABELS),
+    ...Object.values(MOBILE_SCREEN_TITLES),
     ...Object.values(MOBILE_COPY),
   ].join("\n");
 }

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { backMobileHomeView } from "./homeView";
-import { inboxPriorityRows, inboxStatusCounts, inboxWorkStatus } from "./inboxWorkPresentation";
+import {
+  inboxCountedRows,
+  inboxPriorityRows,
+  inboxStatusCounts,
+  inboxWorkStatus,
+} from "./inboxWorkPresentation";
 import type { MobileInboxRow } from "@octant/client-runtime";
 
 const row = (
@@ -66,9 +70,17 @@ describe("Inbox work presentation", () => {
     });
   });
 
-  it("returns home from a nested work view without exiting the app", () => {
-    expect(backMobileHomeView("work")).toBe("inbox");
-    expect(backMobileHomeView("code")).toBe("inbox");
-    expect(backMobileHomeView("inbox")).toBeUndefined();
+  it("counts exactly the threads each of Home's counts lists", () => {
+    const rows = [
+      row("code", "active", "working", "working"),
+      row("work", "active", "waiting", "needs-input"),
+      row("chat", "active", "quiet chat", "working"),
+      { ...row("code", "active", "in review"), reviewState: "pending" as const },
+    ];
+    const counts = inboxStatusCounts(rows);
+    expect(inboxCountedRows(rows, "working").map((item) => item.threadId)).toEqual(["working"]);
+    expect(counts.working).toBe(inboxCountedRows(rows, "working").length);
+    expect(counts.needsAttention).toBe(inboxCountedRows(rows, "attention").length);
+    expect(counts.inReview).toBe(inboxCountedRows(rows, "review").length);
   });
 });

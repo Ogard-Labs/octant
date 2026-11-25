@@ -50,22 +50,27 @@ export interface InboxStatusCounts {
   readonly inReview: number;
 }
 
+/** A Chat counts only while it waits on the person, as Home has always counted it. */
+function countedSection(row: MobileInboxRow): InboxWorkSectionId | undefined {
+  if (row.mode === "chat" && row.waitingAsk === undefined) return undefined;
+  return sectionFor(row.status, row.reviewState, row.live);
+}
+
+/** The threads one of Home's counts counts, so its number and its list agree. */
+export function inboxCountedRows(
+  rows: ReadonlyArray<MobileInboxRow>,
+  section: "attention" | "working" | "review",
+): ReadonlyArray<MobileInboxRow> {
+  return rows.filter((row) => countedSection(row) === section);
+}
+
 export function inboxStatusCounts(rows: ReadonlyArray<MobileInboxRow>): InboxStatusCounts {
-  let all = 0;
-  let working = 0;
-  let needsAttention = 0;
-  let inReview = 0;
-
-  for (const row of rows) {
-    if (row.mode === "chat" && row.waitingAsk === undefined) continue;
-    all += 1;
-    const section = sectionFor(row.status, row.reviewState, row.live);
-    if (section === "working") working += 1;
-    else if (section === "attention") needsAttention += 1;
-    else if (section === "review") inReview += 1;
-  }
-
-  return { all, working, needsAttention, inReview };
+  return {
+    all: rows.filter((row) => countedSection(row) !== undefined).length,
+    working: inboxCountedRows(rows, "working").length,
+    needsAttention: inboxCountedRows(rows, "attention").length,
+    inReview: inboxCountedRows(rows, "review").length,
+  };
 }
 
 const SECTION_ORDER: Readonly<Record<InboxWorkSectionId, number>> = {

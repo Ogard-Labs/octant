@@ -4,8 +4,9 @@ import { createRoot } from "react-dom/client";
 import type { MobileInboxRow, MobileRemoteTransport } from "@octant/client-runtime";
 import { expect, it, vi } from "vitest";
 import { ThemeProvider } from "../../design-system/theme";
-import { AgentsListScreen } from "./AgentsListScreen";
-import { InboxHomeScreen } from "./InboxHomeScreen";
+import { HomeScreen } from "./HomeScreen";
+import { MobileThreadsProvider } from "./MobileThreadsContext";
+import { NewThreadProvider, useNewThread } from "./NewThreadContext";
 
 const { listInbox, createChat, createWork, createCode } = vi.hoisted(() => ({
   listInbox: vi.fn(),
@@ -26,6 +27,13 @@ vi.mock("react-native", async () => ({
   ...(await vi.importActual<Record<string, unknown>>("react-native-web")),
   AppState: { currentState: "active", addEventListener: () => ({ remove: () => undefined }) },
 }));
+vi.mock("@react-navigation/native", async () => {
+  const { useEffect } = await import("react");
+  return { useFocusEffect: (effect: () => void) => useEffect(effect, [effect]) };
+});
+vi.mock("../navigation/ScreenHeader", () => ({ ScreenHeader: () => null }));
+vi.mock("../ui/CountTile", () => ({ CountTile: () => null }));
+vi.mock("expo-linear-gradient", () => ({ LinearGradient: () => null }));
 vi.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 vi.mock("../../design-system", async () => ({
   ...(await import("../../design-system/theme")),
@@ -90,38 +98,58 @@ const existing: MobileInboxRow = {
   freshness: "2026-11-23T07:00:00.000Z",
 };
 
+/** New, as the bar offers it: off while the computer takes no thread from this phone. */
+function NewButton() {
+  const { openNewThread, accessReason } = useNewThread();
+  return createElement(
+    "button",
+    { "data-testid": "new", disabled: accessReason !== undefined, onClick: openNewThread },
+    "New",
+  );
+}
+
 it("keeps existing threads openable while the placement host refuses new threads", async () => {
   const opened = vi.fn();
   const noop = () => undefined;
-  const home = (homeMode: "inbox" | "work" | "code") =>
-    createElement(InboxHomeScreen, {
-      homeMode,
-      arrangement: "status",
-      onOpenThread: opened,
-      onOpenAgents: noop,
-      onSelectArrangement: noop,
-      onOpenWorkspace: noop,
-      onAddWorkspace: noop,
-      onScanToPair: noop,
+  const home = () =>
+    createElement(MobileThreadsProvider, {
+      children: createElement(NewThreadProvider, {
+        onOpenThread: opened,
+        children: [
+          createElement(NewButton, { key: "new" }),
+          createElement(HomeScreen, {
+            key: "home",
+            onAddWorkspace: noop,
+            onOpenCounted: noop,
+            onOpenSettings: noop,
+            onOpenThread: opened,
+            onOpenThreads: noop,
+            onOpenTodos: noop,
+            onOpenWorkspace: noop,
+            onScanToPair: noop,
+          }),
+        ],
+      }),
     });
   const container = document.createElement("div");
   const root = createRoot(container);
-  const render = async (screen: ReturnType<typeof createElement>) =>
+  const render = async () =>
     act(async () =>
-      root.render(createElement(ThemeProvider, { preference: "light", children: screen })),
+      root.render(createElement(ThemeProvider, { preference: "light", children: home() })),
     );
   const element = (testId: string) =>
     container.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+  const sheet = () => document.querySelector('[data-testid="mobile-home-composer-sheet"]');
   listInbox.mockResolvedValue({ rows: [existing], failures: [] });
   try {
-    await render(home("work"));
-    expect(element("mobile-composer-input")?.getAttribute("readonly")).toBeNull();
+    await render();
+    expect(element("new")?.hasAttribute("disabled")).toBe(false);
 
     const reading = Promise.withResolvers<Response>();
     vi.mocked(watching.authenticatedFetch).mockImplementationOnce(() => reading.promise);
     session.placementHostId = hostB;
-    await render(home("work"));
-    expect(element("mobile-composer-input")?.hasAttribute("readonly")).toBe(true);
+    await render();
+    expect(element("new")?.hasAttribute("disabled")).toBe(true);
     expect(container.textContent).toContain("confirm this phone’s access");
     await act(async () => {
       reading.resolve(
@@ -129,50 +157,32 @@ it("keeps existing threads openable while the placement host refuses new threads
       );
     });
     expect(container.textContent).toContain("Watching only");
-    expect(element("mobile-composer-input")?.hasAttribute("readonly")).toBe(true);
-    expect(element("mobile-composer-send")?.getAttribute("aria-disabled")).toBe("true");
-    await render(home("code"));
-    expect(element("mobile-composer-input")?.hasAttribute("readonly")).toBe(true);
-
-    await render(home("inbox"));
-    expect(element("mobile-home-compose")?.getAttribute("aria-disabled")).toBe("true");
-    expect(container.textContent).toContain("Watching only");
-    await act(async () => element("mobile-home-compose")?.click());
-    expect(document.querySelector('[data-testid="mobile-home-composer-sheet"]')).toBeNull();
+    expect(element("new")?.hasAttribute("disabled")).toBe(true);
+    await act(async () => element("new")?.click());
+    expect(sheet()).toBeNull();
     await act(async () => element(`mobile-home-thread-row-work-${existing.threadId}`)?.click());
     expect(opened).toHaveBeenCalledWith(existing);
 
-    await render(
-      createElement(AgentsListScreen, {
-        view: "all",
-        onBack: noop,
-        onOpenThread: opened,
-        onSelectView: noop,
-      }),
-    );
-    expect(element("mobile-agents-compose")?.getAttribute("aria-disabled")).toBe("true");
-    expect(container.textContent).toContain("Watching only");
+    // The sheet was open when the computer new threads go to changed.
+    session.placementHostId = hostA;
+    await render();
+    await act(async () => element("new")?.click());
+    session.placementHostId = hostB;
+    await render();
+    expect(sheet()?.textContent).toContain("Watching only");
+    const input = () => sheet()?.querySelector('[data-testid="mobile-home-composer-input"]');
+    expect(input()?.hasAttribute("readonly")).toBe(true);
     expect(createChat).not.toHaveBeenCalled();
     expect(createWork).not.toHaveBeenCalled();
     expect(createCode).not.toHaveBeenCalled();
-
-    session.placementHostId = hostA;
-    await render(home("inbox"));
-    await act(async () => element("mobile-home-compose")?.click());
-    session.placementHostId = hostB;
-    await render(home("inbox"));
-    const sheet = document.querySelector('[data-testid="mobile-home-composer-sheet"]');
-    expect(sheet?.textContent).toContain("Watching only");
-    const refresh = sheet?.querySelector<HTMLElement>(
+    const refresh = sheet()?.querySelector<HTMLElement>(
       '[data-testid="mobile-home-composer-refresh-host"]',
     );
-    expect(refresh).not.toBeNull();
     vi.mocked(watching.authenticatedFetch).mockResolvedValueOnce(
       Response.json({ ...standing, actsAsHostPerson: false, accessLevel: "approve-and-steer" }),
     );
     await act(async () => refresh?.click());
-    const input = sheet?.querySelector('[data-testid="mobile-home-composer-input"]');
-    expect(input?.hasAttribute("readonly")).toBe(false);
+    expect(input()?.hasAttribute("readonly")).toBe(false);
   } finally {
     act(() => root.unmount());
     session.placementHostId = hostA;

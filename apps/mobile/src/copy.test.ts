@@ -5,8 +5,7 @@ import {
   mobileModelLabel,
   mobileThreadComposerCopy,
   MOBILE_PRODUCT_NAME,
-  MOBILE_ROUTE_IDS,
-  MOBILE_TAB_LABELS,
+  MOBILE_SCREEN_TITLES,
 } from "./copy";
 
 const retiredProductName = "OpenOr" + "bit";
@@ -17,13 +16,13 @@ describe("mobile package identity", () => {
     expect(collectMobileUserFacingCopy()).not.toContain(retiredProductName);
   });
 
-  it("exposes Inbox home, Agents, Thread, Settings, and To-dos routes", () => {
-    expect([...MOBILE_ROUTE_IDS]).toEqual(["home", "agents", "thread", "hosts", "todos"]);
-    expect(MOBILE_TAB_LABELS).toEqual({
-      home: "Inbox",
-      agents: "Agents",
+  it("names every screen's title", () => {
+    expect(MOBILE_SCREEN_TITLES).toEqual({
+      home: "Octant",
+      threads: "Threads",
+      inbox: "Inbox",
       thread: "Thread",
-      hosts: "Settings",
+      settings: "Settings",
       todos: "To-dos",
     });
   });

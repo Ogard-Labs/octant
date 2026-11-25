@@ -6,18 +6,25 @@ const root = resolve(import.meta.dirname, "..");
 
 describe("mobile privacy and delivery wiring", () => {
   it("keeps host repository roots off the screenshot-safe home surface", () => {
-    const home = readFileSync(resolve(root, "inbox", "InboxHomeScreen.tsx"), "utf8");
-    expect(home).not.toContain("rootCandidate");
-    expect(home).not.toContain("projectRoot");
+    for (const file of ["HomeScreen.tsx", "ThreadsScreen.tsx", "NewThreadContext.tsx"]) {
+      const source = readFileSync(resolve(root, "inbox", file), "utf8");
+      expect(source).not.toContain("rootCandidate");
+      expect(source).not.toContain("projectRoot");
+    }
   });
 
   it("scrubs host project labels and validates Code delivery fields before decode", () => {
-    const home = readFileSync(resolve(root, "inbox", "InboxHomeScreen.tsx"), "utf8");
+    const newThread = readFileSync(resolve(root, "inbox", "NewThreadContext.tsx"), "utf8");
+    const threads = readFileSync(resolve(root, "inbox", "ThreadsScreen.tsx"), "utf8");
+    const threadRow = readFileSync(resolve(root, "inbox", "ThreadRow.tsx"), "utf8");
     const deliverySheet = readFileSync(
       resolve(root, "inbox", "CodeDeliveryTargetSheet.tsx"),
       "utf8",
     );
-    expect(home).toContain("formatScreenshotSafeLabel(project.name)");
+    expect(newThread).toContain("formatScreenshotSafeLabel(project.name)");
+    expect(threads).toContain("formatScreenshotSafeLabel(entry.name)");
+    expect(threadRow).toContain("formatScreenshotSafeLabel(project)");
+    expect(threadRow).toContain("formatScreenshotSafeLabel(row.title)");
     expect(deliverySheet).toContain("validateCodeDeliveryTargetFields");
     expect(deliverySheet).toContain('testID="mobile-code-delivery-error"');
   });

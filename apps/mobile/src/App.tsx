@@ -14,14 +14,12 @@ import {
 import Constants from "expo-constants";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import type { MobileInboxRow } from "@octant/client-runtime";
-import { ScreenCanvas, colorsForScheme, resolveThemeScheme, useTheme } from "../design-system";
-import { AppearanceProvider, useAppearance } from "./appearance/AppearanceContext";
-import type { MobileRouteId } from "./copy";
+import { colorsForScheme, resolveThemeScheme, useTheme } from "../design-system";
+import { AppearanceProvider } from "./appearance/AppearanceContext";
 import { resolveMobileMockScenario, type MobileMockScenario } from "./dev/mobileMockScenarioId";
 import { MobileDeepLinkCapture } from "./navigation/mobileDeepLinkCapture";
 import type { MobileComputersDeepLinkTarget } from "./notifications/deepLinks";
 import { RootNavigator } from "./navigation/RootNavigator";
-import { createInitialNavigationState, selectMobileRoute } from "./navigation/navigationState";
 import { AppVaultGate } from "./security/AppVaultGate";
 import { mobileScreenshotPrivacy } from "./security/deviceProtection";
 import { createExpoBiometricAuthenticator } from "./security/expoBiometricAuthenticator";
@@ -35,9 +33,7 @@ function AppShell(props: {
   readonly pendingDeepLinkRow?: MobileInboxRow | undefined;
   readonly pendingComputersLink?: MobileComputersDeepLinkTarget | undefined;
 }) {
-  const appearance = useAppearance();
   const { colors, scheme } = useTheme();
-  const [navigation, setNavigation] = useState(createInitialNavigationState);
 
   const styles = useMemo(
     () =>
@@ -67,19 +63,11 @@ function AppShell(props: {
     [colors],
   );
 
-  const onSelectRoute = (route: MobileRouteId) => {
-    setNavigation((current) => selectMobileRoute(current, route));
-  };
-
   return (
-    <SafeAreaView edges={["top", "right", "bottom", "left"]} style={styles.safeArea}>
+    <View style={styles.safeArea}>
       <StatusBar barStyle={scheme === "dark" ? "light-content" : "dark-content"} />
-      <ScreenCanvas
-        effect={appearance.preferences.effect}
-        picture={appearance.preferences.picture}
-        customImageUri={appearance.preferences.customImageUri}
-      >
-        {props.mockScenario !== undefined ? (
+      {props.mockScenario !== undefined ? (
+        <SafeAreaView edges={["top"]}>
           <View accessibilityRole="text" style={styles.mockBanner} testID="mobile-mock-banner">
             <Text style={styles.mockBannerText}>
               {props.onLeaveDemo === undefined
@@ -97,20 +85,18 @@ function AppShell(props: {
               </Pressable>
             )}
           </View>
-        ) : null}
-        <RootNavigator
-          activeRoute={navigation.activeRoute}
-          onDeepLinkConsumed={props.onDeepLinkConsumed}
-          onSelectRoute={onSelectRoute}
-          {...(props.pendingDeepLinkRow === undefined
-            ? {}
-            : { pendingDeepLinkRow: props.pendingDeepLinkRow })}
-          {...(props.pendingComputersLink === undefined
-            ? {}
-            : { pendingComputersLink: props.pendingComputersLink })}
-        />
-      </ScreenCanvas>
-    </SafeAreaView>
+        </SafeAreaView>
+      ) : null}
+      <RootNavigator
+        onDeepLinkConsumed={props.onDeepLinkConsumed}
+        {...(props.pendingDeepLinkRow === undefined
+          ? {}
+          : { pendingDeepLinkRow: props.pendingDeepLinkRow })}
+        {...(props.pendingComputersLink === undefined
+          ? {}
+          : { pendingComputersLink: props.pendingComputersLink })}
+      />
+    </View>
   );
 }
 

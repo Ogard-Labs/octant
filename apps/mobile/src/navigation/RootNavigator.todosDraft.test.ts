@@ -1,15 +1,24 @@
 // @vitest-environment jsdom
-import { act, createElement } from "react";
+import { act, createElement, type FunctionComponent } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { MobileRemoteTransport } from "@octant/client-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { MobileRouteId } from "../copy";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ThemeProvider } from "../../design-system/theme";
+import * as session from "../session/MobileSessionContext";
 import type { MobileSessionContextValue } from "../session/MobileSessionContext";
 import { RootNavigator } from "./RootNavigator";
 
 const context = vi.hoisted(() => {
-  Object.assign(globalThis, { __DEV__: true, IS_REACT_ACT_ENVIRONMENT: true });
+  Object.assign(globalThis, {
+    __DEV__: true,
+    IS_REACT_ACT_ENVIRONMENT: true,
+    ResizeObserver: class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  });
   return { current: undefined as unknown };
 });
 
@@ -20,9 +29,15 @@ vi.mock("../../design-system/themeAtmospheres", () => ({
   themeAtmosphereOpacity: { light: 0.58, dark: 0.36 },
 }));
 vi.mock("../../design-system/groundPictures", () => ({ pictureSource: () => undefined }));
-vi.mock("../session/MobileSessionContext", () => ({
-  useMobileSession: () => context.current as MobileSessionContextValue,
-}));
+// A context, as in the app: a screen already open hears the session change.
+vi.mock("../session/MobileSessionContext", async () => {
+  const react = await import("react");
+  const Session = react.createContext<unknown>(undefined);
+  return {
+    SessionForTest: Session.Provider,
+    useMobileSession: () => react.useContext(Session),
+  };
+});
 vi.mock("../notifications/usePhoneNotificationRotation", () => ({
   usePhoneNotificationRotation: () => undefined,
 }));
@@ -30,44 +45,30 @@ vi.mock("../notifications/mobileNotificationPort", () => ({ mobileNotificationPo
 vi.mock("../notifications/mobilePushRegistrationBook", () => ({
   mobilePushRegistrationBook: () => ({}),
 }));
-vi.mock("../hosts/expoOwnerUnlockPorts", () => ({ createExpoPhoneUnlockKey: () => undefined }));
-vi.mock("../hosts/GuestHubPanel", () => ({
-  GuestHubPanel: () => null,
-  GuestHubRefusals: () => null,
+vi.mock("react-native-screens", () => ({}));
+vi.mock("expo-linear-gradient", () => ({ LinearGradient: () => null }));
+vi.mock("../appearance/AppearanceContext", () => ({
+  useAppearance: () => ({ preferences: { effect: "none", picture: "plain" } }),
 }));
-vi.mock("../session/mobileSessionLifecycle", () => ({
-  createMobileHostRemover: () => async () => ({ localCredentialRemoved: true }),
+vi.mock("../../design-system/ScreenCanvas", () => ({
+  ScreenCanvas: (props: { readonly children: unknown }) => props.children,
 }));
-vi.mock("./useMobileHardwareBack", () => ({ useMobileHardwareBack: () => undefined }));
-vi.mock("../ui/TabBar", () => ({ TabBar: () => null }));
-vi.mock("../../design-system/ScreenCanvas", () => ({ ScreenCanvas: () => null }));
-vi.mock("../approvals/DeviceRevokePanel", () => ({ DeviceRevokePanel: () => null }));
-vi.mock("../appearance/AppearanceBackgroundPanel", () => ({
-  AppearanceBackgroundPanel: () => null,
+vi.mock("../inbox/MobileThreadsContext", () => ({
+  MobileThreadsProvider: (props: { readonly children: unknown }) => props.children,
 }));
-vi.mock("../hosts/ConnectorSignInPanel", () => ({ ConnectorSignInPanel: () => null }));
-vi.mock("../hosts/OwnerAlertsPanel", () => ({ OwnerAlertsPanel: () => null }));
-vi.mock("../hosts/OwnerMovesPanel", () => ({ OwnerMovesPanel: () => null }));
-vi.mock("../hosts/PairingPanel", () => ({ PairingPanel: () => null }));
-vi.mock("../hosts/RemoveHostPanel", () => ({ RemoveHostPanel: () => null }));
-vi.mock("../inbox/AgentsListScreen", () => ({ AgentsListScreen: () => null }));
-vi.mock("../inbox/InboxHomeScreen", () => ({ InboxHomeScreen: () => null }));
+vi.mock("../inbox/NewThreadContext", () => ({
+  NewThreadProvider: (props: { readonly children: unknown }) => props.children,
+  useNewThread: () => ({ openNewThread: () => undefined, accessReason: undefined }),
+}));
+vi.mock("../inbox/CountedThreadsScreen", () => ({ CountedThreadsScreen: () => null }));
+vi.mock("../inbox/ThreadsScreen", () => ({ ThreadsScreen: () => null }));
+vi.mock("../inbox/InboxScreen", () => ({ InboxScreen: () => null }));
+vi.mock("../inbox/HomeScreen", () => ({
+  HomeScreen: (props: { readonly onOpenTodos: () => void }) =>
+    createElement("button", { "data-testid": "open-todos", onClick: props.onOpenTodos }),
+}));
+vi.mock("../hosts/HostsScreen", () => ({ HostsScreen: () => null }));
 vi.mock("../inbox/ThreadScreen", () => ({ ThreadScreen: () => null }));
-vi.mock("../notifications/enablePhoneNotifications", () => ({
-  forgetPhoneNotificationsForHost: async () => undefined,
-}));
-vi.mock("../notifications/PushNotificationsPanel", () => ({ PushNotificationsPanel: () => null }));
-vi.mock("../security/deviceIntegrityPort", () => ({
-  createUnavailableDeviceIntegrityPort: () => ({}),
-}));
-vi.mock("../security/deviceProtection", () => ({
-  mobileKeyStorageProtection: {},
-  mobileScreenshotPrivacy: {},
-}));
-vi.mock("../security/expoBiometricAuthenticator", () => ({
-  createExpoBiometricAuthenticator: () => ({}),
-}));
-vi.mock("../security/PrivacySecurityPanel", () => ({ PrivacySecurityPanel: () => null }));
 
 const hostA = "11111111-1111-4111-8111-111111111111";
 const hostB = "22222222-2222-4222-8222-222222222222";
@@ -162,19 +163,43 @@ async function settle(): Promise<void> {
   });
 }
 
-function navigator(route: MobileRouteId, onSelectRoute: (next: MobileRouteId) => void) {
-  return createElement(ThemeProvider, {
-    preference: "light",
-    children: createElement(RootNavigator, { activeRoute: route, onSelectRoute }),
+/** Renders the app and takes the person to To-dos, or away from it back to Home. */
+async function renderAt(root: Root, place: "todos" | "elsewhere"): Promise<void> {
+  await act(async () =>
+    root.render(
+      createElement(ThemeProvider, {
+        preference: "light",
+        children: createElement(SafeAreaProvider, {
+          initialMetrics: {
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 47, right: 0, bottom: 34, left: 0 },
+          },
+          children: createElement(
+            (
+              session as unknown as {
+                readonly SessionForTest: FunctionComponent<{ readonly value: unknown }>;
+              }
+            ).SessionForTest,
+            { value: context.current },
+            createElement(RootNavigator, {}),
+          ),
+        }),
+      }),
+    ),
+  );
+  await settle();
+  const onTodos = document.querySelector('[data-testid="mobile-todos-add"]') !== null;
+  if (onTodos === (place === "todos")) return;
+  await act(async () => {
+    if (place === "todos")
+      document.querySelector<HTMLElement>('[data-testid="open-todos"]')?.click();
+    else
+      [...document.querySelectorAll<HTMLElement>("[aria-label]")]
+        .findLast((element) => /back$/i.test(element.getAttribute("aria-label") ?? ""))
+        ?.click();
+    // The header answers on the next frame.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   });
-}
-
-async function renderRoute(
-  root: Root,
-  route: MobileRouteId,
-  onSelectRoute: (next: MobileRouteId) => void,
-): Promise<void> {
-  await act(async () => root.render(navigator(route, onSelectRoute)));
   await settle();
 }
 
@@ -235,15 +260,14 @@ describe("the to-do draft across host selection", () => {
     document.body.append(container);
     const root = createRoot(container);
     roots.push(root);
-    const onSelectRoute = vi.fn<(next: MobileRouteId) => void>();
 
-    await renderRoute(root, "todos", onSelectRoute);
+    await renderAt(root, "todos");
     await typeText(input(container), "Carry this draft");
     await submit(input(container));
     expect(firstCommands).toHaveLength(1);
 
-    await renderRoute(root, "hosts", onSelectRoute);
-    await renderRoute(root, "todos", onSelectRoute);
+    await renderAt(root, "elsewhere");
+    await renderAt(root, "todos");
     expect(input(container).value).toBe("Carry this draft");
     expect(firstCommands).toHaveLength(1);
     await submit(input(container));
@@ -251,10 +275,10 @@ describe("the to-do draft across host selection", () => {
     expect(firstCommands).toHaveLength(2);
     expect(firstCommands[1]?.todoId).toBe(firstCommands[0]?.todoId);
 
-    await renderRoute(root, "hosts", onSelectRoute);
+    await renderAt(root, "elsewhere");
     context.current = mobileSession(nextTransport);
-    await renderRoute(root, "hosts", onSelectRoute);
-    await renderRoute(root, "todos", onSelectRoute);
+    await renderAt(root, "elsewhere");
+    await renderAt(root, "todos");
 
     expect(input(container).value).toBe("Carry this draft");
     expect(nextCommands).toHaveLength(0);
@@ -301,9 +325,8 @@ describe("the to-do draft across host selection", () => {
     document.body.append(container);
     const root = createRoot(container);
     roots.push(root);
-    const onSelectRoute = vi.fn<(next: MobileRouteId) => void>();
 
-    await renderRoute(root, "todos", onSelectRoute);
+    await renderAt(root, "todos");
     await typeText(input(container), "Carry this draft");
     await submit(input(container));
     expect(commands).toHaveLength(1);
@@ -314,22 +337,22 @@ describe("the to-do draft across host selection", () => {
       { kind: "authenticating", hostId: hostA, displayName: "Studio" },
       hostA,
     );
-    await renderRoute(root, "todos", onSelectRoute);
+    await renderAt(root, "todos");
     context.current = mobileSession(transport, [hostA], ready, hostA);
-    await renderRoute(root, "todos", onSelectRoute);
+    await renderAt(root, "todos");
     expect(input(container).value).toBe("Carry this draft");
     await submit(input(container));
     expect(commands).toHaveLength(2);
     expect(commands[1]?.todoId).toBe(commands[0]?.todoId);
 
-    await renderRoute(root, "home", onSelectRoute);
+    await renderAt(root, "elsewhere");
     const resolveFirst = resolveAccepted;
     if (resolveFirst === undefined) throw new Error("The accepted send did not start.");
     await act(async () => {
       resolveFirst(Response.json({ kind: "todo-list", hostId: hostA, todos: [] }));
       await acceptedReply;
     });
-    await renderRoute(root, "todos", onSelectRoute);
+    await renderAt(root, "todos");
     expect(input(container).value).toBe("");
 
     const resolveSecond = resolveRetry;
@@ -338,7 +361,7 @@ describe("the to-do draft across host selection", () => {
       resolveSecond(Response.json({ kind: "todo-list", hostId: hostA, todos: [] }));
       await retryReply;
     });
-    await renderRoute(root, "todos", onSelectRoute);
+    await renderAt(root, "todos");
     expect(input(container).value).toBe("");
   });
 
@@ -388,9 +411,8 @@ describe("the to-do draft across host selection", () => {
     document.body.append(container);
     const root = createRoot(container);
     roots.push(root);
-    const onSelectRoute = vi.fn<(next: MobileRouteId) => void>();
 
-    await renderRoute(root, "todos", onSelectRoute);
+    await renderAt(root, "todos");
     await typeText(input(container), "Send from previous host");
     await submit(input(container));
     expect(previousHostCommands).toHaveLength(1);
@@ -401,7 +423,7 @@ describe("the to-do draft across host selection", () => {
       { kind: "ready", hostId: hostB, displayName: "Current" },
       hostB,
     );
-    await renderRoute(root, "todos", onSelectRoute);
+    await renderAt(root, "todos");
     expect(currentHostReads).toBe(1);
     expect(input(container).value).toBe("Send from previous host");
     await typeText(input(container), "Edited for current host");

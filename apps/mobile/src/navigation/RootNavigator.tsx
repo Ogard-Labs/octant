@@ -1,440 +1,304 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+} from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  createNavigationContainerRef,
+  DarkTheme,
+  DefaultTheme,
+  NavigationContainer,
+  StackActions,
+  type ParamListBase,
+} from "@react-navigation/native";
+import {
+  createNativeStackNavigator,
+  type NativeStackScreenProps,
+} from "@react-navigation/native-stack";
+import { SafeAreaView, type Edge } from "react-native-safe-area-context";
 import type { MobileInboxRow } from "@octant/client-runtime";
 import type { Todo } from "@octant/contracts/todos";
-import { DeviceRevokePanel } from "../approvals/DeviceRevokePanel";
-import { LargeTitle, ListRow, ListSection, NavBar } from "../ui/NativeChrome";
-import { TabBar, type MobileTabId } from "../ui/TabBar";
-import { MOBILE_COPY, MOBILE_TAB_LABELS, mobileHostHealthLabel, type MobileRouteId } from "../copy";
-import { AgentsListScreen, type AgentListView } from "../inbox/AgentsListScreen";
+import { ScreenCanvas, space, typography, useTheme } from "../../design-system";
+import { useAppearance } from "../appearance/AppearanceContext";
+import { HostsScreen } from "../hosts/HostsScreen";
+import { CountedThreadsScreen } from "../inbox/CountedThreadsScreen";
+import { HomeScreen } from "../inbox/HomeScreen";
+import { InboxScreen } from "../inbox/InboxScreen";
+import { MobileThreadsProvider } from "../inbox/MobileThreadsContext";
+import { NewThreadProvider, useNewThread } from "../inbox/NewThreadContext";
+import type { MobileThreadArrangement } from "../inbox/threadArrangement";
+import type { MobileThreadFilter } from "../inbox/threadFilters";
+import { ThreadScreen } from "../inbox/ThreadScreen";
+import { ThreadsScreen } from "../inbox/ThreadsScreen";
+import type { MobileComputersDeepLinkTarget } from "../notifications/deepLinks";
+import { mobileNotificationPort } from "../notifications/mobileNotificationPort";
+import { mobilePushRegistrationBook } from "../notifications/mobilePushRegistrationBook";
+import { usePhoneNotificationRotation } from "../notifications/usePhoneNotificationRotation";
+import { useMobileSession } from "../session/MobileSessionContext";
 import { TodosScreen } from "../todos/TodosScreen";
 import {
   mobileTodoDraftAfterHostChange,
   type MobileStartedThread,
   type MobileTodoQuickAddDraft,
 } from "../todos/todosPresentation";
-import { InboxHomeScreen } from "../inbox/InboxHomeScreen";
-import { backMobileHomeView, type MobileHomeView } from "../inbox/homeView";
-import type { MobileThreadArrangement } from "../inbox/threadArrangement";
-import { ThreadScreen } from "../inbox/ThreadScreen";
-import { hostHealthTone } from "../hosts/hostHealthTone";
-import { GuestHubPanel, GuestHubRefusals } from "../hosts/GuestHubPanel";
-import { createExpoPhoneUnlockKey } from "../hosts/expoOwnerUnlockPorts";
-import { OwnerAlertsPanel } from "../hosts/OwnerAlertsPanel";
-import { OwnerMovesPanel } from "../hosts/OwnerMovesPanel";
-import type { GuestSpokeRefusal } from "../hosts/hubGuestFlow";
-import { PairingPanel } from "../hosts/PairingPanel";
-import { ConnectorSignInPanel } from "../hosts/ConnectorSignInPanel";
-import { RemoveHostPanel } from "../hosts/RemoveHostPanel";
-import { forgetPhoneNotificationsForHost } from "../notifications/enablePhoneNotifications";
-import { mobileNotificationPort } from "../notifications/mobileNotificationPort";
-import { mobilePushRegistrationBook } from "../notifications/mobilePushRegistrationBook";
-import { PushNotificationsPanel } from "../notifications/PushNotificationsPanel";
-import { usePhoneNotificationRotation } from "../notifications/usePhoneNotificationRotation";
-import { createUnavailableDeviceIntegrityPort } from "../security/deviceIntegrityPort";
-import { mobileKeyStorageProtection, mobileScreenshotPrivacy } from "../security/deviceProtection";
-import { createExpoBiometricAuthenticator } from "../security/expoBiometricAuthenticator";
-import { PrivacySecurityPanel } from "../security/PrivacySecurityPanel";
-import { AppearanceBackgroundPanel } from "../appearance/AppearanceBackgroundPanel";
-import { useMobileSession } from "../session/MobileSessionContext";
-import { createMobileHostRemover } from "../session/mobileSessionLifecycle";
-import { mobileSpacing, mobileTypography } from "../theme/tokens";
-import { useTheme } from "../../design-system";
-import { useMobileHardwareBack } from "./useMobileHardwareBack";
-import { mobileThreadReturnRouteForDeepLink } from "./navigationState";
-import { deepLinkRefusal, computersLinkOpening } from "./deepLinkNavigation";
-import { NewDevicesPanel } from "../hosts/NewDevicesPanel";
-import type { MobileComputersDeepLinkTarget } from "../notifications/deepLinks";
+import { computersLinkOpening, deepLinkRefusal } from "./deepLinkNavigation";
+import { createPlaceTabNavigator } from "./PlaceTabNavigator";
+import { shippedMobilePlaces, type MobilePlaceId } from "./places";
+import type { MobileStackParams } from "./routes";
 
 export interface RootNavigatorProps {
-  readonly activeRoute: MobileRouteId;
-  readonly onSelectRoute: (route: MobileRouteId) => void;
   readonly pendingDeepLinkRow?: MobileInboxRow | undefined;
   /** A tapped notification that a move waits for this phone. */
   readonly pendingComputersLink?: MobileComputersDeepLinkTarget | undefined;
   readonly onDeepLinkConsumed?: (() => void) | undefined;
 }
 
-function HostsBody(props: {
-  readonly entryMode: "manage" | "add" | "scan";
-  readonly onBack: () => void;
-  readonly onPaired: () => void;
-  /** Why a link the person followed was not opened, if it was not. */
-  readonly notice?: string | undefined;
-  /** Counts the new-device links followed here, so the list reads again on each. */
-  readonly newDevicesRefreshKey: number;
-}) {
-  const { colors } = useTheme();
-  const {
-    environment,
-    hosts,
-    hostsError,
-    health,
-    registry,
-    refreshHosts,
-    resumeHost,
-    bridge,
-    deviceKeyStore,
-    hub,
-    guestHubStore,
-    transportForHost,
-    transports,
-    placementHostId,
-    setPlacementHostId,
-  } = useMobileSession();
-  const offlineDemo = environment.kind === "mock" && environment.offlineDemo;
-  const pairedHostIds = useMemo(() => hosts.map((host) => host.hostId), [hosts]);
-  const computerName = useCallback(
-    (hostId: string) => hosts.find((host) => host.hostId === hostId)?.label ?? "A paired computer",
-    [hosts],
-  );
-  const [notAccepted, setNotAccepted] = useState<ReadonlyArray<GuestSpokeRefusal>>([]);
-  useEffect(() => {
-    // The computers on a joined hub that refused this phone are listed beside the hosts.
-    void guestHubStore
-      .load()
-      .then((state) => setNotAccepted(state?.notAccepted ?? []))
-      .catch(() => undefined);
-  }, [guestHubStore, hosts]);
-  const [keyNotDeleted, setKeyNotDeleted] = useState(false);
-  const [removeFailed, setRemoveFailed] = useState(false);
-  const [notificationKeyKept, setNotificationKeyKept] = useState(false);
-  const removeMobileHostInTurn = useMemo(
-    () => createMobileHostRemover({ registry, hub, deviceKeyStore }),
-    [deviceKeyStore, hub, registry],
-  );
-  const notificationPermission = mobileNotificationPort;
-  const pushRegistrations = mobilePushRegistrationBook();
-  const removeHost = useCallback(
-    (hostId: string) => {
-      setRemoveFailed(false);
-      setNotificationKeyKept(false);
-      // The computer is asked to drop its registration while the connection
-      // still stands, then notifications already shown for it go, and so does
-      // the key that opens them, whether or not the rest of the removal lands.
-      void forgetPhoneNotificationsForHost({
-        hostId,
-        permission: notificationPermission,
-        book: pushRegistrations,
-        transport: transportForHost(hostId),
-      })
-        .then((forgotten) => {
-          // The record of the key stays, so the next time the app opens it
-          // deletes the key again; the person is told it is not gone yet.
-          if (!forgotten.keyForgotten) setNotificationKeyKept(true);
-        })
-        .catch(() => undefined)
-        .then(() => removeMobileHostInTurn(hostId))
-        .then((result) => {
-          if (!result.localCredentialRemoved) setKeyNotDeleted(true);
-          return refreshHosts();
-        })
-        .catch(() => setRemoveFailed(true));
-    },
-    [
-      notificationPermission,
-      pushRegistrations,
-      refreshHosts,
-      removeMobileHostInTurn,
-      transportForHost,
-    ],
-  );
-  const authenticator = useMemo(() => createExpoBiometricAuthenticator(), []);
-  const unlockKey = useMemo(() => createExpoPhoneUnlockKey(), []);
-  const deviceIntegrity = useMemo(() => createUnavailableDeviceIntegrityPort(), []);
-  const healthTint = {
-    neutral: colors.textSecondary,
-    warning: colors.warning,
-    danger: colors.danger,
-  } as const;
-  const healthByHostId = useMemo(
-    () => new Map(health.map((entry) => [entry.hostId, entry])),
-    [health],
-  );
+const Places = createPlaceTabNavigator();
+const Stack = createNativeStackNavigator<MobileStackParams>();
 
-  const styles = useMemo(
-    () =>
-      StyleSheet.create({
-        hostsShell: { flex: 1 },
-        body: {
-          paddingTop: mobileSpacing.sm,
-          paddingBottom: mobileSpacing.xl,
-        },
-        sectionBody: {
-          color: colors.textSecondary,
-          fontSize: mobileTypography.detail.fontSize,
-          lineHeight: 18,
-          paddingHorizontal: mobileSpacing.md + mobileSpacing.md,
-          marginBottom: mobileSpacing.md,
-        },
-        gutter: { gap: mobileSpacing.md, paddingHorizontal: mobileSpacing.md },
-        hostPanels: { gap: mobileSpacing.sm, paddingHorizontal: mobileSpacing.md },
-        hostPanelsTitle: {
-          color: colors.textSecondary,
-          fontSize: mobileTypography.section.fontSize,
-          fontWeight: mobileTypography.section.fontWeight,
-        },
-      }),
-    [colors],
-  );
+/** What several screens share and no one of them owns. */
+interface Shell {
+  readonly arrangement: MobileThreadArrangement;
+  readonly setArrangement: (arrangement: MobileThreadArrangement) => void;
+  readonly mode: MobileThreadFilter["mode"];
+  readonly setMode: (mode: MobileThreadFilter["mode"]) => void;
+  readonly todoDraft: MobileTodoQuickAddDraft;
+  readonly changeTodoDraft: (text: string) => void;
+  readonly completeTodoDraft: (
+    draftId: string,
+    submittedText: string,
+    hostId: string | undefined,
+  ) => void;
+  readonly recordTodoLink: (todoId: string, thread: MobileStartedThread, linked: boolean) => void;
+  readonly startTodo: (todo: Todo) => void;
+  readonly unlinkedTodoStarts: ReadonlyMap<string, MobileStartedThread>;
+}
 
+const ShellContext = createContext<Shell | undefined>(undefined);
+
+function useShell(): Shell {
+  const shell = useContext(ShellContext);
+  if (shell === undefined) throw new Error("Screens render inside the phone's shell.");
+  return shell;
+}
+
+type ScreenProps<Name extends keyof MobileStackParams> = NativeStackScreenProps<
+  MobileStackParams,
+  Name
+>;
+
+function HomeRoute({ navigation }: ScreenProps<"homeRoot">) {
+  const { setInboxHostFilter } = useMobileSession();
+  const openPlace = (place: MobilePlaceId) => navigation.getParent()?.navigate(place);
   return (
-    <View style={styles.hostsShell}>
-      {props.entryMode === "manage" ? (
-        <LargeTitle title={MOBILE_TAB_LABELS.hosts} />
-      ) : (
-        <NavBar
-          backLabel={MOBILE_TAB_LABELS.home}
-          backTestID="mobile-hosts-back"
-          onBack={props.onBack}
-          title="Add computer"
-        />
+    <HomeScreen
+      onAddWorkspace={() => navigation.push("pair", { entryMode: "add" })}
+      onOpenCounted={(view) => navigation.push("counted", { view })}
+      onOpenSettings={() => navigation.push("settings", {})}
+      onOpenThread={(row) => navigation.push("thread", { row })}
+      onOpenThreads={() => {
+        setInboxHostFilter("all");
+        openPlace("threads");
+      }}
+      onOpenTodos={() => navigation.push("todos")}
+      onOpenWorkspace={(hostId) => {
+        setInboxHostFilter(hostId);
+        openPlace("threads");
+      }}
+      onScanToPair={() => navigation.push("pair", { entryMode: "scan" })}
+    />
+  );
+}
+
+function ThreadsRoute({ navigation }: ScreenProps<"threadsRoot">) {
+  const shell = useShell();
+  return (
+    <ThreadsScreen
+      arrangement={shell.arrangement}
+      mode={shell.mode}
+      onOpenThread={(row, focusTurnId) => navigation.push("thread", { row, focusTurnId })}
+      onSelectArrangement={shell.setArrangement}
+      onSelectMode={shell.setMode}
+    />
+  );
+}
+
+function InboxRoute({ navigation }: ScreenProps<"inboxRoot">) {
+  return <InboxScreen onOpenThread={(row) => navigation.push("thread", { row })} />;
+}
+
+function CountedRoute({ navigation, route }: ScreenProps<"counted">) {
+  return (
+    <CountedThreadsScreen
+      onOpenThread={(row) => navigation.push("thread", { row })}
+      view={route.params.view}
+    />
+  );
+}
+
+function ThreadRoute({ navigation, route }: ScreenProps<"thread">) {
+  return (
+    <ThreadScreen
+      focusTurnId={route.params.focusTurnId}
+      onOpenThread={(row) => navigation.replace("thread", { row })}
+      selected={route.params.row}
+    />
+  );
+}
+
+function SettingsRoute({ navigation, route }: ScreenProps<"settings">) {
+  return (
+    <HostsScreen
+      entryMode="manage"
+      newDevicesRefreshKey={route.params.linkOpened ?? 0}
+      notice={route.params.notice}
+      onPaired={() => navigation.popToTop()}
+    />
+  );
+}
+
+function PairRoute({ navigation, route }: ScreenProps<"pair">) {
+  return (
+    <HostsScreen
+      entryMode={route.params.entryMode}
+      newDevicesRefreshKey={0}
+      onPaired={() => navigation.popToTop()}
+    />
+  );
+}
+
+function TodosRoute() {
+  const shell = useShell();
+  return (
+    <TodosScreen
+      draft={shell.todoDraft}
+      onDraftChange={shell.changeTodoDraft}
+      onDraftSubmitted={shell.completeTodoDraft}
+      onLinked={shell.recordTodoLink}
+      onStart={shell.startTodo}
+      unlinked={shell.unlinkedTodoStarts}
+    />
+  );
+}
+
+// A root's list runs under the bar; a pushed screen owns the bottom edge.
+const ROOT_EDGES: ReadonlyArray<Edge> = ["left", "right"];
+const PUSHED_EDGES: ReadonlyArray<Edge> = ["left", "right", "bottom"];
+
+function PlaceStack(props: { readonly place: "home" | "threads" | "inbox" }) {
+  const appearance = useAppearance();
+  const { colors } = useTheme();
+  return (
+    <Stack.Navigator
+      initialRouteName={`${props.place}Root`}
+      screenLayout={({ children, route }) => (
+        <ScreenCanvas
+          customImageUri={appearance.preferences.customImageUri}
+          effect={appearance.preferences.effect}
+          picture={appearance.preferences.picture}
+        >
+          <SafeAreaView
+            edges={[...(route.name === `${props.place}Root` ? ROOT_EDGES : PUSHED_EDGES)]}
+            style={styles.fill}
+          >
+            {children}
+          </SafeAreaView>
+        </ScreenCanvas>
       )}
-      <ScrollView contentContainerStyle={styles.body}>
-        {props.entryMode !== "manage" ? (
-          environment.kind === "mock" ? (
-            <ListSection
-              footer="Pairing is off in this sample workspace. Leave it to connect a computer."
-              testID="mobile-hosts-mock-notice"
-            >
-              <ListRow
-                icon="qr-code-outline"
-                iconTone={colors.paletteBlue}
-                label="Pair a computer"
-                last
-              />
-            </ListSection>
-          ) : (
-            <View style={styles.gutter}>
-              <PairingPanel
-                registry={registry}
-                deviceKeyStore={deviceKeyStore}
-                bridge={bridge}
-                openScanner={props.entryMode === "scan"}
-                onPaired={() => {
-                  void refreshHosts();
-                  props.onPaired();
-                }}
-              />
-              {props.entryMode === "add" ? (
-                <GuestHubPanel
-                  registry={registry}
-                  deviceKeyStore={deviceKeyStore}
-                  guestHubStore={guestHubStore}
-                  removeHost={removeMobileHostInTurn}
-                  {...(unlockKey === undefined ? {} : { unlockKey })}
-                  onJoined={() => {
-                    void refreshHosts();
-                  }}
-                />
-              ) : null}
-            </View>
-          )
-        ) : (
-          <>
-            {environment.kind === "mock" ? (
-              <ListSection
-                footer="Hosts, credentials, and actions stay in memory and never connect to a real listener."
-                testID="mobile-hosts-mock-notice"
-              >
-                <ListRow
-                  detail={environment.label}
-                  icon="flask-outline"
-                  iconTone={colors.paletteTeal}
-                  label="Sample workspace"
-                  last
-                />
-              </ListSection>
-            ) : null}
-            {props.notice !== undefined ? (
-              <Text style={styles.sectionBody}>{props.notice}</Text>
-            ) : null}
-            {hostsError !== undefined ? <Text style={styles.sectionBody}>{hostsError}</Text> : null}
-            {removeFailed ? (
-              <Text style={styles.sectionBody}>{"Couldn't remove that computer. Try again."}</Text>
-            ) : null}
-            {notificationKeyKept ? (
-              <Text style={styles.sectionBody} testID="mobile-notification-key-kept">
-                {
-                  "This phone could not delete its notification key for that computer. Octant will try again the next time it opens."
-                }
-              </Text>
-            ) : null}
-            {keyNotDeleted ? (
-              <Text style={styles.sectionBody} testID="mobile-host-key-not-deleted">
-                {MOBILE_COPY.hostKeyNotDeleted}
-              </Text>
-            ) : null}
-            {/* These panels draw their own layout; the gutter keeps them off the
-                screen edge now that the page itself has none for grouped lists. */}
-            <View style={styles.gutter}>
-              <GuestHubRefusals refused={notAccepted} />
-              {offlineDemo || unlockKey === undefined ? null : (
-                <OwnerMovesPanel
-                  deviceKeyStore={deviceKeyStore}
-                  guestHubStore={guestHubStore}
-                  unlockKey={unlockKey}
-                />
-              )}
-              {offlineDemo ? null : (
-                <NewDevicesPanel
-                  computerName={computerName}
-                  hostIds={pairedHostIds}
-                  refreshKey={props.newDevicesRefreshKey}
-                  transports={transports}
-                />
-              )}
-              {offlineDemo || unlockKey === undefined ? null : (
-                <OwnerAlertsPanel
-                  deviceKeyStore={deviceKeyStore}
-                  guestHubStore={guestHubStore}
-                  unlockKey={unlockKey}
-                />
-              )}
-            </View>
-            {hosts.length === 0 ? (
-              <Text style={styles.sectionBody}>{MOBILE_COPY.hostsEmpty}</Text>
-            ) : (
-              <>
-                <ListSection title={MOBILE_COPY.workspaces}>
-                  {hosts.map((host, index) => {
-                    const status = healthByHostId.get(host.hostId);
-                    const tone = hostHealthTone(status?.kind ?? "idle");
-                    return (
-                      <ListRow
-                        detail={`${mobileHostHealthLabel(status?.kind ?? "idle")}${
-                          status?.detail !== undefined ? ` · ${status.detail}` : ""
-                        }`}
-                        detailTone={tone === "neutral" ? undefined : healthTint[tone]}
-                        icon="desktop-outline"
-                        iconTone={tone === "neutral" ? colors.paletteBlue : healthTint[tone]}
-                        key={host.hostId}
-                        label={host.label}
-                        last={index === hosts.length - 1}
-                        onPress={
-                          environment.kind === "mock" ? undefined : () => resumeHost(host.origin)
-                        }
-                        testID={`mobile-host-${host.hostId}`}
-                      />
-                    );
-                  })}
-                </ListSection>
-                <ListSection
-                  footer={MOBILE_COPY.placementHint}
-                  title={MOBILE_COPY.placementSection}
-                >
-                  {hosts.map((host, index) => (
-                    <ListRow
-                      accessory={placementHostId === host.hostId ? "check" : "none"}
-                      accessibilityLabel={`${host.label}${
-                        placementHostId === host.hostId ? `, ${MOBILE_COPY.placementHere}` : ""
-                      }`}
-                      key={host.hostId}
-                      label={host.label}
-                      last={index === hosts.length - 1}
-                      onPress={() => setPlacementHostId(host.hostId)}
-                      testID={`mobile-placement-${host.hostId}`}
-                    />
-                  ))}
-                </ListSection>
-                {environment.kind === "live"
-                  ? hosts.map((host) => {
-                      const status = healthByHostId.get(host.hostId);
-                      return (
-                        <View key={host.hostId} style={styles.hostPanels}>
-                          <Text style={styles.hostPanelsTitle}>{host.label}</Text>
-                          {environment.kind === "live" && status?.kind === "ready" ? (
-                            <>
-                              <ConnectorSignInPanel transport={transportForHost(host.hostId)} />
-                              <PushNotificationsPanel
-                                hostKeyFingerprint={host.hostKeyFingerprint}
-                                permission={notificationPermission}
-                                transport={transportForHost(host.hostId)}
-                                book={pushRegistrations}
-                                resolveDeviceId={() =>
-                                  deviceKeyStore
-                                    .findByOrigin(host.origin)
-                                    .then((found) =>
-                                      found?.hostId === host.hostId ? found.deviceId : undefined,
-                                    )
-                                }
-                              />
-                              <DeviceRevokePanel
-                                authenticator={authenticator}
-                                bridge={hub.bridgeForOrigin(host.origin) ?? bridge}
-                                transport={transportForHost(host.hostId)}
-                                onRevoked={() => {
-                                  removeHost(host.hostId);
-                                }}
-                              />
-                            </>
-                          ) : null}
-                          {environment.kind === "live" && status?.kind === "stale" ? (
-                            <DeviceRevokePanel
-                              authenticator={authenticator}
-                              bridge={hub.bridgeForOrigin(host.origin) ?? bridge}
-                              transport={transportForHost(host.hostId)}
-                              onRevoked={() => {
-                                removeHost(host.hostId);
-                              }}
-                            />
-                          ) : null}
-                          {environment.kind === "live" ? (
-                            <RemoveHostPanel
-                              hostLabel={host.label}
-                              onRemove={() => removeHost(host.hostId)}
-                              testIdSuffix={host.hostId}
-                            />
-                          ) : null}
-                        </View>
-                      );
-                    })
-                  : null}
-              </>
-            )}
-            {!offlineDemo ? (
-              <>
-                <AppearanceBackgroundPanel />
-                <PrivacySecurityPanel
-                  hostHealth={
-                    placementHostId !== undefined
-                      ? (healthByHostId.get(placementHostId)?.kind ?? "idle")
-                      : hosts[0] !== undefined
-                        ? (healthByHostId.get(hosts[0].hostId)?.kind ?? "idle")
-                        : "idle"
-                  }
-                  integrity={deviceIntegrity}
-                  keyStorage={mobileKeyStorageProtection}
-                  screenshotPrivacy={mobileScreenshotPrivacy}
-                />
-              </>
-            ) : null}
-          </>
-        )}
-      </ScrollView>
+      screenOptions={{ headerTintColor: colors.accent, headerBackButtonDisplayMode: "minimal" }}
+    >
+      {props.place === "home" ? (
+        <Stack.Screen component={HomeRoute} name="homeRoot" options={ROOT_OPTIONS} />
+      ) : props.place === "threads" ? (
+        <Stack.Screen component={ThreadsRoute} name="threadsRoot" options={ROOT_OPTIONS} />
+      ) : (
+        <Stack.Screen component={InboxRoute} name="inboxRoot" options={ROOT_OPTIONS} />
+      )}
+      <Stack.Screen component={CountedRoute} name="counted" />
+      <Stack.Screen component={ThreadRoute} name="thread" />
+      <Stack.Screen component={SettingsRoute} name="settings" options={ROOT_OPTIONS} />
+      <Stack.Screen component={PairRoute} name="pair" />
+      <Stack.Screen component={TodosRoute} name="todos" />
+    </Stack.Navigator>
+  );
+}
+
+const ROOT_OPTIONS = { headerLargeTitleEnabled: true } as const;
+const HomeStack = () => <PlaceStack place="home" />;
+const ThreadsStack = () => <PlaceStack place="threads" />;
+const InboxStack = () => <PlaceStack place="inbox" />;
+const STACKS: Readonly<Partial<Record<MobilePlaceId, () => JSX.Element>>> = {
+  home: HomeStack,
+  threads: ThreadsStack,
+  inbox: InboxStack,
+};
+
+const styles = StyleSheet.create({ fill: { flex: 1 } });
+
+function PlacesShell() {
+  const { openNewThread, accessReason } = useNewThread();
+  const { hosts } = useMobileSession();
+  return (
+    <Places.Navigator
+      backBehavior="firstRoute"
+      newDisabled={accessReason !== undefined || hosts.length === 0}
+      onNew={openNewThread}
+    >
+      {shippedMobilePlaces().map((place) => {
+        const stack = STACKS[place.id];
+        return stack === undefined ? null : (
+          <Places.Screen component={stack} key={place.id} name={place.id} />
+        );
+      })}
+    </Places.Navigator>
+  );
+}
+
+function LinkNotice(props: { readonly text: string; readonly onDismiss: () => void }) {
+  const { colors } = useTheme();
+  return (
+    <View
+      accessibilityLiveRegion="polite"
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: space.sm,
+        paddingHorizontal: space.md,
+        paddingVertical: space.sm,
+        backgroundColor: colors.surfaceElevated,
+      }}
+      testID="mobile-link-notice"
+    >
+      <Text style={{ flex: 1, color: colors.textPrimary, fontSize: typography.detail.fontSize }}>
+        {props.text}
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        hitSlop={10}
+        onPress={props.onDismiss}
+        testID="mobile-link-notice-dismiss"
+      >
+        <Text style={{ color: colors.accent, fontSize: typography.detail.fontSize }}>OK</Text>
+      </Pressable>
     </View>
   );
 }
 
-const shellStyles = StyleSheet.create({
-  shell: {
-    flex: 1,
-    backgroundColor: "transparent",
-  },
-});
-
 export function RootNavigator(props: RootNavigatorProps) {
-  const [selectedThread, setSelectedThread] = useState<MobileInboxRow | undefined>();
-  const [focusTurnId, setFocusTurnId] = useState<string | undefined>();
-  const [threadReturnRoute, setThreadReturnRoute] = useState<"home" | "agents">("home");
-  const [homeMode, setHomeMode] = useState<MobileHomeView>("inbox");
-  // Each tab keeps its own arrangement while the app runs, as each desktop
-  // mode does; Status is the default.
-  const [arrangements, setArrangements] = useState<
-    Readonly<Record<"work" | "code", MobileThreadArrangement>>
-  >({ work: "status", code: "status" });
-  const [hostEntryMode, setHostEntryMode] = useState<"manage" | "add" | "scan">("manage");
-  // A Start pressed on To-dos, waiting for the Inbox's new-thread sheet to take it.
+  const { colors, scheme } = useTheme();
+  const [navigation] = useState(() => createNavigationContainerRef<ParamListBase>());
+  const [ready, setReady] = useState(false);
+  const [linkNotice, setLinkNotice] = useState<string | undefined>();
+  const linksOpened = useRef(0);
+  const [arrangement, setArrangement] = useState<MobileThreadArrangement>("status");
+  const [mode, setMode] = useState<MobileThreadFilter["mode"]>("all");
+  // A Start pressed on To-dos, waiting for the new-thread sheet to take it.
   const [todoStart, setTodoStart] = useState<Todo | undefined>();
   const [todoDraft, setTodoDraft] = useState<MobileTodoQuickAddDraft>(() => ({
     id: globalThis.crypto.randomUUID(),
@@ -455,12 +319,8 @@ export function RootNavigator(props: RootNavigatorProps) {
       }),
     [],
   );
-  const [agentListView, setAgentListView] = useState<AgentListView>("all");
-  const [deepLinkNotice, setDeepLinkNotice] = useState<string | undefined>();
-  const [newDevicesRefreshKey, setNewDevicesRefreshKey] = useState(0);
   const {
     environment,
-    setInboxHostFilter,
     inboxHostFilter,
     hosts,
     hostsLoaded,
@@ -515,181 +375,112 @@ export function RootNavigator(props: RootNavigatorProps) {
     transportForHost,
     transports,
   });
-  const onHomeBack = useCallback(() => {
-    const previous = backMobileHomeView(homeMode);
-    if (previous === undefined) return false;
-    setHomeMode(previous);
-    return true;
-  }, [homeMode]);
-  useMobileHardwareBack(props.activeRoute, props.onSelectRoute, onHomeBack, threadReturnRoute);
 
+  const { pendingDeepLinkRow, pendingComputersLink, onDeepLinkConsumed } = props;
   useEffect(() => {
-    if (props.pendingDeepLinkRow === undefined) return;
     // On a cold open the paired list is still being read; deciding now would
     // call every computer unpaired.
-    if (!hostsLoaded) return;
+    if (pendingDeepLinkRow === undefined || !hostsLoaded || !ready) return;
     const refusal = deepLinkRefusal(
-      props.pendingDeepLinkRow,
+      pendingDeepLinkRow,
       hosts.map((host) => host.hostId),
       hostsError !== undefined,
     );
-    if (refusal !== undefined) {
-      setDeepLinkNotice(refusal);
-      setHostEntryMode("manage");
-      props.onSelectRoute("hosts");
-      props.onDeepLinkConsumed?.();
-      return;
+    // A refused link leaves the person where they were, with the reason.
+    setLinkNotice(refusal);
+    if (refusal === undefined) {
+      // Under its own list, so Back leads there from wherever the link came.
+      navigation.navigate("threads", {
+        state: {
+          routes: [
+            { name: "threadsRoot" },
+            { name: "thread", params: { row: pendingDeepLinkRow } },
+          ],
+        },
+      });
     }
-    setDeepLinkNotice(undefined);
-    setThreadReturnRoute(mobileThreadReturnRouteForDeepLink(props.activeRoute));
-    setSelectedThread(props.pendingDeepLinkRow);
-    setInboxHostFilter(props.pendingDeepLinkRow.hostId);
-    props.onSelectRoute("thread");
-    props.onDeepLinkConsumed?.();
-  }, [
-    props.activeRoute,
-    props.pendingDeepLinkRow,
-    props.onDeepLinkConsumed,
-    props.onSelectRoute,
-    setInboxHostFilter,
-    hosts,
-    hostsLoaded,
-    hostsError,
-  ]);
+    onDeepLinkConsumed?.();
+  }, [hosts, hostsError, hostsLoaded, navigation, onDeepLinkConsumed, pendingDeepLinkRow, ready]);
 
   useEffect(() => {
-    if (props.pendingComputersLink === undefined) return;
     // As for a thread link, the paired list must be read before a computer
     // can be called unpaired.
-    if (!hostsLoaded) return;
+    if (pendingComputersLink === undefined || !hostsLoaded || !ready) return;
     const opening = computersLinkOpening(
-      props.pendingComputersLink,
+      pendingComputersLink,
       hosts.map((host) => host.hostId),
       hostsError !== undefined,
     );
-    setDeepLinkNotice(opening.notice);
-    setHostEntryMode(opening.entryMode);
-    setNewDevicesRefreshKey((count) => count + 1);
-    props.onSelectRoute(opening.route);
-    props.onDeepLinkConsumed?.();
-  }, [
-    props.pendingComputersLink,
-    props.onDeepLinkConsumed,
-    props.onSelectRoute,
-    hosts,
-    hostsLoaded,
-    hostsError,
-  ]);
+    linksOpened.current += 1;
+    navigation.navigate("home", {
+      state: {
+        routes: [
+          { name: "homeRoot" },
+          {
+            name: "settings",
+            params: { notice: opening.notice, linkOpened: linksOpened.current },
+          },
+        ],
+      },
+    });
+    onDeepLinkConsumed?.();
+  }, [hosts, hostsError, hostsLoaded, navigation, onDeepLinkConsumed, pendingComputersLink, ready]);
 
-  // The tab bar stands on each place's root screen and steps aside for a
-  // pushed screen (a list, a thread, pairing), as the system's own apps do.
-  const activeTab: MobileTabId | undefined =
-    props.activeRoute === "home"
-      ? homeMode
-      : props.activeRoute === "hosts" && hostEntryMode === "manage"
-        ? "settings"
-        : undefined;
+  const shell = useMemo<Shell>(
+    () => ({
+      arrangement,
+      setArrangement,
+      mode,
+      setMode,
+      todoDraft,
+      changeTodoDraft,
+      completeTodoDraft,
+      recordTodoLink,
+      startTodo: setTodoStart,
+      unlinkedTodoStarts,
+    }),
+    [
+      arrangement,
+      changeTodoDraft,
+      completeTodoDraft,
+      mode,
+      recordTodoLink,
+      todoDraft,
+      unlinkedTodoStarts,
+    ],
+  );
+  const theme = useMemo(() => {
+    const base = scheme === "dark" ? DarkTheme : DefaultTheme;
+    return {
+      ...base,
+      colors: {
+        ...base.colors,
+        primary: colors.accent,
+        background: colors.canvas,
+        text: colors.textPrimary,
+      },
+    };
+  }, [colors, scheme]);
 
   return (
-    <View style={shellStyles.shell} testID="octant-mobile-shell">
-      {props.activeRoute === "home" ? (
-        <InboxHomeScreen
-          arrangement={homeMode === "inbox" ? "status" : arrangements[homeMode]}
-          homeMode={homeMode}
-          onSelectArrangement={(arrangement) => {
-            if (homeMode === "inbox") return;
-            setArrangements((current) => ({ ...current, [homeMode]: arrangement }));
-          }}
-          onOpenAgents={(view) => {
-            setAgentListView(view);
-            props.onSelectRoute("agents");
-          }}
-          onOpenTodos={() => props.onSelectRoute("todos")}
-          onTodoLinked={recordTodoLink}
-          onTodoStartOpened={() => setTodoStart(undefined)}
-          todoStart={todoStart}
-          onAddWorkspace={() => {
-            setHostEntryMode("add");
-            props.onSelectRoute("hosts");
-          }}
-          onScanToPair={() => {
-            setHostEntryMode("scan");
-            props.onSelectRoute("hosts");
-          }}
-          onOpenWorkspace={(hostId) => {
-            setInboxHostFilter(hostId);
-            setAgentListView("all");
-            props.onSelectRoute("agents");
-          }}
-          onOpenThread={(row) => {
-            setSelectedThread(row);
-            setFocusTurnId(undefined);
-            setThreadReturnRoute("home");
-            props.onSelectRoute("thread");
-          }}
-        />
-      ) : null}
-      {props.activeRoute === "todos" ? (
-        <TodosScreen
-          onBack={() => props.onSelectRoute("home")}
-          draft={todoDraft}
-          onDraftChange={changeTodoDraft}
-          onDraftSubmitted={completeTodoDraft}
-          onLinked={recordTodoLink}
-          onStart={(todo) => {
-            setTodoStart(todo);
-            props.onSelectRoute("home");
-          }}
-          unlinked={unlinkedTodoStarts}
-        />
-      ) : null}
-      {props.activeRoute === "agents" ? (
-        <AgentsListScreen
-          onBack={() => props.onSelectRoute("home")}
-          onOpenThread={(row, turnId) => {
-            setSelectedThread(row);
-            setFocusTurnId(turnId);
-            setThreadReturnRoute("agents");
-            props.onSelectRoute("thread");
-          }}
-          onSelectView={setAgentListView}
-          view={agentListView}
-        />
-      ) : null}
-      {props.activeRoute === "thread" ? (
-        <ThreadScreen
-          onBack={() => props.onSelectRoute(threadReturnRoute)}
-          focusTurnId={focusTurnId}
-          onOpenThread={(row) => {
-            setSelectedThread(row);
-            setFocusTurnId(undefined);
-          }}
-          selected={selectedThread}
-        />
-      ) : null}
-      {props.activeRoute === "hosts" ? (
-        <HostsBody
-          entryMode={hostEntryMode}
-          onBack={() => props.onSelectRoute("home")}
-          onPaired={() => props.onSelectRoute("home")}
-          notice={deepLinkNotice}
-          newDevicesRefreshKey={newDevicesRefreshKey}
-        />
-      ) : null}
-      {activeTab === undefined ? null : (
-        <TabBar
-          active={activeTab}
-          onSelect={(tab) => {
-            if (tab === "settings") {
-              setHostEntryMode("manage");
-              props.onSelectRoute("hosts");
-              return;
-            }
-            setHomeMode(tab);
-            props.onSelectRoute("home");
-          }}
-        />
+    <View style={styles.fill} testID="octant-mobile-shell">
+      {linkNotice === undefined ? null : (
+        <LinkNotice onDismiss={() => setLinkNotice(undefined)} text={linkNotice} />
       )}
+      <ShellContext.Provider value={shell}>
+        <MobileThreadsProvider>
+          <NewThreadProvider
+            onOpenThread={(row) => navigation.dispatch(StackActions.push("thread", { row }))}
+            onTodoLinked={recordTodoLink}
+            onTodoStartOpened={() => setTodoStart(undefined)}
+            todoStart={todoStart}
+          >
+            <NavigationContainer onReady={() => setReady(true)} ref={navigation} theme={theme}>
+              <PlacesShell />
+            </NavigationContainer>
+          </NewThreadProvider>
+        </MobileThreadsProvider>
+      </ShellContext.Provider>
     </View>
   );
 }

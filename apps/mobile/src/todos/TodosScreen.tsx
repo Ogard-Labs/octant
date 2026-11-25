@@ -2,13 +2,14 @@ import { changeMobileTodos, readMobileTodos } from "@octant/client-runtime/mobil
 import type { Todo, TodoCommand, TodoListView } from "@octant/contracts/todos";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ScreenHeader } from "../navigation/ScreenHeader";
 import { useTheme } from "../../design-system";
-import { MOBILE_COPY } from "../copy";
+import { MOBILE_COPY, MOBILE_SCREEN_TITLES } from "../copy";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { BottomSheet } from "../ui/BottomSheet";
-import { ListRow, ListSection, NavBar } from "../ui/NativeChrome";
+import { ListRow, ListSection } from "../ui/NativeChrome";
 import {
   mobileQuickAdd,
   mobileTickCommand,
@@ -24,7 +25,6 @@ import {
 const REREAD_MS = 30_000;
 
 export interface TodosScreenProps {
-  readonly onBack: () => void;
   readonly draft: MobileTodoQuickAddDraft;
   readonly onDraftChange: (text: string) => void;
   readonly onDraftSubmitted: (draftId: string, text: string, hostId: string | undefined) => void;
@@ -217,13 +217,7 @@ export function TodosScreen(props: TodosScreenProps) {
 
   return (
     <View style={styles.shell} testID="mobile-todos">
-      <NavBar
-        backLabel={MOBILE_COPY.inboxTitle}
-        backTestID="mobile-todos-back"
-        onBack={props.onBack}
-        subtitle={hostName}
-        title={MOBILE_COPY.todosTitle}
-      />
+      <ScreenHeader subtitle={hostName} title={MOBILE_SCREEN_TITLES.todos} />
       <ScrollView contentContainerStyle={styles.body}>
         <TextInput
           accessibilityLabel={MOBILE_COPY.todosNew}
