@@ -679,7 +679,7 @@ export function wireHarness(deps: HarnessDependencies) {
   const sideTaskHost: {
     current:
       | (Pick<SideTaskStartDependencies, "fork" | "offeringTurn" | "sendTurn" | "continueHere"> &
-          Pick<SideTaskRouteDependencies, "childState">)
+          Pick<SideTaskRouteDependencies, "childStates">)
       | undefined;
   } = { current: undefined };
   const authorizeFollowUpThread = ({
@@ -720,7 +720,8 @@ export function wireHarness(deps: HarnessDependencies) {
       Promise.resolve({ kind: "refused", message: "This thread cannot take a message now." }),
     noteStarted: ({ parentThreadId, childThreadId }) =>
       threadFollowUpSuggestions.noteSideTaskStarted(parentThreadId, childThreadId),
-    childState: (input) => sideTaskHost.current?.childState?.(input),
+    childStates: (windowId) =>
+      sideTaskHost.current?.childStates?.(windowId) ?? (() => Promise.resolve(undefined)),
     reports: sideTaskReports,
     clock: () => new Date().toISOString(),
   });

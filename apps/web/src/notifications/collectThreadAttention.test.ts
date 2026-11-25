@@ -217,6 +217,30 @@ describe("collecting thread attention", () => {
     ]);
   });
 
+  it("reports a Code thread parked on a question as a question, once, never as an approval", () => {
+    const asking = {
+      threadId: "code-a",
+      title: "Parser",
+      awaitingInput: true,
+      awaitingKind: "user-input",
+    } as never;
+    const signal = { threadId: "code-a", title: "Parser", source: "code" as const };
+    expect(
+      collectThreadAttentionSignals({ chatThreads: [], workThreads: [], codeThreads: [asking] }),
+    ).toEqual([{ ...signal, reason: "question-asked", detail: "Waiting for your answer." }]);
+    // An open thread already names the question itself.
+    expect(
+      collectThreadAttentionSignals({
+        chatThreads: [],
+        workThreads: [],
+        codeThreads: [asking],
+        codeProviderRequestsByThreadId: {
+          "code-a": [{ kind: "user-input", prompt: "Support the older format?" } as never],
+        },
+      }),
+    ).toEqual([{ ...signal, reason: "question-asked", detail: "Support the older format?" }]);
+  });
+
   it("lists a Code thread that finished a turn in the background, as Home counts it", () => {
     const base = {
       executionPolicy: "approval-gated" as const,

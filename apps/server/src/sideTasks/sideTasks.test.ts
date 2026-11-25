@@ -971,13 +971,14 @@ describe("side tasks", () => {
       const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
       const windowAuthorityStore = new WindowAuthorityStore();
       windowAuthorityStore.register({ windowId: windowId as WindowId, capability, now: 0 });
-      const childState = vi.fn(() => "working" as const);
+      const childState = vi.fn(async () => "working" as const);
+      const childStates = vi.fn(() => childState);
       const route = createSideTaskRouteHandler({
         ...startDependencies(store),
         store,
         windowAuthorityStore,
         authorizeThread: () => true,
-        childState,
+        childStates,
         now: () => 1,
       });
       const response = await route(
@@ -990,9 +991,8 @@ describe("side tasks", () => {
         sideTasks: { tasks: Array<{ childState?: string; status: string }> };
       };
       expect(body.sideTasks.tasks[0]).toMatchObject({ status: "started", childState: "working" });
-      expect(childState).toHaveBeenCalledWith(
-        expect.objectContaining({ mode: "chat", threadId: child, windowId }),
-      );
+      expect(childStates).toHaveBeenCalledWith(windowId);
+      expect(childState).toHaveBeenCalledWith({ mode: "chat", threadId: child });
 
       // An unreadable child carries no state rather than a guessed one.
       const quietRoute = createSideTaskRouteHandler({
@@ -1000,7 +1000,7 @@ describe("side tasks", () => {
         store,
         windowAuthorityStore,
         authorizeThread: () => true,
-        childState: () => undefined,
+        childStates: () => async () => undefined,
         now: () => 1,
       });
       const quietResponse = await quietRoute(
@@ -1068,7 +1068,9 @@ describe("side tasks", () => {
             windowAuthorityStore,
             authorizeThread: authorized,
             reports,
-            ...(childState === undefined ? {} : { childState }),
+            ...(childState === undefined
+              ? {}
+              : { childStates: () => () => Promise.resolve(childState()) }),
             now: () => 1,
           }),
         };
@@ -1221,48 +1223,50 @@ describe("side tasks", () => {
       });
     });
 
-    it("shares one navigation read across the children a single read enriches", async () => {
+    it("shares one reader across the children a single read enriches", async () => {
       const store = storeOn(openConnection());
-      const sideTaskId = await offeredHere(store);
-      const child = "00000000-0000-4000-8000-000000000093";
-      await startSideTask(
-        startDependencies(store, {
-          create: async () => ({
-            kind: "created",
-            created: {
-              kind: "new-thread",
-              mode: "chat",
-              title: offer.title,
-              threadId: child,
-            } as never,
-            onSuggestingModel: true,
+      const tools = toolsFor(store, "chat", uuidFactory());
+      const children = [
+        "00000000-0000-4000-8000-000000000093",
+        "00000000-0000-4000-8000-000000000094",
+      ];
+      for (const child of children) {
+        await tools.execute({ name: "octant_offer_side_task", inputJson: JSON.stringify(offer) });
+        await startSideTask(
+          startDependencies(store, {
+            create: async () => ({
+              kind: "created",
+              created: {
+                kind: "new-thread",
+                mode: "chat",
+                title: offer.title,
+                threadId: child,
+              } as never,
+              onSuggestingModel: true,
+            }),
           }),
-        }),
-        { threadId, windowId, sideTaskId },
-      );
+          {
+            threadId,
+            windowId,
+            sideTaskId: String(store.read(threadId).tasks.at(-1)?.offer.id),
+          },
+        );
+      }
       const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
       const windowAuthorityStore = new WindowAuthorityStore();
       windowAuthorityStore.register({ windowId: windowId as WindowId, capability, now: 0 });
-      const reads: string[] = [];
+      const read: string[] = [];
+      const childStates = vi.fn(() => async (input: { readonly threadId: string }) => {
+        read.push(input.threadId);
+        return "quiet" as const;
+      });
       const route = createSideTaskRouteHandler({
         ...startDependencies(store),
         store,
         windowAuthorityStore,
         authorizeThread: () => true,
         now: () => 1,
-        childState: async (input) => {
-          const first = await input.share?.("work", async () => {
-            reads.push("first");
-            return "one";
-          });
-          const second = await input.share?.("work", async () => {
-            reads.push("second");
-            return "two";
-          });
-          expect(first).toBe("one");
-          expect(second).toBe("one");
-          return "quiet" as const;
-        },
+        childStates,
       });
 
       const response = await route(
@@ -1272,7 +1276,8 @@ describe("side tasks", () => {
       );
 
       expect(response?.status).toBe(200);
-      expect(reads).toEqual(["first"]);
+      expect(childStates).toHaveBeenCalledExactlyOnceWith(windowId);
+      expect(read).toEqual(children);
     });
   });
 

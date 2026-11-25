@@ -1,4 +1,5 @@
 import {
+  Fragment,
   lazy,
   memo,
   Suspense,
@@ -1282,9 +1283,27 @@ function CoordinatorThreadSection(props: {
             {open && hasRows ? (
               <div className="project-coordinator__workers" id={listId}>
                 {childRows.length === 0 ? null : rows(childRows)}
-                {workerRows.length === 0 ? null : (
-                  <div className="project-coordinator__worker-rows">{rows(workerRows)}</div>
-                )}
+                {!hasWorkers
+                  ? null
+                  : workerRows.length === group.workers.length
+                    ? rows(group.workers)
+                    : group.workers.map((worker) => {
+                        // A worker already sits one step in, so the threads it
+                        // started take a step of their own. Set here, not in the
+                        // sidebar's stylesheet: that loads before first paint
+                        // and has no room under its budget.
+                        const own = props.expandThreads([worker]).slice(1);
+                        return (
+                          <Fragment key={worker.navigationId ?? worker.threadId}>
+                            {rows([worker])}
+                            {own.length === 0 ? null : (
+                              <div style={{ marginInlineStart: "var(--oct-space-3)" }}>
+                                {rows(own)}
+                              </div>
+                            )}
+                          </Fragment>
+                        );
+                      })}
               </div>
             ) : null}
           </div>

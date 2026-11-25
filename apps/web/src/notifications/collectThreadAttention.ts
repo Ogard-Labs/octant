@@ -91,12 +91,19 @@ export function collectThreadAttentionSignals(
       ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
     };
     if (thread.awaitingInput === true) {
-      // The agent's own harness approval: the turn is parked until a person decides.
-      signals.push({
-        ...shared,
-        reason: "approval-required",
-        detail: "Waiting for your approval.",
-      });
+      // The turn is parked until a person decides or answers. A provider's own
+      // request in an open thread is listed below with its text, so only a
+      // request nothing else names is listed here.
+      const question = thread.awaitingKind === "user-input";
+      const named = sources.codeProviderRequestsByThreadId?.[String(thread.threadId)]?.some(
+        (request) => (request.kind === "approval") !== question,
+      );
+      if (named !== true)
+        signals.push(
+          question
+            ? { ...shared, reason: "question-asked", detail: "Waiting for your answer." }
+            : { ...shared, reason: "approval-required", detail: "Waiting for your approval." },
+        );
     }
     if (thread.followUp === true) {
       signals.push({ ...shared, reason: "question-asked" });

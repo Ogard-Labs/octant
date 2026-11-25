@@ -750,11 +750,11 @@ export interface CodeServiceOptions {
    */
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
   /**
-   * Whether the thread's running provider turn is parked on a question the
-   * person has not answered. Its work record stays `running` while it waits,
-   * so without this the navigation row would call a parked turn executing.
+   * The approval or question the thread's running provider turn is parked on.
+   * Its work record stays `running` while it waits, so without this the
+   * navigation row would call a parked turn executing.
    */
-  readonly turnAwaitsPerson?: (threadId: string) => boolean;
+  readonly turnAwaiting?: (threadId: string) => "approval" | "user-input" | undefined;
   /** Reads the thread's latest finished receipt so Done attaches fresh proof. */
   readonly readLatestFinishedReceipt?: (threadId: string) => ThreadFinishedReceipt | undefined;
   /** The person's Settings choice to put a thread away once it is done; absent is off. */
@@ -1179,7 +1179,7 @@ export class CodeService {
   readonly #putAwayWhenDone: () => boolean;
   readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #awaitsHarnessApproval: ((threadId: string) => boolean) | undefined;
-  readonly #turnAwaitsPerson: ((threadId: string) => boolean) | undefined;
+  readonly #turnAwaiting: CodeServiceOptions["turnAwaiting"];
   readonly #issueContext?: GithubIssueContextPort;
   readonly #moveHold?: (threadId: string) => boolean;
   readonly #terminalSessions: TerminalSessionImportPort | undefined;
@@ -1246,7 +1246,7 @@ export class CodeService {
     this.#touchedIssues = options.touchedIssues;
     this.#liveTurns = options.liveTurns;
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
-    this.#turnAwaitsPerson = options.turnAwaitsPerson;
+    this.#turnAwaiting = options.turnAwaiting;
     this.#readLatestFinishedReceipt = options.readLatestFinishedReceipt;
     this.#putAwayWhenDone = options.putAwayWhenDone ?? (() => false);
     if (options.issueContext !== undefined) {
@@ -1558,10 +1558,10 @@ export class CodeService {
     return threads.map((thread) => {
       // A provider turn parked on a question keeps its `running` work record,
       // so the live read is what tells a waiting turn from an executing one.
-      const personParked = this.#turnAwaitsPerson?.(String(thread.id)) === true;
+      const asked = this.#turnAwaiting?.(String(thread.id));
       const activity = boardRuntimeActivityFromWorks(
         this.#persistence.readCodeRuntimeWorks(thread.id),
-        { turnParkedOnPerson: personParked },
+        { turnParkedOnPerson: asked !== undefined },
       );
       const checkout = this.#persistence.readCodeCheckout(thread.checkoutId);
       const checkoutChip = codeNavigationCheckoutChip(checkout);
@@ -1581,13 +1581,16 @@ export class CodeService {
       // A turn parked on the agent's own approval is owed by the person, not
       // executing, the same as the board reads it. The thread keeps saying so
       // after a restart took the turn: the approval stays until it is resumed.
-      const parked = this.#awaitsHarnessApproval?.(String(thread.id)) === true;
+      const awaitingKind =
+        this.#awaitsHarnessApproval?.(String(thread.id)) === true ? "approval" : asked;
+      const parked = awaitingKind !== undefined;
       return {
         threadId: thread.id,
-        executing: activity.executing && !parked && !personParked,
-        ...(parked || personParked || activity.awaitingInput
-          ? { awaitingInput: true as const }
-          : {}),
+        executing: activity.executing && !parked,
+        // Only what the person is asked now. The board's `awaitingInput` also
+        // counts a turn stopped at a usage limit and an unconfirmed Git step;
+        // here it would list them as approvals and end the thread's snooze.
+        ...(parked ? { awaitingInput: true as const, awaitingKind } : {}),
         ...(checkoutChip === undefined ? {} : { checkoutChip }),
         ...(hasPullRequests ? { pullRequestSummaries, threadPullRequests } : {}),
         ...this.#touchedIssuesFor(thread, pullRequests),
