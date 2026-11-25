@@ -455,9 +455,10 @@ Chat can receive a message. Its actions are **Open thread**, **Side Chat** where
 the composer offers it, and **Remove**. Pull requests and issues read there as
 facts, not links. Hovering never moves focus from the prompt.
 
-The card's facts are the window's own sidebar rows, read by thread id: drawing
-it asks the host for nothing, and it says nothing the sidebar could not. A
-thread the window does not list shows what the host's search said of it (title,
+The card's facts are the threads the host already lists to the window, read by
+thread id, so drawing it asks the host for nothing. A worker the sidebar leaves
+out (Show workers off) is listed all the same, as it is for Needs you and
+search. A thread the window does not list shows what the host's search said of it (title,
 mode and Project) and no Open thread. A thread the host refused is outlined and
 shows its reason and no other fact, even where the window lists it.
 
@@ -467,9 +468,11 @@ Project. A phone's row leaves out the model.
 
 A sent message keeps its chips. The turn stores the mentioned ids and nothing
 else of their threads ([Architecture](../architecture.md#modes-chat-work-and-code)),
-and each id is matched to the chip text its thread's title reads as now; a
-thread renamed since is matched by order when exactly one place is left for each
-id that is left. A mention of a thread the window does not list, text no id
+in the order the text shows them. A message with exactly one chip text per id
+pairs them in that order, renamed threads included; otherwise an id takes the
+text its thread's title reads as now, unless an unlisted or renamed thread could
+stand there instead. A chip never opens a thread the message did not name there.
+A mention of a thread the window does not list, text no id
 claims, and a message sent before ids were stored stay the text they were. A
 side task's receipt opens the same card from the title of the thread it
 started, while the window lists that thread.

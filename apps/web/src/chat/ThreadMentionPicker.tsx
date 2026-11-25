@@ -44,6 +44,8 @@ export interface ThreadMentions {
   readonly dialogueEnabled?: boolean;
   /** Receives the text after `#`, or `undefined` when the typeahead closes. */
   readonly onQueryChange: (query: string | undefined) => void;
+  /** Receives each edit with the caret it left, which says where it was made. */
+  readonly onDraftEdited?: (draft: string, caretIndex: number) => void;
   readonly onSelectCandidate: (candidate: ThreadMentionCandidate) => void;
   readonly onRemoveChip: (threadId: MentionableThreadId) => void;
   readonly onOpenSideChat?: (threadId: MentionableThreadId) => void;
@@ -92,6 +94,7 @@ export function useThreadMentionTypeahead(input: {
 
   function sync(draft: string, caretIndex: number | null) {
     if (mentions === undefined) return;
+    if (caretIndex !== null) mentions.onDraftEdited?.(draft, caretIndex);
     const next = caretIndex === null ? undefined : parseThreadMentionToken(draft, caretIndex);
     setToken(next);
     setActiveIndex(0);

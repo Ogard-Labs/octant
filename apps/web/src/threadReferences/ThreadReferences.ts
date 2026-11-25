@@ -13,9 +13,10 @@ export interface ThreadReference {
 }
 
 /**
- * The threads this window already lists, by id. A name in a prompt, a message
- * or a receipt reads its facts here, so showing a thread's card asks the host
- * for nothing and says nothing the sidebar could not.
+ * The threads the host already lists to this window, by id, a worker the
+ * sidebar leaves out included, as Needs you and search include it. A name in a
+ * prompt, a message or a receipt reads its facts here, so showing a thread's
+ * card asks the host for nothing.
  */
 export interface ThreadReferences {
   readonly find: (threadId: string) => ThreadReference | undefined;
@@ -30,7 +31,7 @@ export function useThreadReferences(): ThreadReferences {
   return useContext(ThreadReferencesContext);
 }
 
-/** Builds the window's directory from the rows its sidebar draws. */
+/** Builds the window's directory from its full thread lists. */
 export function useThreadReferenceDirectory(input: {
   readonly chat: ReadonlyArray<ChatThreadNavigationItem>;
   readonly work: ReadonlyArray<ChatThreadNavigationItem>;

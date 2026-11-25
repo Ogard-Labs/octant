@@ -1,4 +1,6 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ComposerInputElement } from "../composer/ComposerInput";
+import { useThreadMentions } from "./useThreadMentions";
 import { ThreadReferencesContext } from "../threadReferences/ThreadReferences";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -300,6 +302,63 @@ describe("ChatComposer thread mentions", () => {
 
     expect(onRemoveChip).toHaveBeenCalledWith("thread-1");
     expect(onDraftChange).toHaveBeenLastCalledWith("See first", 4);
+  });
+
+  it("keeps and sends the thread that was not cut when two share a title side by side", async () => {
+    const roadmap = (threadId: string) => ({
+      threadId: threadId as never,
+      title: "Roadmap",
+      mode: "chat" as const,
+      placementLabel: "Recents",
+    });
+    // Held outside the component: a client made on each render restarts the search.
+    const client = {
+      search: vi.fn(),
+      searchThread: vi.fn(),
+      resolve: vi.fn(async () => ({ mentions: [], unavailable: [] })),
+    } as never;
+    let send: (() => Promise<ReadonlyArray<unknown>>) | undefined;
+    function Mentions() {
+      const [draft, setDraft] = useState("#[Roadmap] #[Roadmap]");
+      const threadMentions = useThreadMentions({
+        client,
+        draft,
+        initialChips: [roadmap("thread-a"), roadmap("thread-b")],
+      });
+      send = threadMentions.resolveForSend;
+      return (
+        <ChatComposer
+          draft={draft}
+          isSending={false}
+          model={{ options: [{ id: "model-a", label: "Model A" }], value: "model-a" }}
+          onDraftChange={setDraft}
+          onFileSelected={vi.fn()}
+          onModelChange={vi.fn()}
+          onProviderChange={vi.fn()}
+          onResearchEnabledChange={vi.fn()}
+          onResearchRoutingChange={vi.fn()}
+          onSend={vi.fn(async () => true)}
+          provider={{ options: [{ id: "provider-a", label: "Provider A" }], value: "provider-a" }}
+          research={{ backend: { kind: "disabled" }, enabled: false, routing: "automatic" }}
+          {...(threadMentions.composer === undefined
+            ? {}
+            : { threadMentions: threadMentions.composer })}
+        />
+      );
+    }
+    render(<Mentions />);
+    const message = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    message.focus();
+    message.setSelectionRange(0, 11);
+
+    fireEvent.cut(message, { clipboardData: { setData: vi.fn() } });
+
+    await waitFor(() => expect(message).toHaveValue("#[Roadmap]"));
+    let sent: ReadonlyArray<unknown> | undefined;
+    await act(async () => {
+      sent = await send?.();
+    });
+    expect(sent).toEqual(["thread-b"]);
   });
 
   it("labels an explicitly mentioned Chat as able to receive a message", async () => {

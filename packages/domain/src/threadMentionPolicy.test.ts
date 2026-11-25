@@ -136,6 +136,17 @@ describe("following chips through an edit", () => {
     ).toEqual([first]);
   });
 
+  it("keeps the thread that was not cut when the two stand side by side", () => {
+    const beside = "#[Roadmap] #[Roadmap]";
+    // Both cuts leave the same text; only where the caret ended tells them apart.
+    expect(
+      reconcileThreadMentionChips("#[Roadmap]", [first, second], { draft: beside, caret: 0 }),
+    ).toEqual([second]);
+    expect(
+      reconcileThreadMentionChips("#[Roadmap]", [first, second], { draft: beside, caret: 10 }),
+    ).toEqual([first]);
+  });
+
   it("reports the chips in the order the draft shows them", () => {
     const launch = { id: "c", title: "Launch" };
     expect(
@@ -169,6 +180,11 @@ describe("findThreadMentionTags", () => {
     ]);
   });
 
+  it("finds a chip behind brackets left open before it", () => {
+    const chip = { title: "Plan" };
+    expect(findThreadMentionTags("#[#[ [#[Plan]", [chip]).map((tag) => tag.start)).toEqual([6]);
+  });
+
   it("lets repeated text stand for the same thread", () => {
     const chip = { title: "Plan" };
     expect(findThreadMentionTags("#[Plan] #[Plan]", [chip]).map((tag) => tag.chip)).toEqual([
@@ -198,6 +214,19 @@ describe("findSentThreadMentions", () => {
       ),
     ).toEqual(["b", "a"]);
     expect(findSentThreadMentions("#[Old name] #[another]", ["b"], titleOf)).toEqual([]);
+  });
+
+  it("never gives an unlisted or renamed thread's place to another of the same title", () => {
+    const text = "#[Roadmap] and #[Roadmap]";
+    const start = text.lastIndexOf("#");
+    expect(findSentThreadMentions(text, ["gone", "a"], titleOf)).toEqual([
+      { start, end: text.length, text: "#[Roadmap]", threadId: "a" },
+    ]);
+    expect(
+      findSentThreadMentions(text, ["b", "a"], titleOf).map((mention) => mention.threadId),
+    ).toEqual(["b", "a"]);
+    // With text typed by hand beside them, whose place is whose cannot be told.
+    expect(findSentThreadMentions(`${text} #[typed]`, ["gone", "a"], titleOf)).toEqual([]);
   });
 
   it("leaves a message with no stored ids, and an unlisted thread, as text", () => {

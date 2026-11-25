@@ -149,15 +149,23 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
   // brings a chip's text back brings its thread back with it.
   const droppedRef = useRef<ReadonlyArray<ChatComposerThreadMentionChip>>([]);
   const reconciledDraftRef = useRef(draft);
+  // Also told when only the caret moved, so an edit is a draft not yet followed.
+  const editRef = useRef<{ readonly draft: string; readonly caret: number } | undefined>(undefined);
+  const onDraftEdited = useCallback((next: string, caret: number) => {
+    if (next !== reconciledDraftRef.current) editRef.current = { draft: next, caret };
+  }, []);
   useEffect(() => {
     droppedRef.current = [];
   }, [readerThreadId]);
   useEffect(() => {
     const before = reconciledDraftRef.current;
     reconciledDraftRef.current = draft;
+    const edit = editRef.current;
+    editRef.current = undefined;
     const current = chipsRef.current;
     const kept = reconcileThreadMentionChips(draft, current, {
       draft: before,
+      ...(edit?.draft === draft ? { caret: edit.caret } : {}),
       dropped: droppedRef.current,
     });
     if (kept.length === current.length && kept.every((chip, index) => chip === current[index])) {
@@ -318,6 +326,7 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
       chips,
       ...(options.dialogueEnabled === true ? { dialogueEnabled: true } : {}),
       onQueryChange: setQuery,
+      onDraftEdited,
       onSelectCandidate,
       onRemoveChip,
       // The chip's Side Chat control mints or reopens a sidecar. Offer it
@@ -335,6 +344,7 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
     options.dialogueEnabled,
     chips,
     client,
+    onDraftEdited,
     onOpenSideChat,
     onRemoveChip,
     onSelectCandidate,
