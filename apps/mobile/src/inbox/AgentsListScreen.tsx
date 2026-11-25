@@ -1,3 +1,4 @@
+import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -54,6 +55,9 @@ function statusTone(status: string, colors: ThemeColors): string {
 function sentenceCase(value: string): string {
   return value.length === 0 ? value : `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
 }
+
+/** The draft the new Chat sheet holds, which says whose typing a send may claim. */
+const NEW_CHAT_TYPED_SCOPE = "mobile-agents-new-chat";
 
 export function AgentsListScreen(props: AgentsListScreenProps) {
   const { colors } = useTheme();
@@ -157,6 +161,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
   }, [refresh]);
 
   const createChatThread = async () => {
+    const typedClaim = typedClaimFor(NEW_CHAT_TYPED_SCOPE, prompt);
     if (placementTransport === undefined) {
       setComposerError("Pair a computer before starting a Chat thread.");
       return;
@@ -172,7 +177,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
     setCreating(true);
     setComposerError(undefined);
     try {
-      const row = await createChat(prompt);
+      const row = await createChat(prompt, undefined, typedClaim.typedByPerson);
       setPrompt("");
       setComposerOpen(false);
       await refresh();
@@ -513,6 +518,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
         </Text>
       )}
       <HomeComposerSheet
+        typedScope={NEW_CHAT_TYPED_SCOPE}
         availableModes={["chat"]}
         busy={creating}
         editable={

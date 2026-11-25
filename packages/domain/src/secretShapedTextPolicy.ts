@@ -22,9 +22,14 @@ export function redactSecretShaped(text: string): string {
   return redacted;
 }
 
+/** Every private-key block replaced, closed or not. */
+export function redactPrivateKeys(text: string): string {
+  return text.replaceAll(PRIVATE_KEY_BLOCK, "[redacted]");
+}
+
 /** Secret-shaped text and private-key blocks replaced: the checks person memory runs. */
 export function redactSecretsAndPrivateKeys(text: string): string {
-  return redactSecretShaped(text.replaceAll(PRIVATE_KEY_BLOCK, "[redacted]"));
+  return redactSecretShaped(redactPrivateKeys(text));
 }
 
 /** Whether the text holds anything those checks would replace. */

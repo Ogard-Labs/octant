@@ -1,3 +1,8 @@
+import {
+  noteTypedComposerText,
+  threadDraftScope,
+  typedSendClaim,
+} from "@octant/client-runtime/typed-composer-text";
 import type { RevealedThreadTurn } from "./shell/WorkspaceView";
 import { attachmentMediaType } from "./composer/attachmentMediaType";
 import { OctantEmpty } from "./ui/base/OctantEmpty";
@@ -4873,8 +4878,12 @@ function LaunchedShell(
     threadId: string,
     text: string,
     stagedDropped = false,
+    typedByPerson = false,
   ): void {
     if (text.length === 0) return;
+    // A first message the person typed that is put back for another try is
+    // still theirs: its claim moves to the draft of the thread that holds it.
+    if (typedByPerson) noteTypedComposerText(threadDraftScope(mode, threadId), text);
     composerThreadDrafts.write(mode, threadId, {
       text,
       caretIndex: text.length,
@@ -4887,6 +4896,7 @@ function LaunchedShell(
     title: string,
     prompt: string,
     projectId?: ProjectId,
+    typedByPerson = false,
   ): Promise<boolean> {
     const opened =
       projectId === undefined
@@ -4896,7 +4906,7 @@ function LaunchedShell(
     chatController.reportError(
       "The chat was created, but it could not be opened. Open it from the sidebar to continue.",
     );
-    seedOpenedComposerDraft("chat", String(threadId), prompt);
+    seedOpenedComposerDraft("chat", String(threadId), prompt, false, typedByPerson);
     return false;
   }
 
@@ -7813,6 +7823,8 @@ function LaunchedShell(
     threadMentionIds?: ReadonlyArray<import("@octant/contracts").MentionableThreadId>,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
   ): Promise<boolean> {
+    // Read before the first await: the claim lasts only for the call that handed the prompt over.
+    const typedClaim = typedSendClaim(prompt);
     const destinationHostId = refuseUnlessCreatableDestination({
       action: "create-work-thread",
       requiredCapability: "work",
@@ -7875,6 +7887,7 @@ function LaunchedShell(
         threadId: created.thread.id,
         turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
         prompt,
+        ...typedClaim,
         authority: {
           hostId: destinationHostId,
           projectId: project.id,
@@ -7897,7 +7910,13 @@ function LaunchedShell(
       firstTurnFailed = true;
     }
     if (firstTurnFailed) {
-      seedOpenedComposerDraft("work", String(created.thread.id), prompt, (images ?? []).length > 0);
+      seedOpenedComposerDraft(
+        "work",
+        String(created.thread.id),
+        prompt,
+        (images ?? []).length > 0,
+        typedClaim.typedByPerson === true,
+      );
     }
     return true;
   }
@@ -7927,6 +7946,7 @@ function LaunchedShell(
     prompt: string,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
   ): Promise<boolean> {
+    const typedClaim = typedSendClaim(prompt);
     const project = projectController.allProjects.find(
       (candidate) =>
         candidate.type === "chat" &&
@@ -7950,7 +7970,15 @@ function LaunchedShell(
     // A successful create is durable even if provider selection or the first
     // turn fails. Open its exact thread before either follow-up command so the
     // user can see the failure and retry instead of creating a duplicate.
-    if (!(await openCreatedChatThread(thread.id, thread.title, prompt, project.id))) {
+    if (
+      !(await openCreatedChatThread(
+        thread.id,
+        thread.title,
+        prompt,
+        project.id,
+        typedClaim.typedByPerson === true,
+      ))
+    ) {
       return true;
     }
     try {
@@ -7972,7 +8000,13 @@ function LaunchedShell(
           chatController.reportError(
             "The selected Chat provider and model could not be applied. Retry from the open thread.",
           );
-          seedOpenedComposerDraft("chat", String(thread.id), prompt);
+          seedOpenedComposerDraft(
+            "chat",
+            String(thread.id),
+            prompt,
+            false,
+            typedClaim.typedByPerson === true,
+          );
           return true;
         }
         thread = changed.thread;
@@ -7982,18 +8016,31 @@ function LaunchedShell(
         threadId: thread.id,
         expectedVersion: thread.version,
         prompt,
+        ...typedClaim,
       });
       if (sent === undefined) {
         chatController.reportError(
           "The first message could not be sent. Retry from the open thread.",
         );
-        seedOpenedComposerDraft("chat", String(thread.id), prompt);
+        seedOpenedComposerDraft(
+          "chat",
+          String(thread.id),
+          prompt,
+          false,
+          typedClaim.typedByPerson === true,
+        );
       }
     } catch {
       chatController.reportError(
         "The first message could not be sent. Retry from the open thread.",
       );
-      seedOpenedComposerDraft("chat", String(thread.id), prompt);
+      seedOpenedComposerDraft(
+        "chat",
+        String(thread.id),
+        prompt,
+        false,
+        typedClaim.typedByPerson === true,
+      );
     }
     return true;
   }
@@ -8231,7 +8278,12 @@ function LaunchedShell(
             undefined,
             created.thread.projectId,
           );
-          codeThreadControllers.restoreDraft(created.thread.id, input.prompt, refusal);
+          codeThreadControllers.restoreDraft(
+            created.thread.id,
+            input.prompt,
+            refusal,
+            input.typedByPerson === true,
+          );
           setDraftError(refusal);
           return false;
         }
@@ -8268,6 +8320,7 @@ function LaunchedShell(
         threadId: created.thread.id,
         checkoutId,
         prompt: input.prompt,
+        ...(input.typedByPerson === true ? { typedByPerson: true as const } : {}),
         ...(input.computerUseSelection === undefined
           ? {}
           : { computerUseSelection: input.computerUseSelection }),
@@ -8290,7 +8343,12 @@ function LaunchedShell(
         // The thread is already open on a different controller than the one
         // that started the turn, so restore the prompt onto that transcript.
         // Restore the reason with the draft after initial loading settles.
-        codeThreadControllers.restoreDraft(created.thread.id, input.prompt, refusal);
+        codeThreadControllers.restoreDraft(
+          created.thread.id,
+          input.prompt,
+          refusal,
+          input.typedByPerson === true,
+        );
         return false;
       }
       // The window-level create controller owns the command, while the open
@@ -8310,7 +8368,12 @@ function LaunchedShell(
         // The thread is already open, so the words go back into its composer,
         // as they do when the first turn is refused. Withdrawn from the
         // transcript and restored nowhere, the person's prompt was simply gone.
-        codeThreadControllers.restoreDraft(firstPromptAnnouncedFor, input.prompt);
+        codeThreadControllers.restoreDraft(
+          firstPromptAnnouncedFor,
+          input.prompt,
+          undefined,
+          input.typedByPerson === true,
+        );
       }
       setDraftError(
         error instanceof Error && error.message !== ""
@@ -8348,6 +8411,7 @@ function LaunchedShell(
     terminalSession?: import("@octant/contracts").TerminalSessionImportRequest,
     workingFolder?: import("@octant/contracts").ThreadWorkingFolderChoice,
   ): Promise<boolean | void> {
+    const typedClaim = typedSendClaim(prompt);
     const sentFromTodo = todoStartOfSentDraft(mode);
     const paneToReset =
       initiatingPaneId ??
@@ -8404,17 +8468,39 @@ function LaunchedShell(
             ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
           });
           if (changed?.kind !== "thread-updated") {
-            if (await openCreatedChatThread(thread.id, thread.title, prompt)) {
+            if (
+              await openCreatedChatThread(
+                thread.id,
+                thread.title,
+                prompt,
+                undefined,
+                typedClaim.typedByPerson === true,
+              )
+            ) {
               chatController.reportError(
                 "The selected Chat provider and model could not be applied. Retry from the open thread.",
               );
-              seedOpenedComposerDraft("chat", String(thread.id), prompt);
+              seedOpenedComposerDraft(
+                "chat",
+                String(thread.id),
+                prompt,
+                false,
+                typedClaim.typedByPerson === true,
+              );
             }
             return true;
           }
           thread = changed.thread;
         }
-        if (!(await openCreatedChatThread(thread.id, thread.title, prompt))) {
+        if (
+          !(await openCreatedChatThread(
+            thread.id,
+            thread.title,
+            prompt,
+            undefined,
+            typedClaim.typedByPerson === true,
+          ))
+        ) {
           return true;
         }
         const draftExtensionSelections =
@@ -8450,12 +8536,19 @@ function LaunchedShell(
             threadId: thread.id,
             expectedVersion,
             prompt,
+            ...typedClaim,
           });
           if (sent === undefined) {
             chatController.reportError(
               "The first message could not be sent. Retry from the open thread.",
             );
-            seedOpenedComposerDraft("chat", String(thread.id), prompt);
+            seedOpenedComposerDraft(
+              "chat",
+              String(thread.id),
+              prompt,
+              false,
+              typedClaim.typedByPerson === true,
+            );
             // False keeps the files the welcome composer staged, so a failed
             // first send does not drop them along with the message.
             return false;
@@ -8464,7 +8557,13 @@ function LaunchedShell(
           chatController.reportError(
             "The first message could not be sent. Retry from the open thread.",
           );
-          seedOpenedComposerDraft("chat", String(thread.id), prompt);
+          seedOpenedComposerDraft(
+            "chat",
+            String(thread.id),
+            prompt,
+            false,
+            typedClaim.typedByPerson === true,
+          );
           return false;
         }
       } else if (mode === "code") {
@@ -8602,12 +8701,18 @@ function LaunchedShell(
           threadId: created.thread.id,
           checkoutId: created.thread.checkoutId,
           prompt,
+          ...typedClaim,
           ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
         });
         if (!firstTurnStarted) {
           codeThreadControllers.announceFirstPrompt(created.thread.id, undefined);
           const refusal = codeController.lastStartRefusal.current;
-          codeThreadControllers.restoreDraft(created.thread.id, prompt, refusal);
+          codeThreadControllers.restoreDraft(
+            created.thread.id,
+            prompt,
+            refusal,
+            typedClaim.typedByPerson === true,
+          );
           setDraftError(
             refusal ?? "The thread was created, but its first provider turn could not be started.",
           );
@@ -8702,6 +8807,7 @@ function LaunchedShell(
             threadId: created.thread.id,
             turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
             prompt,
+            ...typedClaim,
             authority: {
               hostId: destinationHostId,
               projectId: project.id,
@@ -8730,6 +8836,7 @@ function LaunchedShell(
             String(created.thread.id),
             prompt,
             (images ?? []).length > 0,
+            typedClaim.typedByPerson === true,
           );
         }
       }
@@ -8737,7 +8844,12 @@ function LaunchedShell(
     } catch (error) {
       if (firstPromptAnnouncedFor !== undefined) {
         codeThreadControllers.announceFirstPrompt(firstPromptAnnouncedFor, undefined);
-        codeThreadControllers.restoreDraft(firstPromptAnnouncedFor, prompt);
+        codeThreadControllers.restoreDraft(
+          firstPromptAnnouncedFor,
+          prompt,
+          undefined,
+          typedClaim.typedByPerson === true,
+        );
       }
       const detail =
         error instanceof Error && error.message.trim() !== ""

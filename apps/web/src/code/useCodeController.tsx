@@ -1,3 +1,8 @@
+import {
+  noteTypedComposerText,
+  threadDraftScope,
+  typedClaimFor,
+} from "@octant/client-runtime/typed-composer-text";
 import { createEditorDraftStore } from "../editor/editorDraftStore";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import type {
@@ -2433,6 +2438,8 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly computerUseSelection?: ExtensionSelection;
       readonly extensionSelections?: ReadonlyArray<ExtensionSelection>;
       readonly toolCatalogHandoff?: boolean;
+      /** The person typed this message into the composer; a button's text is not. */
+      readonly typedByPerson?: true;
       /**
        * The posture this turn asks to run under. The host clamps it to the
        * thread's grant, so this is an intent, not a grant.
@@ -2452,6 +2459,7 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(input.contextInputPolicy === undefined
           ? {}
           : { contextInputPolicy: input.contextInputPolicy }),
+        ...(input.typedByPerson === true ? { typedByPerson: true as const } : {}),
         operationId,
         threadId: input.threadId,
         checkoutId: input.checkoutId,
@@ -2499,6 +2507,8 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly fileMentionPaths?: ReadonlyArray<string>;
       readonly computerUseSelection?: ExtensionSelection;
       readonly extensionSelections?: ReadonlyArray<ExtensionSelection>;
+      /** The person typed the prompt where it was written; it keeps the claim if it is put back. */
+      readonly typedByPerson?: true;
     }): Promise<boolean> => {
       const prompt = input.prompt.trim();
       if (prompt.length === 0) return false;
@@ -2519,13 +2529,19 @@ export function useCodeController(options: CodeControllerOptions) {
         // fail on a thread that is already open — the New Code composer opens
         // the thread before starting — so put it back now or the composer stays
         // empty in front of the error.
+        if (input.typedByPerson === true) {
+          noteTypedComposerText(threadDraftScope("code", String(input.threadId)), prompt);
+        }
         if (String(activeThreadId.current) === String(input.threadId)) {
           setPendingDraft(prompt);
           firstTurnFailures.current.delete(String(input.threadId));
         }
       };
       try {
-        const { operationId, started } = await beginProviderTurn({ ...input, prompt });
+        const { operationId, started } = await beginProviderTurn({
+          ...input,
+          prompt,
+        });
         if (started.kind === "operation-failed") {
           failFirstTurn(started.failure.message);
           if (started.failure.usageLimit !== undefined) {
@@ -3170,6 +3186,11 @@ export function useCodeController(options: CodeControllerOptions) {
           checkoutId: view.checkout.id,
           prompt: trimmed,
           ...(toolCatalogHandoff ? { toolCatalogHandoff: true } : {}),
+          // Only the composer's own send can claim it: text a button composed
+          // (a turn's line notes) arrives through `fromOutsideComposer`.
+          ...(outsideComposer
+            ? {}
+            : typedClaimFor(threadDraftScope("code", String(view.thread.id)), trimmed)),
           threadMentionIds,
           sideChatReturns,
           reviewFindingReferences: reviewReferences,

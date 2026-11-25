@@ -1,9 +1,13 @@
 import type { SettingsDeepLink } from "@octant/contracts";
-import type { RefObject } from "react";
+import { lazy, Suspense, type RefObject } from "react";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
-import { NavigatorPanel } from "./NavigatorPanel";
 import type { NavigatorAssistantController } from "./useNavigatorAssistant";
+
+// Opened from a menu or a shortcut, so its composer stays out of the first bundle.
+const NavigatorPanel = lazy(() =>
+  import("./NavigatorPanel").then((module) => ({ default: module.NavigatorPanel })),
+);
 
 export interface NavigatorPopoverProps {
   readonly controller: NavigatorAssistantController;
@@ -21,20 +25,23 @@ export function NavigatorPopover(props: NavigatorPopoverProps) {
   return (
     <OctantDialogPresence>
       {props.open ? (
-        <OctantDialog
-          className="navigator-popover"
-          label="Navigator"
-          onClose={props.onClose}
-          open
-          popupId="navigator-popover"
-          {...(props.restoreFocus === undefined ? {} : { restoreFocus: props.restoreFocus })}
-        >
-          <NavigatorPanel
-            controller={props.controller}
+        // Outside the dialog, so it opens once with its panel and focuses into it.
+        <Suspense fallback={null}>
+          <OctantDialog
+            className="navigator-popover"
+            label="Navigator"
             onClose={props.onClose}
-            onOpenSettings={props.onOpenSettings}
-          />
-        </OctantDialog>
+            open
+            popupId="navigator-popover"
+            {...(props.restoreFocus === undefined ? {} : { restoreFocus: props.restoreFocus })}
+          >
+            <NavigatorPanel
+              controller={props.controller}
+              onClose={props.onClose}
+              onOpenSettings={props.onOpenSettings}
+            />
+          </OctantDialog>
+        </Suspense>
       ) : null}
     </OctantDialogPresence>
   );

@@ -1,8 +1,14 @@
+import {
+  composerTextWasTyped,
+  noteTypedComposerText,
+  sendingTyped,
+} from "@octant/client-runtime/typed-composer-text";
 import "../styles/chat-project-overview.css";
 import {
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
   useNewTaskPrompt,
+  useNewTaskTypedScope,
 } from "../composer/useNewTaskPrompt";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import type { ComposerStashSubmission } from "../composer/useComposerStash";
@@ -125,6 +131,7 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
   const drafts = useContext(NewTaskDraftsContext);
   const draftScope = useContext(NewTaskDraftScopeContext);
   const [draft, setDraft] = useNewTaskPrompt();
+  const typedScope = useNewTaskTypedScope();
   // The quick start offers `@model` as every thread composer does, so the
   // first message can name a subagent's route; it has no other `@` mentions.
   const atMenu = useComposerAtMenu({
@@ -166,21 +173,27 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
     const normalized = draft.trim();
     if (!createAvailable || submitting || normalized === "") return;
     setSubmitting(true);
+    // The claim is taken before the draft is cleared, and the draft that a
+    // refused create puts back keeps it.
+    const typedBefore = composerTextWasTyped(typedScope, normalized);
     const retireStashRecovery = stashSubmission.current?.();
     if (retireStashRecovery === undefined) setDraft("");
     try {
-      const created =
+      const created = await sendingTyped(typedBefore, normalized, () =>
         Object.keys(modelOptionValues).length === 0
-          ? await props.onCreateThread(normalized)
-          : await props.onCreateThread(normalized, modelOptionValues);
+          ? props.onCreateThread?.(normalized)
+          : props.onCreateThread?.(normalized, modelOptionValues),
+      );
       const current =
         drafts === undefined || draftScope === undefined ? undefined : drafts.read(draftScope);
       if (created && retireStashRecovery !== undefined) {
         retireStashRecovery();
         if (current === undefined || current === draft) setDraft("");
       } else if (!created) {
-        if (retireStashRecovery === undefined && (current ?? "").trim() === "")
+        if (retireStashRecovery === undefined && (current ?? "").trim() === "") {
+          if (typedBefore) noteTypedComposerText(typedScope, normalized);
           setDraft(normalized);
+        }
         setRestoreFocus(true);
       }
     } finally {
@@ -219,6 +232,7 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
             }
             input={
               <ComposerInput
+                typedScope={typedScope}
                 className="composer-input"
                 disabled={!createAvailable || submitting}
                 id={inputId}
@@ -276,7 +290,7 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
                 <ComposerVoiceButton
                   disabled={!createAvailable || submitting}
                   onTranscript={(transcript) =>
-                    setDraft((current) => appendTranscript(current, transcript))
+                    setDraft((current) => appendTranscript(typedScope, current, transcript))
                   }
                 />
               ),

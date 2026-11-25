@@ -1,3 +1,7 @@
+import {
+  noteTypedComposerText,
+  threadDraftScope,
+} from "@octant/client-runtime/typed-composer-text";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeBootstrap, CodeThreadId } from "@octant/contracts/code";
 import { memo, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
@@ -62,7 +66,13 @@ export interface CodeThreadControllerRegistry extends CodeThreadControllers {
    */
   readonly announceFirstPrompt: (threadId: CodeThreadId, prompt: string | undefined) => void;
   /** Defer restoration until initial controller loading can no longer replace the draft. */
-  readonly restoreDraft: (threadId: CodeThreadId, prompt: string, refusal?: string) => void;
+  readonly restoreDraft: (
+    threadId: CodeThreadId,
+    prompt: string,
+    refusal?: string,
+    /** The person typed it: the claim moves to the draft of the thread that holds it. */
+    typedByPerson?: boolean,
+  ) => void;
   readonly publish: (threadId: CodeThreadId, controller: CodeController) => void;
   readonly refreshConversation: (threadId: CodeThreadId) => void;
   readonly release: (threadId: CodeThreadId) => void;
@@ -94,8 +104,9 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
       if (prompt === undefined) firstPromptWhenPublished.delete(key);
       else firstPromptWhenPublished.set(key, prompt);
     },
-    restoreDraft: (threadId, prompt, refusal) => {
+    restoreDraft: (threadId, prompt, refusal, typedByPerson) => {
       const key = String(threadId);
+      if (typedByPerson === true) noteTypedComposerText(threadDraftScope("code", key), prompt);
       const controller = byThread.get(key);
       if (controller === undefined || controller.status !== "ready")
         draftWhenPublished.set(key, { prompt, refusal });

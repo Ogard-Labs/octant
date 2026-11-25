@@ -1,3 +1,4 @@
+import { withTypedSend } from "@octant/client-runtime/typed-composer-text";
 import { matchProjectForLinearIssue } from "@octant/domain";
 import {
   decodeThreadWorkingDirectory,
@@ -17,6 +18,7 @@ import {
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
   useNewTaskPrompt,
+  useNewTaskTypedScope,
   type NewTaskCreateFromSelection,
 } from "../composer/useNewTaskPrompt";
 import {
@@ -1294,6 +1296,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
   const presentation = draftThreadModePresentation(props.mode);
   const [prompt, setPrompt] = useNewTaskPrompt();
+  const typedScope = useNewTaskTypedScope();
   const textareaRef = useRef<ComposerInputElement>(null);
   // A Chat draft is a first-message composer like Work's and Code's, so it
   // offers the same host command list.
@@ -1358,6 +1361,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
+    const claimedCreate = withTypedSend(createThread, typedScope, trimmed);
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
@@ -1369,7 +1373,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     };
     if (Object.keys(modelOptionValues).length > 0) {
       afterCreate(
-        createThread(
+        claimedCreate(
           trimmed,
           undefined,
           undefined,
@@ -1388,7 +1392,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     }
     if (extensionSelections.length > 0) {
       afterCreate(
-        createThread(
+        claimedCreate(
           trimmed,
           undefined,
           undefined,
@@ -1403,10 +1407,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       return;
     }
     if (issueContext === undefined && linearIssueContext === undefined) {
-      void createThread(trimmed);
+      void claimedCreate(trimmed);
       return;
     }
-    void createThread(
+    void claimedCreate(
       trimmed,
       undefined,
       undefined,
@@ -1516,6 +1520,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             }
             input={
               <ComposerInput
+                typedScope={typedScope}
                 renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"
                 aria-autocomplete="list"
@@ -1586,7 +1591,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 <ComposerVoiceButton
                   disabled={props.creating}
                   onTranscript={(transcript) =>
-                    setPrompt((current) => appendTranscript(current, transcript))
+                    setPrompt((current) => appendTranscript(typedScope, current, transcript))
                   }
                 />
               ),

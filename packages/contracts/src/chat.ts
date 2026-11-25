@@ -775,6 +775,13 @@ export const SendChatTurnCommand = Schema.Struct({
   contextInputPolicy: Schema.optional(ConversationInputPolicy),
   ...ChatThreadCommandFields,
   prompt: PromptText,
+  /**
+   * The person typed (pasted, or dictated) this message into a composer. Only
+   * a composer sets it; a button, template, routine, side task, delivery, or
+   * outside agent does not. The host honours it on the person's own routes
+   * alone and ignores it everywhere else.
+   */
+  typedByPerson: Schema.optional(Schema.Literal(true)),
   /** Optional for older clients; new clients preserve it across retry after an unknown outcome. */
   submissionId: Schema.optional(ChatSubmissionId),
   attachmentIds: Schema.optional(

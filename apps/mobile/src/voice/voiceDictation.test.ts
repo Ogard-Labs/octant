@@ -43,7 +43,7 @@ function fixture(
   });
   let draft = "Please";
   const appendToDraft = vi.fn((text: string) => {
-    draft = appendTranscript(draft, text);
+    draft = appendTranscript("thread:test", draft, text);
   });
   const views: VoiceDictationView[] = [];
   const notices: Array<string | undefined> = [];
@@ -205,9 +205,9 @@ describe("dictation on the phone", () => {
 
 describe("appending a transcript", () => {
   it("joins the words to the draft with one space and ignores silence", () => {
-    expect(appendTranscript("", "  Hello there ")).toBe("Hello there");
-    expect(appendTranscript("Hi", "there")).toBe("Hi there");
-    expect(appendTranscript("Hi\n", "there")).toBe("Hi\nthere");
-    expect(appendTranscript("Hi", "   ")).toBe("Hi");
+    expect(appendTranscript("thread:test", "", "  Hello there ")).toBe("Hello there");
+    expect(appendTranscript("thread:test", "Hi", "there")).toBe("Hi there");
+    expect(appendTranscript("thread:test", "Hi\n", "there")).toBe("Hi\nthere");
+    expect(appendTranscript("thread:test", "Hi", "   ")).toBe("Hi");
   });
 });

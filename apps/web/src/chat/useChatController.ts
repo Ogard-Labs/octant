@@ -1513,6 +1513,8 @@ export function useChatController(options: ChatControllerOptions) {
         readonly composerDraft: "consume" | "consume-on-acceptance" | "keep";
         readonly contextInputPolicy?: ConversationInputPolicy;
         readonly draftRevision?: number;
+        /** The person typed this message into the composer; a button's text is not. */
+        readonly typedByPerson?: true;
       } = { composerDraft: "consume" },
       sideChatReturns: ReadonlyArray<SideChatDraftReturnReference> = [],
       toolCatalogHandoff = false,
@@ -1559,6 +1561,7 @@ export function useChatController(options: ChatControllerOptions) {
         ...(sendOptions.contextInputPolicy === undefined
           ? {}
           : { contextInputPolicy: sendOptions.contextInputPolicy }),
+        ...(sendOptions.typedByPerson === true ? { typedByPerson: true as const } : {}),
         threadId: activeView.thread.id,
         expectedVersion: expectedVersion ?? activeView.thread.version,
         prompt,

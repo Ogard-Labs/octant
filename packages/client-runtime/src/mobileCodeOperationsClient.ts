@@ -1,3 +1,4 @@
+import { postWithTypedClaim } from "./typedClaim";
 import {
   MAX_CODE_CONVERSATION_PAGE_SIZE,
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
@@ -165,11 +166,13 @@ export async function executeMobileCodeOperation(
   transport: MobileRemoteTransport,
   command: CodeOperationCommand,
 ): Promise<CodeOperationResult> {
-  const response = await transport.authenticatedFetch({
-    method: "POST",
-    path: "/api/code/commands",
-    body: JSON.stringify(command),
-  });
+  const response = await postWithTypedClaim(command, (body) =>
+    transport.authenticatedFetch({
+      method: "POST",
+      path: "/api/code/commands",
+      body: JSON.stringify(body),
+    }),
+  );
   const result = await decodeJson(
     response,
     decodeHostAnswer(CodeOperationResult),
@@ -586,6 +589,8 @@ function stagedCodeAttachmentIds(ids: ReadonlyArray<string>): ReadonlyArray<Code
  * stay on the host.
  */
 export async function sendMobileCodeTurn(input: {
+  /** The person typed the prompt into the composer; a claim, believed only on their own routes. */
+  readonly typedByPerson?: true;
   readonly transport: MobileRemoteTransport;
   readonly threadId: string;
   readonly prompt: string;
@@ -624,6 +629,7 @@ export async function sendMobileCodeTurn(input: {
       { readonly kind: "start-provider-turn" }
     >["sessionId"],
     prompt: evidence,
+    ...(input.typedByPerson === true ? { typedByPerson: true as const } : {}),
     ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
       ? {}
       : {

@@ -39,6 +39,7 @@ const BROADEST = [
   "octant_past_threads",
   "octant_propose_routine",
   "octant_pull_request",
+  "octant_remember_person",
   "octant_report_finished",
   "octant_routines",
   "octant_side_chat_list_files",
@@ -188,8 +189,9 @@ describe("appToolHostLines", () => {
     for (const line of lines) expect(line.text.length).toBeLessThanOrEqual(240);
     const characters = lines.reduce((total, line) => total + line.text.length + 1, 0);
     // Raised from 1,000 to 1,050 when adding octant_create_video and
-    // octant_linear on top of the expanded Canvas routing line.
-    expect(Math.ceil(characters / 4)).toBeLessThanOrEqual(1_050);
+    // octant_linear on top of the expanded Canvas routing line, and to 1,075
+    // when adding octant_remember_person.
+    expect(Math.ceil(characters / 4)).toBeLessThanOrEqual(1_075);
   });
 
   it("fails for a first-party tool name with no line and passes for the names deliberately left out", () => {

@@ -1,3 +1,8 @@
+import {
+  composerTextWasTyped,
+  forgetTypedComposerText,
+  threadDraftScope,
+} from "@octant/client-runtime/typed-composer-text";
 import { CodeClientFailure, type CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeBootstrap, CodeThreadId, CodeThreadView } from "@octant/contracts/code";
 import { act, render, waitFor } from "@testing-library/react";
@@ -160,6 +165,23 @@ describe("CodeThreadControllerSlots", () => {
     registry.publish(threadA, { status: "ready", setPendingDraft } as never);
     registry.publish(threadA, { status: "ready", setPendingDraft } as never);
     expect(setPendingDraft).toHaveBeenCalledExactlyOnceWith("Retry this prompt");
+  });
+
+  it("moves the claim of a typed first prompt to the thread that gets it back, and only for that prompt", () => {
+    forgetTypedComposerText();
+    const registry = createCodeThreadControllers();
+    registry.restoreDraft(threadA, "I prefer tabs", undefined, true);
+    registry.restoreDraft(threadB, "A button wrote this");
+
+    expect(composerTextWasTyped(threadDraftScope("code", String(threadA)), "I prefer tabs")).toBe(
+      true,
+    );
+    expect(
+      composerTextWasTyped(threadDraftScope("code", String(threadB)), "A button wrote this"),
+    ).toBe(false);
+    expect(composerTextWasTyped(threadDraftScope("code", String(threadB)), "I prefer tabs")).toBe(
+      false,
+    );
   });
 
   it("keeps the first-turn refusal until the task finishes loading", () => {

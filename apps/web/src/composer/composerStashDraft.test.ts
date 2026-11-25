@@ -40,6 +40,22 @@ describe("restoring a saved composer draft", () => {
     );
   });
 
+  it("brings the person's own typing back with a restored draft, and drops it from text the person did not type", () => {
+    const typed = { ...emptyComposerStashDraft(), text: "I prefer tabs", typed: true as const };
+    const written = { ...emptyComposerStashDraft(), text: "A button wrote this" };
+    const restore = (current: typeof typed, saved: typeof typed) => {
+      const plan = planComposerStashRestore(chat, target, current, saved);
+      if (plan.kind !== "ready") throw new Error("Expected a restore plan.");
+      return plan.draft.typed === true;
+    };
+
+    expect(restore(emptyComposerStashDraft() as typeof typed, typed)).toBe(true);
+    expect(restore(emptyComposerStashDraft() as typeof typed, written as typeof typed)).toBe(false);
+    // Joined with text already in the composer, the whole must be the person's.
+    expect(restore(written as typeof typed, typed)).toBe(false);
+    expect(restore({ ...typed, text: "Also this" }, typed)).toBe(true);
+  });
+
   it("keeps extension selections in their original provider scope", () => {
     const location = { ...chat, threadId: null, extensionScope: "provider-one" };
     expect(

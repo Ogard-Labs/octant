@@ -1,3 +1,4 @@
+import { noteTypedComposerText, typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import { ChevronDown } from "../ui/icons";
 import type { ThreadMessageQueueHoldReason, ThreadMessageQueueSnapshot } from "@octant/contracts";
 import { useId, useState } from "react";
@@ -148,6 +149,7 @@ export function ThreadMessageQueue({
           const editable =
             item.status === "queued" && item.steering !== true && item.payload !== undefined;
           const edit = editing?.id === item.messageId ? editing : undefined;
+          const editScope = `queue-edit:${item.messageId}`;
           const move = (offset: number) => {
             const ids = movable.map((entry) => entry.messageId);
             const other = ids[position + offset];
@@ -176,7 +178,12 @@ export function ThreadMessageQueue({
                     aria-label={`Edit queued message ${index + 1}`}
                     value={edit.prompt}
                     maxLength={200000}
-                    onChange={(event) => setEditing({ ...edit, prompt: event.currentTarget.value })}
+                    onChange={(event) => {
+                      // The person's own edit of a queued message claims typing
+                      // as a composer does; opening it writes nothing.
+                      noteTypedComposerText(editScope, event.currentTarget.value);
+                      setEditing({ ...edit, prompt: event.currentTarget.value });
+                    }}
                   />
                   <OctantButton
                     type="button"
@@ -188,6 +195,7 @@ export function ThreadMessageQueue({
                           kind: "edit",
                           messageId: item.messageId,
                           prompt: edit.prompt,
+                          ...typedClaimFor(editScope, edit.prompt),
                           expectedVersion: edit.version,
                         })) === "accepted"
                       )

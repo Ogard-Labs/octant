@@ -1,3 +1,4 @@
+import { createPersonMemoryAccess } from "../personMemory/personMemoryAccess";
 import { videoOfferDecisionRules } from "../video/videoOfferDecisionRules";
 import { decodeChatThreadId, decodeEventActor } from "@octant/contracts";
 import {
@@ -359,6 +360,7 @@ function openFixture(options?: {
   readonly hiddenThreadIds?: () => ReadonlySet<string>;
   readonly octantInstructionBlocks?: ChatServiceOptions["octantInstructionBlocks"];
   readonly personMemoryBlock?: ChatServiceOptions["personMemoryBlock"];
+  readonly markTurnTyped?: ChatServiceOptions["markTurnTyped"];
   readonly moveHold?: (threadId: string) => boolean;
   readonly liveTurns?: import("../liveTurn/liveTurnRegistry").LiveTurnRegistry;
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
@@ -861,6 +863,7 @@ function openFixture(options?: {
     ...(options?.personMemoryBlock === undefined
       ? {}
       : { personMemoryBlock: options.personMemoryBlock }),
+    ...(options?.markTurnTyped === undefined ? {} : { markTurnTyped: options.markTurnTyped }),
     ...(options?.moveHold === undefined ? {} : { moveHold: options.moveHold }),
     ...(options?.resolveSideChatReturns === undefined
       ? {}
@@ -2512,6 +2515,75 @@ describe("ChatService", () => {
     expect(planSpy.mock.calls.at(-1)?.[0].entries.map((entry) => entry.category)).toEqual(
       expect.arrayContaining(["person-instructions", "project-instructions"]),
     );
+  });
+
+  it("marks a turn as typed by the person only when the route said so, and never from the command", async () => {
+    const markTurnTyped = vi.fn();
+    const { service } = openFixture({ markTurnTyped });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Typed",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const send = async (prompt: string, context?: { readonly typedByPerson?: true }) =>
+      service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: service.read(created.thread.id).thread.version,
+          prompt,
+          // A claim in the command is only a claim: the route decides.
+          typedByPerson: true,
+        },
+        context,
+      );
+
+    const first = await send("A button wrote this.");
+    expect(markTurnTyped).not.toHaveBeenCalled();
+    const second = await send("I typed this.", { typedByPerson: true });
+
+    if (second.kind !== "turn-created" || first.kind !== "turn-created")
+      throw new Error("Expected turns.");
+    expect(markTurnTyped).toHaveBeenCalledTimes(1);
+    expect(markTurnTyped).toHaveBeenCalledWith({
+      threadId: String(created.thread.id),
+      turnId: String(second.turn.id),
+    });
+  });
+
+  it("starts the run of an accepted turn when the journal cannot record that the person typed it", async () => {
+    const access = createPersonMemoryAccess({
+      store: {
+        markTurnTyped: () => {
+          throw new Error("SQLITE_FULL: database or disk is full");
+        },
+      } as unknown as Parameters<typeof createPersonMemoryAccess>[0]["store"],
+      projectLabel: () => undefined,
+    });
+    const { service, fakeDriver } = openFixture({
+      markTurnTyped: ({ threadId, projectId, turnId }) =>
+        access.markTurnTyped({ mode: "chat", threadId, projectId, turnId }),
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Typed",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    const sent = await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+        prompt: "I typed this.",
+      },
+      { typedByPerson: true },
+    );
+
+    expect(sent.kind).toBe("turn-created");
+    expect(fakeDriver.sentTurns).toHaveLength(1);
   });
 
   it("sends an unchanged Side Chat source once to a provider that keeps its own history", async () => {
@@ -6383,10 +6455,16 @@ describe("ChatService", () => {
      * A conversation of `turns` long messages on a model with `contextWindow`
      * tokens, sent one after another, with the size each turn was admitted at.
      */
-    async function longConversation(contextWindow: number, turns: number, words: number) {
+    async function longConversation(
+      contextWindow: number,
+      turns: number,
+      words: number,
+      personMemoryBlock?: ChatServiceOptions["personMemoryBlock"],
+    ) {
       const probe = probeFixture();
       const sent: Array<SentTurn> = [];
       const fixture = openFixture({
+        ...(personMemoryBlock === undefined ? {} : { personMemoryBlock }),
         probe,
         driver: {
           ...compactionDriver(sent, { resumable: true }),
@@ -6452,6 +6530,20 @@ describe("ChatService", () => {
       // reply, all of which the continued session sends with the third turn.
       const first = admittedTokens[0] ?? 0;
       expect(admittedTokens.at(-1)).toBeGreaterThan(first + 2_000);
+    });
+
+    it("cuts the person-memory block anew for the session it rebuilds once the conversation no longer fits", async () => {
+      const { replies } = await longConversation(1_200, 4, 228, ({ startsFreshSession }) => {
+        return startsFreshSession ? "Block cut for a new session." : "Block of the old cut.";
+      });
+      const rebuilt = replies.find(
+        (turn) => turn.context?.some((block) => block.kind === "conversation-summary") === true,
+      );
+
+      expect(rebuilt?.context?.map((block) => block.text)).toContain(
+        "Block cut for a new session.",
+      );
+      expect(rebuilt?.context?.map((block) => block.text)).not.toContain("Block of the old cut.");
     });
 
     it("rebuilds the history on the host, compacted, once the conversation no longer fits", async () => {

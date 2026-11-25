@@ -43,6 +43,7 @@ import {
   readAgentResultsSteered,
 } from "../agentRun/agentResultSteeredRecord";
 import {
+  readNewestThreadMessagesSteered,
   readThreadMessagesSteered,
   threadMessagesSteeredInto,
 } from "../messageQueue/threadMessageSteeredRecord";
@@ -96,6 +97,7 @@ type JournalPort = Pick<
   | "append"
   | "replayAggregate"
   | "replayAggregateTypeForThread"
+  | "latestAggregateTypeForThread"
   | "aggregateTypeThreadHead"
   | "replayThreadAnchoredRows"
   | "latestThreadEvents"
@@ -1018,6 +1020,129 @@ export class CodeOperationEventStore {
         })
         .slice(0, limit)
         .reverse();
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Like `personPromptsForThread`, with each turn's operation id and the time
+   * it began, oldest first, so the reader can tell which turns the person typed.
+   */
+  personPromptTurnsForThread(
+    threadId: CodeThreadId,
+    limit: number,
+  ): ReadonlyArray<{
+    readonly operationId: string;
+    readonly began: string;
+    readonly prompt: Extract<
+      CodeOperationEvent,
+      { readonly kind: "conversation-turn-started" }
+    >["prompt"];
+  }> {
+    try {
+      return this.#journal
+        .latestThreadEvents({
+          aggregateType: "code-operation",
+          threadId: String(threadId),
+          kind: "conversation-turn-started",
+          limit,
+        })
+        .flatMap((envelope) => {
+          if (envelope.eventName !== CODE_OPERATION_EVENT_RECORDED || envelope.eventVersion !== 1)
+            return [];
+          const frame = decodeCodeOperationEventFrame(envelope.payload);
+          if (String(frame.threadId) !== String(threadId)) return [];
+          const event = frame.event;
+          return event.kind === "conversation-turn-started" && event.delivery === undefined
+            ? [
+                {
+                  operationId: String(frame.operationId),
+                  began: String(envelope.occurredAt),
+                  prompt: event.prompt,
+                },
+              ]
+            : [];
+        })
+        .reverse();
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * The newest `limit` messages the person steered into this thread's running
+   * turns, oldest first among them, each under the id its typed mark uses. Empty when the journal cannot
+   * be read.
+   */
+  steeredPersonMessagesForThread(
+    threadId: CodeThreadId,
+    limit: number,
+  ): ReadonlyArray<{ readonly messageId: string; readonly at: string; readonly body: string }> {
+    try {
+      return readNewestThreadMessagesSteered(this.#journal, String(threadId), limit)
+        .filter((record) => record.mode === "code")
+        .map((record) => ({
+          messageId: String(record.messageId),
+          at: String(record.steeredAt),
+          body: record.body,
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * The messages of one turn: the prompt that started it, and each message the
+   * person steered into it, under the id its typed mark uses (the operation id,
+   * and the steered message's id). A turn the host started to deliver a
+   * subagent's result has none. Empty when the journal cannot be read.
+   */
+  turnPersonMessages(
+    threadId: CodeThreadId,
+    operationId: string,
+  ): ReadonlyArray<{
+    readonly markId: string;
+    readonly prompt?: Extract<
+      CodeOperationEvent,
+      { readonly kind: "conversation-turn-started" }
+    >["prompt"];
+    readonly body?: string;
+  }> {
+    try {
+      const started = this.#journal
+        .latestThreadEvents({
+          aggregateType: "code-operation",
+          threadId: String(threadId),
+          kind: "conversation-turn-started",
+          limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
+        })
+        .flatMap((envelope) => {
+          if (envelope.eventName !== CODE_OPERATION_EVENT_RECORDED || envelope.eventVersion !== 1)
+            return [];
+          const frame = decodeCodeOperationEventFrame(envelope.payload);
+          const event = frame.event;
+          return String(frame.threadId) === String(threadId) &&
+            String(frame.operationId) === String(operationId) &&
+            event.kind === "conversation-turn-started" &&
+            event.delivery === undefined
+            ? [event.prompt]
+            : [];
+        })[0];
+      if (started === undefined) return [];
+      const steered = threadMessagesSteeredInto(
+        readThreadMessagesSteered(this.#journal, threadId).filter(
+          (record) => record.mode === "code",
+        ),
+        String(operationId),
+      );
+      return [
+        { markId: String(operationId), prompt: started },
+        ...steered.map((message) => ({
+          markId: String(message.messageId),
+          body: message.body,
+        })),
+      ];
     } catch {
       return [];
     }

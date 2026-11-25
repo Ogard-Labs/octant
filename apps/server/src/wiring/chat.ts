@@ -501,12 +501,16 @@ export function wireChat(deps: ChatDependencies) {
         octantInstructions.contextBlocks({
           projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
         }),
-      personMemoryBlock: ({ thread, windowId }) =>
+      markTurnTyped: ({ threadId, projectId, turnId }) =>
+        personMemoryAccess.markTurnTyped({ mode: "chat", threadId, projectId, turnId }),
+      personMemoryBlock: ({ thread, windowId, startsFreshSession }) =>
         personMemoryAccess.blockFor({
           mode: "chat",
           threadId: String(thread.id),
           projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
           createdAt: thread.createdAt,
+          providerInstanceId: thread.providerInstanceId,
+          startsFreshSession,
           windowId,
         }),
       awaitsHarnessApproval: threadAwaitsHarnessApproval,
@@ -788,6 +792,21 @@ export function wireChat(deps: ChatDependencies) {
                   projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
                   createdAt: thread.createdAt,
                   windowId,
+                  title: thread.title,
+                  providerInstanceId: thread.providerInstanceId,
+                  // The message of this turn alone, pinned by its id: what the
+                  // model may quote to have it remembered at once, and only
+                  // when the host marked it typed.
+                  turnMessages: () => {
+                    const view = persistence.readChatThreadView(thread.id);
+                    const own = view?.turns.find((turn) => String(turn.id) === String(turnId));
+                    if (view === undefined || own === undefined) return [];
+                    const body = view.contents.find(
+                      (content) =>
+                        String(content.contentId) === String(own.userMessageRef.contentId),
+                    )?.body;
+                    return body === undefined ? [] : [{ markId: String(own.id), text: body }];
+                  },
                 }),
                 // Outside the taint wrapper too: it returns Project memory the
                 // person approved, and a Chat thread outside a Project gets no

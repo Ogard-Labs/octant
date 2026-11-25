@@ -25,7 +25,14 @@ import {
   threadTitleSubscriptionCredentials,
 } from "../automaticModels/threadTitle";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
-import { createPersonMemorySweep } from "../personMemory/personMemoryWiring";
+import {
+  codeLastMessageAt,
+  codePersonMessages,
+  createPersonMemorySweep,
+  newestTurnUpdate,
+  workLastMessageAt,
+  workPersonMessages,
+} from "../personMemory/personMemoryWiring";
 import { createDecisionReviewModelPort } from "../turnDecisions/decisionReviewWiring";
 import { isProtectedSecretPath } from "../process/secretGuard";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
@@ -152,6 +159,8 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "codeParentActiveTurn"
     | "codeSessionAuthority"
     | "personMemory"
+    | "conversationOwnershipSlot"
+    | "liveTurns"
     | "processAuthorityTime"
     | "toolEffectLedger"
     | "windowAuthorityStore"
@@ -935,6 +944,10 @@ export function wireHarness(deps: HarnessDependencies) {
       return undefined;
     }
   };
+  // The refresh point of a thread's person-memory block asks how a provider keeps
+  // its conversation: only one that keeps sessions of its own refreshes at a new one.
+  deps.conversationOwnershipSlot.current = (providerInstanceId) =>
+    resolveConfiguredDriver(providerInstanceId as ProviderInstanceId)?.conversationOwnership;
   // The account the person chose for an automatic call is asked as it is: off,
   // not ready or at its limit, it is reported and no other account is tried.
   const automaticModelAccountUnavailable = createAutomaticModelAccountCheck({
@@ -1172,26 +1185,62 @@ export function wireHarness(deps: HarnessDependencies) {
           modelId: thread.modelId,
           completedAt: thread.completedAt,
         })),
+      get: (threadId) => {
+        const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+        return thread === undefined
+          ? undefined
+          : {
+              id: String(thread.id),
+              title: thread.title,
+              projectId: String(thread.projectId),
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+              completedAt: thread.completedAt,
+            };
+      },
     },
-    // What the person wrote: each turn's prompt, leaving out the turns the
-    // host accepted to deliver a subagent's result.
+    // What the person wrote: each turn's prompt that the host marked typed (or
+    // that began before marks were kept), leaving out the turns the host
+    // accepted to deliver a subagent's result.
     workPersonMessages: (threadId, limit) =>
-      workTurnProjection
-        .listForThread(decodeWorkThreadId(threadId))
-        .filter((turn) => turn.delivery === undefined)
-        .map((turn) => turn.prompt)
-        .slice(-limit),
+      workPersonMessages(
+        workTurnProjection.listForThread(decodeWorkThreadId(threadId)),
+        limit,
+        ({ turnId, began }) =>
+          personMemory.countsAsPersonWords({ mode: "work", threadId, turnId, began }),
+        (turnId) => personMemory.isTurnTyped({ mode: "work", threadId, turnId }),
+      ),
+    workLastMessageAt: (threadId) =>
+      workLastMessageAt(workTurnProjection.listForThread(decodeWorkThreadId(threadId))),
+    workLastActivityAt: (threadId) =>
+      newestTurnUpdate(workTurnProjection.listForThread(decodeWorkThreadId(threadId))),
     codePersonMessages: (threadId, limit) =>
-      codeBoardEventStore
-        .personPromptsForThread(decodeCodeThreadId(threadId), limit)
-        .flatMap((prompt) => {
-          const text = codeEvidence.read(prompt);
-          return text === undefined ? [] : [text];
-        }),
+      codePersonMessages({
+        turns: codeBoardEventStore.personPromptTurnsForThread(
+          decodeCodeThreadId(threadId),
+          limit * 4,
+        ),
+        steered: codeBoardEventStore.steeredPersonMessagesForThread(
+          decodeCodeThreadId(threadId),
+          limit,
+        ),
+        readPrompt: (prompt) => codeEvidence.read(prompt),
+        limit,
+        counts: ({ turnId, began }) =>
+          personMemory.countsAsPersonWords({ mode: "code", threadId, turnId, began }),
+        typed: (turnId) => personMemory.isTurnTyped({ mode: "code", threadId, turnId }),
+      }),
+    codeLastMessageAt: (threadId) =>
+      codeLastMessageAt(
+        codeBoardEventStore.personPromptTurnsForThread(decodeCodeThreadId(threadId), 1),
+        codeBoardEventStore.steeredPersonMessagesForThread(decodeCodeThreadId(threadId), 1),
+      ),
+    turnRunning: (threadId) => deps.liveTurns.read(threadId) !== undefined,
     resolveDriver: resolveConfiguredDriver,
     accountUnavailable: automaticModelAccountUnavailable,
     scratchRoot: harnessWorkDirectory,
     protectedSecretPath: (path) => isProtectedSecretPath(path),
+    spendCeiling,
   });
   const decisionReviewModelPort = createDecisionReviewModelPort({
     persistence,

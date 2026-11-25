@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 import {
+  type ChatThread,
   type ChatThreadView,
   type ChatTurn,
   decodeChatThreadId,
   decodeCodeThreadId,
+  decodeProjectId,
   decodeProviderSessionId,
+  decodeSpendCeilingReservationId,
   personalSignInRefusals,
   PERSON_MEMORY_REQUEST_SHAPE,
   PERSON_MEMORY_USAGE_AGGREGATE_TYPE,
@@ -12,24 +15,234 @@ import {
   type ProviderModelId,
 } from "@octant/contracts";
 import { activeChatTurns } from "@octant/domain";
+import {
+  resolveModelContextWindow,
+  type ModelContextWindowFacts,
+} from "@octant/domain/model-context-window";
+import { isProviderAllowedByProjectPolicy } from "@octant/domain/project-provider-policy";
 import { smallestShieldModel } from "@octant/domain/shield-judge-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { completeOnceOutcome } from "../harness/nativeHarnessSingleShot";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { recordOneShotUsage } from "../shield/shieldUsageLedger";
+import type { SpendCeilingService } from "../spendCeilingService";
+import { namesProtectedPath } from "./namesProtectedPath";
 import type { PersonMemoryStore } from "./personMemoryStore";
-import { PersonMemorySweep, type PersonMemoryThreadSource } from "./personMemorySweep";
+import {
+  PersonMemorySweep,
+  type PersonMemoryModelPort,
+  type PersonMemoryThreadSource,
+  type PersonMessage,
+} from "./personMemorySweep";
+
+interface WorkThreadFacts {
+  readonly id: string;
+  readonly title: string;
+  readonly projectId: string;
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly modelId: ProviderModelId;
+  readonly completedAt?: string | undefined;
+}
+
+type CodeThread = ReturnType<PersistenceService["readCodeThreads"]>[number];
+
+/**
+ * What a call with no output limit may write when nothing names the model's
+ * window or its longest reply: a figure above every built-in profile's.
+ */
+const UNKNOWN_MODEL_OUTPUT_TOKEN_BOUND = 64_000;
+
+/**
+ * The spend-ceiling door for a memory call. The one-shot request carries no
+ * output limit, so the call is held to what the model could write: its longest
+ * reply (which counts its reasoning), else its window, else a large figure. A
+ * monetary ceiling refuses it, because the selected endpoint may set its own
+ * prices for any model, as it does for the other one-shot calls.
+ */
+export function personMemorySpend(input: {
+  readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle">;
+  readonly modelFacts: (model: {
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly modelId: ProviderModelId;
+  }) => ModelContextWindowFacts | undefined;
+}): NonNullable<PersonMemoryModelPort["admit"]> {
+  return ({ mode, threadId, projectId, model, inputUpperBoundTokens }) => {
+    const { spendCeiling } = input;
+    if (spendCeiling === undefined) return { status: "admitted", settle: () => undefined };
+    const facts = input.modelFacts(model);
+    const window = facts === undefined ? undefined : resolveModelContextWindow(facts);
+    const reservedTokens =
+      window?.maxOutput !== undefined
+        ? inputUpperBoundTokens + window.maxOutput
+        : window !== undefined
+          ? Math.max(window.contextWindow, inputUpperBoundTokens)
+          : inputUpperBoundTokens + UNKNOWN_MODEL_OUTPUT_TOKEN_BOUND;
+    const reservationId = decodeSpendCeilingReservationId(randomUUID());
+    const admission = spendCeiling.admit({
+      reservationId,
+      threadId,
+      threadType: `${mode}-thread`,
+      ...(projectId === undefined ? {} : { projectId }),
+      turnUpperBoundTokens: reservedTokens,
+      estimatedCostUsdMicros: "unknown",
+      // Learning is spend, not a turn of the thread's own.
+      countsAsTurn: false,
+    });
+    if (admission.status === "refused") return { status: "refused" };
+    return {
+      status: "admitted",
+      settle: (usage) =>
+        spendCeiling.settle({
+          reservationId,
+          ...(usage === undefined
+            ? {}
+            : { observedTokens: usage.inputTokens + usage.outputTokens }),
+        }),
+    };
+  };
+}
 
 /** The newest person messages a thread is distilled from; older ones are past the input cap anyway. */
 const PERSON_MESSAGE_LIMIT = 60;
 
-/** Path-shaped runs in text: home-relative (`~`, `$HOME`, `${HOME}`) or absolute. */
-const PATH_SHAPED = /(?:~|\$HOME|\$\{HOME\})?\/[^\s"'`<>()]+/g;
+/** The newest `limit` messages in the order they were said; at one time, as given. */
+function newestInOrder(
+  messages: ReadonlyArray<PersonMessage>,
+  limit: number,
+): ReadonlyArray<PersonMessage> {
+  return messages
+    .map((message, index) => ({ message, index }))
+    .sort(
+      (left, right) => left.message.at.localeCompare(right.message.at) || left.index - right.index,
+    )
+    .map(({ message }) => message)
+    .slice(-limit);
+}
 
-/** Whether text names a path the secret guard protects, ignoring punctuation that ends a sentence. */
-function namesProtectedPath(text: string, protectedSecretPath: (path: string) => boolean): boolean {
-  return [...text.matchAll(PATH_SHAPED)].some((match) =>
-    protectedSecretPath(match[0].replace(/[.,;:!?'"]+$/u, "")),
+/**
+ * A Work thread's newest messages from the person: each turn's prompt and each
+ * message steered into a running turn, in the order they were said. A turn the
+ * host accepted to deliver a subagent's result is left out. A steered message
+ * counts on its own mark, as a prompt does.
+ */
+export function workPersonMessages(
+  turns: ReadonlyArray<{
+    readonly turnId: string;
+    readonly acceptedAt: string;
+    readonly prompt: string;
+    readonly delivery?: unknown;
+    readonly steeredMessages?:
+      | ReadonlyArray<{
+          readonly messageId: string;
+          readonly body: string;
+          readonly steeredAt: string;
+        }>
+      | undefined;
+  }>,
+  limit: number,
+  counts: (message: { readonly turnId: string; readonly began: string }) => boolean,
+  typed: (id: string) => boolean,
+): ReadonlyArray<PersonMessage> {
+  return newestInOrder(
+    turns
+      .filter((turn) => turn.delivery === undefined)
+      .flatMap((turn) => [
+        ...(counts({ turnId: turn.turnId, began: turn.acceptedAt })
+          ? [
+              {
+                id: turn.turnId,
+                at: turn.acceptedAt,
+                text: turn.prompt,
+                typed: typed(turn.turnId),
+              },
+            ]
+          : []),
+        ...(turn.steeredMessages ?? [])
+          .filter((message) => counts({ turnId: message.messageId, began: message.steeredAt }))
+          .map((message) => ({
+            id: message.messageId,
+            at: message.steeredAt,
+            text: message.body,
+            typed: typed(message.messageId),
+          })),
+      ]),
+    limit,
+  );
+}
+
+/** When the person last wrote to a Work thread: its newest prompt or steered message. */
+export function workLastMessageAt(
+  turns: ReadonlyArray<{
+    readonly acceptedAt: string;
+    readonly delivery?: unknown;
+    readonly steeredMessages?: ReadonlyArray<{ readonly steeredAt: string }> | undefined;
+  }>,
+): string | undefined {
+  return turns
+    .filter((turn) => turn.delivery === undefined)
+    .flatMap((turn) => [turn.acceptedAt, ...(turn.steeredMessages ?? []).map((m) => m.steeredAt)])
+    .sort()
+    .at(-1);
+}
+
+/** When the person last wrote to a Code thread: its newest prompt or steered message. */
+export function codeLastMessageAt(
+  turns: ReadonlyArray<{ readonly began: string }>,
+  steered: ReadonlyArray<{ readonly at: string }>,
+): string | undefined {
+  return [...turns.map((turn) => turn.began), ...steered.map((message) => message.at)]
+    .sort()
+    .at(-1);
+}
+
+/**
+ * A Code thread's newest messages from the person: each turn's prompt (read
+ * through `readPrompt`, which may find it gone) and each message steered into a
+ * running turn, in the order they were said.
+ */
+export function codePersonMessages<Prompt>(input: {
+  readonly turns: ReadonlyArray<{
+    readonly operationId: string;
+    readonly began: string;
+    readonly prompt: Prompt;
+  }>;
+  readonly steered: ReadonlyArray<{
+    readonly messageId: string;
+    readonly at: string;
+    readonly body: string;
+  }>;
+  readonly readPrompt: (prompt: Prompt) => string | undefined;
+  readonly limit: number;
+  readonly counts: (message: { readonly turnId: string; readonly began: string }) => boolean;
+  readonly typed: (id: string) => boolean;
+}): ReadonlyArray<PersonMessage> {
+  return newestInOrder(
+    [
+      ...input.turns
+        .filter((turn) => input.counts({ turnId: turn.operationId, began: turn.began }))
+        .flatMap((turn) => {
+          const text = input.readPrompt(turn.prompt);
+          return text === undefined
+            ? []
+            : [
+                {
+                  id: turn.operationId,
+                  at: turn.began,
+                  text,
+                  typed: input.typed(turn.operationId),
+                },
+              ];
+        }),
+      ...input.steered
+        .filter((message) => input.counts({ turnId: message.messageId, began: message.at }))
+        .map((message) => ({
+          id: message.messageId,
+          at: message.at,
+          text: message.body,
+          typed: input.typed(message.messageId),
+        })),
+    ],
+    input.limit,
   );
 }
 
@@ -41,19 +254,113 @@ function namesProtectedPath(text: string, protectedSecretPath: (path: string) =>
 export function chatPersonMessages(
   view: {
     readonly turns: ReadonlyArray<
-      Pick<ChatTurn, "id" | "supersedes" | "rewound" | "delivery" | "userMessageRef">
+      Pick<ChatTurn, "id" | "supersedes" | "rewound" | "delivery" | "userMessageRef"> & {
+        readonly createdAt?: string;
+      }
     >;
     readonly contents: ReadonlyArray<
       Pick<ChatThreadView["contents"][number], "contentId" | "body">
     >;
   },
   limit: number,
-): ReadonlyArray<string> {
+  /** Whether a turn's message is the person's own words, as the store reads marks. */
+  counts: (turn: { readonly turnId: string; readonly began: string }) => boolean,
+  /** Whether the host marked the turn's message typed by the person. */
+  typed: (turnId: string) => boolean = () => false,
+): ReadonlyArray<PersonMessage> {
   const bodies = new Map(view.contents.map((content) => [String(content.contentId), content.body]));
   return activeChatTurns(view.turns)
     .filter((turn) => turn.delivery === undefined)
-    .flatMap((turn) => bodies.get(String(turn.userMessageRef.contentId)) ?? [])
+    .filter((turn) => counts({ turnId: String(turn.id), began: turn.createdAt ?? "" }))
+    .flatMap((turn) => {
+      const text = bodies.get(String(turn.userMessageRef.contentId));
+      return text === undefined
+        ? []
+        : [
+            {
+              id: String(turn.id),
+              at: turn.createdAt ?? "",
+              text,
+              typed: typed(String(turn.id)),
+            },
+          ];
+    })
     .slice(-limit);
+}
+
+/**
+ * When a Work thread's turns last changed. The projection lists turns in the
+ * order they were accepted, which is not the order they last changed: a turn
+ * accepted earlier can settle after a later one is accepted.
+ */
+export function newestTurnUpdate(
+  turns: ReadonlyArray<{ readonly updatedAt: string }>,
+): string | undefined {
+  return turns.reduce<string | undefined>(
+    (newest, turn) => (newest === undefined || turn.updatedAt > newest ? turn.updatedAt : newest),
+    undefined,
+  );
+}
+
+/**
+ * What a Code thread's terminal writes while no turn runs (a dev server left
+ * going journals its output into the thread), which is not the person or a turn
+ * being active, so it never makes a thread quiet.
+ */
+export const CODE_BACKGROUND_EVENT_KINDS: ReadonlyArray<string> = [
+  "terminal-output",
+  "terminal-state-changed",
+];
+
+/**
+ * When a thread's stream last recorded anything, which is when its last turn
+ * ended as well as when it began. Chat reads its own stream; Code reads the
+ * thread's operations through the index that starts at the thread, passing
+ * over what the thread's terminal wrote. Newest first and one row, so the cost
+ * does not grow with the thread's length (a terminal's rows apart).
+ */
+export function latestEventAt(
+  connection: PersistenceService["connection"],
+  key:
+    | { readonly aggregateType: string; readonly aggregateId: string; readonly eventName?: string }
+    | {
+        readonly aggregateType: string;
+        readonly threadId: string;
+        /** Event kinds (`$.event.kind`) that are not the thread's own activity. */
+        readonly exceptKinds?: ReadonlyArray<string>;
+      },
+): string | undefined {
+  const row =
+    "threadId" in key
+      ? connection
+          .prepare(
+            `SELECT occurred_at AS at FROM event_journal
+             WHERE aggregate_type = ?
+               AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+               ${
+                 key.exceptKinds === undefined || key.exceptKinds.length === 0
+                   ? ""
+                   : `AND coalesce(CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END, '') NOT IN (${key.exceptKinds.map(() => "?").join(", ")})`
+               }
+             ORDER BY global_sequence DESC LIMIT 1`,
+          )
+          .get(key.aggregateType, key.threadId, ...(key.exceptKinds ?? []))
+      : key.eventName === undefined
+        ? connection
+            .prepare(
+              `SELECT occurred_at AS at FROM event_journal
+               WHERE aggregate_type = ? AND aggregate_id = ?
+               ORDER BY global_sequence DESC LIMIT 1`,
+            )
+            .get(key.aggregateType, key.aggregateId)
+        : connection
+            .prepare(
+              `SELECT occurred_at AS at FROM event_journal
+               WHERE aggregate_type = ? AND aggregate_id = ? AND event_name = ?
+               ORDER BY global_sequence DESC LIMIT 1`,
+            )
+            .get(key.aggregateType, key.aggregateId, key.eventName);
+  return (row as { readonly at: string } | undefined)?.at;
 }
 
 /**
@@ -70,39 +377,79 @@ export function createPersonMemorySweep(input: {
     | "readChatThreads"
     | "readChatThreadView"
     | "readCodeThreads"
+    | "readChatThread"
+    | "readCodeThread"
     | "readProviderInstance"
     | "readProviderCatalog"
+    | "readProject"
   >;
   readonly store: PersonMemoryStore;
   readonly workThreads: {
-    readonly list: () => ReadonlyArray<{
-      readonly id: string;
-      readonly title: string;
-      readonly projectId: string;
-      readonly providerInstanceId: ProviderInstanceId;
-      readonly modelId: ProviderModelId;
-      readonly completedAt?: string | undefined;
-    }>;
+    readonly list: () => ReadonlyArray<WorkThreadFacts>;
+    /** One thread as it is now, without listing the others. */
+    readonly get: (threadId: string) => WorkThreadFacts | undefined;
   };
-  readonly workPersonMessages: (threadId: string, limit: number) => ReadonlyArray<string>;
-  readonly codePersonMessages: (threadId: string, limit: number) => ReadonlyArray<string>;
+  /** The newest messages the person wrote in a Work or Code thread that count as theirs. */
+  readonly workPersonMessages: (threadId: string, limit: number) => ReadonlyArray<PersonMessage>;
+  readonly codePersonMessages: (threadId: string, limit: number) => ReadonlyArray<PersonMessage>;
+  /** When the person last wrote to a Work or Code thread, whether it counts or not. */
+  readonly workLastMessageAt: (threadId: string) => string | undefined;
+  /** When a Work thread's newest turn last changed, which is when it ended. */
+  readonly workLastActivityAt: (threadId: string) => string | undefined;
+  readonly codeLastMessageAt: (threadId: string) => string | undefined;
+  /** A turn is running or waiting in the thread. */
+  readonly turnRunning: (threadId: string) => boolean;
   readonly resolveDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
   /** Why the account the person chose cannot be asked now; undefined when it can. */
   readonly accountUnavailable: (providerInstanceId: ProviderInstanceId) => string | undefined;
   readonly scratchRoot: string;
   readonly protectedSecretPath: (path: string) => boolean;
+  /** The thread's and its Project's spend ceilings, asked before each call. */
+  readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle">;
 }): PersonMemorySweep {
   const { persistence } = input;
+  // Each pass lists a mode's threads once; reading one thread uses that list
+  // instead of scanning it again for every thread.
+  const listedChat = new Map<string, ChatThread>();
+  const listedCode = new Map<string, CodeThread>();
   const chat: PersonMemoryThreadSource = {
     mode: "chat",
     // A Chat being deleted is on its way out; learning from it now would
     // spend a call on a thread whose memory the delete then erases.
-    threads: () =>
-      persistence.readChatThreads().filter((thread) => thread.lifecycle !== "deleting"),
-    read: (threadId) => {
-      const thread = persistence
+    threads: () => {
+      const threads = persistence
         .readChatThreads()
-        .find((candidate) => String(candidate.id) === threadId);
+        .filter((thread) => thread.lifecycle !== "deleting");
+      listedChat.clear();
+      for (const thread of threads) listedChat.set(String(thread.id), thread);
+      return threads;
+    },
+    current: (threadId) => {
+      const thread = persistence.readChatThread(decodeChatThreadId(threadId));
+      return thread === undefined || thread.lifecycle === "deleting"
+        ? undefined
+        : {
+            title: thread.title,
+            projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
+            providerInstanceId: thread.providerInstanceId,
+          };
+    },
+    peek: (threadId) => ({
+      lastMessageAt: latestEventAt(persistence.connection, {
+        aggregateType: "chat-thread",
+        aggregateId: threadId,
+        eventName: "chat.turn-created@1",
+      }),
+      lastActivityAt: latestEventAt(persistence.connection, {
+        aggregateType: "chat-thread",
+        aggregateId: threadId,
+      }),
+      running: input.turnRunning(threadId),
+    }),
+    read: (threadId) => {
+      const thread =
+        listedChat.get(threadId) ??
+        persistence.readChatThreads().find((candidate) => String(candidate.id) === threadId);
       const view = persistence.readChatThreadView(decodeChatThreadId(threadId));
       if (thread === undefined || view === undefined) return undefined;
       return {
@@ -110,15 +457,43 @@ export function createPersonMemorySweep(input: {
         projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
-        personMessages: chatPersonMessages(view, PERSON_MESSAGE_LIMIT),
+        personMessages: chatPersonMessages(
+          view,
+          PERSON_MESSAGE_LIMIT,
+          (turn) => input.store.countsAsPersonWords({ mode: "chat", threadId, ...turn }),
+          (turnId) => input.store.isTurnTyped({ mode: "chat", threadId, turnId }),
+        ),
       };
     },
   };
+  const listedWork = new Map<string, WorkThreadFacts>();
   const work: PersonMemoryThreadSource = {
     mode: "work",
-    threads: () => input.workThreads.list(),
+    threads: () => {
+      const threads = input.workThreads.list();
+      listedWork.clear();
+      for (const thread of threads) listedWork.set(thread.id, thread);
+      return threads;
+    },
+    current: (threadId) => {
+      const thread = input.workThreads.get(threadId);
+      return thread === undefined
+        ? undefined
+        : {
+            title: thread.title,
+            projectId: thread.projectId,
+            providerInstanceId: thread.providerInstanceId,
+          };
+    },
+    peek: (threadId) => ({
+      lastMessageAt: input.workLastMessageAt(threadId),
+      lastActivityAt: input.workLastActivityAt(threadId),
+      running: input.turnRunning(threadId),
+    }),
     read: (threadId) => {
-      const thread = input.workThreads.list().find((candidate) => candidate.id === threadId);
+      const thread =
+        listedWork.get(threadId) ??
+        input.workThreads.list().find((candidate) => candidate.id === threadId);
       if (thread === undefined) return undefined;
       return {
         title: thread.title,
@@ -131,11 +506,36 @@ export function createPersonMemorySweep(input: {
   };
   const code: PersonMemoryThreadSource = {
     mode: "code",
-    threads: () => persistence.readCodeThreads(),
+    threads: () => {
+      const threads = persistence.readCodeThreads();
+      listedCode.clear();
+      for (const thread of threads) listedCode.set(String(thread.id), thread);
+      return threads;
+    },
+    current: (threadId) => {
+      const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+      return thread === undefined
+        ? undefined
+        : {
+            title: thread.title,
+            projectId: String(thread.projectId),
+            providerInstanceId: thread.providerInstanceId,
+          };
+    },
+    peek: (threadId) => ({
+      lastMessageAt: input.codeLastMessageAt(threadId),
+      lastActivityAt: latestEventAt(persistence.connection, {
+        aggregateType: "code-operation",
+        threadId,
+        exceptKinds: CODE_BACKGROUND_EVENT_KINDS,
+      }),
+      running: input.turnRunning(threadId),
+    }),
     read: (threadId) => {
-      const thread = persistence
-        .readCodeThreads()
-        .find((candidate) => String(candidate.id) === String(decodeCodeThreadId(threadId)));
+      const decoded = String(decodeCodeThreadId(threadId));
+      const thread =
+        listedCode.get(decoded) ??
+        persistence.readCodeThreads().find((candidate) => String(candidate.id) === decoded);
       if (thread === undefined) return undefined;
       return {
         title: thread.title,
@@ -151,6 +551,26 @@ export function createPersonMemorySweep(input: {
     sources: [chat, work, code],
     namesProtectedPath: (text) => namesProtectedPath(text, input.protectedSecretPath),
     model: {
+      projectAllows: ({ projectId, model }) => {
+        if (projectId === undefined) return true;
+        const project = persistence.readProject(decodeProjectId(projectId));
+        // A Chat Project keeps no provider rule; any other Project's rule judges
+        // the provider and model that would read its threads.
+        if (project === undefined || project.type === "chat") return true;
+        const instance = persistence.readProviderInstance(model.providerInstanceId);
+        if (instance === undefined) return false;
+        const facts = persistence
+          .readProviderCatalog?.(model.providerInstanceId)
+          ?.models.find((candidate) => candidate.id === model.modelId);
+        return isProviderAllowedByProjectPolicy(project, instance, facts);
+      },
+      admit: personMemorySpend({
+        ...(input.spendCeiling === undefined ? {} : { spendCeiling: input.spendCeiling }),
+        modelFacts: (model) =>
+          persistence
+            .readProviderCatalog?.(model.providerInstanceId)
+            ?.models.find((candidate) => candidate.id === model.modelId),
+      }),
       resolve: ({ chosen, thread }) => {
         const model =
           chosen ??

@@ -117,6 +117,25 @@ export function readThreadMessagesSteered(
   return records;
 }
 
+/** A thread's newest `limit` steered messages, oldest first among them. */
+export function readNewestThreadMessagesSteered(
+  journal: Pick<Journal, "latestAggregateTypeForThread">,
+  threadId: string,
+  limit: number,
+): ReadonlyArray<ThreadMessageSteered> {
+  return journal
+    .latestAggregateTypeForThread({
+      aggregateType: THREAD_MESSAGE_STEERING_AGGREGATE_TYPE,
+      threadId,
+      limit: Math.min(Math.max(limit, 1), 1_000),
+    })
+    .flatMap((envelope) => {
+      const record = threadMessageSteeredFrom(envelope);
+      return record === undefined ? [] : [record];
+    })
+    .reverse();
+}
+
 /**
  * Adds one steered message to what a turn already carries. A record for a
  * message the turn already shows is the same one read again, so replay and a

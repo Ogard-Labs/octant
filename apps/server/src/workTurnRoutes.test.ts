@@ -1,6 +1,6 @@
 import { decodeWindowId, type HubGrant } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { AGENT_ACCESS_ORIGIN, createRemoteDevicePrincipal } from "./clientPrincipal";
 import { hubActScopeFromSpokeLink } from "./hub/hubActScope";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
@@ -325,6 +325,63 @@ describe("Work turn Stop from a hub-introduced device", () => {
     });
     expect((await route(stop(otherThreadId, "host-person")))?.status).toBe(200);
     expect(cancelFirstTurn).toHaveBeenCalledTimes(2);
+  });
+
+  it("believes that a Work message was typed only from the person's own window or a device they paired", async () => {
+    const startFirstTurn = vi.fn(
+      async (_window: unknown, _command: unknown, _options?: unknown) => ({
+        kind: "accepted" as const,
+        turn: {},
+      }),
+    );
+    const route = routeFixture({ startFirstTurn });
+    const remoteDeviceId = "00000000-0000-4000-8000-0000000009e0";
+    const turn = (typedByPerson: boolean) =>
+      JSON.stringify({
+        kind: "start-work-thread-turn",
+        ...(typedByPerson ? { typedByPerson: true } : {}),
+      });
+    const post = (body: string) =>
+      request("/api/work/turns", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+    const from = (
+      body: string,
+      principal: { readonly origin: string; readonly admittedBy?: "host-person" | "hub-roster" },
+    ) => {
+      const remote = post(body);
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-0000000009e1" as never,
+          ...principal,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    const sent = async (message: Request) => {
+      await route(message);
+      return startFirstTurn.mock.lastCall?.[2] as { readonly typedByPerson?: true } | undefined;
+    };
+    const paired = { origin: "https://octant.invalid", admittedBy: "host-person" } as const;
+
+    expect((await sent(post(turn(true))))?.typedByPerson).toBe(true);
+    expect((await sent(from(turn(true), paired)))?.typedByPerson).toBe(true);
+    for (const outsider of [
+      { origin: "https://octant.invalid", admittedBy: "hub-roster" },
+      { origin: "https://octant.invalid" },
+      { origin: AGENT_ACCESS_ORIGIN, admittedBy: "host-person" },
+    ] as const) {
+      expect((await sent(from(turn(true), outsider)))?.typedByPerson).toBeUndefined();
+    }
+    expect((await sent(post(turn(false))))?.typedByPerson).toBeUndefined();
   });
 });
 

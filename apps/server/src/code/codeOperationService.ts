@@ -1342,6 +1342,12 @@ export interface CodeOperationExecuteOptions {
    * command cannot carry it.
    */
   readonly limitRecovery?: boolean;
+  /**
+   * Set only by the person's own route when it says they typed this message
+   * into a composer. Host-only: a caller inside the host, a restricted device,
+   * and an agent grant never carry it.
+   */
+  readonly typedByPerson?: true;
   /** Host-only revocation check; never grants authority or travels on the wire. */
   readonly admissionCurrent?: () => boolean;
   /** Host-owned input preparation, only for a fresh start after checkout authority resolves. */
@@ -1360,6 +1366,12 @@ export interface CodeOperationExecuteOptions {
 }
 
 export interface CodeOperationServiceOptions {
+  /** Records that the person typed a turn's message, once the turn's start is journaled. */
+  readonly markTurnTyped?: (input: {
+    readonly threadId: string;
+    readonly projectId: string;
+    readonly turnId: string;
+  }) => void;
   /**
    * Whether Strict is on for a thread now, read as each provider turn starts.
    * Absent reads as Strict.
@@ -2406,6 +2418,15 @@ export class CodeOperationService {
                     },
                   });
                   resultCursor += 1;
+                  // After the start, before the runtime: a turn with no mark
+                  // is not the person's words, so a missing mark is the safe side.
+                  if (options.typedByPerson === true && command.delivery === undefined) {
+                    this.#options.markTurnTyped?.({
+                      threadId: String(command.threadId),
+                      projectId: String(scope.thread.projectId),
+                      turnId: String(command.operationId),
+                    });
+                  }
                 }
               }
               try {

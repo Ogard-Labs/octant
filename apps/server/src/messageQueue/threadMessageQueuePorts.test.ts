@@ -548,7 +548,13 @@ describe("queued turn admission", () => {
           messageId,
           ...(mode === "code" ? { codeOperationId } : {}),
           binding: inspection.binding,
-          payload: { mode, prompt: "Continue", threadMentionIds: [threadId], sideChatReturns },
+          payload: {
+            mode,
+            prompt: "Continue",
+            threadMentionIds: [threadId],
+            sideChatReturns,
+            typedByPerson: true,
+          },
           signal: new AbortController().signal,
         }),
       ).toEqual({ status: "accepted" });
@@ -564,7 +570,12 @@ describe("queued turn admission", () => {
               workingDirectory: "docs",
             }),
           }),
-          expect.objectContaining({ admissionCurrent: expect.any(Function) }),
+          // What the person typed is passed as the dispatching context, never as
+          // a field of the command the person's route would have to vouch for.
+          expect.objectContaining({
+            admissionCurrent: expect.any(Function),
+            typedByPerson: true,
+          }),
         );
         const accepted = await startFirstTurn.mock.results[0]?.value;
         if (accepted?.kind !== "accepted") throw new Error("Expected Work admission.");
@@ -589,7 +600,10 @@ describe("queued turn admission", () => {
             threadMentionIds: [threadId],
             sideChatReturns,
           }),
-          expect.objectContaining({ admissionCurrent: expect.any(Function) }),
+          expect.objectContaining({
+            admissionCurrent: expect.any(Function),
+            typedByPerson: true,
+          }),
         );
         const event = (sequence: number, payload: unknown) =>
           Schema.decodeUnknownSync(EventEnvelope)({
@@ -1334,7 +1348,10 @@ describe("a message sent while the thread's turn runs", () => {
     const send = (
       prompt: string,
       from = windowId,
-      extra: { readonly attachmentIds?: ReadonlyArray<string> } = {},
+      extra: {
+        readonly attachmentIds?: ReadonlyArray<string>;
+        readonly typedByPerson?: true;
+      } = {},
     ) => {
       const steerQueued = port.steer;
       if (steerQueued === undefined) throw new Error("The port offers no steering.");
@@ -1364,7 +1381,17 @@ describe("a message sent while the thread's turn runs", () => {
       scope,
       messageId,
       body: "Use the staging database instead.",
+      typedByPerson: false,
     });
+  });
+
+  it("passes on that the person typed a steered message only when its queue entry says so", async () => {
+    const steer = vi.fn<NonNullable<ProviderConnection["steer"]>>(() => Effect.succeed("steered"));
+    const { send, record } = steering(steer);
+
+    expect(await send("Use staging.", windowId, { typedByPerson: true })).toBe("steered");
+
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({ typedByPerson: true }));
   });
 
   it("is left to the queue when the runtime cannot steer, refuses, or fails, and is not recorded", async () => {

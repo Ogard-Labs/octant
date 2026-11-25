@@ -154,6 +154,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
     identity === undefined || hostId === undefined || threadId === undefined || mode !== wanted
       ? undefined
       : { identity, hostId, threadId, mode };
+  const typedScope = `thread:${identity ?? "none"}`;
   const shared = (target: ThreadTarget | undefined): ThreadHookInput => ({
     transport,
     target,
@@ -161,6 +162,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
     ui,
     gate: staleGate,
     prompt,
+    typedScope,
     setPrompt,
   });
 
@@ -393,8 +395,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
         !codeTurnLive &&
         (mode === "code" || work.thread !== undefined));
   const appendToDraft = useCallback(
-    (text: string) => setPrompt((draft) => appendTranscript(draft, text)),
-    [],
+    (text: string) => setPrompt((draft) => appendTranscript(typedScope, draft, text)),
+    [typedScope],
   );
   const voice = useVoiceDictation({
     transport: offlineDemo ? undefined : transport,
@@ -839,6 +841,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
               : {})}
             placeholder={MOBILE_COPY.composerFollowUp}
             testID="mobile-thread-composer"
+            typedScope={typedScope}
             value={prompt}
             voice={voice}
           />
@@ -863,6 +866,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
           {...(workTurnLive || codeTurnLive ? {} : attachProps)}
           placeholder={followUpComposerCopy?.placeholder ?? MOBILE_COPY.composerFollowUp}
           testID="mobile-thread-composer"
+          typedScope={typedScope}
           value={prompt}
           voice={voice}
         />

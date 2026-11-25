@@ -1,3 +1,4 @@
+import { withTypedSend } from "@octant/client-runtime/typed-composer-text";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import {
   ComposerSlashTypeahead,
@@ -13,7 +14,7 @@ import { useExtensionDraftSelections } from "./useExtensionDraftSelections";
 import { providerFamilyForThread } from "../providers/providerFamily";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
-import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
+import { useNewTaskPrompt, useNewTaskTypedScope } from "../composer/useNewTaskPrompt";
 import { pastedImageName } from "./composerImagePaste";
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import type { ChatControllerStatus } from "./useChatController";
@@ -98,6 +99,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
   ];
   const ready = props.status === undefined || props.status === "ready";
   const [prompt, setPrompt] = useNewTaskPrompt();
+  const typedScope = useNewTaskTypedScope();
   const [attachmentNotice, setAttachmentNotice] = useState<string>();
   const [stagedFiles, setStagedFiles] = useState<ReadonlyArray<File>>([]);
   // This composer has no suggestion list, so a capability token typed here can
@@ -167,13 +169,14 @@ export function ChatWelcome(props: ChatWelcomeProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
+    const onCreateChat = withTypedSend(props.onCreateChat, typedScope, trimmed);
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
     const options = Object.keys(modelOptionValues).length === 0 ? undefined : modelOptionValues;
     if (stagedFiles.length > 0) {
       const submitted = stagedFiles;
-      const created = props.onCreateChat(
+      const created = onCreateChat(
         trimmed,
         options,
         extensionSelections.length > 0 ? extensionSelections : undefined,
@@ -191,11 +194,11 @@ export function ChatWelcome(props: ChatWelcomeProps) {
         });
       if (extensionSelections.length > 0) extensionDraft.clear();
     } else if (extensionSelections.length > 0) {
-      props.onCreateChat(trimmed, options, extensionSelections);
+      onCreateChat(trimmed, options, extensionSelections);
       extensionDraft.clear();
-    } else if (options === undefined) props.onCreateChat(trimmed);
-    else props.onCreateChat(trimmed, options);
-  }, [canSubmit, extensionDraft, props, trimmed, modelOptionValues, stagedFiles]);
+    } else if (options === undefined) onCreateChat(trimmed);
+    else onCreateChat(trimmed, options);
+  }, [canSubmit, extensionDraft, props, trimmed, modelOptionValues, stagedFiles, typedScope]);
 
   function handleKeyDown(event: KeyboardEvent<ComposerInputElement>) {
     if (atMenu.handleKeyDown(event)) return;
@@ -283,6 +286,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             }
             input={
               <ComposerInput
+                typedScope={typedScope}
                 renderModelChip={atMenu.renderModelChip}
                 aria-activedescendant={
                   atMenu.active !== undefined
@@ -424,7 +428,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                 <ComposerVoiceButton
                   disabled={!ready || props.creating === true}
                   onTranscript={(transcript) =>
-                    setPrompt((current) => appendTranscript(current, transcript))
+                    setPrompt((current) => appendTranscript(typedScope, current, transcript))
                   }
                 />
               ),

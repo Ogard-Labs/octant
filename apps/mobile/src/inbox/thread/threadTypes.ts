@@ -27,6 +27,8 @@ export interface ThreadHookInput {
   readonly ui: ThreadUi;
   readonly gate: MutationGate;
   readonly prompt: string;
+  /** The draft the prompt belongs to, which says whose typing a send may claim. */
+  readonly typedScope: string;
   readonly setPrompt: (prompt: string) => void;
 }
 

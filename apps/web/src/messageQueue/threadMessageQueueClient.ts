@@ -6,6 +6,14 @@ import {
   ThreadMessageQueueReadResult,
   decodeHostAnswer,
 } from "@octant/contracts";
+import { sendWithTypedClaim } from "@octant/client-runtime/typed-claim";
+
+/** The host answered the request with this HTTP status. */
+class QueueRequestRefused extends Error {
+  constructor(readonly status: number) {
+    super("The host message queue is unavailable.");
+  }
+}
 
 export interface ThreadMessageQueueClient {
   readonly read: (scope: ThreadMessageQueueScope) => Promise<ThreadMessageQueueSnapshot>;
@@ -25,7 +33,7 @@ export function createThreadMessageQueueClient(options: {
       signal: AbortSignal.timeout(15000),
       ...init,
     });
-    if (!response.ok) throw new Error("The host message queue is unavailable.");
+    if (!response.ok) throw new QueueRequestRefused(response.status);
     return await response.json();
   }
   return {
@@ -46,11 +54,16 @@ export function createThreadMessageQueueClient(options: {
     },
     execute: async (command) => {
       const result = decodeHostAnswer(ThreadMessageQueueResult)(
-        await json("/api/thread-message-queue/commands", {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify(command),
-        }),
+        await sendWithTypedClaim(
+          command,
+          (sent) =>
+            json("/api/thread-message-queue/commands", {
+              method: "POST",
+              headers: { ...headers, "content-type": "application/json" },
+              body: JSON.stringify(sent),
+            }),
+          (error) => error instanceof QueueRequestRefused && error.status === 400,
+        ),
       );
       if (
         result.requestId !== command.requestId ||
