@@ -6,13 +6,9 @@ const GATE_ORIGIN = "https://octant.example:8443";
 
 /**
  * Paths the private listener must never forward: host-wide ledger purges,
- * diagnostics export, and local-only administration.
+ * the desktop's support bundle save, and local-only administration.
  */
 const LOCAL_ONLY_PROBES = [
-  { path: "/api/diagnostics/export", method: "POST" },
-  { path: "/api/diagnostics/journal-growth", method: "GET" },
-  { path: "/api/diagnostics/bundle", method: "POST" },
-  { path: "/api/diagnostics/bundle/preview", method: "GET" },
   { path: "/api/diagnostics/bundle/save", method: "POST" },
   { path: "/api/host-control/export", method: "GET" },
   { path: "/api/extensions/skill-folder-selection", method: "POST" },

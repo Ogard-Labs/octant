@@ -445,9 +445,11 @@ expires into a refusal (maintainer decision, 2026-11-13).
   site's signed-in session differs by profile. It
   is journaled in the shell settings like a remembered site, lifts no path or
   size check, and is listed, with its profile, with a Forget control in
-  Settings › Permissions › Browser uploads and downloads. Not built yet: it
-  grows only through the approval answer of a window
-  of this computer (a paired device's answer covers one upload).
+  Settings › Permissions › Browser uploads and downloads. It grows through
+  the approval answer of a window of this computer or of a device the host's
+  own person paired at Full, whose shell-settings change names that device; a
+  device below Full, a restricted device and a hub-introduced device answer for
+  one transfer only, and a read-only device is refused the Browser prompts.
   An answer given on a Private page is stored as one and covers Private pages alone. An answer remembered before the page was recorded names neither a profile nor a Private page: it was given for the site and the folder on any page, so it keeps covering every profile and Private pages, shown as "on any page" in Settings, until the person forgets it (maintainer decision, 2026-11-13). It was not narrowed because that would ask again for what the person already answered, and it cannot be confused with a newer answer, which always names its page. An unanswered ask waits in Needs
   you. At Full access nothing is asked. Work and Code both ask in the
   thread's Browser approval card ("Upload once", "Always allow" or "Deny"),

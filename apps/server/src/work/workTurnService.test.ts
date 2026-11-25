@@ -43,6 +43,7 @@ import {
   decodeProviderRuntimeEvent,
   decodeNativeHarnessSlotCandidate,
   EventActor,
+  decodeEventActor,
   ReplayCursor,
   type ProviderContextBlock,
   type WorkAccess,
@@ -2622,6 +2623,7 @@ describe("WorkTurnService", () => {
     it("records the adopted session's earlier conversation with the adoption, shows it back, and never sends it to the provider", async () => {
       let adopted: WorkThreadAdoptedSession | undefined;
       let imported: ImportedSessionHistory | undefined;
+      let recordedFor: typeof EventActor.Type | undefined;
       const prompts: string[] = [];
       const fixture = serviceFixture({
         resolveDriver: (_id, fallback) => ({
@@ -2636,9 +2638,10 @@ describe("WorkTurnService", () => {
               }),
           },
         }),
-        recordAdoptedSession: (_thread, record, history) => {
+        recordAdoptedSession: (_thread, record, history, actor) => {
           adopted = record;
           imported = history;
+          recordedFor = actor;
           return { status: "recorded" };
         },
         readImportedSessionHistory: () => imported,
@@ -2651,8 +2654,15 @@ describe("WorkTurnService", () => {
         },
       });
 
-      await fixture.service.adoptNativeSession(ids.window, ids.thread, "outside-1");
+      const asking = decodeEventActor({
+        kind: "remote-device",
+        actorId: "90000000-0000-4000-8000-0000000000e4",
+        deviceId: "90000000-0000-4000-8000-0000000000e4",
+      });
+      await fixture.service.adoptNativeSession(ids.window, ids.thread, "outside-1", asking);
 
+      // The record is journaled as whoever asked, not as the host.
+      expect(recordedFor).toEqual(asking);
       expect(imported).toEqual({
         status: "imported",
         messages: [{ role: "person", text: "Collect the vendor quotes" }],

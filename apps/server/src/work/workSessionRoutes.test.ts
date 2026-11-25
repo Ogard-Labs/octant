@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { decodeWindowId, decodeWorkThreadId } from "@octant/contracts";
+import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createWorkSessionRouteHandler } from "./workSessionRoutes";
 
@@ -87,7 +88,12 @@ describe("Work session routes", () => {
     const person = setup();
     const adopted = await person.handle(adoption(authorized));
     expect(await adopted?.json()).toMatchObject({ kind: "work-native-session-adopted" });
-    expect(person.adoptNativeSession).toHaveBeenCalledWith(windowId, threadId, "outside-session-1");
+    expect(person.adoptNativeSession).toHaveBeenCalledWith(
+      windowId,
+      threadId,
+      "outside-session-1",
+      expect.objectContaining({ kind: "local-user" }),
+    );
 
     const routine = setup(() => false);
     expect((await routine.handle(adoption(authorized)))?.status).toBe(403);
@@ -100,5 +106,34 @@ describe("Work session routes", () => {
     expect(routine.nativeSessions).not.toHaveBeenCalled();
     expect(routine.adoptNativeSession).not.toHaveBeenCalled();
     expect((await person.handle(adoption({})))?.status).toBe(401);
+  });
+
+  it("journals a session adoption as the local person from a window and as the device from a paired device", async () => {
+    const { handle, adoptNativeSession } = setup();
+    expect((await handle(adoption(authorized)))?.status).toBe(200);
+    expect(adoptNativeSession).toHaveBeenLastCalledWith(
+      windowId,
+      threadId,
+      "outside-session-1",
+      expect.objectContaining({ kind: "local-user" }),
+    );
+    const request = adoption({});
+    bindPrincipalRouteContext(request, {
+      principal: {
+        kind: "remote-device",
+        deviceId: "22222222-2222-4222-8222-222222222222",
+      } as never,
+      scopeId: windowId,
+    });
+    expect((await handle(request))?.status).toBe(200);
+    expect(adoptNativeSession).toHaveBeenLastCalledWith(
+      windowId,
+      threadId,
+      "outside-session-1",
+      expect.objectContaining({
+        kind: "remote-device",
+        deviceId: "22222222-2222-4222-8222-222222222222",
+      }),
+    );
   });
 });

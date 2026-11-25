@@ -1767,13 +1767,14 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         }
         if (route === "public-link-settings" && request.method === "POST") {
           // Turning public links on or pointing them at another service is
-          // the person's choice at this Mac, never a paired device's.
+          // the person's choice, at a window or on a device they paired.
           if (!principalActsAsHostPerson(principal)) {
             return jsonResponse(
               decodeCanvasPublicLinkSettingsResult({
                 kind: "canvas-public-link-settings-refused",
                 reason: "unauthorized",
-                message: "Public link settings can be changed only from a window on this computer.",
+                message:
+                  "Only you can change public links, from a window on this computer or a device you paired.",
               }),
               200,
               origin,

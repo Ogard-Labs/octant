@@ -9,15 +9,16 @@ import { eventActorForPrincipal } from "./principalEventActor";
 export interface HostPersonScopes {
   /**
    * Whether the scope is the host's own person: one of this host's live
-   * windows, or an active device that person paired (maintainer decision,
-   * 2026-11-12). A device the hub's roster introduced, a revoked or expired
+   * windows, or an active device that person paired at the Full access level
+   * (maintainer decisions, 2026-11-12 and 2026-11-22). A device the hub's
+   * roster introduced, one the person paired below Full, a revoked or expired
    * device, and an id nobody registered are not.
    */
   readonly actsAsHostPerson: (scopeId: WindowId) => boolean;
   /**
    * The device a change made under the scope is journaled as, when the scope
-   * is a device the person paired. Undefined for a window, whose change is the
-   * local person's.
+   * is a device the person paired, at any access level. Undefined for a window,
+   * whose change is the local person's.
    */
   readonly deviceActor: (scopeId: WindowId) => EventActor | undefined;
 }
@@ -31,6 +32,8 @@ export function createHostPersonScopes(options: {
   }>;
   /** Whether the host's approval record for the device says its person approved it. */
   readonly approvedByPerson: (deviceId: string) => boolean;
+  /** Whether the host's record gives the device the Full access level; only Full is the person. */
+  readonly hasFullAccess: (deviceId: string) => boolean;
 }): HostPersonScopes {
   const isLocalWindow = (scopeId: WindowId): boolean =>
     options.localWindows().some((windowId) => String(windowId) === String(scopeId));
@@ -44,7 +47,9 @@ export function createHostPersonScopes(options: {
     );
   };
   return {
-    actsAsHostPerson: (scopeId) => isLocalWindow(scopeId) || isPersonPairedDevice(scopeId),
+    actsAsHostPerson: (scopeId) =>
+      isLocalWindow(scopeId) ||
+      (isPersonPairedDevice(scopeId) && options.hasFullAccess(String(scopeId))),
     deviceActor: (scopeId) =>
       !isLocalWindow(scopeId) && isPersonPairedDevice(scopeId)
         ? eventActorForPrincipal({ kind: "remote-device", deviceId: String(scopeId) })
@@ -67,4 +72,20 @@ export function createPersonProjectReach<ProjectRef, Mode>(options: {
   return (scopeId, projectId, mode) =>
     options.windowHoldsProject(scopeId, projectId, mode) ||
     (options.isPersonPairedDevice(scopeId) && options.isActiveProject(projectId, mode));
+}
+
+/**
+ * Whether a paired device's scope is held to less than the host's own person:
+ * one the hub introduced or whose approval is unproved, or one the person
+ * paired below the Full access level. A scope that is no paired device (a
+ * window, the host) is never restricted by this.
+ */
+export function createRestrictedDeviceScope(options: {
+  readonly isPairedDeviceScope: (scopeId: WindowId) => boolean;
+  readonly approvedByPerson: (deviceId: string) => boolean;
+  readonly hasFullAccess: (deviceId: string) => boolean;
+}): (scopeId: WindowId) => boolean {
+  return (scopeId) =>
+    options.isPairedDeviceScope(scopeId) &&
+    (!options.approvedByPerson(String(scopeId)) || !options.hasFullAccess(String(scopeId)));
 }

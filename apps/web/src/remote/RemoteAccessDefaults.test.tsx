@@ -194,4 +194,77 @@ describe("default modes on a browser the host's own person paired", () => {
       await screen.findByRole("combobox", { name: "Default mode for new threads" }),
     ).toBeDisabled();
   });
+
+  it("offers a Code Project the standing-permission switches a window offers, and sends each as a Project command", async () => {
+    const { codeClient, projectClient, workThreadClient, executeProject } = clients();
+    const user = userEvent.setup();
+    render(
+      <RemoteAccessDefaults
+        codeClient={codeClient}
+        connected
+        mode="code"
+        projectClient={projectClient}
+        workThreadClient={workThreadClient}
+      />,
+    );
+
+    await user.click(await screen.findByRole("switch", { name: "Agents may merge" }));
+    await waitFor(() =>
+      expect(executeProject).toHaveBeenCalledWith({
+        kind: "change-code-project-agent-merge",
+        projectId: project.id,
+        expectedVersion: 3,
+        agentMerge: "enabled",
+      }),
+    );
+    for (const name of [
+      "Agents may write Project memory without asking",
+      "Agents may comment on pull requests",
+      "Use the Project's own toolchain",
+    ]) {
+      expect(screen.getByRole("switch", { name })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("switch", { name: /default branch/i })).toBeNull();
+  });
+
+  it("holds a Project's other switches until the first change comes back", async () => {
+    const { codeClient, projectClient, workThreadClient, executeProject } = clients();
+    executeProject.mockImplementation(() => new Promise(() => undefined));
+    const user = userEvent.setup();
+    render(
+      <RemoteAccessDefaults
+        codeClient={codeClient}
+        connected
+        mode="code"
+        projectClient={projectClient}
+        workThreadClient={workThreadClient}
+      />,
+    );
+
+    await user.click(await screen.findByRole("switch", { name: "Agents may merge" }));
+    await user.click(screen.getByRole("switch", { name: "Agents may comment on pull requests" }));
+
+    expect(executeProject).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByRole("switch", { name: "Agents may comment on pull requests" }),
+    ).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("holds the standing-permission switches while the session is stale", async () => {
+    const { codeClient, projectClient, workThreadClient } = clients();
+    render(
+      <RemoteAccessDefaults
+        codeClient={codeClient}
+        connected={false}
+        mode="code"
+        projectClient={projectClient}
+        workThreadClient={workThreadClient}
+      />,
+    );
+
+    expect(await screen.findByRole("switch", { name: "Agents may merge" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
 });
