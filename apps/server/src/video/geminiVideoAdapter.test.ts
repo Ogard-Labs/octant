@@ -252,6 +252,7 @@ describe("Gemini video driver", () => {
       const adapter = geminiVideoDriver.create({ profile, ports: recorder.ports });
       expect(await adapter.poll("v1_abc", new AbortController().signal)).toEqual({
         status: "running",
+        usage: { outputTokens: 46_376, inputTokens: 12 },
       });
     },
   );
@@ -274,6 +275,7 @@ describe("Gemini video driver", () => {
     const adapter = geminiVideoDriver.create({ profile, ports: recorder.ports });
     expect(await adapter.poll("v1_abc", new AbortController().signal)).toEqual({
       status: "running",
+      usage: { outputTokens: 46_376, inputTokens: 12 },
     });
   });
 

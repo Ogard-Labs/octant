@@ -2063,6 +2063,39 @@ describe("video jobs", () => {
     expect(spend.settle).toHaveBeenCalledOnce();
   });
 
+  it("settles a finished clip that never downloaded at the usage the provider last reported", async () => {
+    const { service, calls, journal, advance } = harness({
+      poll: async () => {
+        if (calls.poll === 3) advance(VIDEO_JOB_TIMEOUT_MS);
+        // The last status check says nothing about usage; the one before it did.
+        return calls.poll === 2
+          ? { status: "running", usage: { outputTokens: 28_960 } }
+          : { status: "running" };
+      },
+    });
+    const append = vi.spyOn(journal, "append");
+    const queued = await enqueue(service);
+    const done = await service.whenTerminal(queued.id);
+    expect(done).toMatchObject({ status: "failed", settledCostUsdMicros: 347_520 });
+    expect(queued.estimatedCostUsdMicros).toBe(695_040);
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: expect.arrayContaining([
+          expect.objectContaining({
+            eventName: "context.usage-reconciled@1",
+            payload: {
+              reconciliation: expect.objectContaining({
+                actualOutputTokens: 28_960,
+                cost: { kind: "api-estimate", usdMicros: 347_520 },
+              }),
+            },
+          }),
+        ]),
+      }),
+    );
+    service.close();
+  });
+
   it("ends a job on the provider's own failure answer, billed nothing", async () => {
     const { service, spend } = harness({
       polls: [

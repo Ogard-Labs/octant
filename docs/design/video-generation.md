@@ -328,6 +328,10 @@ which the person sets, like any turn.
     delivery uncertain, and the start settles at the estimate. A confirmed
     completion with invalid output still settles to reported usage or to the
     estimate when no usage was reported.
+  - A clip Gemini finished but the host could not download in the job time
+    settles at the usage Gemini last reported with it, and at the estimate when
+    it reported none. The host keeps that usage only while it runs: a job
+    resumed after a restart settles at what the provider reports again.
   - A cancelled job settles at the reported usage, or at the estimate when
     none is reported, because a provider may bill a job it had already
     started. Stop releases the reservation after a confirmed rejection
@@ -634,7 +638,11 @@ export type VideoAdapterStart =
     };
 
 export type VideoAdapterPoll =
-  | { readonly status: "running" }
+  | {
+      readonly status: "running";
+      /** Already billed for a finished clip that is not collected yet. */
+      readonly usage?: VideoAdapterUsage;
+    }
   | {
       readonly status: "completed";
       readonly video: { readonly bytes: Uint8Array; readonly mediaType: "video/mp4" };

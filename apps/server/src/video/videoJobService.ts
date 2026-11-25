@@ -1002,6 +1002,7 @@ export class VideoJobService {
     const deadline = Date.parse(job.startedAt ?? job.createdAt) + VIDEO_JOB_TIMEOUT_MS;
     let interval = FIRST_POLL_MS;
     let cancelAsked = false;
+    let reported: VideoAdapterUsage | undefined;
     while (!this.#closing.signal.aborted) {
       if (running.stopRequested && !cancelAsked) {
         cancelAsked = true;
@@ -1018,6 +1019,7 @@ export class VideoJobService {
           // Shutdown aborted the cancel: the job stays running for the next
           // host to resume, never concluded from an answer the abort produced.
           if (this.#closing.signal.aborted) return;
+          if (answer.status === "running") reported = answer.usage ?? reported;
           // A failed answer is a failure of the cancel REQUEST, not proof
           // about the job: it falls through to an immediate poll, and only a
           // terminal answer from there — or the deadline — concludes the job.
@@ -1039,7 +1041,7 @@ export class VideoJobService {
         }
       }
       if (this.#now() >= deadline) {
-        this.#finishExpired(job, adapter, canCancel);
+        this.#finishExpired(job, adapter, canCancel, reported);
         return;
       }
       // Once cancel is asked, Stop's signal stays aborted. Keep polling for
@@ -1052,6 +1054,7 @@ export class VideoJobService {
       // Shutdown leaves the job running for recovery. A poll interrupted by
       // Stop leaves the provider outcome unknown and must reach cancel first.
       if (this.#closing.signal.aborted) return;
+      if (poll.status === "running") reported = poll.usage ?? reported;
       if (
         poll.status === "failed" &&
         poll.billed !== true &&
@@ -1082,14 +1085,20 @@ export class VideoJobService {
     }
   }
 
-  #finishExpired(job: VideoJob, adapter: VideoGenerationAdapter, canCancel: boolean): void {
+  #finishExpired(
+    job: VideoJob,
+    adapter: VideoGenerationAdapter,
+    canCancel: boolean,
+    reported?: VideoAdapterUsage,
+  ): void {
     this.#finish(this.#current(job), "failed", {
       failure: videoFailure(
         "unavailable",
         "Octant could not confirm the clip's result within 30 minutes.",
       ),
-      settledCostUsdMicros: estimateOrZero(job),
+      settledCostUsdMicros: this.#settled(job, reported),
       billed: true,
+      ...(reported === undefined ? {} : { usage: reported }),
     });
     const { remoteId } = job;
     if (!canCancel || remoteId === undefined) return;

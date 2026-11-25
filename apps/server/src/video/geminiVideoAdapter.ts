@@ -287,8 +287,10 @@ async function readInteraction(
           const downloaded = await downloadFile(ports, video.uri, signal);
           // Google finished and billed the clip; a failed download is tried
           // again on the next poll, and a job that never gets it settles at
-          // its estimate when its time runs out, never as an unbilled failure.
-          if (downloaded.status !== "downloaded") return { status: "running" };
+          // this usage when its time runs out, never as an unbilled failure.
+          if (downloaded.status !== "downloaded") {
+            return usage === undefined ? { status: "running" } : { status: "running", usage };
+          }
           return {
             status: "completed",
             video: { bytes: downloaded.bytes, mediaType: "video/mp4" },
