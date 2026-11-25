@@ -49,7 +49,10 @@ export function RemoteHostPermissions(props: RemoteHostPermissionsProps) {
     projects.find((project) => project.id === ceilingProject)?.id ?? projects[0]?.id;
 
   return (
-    <div className="settings-section-stack" id="settings-permissions">
+    <div className="flex min-w-0 flex-col gap-3" id="settings-permissions">
+      <p className="text-xs text-muted-foreground">
+        These belong to the host. “This computer” below is the host, not the one you are using.
+      </p>
       <ProtectedFilesSettings client={clients.protectedFiles} />
       <SafeNetworksSettings client={clients.safeNetworks} projectNames={projectNames} />
       <ShieldServersSettings client={clients.shieldServers} projectNames={projectNames} />
@@ -69,6 +72,7 @@ export function RemoteHostPermissions(props: RemoteHostPermissionsProps) {
           />
           <ProjectSpendCeilingSection
             client={clients.spendCeiling}
+            inSettings
             key={ceilingProjectId}
             projectId={ceilingProjectId}
           />

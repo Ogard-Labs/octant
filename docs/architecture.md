@@ -18441,7 +18441,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   everywhere until reconfirmed, and the desktop app loads them into the profile's
   Electron session, with `chrome.tabs` for the profile's own pages and
   `chrome.action.onClicked` answered by the app. A signed-in page's approval from a phone-started turn is answered on that phone or at any window or paired device that may drive the thread
-  (maintainer decision, 2026-11-12; a browser the host's own person paired reads and answers it, and one the hub introduced does only where its Act item names the Project), and a kept screenshot's record names the profile. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
+  (maintainer decision, 2026-11-12; a browser the host's own person paired reads and answers it; a hub-introduced or restricted device never sees it), and a kept screenshot's record names the profile. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,

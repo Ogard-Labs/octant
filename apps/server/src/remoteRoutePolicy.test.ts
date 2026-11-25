@@ -319,6 +319,8 @@ describe("remote route policy", () => {
       { path: "/api/artifacts/synced", method: "POST" },
       { path: "/api/threads/tool-call-records", method: "POST" },
       { path: "/api/provider-tooling/list", method: "POST" },
+      { path: "/api/mcp-plan-read-only", method: "GET" },
+      { path: "/api/mcp-plan-read-only/commands", method: "POST" },
       { path: "/api/code-live-tasks?threadId=t1", method: "GET" },
       { path: "/api/work-live-tasks?threadId=t1", method: "GET" },
       { path: "/api/replica-store/settings", method: "GET" },

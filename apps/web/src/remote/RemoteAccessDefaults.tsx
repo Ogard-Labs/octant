@@ -99,6 +99,13 @@ function ProjectStandingPermissions(props: {
   readonly connected: boolean;
 }) {
   const { controller, projectId } = props;
+  // Each command asserts the Project version it read, so one switch waits for
+  // another on the same Project, not only for itself.
+  const [pending, setPending] = useState(false);
+  const run = (change: Promise<boolean>) => {
+    setPending(true);
+    void change.finally(() => setPending(false));
+  };
   const project = controller.projects.find((candidate) => candidate.id === projectId);
   if (project === undefined || project.lifecycle !== "active") return null;
   const toState = (enabled: boolean) => (enabled ? "enabled" : "disabled");
@@ -107,34 +114,34 @@ function ProjectStandingPermissions(props: {
       <PermissionSwitch
         checked={project.agentMemoryWrites === "enabled"}
         description={AGENT_MEMORY_WRITES_COPY}
-        disabled={!props.connected}
+        disabled={!props.connected || pending}
         label="Agents may write Project memory without asking"
-        onChange={(enabled) => controller.setAgentMemoryWrites(projectId, enabled)}
+        onChange={(enabled) => run(controller.setAgentMemoryWrites(projectId, enabled))}
       />
       {project.type !== "code" ? null : (
         <>
           <PermissionSwitch
             checked={project.agentMerge === "enabled"}
             description={AGENT_MERGE_COPY}
-            disabled={!props.connected}
+            disabled={!props.connected || pending}
             label="Agents may merge"
-            onChange={(enabled) => controller.setCodeAgentMerge(projectId, toState(enabled))}
+            onChange={(enabled) => run(controller.setCodeAgentMerge(projectId, toState(enabled)))}
           />
           <PermissionSwitch
             checked={project.agentPullRequestComments === "enabled"}
             description={AGENT_PULL_REQUEST_COMMENTS_COPY}
-            disabled={!props.connected}
+            disabled={!props.connected || pending}
             label="Agents may comment on pull requests"
             onChange={(enabled) =>
-              controller.setCodeAgentPullRequestComments(projectId, toState(enabled))
+              run(controller.setCodeAgentPullRequestComments(projectId, toState(enabled)))
             }
           />
           <PermissionSwitch
             checked={project.ownToolchain === "enabled"}
             description={OWN_TOOLCHAIN_COPY}
-            disabled={!props.connected}
+            disabled={!props.connected || pending}
             label="Use the Project's own toolchain"
-            onChange={(enabled) => controller.setCodeOwnToolchain(projectId, toState(enabled))}
+            onChange={(enabled) => run(controller.setCodeOwnToolchain(projectId, toState(enabled)))}
           />
         </>
       )}
@@ -147,11 +154,8 @@ function PermissionSwitch(props: {
   readonly label: string;
   readonly description: string;
   readonly disabled: boolean;
-  readonly onChange: (enabled: boolean) => Promise<boolean>;
+  readonly onChange: (enabled: boolean) => void;
 }) {
-  // Each command asserts the Project version it read, so a second flip waits
-  // for the first to come back.
-  const [pending, setPending] = useState(false);
   const descriptionId = useId();
   return (
     <div className="flex items-start justify-between gap-2">
@@ -164,12 +168,9 @@ function PermissionSwitch(props: {
       <OctantSwitch
         checked={props.checked}
         describedBy={descriptionId}
-        disabled={props.disabled || pending}
+        disabled={props.disabled}
         label={props.label}
-        onCheckedChange={(enabled) => {
-          setPending(true);
-          void props.onChange(enabled).finally(() => setPending(false));
-        }}
+        onCheckedChange={props.onChange}
       />
     </div>
   );
