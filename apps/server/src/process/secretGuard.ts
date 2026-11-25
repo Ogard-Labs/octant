@@ -232,7 +232,8 @@ export function secretGuardNativeReadOverlap(
   platform: NodeJS.Platform = process.platform,
 ): ResolvedProtectedEntry | undefined {
   const forms = roots.flatMap((root) => pathForms(root, platform));
-  return withResolvedForms(secretGuardEntries({ platform }), platform).find((entry) => {
+  const entries = [...secretGuardEntries({ platform }), ...threadSecretGuardEntries(platform)];
+  return withResolvedForms(entries, platform).find((entry) => {
     const location = entry.kind === "path" ? entry.path : entry.directory;
     return forms.some((root) => isSameOrInside(location, root) || isSameOrInside(root, location));
   });

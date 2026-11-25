@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { CredentialRequestResolution } from "@octant/contracts/credential-request";
 import {
   decodeThreadSecretsView,
+  ThreadSecretAnswer as ThreadSecretAnswerSchema,
   ThreadSecretRequestInput,
   ThreadSecretRequestResult,
   type ThreadSecretAnswer,
@@ -32,6 +33,7 @@ const VALUE = "s3cret-Value-ångström";
 const NOW = "2026-11-24T20:00:00.000Z";
 const CONSUMER = { id: "computer", label: "Computer use" };
 const decodeInput = Schema.decodeUnknownSync(ThreadSecretRequestInput);
+const decodeThreadSecretAnswer = Schema.decodeUnknownSync(ThreadSecretAnswerSchema);
 const decodeResult = Schema.decodeUnknownSync(ThreadSecretRequestResult);
 
 let directory: string;
@@ -914,6 +916,34 @@ describe("a host with trouble", () => {
       }),
     ).toEqual({ status: "refused", failure: "unavailable" });
     expect(records().some((record) => record.name === "thread-secret.used")).toBe(false);
+  });
+
+  it("masks every field of an account password, whatever the agent asked", () => {
+    const context = host();
+    const fields = [
+      { name: "USER", label: "User", secret: false },
+      { name: "PASSWORD", label: "Password", secret: false },
+    ];
+    void context.service.request(context.caller, request({ kind: "account-password", fields }));
+    expect(card(context.service).fields.map(({ secret }) => secret)).toEqual([true, true]);
+  });
+
+  it("shows a card whose field has a name Windows keeps for itself", async () => {
+    const context = host();
+    const fields = [{ name: "AUX", label: "Auxiliary key" }];
+    const asked = context.service.request(context.caller, request({ fields }));
+    const view = JSON.parse(JSON.stringify(context.service.view(WINDOW, THREAD)));
+    expect(decodeThreadSecretsView(view).requests).toMatchObject([{ fields: [{ name: "AUX" }] }]);
+    expect(
+      decodeThreadSecretAnswer({
+        id: card(context.service).id,
+        action: "save",
+        lifetime: "1-hour",
+        fields: [{ name: "AUX", source: "pasted", value: VALUE }],
+      }),
+    ).toMatchObject({ fields: [{ name: "AUX" }] });
+    expect(await save(context.service)).toEqual({ status: "accepted" });
+    expect(await asked).toMatchObject({ status: "saved" });
   });
 
   it("keeps the earlier secret and its file when the new file cannot be put in place", async () => {

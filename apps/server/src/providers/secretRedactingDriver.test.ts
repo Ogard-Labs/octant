@@ -8,7 +8,7 @@ import { SECRET_REDACTION } from "@octant/domain/secret-guard-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
-import { noteIssuedSecret } from "../process/secretRedaction";
+import { holdSecretValue, noteIssuedSecret } from "../process/secretRedaction";
 import { redactProviderRuntimeSecrets } from "./secretRedactingDriver";
 
 const instanceId = decodeProviderInstanceId("00000000-0000-4000-8000-000000000011");
@@ -102,6 +102,102 @@ describe("secret redaction at the driver boundary", () => {
     ]);
     expect(JSON.stringify(events)).not.toContain(fakeGithubToken);
     expect(JSON.stringify(events)).not.toContain(fakeIssued);
+  });
+
+  it("keeps an event's own words when a person's secret is one of them", async () => {
+    const releases = ["completed", "in-progress", "modified", "unavailable"].map(holdSecretValue);
+    try {
+      const events = await collect(
+        redactProviderRuntimeSecrets(
+          fixture([
+            event({
+              kind: "task-progress",
+              taskId: "task",
+              status: "completed",
+              summary: "It is completed.",
+            }),
+            event({ kind: "file-change", path: "modified", change: "modified" }),
+            event({
+              kind: "failed",
+              failure: { category: "unavailable", message: "It is unavailable." },
+            }),
+          ]),
+        ),
+      );
+      expect(events).toMatchObject([
+        { status: "completed", summary: `It is ${SECRET_REDACTION}.` },
+        { path: SECRET_REDACTION, change: "modified" },
+        { failure: { category: "unavailable", message: `It is ${SECRET_REDACTION}.` } },
+      ]);
+      for (const item of events) expect(decodeProviderRuntimeEvent(item)).toEqual(item);
+    } finally {
+      for (const release of releases) release();
+    }
+  });
+
+  it("keeps such words inside an event too, and drops a reference it could not read again", async () => {
+    const releases = [
+      "authentication",
+      "timed-out",
+      "exhausted",
+      "pull-request",
+      "reviewed",
+      "acme-private",
+    ].map(holdSecretValue);
+    const reference = {
+      forge: "github",
+      kind: "pull-request",
+      action: "reviewed",
+      owner: "acme",
+      repository: "app",
+      number: 7,
+      title: "Use acme-private",
+    };
+    try {
+      const events = await collect(
+        redactProviderRuntimeSecrets(
+          fixture([
+            event({
+              kind: "failed",
+              failure: {
+                category: "unavailable",
+                message: "It timed-out.",
+                diagnostic: { stage: "authentication", kind: "timed-out" },
+                usageLimit: { kind: "exhausted" },
+              },
+            }),
+            event({
+              kind: "tool-success",
+              toolCallId: "call",
+              summary: "Done.",
+              forgeReferences: [reference, { ...reference, owner: "acme-private" }],
+            }),
+            event({
+              kind: "tool-success",
+              toolCallId: "call",
+              summary: "Done.",
+              forgeReferences: [{ ...reference, owner: "acme-private" }],
+            }),
+          ]),
+        ),
+      );
+      expect(events).toMatchObject([
+        {
+          failure: {
+            message: `It ${SECRET_REDACTION}.`,
+            diagnostic: { stage: "authentication", kind: "timed-out" },
+            usageLimit: { kind: "exhausted" },
+          },
+        },
+        { forgeReferences: [{ ...reference, title: `Use ${SECRET_REDACTION}` }] },
+        { summary: "Done." },
+      ]);
+      expect(events[2]).not.toHaveProperty("forgeReferences");
+      for (const item of events) expect(decodeProviderRuntimeEvent(item)).toEqual(item);
+      expect(JSON.stringify(events)).not.toContain("acme-private");
+    } finally {
+      for (const release of releases) release();
+    }
   });
 
   it("passes an event with nothing to redact through as the same object", async () => {

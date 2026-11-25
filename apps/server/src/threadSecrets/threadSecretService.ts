@@ -588,7 +588,8 @@ export class ThreadSecretService {
               name: field.name,
               label: field.label,
               ...(field.placeholder === undefined ? {} : { placeholder: field.placeholder }),
-              secret: field.secret ?? true,
+              // The agent does not decide that a computer's password is shown.
+              secret: input.kind === "account-password" || (field.secret ?? true),
             })),
       lifetimes: offer.lifetimes.filter((lifetime) => lifetime !== "remember"),
       defaultLifetime: offer.defaultLifetime === "remember" ? "24-hours" : offer.defaultLifetime,

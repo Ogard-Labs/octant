@@ -21,6 +21,7 @@ import {
   protectedAtLevel,
   secretGuardEntries,
   secretGuardLinuxPaths,
+  secretGuardNativeReadOverlap,
   secretGuardRefusal,
   secretGuardSearchRefusal,
   threadSecretGuardEntries,
@@ -402,6 +403,15 @@ describe("secret guard on Linux", () => {
     expect(
       secretGuardLinuxPaths({ entries: threadSecretGuardEntries("linux"), ownAccountPaths: [] }),
     ).toEqual([join(runtime, "thread-secrets")]);
+  });
+
+  it("refuses a native sandbox a read folder above the threads' secrets, whatever the list says", () => {
+    const home = fakeHome();
+    const runtime = join(home, "runtime");
+    configureSecretGuardLocations({ dataDirectory: join(home, "data"), runtimeDirectory: runtime });
+    applyProtectedFilesChoice({ added: [], removed: ["octant-credentials"] });
+    expect(secretGuardNativeReadOverlap([runtime])).toMatchObject({ label: "Thread secrets" });
+    expect(secretGuardNativeReadOverlap([join(home, "elsewhere")])).toBeUndefined();
   });
 
   it("names the threads' secrets folder the way Windows paths are compared", () => {

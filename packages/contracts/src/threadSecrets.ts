@@ -35,6 +35,8 @@ export const ThreadSecretName = Schema.String.pipe(
  * the 128 characters Octant's command launches accept for a variable.
  */
 export const ThreadSecretFieldName = Schema.String.pipe(Schema.pattern(/^[A-Z][A-Z0-9_]{0,47}$/));
+/** A card's field: one the agent named, or the request's own name. Never a file's name alone. */
+const CardFieldName = Schema.String.pipe(Schema.pattern(/^[A-Z][A-Z0-9_]{0,63}$/));
 /** A secret's name, or its name and one field's. */
 const DeliveredName = Schema.String.pipe(Schema.pattern(/^[A-Z][A-Z0-9_]{0,112}$/));
 const EnvironmentName = Schema.String.pipe(Schema.pattern(/^OCTANT_SECRET_[A-Z][A-Z0-9_]{0,112}$/));
@@ -244,7 +246,7 @@ export const ThreadSecretRequestCard = Schema.Struct({
   /** Always at least one: a request with no named fields has one, under its own name. */
   fields: Schema.Array(
     Schema.Struct({
-      name: ThreadSecretName,
+      name: CardFieldName,
       label: Label,
       placeholder: Schema.optional(Placeholder),
       secret: Schema.Boolean,
@@ -269,12 +271,12 @@ export type ThreadSecretRequestCard = typeof ThreadSecretRequestCard.Type;
 
 export const ThreadSecretAnswerField = Schema.Union(
   Schema.Struct({
-    name: ThreadSecretName,
+    name: CardFieldName,
     source: Schema.Literal("pasted"),
     value: ThreadSecretValue,
   }).annotations(strict),
   Schema.Struct({
-    name: ThreadSecretName,
+    name: CardFieldName,
     source: Schema.Literal("onepassword"),
     store: SecretStoreKind,
     reference: SecretStoreItemReference,
@@ -282,7 +284,7 @@ export const ThreadSecretAnswerField = Schema.Union(
     freshEachUse: Schema.Boolean,
   }).annotations(strict),
   Schema.Struct({
-    name: ThreadSecretName,
+    name: CardFieldName,
     source: Schema.Literal("remembered"),
     rememberedId: Schema.UUID,
   }).annotations(strict),

@@ -1,6 +1,7 @@
 import type { ProviderRuntimeEvent } from "@octant/contracts";
+import { ThreadForgeReference } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
-import { Effect, Stream } from "effect";
+import { Effect, Schema, Stream } from "effect";
 import { redactHostSecretsInValue } from "../process/secretRedaction";
 
 /**
@@ -36,14 +37,53 @@ const REDACTED_KINDS: ReadonlySet<ProviderRuntimeEvent["kind"]> = new Set([
   "failed",
 ]);
 
+/** What says which event this is and what state it reports, in Octant's own words. */
+const STRUCTURE = [
+  "instanceId",
+  "sessionId",
+  "correlationId",
+  "occurredAt",
+  "kind",
+  "part",
+  "change",
+  "status",
+] as const;
+
+const isForgeReference = Schema.is(ThreadForgeReference);
+
 export function redactProviderRuntimeEvent(event: ProviderRuntimeEvent): ProviderRuntimeEvent {
   if (!REDACTED_KINDS.has(event.kind)) return event;
   const redacted = redactHostSecretsInValue(event);
-  // A password can be a word Octant uses ("tool-failure"). What says which
-  // event this is stays; anything else that carries it is replaced.
-  return redacted.kind === event.kind
-    ? redacted
-    : ({ ...redacted, kind: event.kind } as ProviderRuntimeEvent);
+  if (redacted === event) return event;
+  // A password can be a word Octant uses ("completed"). Those stay; anything
+  // else that carries it is replaced.
+  const structure = STRUCTURE.filter((key) => key in event).map((key) => [
+    key,
+    Reflect.get(event, key),
+  ]);
+  const shown = { ...redacted, ...Object.fromEntries(structure) } as ProviderRuntimeEvent;
+  if (event.kind === "failed" && shown.kind === "failed") {
+    const { category, reason, diagnostic, usageLimit } = event.failure;
+    return {
+      ...shown,
+      failure: {
+        ...shown.failure,
+        category,
+        ...(reason === undefined ? {} : { reason }),
+        ...(diagnostic === undefined ? {} : { diagnostic }),
+        ...(usageLimit === undefined ? {} : { usageLimit }),
+      },
+    };
+  }
+  if (event.kind !== "tool-success" || shown.kind !== "tool-success") return shown;
+  const { forgeReferences, ...rest } = shown;
+  // A name that carried the secret names nothing once it is replaced.
+  const readable = (forgeReferences ?? []).flatMap((reference, index) => {
+    const { forge, kind, action } = event.forgeReferences?.[index] ?? reference;
+    const kept: unknown = { ...reference, forge, kind, action };
+    return isForgeReference(kept) ? [kept] : [];
+  });
+  return readable.length === 0 ? rest : { ...rest, forgeReferences: readable };
 }
 
 export function redactProviderRuntimeSecrets(driver: ProviderDriver): ProviderDriver {
