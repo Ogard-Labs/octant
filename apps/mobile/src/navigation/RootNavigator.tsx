@@ -248,11 +248,9 @@ function PlaceStack(props: { readonly place: "home" | "threads" | "inbox" }) {
 }
 
 const ROOT_OPTIONS = { headerLargeTitleEnabled: true } as const;
-// On Liquid Glass a place's list runs under its bar and fades there; its name
-// is in the bar (ScreenHeader). Older systems keep the large title.
-const PLACE_OPTIONS = hasLiquidGlass()
-  ? ({ headerTransparent: true, scrollEdgeEffects: { top: "hard" } } as const)
-  : ROOT_OPTIONS;
+// On Liquid Glass a place's name is in the bar (ScreenHeader). Older systems
+// keep the large title.
+const PLACE_OPTIONS = hasLiquidGlass() ? {} : ROOT_OPTIONS;
 const HomeStack = () => <PlaceStack place="home" />;
 const ThreadsStack = () => <PlaceStack place="threads" />;
 const InboxStack = () => <PlaceStack place="inbox" />;
@@ -480,6 +478,8 @@ export function RootNavigator(props: RootNavigatorProps) {
         ...base.colors,
         primary: colors.accent,
         background: colors.canvas,
+        // The bar is the page's own colour, so nothing shows through a title.
+        card: colors.canvas,
         text: colors.textPrimary,
       },
     };

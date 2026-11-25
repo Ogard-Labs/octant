@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import type { MobileIconName } from "./symbols";
 import { Icon } from "./Icon";
+import { messageTime } from "./turnTime";
 import { space, typography, useTheme } from "../../design-system";
 
 export interface MessageActionItem {
@@ -17,6 +18,10 @@ export interface MessageActionItem {
  */
 export function MessageActions(props: {
   readonly actions: ReadonlyArray<MessageActionItem>;
+  /** When the message was sent or the reply finished. */
+  readonly at?: string | undefined;
+  /** A person's message is at the trailing edge, with its time first. */
+  readonly trailing?: boolean;
   readonly testID?: string;
 }) {
   const { colors } = useTheme();
@@ -47,6 +52,11 @@ export function MessageActions(props: {
           fontSize: typography.meta.fontSize,
           fontWeight: "500",
         },
+        time: {
+          color: colors.textTertiary,
+          fontSize: typography.meta.fontSize,
+          fontVariant: ["tabular-nums"],
+        },
         labelActive: {
           color: colors.accent,
         },
@@ -54,10 +64,18 @@ export function MessageActions(props: {
     [colors],
   );
 
-  if (props.actions.length === 0) return null;
+  const time = props.at === undefined ? "" : messageTime(props.at, new Date());
+  if (props.actions.length === 0 && time === "") return null;
+  const clock =
+    time === "" ? null : (
+      <Text key="time" style={styles.time}>
+        {time}
+      </Text>
+    );
 
   return (
     <View style={styles.row} testID={props.testID ?? "mobile-message-actions"}>
+      {props.trailing === true ? clock : null}
       {props.actions.map((action) => {
         const active = activeId === action.id;
         return (
@@ -87,6 +105,7 @@ export function MessageActions(props: {
           </Pressable>
         );
       })}
+      {props.trailing === true ? null : clock}
     </View>
   );
 }

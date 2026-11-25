@@ -122,6 +122,8 @@ export function ThreadRow(props: {
         },
         quiet: { opacity: 0.55 },
         line: { flexDirection: "row", alignItems: "center", gap: space.sm },
+        lines: { alignItems: "flex-start", gap: 2 },
+        placeAlone: { flexDirection: "row", alignItems: "center", gap: 5 },
         title: { flex: 1, color: colors.textPrimary, fontSize: 16, fontWeight: "500" },
         state: { flexDirection: "row", alignItems: "center", gap: 4 },
         stateWord: { fontSize: typography.detail.fontSize, fontWeight: "600" },
@@ -202,8 +204,8 @@ export function ThreadRow(props: {
               {large ? null : stateWord}
             </View>
             {large ? <View style={quiet ? styles.quiet : null}>{stateWord}</View> : null}
-            <View style={[styles.line, quiet ? styles.quiet : null]}>
-              <View style={styles.place}>
+            <View style={[large ? styles.lines : styles.line, quiet ? styles.quiet : null]}>
+              <View style={large ? styles.placeAlone : styles.place}>
                 <Icon color={colors.textTertiary} name="desktop-outline" size={glyph(13)} />
                 <Text numberOfLines={large ? 2 : 1} style={styles.placeText}>
                   {place}

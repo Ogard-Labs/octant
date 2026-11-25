@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Pressable, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 import { Icon } from "./Icon";
 import type { MobileIconName } from "./symbols";
-import { GlassSurface, useTheme } from "../../design-system";
+import { GlassSurface, useTheme, withAlpha } from "../../design-system";
 
 const MIN_TAP_TARGET = 44;
 
@@ -16,7 +16,7 @@ export interface IconButtonProps {
   readonly size?: number;
   readonly iconSize?: number;
   readonly color?: string;
-  readonly variant?: "solid" | "ghost" | "send";
+  readonly variant?: "solid" | "ghost" | "send" | "stop";
   readonly disabled?: boolean;
   readonly style?: StyleProp<ViewStyle>;
 }
@@ -44,6 +44,9 @@ export function IconButton(props: IconButtonProps) {
         sendDisabled: {
           backgroundColor: colors.glassFillThin,
         },
+        stop: {
+          backgroundColor: withAlpha(colors.danger, 0.18),
+        },
         disabled: {
           opacity: 0.4,
         },
@@ -61,9 +64,11 @@ export function IconButton(props: IconButtonProps) {
     props.color ??
     (variant === "send"
       ? colors.sendLabel
-      : variant === "ghost"
-        ? colors.textSecondary
-        : colors.textPrimary);
+      : variant === "stop"
+        ? colors.danger
+        : variant === "ghost"
+          ? colors.textSecondary
+          : colors.textPrimary);
 
   const body = (
     <Icon
@@ -111,6 +116,7 @@ export function IconButton(props: IconButtonProps) {
         styles.base,
         variant === "ghost" ? styles.ghost : null,
         variant === "send" ? styles.send : null,
+        variant === "stop" ? styles.stop : null,
         disabled && variant === "send" ? styles.sendDisabled : null,
         disabled && variant !== "send" ? styles.disabled : null,
         { width: size, height: size, borderRadius: size / 2 },

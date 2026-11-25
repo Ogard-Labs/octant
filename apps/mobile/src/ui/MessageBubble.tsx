@@ -22,6 +22,8 @@ export interface MessageBubbleProps {
   readonly extraActions?: ReadonlyArray<MessageActionItem>;
   /** Fork from here and Rewind to here; shown under either role's message. */
   readonly turnActions?: ReadonlyArray<MessageActionItem>;
+  /** When the message was sent or the reply finished, where the thread says. */
+  readonly at?: string | undefined;
   /** The thread's Reply detail level; absent draws Low. */
   readonly replyDetail?: ReplyDetailLevel;
 }
@@ -79,6 +81,14 @@ export function MessageBubble(props: MessageBubbleProps) {
     [props.body, props.parts, props.role],
   );
 
+  const copy: MessageActionItem = {
+    id: "copy",
+    label: "Copy",
+    icon: "copy-outline",
+    onPress: async () => {
+      await Clipboard.setStringAsync(props.body);
+    },
+  };
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -94,14 +104,12 @@ export function MessageBubble(props: MessageBubbleProps) {
           paddingHorizontal: 14,
           paddingVertical: 10,
         },
-        // A person's message: the control fill and a hairline, no accent
-        // (docs/design/thread-view.md › Transcript); the reply beside it is bare prose.
+        // A person's message: the control fill, no accent and no outline; the
+        // reply beside it is bare prose.
         bubbleUser: {
           // On glass the bubble takes the thin glass fill so the ground shows
           // through it like every other panel; flat keeps the control fill.
           backgroundColor: surfaceStyle === "glass" ? colors.glassFillRegular : colors.userBubble,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: surfaceStyle === "glass" ? colors.glassStrokeStrong : colors.hairline,
         },
         assistantStack: {
           width: "100%",
@@ -117,12 +125,12 @@ export function MessageBubble(props: MessageBubbleProps) {
         <View style={[styles.bubble, styles.bubbleUser]}>
           <MessageBlocks text={props.body} tone="user" />
         </View>
-        {props.turnActions === undefined || props.turnActions.length === 0 ? null : (
-          <MessageActions
-            actions={props.turnActions}
-            {...(props.testID === undefined ? {} : { testID: `${props.testID}-actions` })}
-          />
-        )}
+        <MessageActions
+          actions={[copy, ...(props.turnActions ?? [])]}
+          at={props.at}
+          trailing
+          {...(props.testID === undefined ? {} : { testID: `${props.testID}-actions` })}
+        />
       </View>
     );
   }
@@ -170,21 +178,10 @@ export function MessageBubble(props: MessageBubbleProps) {
       {showActions || (props.turnActions?.length ?? 0) > 0 ? (
         <MessageActions
           actions={[
-            ...(showActions
-              ? [
-                  {
-                    id: "copy",
-                    label: "Copy",
-                    icon: "copy-outline" as const,
-                    onPress: async () => {
-                      await Clipboard.setStringAsync(props.body);
-                    },
-                  },
-                  ...(props.extraActions ?? []),
-                ]
-              : []),
+            ...(showActions ? [copy, ...(props.extraActions ?? [])] : []),
             ...(props.turnActions ?? []),
           ]}
+          at={props.at}
           {...(props.testID === undefined ? {} : { testID: `${props.testID}-actions` })}
         />
       ) : null}

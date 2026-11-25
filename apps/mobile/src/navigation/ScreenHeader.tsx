@@ -45,6 +45,8 @@ export function ScreenHeader(props: {
   const { colors } = useTheme();
   const { title, subtitle, actions, search } = props;
   const leading = props.place === true && hasLiquidGlass();
+  // Beside Back, where a long title keeps its room as actions join the bar.
+  const leadingTitles = hasLiquidGlass();
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -55,7 +57,7 @@ export function ScreenHeader(props: {
         },
         place: { color: colors.textPrimary, fontSize: 28, fontWeight: "700", letterSpacing: -0.4 },
         subtitle: { color: colors.textSecondary, fontSize: typography.meta.fontSize },
-        titles: { maxWidth: 230, alignItems: "center" },
+        titles: { maxWidth: 190 },
         actions: { flexDirection: "row", alignItems: "center" },
       }),
     [colors],
@@ -78,6 +80,23 @@ export function ScreenHeader(props: {
     })),
   });
   useLayoutEffect(() => {
+    const titles = (
+      <View style={styles.titles}>
+        <Text
+          accessibilityRole="header"
+          maxFontSizeMultiplier={BAR_TEXT_SCALE}
+          numberOfLines={1}
+          style={styles.title}
+        >
+          {title}
+        </Text>
+        {subtitle === undefined ? null : (
+          <Text maxFontSizeMultiplier={BAR_TEXT_SCALE} numberOfLines={1} style={styles.subtitle}>
+            {subtitle}
+          </Text>
+        )}
+      </View>
+    );
     const run = (label: string) =>
       handlers.current.actions?.find((current) => current.label === label)?.onPress();
     const options: NativeStackNavigationOptions = {
@@ -141,27 +160,21 @@ export function ScreenHeader(props: {
           }),
       ...(subtitle === undefined
         ? {}
-        : {
-            headerTitle: () => (
-              <View style={styles.titles}>
-                <Text
-                  accessibilityRole="header"
-                  maxFontSizeMultiplier={BAR_TEXT_SCALE}
-                  numberOfLines={1}
-                  style={styles.title}
-                >
-                  {title}
-                </Text>
-                <Text
-                  maxFontSizeMultiplier={BAR_TEXT_SCALE}
-                  numberOfLines={1}
-                  style={styles.subtitle}
-                >
-                  {subtitle}
-                </Text>
-              </View>
-            ),
-          }),
+        : leadingTitles
+          ? {
+              headerTitle: "",
+              headerBackVisible: true,
+              unstable_headerLeftItems: () => [
+                {
+                  type: "custom" as const,
+                  hidesSharedBackground: true,
+                  element: titles,
+                },
+              ],
+            }
+          : {
+              headerTitle: () => titles,
+            }),
       ...(search === undefined
         ? {}
         : {
@@ -180,6 +193,6 @@ export function ScreenHeader(props: {
     };
     navigation.setOptions(options);
     // `shown` stands for every value the options draw.
-  }, [leading, navigation, shown, styles]);
+  }, [leading, leadingTitles, navigation, shown, styles]);
   return null;
 }

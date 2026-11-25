@@ -7,7 +7,7 @@ export function ComposerSurface(props: ComposerSurfaceProps) {
   const { scheme, surfaceStyle } = useTheme();
   if (surfaceStyle === "flat" || !isLiquidGlassAvailable())
     return (
-      <GlassSurface contentStyle={props.contentStyle} material="thick" radius={24}>
+      <GlassSurface contentStyle={props.contentStyle} material="thick" radius={props.radius ?? 24}>
         {props.children}
       </GlassSurface>
     );
@@ -16,7 +16,7 @@ export function ComposerSurface(props: ComposerSurfaceProps) {
       colorScheme={scheme}
       glassEffectStyle="regular"
       isInteractive
-      style={[{ borderRadius: 24 }, props.contentStyle]}
+      style={[{ borderRadius: props.radius ?? 24 }, props.contentStyle]}
     >
       {props.children}
     </GlassView>

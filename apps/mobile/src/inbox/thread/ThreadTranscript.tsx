@@ -146,6 +146,14 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
   const codeTurns = codeConversation?.turns;
   const view = chat.view;
   const messages = useMemo(() => (view === undefined ? [] : mobileChatMessages(view)), [view]);
+  // A Chat's message holds no time; the turn it opened does.
+  const sentAt = useMemo(
+    () =>
+      new Map(
+        (view?.turns ?? []).map((turn) => [String(turn.userMessageRef.contentId), turn.createdAt]),
+      ),
+    [view],
+  );
   const chatAnnotations = useMemo<MobileChatTranscriptAnnotations>(() => {
     if (view === undefined) {
       return { beforeContentId: new Map(), afterContentId: new Map(), trailing: [] };
@@ -279,6 +287,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                     />
                   )}
                   <MessageBubble
+                    at={turn.acceptedAt}
                     replyDetail={props.replyDetail}
                     body={turn.prompt}
                     role="user"
@@ -290,6 +299,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                   />
                   {turn.response !== undefined && turn.response.length > 0 ? (
                     <MessageBubble
+                      {...(turn.status === "completed" ? { at: turn.updatedAt } : {})}
                       replyDetail={props.replyDetail}
                       body={turn.response}
                       role="assistant"
@@ -368,6 +378,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                       testID={`mobile-code-reply-${turn.operationId}-${index}`}
                       {...(index === turn.assistant.length - 1
                         ? {
+                            ...(turn.status === "completed" ? { at: turn.updatedAt } : {}),
                             turnActions: props.turnActionsFor(
                               mobileCodeTurnTargets(codeTurns, turnIndex, "assistant"),
                             ),
@@ -515,6 +526,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                     ),
                   )}
                   <MessageBubble
+                    at={sentAt.get(String(content.contentId))}
                     replyDetail={props.replyDetail}
                     body={content.body}
                     role={content.role}

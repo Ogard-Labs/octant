@@ -285,6 +285,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
       : {};
   const threadHint = mode === "code" || mode === "work" ? mobileThreadHint(mode) : undefined;
   const sendFollowUp = () => void (mode === "work" ? work : code).sendFollowUp();
+  const runningChatTurn = chat.view?.turns.at(-1);
   const liveBusy = busy || chat.activeAttempt !== undefined;
   const [resumeBusy, setResumeBusy] = useState(false);
   const resetLabel = (resetsAt: string | undefined) =>
@@ -774,8 +775,10 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 ? chatAttemptStatusLabel(chat.activeAttempt.outcome)
                 : MOBILE_COPY.working
             }
+            busySince={chat.activeAttempt === undefined ? undefined : runningChatTurn?.createdAt}
             editable={composerEditable}
             footerHint={composerAccess.reason}
+            modelDriverKind={selectedModel?.driverKind}
             modelLabel={modelLabel}
             onChangeText={setPrompt}
             onPressModel={() => setModelOpen(true)}
@@ -798,6 +801,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
               ? MOBILE_COPY.turnWaitingOnUsageLimit
               : MOBILE_COPY.turnRunning
           }
+          busySince={workTurnLive ? work.turns?.at(-1)?.acceptedAt : undefined}
           editable={composerEditable}
           footerHint={composerAccess.reason}
           {...(levelLabel === undefined

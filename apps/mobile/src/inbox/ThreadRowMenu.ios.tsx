@@ -33,7 +33,12 @@ export function ThreadRowMenu(props: ThreadRowMenuProps) {
         actions={offers.map((offer): MenuAction => {
           if (offer.kind === "action") return item(offer.action);
           if (offer.kind === "choice")
-            return { id: offer.label, title: offer.label, subactions: offer.actions.map(item) };
+            return {
+              id: offer.label,
+              title: offer.label,
+              image: "clock",
+              subactions: offer.actions.map(item),
+            };
           const symbol = systemSymbol(offer.icon);
           return {
             id: offer.id,

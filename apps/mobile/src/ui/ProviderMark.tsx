@@ -34,6 +34,11 @@ const MARKS: Readonly<Record<string, ImageSourcePropType>> = {
   qwen,
 };
 
+/** Whether this provider has a mark to draw. */
+export function hasProviderMark(driverKind: string): boolean {
+  return MARKS[driverKind] !== undefined;
+}
+
 /** The provider's mark in its colour; a provider with none draws nothing. */
 export function ProviderMark(props: { readonly driverKind: string; readonly size: number }) {
   const { colors } = useTheme();
