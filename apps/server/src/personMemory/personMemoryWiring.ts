@@ -86,16 +86,46 @@ export function chatPersonMessages(
 }
 
 /**
+ * When a Work thread's turns last changed. The projection lists turns in the
+ * order they were accepted, which is not the order they last changed: a turn
+ * accepted earlier can settle after a later one is accepted.
+ */
+export function newestTurnUpdate(
+  turns: ReadonlyArray<{ readonly updatedAt: string }>,
+): string | undefined {
+  return turns.reduce<string | undefined>(
+    (newest, turn) => (newest === undefined || turn.updatedAt > newest ? turn.updatedAt : newest),
+    undefined,
+  );
+}
+
+/**
+ * What a Code thread's terminal writes while no turn runs (a dev server left
+ * going journals its output into the thread), which is not the person or a turn
+ * being active, so it never makes a thread quiet.
+ */
+export const CODE_BACKGROUND_EVENT_KINDS: ReadonlyArray<string> = [
+  "terminal-output",
+  "terminal-state-changed",
+];
+
+/**
  * When a thread's stream last recorded anything, which is when its last turn
  * ended as well as when it began. Chat reads its own stream; Code reads the
- * thread's operations through the index that starts at the thread. Newest
- * first and one row, so the cost does not grow with the thread's length.
+ * thread's operations through the index that starts at the thread, passing
+ * over what the thread's terminal wrote. Newest first and one row, so the cost
+ * does not grow with the thread's length (a terminal's rows apart).
  */
 export function latestEventAt(
   connection: PersistenceService["connection"],
   key:
     | { readonly aggregateType: string; readonly aggregateId: string; readonly eventName?: string }
-    | { readonly aggregateType: string; readonly threadId: string },
+    | {
+        readonly aggregateType: string;
+        readonly threadId: string;
+        /** Event kinds (`$.event.kind`) that are not the thread's own activity. */
+        readonly exceptKinds?: ReadonlyArray<string>;
+      },
 ): string | undefined {
   const row =
     "threadId" in key
@@ -104,9 +134,14 @@ export function latestEventAt(
             `SELECT occurred_at AS at FROM event_journal
              WHERE aggregate_type = ?
                AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+               ${
+                 key.exceptKinds === undefined || key.exceptKinds.length === 0
+                   ? ""
+                   : `AND coalesce(CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END, '') NOT IN (${key.exceptKinds.map(() => "?").join(", ")})`
+               }
              ORDER BY global_sequence DESC LIMIT 1`,
           )
-          .get(key.aggregateType, key.threadId)
+          .get(key.aggregateType, key.threadId, ...(key.exceptKinds ?? []))
       : key.eventName === undefined
         ? connection
             .prepare(
@@ -255,6 +290,7 @@ export function createPersonMemorySweep(input: {
       lastActivityAt: latestEventAt(persistence.connection, {
         aggregateType: "code-operation",
         threadId,
+        exceptKinds: CODE_BACKGROUND_EVENT_KINDS,
       }),
       running: input.turnRunning(threadId),
     }),

@@ -25,7 +25,7 @@ import {
   threadTitleSubscriptionCredentials,
 } from "../automaticModels/threadTitle";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
-import { createPersonMemorySweep } from "../personMemory/personMemoryWiring";
+import { createPersonMemorySweep, newestTurnUpdate } from "../personMemory/personMemoryWiring";
 import { createDecisionReviewModelPort } from "../turnDecisions/decisionReviewWiring";
 import { isProtectedSecretPath } from "../process/secretGuard";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
@@ -1198,7 +1198,7 @@ export function wireHarness(deps: HarnessDependencies) {
         .filter((turn) => turn.delivery === undefined)
         .at(-1)?.acceptedAt,
     workLastActivityAt: (threadId) =>
-      workTurnProjection.listForThread(decodeWorkThreadId(threadId)).at(-1)?.updatedAt,
+      newestTurnUpdate(workTurnProjection.listForThread(decodeWorkThreadId(threadId))),
     codePersonMessages: (threadId, limit) =>
       codeBoardEventStore
         .personPromptTurnsForThread(decodeCodeThreadId(threadId), limit * 4)

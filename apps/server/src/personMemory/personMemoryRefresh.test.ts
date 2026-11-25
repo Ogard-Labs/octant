@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  ChatAttempt,
   EventActor,
   decodeUtcTimestamp,
   type OctantMode,
@@ -17,7 +18,7 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { createPersonMemoryAccess } from "./personMemoryAccess";
-import { latestEventAt } from "./personMemoryWiring";
+import { CODE_BACKGROUND_EVENT_KINDS, latestEventAt, newestTurnUpdate } from "./personMemoryWiring";
 import { createPersonMemoryCutOff, type ConversationOwnership } from "./personMemoryRefresh";
 import { PersonMemoryStore, registerPersonMemoryEvents } from "./personMemoryStore";
 
@@ -555,5 +556,45 @@ describe("when a thread was last active", () => {
     expect(
       latestEventAt(f.connection, { aggregateType: "chat-thread", aggregateId: "nobody" }),
     ).toBeUndefined();
+  });
+
+  it("does not count a terminal's output or state change as a Code thread's activity", () => {
+    const f = fixture();
+    const record = (at: string, kind: string) =>
+      f.insert("code-operation", crypto.randomUUID(), "code.operation-event-recorded@1", at, {
+        threadId: THREAD,
+        event: { kind },
+      });
+    record("2026-11-01T10:40:00.000Z", "turn-finished");
+    // A dev server left running in the thread's terminal writes after the turn ended.
+    record("2026-11-01T11:30:00.000Z", "terminal-output");
+    record("2026-11-01T11:40:00.000Z", "terminal-state-changed");
+
+    expect(
+      latestEventAt(f.connection, {
+        aggregateType: "code-operation",
+        threadId: THREAD,
+        exceptKinds: CODE_BACKGROUND_EVENT_KINDS,
+      }),
+    ).toBe("2026-11-01T10:40:00.000Z");
+    expect(latestEventAt(f.connection, { aggregateType: "code-operation", threadId: THREAD })).toBe(
+      "2026-11-01T11:40:00.000Z",
+    );
+  });
+
+  it("reads a Work thread's newest change from every turn, not the last one accepted", () => {
+    expect(
+      newestTurnUpdate([
+        { updatedAt: "2026-11-01T12:00:00.000Z" },
+        { updatedAt: "2026-11-01T10:30:00.000Z" },
+      ]),
+    ).toBe("2026-11-01T12:00:00.000Z");
+    expect(newestTurnUpdate([])).toBeUndefined();
+  });
+
+  it("proves a Chat attempt always names its provider session, so the newest attempt event cannot hide it", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(ChatAttempt.pipe(Schema.pick("providerSessionId")))({}),
+    ).toThrow();
   });
 });
