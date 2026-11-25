@@ -6,6 +6,7 @@ import { HostId } from "./host";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { ToolExtensionId } from "./toolActions";
+import { MAX_VIDEO_REFERENCES, VideoModelCapabilities, type VideoPrice } from "./videoGeneration";
 import {
   AppBackgroundCharacterPattern,
   AppBackgroundCharacterSet,
@@ -613,20 +614,109 @@ export const ExtensionImageGenerationModel = Schema.Struct({
 }).annotations(strict);
 export type ExtensionImageGenerationModel = typeof ExtensionImageGenerationModel.Type;
 
+/** The longest clip a video model may declare, so a declared range stays a short list. */
+export const MAX_DECLARED_VIDEO_SECONDS = 600;
+/** One year: the longest a declaration may say a provider keeps a copy or a job id. */
+export const MAX_DECLARED_VIDEO_HOURS = 8_760;
+/** The largest rate per second or per clip a video model may declare: 100 US dollars. */
+export const MAX_DECLARED_USD_MICROS_PER_VIDEO_RATE = 100_000_000;
+/** The largest rate per million tokens a video model may declare: 10,000 US dollars. */
+export const MAX_DECLARED_USD_MICROS_PER_MILLION_VIDEO_TOKENS = 10_000_000_000;
+
+/**
+ * Whether the host can reserve against a video model's declaration. A free
+ * rate would reserve nothing and let a clip past any spend limit, and a figure
+ * far above a published one reads as a mistake, so either refuses the package.
+ * A model that publishes no price says `unpublished`, which an active spend
+ * limit refuses.
+ */
+function declaresReservablePrice(price: VideoPrice): boolean {
+  const rate = (value: number, cap: number) => value > 0 && value <= cap;
+  switch (price.kind) {
+    case "unpublished":
+      return true;
+    case "per-second":
+      return (
+        price.rates.length <= 64 &&
+        price.rates.every((entry) =>
+          rate(entry.usdMicrosPerSecond, MAX_DECLARED_USD_MICROS_PER_VIDEO_RATE),
+        ) &&
+        (price.inputUsdMicrosPerImage ?? 0) <= MAX_DECLARED_USD_MICROS_PER_VIDEO_RATE
+      );
+    case "per-clip":
+      return (
+        price.rates.length <= 1_024 &&
+        price.rates.every((entry) => rate(entry.usdMicros, MAX_DECLARED_USD_MICROS_PER_VIDEO_RATE))
+      );
+    case "per-token": {
+      const tokenCap = 1_000_000_000;
+      return (
+        price.outputTokensPerSecond.length <= 64 &&
+        price.outputTokensPerSecond.every((entry) => entry.tokens <= tokenCap) &&
+        rate(
+          price.outputUsdMicrosPerMillionTokens,
+          MAX_DECLARED_USD_MICROS_PER_MILLION_VIDEO_TOKENS,
+        ) &&
+        (price.inputUsdMicrosPerMillionTokens ?? 0) <=
+          MAX_DECLARED_USD_MICROS_PER_MILLION_VIDEO_TOKENS &&
+        (price.inputTokensPerImage ?? 0) <= tokenCap &&
+        (price.reservedOutputTokenAllowance ?? 0) <= tokenCap
+      );
+    }
+  }
+}
+
+function declaresBoundedClips(model: VideoModelCapabilities): boolean {
+  const longest =
+    model.durations.kind === "range" ? model.durations.max : Math.max(...model.durations.values);
+  return (
+    longest <= MAX_DECLARED_VIDEO_SECONDS &&
+    (model.durations.kind === "range" || model.durations.values.length <= 128) &&
+    model.resolutions.length <= 32 &&
+    model.aspectRatios.length <= 64 &&
+    model.inputs.maxReferenceImages <= MAX_VIDEO_REFERENCES &&
+    model.job.resumeWindowHours <= MAX_DECLARED_VIDEO_HOURS &&
+    (model.job.removal.kind === "delete" ||
+      model.job.removal.afterHours <= MAX_DECLARED_VIDEO_HOURS)
+  );
+}
+
+/**
+ * One video model an outside media driver offers: exactly what the video
+ * seam's own models declare, within bounds the host can reserve and show.
+ */
+export const ExtensionVideoGenerationModel = VideoModelCapabilities.pipe(
+  Schema.filter((model) => declaresReservablePrice(model.price) && declaresBoundedClips(model)),
+);
+export type ExtensionVideoGenerationModel = typeof ExtensionVideoGenerationModel.Type;
+
+const distinctModels = (models: ReadonlyArray<{ readonly modelId: string }>): boolean =>
+  new Set(models.map((model) => String(model.modelId))).size === models.length;
+
 /**
  * What a provider-driver component generates, as data: present exactly when
  * the component is a media driver rather than a harness endpoint. The host
  * reads prices only from here, so a running driver can never name its own
  * price, and the digest the person trusted covers them.
  */
-export const ExtensionMediaGenerationDeclaration = Schema.Struct({
-  media: Schema.Literal("image"),
-  models: Schema.Array(ExtensionImageGenerationModel).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(64),
-    Schema.filter((models) => new Set(models.map((model) => model.modelId)).size === models.length),
-  ),
-}).annotations(strict);
+export const ExtensionMediaGenerationDeclaration = Schema.Union(
+  Schema.Struct({
+    media: Schema.Literal("image"),
+    models: Schema.Array(ExtensionImageGenerationModel).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(64),
+      Schema.filter(distinctModels),
+    ),
+  }).annotations(strict),
+  Schema.Struct({
+    media: Schema.Literal("video"),
+    models: Schema.Array(ExtensionVideoGenerationModel).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(64),
+      Schema.filter(distinctModels),
+    ),
+  }).annotations(strict),
+);
 export type ExtensionMediaGenerationDeclaration = typeof ExtensionMediaGenerationDeclaration.Type;
 
 export const ExtensionComponent = Schema.Struct({
