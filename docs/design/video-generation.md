@@ -426,6 +426,10 @@ reading its reply. If the start times out, the slot opens for another job.
 The failed start settles at the estimate when the provider may have received
 it. A start the host knows it never sent bills nothing.
 
+A job that runs out of time settles first and frees its slot at once. The host
+then asks the provider to stop it, for at most 15 seconds, and removes the
+provider's copy only after the provider answers or those seconds pass.
+
 If a provider rejects authentication on a status check for an accepted clip,
 the host keeps polling within the job time. It settles at the estimate if it
 still cannot confirm the outcome at the deadline.

@@ -746,6 +746,84 @@ describe("video jobs", () => {
     expect(cancelSignal?.aborted).toBe(true);
   });
 
+  it("starts a waiting clip as soon as an expired one settles, before the provider confirms its stop", async () => {
+    const { service, calls, advance } = harness({
+      poll: async () =>
+        calls.start < 3
+          ? { status: "running" }
+          : {
+              status: "completed",
+              video: { bytes: CONFORMANCE_MP4_BYTES, mediaType: "video/mp4" },
+            },
+      cancel: () => new Promise(() => undefined),
+    });
+    const expiring = [await enqueue(service), await enqueue(service)];
+    const waiting = await enqueue(service);
+    await vi.waitFor(() =>
+      expect(expiring.map((job) => service.getById(job.id)?.remoteId)).toEqual([
+        "remote-1",
+        "remote-1",
+      ]),
+    );
+    advance(VIDEO_JOB_TIMEOUT_MS + 1_000);
+    expect(await service.whenTerminal(waiting.id, 1_000)).toMatchObject({ status: "completed" });
+    // Shutdown ends the stops still pending, so the removals they hold back stay owed.
+    expect(expiring.map((job) => service.getById(job.id)?.providerCopy)).toEqual(["held", "held"]);
+    service.close();
+  });
+
+  it.each(["answers", "rejects"])(
+    "keeps the provider's copy until the stop of an expired clip %s",
+    async (outcome) => {
+      const stop = Promise.withResolvers<VideoAdapterPoll>();
+      const { service, calls, advance } = harness({
+        poll: async () => ({ status: "running" }),
+        cancel: () => stop.promise,
+      });
+      const queued = await enqueue(service);
+      await vi.waitFor(() => expect(service.getById(queued.id)?.remoteId).toBe("remote-1"));
+      advance(VIDEO_JOB_TIMEOUT_MS + 1_000);
+      await service.whenTerminal(queued.id);
+      await vi.waitFor(() => expect(calls.cancel).toBe(1));
+      const sweep = service.retryOwedRemovals();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(calls.forget).toBe(0);
+
+      if (outcome === "answers") stop.resolve({ status: "cancelled" });
+      else stop.reject(new Error("The provider could not be reached."));
+      await sweep;
+      await vi.waitFor(() => expect(service.getById(queued.id)?.providerCopy).toBe("removed"));
+      expect(calls.forget).toBe(1);
+      service.close();
+    },
+  );
+
+  it("removes the provider's copy once an unanswered stop reaches its bound", async () => {
+    const bound = new AbortController();
+    const timeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeouts = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation((ms) => (ms === 15_000 ? bound.signal : timeout(ms)));
+    const { service, calls, advance } = harness({
+      poll: async () => ({ status: "running" }),
+      // A driver that never notices the signal it was given.
+      cancel: () => new Promise(() => undefined),
+    });
+    try {
+      const queued = await enqueue(service);
+      await vi.waitFor(() => expect(service.getById(queued.id)?.remoteId).toBe("remote-1"));
+      advance(VIDEO_JOB_TIMEOUT_MS + 1_000);
+      await service.whenTerminal(queued.id);
+      await vi.waitFor(() => expect(calls.cancel).toBe(1));
+      expect(calls.forget).toBe(0);
+      bound.abort();
+      await vi.waitFor(() => expect(service.getById(queued.id)?.providerCopy).toBe("removed"));
+    } finally {
+      timeouts.mockRestore();
+      service.close();
+    }
+  });
+
   it("leaves a job running for the next host when shutdown interrupts its cancel", async () => {
     const { service, calls } = harness({
       polls: Array.from({ length: 1000 }, () => ({ status: "running" as const })),

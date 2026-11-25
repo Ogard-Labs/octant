@@ -923,7 +923,7 @@ export class VideoJobService {
         ? adapter?.cancelRunningWithoutDiscovery === true
         : model.job.cancel === "running";
     if (adapter !== undefined && (deadlineSignal.aborted || this.#now() >= deadline)) {
-      await this.#finishExpired(job, adapter, canCancel);
+      this.#finishExpired(job, adapter, canCancel);
       return;
     }
     const windowMs = (model?.job.resumeWindowHours ?? 0) * 3_600_000;
@@ -1018,7 +1018,7 @@ export class VideoJobService {
         }
       }
       if (this.#now() >= deadline) {
-        await this.#finishExpired(job, adapter, canCancel);
+        this.#finishExpired(job, adapter, canCancel);
         return;
       }
       // Once cancel is asked, Stop's signal stays aborted. Keep polling for
@@ -1061,7 +1061,7 @@ export class VideoJobService {
     }
   }
 
-  async #finishExpired(job: VideoJob, adapter: VideoGenerationAdapter, canCancel: boolean) {
+  #finishExpired(job: VideoJob, adapter: VideoGenerationAdapter, canCancel: boolean): void {
     this.#finish(this.#current(job), "failed", {
       failure: videoFailure(
         "unavailable",
@@ -1070,13 +1070,33 @@ export class VideoJobService {
       settledCostUsdMicros: estimateOrZero(job),
       billed: true,
     });
+    const { remoteId } = job;
+    if (!canCancel || remoteId === undefined) return;
+    // Not awaited: the job has settled, so its slot goes to the next clip
+    // while the provider is asked to stop. `#forget` waits for this instead.
+    const key = String(job.id);
+    this.#expiryCancels.set(
+      key,
+      this.#cancelExpired(adapter, remoteId).finally(() => this.#expiryCancels.delete(key)),
+    );
+  }
+
+  /** Ends when the provider answers, or at the cleanup bound even if the driver ignores it. */
+  async #cancelExpired(adapter: VideoGenerationAdapter, remoteId: string): Promise<void> {
     // A cancel can download an already finished clip. Bound that cleanup
     // separately after settling the job at its original deadline.
-    if (canCancel && job.remoteId !== undefined) {
-      await adapter.cancel(
-        job.remoteId,
-        AbortSignal.any([this.#closing.signal, AbortSignal.timeout(VIDEO_TIMEOUT_CLEANUP_MS)]),
-      );
+    const bound = AbortSignal.any([
+      this.#closing.signal,
+      AbortSignal.timeout(VIDEO_TIMEOUT_CLEANUP_MS),
+    ]);
+    const reached = new Promise<void>((resolve) => {
+      if (bound.aborted) resolve();
+      else bound.addEventListener("abort", () => resolve(), { once: true });
+    });
+    try {
+      await Promise.race([adapter.cancel(remoteId, bound), reached]);
+    } catch {
+      // The job is already settled; the copy's removal is what is still owed.
     }
   }
 
@@ -1209,8 +1229,13 @@ export class VideoJobService {
    * `finally`: a rejected delete leaves the copy owed for the next sweep.
    */
   readonly #removing = new Set<string>();
+  /** Provider stops still pending for expired jobs, each bounded by `VIDEO_TIMEOUT_CLEANUP_MS`. */
+  readonly #expiryCancels = new Map<string, Promise<void>>();
 
   async #forget(candidate: VideoJob): Promise<void> {
+    // Removing a copy the provider is still stopping would race that stop.
+    const stopping = this.#expiryCancels.get(String(candidate.id));
+    if (stopping !== undefined) await stopping;
     if (this.#closing.signal.aborted) return;
     const job = this.#current(candidate);
     if (job.providerCopy !== "held" || job.remoteId === undefined) return;
