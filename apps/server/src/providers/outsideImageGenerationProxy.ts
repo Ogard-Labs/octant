@@ -558,13 +558,15 @@ function scanProseAddresses(
   complete: boolean,
 ): void {
   let index = 0;
+  let nextHttp = text.indexOf("http://", 0);
+  let nextHttps = text.indexOf("https://", 0);
   while (index < text.length) {
-    const httpIdx = text.indexOf("http://", index);
-    const httpsIdx = text.indexOf("https://", index);
+    if (nextHttp !== -1 && nextHttp < index) nextHttp = text.indexOf("http://", index);
+    if (nextHttps !== -1 && nextHttps < index) nextHttps = text.indexOf("https://", index);
     const start =
-      httpIdx === -1 ? httpsIdx : httpsIdx === -1 ? httpIdx : Math.min(httpIdx, httpsIdx);
+      nextHttp === -1 ? nextHttps : nextHttps === -1 ? nextHttp : Math.min(nextHttp, nextHttps);
     if (start === -1) break;
-    const schemeEnd = start + (start === httpsIdx ? 8 : 7);
+    const schemeEnd = start + (start === nextHttps ? 8 : 7);
     const prev = start === 0 ? "" : (text[start - 1] ?? "");
 
     if (prev === "<") {
