@@ -862,7 +862,11 @@ describe("browser automation routes", () => {
 
     // Live Browser authority and being able to open the thread are separate
     // facts: an archived thread has lost the first and kept the second.
-    function withCaptures(canAccessWindow = true, canOpenThread = canAccessWindow) {
+    function withCaptures(
+      canAccessWindow = true,
+      canOpenThread = canAccessWindow,
+      windowCanOpenThread = vi.fn(async (..._asked: ReadonlyArray<unknown>) => canOpenThread),
+    ) {
       const captures = {
         list: vi.fn(() => [capture] as never),
         listSteps: vi.fn(() => [step] as never),
@@ -874,10 +878,11 @@ describe("browser automation routes", () => {
       };
       return {
         captures,
+        windowCanOpenThread,
         handler: createBrowserAutomationRouteHandler({
           service: service as any,
           captures: captures as never,
-          windowCanOpenThread: async () => canOpenThread,
+          windowCanOpenThread,
           authority: {
             canAccessWindow: () => canAccessWindow,
             resolve: () => authority,
@@ -959,6 +964,21 @@ describe("browser automation routes", () => {
       expect(wrong?.status).toBe(401);
       expect(refused.captures.listSteps).not.toHaveBeenCalled();
       expect(allowed.captures.listSteps).toHaveBeenCalledOnce();
+    });
+
+    it("asks whether the thread is open to the paired device that asked, not to a window it does not have", async () => {
+      const { handler: capturing, windowCanOpenThread } = withCaptures();
+      expect((await capturing(asPairedDevice(post("", { threadId }), "host-person")))?.status).toBe(
+        200,
+      );
+      expect(windowCanOpenThread).toHaveBeenCalledWith(
+        windowId,
+        threadId,
+        expect.objectContaining({
+          kind: "remote-device",
+          deviceId: "90000000-0000-4000-8000-000000000001",
+        }),
+      );
     });
 
     it("refuses a caller with no window capability", async () => {

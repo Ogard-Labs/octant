@@ -2551,8 +2551,8 @@ cleanup as a confirmed local-user request: it refuses uncommitted changes, an
 active thread, and a thread whose turn is still in progress, and keeps the
 branch. Listing and removing are the person's, at a local window or a paired
 device (maintainer decision, 2026-11-12; a browser the host's own person paired
-lists and removes them, journaled as that device, and a hub-introduced or
-restricted device is refused both, because the list names folders on this
+lists and removes them, and a hub-introduced or restricted device is refused
+both, because the list names folders on this
 computer and removal deletes from its disk). The receipt's
 `cleanup-pending` and `removed` states record each removal, as they do for the
 other cleanup callers.
