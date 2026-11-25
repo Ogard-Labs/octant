@@ -15,6 +15,9 @@ const MODES = {
   code: { label: "Code", cls: "mb-code", icon: "square-code" },
 };
 
+/* status is what the thread's own turn is doing: working, waiting (on the
+   person, with ask saying for what), failed, or finished. unread, snoozed and
+   settled are separate facts about it. Every count and list below reads these. */
 const THREADS = [
   {
     id: "sync",
@@ -22,7 +25,7 @@ const THREADS = [
     mode: "code",
     computer: "studio",
     project: "octant",
-    section: "working",
+    status: "working",
     elapsed: "2m",
     pr: null,
   },
@@ -32,18 +35,30 @@ const THREADS = [
     mode: "code",
     computer: "studio",
     project: "octant",
-    section: "needs",
+    status: "waiting",
+    ask: "approval",
     elapsed: "12m",
     pr: null,
   },
   {
-    id: "release",
-    title: "Write release notes for 0.2",
-    mode: "chat",
-    computer: "devbox",
+    id: "botsplan",
+    title: "Plan the Bots tab",
+    mode: "work",
+    computer: "studio",
     project: "octant",
-    section: "working",
-    elapsed: "18m",
+    status: "waiting",
+    ask: "question",
+    elapsed: "22m",
+    pr: "+4",
+  },
+  {
+    id: "s2",
+    title: "Triage crash reports from 0.1",
+    mode: "chat",
+    computer: "studio",
+    project: "octant",
+    status: "failed",
+    elapsed: "26m",
     pr: null,
   },
   {
@@ -52,7 +67,7 @@ const THREADS = [
     mode: "code",
     computer: "studio",
     project: "octant",
-    section: "working",
+    status: "working",
     elapsed: "44m",
     pr: "+2",
   },
@@ -62,19 +77,41 @@ const THREADS = [
     mode: "chat",
     computer: "studio",
     project: "octant",
-    section: "review",
+    status: "finished",
+    unread: true,
     elapsed: "1h",
     pr: "#2864",
   },
   {
-    id: "botsplan",
-    title: "Plan the Bots tab",
-    mode: "work",
+    id: "s9",
+    title: "Write release notes for 0.1",
+    mode: "chat",
     computer: "studio",
     project: "octant",
-    section: "review",
-    elapsed: "3h",
-    pr: "+4",
+    status: "finished",
+    unread: true,
+    elapsed: "1h",
+    pr: null,
+  },
+  {
+    id: "release",
+    title: "Write release notes for 0.2",
+    mode: "chat",
+    computer: "devbox",
+    project: "octant",
+    status: "working",
+    elapsed: "2h",
+    pr: null,
+  },
+  {
+    id: "s8",
+    title: "Polish empty states",
+    mode: "chat",
+    computer: "studio",
+    project: "octant",
+    status: "finished",
+    elapsed: "5h",
+    pr: null,
   },
   {
     id: "tokens",
@@ -82,28 +119,19 @@ const THREADS = [
     mode: "code",
     computer: "devbox",
     project: "octant",
-    section: "settled",
+    status: "finished",
+    settled: true,
     elapsed: "5h",
     pr: "#2851",
   },
-  // settled
   {
     id: "s1",
     title: "Audit accessibility labels in settings",
     mode: "work",
     computer: "studio",
     project: "octant",
-    section: "settled",
-    elapsed: "1d",
-    pr: null,
-  },
-  {
-    id: "s2",
-    title: "Triage crash reports from 0.1",
-    mode: "chat",
-    computer: "devbox",
-    project: "octant",
-    section: "settled",
+    status: "finished",
+    settled: true,
     elapsed: "1d",
     pr: null,
   },
@@ -113,7 +141,8 @@ const THREADS = [
     mode: "chat",
     computer: "studio",
     project: "octant-site",
-    section: "settled",
+    status: "finished",
+    settled: true,
     elapsed: "2d",
     pr: null,
   },
@@ -123,7 +152,8 @@ const THREADS = [
     mode: "code",
     computer: "studio",
     project: "octant",
-    section: "settled",
+    status: "finished",
+    settled: true,
     elapsed: "2d",
     pr: null,
   },
@@ -133,7 +163,8 @@ const THREADS = [
     mode: "code",
     computer: "devbox",
     project: "octant",
-    section: "settled",
+    status: "finished",
+    settled: true,
     elapsed: "3d",
     pr: null,
   },
@@ -143,7 +174,8 @@ const THREADS = [
     mode: "work",
     computer: "studio",
     project: "octant",
-    section: "settled",
+    status: "finished",
+    settled: true,
     elapsed: "4d",
     pr: null,
   },
@@ -153,45 +185,84 @@ const THREADS = [
     mode: "code",
     computer: "studio",
     project: "octant",
-    section: "settled",
+    status: "finished",
+    settled: true,
     elapsed: "4d",
     pr: "#2790",
   },
-  {
-    id: "s8",
-    title: "Polish empty states",
-    mode: "chat",
-    computer: "studio",
-    project: "octant",
-    section: "settled",
-    elapsed: "5d",
-    pr: null,
-  },
-  {
-    id: "s9",
-    title: "Write release notes for 0.1",
-    mode: "chat",
-    computer: "studio",
-    project: "octant",
-    section: "settled",
-    elapsed: "6d",
-    pr: null,
-  },
 ];
 
+const isConnected = (t) => COMPUTERS[t.computer].status === "connected";
+
+/* The panel's "Nothing waiting" state, for the empty lists. */
+let emptyCounts = false;
+
+/* One place decides what a thread counts as. Home's counts, their lists, the
+   Threads sections, Inbox and the awareness previews all ask it, so a number
+   and the rows behind it cannot disagree. A computer that has gone offline
+   reports nothing, so its last-known turn is not counted as working. Work
+   threads have no unread state, so they never count as To review. */
+function sectionOf(t) {
+  if (t.snoozed) return "snoozed";
+  if (t.settled) return "settled";
+  if (emptyCounts) return "idle";
+  if (t.status === "waiting" || t.status === "failed") return "needs";
+  if (t.status === "working" && isConnected(t)) return "working";
+  if (t.status === "finished" && t.unread && t.mode !== "work") return "review";
+  return "idle";
+}
+const threadsIn = (key) => THREADS.filter((t) => sectionOf(t) === key);
+
+const COUNTS = {
+  needs: {
+    label: "Needs you",
+    icon: "inbox",
+    color: "var(--palette-blue)",
+    empty: "Nothing needs you right now.",
+  },
+  working: {
+    label: "Working",
+    icon: "circle-play",
+    color: "var(--palette-orange)",
+    empty: "No thread is working.",
+  },
+  review: {
+    label: "To review",
+    icon: "eye",
+    color: "var(--palette-purple)",
+    empty: "No finished turns to review.",
+  },
+};
+
 const SECTIONS = [
-  { key: "needs", label: "Needs input" },
+  { key: "needs", label: "Needs you" },
   { key: "working", label: "Working" },
-  { key: "review", label: "Ready for review" },
+  { key: "review", label: "To review" },
+  { key: "idle", label: "Idle" },
+  { key: "snoozed", label: "Snoozed" },
   { key: "settled", label: "Settled" },
 ];
 
 const STATUS_META = {
-  needs: { cls: "needs", icon: "help-circle", label: "Needs input" },
-  working: { cls: "working", icon: "loader-circle", label: "Working" },
-  review: { cls: "review", icon: "eye", label: "Ready for review" },
+  needs: { cls: "needs", icon: "help-circle", label: "Needs you" },
+  working: { cls: "working", icon: "circle-play", label: "Working" },
+  review: { cls: "review", icon: "eye", label: "To review" },
+  idle: { cls: "settled", icon: "circle-dot", label: "Idle" },
+  snoozed: { cls: "settled", icon: "moon", label: "Snoozed" },
   settled: { cls: "settled", icon: "check", label: "Settled" },
 };
+
+/* What the host answers when a thread cannot be settled or snoozed. */
+function restRefusal(t, action) {
+  if (!isConnected(t)) return `${compName(t.computer)} is offline`;
+  if (t.status === "waiting") return "The agent is waiting on you. Answer it first.";
+  if (t.status === "working" && action === "settle")
+    return "A turn is running. Settle it when it finishes.";
+  return null;
+}
+
+/* A host preference, so the phone shows it and does not change it. */
+const SETTLES_WHEN_DONE = { studio: true, devbox: false };
 
 const BOTS = [
   {
@@ -233,7 +304,7 @@ const REPOS = [
         base: "main",
         author: "henrik",
         time: "2h",
-        meta: "Review pending",
+        meta: "In review",
       },
       {
         n: 2859,
@@ -288,7 +359,7 @@ const REPOS = [
         base: "main",
         author: "henrik",
         time: "4h",
-        meta: "Review pending",
+        meta: "In review",
       },
       {
         n: 128,
@@ -419,14 +490,19 @@ const PHASE_COLOR = {
   done: "var(--success-text)",
   failed: "var(--danger-text)",
 };
-const AWARE = [
-  { tid: "sync", phase: "working", status: "Working" },
-  { tid: "pairing", phase: "approval", status: "Approval" },
-  { tid: "release", phase: "working", status: "Working" },
-  { tid: "botsplan", phase: "working", status: "Working" },
-  { tid: "s2", phase: "failed", status: "Failed" },
-];
-const awareRow = (a, i) => {
+const aware = () =>
+  [...threadsIn("needs"), ...threadsIn("working")].map((t) => {
+    const [phase, status] =
+      t.status === "failed"
+        ? ["failed", "Failed"]
+        : t.ask === "approval"
+          ? ["approval", "Approval"]
+          : t.ask === "question"
+            ? ["input", "Question"]
+            : ["working", "Working"];
+    return { tid: t.id, phase, status };
+  });
+const awareRow = (a) => {
   const t = threadById(a.tid);
   const name = showNames ? t.title : `Thread on ${compName(t.computer)}`;
   return `<div class="aware-row">
@@ -434,11 +510,10 @@ const awareRow = (a, i) => {
     <div class="a3" style="color:${PHASE_COLOR[a.phase]}">${a.status}</div>
   </div>`;
 };
-const awareCounts = () => {
-  const active = AWARE.filter((a) => ["working", "approval", "input"].includes(a.phase)).length;
-  const needs = AWARE.filter((a) => ["approval", "input"].includes(a.phase)).length;
-  return { active, needs };
-};
+const awareCounts = () => ({
+  active: threadsIn("needs").length + threadsIn("working").length,
+  needs: threadsIn("needs").length,
+});
 
 const MODE_OPTIONS = ["Plan", "Ask first", "Auto", "Full access"];
 const MODEL_GROUPS = [
@@ -454,46 +529,6 @@ let panesState = { seg: 0, view: "root", file: null };
 let ipadInspector = false;
 
 const INBOX = {
-  sub: "2 threads are waiting on you.",
-  chips: [
-    { key: "all", label: "All", n: 4 },
-    { key: "urgent", label: "Urgent", n: 1 },
-    { key: "decide", label: "Decide", n: 2 },
-    { key: "stuck", label: "Stuck", n: 0 },
-    { key: "finished", label: "Finished", n: 1 },
-  ],
-  needs: [
-    {
-      kind: "urgent",
-      icon: "shield-check",
-      tint: "var(--warning-text)",
-      title: "Approval needed · npm test",
-      sub: "Fix flaky pairing test",
-      meta: "Studio Mac · octant",
-      allow: true,
-      open: "thread/pairing",
-    },
-    {
-      kind: "decide",
-      icon: "message-circle-question",
-      tint: "var(--accent)",
-      title: "Question · Which scope should the sweep cover?",
-      sub: "Plan the Bots tab",
-      meta: "Studio Mac · octant",
-      allow: false,
-      open: "thread/botsplan",
-    },
-    {
-      kind: "finished",
-      icon: "circle-check",
-      tint: "var(--success-text)",
-      title: "Finished · Draft ready for review",
-      sub: "Write release notes for 0.1",
-      meta: "Studio Mac · octant",
-      allow: false,
-      open: "thread/s9",
-    },
-  ],
   notifs: [
     {
       icon: "bell-dot",
@@ -540,22 +575,15 @@ const INBOX = {
 
 /* ============================== helpers ============================== */
 
-const $ = (s, el = document) => el.querySelector(s);
-const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-const esc = (s) =>
-  String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-
 const threadById = (id) => THREADS.find((t) => t.id === id) || THREADS[0];
 const compName = (id) => COMPUTERS[id].name;
 
 function statusGlyph(t) {
-  const m = STATUS_META[t.section];
-  if (t.section === "working") return `<span class="pulse-dot" title="Working"></span>`;
-  return `<span class="status-glyph ${m.cls}">${I(m.icon, "s15")}</span>`;
+  const m = STATUS_META[sectionOf(t)];
+  if (sectionOf(t) === "working") return `<span class="pulse-dot" title="Working"></span>`;
+  if (sectionOf(t) === "needs" && t.status === "failed")
+    return `<span class="status-glyph failed" title="Failed">${I("circle-x", "s15")}</span>`;
+  return `<span class="status-glyph ${m.cls}" title="${m.label}">${I(m.icon, "s15")}</span>`;
 }
 
 function modeBadge(mode) {
@@ -563,20 +591,19 @@ function modeBadge(mode) {
   return `<span class="mbadge ${m.cls}" title="${m.label}">${I(m.icon)}</span>`;
 }
 
-function threadRowHTML(t, opts = {}) {
-  const comp = COMPUTERS[t.computer];
+function threadRowHTML(t) {
   const pr = t.pr ? `<span class="prchip">${esc(t.pr)}</span>` : "";
   return `
   <div class="rowwrap" data-tid="${t.id}">
     <div class="rowactions">
-      <button class="act-snooze" data-act="snooze">${I("moon", "s16")}<span>Snooze</span></button>
-      <button class="act-away" data-act="away">${I("archive", "s16")}<span>Put away</span></button>
+      <button class="act-snooze" data-act="${t.snoozed ? "wake" : "snooze"}">${I("moon", "s16")}<span>${t.snoozed ? "Wake" : "Snooze"}</span></button>
+      <button class="act-settle" data-act="${t.settled ? "unsettle" : "settle"}">${I(t.settled ? "history" : "check", "s16")}<span>${t.settled ? "Un-settle" : "Settle"}</span></button>
     </div>
-    <div class="trow row" data-tid="${t.id}" role="button" tabindex="0">
+    <div class="trow row" data-tid="${t.id}" role="button" tabindex="0" aria-label="${esc(t.title)}, ${STATUS_META[sectionOf(t)].label}">
       ${modeBadge(t.mode)}
       <div class="main">
-        <div class="t1">${esc(t.title)}</div>
-        <div class="t2">${I("monitor")}${comp.name}<span>·</span>${esc(t.project)}</div>
+        <div class="t1">${t.pinned ? `<span class="pinmark">${I("pin", "s12")}</span>` : ""}${esc(t.title)}</div>
+        <div class="t2">${I("monitor")}${compName(t.computer)}<span>·</span>${esc(t.project)}</div>
       </div>
       <div class="trail">
         ${pr}${statusGlyph(t)}<span class="elapsed">${t.elapsed}</span>
@@ -587,8 +614,19 @@ function threadRowHTML(t, opts = {}) {
 
 /* ============================== screens ============================== */
 
+function tileHTML(key) {
+  const c = COUNTS[key];
+  const n = threadsIn(key).length;
+  return `
+  <button class="tile" style="--tile-c:${c.color}" data-count="${key}" aria-label="${c.label}, ${n} ${n === 1 ? "thread" : "threads"}">
+    <span class="top">${I(c.icon, "s16")}<span>${c.label}</span></span>
+    <span class="num">${n}</span>
+  </button>`;
+}
+
 function homeScreen() {
-  const recent = ["sync", "pairing", "payload", "ipad"].map((id) => threadById(id));
+  // the threads that need the person come first
+  const recent = ["needs", "review", "working", "idle"].flatMap(threadsIn).slice(0, 6);
   return `
   <section class="screen" data-route="home">
     <div class="scroll">
@@ -599,71 +637,99 @@ function homeScreen() {
           <button class="navbtn" data-push="settings" aria-label="Settings">${I("settings", "s18")}</button>
         </div>
       </div>
-      <div class="tiles">
-        <div class="tile" style="--tile-c:var(--palette-blue)">
-          <div class="top">${I("inbox", "s16")}<span>Needs you</span></div>
-          <div class="num">4</div>
-        </div>
-        <div class="tile" style="--tile-c:var(--palette-orange)">
-          <div class="top">${I("circle-play", "s16")}<span>Working</span></div>
-          <div class="num">3</div>
-        </div>
-        <div class="tile" style="--tile-c:var(--palette-purple)">
-          <div class="top">${I("eye", "s16")}<span>In review</span></div>
-          <div class="num">2</div>
-        </div>
-      </div>
+      <div class="tiles">${Object.keys(COUNTS).map(tileHTML).join("")}</div>
       <div class="section-label">Recent</div>
       <div class="screen-body">
         ${recent.map(threadRowHTML).join("")}
       </div>
       <div class="section-label">Computers</div>
       <div class="screen-body">
-        <div class="comp-row">
-          <div class="comp-ic">${I("monitor")}</div>
-          <div class="main">
-            <div class="t1">Studio Mac</div>
-            <div class="t2"><span class="live-dot"></span>Connected · Local network</div>
-          </div>
-        </div>
-        <div class="comp-row">
-          <div class="comp-ic">${I("monitor")}</div>
-          <div class="main">
-            <div class="t1">Devbox</div>
-            <div class="t2"><span class="stale-dot"></span>Last seen 2h ago</div>
-          </div>
-        </div>
+        ${Object.entries(COMPUTERS)
+          .map(
+            ([id, c]) => `
+        <button class="comp-row" data-push="computer/${id}">
+          <span class="comp-ic">${I("monitor")}</span>
+          <span class="main">
+            <span class="t1">${c.name}</span>
+            <span class="t2"><span class="${c.status === "stale" ? "stale-dot" : "live-dot"}"></span>${c.sub}</span>
+          </span>
+        </button>`,
+          )
+          .join("")}
       </div>
     </div>
   </section>`;
 }
 
+/* what a Home count opens: exactly the threads it counted */
+function countScreen(key) {
+  const c = COUNTS[key] || COUNTS.needs;
+  const k = COUNTS[key] ? key : "needs";
+  const rows = threadsIn(k);
+  return `
+  <section class="screen" data-route="list/${k}">
+    <div class="navbar">
+      <button class="navbtn" data-back aria-label="Back">${I("chevron-left", "s20")}</button>
+      <div class="navtitle"><div class="t">${c.label}</div><div class="s">${rows.length} ${rows.length === 1 ? "thread" : "threads"}</div></div>
+    </div>
+    <div class="scroll">
+      <div class="screen-body">${rows.map(threadRowHTML).join("")}</div>
+      ${rows.length ? "" : `<div class="empty-note">${c.empty}</div>`}
+    </div>
+  </section>`;
+}
+
+const threadFilter = { computers: null, projects: null, modes: null };
+const FILTER_ALL = { computers: "All computers", projects: "All projects", modes: "All modes" };
+const passesFilter = (t) =>
+  (!threadFilter.computers || compName(t.computer) === threadFilter.computers) &&
+  (!threadFilter.projects || t.project === threadFilter.projects) &&
+  (!threadFilter.modes || MODES[t.mode].label === threadFilter.modes);
+const collapsedSections = new Set(["snoozed", "settled"]);
+
+/* Finished work is settled by the person, or by a computer that does it when
+   a thread is done. Neither is true everywhere, so the shelf says which. */
+function settledNote() {
+  const on = Object.keys(COMPUTERS)
+    .filter((id) => SETTLES_WHEN_DONE[id])
+    .map(compName);
+  const off = Object.keys(COMPUTERS)
+    .filter((id) => !SETTLES_WHEN_DONE[id])
+    .map(compName);
+  const parts = [];
+  if (on.length) parts.push(`${on.join(" and ")} settles threads when they're done.`);
+  if (off.length)
+    parts.push(`On ${off.join(" and ")}, a thread stays in the list until you settle it.`);
+  return parts.join(" ");
+}
+
 function threadsScreen() {
   const sections = SECTIONS.map((s) => {
-    const rows = THREADS.filter((t) => t.section === s.key);
-    const collapsed = s.key === "settled";
+    const rows = threadsIn(s.key).filter(passesFilter);
+    if (!rows.length && s.key !== "settled") return "";
+    const collapsed = collapsedSections.has(s.key);
     return `
     <div class="section${collapsed ? " collapsed" : ""}" data-sec="${s.key}">
-      <button class="sechead${collapsed ? " collapsed" : ""}" data-sec="${s.key}">
+      <button class="sechead${collapsed ? " collapsed" : ""}" data-sec="${s.key}" aria-expanded="${!collapsed}">
         <span>${s.label}</span><span class="n">(${rows.length})</span>
         <span class="chev ${collapsed ? "" : "open"}">${I("chevron-down", "s14")}</span>
       </button>
-      <div class="rows screen-body">${rows.map(threadRowHTML).join("")}</div>
+      <div class="rows screen-body">${rows.map(threadRowHTML).join("")}${s.key === "settled" ? `<div class="shelf-note">${settledNote()}</div>` : ""}</div>
     </div>`;
   }).join("");
+  const chip = (key) =>
+    `<button class="chip${threadFilter[key] ? " on" : ""}" data-menu="${key}">${threadFilter[key] || FILTER_ALL[key]} ${I("chevron-down", "s14")}</button>`;
   return `
   <section class="screen" data-route="threads">
     <div class="scroll">
       <div class="large-head">
         <div class="large-title">Threads</div>
         <div class="head-actions">
-          <button class="navbtn" style="background:var(--control);border-color:transparent" data-dead="Search threads" aria-label="Search">${I("search", "s18")}</button>
+          <button class="navbtn" data-dead="Search threads" aria-label="Search">${I("search", "s18")}</button>
         </div>
       </div>
       <div class="chips">
-        <button class="chip" data-menu="computers">All computers ${I("chevron-down", "s14")}</button>
-        <button class="chip" data-menu="projects">All projects ${I("chevron-down", "s14")}</button>
-        <button class="chip" data-menu="modes">All modes ${I("chevron-down", "s14")}</button>
+        ${chip("computers")}${chip("projects")}${chip("modes")}
         <button class="chip" data-menu="arrange" aria-label="Arrange">${I("sliders-horizontal", "s14")}</button>
       </div>
       ${sections}
@@ -671,28 +737,69 @@ function threadsScreen() {
   </section>`;
 }
 
-function inboxScreen() {
-  const needs = INBOX.needs
-    .map(
-      (n, i) => `
-    <div class="nrow" data-kind="${n.kind}" data-ni="${i}"${n.open ? ` data-open="${n.open}"` : ""}>
+let inboxFilter = "all";
+const INBOX_FILTERS = [
+  ["all", "All"],
+  ["urgent", "Urgent"],
+  ["decide", "Decide"],
+  ["stuck", "Stuck"],
+  ["finished", "Finished"],
+];
+function inboxKind(t) {
+  if (sectionOf(t) === "review") return "finished";
+  return t.status === "failed" ? "stuck" : t.ask === "approval" ? "urgent" : "decide";
+}
+const INBOX_KIND = {
+  urgent: {
+    icon: "shield-check",
+    tint: "var(--warning-text)",
+    title: "Approval needed · npm test",
+  },
+  decide: {
+    icon: "message-circle-question",
+    tint: "var(--accent)",
+    title: "Question · Which scope should the sweep cover?",
+  },
+  stuck: {
+    icon: "circle-x",
+    tint: "var(--danger-text)",
+    title: "Failed · The provider stopped responding",
+  },
+  finished: {
+    icon: "circle-check",
+    tint: "var(--success-text)",
+    title: "Finished · Ready to read",
+  },
+};
+function inboxRowHTML(t) {
+  const n = INBOX_KIND[inboxKind(t)];
+  return `
+    <div class="nrow" data-kind="${inboxKind(t)}" data-open="thread/${t.id}">
       <div class="kindic" style="background:color-mix(in srgb, ${n.tint} 16%, transparent);color:${n.tint}">${I(n.icon)}</div>
       <div class="main">
         <div class="k1">${esc(n.title)}</div>
-        <div class="k2">${esc(n.sub)}</div>
-        <div class="k3">${esc(n.meta)}</div>
+        <div class="k2">${esc(t.title)}</div>
+        <div class="k3">${compName(t.computer)} · ${esc(t.project)}</div>
         ${
-          n.allow
+          t.ask === "approval"
             ? `<div class="actions">
-          <button class="mini-btn allow" data-inbox="allow">Allow</button>
-          <button class="mini-btn deny" data-inbox="deny">Deny</button>
+          <button class="mini-btn allow" data-inbox="allow" data-tid="${t.id}">Allow</button>
+          <button class="mini-btn deny" data-inbox="deny" data-tid="${t.id}">Deny</button>
         </div>`
             : ""
         }
       </div>
-    </div>`,
-    )
-    .join("");
+    </div>`;
+}
+
+function inboxScreen() {
+  const all = [...threadsIn("needs"), ...threadsIn("review")];
+  const shown = all.filter((t) => inboxFilter === "all" || inboxKind(t) === inboxFilter);
+  const card = (rows, empty) =>
+    `<div class="needs-card">${rows.map(inboxRowHTML).join("") || `<div class="empty-note">${empty}</div>`}</div>`;
+  const needsRows = shown.filter((t) => sectionOf(t) === "needs");
+  const reviewRows = shown.filter((t) => sectionOf(t) === "review");
+  const waiting = threadsIn("needs").length;
   const notifs = INBOX.notifs
     .map(
       (n) => `
@@ -712,17 +819,14 @@ function inboxScreen() {
       <div class="large-head">
         <div>
           <div class="large-title">Inbox</div>
-          <div class="inbox-sub">${INBOX.sub}</div>
+          <div class="inbox-sub">${waiting ? `${waiting} ${waiting === 1 ? "thread needs" : "threads need"} you.` : COUNTS.needs.empty}</div>
         </div>
       </div>
-      <div class="chips" id="inbox-chips">
-        ${INBOX.chips.map((c, i) => `<button class="chip${i === 0 ? " on" : ""}" data-ick="${c.key}">${c.label}<span class="cn">${c.n}</span></button>`).join("")}
+      <div class="chips">
+        ${INBOX_FILTERS.map(([key, label]) => `<button class="chip${key === inboxFilter ? " on" : ""}" data-ick="${key}">${label}<span class="cn">${all.filter((t) => key === "all" || inboxKind(t) === key).length}</span></button>`).join("")}
       </div>
-      <div class="section-label">Needs you</div>
-      <div class="needs-card" id="needs-card">
-        ${needs}
-        <div class="empty-note" id="needs-empty" style="display:none">Nothing here right now.</div>
-      </div>
+      ${inboxFilter === "finished" ? "" : `<div class="section-label">Needs you</div>${card(needsRows, "Nothing here right now.")}`}
+      ${["all", "finished"].includes(inboxFilter) ? `<div class="section-label">To review</div>${card(reviewRows, COUNTS.review.empty)}` : ""}
       <div class="section-label">Recent notifications</div>
       <div class="screen-body">${notifs}</div>
     </div>
@@ -750,7 +854,7 @@ function prsScreen() {
               ? `<span class="trail-ok">${I("circle-check")}</span>`
               : p.meta === "Draft"
                 ? `<span class="pill" style="color:var(--text-muted);background:var(--control)">Draft</span>`
-                : `<span class="pill ${p.meta === "Conflicts" ? "conflict" : "warn"}">${p.meta === "Conflicts" ? "Conflicts" : "Review pending"}</span>`;
+                : `<span class="pill ${p.meta === "Conflicts" ? "conflict" : "warn"}">${p.meta === "Conflicts" ? "Conflicts" : "In review"}</span>`;
           const repoShort = r.name.split("/")[1];
           const clickable = p.n === 2864 ? `data-pr="2864"` : `data-dead="PR #${p.n}"`;
           return `
@@ -772,13 +876,13 @@ function prsScreen() {
       <div class="large-head">
         <div class="large-title">Pull requests</div>
         <div class="head-actions">
-          <button class="navbtn" style="background:var(--control);border-color:transparent" data-dead="Search pull requests" aria-label="Search">${I("search", "s18")}</button>
+          <button class="navbtn" data-dead="Search pull requests" aria-label="Search">${I("search", "s18")}</button>
         </div>
       </div>
       <div class="chips">
         <button class="chip" data-menu="prcomputers">All computers ${I("chevron-down", "s14")}</button>
         <button class="chip" data-menu="prrepos">All repositories ${I("chevron-down", "s14")}</button>
-        <button class="chip" id="needs-review">Needs my review</button>
+        <button class="chip" data-needs-review>Needs my review</button>
         <button class="chip" data-menu="prsort" aria-label="Sort">${I("arrow-up-down", "s14")}</button>
       </div>
       ${groups}
@@ -804,12 +908,50 @@ function botsScreen() {
       <div class="large-head">
         <div class="large-title">Bots</div>
         <div class="head-actions">
-          <button class="round-add" id="new-bot" aria-label="New bot">${I("plus")}</button>
+          <button class="round-add" data-new-bot aria-label="New bot">${I("plus")}</button>
         </div>
       </div>
       <div class="screen-body">${rows}</div>
     </div>
   </section>`;
+}
+
+function threadAskHTML(t) {
+  if (sectionOf(t) !== "needs" || !t.ask) return "";
+  if (t.ask === "question") {
+    return `<div class="card approval-card">
+      <div class="chead">${I("message-circle-question")}<span>Question</span></div>
+      <div class="q">Which scope should the sweep cover?</div>
+      <div class="btns">
+        <button class="b-ghost" data-answer="${t.id}">Only changed files</button>
+        <button class="b-ghost" data-answer="${t.id}">The whole Project</button>
+      </div>
+    </div>`;
+  }
+  return `<div class="card approval-card">
+    <div class="chead">${I("shield-check")}<span>Approval needed</span></div>
+    <div class="q">Run <code>npm test</code>?</div>
+    <div class="btns">
+      <button class="b-primary" data-approve="once" data-tid="${t.id}">Allow once</button>
+      <button class="b-ghost" data-approve="always" data-tid="${t.id}">Always allow in this Project</button>
+      <button class="b-danger" data-approve="deny" data-tid="${t.id}">Deny</button>
+    </div>
+  </div>`;
+}
+
+function threadLiveHTML(t) {
+  const status = emptyCounts ? "finished" : t.status;
+  if (!isConnected(t)) return `<span>Paused · ${compName(t.computer)} offline</span>`;
+  if (status === "working")
+    return `<span class="pulse-dot"></span><span>Working · ${t.elapsed}</span>`;
+  if (status === "waiting") return `<span>Waiting for you · ${t.elapsed}</span>`;
+  if (status === "failed") return `<span>Failed · ${t.elapsed} ago</span>`;
+  return `<span>Finished · ${t.elapsed} ago</span>`;
+}
+
+function settledBannerHTML(t) {
+  if (!t.settled) return "";
+  return `<div class="settled-note"><span>Settled ${t.elapsed} ago</span>${isConnected(t) ? `<button data-unsettle="${t.id}">Un-settle</button>` : ""}</div>`;
 }
 
 function threadScreen(id = "sync") {
@@ -819,18 +961,18 @@ function threadScreen(id = "sync") {
   const dkey = `thread/${t.id}`;
   const attach = attachChipsHTML(dkey);
   return `
-  <section class="screen dock${getDrafts(dkey).length ? " has-attach" : ""}${stale ? " stale" : ""}" data-route="thread/${t.id}">
+  <section class="screen dock${stale ? " stale" : ""}" data-route="thread/${t.id}">
     <div class="navbar">
       <button class="navbtn" data-back aria-label="Back">${I("chevron-left", "s20")}</button>
       <div class="navtitle">
         <div class="t" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.title)}</div>
         <div class="s">${comp.name} · ${esc(t.project)} · ${t.id === "sync" ? "sync-worker" : t.id}</div>
       </div>
-      <button class="navbtn" data-sheet="panes" aria-label="Panes">${I("columns-2", "s18")}</button>
+      <button class="navbtn" data-sheet="panes" aria-label="Panes">${I("panel-right", "s18")}</button>
       <button class="navbtn" data-menu="threadmore" aria-label="More">${I("more-horizontal", "s18")}</button>
     </div>
     ${stale ? `<div class="stale-banner"><span class="sb-dot"></span><span>${esc(comp.name)} was last seen ${esc(comp.sub.replace("Last seen ", ""))}. You can read this thread, but not change it.</span></div>` : ""}
-    <div class="scroll" id="transcript-scroll">
+    <div class="scroll">
       <div class="transcript">
         <div class="msg-user">Can you make the sync worker stop re-checking unchanged payloads? It is burning CPU on large repos.</div>
         <div class="md">
@@ -849,8 +991,8 @@ for (const entry of queue) {
           <p>I would add a <code>seen</code> map keyed by path, guarded by the file stats. Want me to go ahead?</p>
         </div>
         <div class="thought-row">${I("sparkles", "s14")}<span>Thought for 12s</span></div>
-        <div class="toolrun" id="toolrun">
-          <button class="thead" id="toolrun-head">
+        <div class="toolrun">
+          <button class="thead">
             ${I("terminal", "s14")}<span>Ran 3 commands</span>
             <span class="chev">${I("chevron-right", "s14")}</span>
           </button>
@@ -865,34 +1007,21 @@ for (const entry of queue) {
           <div class="csub">apps/server/src/sync/worker.ts · packages/shared/src/hash.ts</div>
           <div class="diffstat"><span class="add">+34</span><span class="del">−8</span></div>
         </div>
-        <div class="card approval-card${stale ? " is-stale" : ""}" id="approval">
-          <div class="chead">${I("shield-check")}<span>Approval needed</span></div>
-          <div class="q">Run <code>bun run test</code>?</div>
-          ${
-            stale
-              ? `<div class="stale-note">${esc(comp.name)} is offline — approvals are paused.</div>`
-              : `
-          <div class="btns">
-            <button class="b-primary" data-approve="once">Allow once</button>
-            <button class="b-ghost" data-approve="always">Always allow in this Project</button>
-            <button class="b-danger" data-approve="deny">Deny</button>
-          </div>`
-          }
-          <div class="resolved-note" style="display:none"></div>
-        </div>
-        <div class="live-status"><span class="pulse-dot"></span><span>${stale ? "Paused · Devbox offline" : "Working · 2m"}</span></div>
+        <div class="t-ask">${threadAskHTML(t)}</div>
+        <div class="live-status t-live">${threadLiveHTML(t)}</div>
       </div>
     </div>
-    <div class="composer${stale ? " disabled" : ""}" id="composer">
+    <div class="composer${stale ? " disabled" : ""}">
+      <div class="t-settled">${settledBannerHTML(t)}</div>
       ${stale ? "" : attach}
       <div class="crow">
         <div class="field">
           ${stale ? "" : `<button class="cbtn" data-dead="Attach" aria-label="Attach">${I("plus")}</button>`}
-          <input id="msg-input" type="text" placeholder="${stale ? `${comp.name} is offline` : "Message…"}" autocomplete="off" ${stale ? "disabled" : ""}>
+          <input class="msg-input" type="text" aria-label="Message" placeholder="${stale ? `${comp.name} is offline` : "Message…"}" autocomplete="off" ${stale ? "disabled" : ""}>
           <button class="modelchip" data-sheet="model">${modelState.model} · ${modelState.effort} ${I("chevron-down", "s12")}</button>
           ${stale ? "" : `<button class="cbtn" data-dead="Voice input" aria-label="Voice input">${I("mic")}</button>`}
         </div>
-        ${stale ? "" : `<button class="sendbtn" id="sendbtn" aria-label="Send">${I("arrow-up")}</button>`}
+        ${stale ? "" : `<button class="sendbtn" aria-label="Send">${I("arrow-up")}</button>`}
       </div>
     </div>
   </section>`;
@@ -1066,7 +1195,7 @@ function botScreen(id = "bugscout") {
   const dkey = `bot/${b.id}`;
   const attach = attachChipsHTML(dkey);
   return `
-  <section class="screen dock${getDrafts(dkey).length ? " has-attach" : ""}" data-route="bot/${b.id}">
+  <section class="screen dock" data-route="bot/${b.id}">
     <div class="navbar tall">
       <button class="navbtn" data-back aria-label="Back">${I("chevron-left", "s20")}</button>
       <div class="navtitle">
@@ -1101,7 +1230,7 @@ function botScreen(id = "bugscout") {
       <div class="crow">
         <div class="field">
           <button class="cbtn" data-dead="Attach" aria-label="Attach">${I("plus")}</button>
-          <input class="bot-input" type="text" placeholder="Message ${esc(b.name)}" autocomplete="off">
+          <input class="bot-input" type="text" aria-label="Message ${esc(b.name)}" placeholder="Message ${esc(b.name)}" autocomplete="off">
           <button class="cbtn" data-dead="Voice input" aria-label="Voice input">${I("mic")}</button>
         </div>
         <button class="callbtn" data-dead="Start voice call" aria-label="Voice call">${I("audio-waveform")}</button>
@@ -1338,7 +1467,14 @@ function computerScreen(id = "studio") {
         setRow("user", "Access", `<span class="set-val">Acts as you</span>`),
         setSep(),
         setRow("sliders-horizontal", "Default mode", `<span class="set-val">Ask first</span>`),
+        setSep(),
+        setRow(
+          "circle-check",
+          "Settle threads when they're done",
+          `<span class="set-val">${SETTLES_WHEN_DONE[id] ? "On" : "Off"}</span>`,
+        ),
       ])}
+      ${setFooter(`Change this in Settings › General on ${esc(c.name)}.`)}
       <div class="set-head">This phone</div>
       ${setGroup([
         setRow("shield-off", "Revoke this phone", "", "", {
@@ -1386,12 +1522,13 @@ function pairScreen() {
 
 function lockScreen() {
   const { active, needs } = awareCounts();
-  const rows = AWARE.slice(0, 5).map(awareRow).join("");
+  const rows = aware().slice(0, 5).map(awareRow).join("");
   const islandCompact = `<div class="isl isl-compact"><img src="../../assets/icon.png" alt="">${showNames ? "" : '<span class="isl-g">' + I("bot", "s10") + "</span>"}<span class="isl-n">${active}</span></div>`;
   const islandMinimal = `<div class="isl isl-minimal">${I("bot", "s12")}</div>`;
   const islandExpanded = `<div class="isl isl-expanded">
       <div class="isl-top"><img src="../../assets/icon.png" alt="" class="isl-logo"><span class="isl-count">${active} agents</span></div>
-      ${AWARE.slice(0, 2)
+      ${aware()
+        .slice(0, 2)
         .map((a) => {
           const t = threadById(a.tid);
           const nm = showNames ? t.title : `Thread on ${compName(t.computer)}`;
@@ -1427,14 +1564,16 @@ function lockScreen() {
 
 function widgetScreen() {
   const { active, needs } = awareCounts();
-  const smallRows = AWARE.slice(0, 2)
+  const smallRows = aware()
+    .slice(0, 2)
     .map((a) => {
       const t = threadById(a.tid);
       const nm = showNames ? t.title : `Thread on ${compName(t.computer)}`;
       return `<div class="wg-row"><span class="wg-t">${esc(nm.length > 22 ? nm.slice(0, 22) + "…" : nm)}</span><span class="wg-s" style="color:${PHASE_COLOR[a.phase]}">${a.status}</span></div>`;
     })
     .join("");
-  const medRows = AWARE.slice(0, 4)
+  const medRows = aware()
+    .slice(0, 4)
     .map((a) => {
       const t = threadById(a.tid);
       const nm = showNames ? t.title : `Thread on ${compName(t.computer)}`;
@@ -1488,7 +1627,8 @@ function widgetScreen() {
 
 function androidNotifScreen() {
   const { active, needs } = awareCounts();
-  const rows = AWARE.slice(0, 4)
+  const rows = aware()
+    .slice(0, 4)
     .map((a) => {
       const t = threadById(a.tid);
       const nm = showNames ? t.title : `Thread on ${compName(t.computer)}`;
@@ -1621,8 +1761,18 @@ function panesContentHTML() {
   </div>`;
 }
 
+const PANE_SEGS = ["Environment", "Review", "Context", "Agents"];
+function inspectorHTML() {
+  return `<div class="segmented panes-seg">${PANE_SEGS.map((s, i) => `<button class="${i === panesState.seg ? "on" : ""}" data-panes-seg="${i}">${s}</button>`).join("")}</div>${panesContentHTML()}`;
+}
+function refreshPanesHosts() {
+  $$(".panes-host", viewport).forEach((h) => {
+    h.innerHTML = inspectorHTML();
+  });
+}
+
 function panesSheetHTML() {
-  const segs = ["Environment", "Review", "Context", "Agents"];
+  const segs = PANE_SEGS;
   return `
   <div class="grabber"></div>
   <div class="sheet-head">
@@ -1656,20 +1806,33 @@ function attachChipsHTML(key) {
     .join("")}</div>`;
 }
 
-function refreshComposerChips() {
-  const top = topScreen();
-  if (!top) return;
-  const comp = top.el.querySelector(".composer");
-  if (!comp) return;
-  const old = comp.querySelector(".attachchips");
-  if (old) old.remove();
-  const html = attachChipsHTML(top.route);
-  if (html) {
-    const d = document.createElement("div");
-    d.innerHTML = html;
-    comp.prepend(d.firstElementChild);
+/* What is typed and what is attached belong to the conversation, so every pane
+   that shows it shows the same draft. */
+const textDrafts = new Map();
+function restoreDraft(s) {
+  const input = s.el.querySelector(".composer input");
+  if (input && textDrafts.get(s.route)) {
+    input.value = textDrafts.get(s.route);
+    syncSend(s.el);
   }
-  top.el.classList.toggle("has-attach", getDrafts(top.route).length > 0);
+}
+function syncSend(screen) {
+  const input = screen.querySelector(".msg-input");
+  screen
+    .querySelector(".sendbtn")
+    ?.classList.toggle("show", !!input && input.value.trim().length > 0);
+}
+
+function refreshComposerChips(route) {
+  allScreens()
+    .filter((s) => s.route === route)
+    .forEach((s) => {
+      const comp = s.el.querySelector(".composer");
+      if (!comp) return;
+      comp.querySelector(".attachchips")?.remove();
+      const html = attachChipsHTML(route);
+      if (html) comp.querySelector(".crow").insertAdjacentHTML("beforebegin", html);
+    });
 }
 
 const SHARE_ITEMS = [
@@ -1746,128 +1909,12 @@ function sendSheetHTML() {
   </div>`;
 }
 
-/* ============================== router ============================== */
-
-const phone = $(".phone");
-const viewport = $("#viewport");
-const tabbarEl = $("#tabbar");
-
-let stack = [];
-let activeTab = "home";
-let beforeMode = localStorage.getItem("octant-mock-before") === "1";
-
-const TABS = [
-  { key: "home", label: "Home", icon: "house" },
-  { key: "bots", label: "Bots", icon: "bot" },
-  { key: "threads", label: "Threads", icon: "message-square" },
-  { key: "prs", label: "Pull requests", icon: "git-pull-request" },
-  { key: "inbox", label: "Inbox", icon: "inbox" },
-];
-const TAB_ORDER = ["home", "bots", "threads", "prs", "inbox"];
-
-function visibleTabs() {
-  return beforeMode ? TABS.filter((t) => ["home", "threads", "inbox"].includes(t.key)) : TABS;
-}
-
-const DETAIL_KINDS = new Set(["thread", "bot", "pr", "computer"]);
-function foldWide() {
-  return (
-    (deviceMode === "duo" && posture === "unfolded") ||
-    (deviceMode === "androidfold" && (posture === "unfolded" || posture === "spanned"))
-  );
-}
-function updateFoldLayout() {
-  const wide = foldWide();
-  const top = topScreen();
-  const topName = top ? parseRoute(top.route).name : "";
-  const detailOK = wide && stack.length > 1 && DETAIL_KINDS.has(topName);
-  const loneRoot = wide && stack.length === 1 && isTab(top ? top.route : "");
-  const usePanes = detailOK || loneRoot;
-  phone.classList.toggle("foldwide", usePanes);
-  stack.forEach((s, i) => {
-    const el = s.el;
-    el.removeAttribute("data-pane");
-    el.style.display = "";
-    if (!usePanes) {
-      const hidden = deviceMode === "ipad" ? i > 0 && i < stack.length - 1 : i !== stack.length - 1;
-      el.inert = hidden;
-      if (hidden) el.style.display = "none";
-      return;
-    }
-    if (detailOK) {
-      if (i === 0) el.dataset.pane = "list";
-      else if (i === stack.length - 1) el.dataset.pane = "detail";
-      else {
-        el.style.display = "none";
-        el.inert = true;
-      }
-    } else {
-      if (i === 0) el.dataset.pane = "list";
-      else {
-        el.style.display = "none";
-        el.inert = true;
-      }
-    }
-    el.inert = el.style.display === "none";
-  });
-  document.querySelectorAll(".pane-active").forEach((e) => e.classList.remove("pane-active"));
-  if (detailOK && top) {
-    const arg = parseRoute(top.route).arg;
-    if (arg) {
-      const sel = viewport.querySelector(`.trow[data-tid="${arg}"], [data-bot="${arg}"]`);
-      (sel && (sel.closest(".rowwrap") || sel))?.classList.add("pane-active");
-    }
-  }
-  if (deviceMode === "ipad") renderIpadChrome();
-}
-
-function renderTabbar() {
-  updateFoldLayout();
-  const top = topScreen();
-  const isDevicePage = top && DEVICE_PAGES.has(parseRoute(top.route).name);
-  if (deviceMode === "ipad" || isDevicePage) {
-    tabbarEl.classList.add("hidden");
-    tabbarEl.innerHTML = "";
-    return;
-  }
-  tabbarEl.classList.remove("hidden");
-  const tabs = visibleTabs();
-  const current = top ? top.tab : activeTab;
-  const activeKey = tabs.some((t) => t.key === current)
-    ? current
-    : tabs.some((t) => t.key === activeTab)
-      ? activeTab
-      : tabs[0].key;
-  if (deviceMode === "android" || deviceMode === "androidfold") {
-    tabbarEl.innerHTML = `
-      <nav class="android-nav">
-        ${tabs
-          .map(
-            (t) => `
-          <button class="anav ${t.key === activeKey ? "active" : ""}" data-tab="${t.key}"
-            aria-label="${t.label}" title="${t.label}">${I(t.icon, "s22")}</button>`,
-          )
-          .join("")}
-      </nav>
-      <button class="android-fab" id="newbtn" aria-label="New">${I("square-pen", "s22")}</button>`;
-    return;
-  }
-  tabbarEl.innerHTML = `
-    <div class="capsule">
-      ${tabs
-        .map(
-          (t) => `
-        <button class="tabbtn ${t.key === activeKey ? "active" : ""}" data-tab="${t.key}"
-          aria-label="${t.label}" title="${t.label}">${I(t.icon)}</button>`,
-        )
-        .join("")}
-    </div>
-    <button class="newbtn" id="newbtn" aria-label="New" title="New">${I("square-pen")}</button>`;
-}
+/* ============================== screens by route ============================== */
 
 const SCREEN_BUILDERS = {
   home: homeScreen,
   threads: threadsScreen,
+  list: (key) => countScreen(key || "needs"),
   inbox: inboxScreen,
   prs: prsScreen,
   bots: botsScreen,
@@ -1881,326 +1928,94 @@ const SCREEN_BUILDERS = {
   homescreen: widgetScreen,
   "android-notification": androidNotifScreen,
 };
-const DEVICE_PAGES = new Set(["lock", "homescreen", "android-notification"]);
-
-function parseRoute(hash) {
-  const h = (hash || "").replace(/^#\/?/, "");
-  if (!h) return { name: "home", arg: null, route: "home" };
-  const [name, arg] = h.split("/");
-  const route = arg ? `${name}/${arg}` : name;
-  return { name, arg, route };
-}
-
 function buildScreen(routeStr) {
   const { name, arg } = parseRoute(routeStr);
   const builder = SCREEN_BUILDERS[name];
   if (!builder) return homeScreen();
-  const html = ["thread", "bot", "computer"].includes(name) ? builder(arg) : builder();
+  const html = ["thread", "bot", "computer", "list"].includes(name) ? builder(arg) : builder();
   const tmp = document.createElement("div");
   tmp.innerHTML = html;
   return tmp.firstElementChild;
 }
 
-function isTab(routeStr) {
-  return ["home", "threads", "inbox", "prs", "bots"].includes(parseRoute(routeStr).name);
-}
-function isDevicePage(routeStr) {
-  return DEVICE_PAGES.has(parseRoute(routeStr).name);
-}
-function screenHost(routeStr) {
-  if (deviceMode === "ipad") {
-    ensureIpadShell();
-    return isTab(routeStr) || isDevicePage(routeStr) ? $("#ipad-mid") : $("#ipad-detail");
-  }
-  return viewport;
-}
+/* ============================== thread state ============================== */
 
-function topScreen() {
-  return stack[stack.length - 1];
-}
-
-function pushScreen(routeStr, { instant = false } = {}) {
-  const el = buildScreen(routeStr);
-  const host = screenHost(routeStr);
-  const animate = !instant && deviceMode !== "ipad";
-  if (animate) {
-    el.classList.add("enter-right");
-    host.appendChild(el);
-    void el.offsetWidth;
-    el.classList.remove("enter-right");
-  }
-  el.classList.add("back");
-  if (!el.isConnected) host.appendChild(el);
-  const prev = topScreen();
-  if (prev && deviceMode !== "ipad") prev.el.classList.add("under");
-  const entry = {
-    route: routeStr,
-    el,
-    tab: isTab(routeStr) ? routeStr : prev ? prev.tab : activeTab,
-  };
-  stack.push(entry);
-  if (isTab(routeStr)) activeTab = routeStr;
-  renderTabbar();
-  renderIpadChrome();
-  const rname = parseRoute(routeStr).name;
-  if (rname === "thread" || rname === "bot") {
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        const sc = el.querySelector(".scroll");
-        if (sc) sc.scrollTop = sc.scrollHeight;
-      }),
-    );
-  }
-  if (deviceMode === "android") wireAndroidAppbars();
-}
-
-function clearScreens() {
-  stack.forEach((s) => s.el.remove());
-  stack = [];
-}
-
-function popTo(index) {
-  const removing = stack.splice(index + 1);
-  removing.forEach((s, i) => {
-    s.el.classList.add("leaving-right");
-    void s.el.offsetWidth;
-    setTimeout(() => s.el.classList.add("out"), 20);
-    setTimeout(() => s.el.remove(), 280);
-  });
-  const newTop = stack[stack.length - 1];
-  if (newTop) newTop.el.classList.remove("under");
-  renderTabbar();
-}
-
-function route() {
-  const r = parseRoute(location.hash).route;
-  if (deviceMode === "ipad") {
-    // iPad: stack[0] is the place (mid column); anything deeper is detail
-    const idx = stack.findIndex((s) => s.route === r);
-    if (stack.length && idx === stack.length - 1) {
-      renderTabbar();
-      renderIpadChrome();
+/* Redraw everything that counts or lists threads, in every pane. */
+function refreshData() {
+  allScreens().forEach((s) => {
+    const { name, arg } = parseRoute(s.route);
+    if (name === "thread") {
+      const t = threadById(arg);
+      s.el.querySelector(".navtitle .t").textContent = t.title;
+      s.el.querySelector(".t-ask").innerHTML = threadAskHTML(t);
+      s.el.querySelector(".t-live").innerHTML = threadLiveHTML(t);
+      s.el.querySelector(".t-settled").innerHTML = settledBannerHTML(t);
       return;
     }
-    if (idx >= 0) {
-      popTo(idx);
-      renderIpadChrome();
-      return;
-    }
-    if (isTab(r) || isDevicePage(r)) {
-      clearScreens();
-      pushScreen(r, { instant: true });
-    } else {
-      if (!stack.length || !isTab(stack[0].route)) {
-        clearScreens();
-        const place = isTab(activeTab) ? activeTab : "threads";
-        pushScreen(place, { instant: true });
-      }
-      pushScreen(r);
-    }
-    renderIpadChrome();
-    return;
-  }
-  const idx = stack.findIndex((s) => s.route === r);
-  if (stack.length && idx === stack.length - 1) {
-    renderTabbar();
-    return;
-  }
-  if (idx >= 0) {
-    popTo(idx);
-    return;
-  }
-  if (isTab(r) || isDevicePage(r)) {
-    clearScreens();
-    pushScreen(r, { instant: true });
-  } else {
-    // wide foldable: replace the detail pane instead of stacking siblings
-    if (foldWide() && stack.length >= 2 && DETAIL_KINDS.has(parseRoute(topScreen().route).name)) {
-      popTo(stack.length - 2);
-      pushScreen(r);
-      return;
-    }
-    // pushed route: ensure a root exists beneath
-    if (!stack.length) {
-      const home = buildScreen("home");
-      home.classList.add("back");
-      screenHost("home").appendChild(home);
-      stack.push({ route: "home", el: home, tab: "home" });
-      activeTab = "home";
-    }
-    pushScreen(r);
-  }
-}
-
-window.addEventListener("hashchange", route);
-
-function go(hash) {
-  location.hash = hash;
-}
-
-/* ---------- iPad shell ---------- */
-
-const IPAD_PLACES = ["home", "bots", "threads", "prs", "inbox"];
-const PLACE_LABEL = {
-  home: "Home",
-  bots: "Bots",
-  threads: "Threads",
-  prs: "Pull requests",
-  inbox: "Inbox",
-};
-let ipadShellBuilt = false;
-
-function ensureIpadShell() {
-  if (ipadShellBuilt) return;
-  const shell = document.createElement("div");
-  shell.className = "ipad-shell";
-  shell.innerHTML = `
-    <aside class="ipad-side" id="ipad-side"></aside>
-    <div class="ipad-col ipad-mid" id="ipad-mid"></div>
-    <div class="ipad-col ipad-detail" id="ipad-detail"><div class="ipad-empty" id="ipad-empty">Select a thread</div></div>
-    <div class="ipad-col ipad-inspector" id="ipad-inspector" style="display:none"></div>`;
-  viewport.appendChild(shell);
-  ipadShellBuilt = true;
-}
-
-function renderIpadChrome() {
-  if (deviceMode !== "ipad") return;
-  ensureIpadShell();
-  const side = $("#ipad-side");
-  if (!side) return;
-  const place = stack.length && isTab(stack[0].route) ? parseRoute(stack[0].route).name : "threads";
-  const places = IPAD_PLACES.filter((p) => !(beforeMode && ["bots", "prs"].includes(p)));
-  const pinned = beforeMode ? [] : BOTS.slice(0, 3);
-  side.innerHTML = `
-    <div class="ipad-brand"><img src="../../assets/icon.png" alt=""><span>Octant</span>
-      <button class="ipad-compose" id="ipad-compose" aria-label="New">${I("square-pen", "s16")}</button>
-    </div>
-    <div class="ipad-sec">Places</div>
-    ${places.map((p) => `<button class="ipad-place ${p === place ? "active" : ""}" data-ipad-place="${p}">${I(TABS.find((t) => t.key === p).icon, "s17")}<span>${PLACE_LABEL[p]}</span></button>`).join("")}
-    ${pinned.length ? `<div class="ipad-sec">Pinned bots</div>${pinned.map((b) => `<button class="ipad-bot" data-push="bot/${b.id}"><span class="bot-av" style="--g1:${b.g1};--g2:${b.g2};width:26px;height:26px;border-radius:8px">${I(b.icon, "s13")}</span><span class="ib-name">${esc(b.name)}</span><span class="ib-dot ${b.status}"></span></button>`).join("")}` : ""}
-    <div class="ipad-spacer"></div>
-    <button class="ipad-place" data-push="settings">${I("settings", "s17")}<span>Settings</span></button>`;
-  $("#ipad-empty").style.display = stack.length > 1 ? "none" : "";
-  const insp = $("#ipad-inspector");
-  const inspOn = !!(ipadInspector && parseRoute(topScreen()?.route || "").name === "thread");
-  document.querySelector(".ipad-shell")?.classList.toggle("has-insp", inspOn);
-  if (inspOn) {
-    insp.style.display = "";
-    insp.innerHTML = `<div class="insp-head">Panes</div><div class="insp-body">${panesContentHTML()}</div>`;
-  } else {
-    insp.style.display = "none";
-    insp.innerHTML = "";
-  }
-}
-
-const POSTURES = {
-  duo: [
-    ["folded", "Folded"],
-    ["unfolded", "Unfolded"],
-  ],
-  androidfold: [
-    ["single", "Single screen"],
-    ["unfolded", "Unfolded"],
-    ["spanned", "Spanned (dual screen)"],
-  ],
-};
-let posture = localStorage.getItem("octant-mock-posture") || "folded";
-if (POSTURES[deviceMode] && !POSTURES[deviceMode].some(([k]) => k === posture))
-  posture = POSTURES[deviceMode][0][0];
-
-function setPosture(p) {
-  posture = p;
-  localStorage.setItem("octant-mock-posture", p);
-  phone.dataset.posture = p;
-  syncDeviceUI();
-  renderTabbar();
-}
-
-function setDeviceMode(mode) {
-  deviceMode = mode;
-  localStorage.setItem("octant-mock-device", mode);
-  if (POSTURES[mode] && !POSTURES[mode].some(([k]) => k === posture))
-    posture = POSTURES[mode][0][0];
-  phone.dataset.device = mode;
-  phone.dataset.posture = POSTURES[mode] ? posture : "";
-  syncDeviceUI();
-  if (mode === "ipad") ensureIpadShell();
-  else {
-    document.querySelector(".ipad-shell")?.remove();
-    ipadShellBuilt = false;
-  }
-  // rebuild synchronously on the current route — never leave a blank frame
-  const r = parseRoute(location.hash).route;
-  clearScreens();
-  if (mode === "ipad") {
-    if (isTab(r) || isDevicePage(r)) pushScreen(r, { instant: true });
+    if (!["home", "threads", "list", "inbox"].includes(name)) return;
+    const fresh = buildScreen(s.route);
+    const actions = s.el.querySelector(".split-btn");
+    const sc = s.el.querySelector(":scope > .scroll");
+    const y = sc.scrollTop;
+    const inner = sc.querySelector(".scroll-in");
+    inner.replaceChildren(...fresh.querySelector(".scroll").childNodes);
+    const navbar = fresh.querySelector(".navbar");
+    if (navbar)
+      s.el.querySelector(".navbar .navtitle").innerHTML =
+        navbar.querySelector(".navtitle").innerHTML;
     else {
-      const root = visibleTabs().some((t) => t.key === activeTab) ? activeTab : "threads";
-      pushScreen(root, { instant: true });
-      pushScreen(r);
+      let host = inner.querySelector(".head-actions");
+      if (!host) {
+        host = document.createElement("div");
+        host.className = "head-actions";
+        inner.querySelector(".large-head").appendChild(host);
+      }
+      host.appendChild(actions);
     }
-    return;
-  }
-  if (isTab(r) || isDevicePage(r)) {
-    pushScreen(r, { instant: true });
-    return;
-  }
-  const root = visibleTabs().some((t) => t.key === activeTab) ? activeTab : "home";
-  pushScreen(root, { instant: true });
-  pushScreen(r);
-}
-
-/* ---------- Android chrome ---------- */
-
-const ANDROID_TITLES = {
-  home: "Home",
-  threads: "Threads",
-  inbox: "Inbox",
-  prs: "Pull requests",
-  bots: "Bots",
-  thread: "Thread",
-  pr: "Pull request",
-  bot: "Bot",
-  settings: "Settings",
-  computer: "Computer",
-  pair: "Pair a computer",
-  lock: "Lock Screen",
-  homescreen: "Home Screen",
-  "android-notification": "Notification",
-};
-
-function wireAndroidAppbars() {
-  if (deviceMode !== "android" && deviceMode !== "androidfold") return;
-  stack.forEach((s) => {
-    const el = s.el;
-    if (el.dataset.abar) return;
-    const name = parseRoute(s.route).name;
-    const title = ANDROID_TITLES[name] || "Octant";
-    const bar = document.createElement("div");
-    bar.className = "android-appbar";
-    bar.innerHTML = `<span class="aabar-t">${title}</span>`;
-    el.insertBefore(bar, el.firstChild);
-    el.dataset.abar = "1";
-    const sc = el.querySelector(".scroll");
-    if (sc)
-      sc.addEventListener("scroll", () => el.classList.toggle("abar-on", sc.scrollTop > 24), {
-        passive: true,
-      });
+    sc.scrollTop = y;
   });
+  if (deviceRoute) showDevicePage(deviceRoute);
+  layoutPanes();
 }
 
-function goBack() {
-  if (stack.length <= 1) return;
-  const cur = topScreen().route;
-  const prev = stack[stack.length - 2].route;
-  history.back();
-  // fallback only if the hash never moved (deep-link edge)
-  setTimeout(() => {
-    if (topScreen() && topScreen().route === cur && parseRoute(location.hash).route === cur) {
-      history.replaceState(null, "", "#/" + prev);
-      popTo(stack.length - 2);
-    }
-  }, 300);
+/* opening a thread moves its read cursor */
+function markRead(t) {
+  if (!t.unread) return;
+  t.unread = false;
+  refreshData();
+}
+
+function setRest(t, action) {
+  const refused =
+    ["settle", "snooze"].includes(action) || !isConnected(t) ? restRefusal(t, action) : null;
+  if (refused) {
+    toast(refused);
+    return false;
+  }
+  if (action === "settle") {
+    t.settled = true;
+    t.snoozed = false;
+  }
+  if (action === "unsettle") t.settled = false;
+  if (action === "snooze") t.snoozed = true;
+  if (action === "wake") t.snoozed = false;
+  toast(
+    {
+      settle: "Thread settled",
+      unsettle: "Thread un-settled",
+      snooze: "Snoozed until tomorrow",
+      wake: "Thread woken",
+    }[action],
+  );
+  refreshData();
+  return true;
+}
+
+function answerAsk(t) {
+  t.status = "working";
+  t.ask = undefined;
+  t.elapsed = "now";
+  refreshData();
 }
 
 /* ============================== sheets & menus ============================== */
@@ -2235,6 +2050,7 @@ function openSheetEl(kind) {
     </div>`;
   sheetRoot.classList.add("open");
   openSheet = kind;
+  updateSafeArea();
   const sheet = $("#sheet");
   sheet.addEventListener("pointerdown", onSheetPointerDown);
   bindSheetContent(sheet, kind);
@@ -2303,8 +2119,11 @@ function bindSheetContent(sheet, kind) {
         getDrafts(dest).push(...SHARE_ITEMS.map((s) => ({ name: s.name, icon: s.icon })));
         closeSheet();
         setTimeout(() => {
-          if (topScreen() && topScreen().route === dest) refreshComposerChips();
-          else go("#/" + dest);
+          if (topScreen() && topScreen().route === dest) refreshComposerChips(dest);
+          else {
+            refreshComposerChips(dest);
+            go("#/" + dest);
+          }
         }, 300);
       }),
     );
@@ -2420,8 +2239,7 @@ function modelSheetHTML() {
 
 function bindModelSheet(sheet) {
   const syncChip = () => {
-    const chip = $(".modelchip");
-    if (chip)
+    for (const chip of $$(".modelchip"))
       chip.innerHTML = `${modelState.model} · ${modelState.effort} ${I("chevron-down", "s12")}`;
   };
   sheet.addEventListener("click", (e) => {
@@ -2507,10 +2325,10 @@ function doRewind() {
   const transcript = t.closest(".transcript");
   if (!transcript) return;
   if (t.classList.contains("msg-user")) {
-    const input = $("#msg-input");
+    const input = t.closest(".screen").querySelector(".msg-input");
     if (input) {
       input.value = t.textContent.trim();
-      input.dispatchEvent(new Event("input"));
+      input.dispatchEvent(new Event("input", { bubbles: true }));
     }
     t.remove();
   }
@@ -2540,12 +2358,7 @@ function openMessageMenu(x, y, target) {
   menu.innerHTML = MSG_ACTIONS.map(
     (it) => `<button data-msgact="${it.label}">${I(it.icon)}<span>${it.label}</span></button>`,
   ).join("");
-  const pr = phone.getBoundingClientRect();
-  let mx = Math.min(x - pr.left, pr.width - 200);
-  let my = Math.min(y - pr.top, pr.height - MSG_ACTIONS.length * 44 - 130);
-  menu.style.left = Math.max(8, mx) + "px";
-  menu.style.top = Math.max(70, my) + "px";
-  menuRoot.classList.add("open");
+  placeMenu(menu, x, y);
   $$("button", menu).forEach((b) =>
     b.addEventListener("click", () => {
       const label = b.dataset.msgact;
@@ -2562,21 +2375,33 @@ function openMessageMenu(x, y, target) {
 
 const menuRoot = $("#menu-root");
 
+const filterMenu = (key, labels) => () =>
+  [FILTER_ALL[key], ...labels].map((label) => ({
+    label,
+    on: (threadFilter[key] || FILTER_ALL[key]) === label,
+    run: () => {
+      threadFilter[key] = label === FILTER_ALL[key] ? null : label;
+      refreshData();
+    },
+  }));
+
 const MENUS = {
-  computers: [{ label: "All computers", on: true }, { label: "Studio Mac" }, { label: "Devbox" }],
-  projects: [{ label: "All projects", on: true }, { label: "octant" }, { label: "octant-site" }],
-  modes: [
-    { label: "All modes", on: true },
-    { label: "Chat" },
-    { label: "Work" },
-    { label: "Code" },
-  ],
+  split: splitMenu,
+  computers: filterMenu(
+    "computers",
+    Object.values(COMPUTERS).map((c) => c.name),
+  ),
+  projects: filterMenu("projects", PROJECTS),
+  modes: filterMenu(
+    "modes",
+    Object.values(MODES).map((m) => m.label),
+  ),
   arrange: [
     { label: "Status", icon: "circle-dot" },
     { label: "Projects", icon: "folder" },
     { label: "Activity", icon: "history" },
   ],
-  prcomputers: [], // filled below (same list as Threads computers)
+  prcomputers: [{ label: "All computers", on: true }, { label: "Studio Mac" }, { label: "Devbox" }],
   prrepos: [
     { label: "All repositories", on: true },
     { label: "Ogard-Labs/octant" },
@@ -2593,17 +2418,13 @@ const MENUS = {
     { sep: true },
     { label: "Hide repository", icon: "eye-off", danger: true },
   ],
-  panes: [
-    { label: "Single pane", icon: "square", on: true },
-    { label: "Side by side", icon: "columns-2" },
-    { label: "Stacked", icon: "rows-3" },
-  ],
   threadmore: () => {
     const stale = currentThreadStale();
     return [
       { label: `Mode: ${modeState}`, icon: "sliders-horizontal", sub: "mode" },
       { label: "Pin thread", icon: "pin" },
       { label: "Rename", icon: "pencil" },
+      ...restItems(currentThread()),
       { sep: true },
       { label: "Archive", icon: "archive", danger: true, disabled: stale },
       { label: "Delete", icon: "trash-2", danger: true, disabled: stale },
@@ -2660,9 +2481,40 @@ const MENUS = {
     { label: "Haiku · Low" },
   ],
 };
-MENUS.prcomputers = MENUS.computers;
 
-let menuAnchor = null;
+/* Keep a menu inside the frame, and on one side of a hinge. */
+function placeMenu(menu, x, y, { alignRight = false, flipTop = null } = {}) {
+  menuRoot.classList.add("open");
+  const frame = phone.getBoundingClientRect();
+  const safe = updateSafeArea();
+  const w = menu.offsetWidth;
+  const h = menu.offsetHeight;
+  let left = x - frame.left - (alignRight ? w : 0);
+  let top = y - frame.top;
+  left = Math.max(safe.left + 8, Math.min(left, safe.right - w - 8));
+  if (top + h > frame.height - 16 && flipTop !== null) top = flipTop - frame.top - h;
+  top = Math.max(60, Math.min(top, frame.height - h - 16));
+  menu.style.left = left + "px";
+  menu.style.top = top + "px";
+}
+
+function currentThread() {
+  return threadById(parseRoute(topScreen().route).arg);
+}
+
+/* Settle and Snooze with the reason where the host would refuse them. */
+function restItems(t) {
+  const item = (label, icon, action) => {
+    const refused = restRefusal(t, action);
+    const undo = action === "unsettle" || action === "wake";
+    const reason = undo && isConnected(t) ? null : refused;
+    return { label, icon, disabled: !!reason, reason, run: () => setRest(t, action) };
+  };
+  return [
+    t.snoozed ? item("Wake", "moon", "wake") : item("Snooze", "moon", "snooze"),
+    t.settled ? item("Un-settle", "history", "unsettle") : item("Settle", "check", "settle"),
+  ];
+}
 
 function currentThreadStale() {
   const t = topScreen();
@@ -2676,51 +2528,37 @@ function currentThreadStale() {
 function openMenu(key, anchorEl) {
   closeMenus();
   let items = MENUS[key];
-  if (typeof items === "function") items = items();
+  if (typeof items === "function") items = items(anchorEl);
   if (!items) return;
-  menuAnchor = anchorEl;
   menuRoot.innerHTML = `<div class="menu-backdrop" data-close-menu></div><div class="menu" id="menu"></div>`;
   const menu = $("#menu", menuRoot);
   menu.innerHTML = items
     .map((it) =>
       it.sep
         ? `<div class="msep"></div>`
-        : `<button class="${it.danger ? "mdanger" : ""}${it.disabled ? " mdisabled" : ""}" data-mlabel="${esc(it.label)}" ${it.sub ? `data-msub="${it.sub}"` : ""}>
+        : it.head
+          ? `<div class="mhead">${esc(it.head)}</div>`
+          : `<button class="${it.danger ? "mdanger" : ""}${it.disabled ? " mdisabled" : ""}" data-mlabel="${esc(it.label)}" ${it.sub ? `data-msub="${it.sub}"` : ""}>
         ${it.icon ? I(it.icon) : ""}<span>${esc(it.label)}</span>
         ${it.on ? `<span style="margin-left:auto;color:var(--accent)">${I("check", "s14")}</span>` : ""}
         ${it.sub ? `<span style="margin-left:auto;color:var(--text-muted)">${I("chevron-right", "s13")}</span>` : ""}
       </button>`,
     )
     .join("");
-  // position near anchor, inside phone
-  const phoneRect = phone.getBoundingClientRect();
   const r = anchorEl.getBoundingClientRect();
-  const mw = 230;
-  let x = r.right - phoneRect.left - mw;
-  let y = r.bottom - phoneRect.top + 6;
-  if (x < 8) x = 8;
-  if (x + mw > phoneRect.width - 8) x = phoneRect.width - mw - 8;
-  if (y + items.length * 40 > phoneRect.height - 90)
-    y = r.top - phoneRect.top - items.length * 40 - 8;
-  menu.style.left = x + "px";
-  menu.style.top = Math.max(60, y) + "px";
-  if (foldWide() && posture === "spanned") {
-    // keep menus inside the detail (right) pane, clear of the hinge
-    const paneL = phoneRect.width / 2 + 10;
-    const paneR = phoneRect.width - 8;
-    if (x + mw > paneR) x = paneR - mw;
-    if (x < paneL) x = paneL;
-    menu.style.left = x + "px";
-  }
-  menuRoot.classList.add("open");
+  placeMenu(menu, r.right, r.bottom + 6, { alignRight: true, flipTop: r.top - 8 });
   $$("button", menu).forEach((b) =>
     b.addEventListener("click", () => {
       const label = b.dataset.mlabel;
       const sub = b.dataset.msub;
-      const wasDisabled = b.classList.contains("mdisabled");
+      const item = items.find((it) => it.label === label);
       closeMenus();
-      if (wasDisabled) {
-        toast(`${compName(currentThreadComputer())} is offline`);
+      if (item.disabled) {
+        toast(item.reason || `${currentThreadComputer()} is offline`);
+        return;
+      }
+      if (item.run) {
+        item.run();
         return;
       }
       if (sub === "mode") {
@@ -2753,9 +2591,6 @@ function relabel(anchor, label) {
 }
 
 const SELECT_KEYS = [
-  "computers",
-  "projects",
-  "modes",
   "prcomputers",
   "prrepos",
   "prsort",
@@ -2779,7 +2614,6 @@ function onMenuPick(key, label, anchor) {
   if (key === "mergeinfo") toast(`Will ${label.toLowerCase()}`);
   if (key === "prmore2" && label === "Start a Code thread") toast("Opening a Code thread…");
   if (key === "prrepo" || key === "prmore") toast(label);
-  if (key === "panes") toast(`Layout: ${label.toLowerCase()}`);
   if (key === "botmore") toast(label);
   if (key === "threadmore") {
     if (label === "Pin thread") toast("Thread pinned");
@@ -2862,15 +2696,18 @@ function toast(msg) {
   if (!toastEl) {
     toastEl = document.createElement("div");
     toastEl.style.cssText = `
-      position:absolute;left:50%;bottom:96px;transform:translateX(-50%);
+      position:absolute;left:calc(var(--safe-l, 0px) + var(--safe-w, 100%) / 2);bottom:96px;transform:translateX(-50%);
+      max-width:calc(var(--safe-w, 100%) - 32px);text-align:center;
       background:var(--floating);color:var(--text-primary);
       border:1px solid var(--border-strong);border-radius:12px;
       padding:9px 16px;font-size:13.5px;font-weight:500;z-index:120;
       box-shadow:0 10px 30px rgba(0,0,0,.35);pointer-events:none;
-      opacity:0;transition:opacity .2s ease;white-space:nowrap;`;
+      opacity:0;transition:opacity .2s ease;`;
+    toastEl.setAttribute("role", "status");
     phone.appendChild(toastEl);
   }
   toastEl.textContent = msg;
+  updateSafeArea();
   requestAnimationFrame(() => (toastEl.style.opacity = "1"));
   clearTimeout(toastEl._t);
   toastEl._t = setTimeout(() => (toastEl.style.opacity = "0"), 1800);
@@ -2878,73 +2715,60 @@ function toast(msg) {
 
 /* ---------- context menu (long press) ---------- */
 
-function openContextMenu(x, y, tid) {
+function openContextMenu(x, y, tid, from) {
   closeMenus();
   menuRoot.innerHTML = `<div class="menu-backdrop" data-close-menu></div><div class="menu ctxmenu" id="ctxmenu"></div>`;
   const menu = $("#ctxmenu", menuRoot);
+  const t = threadById(tid);
   const items = [
-    { label: "Pin", icon: "pin" },
-    { label: "Snooze", icon: "moon" },
-    { label: "Put away", icon: "archive" },
+    {
+      label: t.pinned ? "Unpin" : "Pin",
+      icon: "pin",
+      run: () => {
+        t.pinned = !t.pinned;
+        toast(t.pinned ? "Thread pinned" : "Thread unpinned");
+        refreshData();
+      },
+    },
+    ...restItems(t),
     { label: "Rename", icon: "pencil" },
   ];
   menu.innerHTML = items
-    .map((it) => `<button data-ctx="${it.label}">${I(it.icon)}<span>${it.label}</span></button>`)
+    .map(
+      (it) =>
+        `<button class="${it.disabled ? "mdisabled" : ""}" data-ctx="${it.label}">${I(it.icon)}<span>${it.label}</span></button>`,
+    )
     .join("");
-  const pr = phone.getBoundingClientRect();
-  let mx = Math.min(x - pr.left, pr.width - 190);
-  let my = Math.min(y - pr.top, pr.height - items.length * 42 - 120);
-  menu.style.left = Math.max(8, mx) + "px";
-  menu.style.top = Math.max(70, my) + "px";
-  menuRoot.classList.add("open");
+  placeMenu(menu, x, y);
   $$("button", menu).forEach((b) =>
     b.addEventListener("click", () => {
       const label = b.dataset.ctx;
-      const row = viewport.querySelector(`.rowwrap[data-tid="${tid}"] .trow`);
+      const item = items.find((it) => it.label === label);
       closeMenus();
-      if (!row) return;
-      if (label === "Pin") {
-        if (!row.querySelector(".pinmark")) {
-          const pin = document.createElement("span");
-          pin.className = "pinmark";
-          pin.innerHTML = I("pin", "s12");
-          row.querySelector(".main").prepend(pin);
-          row.querySelector(".main").style.display = "flex";
-          row.querySelector(".main").style.alignItems = "center";
-          row.querySelector(".main").style.gap = "7px";
-        }
-        toast("Thread pinned");
-      } else if (label === "Snooze") {
-        row.classList.add("snoozed");
-        toast("Snoozed until tomorrow");
-      } else if (label === "Put away") {
-        const wrap = row.closest(".rowwrap");
-        wrap.style.transition = "all .25s ease";
-        wrap.style.opacity = "0";
-        wrap.style.maxHeight = wrap.offsetHeight + "px";
-        requestAnimationFrame(() => {
-          wrap.style.maxHeight = "0px";
-          wrap.style.paddingTop = "0";
-          wrap.style.paddingBottom = "0";
-        });
-        setTimeout(() => wrap.remove(), 280);
-        toast("Thread put away");
-      } else if (label === "Rename") {
+      if (item.disabled) {
+        toast(item.reason);
+        return;
+      }
+      if (item.run) {
+        item.run();
+        return;
+      }
+      const row = from.querySelector(".trow");
+      if (!row || !row.isConnected) return;
+      if (label === "Rename") {
         const t1 = row.querySelector(".t1");
         const input = document.createElement("input");
         input.className = "rename-input";
-        input.value = t1.textContent;
+        input.value = t.title;
         t1.replaceWith(input);
         input.focus();
         input.select();
         const done = () => {
-          const v = input.value.trim() || t1.textContent;
-          const d = document.createElement("div");
-          d.className = "t1";
-          d.textContent = v;
-          input.replaceWith(d);
+          t.title = input.value.trim() || t.title;
+          input.replaceWith(t1);
+          refreshData();
         };
-        input.addEventListener("blur", done);
+        input.addEventListener("blur", done, { once: true });
         input.addEventListener("keydown", (e) => {
           if (e.key === "Enter") input.blur();
           if (e.key === "Escape") {
@@ -2970,23 +2794,26 @@ phone.addEventListener("pointerdown", (e) => {
   suppressClick = false;
   const trow = e.target.closest(".trow");
   const wrap = e.target.closest(".rowwrap");
-  const pr = phone.getBoundingClientRect();
-  const onEdge = e.clientX - pr.left < 26;
+  lastTouchX = e.clientX - phone.getBoundingClientRect().left;
+  const inPane = e.target.closest(".pane");
+  const pane = inPane ? paneOf(inPane) : null;
+  const onEdge = pane && e.clientX - inPane.getBoundingClientRect().left < 26;
 
-  if (onEdge && stack.length > 1 && !trow) {
+  if (onEdge && pane.stack.length > 1 && !trow) {
     swipe = {
       kind: "edge",
+      pane,
       x: e.clientX,
       y: e.clientY,
       active: false,
-      topEl: topScreen() ? topScreen().el : null,
-      underEl: stack.length > 1 ? stack[stack.length - 2].el : null,
+      topEl: topOf(pane).el,
+      underEl: pane.stack[pane.stack.length - 2].el,
     };
   } else if (trow && wrap && !e.target.closest("button,a,input,textarea")) {
     pressTimer = setTimeout(() => {
       pressFired = true;
       const r = wrap.getBoundingClientRect();
-      openContextMenu(r.left + 40, r.top + r.height / 2, wrap.dataset.tid);
+      openContextMenu(r.left + 40, r.top + r.height / 2, wrap.dataset.tid, wrap);
       if (navigator.vibrate) navigator.vibrate(10);
     }, 480);
     swipe = { kind: "row", row: wrap, x: e.clientX, y: e.clientY, mode: null };
@@ -3017,7 +2844,7 @@ phone.addEventListener("pointermove", (e) => {
   if (swipe.kind === "edge") {
     if (Math.abs(dx) > 4 || Math.abs(dy) > 4) swipe.active = true;
     if (swipe.active && dx > 0 && swipe.topEl) {
-      const w = phone.getBoundingClientRect().width;
+      const w = swipe.pane.el.getBoundingClientRect().width;
       const t = Math.min(dx / w, 1);
       swipe.topEl.style.transition = "none";
       swipe.topEl.style.transform = `translateX(${t * 100}%)`;
@@ -3039,6 +2866,7 @@ phone.addEventListener("pointermove", (e) => {
       }
     }
     if (swipe.mode === "h") {
+      swipe.row.classList.add("dragging");
       const nx = Math.min(0, Math.max(dx, -150));
       const trow = swipe.row.querySelector(".trow");
       trow.style.transition = "none";
@@ -3051,7 +2879,8 @@ phone.addEventListener("pointermove", (e) => {
 function endPointer(e) {
   if (swipe) {
     if (swipe.kind === "edge" && swipe.topEl) {
-      const w = phone.getBoundingClientRect().width;
+      const w = swipe.pane.el.getBoundingClientRect().width;
+      const pane = swipe.pane;
       const dx = e.clientX - swipe.x;
       const el = swipe.topEl;
       const under = swipe.underEl;
@@ -3061,7 +2890,7 @@ function endPointer(e) {
         el.style.transform = "translateX(102%)";
         if (under) under.style.transform = "";
         suppressClick = true;
-        setTimeout(() => goBack(), 30);
+        setTimeout(() => goBack(pane), 30);
       } else {
         el.style.transform = "";
         if (under) under.style.transform = "";
@@ -3077,6 +2906,7 @@ function endPointer(e) {
         else row.classList.remove("swiped");
         trow.style.transform = "";
         suppressClick = true;
+        setTimeout(() => row.classList.remove("dragging"), 220);
       } else {
         trow.style.transform = "";
       }
@@ -3092,7 +2922,7 @@ phone.addEventListener("contextmenu", (e) => {
   if (e.target.closest(".trow")) e.preventDefault();
 });
 
-// suppress click after long-press or swipe
+// suppress click after long-press or swipe; otherwise the pane pressed is selected
 phone.addEventListener(
   "click",
   (e) => {
@@ -3101,10 +2931,30 @@ phone.addEventListener(
       suppressClick = false;
       e.stopPropagation();
       e.preventDefault();
+      return;
     }
+    if (e.target.closest(".pane")) focusPane(paneOf(e.target));
   },
   true,
 );
+phone.addEventListener("focusin", (e) => {
+  if (e.target.closest(".pane") && e.target.matches("input, textarea")) focusPane(paneOf(e.target));
+  setTimeout(syncKeyboard, 0);
+});
+phone.addEventListener("focusout", () => setTimeout(syncKeyboard, 0));
+// pressing a composer button keeps the keyboard up
+phone.addEventListener("mousedown", (e) => {
+  if (e.target.closest(".composer button")) e.preventDefault();
+});
+phone.addEventListener("keydown", (e) => {
+  const row = e.target.closest?.(".trow");
+  if (row && e.target === row && (e.key === "Enter" || e.key === " ")) {
+    e.preventDefault();
+    row.click();
+  }
+  if (e.key === "Enter" && e.target.matches?.(".msg-input"))
+    e.target.closest(".screen").querySelector(".sendbtn")?.click();
+});
 
 // long-press tooltip on tab bar icons
 let tipTimer = null;
@@ -3142,14 +2992,15 @@ phone.addEventListener("click", (e) => {
   // tab bar
   const tab = el.closest("[data-tab]");
   if (tab) {
-    go("#/" + tab.dataset.tab);
+    hideDevicePage();
+    openPlace(tab.dataset.tab);
     return;
   }
-  if (el.closest("#newbtn")) {
+  if (el.closest("[data-new]")) {
     openSheetEl("new");
     return;
   }
-  if (el.closest("#new-bot")) {
+  if (el.closest("[data-new-bot]")) {
     toast("Describe the bot and Octant will draft its role");
     return;
   }
@@ -3157,7 +3008,26 @@ phone.addEventListener("click", (e) => {
   // back
   const back = el.closest("[data-back]");
   if (back) {
-    goBack();
+    goBack(paneOf(back));
+    return;
+  }
+
+  // Home counts
+  const count = el.closest("[data-count]");
+  if (count) {
+    openCount("list/" + count.dataset.count, count);
+    return;
+  }
+
+  // settled banner and question card
+  const un0 = el.closest("[data-unsettle]");
+  if (un0) {
+    setRest(threadById(un0.dataset.unsettle), "unsettle");
+    return;
+  }
+  const answer = el.closest("[data-answer]");
+  if (answer) {
+    answerAsk(threadById(answer.dataset.answer));
     return;
   }
 
@@ -3186,7 +3056,7 @@ phone.addEventListener("click", (e) => {
     }
     const tid = trow.dataset.tid || wrap.dataset.tid;
     const t = THREADS.find((x) => x.id === tid);
-    if (t) go("#/thread/" + t.id);
+    if (t) openRow("thread/" + t.id, wrap);
     return;
   }
 
@@ -3194,35 +3064,22 @@ phone.addEventListener("click", (e) => {
   const act = el.closest(".rowactions button");
   if (act) {
     const wrap = act.closest(".rowwrap");
-    const trowEl = wrap.querySelector(".trow");
-    if (act.dataset.act === "away") {
-      wrap.style.transition = "all .25s ease";
-      wrap.style.opacity = "0";
-      wrap.style.maxHeight = wrap.offsetHeight + "px";
-      requestAnimationFrame(() => {
-        wrap.style.maxHeight = "0px";
-      });
-      setTimeout(() => wrap.remove(), 280);
-      toast("Thread put away");
-    } else {
-      trowEl.classList.add("snoozed");
-      toast("Snoozed until tomorrow");
-    }
     wrap.classList.remove("swiped");
+    setRest(threadById(wrap.dataset.tid), act.dataset.act);
     return;
   }
 
   // bots rows
   const botrow = el.closest("[data-bot]");
   if (botrow) {
-    go("#/bot/" + botrow.dataset.bot);
+    openRow("bot/" + botrow.dataset.bot, botrow);
     return;
   }
 
   // PR rows
   const prrow = el.closest("[data-pr]");
   if (prrow) {
-    go("#/pr/2864");
+    openRow("pr/2864", prrow);
     return;
   }
 
@@ -3230,6 +3087,9 @@ phone.addEventListener("click", (e) => {
   const sechead = el.closest(".sechead");
   if (sechead) {
     const sec = sechead.closest(".section");
+    const key = sechead.dataset.sec;
+    if (collapsedSections.has(key)) collapsedSections.delete(key);
+    else collapsedSections.add(key);
     sec.classList.toggle("collapsed");
     sechead.classList.toggle("collapsed");
     const chev = sechead.querySelector(".chev");
@@ -3238,14 +3098,13 @@ phone.addEventListener("click", (e) => {
   }
 
   // PR segments
-  const seg = el.closest("#prsegs button");
+  const seg = el.closest(".segbar button");
   if (seg) {
-    $$("#prsegs button").forEach((b) => b.classList.remove("on"));
-    seg.classList.add("on");
-    for (let i = 0; i < 5; i++) {
-      const p = $(`#prseg-${i}`);
-      if (p) p.style.display = i === +seg.dataset.seg ? "" : "none";
-    }
+    const screen = seg.closest(".screen");
+    $$(".segbar button", screen).forEach((b) => b.classList.toggle("on", b === seg));
+    $$(".prbody", screen).forEach((b, i) => {
+      b.style.display = i === +seg.dataset.seg ? "" : "none";
+    });
     return;
   }
 
@@ -3257,77 +3116,71 @@ phone.addEventListener("click", (e) => {
   }
 
   // tool run
-  if (el.closest("#toolrun-head")) {
-    $("#toolrun").classList.toggle("open");
+  const run = el.closest(".toolrun > .thead");
+  if (run) {
+    run.parentElement.classList.toggle("open");
     return;
   }
 
   // approval buttons
   const appr = el.closest("[data-approve]");
   if (appr) {
-    const card = appr.closest(".approval-card");
-    card.classList.add("resolved");
-    const note = card.querySelector(".resolved-note");
-    const what = { once: "Allowed once", always: "Always allowed in this Project", deny: "Denied" }[
-      appr.dataset.approve
-    ];
-    note.style.display = "";
-    note.textContent = what;
-    note.style.color =
-      appr.dataset.approve === "deny" ? "var(--danger-text)" : "var(--success-text)";
+    answerAsk(threadById(appr.dataset.tid));
+    toast(
+      { once: "Allowed once", always: "Always allowed in this Project", deny: "Denied" }[
+        appr.dataset.approve
+      ],
+    );
     return;
   }
 
   // inbox chips
-  const ichip = el.closest("#inbox-chips .chip");
+  const ichip = el.closest("[data-ick]");
   if (ichip) {
-    $$("#inbox-chips .chip").forEach((c) => c.classList.remove("on"));
-    ichip.classList.add("on");
-    const key = ichip.dataset.ick;
-    $$("#needs-card .nrow").forEach((r) => {
-      r.style.display = key === "all" || r.dataset.kind === key ? "" : "none";
-    });
-    const any = $$("#needs-card .nrow").some((r) => r.style.display !== "none");
-    $("#needs-empty").style.display = any ? "none" : "";
+    inboxFilter = ichip.dataset.ick;
+    refreshData();
     return;
   }
 
   // inbox allow/deny
   const inb = el.closest("[data-inbox]");
   if (inb) {
-    const nrow = inb.closest(".nrow");
-    nrow.style.transition = "all .25s ease";
-    nrow.style.opacity = "0";
-    setTimeout(() => {
-      nrow.remove();
-      checkNeedsEmpty();
-    }, 260);
+    answerAsk(threadById(inb.dataset.tid));
     toast(inb.dataset.inbox === "allow" ? "Allowed" : "Denied");
     return;
   }
 
   // inbox rows open their thread
-  const openRow = el.closest("[data-open]");
-  if (openRow && !el.closest("button")) {
-    go("#/" + openRow.dataset.open);
+  const openEl = el.closest("[data-open]");
+  if (openEl && !el.closest("button")) {
+    openRow(openEl.dataset.open, openEl);
     return;
   }
 
   // needs-my-review chip
-  if (el.closest("#needs-review")) {
-    el.closest("#needs-review").classList.toggle("on");
+  if (el.closest("[data-needs-review]")) {
+    el.closest("[data-needs-review]").classList.toggle("on");
     toast("Showing pull requests that need your review");
     return;
   }
 
   // send button
-  if (el.closest("#sendbtn")) {
-    const input = $("#msg-input");
+  if (el.closest(".sendbtn")) {
+    const s = screenOf(el);
+    const input = s.el.querySelector(".msg-input");
     const text = input.value.trim();
     if (text) {
-      addUserMessage(text);
       input.value = "";
-      $("#sendbtn").classList.remove("show");
+      textDrafts.delete(s.route);
+      getDrafts(s.route).length = 0;
+      refreshComposerChips(s.route);
+      syncSend(s.el);
+      addUserMessage(s.el, text);
+      // a message starts a turn, and brings a settled or snoozed thread back
+      const t = threadById(parseRoute(s.route).arg);
+      Object.assign(t, { settled: false, snoozed: false, elapsed: "now" });
+      if (t.status !== "waiting") t.status = "working";
+      refreshData();
     }
     return;
   }
@@ -3335,10 +3188,9 @@ phone.addEventListener("click", (e) => {
   // remove attachment chip (scoped to the current screen's draft)
   const un = el.closest("[data-unattach]");
   if (un) {
-    const top = topScreen();
-    if (!top) return;
-    getDrafts(top.route).splice(+un.dataset.unattach, 1);
-    refreshComposerChips();
+    const s = screenOf(un);
+    getDrafts(s.route).splice(+un.dataset.unattach, 1);
+    refreshComposerChips(s.route);
     return;
   }
 
@@ -3347,8 +3199,9 @@ phone.addEventListener("click", (e) => {
   if (sheetBtn) {
     const kind = sheetBtn.dataset.sheet;
     if (kind === "panes" && deviceMode === "ipad") {
-      ipadInspector = !ipadInspector;
-      renderIpadChrome();
+      relayout(() => {
+        ipadInspector = !ipadInspector;
+      });
       return;
     }
     openSheetEl(kind);
@@ -3358,50 +3211,39 @@ phone.addEventListener("click", (e) => {
   // pushes (settings rows, iPad sidebar)
   const pushEl = el.closest("[data-push]");
   if (pushEl) {
-    go("#/" + pushEl.dataset.push);
+    recordHash(pushEl.dataset.push);
+    openIn(paneOf(pushEl), pushEl.dataset.push);
     return;
   }
 
-  // iPad sidebar places
-  const place = el.closest("[data-ipad-place]");
-  if (place) {
-    go("#/" + place.dataset.ipadPlace);
+  // iPad sidebar
+  const sideOpen = el.closest("[data-side-open]");
+  if (sideOpen) {
+    openSide(sideOpen.dataset.sideOpen);
     return;
   }
-  if (el.closest("#ipad-compose")) {
-    openSheetEl("new");
+  const sidePush = el.closest("[data-side-push]");
+  if (sidePush) {
+    openIn(barPane(), sidePush.dataset.sidePush);
     return;
   }
 
-  // iPad inspector panes controls
-  const insp = el.closest("#ipad-inspector");
-  if (insp) {
+  // panes shown beside a thread (iPad inspector, dual screen)
+  const host = el.closest(".panes-host");
+  if (host) {
     const segBtn = el.closest("[data-panes-seg]");
-    if (segBtn) {
-      panesState.seg = +segBtn.dataset.panesSeg;
-      panesState.view = "root";
-      renderIpadChrome();
-      return;
-    }
     const fileBtn = el.closest("[data-panes-file]");
-    if (fileBtn) {
-      panesState.file = PANES_FILES[+fileBtn.dataset.panesFile];
-      panesState.view = "diff";
-      renderIpadChrome();
-      return;
-    }
-    if (el.closest("[data-panes='review']")) {
-      panesState.seg = 1;
-      panesState.view = "root";
-      renderIpadChrome();
-      return;
-    }
-    if (el.closest("[data-panes='back']")) {
-      panesState.view = "root";
-      panesState.file = null;
-      renderIpadChrome();
-      return;
-    }
+    if (segBtn)
+      Object.assign(panesState, { seg: +segBtn.dataset.panesSeg, view: "root", file: null });
+    else if (fileBtn)
+      Object.assign(panesState, { file: PANES_FILES[+fileBtn.dataset.panesFile], view: "diff" });
+    else if (el.closest("[data-panes='review']"))
+      Object.assign(panesState, { seg: 1, view: "root" });
+    else if (el.closest("[data-panes='back']"))
+      Object.assign(panesState, { view: "root", file: null });
+    else return;
+    refreshPanesHosts();
+    return;
   }
 
   // lock screen stale toggle
@@ -3437,38 +3279,31 @@ function syncNamesUI() {
   if (nc) nc.checked = showNames;
 }
 function refreshAwareness() {
-  const top = topScreen();
-  if (top && DEVICE_PAGES.has(parseRoute(top.route).name)) {
-    const r = top.route;
-    clearScreens();
-    pushScreen(r, { instant: true });
-  } else if (deviceMode === "ipad") renderIpadChrome();
+  if (deviceRoute) showDevicePage(deviceRoute);
 }
 
-function checkNeedsEmpty() {
-  const rows = $$("#needs-card .nrow");
-  const any = rows.some((r) => r.isConnected);
-  const empty = $("#needs-empty");
-  if (empty) empty.style.display = any ? "none" : "";
-}
-
-function addUserMessage(text) {
-  const transcript = $(".transcript");
-  if (!transcript) return;
+function addUserMessage(screen, text) {
   const div = document.createElement("div");
   div.className = "msg-user";
   div.textContent = text;
-  transcript.appendChild(div);
-  const sc = $("#transcript-scroll");
-  if (sc) sc.scrollTop = sc.scrollHeight;
+  screen.querySelector(".transcript").insertBefore(div, screen.querySelector(".t-live"));
+  const sc = screen.querySelector(".scroll");
+  sc.scrollTop = sc.scrollHeight;
 }
 
 /* ---------- input listeners (delegated) ---------- */
 
 phone.addEventListener("input", (e) => {
-  if (e.target.id === "msg-input") {
-    $("#sendbtn")?.classList.toggle("show", e.target.value.trim().length > 0);
-  }
+  if (!e.target.matches(".composer input")) return;
+  const s = screenOf(e.target);
+  textDrafts.set(s.route, e.target.value);
+  syncSend(s.el);
+  allScreens()
+    .filter((o) => o !== s && o.route === s.route)
+    .forEach((o) => {
+      o.el.querySelector(".composer input").value = e.target.value;
+      syncSend(o.el);
+    });
 });
 
 /* ---------- sheet backdrop / menu backdrop clicks ---------- */
@@ -3496,8 +3331,7 @@ function setThemePref(p) {
   localStorage.setItem("octant-mock-theme", eff);
   localStorage.setItem("octant-mock-theme-pref", themePref);
   themeBtns.forEach((b) => b.classList.toggle("on", b.dataset.theme === eff));
-  const tv = document.querySelector('[data-menu="settheme"] .set-val');
-  if (tv) tv.textContent = themeLabel();
+  for (const tv of $$('[data-menu="settheme"] .set-val')) tv.textContent = themeLabel();
 }
 function setTheme(t) {
   setThemePref(t);
@@ -3509,13 +3343,31 @@ beforeCheck.checked = beforeMode;
 beforeCheck.addEventListener("change", () => {
   beforeMode = beforeCheck.checked;
   localStorage.setItem("octant-mock-before", beforeMode ? "1" : "0");
-  const tabs = visibleTabs();
-  const curTab = topScreen() ? topScreen().tab : activeTab;
-  if (!tabs.some((t) => t.key === curTab)) {
-    go("#/home");
-  } else {
-    renderTabbar();
-  }
+  const keys = visibleTabs().map((t) => t.key);
+  panes.forEach((p) => {
+    const hidden = p.stack.some(
+      (s) =>
+        (isTab(s.route) && !keys.includes(s.route)) ||
+        (parseRoute(s.route).name === "bot" && beforeMode),
+    );
+    if (hidden) {
+      clearPane(p);
+      pushScreen(p, "home", { instant: true });
+    }
+  });
+  layoutPanes();
+  syncHash();
+});
+
+const emptyCheck = $("#empty-toggle");
+emptyCheck.addEventListener("change", () => {
+  emptyCounts = emptyCheck.checked;
+  refreshData();
+});
+const keyboardCheck = $("#keyboard-toggle");
+keyboardCheck.addEventListener("change", () => {
+  keyboardOn = keyboardCheck.checked;
+  syncKeyboard();
 });
 
 $("#share-btn").addEventListener("click", () => openSheetEl("send"));
@@ -3550,9 +3402,9 @@ function updateDeviceNote() {
   if (!note) return;
   note.textContent =
     deviceMode === "android" || deviceMode === "androidfold"
-      ? "Android preview: Material chrome; non-core screens may keep iOS styling. Spanned is a hinge-safe single-pane layout, not real dual-screen rendering."
+      ? "Android preview: Material chrome; non-core screens may keep iOS styling. Frame sizes are illustrative."
       : deviceMode === "ipad"
-        ? "iPad layout: sidebar + list + detail columns."
+        ? "iPad layout: sidebar, then one pane in full or two side by side."
         : deviceMode === "duo"
           ? "iPhone Duo preview: folded/unfolded are illustrative widths, not hardware metrics."
           : "";
@@ -3564,11 +3416,14 @@ syncDeviceUI();
 /* ---------- boot ---------- */
 
 (function init() {
-  const saved = localStorage.getItem("octant-mock-theme");
-  setTheme(saved || "dark");
+  if (POSTURES[deviceMode] && !POSTURES[deviceMode].some(([k]) => k === posture))
+    posture = POSTURES[deviceMode][0][0];
+  phone.dataset.posture = POSTURES[deviceMode] ? posture : "";
+  syncDeviceUI();
+  setTheme(localStorage.getItem("octant-mock-theme") || "dark");
   const desired = parseRoute(location.hash).route;
-  // normalize history so back always lands on a tab root inside the mockup
-  history.replaceState(null, "", "#/home");
-  if (desired && desired !== "home") location.hash = "#/" + desired;
-  route();
+  pushScreen(panes[0], "home", { instant: true });
+  if (isDevicePage(desired)) showDevicePage(desired);
+  else if (desired !== "home") openFrom(panes[0], desired);
+  syncHash();
 })();

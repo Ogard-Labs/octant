@@ -1,0 +1,569 @@
+/* Panes, split view, hinge and dock geometry. Loaded after styles.css. */
+
+[hidden] {
+  display: none !important;
+}
+
+/* ---------- shell ---------- */
+
+.shell {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+.panes {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 1px;
+  background: var(--border);
+}
+.pane {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--workspace);
+}
+.phone.spanned .panes {
+  gap: 16px;
+  background: #000;
+}
+.phone.has-side .ipad-side {
+  width: 260px;
+}
+.phone[data-device="ipad"] .pane.listcol {
+  flex: none;
+  width: 360px;
+}
+.phone.has-insp .ipad-inspector {
+  width: 300px;
+}
+.phone.has-insp.has-side .ipad-side {
+  width: 220px;
+}
+.phone.has-insp .pane.listcol {
+  width: 300px;
+}
+.device-layer {
+  position: absolute;
+  inset: 0;
+  display: none;
+}
+.phone.on-device-page .device-layer {
+  display: block;
+}
+.phone.on-device-page .shell {
+  display: none;
+}
+.phone.spanned .statusbar .island,
+.phone.android .statusbar .island {
+  display: none;
+}
+
+.ipad-bot .bot-avatar {
+  border-radius: 8px;
+}
+.ipad-bot .bot-avatar .ic {
+  width: 14px;
+  height: 14px;
+}
+
+/* ---------- dock geometry ----------
+   --bar-b and --bar-h place the bottom bar. A pane that holds the bar keeps its
+   composer above it; a pane without one puts the composer on the bar's own
+   bottom line. */
+
+.phone {
+  --bar-b: 16px;
+  --bar-h: 56px;
+  --column: 760px;
+  --kb-h: 0px;
+}
+.phone.android {
+  --bar-b: 14px;
+  --bar-h: 64px;
+}
+.phone.kb-open {
+  --kb-h: 268px;
+}
+.phone.wide.kb-open {
+  --kb-h: 244px;
+}
+
+.pane {
+  --clear: 8px;
+  --dock-b: var(--bar-b);
+  --act-b: 0px;
+  --act-pad: var(--bar-b);
+}
+.pane.has-bar {
+  --clear: calc(var(--bar-b) + var(--bar-h) + 16px);
+  --dock-b: calc(var(--bar-b) + var(--bar-h) + 16px);
+  --act-b: calc(var(--bar-b) + var(--bar-h) + 16px);
+  --act-pad: 10px;
+}
+/* one keyboard covers the whole window; on a dual screen it covers the display
+   being typed on */
+.phone.kb-open .pane {
+  --clear: var(--kb-h);
+  --dock-b: calc(var(--kb-h) + 10px);
+  --act-b: var(--kb-h);
+  --act-pad: 10px;
+}
+.phone.kb-open.spanned.split .pane:not(.kb-target) {
+  --clear: 8px;
+  --dock-b: var(--bar-b);
+  --act-b: 0px;
+  --act-pad: var(--bar-b);
+}
+
+.pane .screen > .scroll {
+  padding-bottom: calc(var(--clear) + 8px);
+}
+.pane .screen.dock > .scroll {
+  padding-bottom: calc(var(--dock-b) + var(--dock-h, 46px) + 16px);
+}
+.pane .screen::after {
+  height: var(--clear);
+}
+.pane:not(.has-bar) .screen:not(.dock)::after {
+  display: none;
+}
+.pane .screen.dock::after {
+  height: calc(var(--dock-b) + var(--dock-h, 46px) + 18px);
+}
+
+/* the composer's edges are the transcript cards' edges */
+.pane .composer {
+  bottom: var(--dock-b);
+  max-width: var(--column);
+  margin-inline: auto;
+}
+.pane .transcript {
+  max-width: calc(var(--column) + 32px);
+  margin-inline: auto;
+}
+.pane .composer .field {
+  min-width: 0;
+}
+.pane .composer .sendbtn:not(.show) {
+  display: none;
+}
+.pane .composer .sendbtn {
+  height: 46px;
+  width: 46px;
+}
+.pane .praction {
+  bottom: var(--act-b);
+  padding: 10px max(16px, calc((100% - var(--column)) / 2)) var(--act-pad);
+}
+.pane .screen[data-route^="pr/"] .scroll-in {
+  max-width: calc(var(--column) + 32px);
+  margin-inline: auto;
+}
+.stale-banner {
+  width: calc(100% - 32px);
+  max-width: var(--column);
+  margin-inline: auto;
+}
+
+.pane.listcol .tile {
+  padding-inline: 10px;
+}
+.pane.listcol .tile .top {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/* ---------- bottom bar ---------- */
+
+.tabbar {
+  left: calc(var(--bar-x, 0px) + 16px);
+  right: auto;
+  width: calc(var(--bar-w, 100%) - 32px);
+  bottom: var(--bar-b);
+  height: var(--bar-h);
+  justify-content: center;
+}
+.tabbar .capsule {
+  max-width: 420px;
+}
+.phone.android .tabbar {
+  left: calc(var(--bar-x, 0px) + 12px);
+  width: calc(var(--bar-w, 100%) - 24px);
+}
+.android-nav {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  max-width: 480px;
+  height: 64px;
+}
+.android-fab {
+  right: 4px;
+  bottom: calc(var(--bar-h) + 14px);
+}
+.phone.kb-open .tabbar {
+  display: none;
+}
+
+/* ---------- on-screen keyboard ---------- */
+
+.keyboard {
+  position: absolute;
+  left: var(--safe-l, 0px);
+  right: var(--safe-r, 0px);
+  bottom: 0;
+  height: var(--kb-h);
+  display: none;
+  z-index: 54;
+  flex-direction: column;
+  justify-content: center;
+  gap: 9px;
+  padding: 8px 6px 22px;
+  background: var(--control);
+}
+.phone.kb-open .keyboard {
+  display: flex;
+}
+.kb-row {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+.key {
+  flex: 0 1 34px;
+  height: 42px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: var(--floating);
+  color: var(--text-primary);
+  font-size: 17px;
+}
+.phone.wide:not(.spanned) .key {
+  flex-basis: 58px;
+}
+.key.wide-key {
+  flex-basis: 46%;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* ---------- split control ---------- */
+
+.split-btn {
+  display: none;
+}
+.phone.can-split .split-btn {
+  display: grid;
+}
+.phone.split .pane.focused .split-btn {
+  background: var(--control-pressed);
+  color: var(--accent);
+}
+.settings-back + .split-btn {
+  margin-inline-start: auto;
+}
+.pane.no-back .screen [data-back] {
+  visibility: hidden;
+}
+.pane.no-back .navbar > .navbtn[data-back] {
+  display: none;
+}
+.pane.no-back .navtitle {
+  text-align: start;
+  padding-inline-start: 6px;
+}
+.pane.no-back .navbar.tall .navtitle {
+  text-align: center;
+}
+.head-actions .navbtn {
+  width: 38px;
+  height: 38px;
+}
+.round-add + .split-btn {
+  align-self: center;
+}
+.mhead {
+  padding: 9px 14px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.menu {
+  max-height: calc(100% - 92px);
+  overflow-y: auto;
+}
+
+/* ---------- one surface across a wide window ---------- */
+
+.phone.wide:not(.split) .screen[data-route="settings"] > .scroll,
+.phone.wide:not(.split) .screen[data-route^="computer/"] > .scroll {
+  max-width: 1040px;
+}
+.phone.wide:not(.split) .screen[data-route="settings"] .scroll-in,
+.phone.wide:not(.split) .screen[data-route^="computer/"] .scroll-in {
+  columns: 2;
+  column-gap: 24px;
+}
+.set-group,
+.set-head,
+.set-foot,
+.row,
+.rowwrap,
+.nrow,
+.notif-row,
+.comp-row,
+.tiles,
+.large-head,
+.home-head,
+.settings-title,
+.comp-hero,
+.pair-view,
+.pair-btns {
+  break-inside: avoid;
+}
+.set-head,
+.section-label,
+.sechead,
+.repohead,
+.settings-title {
+  break-after: avoid;
+}
+
+/* one surface across both displays of a dual screen: lists flow in two columns
+   that meet at the hinge, and controls stay on one display */
+.phone.spanfull .screen:not(.dock) > .scroll {
+  max-width: none !important;
+  padding-inline: 0 !important;
+}
+.phone.spanfull .screen:not(.dock) .scroll-in {
+  columns: 2 !important;
+  column-gap: 16px !important;
+}
+.phone.spanfull .screen[data-route="settings"] .scroll-in > *,
+.phone.spanfull .screen[data-route^="computer/"] .scroll-in > * {
+  margin-inline: 16px;
+}
+.phone.spanfull .screen:not(.dock) .navbar {
+  width: calc(50% - 8px);
+}
+.phone.spanfull .chips {
+  flex-wrap: wrap;
+}
+.phone.spanfull .needs-card {
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.phone.spanfull .screen::after {
+  display: none;
+}
+.phone.spanfull .screen > .scroll {
+  padding-bottom: 96px;
+}
+
+.span-side {
+  display: none;
+}
+.phone.spanfull .screen.dock .navbar {
+  width: calc(50% - 8px);
+}
+.phone.spanfull .screen.dock > .scroll,
+.phone.spanfull .screen.dock > .stale-banner {
+  margin-inline-start: calc(50% + 8px);
+  width: auto;
+}
+.phone.spanfull .screen.dock > .scroll {
+  position: absolute;
+  inset: 0 0 0 0;
+  padding-top: 12px;
+}
+.phone.spanfull .screen.dock > .stale-banner {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  left: 16px;
+  z-index: 3;
+  background: var(--floating);
+}
+.phone.spanfull .screen.dock .composer,
+.phone.spanfull .screen.dock .praction {
+  left: calc(50% + 8px + 16px);
+  right: 16px;
+}
+.phone.spanfull .screen.dock .praction {
+  left: calc(50% + 8px);
+  right: 0;
+  padding-inline: 16px;
+}
+.phone.spanfull .pane {
+  --dock-b: var(--bar-b);
+  --act-b: 0px;
+  --act-pad: var(--bar-b);
+}
+.phone.spanfull.kb-open .pane {
+  --dock-b: calc(var(--kb-h) + 10px);
+  --act-b: var(--kb-h);
+  --act-pad: 10px;
+}
+.phone.spanfull .screen.dock > .span-side {
+  display: block;
+  position: absolute;
+  left: 0;
+  width: calc(50% - 8px);
+  top: 58px;
+  bottom: 0;
+  overflow-y: auto;
+  padding: 8px 0 96px;
+  scrollbar-width: none;
+}
+.phone.spanfull .screen[data-route^="bot/"] > .span-side {
+  top: 100px;
+  text-align: center;
+}
+.side-title {
+  font-size: 20px;
+  font-weight: 700;
+  padding: 4px 20px;
+}
+.side-sub {
+  padding: 4px 20px 14px;
+  color: var(--text-secondary);
+  font-size: 13.5px;
+}
+.side-file {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 20px;
+  font-size: 12px;
+  border-top: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+/* sheets, menus and alerts stay on one display */
+.sheet,
+.phone[data-posture="spanned"] .sheet,
+.sheet-backdrop,
+.phone[data-posture="spanned"] .sheet-backdrop {
+  left: var(--safe-l, 0px);
+  right: var(--safe-r, 0px);
+}
+.phone.wide:not(.spanned) .sheet {
+  max-width: 560px;
+  margin-inline: auto;
+}
+.alert-root {
+  left: var(--safe-l, 0px);
+  right: var(--safe-r, 0px);
+}
+.alert-backdrop {
+  display: grid;
+  place-items: center;
+}
+
+/* ---------- counts and shelves ---------- */
+
+.tile {
+  text-align: start;
+  color: inherit;
+  align-items: stretch;
+}
+.tile .num {
+  display: block;
+}
+.tile:active {
+  filter: brightness(1.1);
+}
+.tile:focus-visible,
+.trow:focus-visible,
+.comp-row:focus-visible,
+.split-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+button.comp-row {
+  width: 100%;
+  text-align: start;
+}
+button.comp-row .main > span {
+  display: block;
+}
+button.comp-row .t2 {
+  display: flex !important;
+  align-items: center;
+}
+.rowactions .act-settle {
+  background: #2f6b55;
+}
+.rowwrap .trow {
+  border-radius: 0;
+}
+.phone .status-glyph.failed {
+  color: var(--danger-text);
+}
+.trow .pinmark {
+  display: inline-flex;
+  vertical-align: -1px;
+  margin-inline-end: 6px;
+  color: var(--text-muted);
+}
+.trow .pinmark .ic {
+  width: 12px;
+  height: 12px;
+}
+.shelf-note {
+  padding: 10px 0 14px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.settled-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  padding: 8px 8px 8px 14px;
+  border-radius: 14px;
+  background: var(--floating);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.settled-note button {
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: var(--control);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.t-ask:empty {
+  display: none;
+}
+
+/* the fade behind the bottom bar ends in the screen's own colour */
+.pane .screen {
+  --ground: var(--workspace);
+}
+.pane .screen[data-route="settings"],
+.pane .screen[data-route^="computer/"] {
+  --ground: var(--app-bg);
+}
+.pane .screen::after,
+.pane .screen.dock::after {
+  background: linear-gradient(to top, var(--ground) 0%, var(--ground) 70%, transparent 100%);
+}
+
+/* swipe actions exist only while a row is swiped, so no colour shows at its corners */
+.rowactions {
+  visibility: hidden;
+}
+.rowwrap.dragging .rowactions,
+.rowwrap.swiped .rowactions {
+  visibility: visible;
+}

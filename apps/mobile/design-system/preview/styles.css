@@ -312,14 +312,6 @@ textarea {
   padding-bottom: 88px;
 }
 
-/* screens with a composer or sticky action row need a deeper dock zone */
-.screen.dock > .scroll {
-  padding-bottom: 156px;
-}
-.screen.dock.has-attach > .scroll {
-  padding-bottom: 210px;
-}
-
 /* soft fade behind the tab bar / composer so scrolling content dissolves
    instead of colliding with the glass */
 .screen::after {
@@ -332,13 +324,6 @@ textarea {
   background: linear-gradient(to top, var(--app-bg) 0%, var(--app-bg) 70%, transparent 100%);
   pointer-events: none;
   z-index: 40;
-}
-.screen.dock::after {
-  height: 176px;
-  background: linear-gradient(to top, var(--app-bg) 0%, var(--app-bg) 72%, transparent 100%);
-}
-.screen.dock.has-attach::after {
-  height: 230px;
 }
 
 .screen-body {
@@ -847,9 +832,6 @@ textarea {
 }
 .rowactions .act-snooze {
   background: #8a6218;
-}
-.rowactions .act-away {
-  background: #5b4bb0;
 }
 .phone[data-theme="dark"] .rowactions .act-snooze {
   background: #6e5416;
@@ -2661,34 +2643,6 @@ textarea {
   width: 880px;
   height: 720px;
 }
-.phone.foldwide {
-  --fold-gap: 1px;
-  --pane-width: calc((100% - var(--fold-gap)) /2);
-}
-.phone[data-posture="spanned"].foldwide {
-  --fold-gap: 16px;
-}
-.phone.foldwide .screen[data-pane="list"] {
-  left: 0;
-  right: auto;
-  width: var(--pane-width);
-}
-.phone.foldwide .screen[data-pane="detail"] {
-  left: calc(var(--pane-width) + var(--fold-gap));
-  right: 0;
-  width: auto;
-}
-.phone.foldwide .screen:not([data-pane]) {
-  display: none !important;
-}
-.phone.foldwide .tabbar {
-  left: 16px;
-  right: auto;
-  width: calc(var(--pane-width) - 32px);
-}
-.phone.foldwide .tabbar .capsule {
-  flex: 1;
-}
 .phone[data-posture="spanned"]::after {
   content: "";
   position: absolute;
@@ -2707,14 +2661,6 @@ textarea {
   z-index: 58;
   pointer-events: none;
 }
-.phone[data-posture="spanned"] .sheet {
-  left: calc(var(--pane-width) + var(--fold-gap));
-  right: 0;
-  width: auto;
-}
-.phone[data-posture="spanned"] .sheet-backdrop {
-  left: calc(var(--pane-width) + var(--fold-gap));
-}
 .pane-active .trow,
 .trow.pane-active {
   background: var(--control);
@@ -2727,18 +2673,6 @@ textarea {
   .phone[data-posture="spanned"] {
     zoom: 0.74;
   }
-}
-.ipad-shell.has-insp .ipad-side {
-  width: 230px;
-}
-.ipad-shell.has-insp .ipad-mid {
-  width: 290px;
-}
-.ipad-shell {
-  position: absolute;
-  inset: 54px 0 0;
-  display: flex;
-  background: var(--app-bg);
 }
 .ipad-side {
   width: 320px;
@@ -2812,38 +2746,12 @@ textarea {
   white-space: nowrap;
   font-size: 13px;
 }
-.ib-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex: none;
-}
-.ib-dot.working {
-  background: var(--palette-orange);
-}
-.ib-dot.idle {
-  background: var(--text-muted);
-}
-.ib-dot.review {
-  background: var(--palette-purple);
-}
 .ipad-spacer {
   flex: 1;
 }
-.ipad-col {
+.ipad-inspector {
   position: relative;
   flex: none;
-  height: 100%;
-  overflow: hidden;
-}
-.ipad-mid {
-  width: 360px;
-  border-right: 1px solid var(--border);
-}
-.ipad-detail {
-  flex: 1;
-}
-.ipad-inspector {
   width: 320px;
   border-left: 1px solid var(--border);
   background: var(--workspace);
@@ -2859,28 +2767,6 @@ textarea {
   inset: 49px 0 0;
   overflow-y: auto;
   padding: 8px 0;
-}
-.ipad-empty {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: var(--text-muted);
-  font-size: 15px;
-}
-.ipad-col .screen {
-  position: absolute;
-  inset: 0;
-}
-.ipad-col .screen > .scroll {
-  padding-bottom: 24px;
-}
-.ipad-col .screen::after {
-  display: none;
-}
-.ipad-col .navbar {
-  backdrop-filter: none;
-  background: var(--app-bg);
 }
 /* Android chrome */
 .android-nav {
