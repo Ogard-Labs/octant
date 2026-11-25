@@ -84,8 +84,15 @@ export function createAgentTerminal(options: {
     close: async () => {
       closed = true;
       // A shell still starting as the caller ends is stopped once it has.
-      await launching?.catch(() => undefined);
-      await terminate();
+      try {
+        await launching?.catch(() => undefined);
+        await terminate();
+      } finally {
+        // A caller that may act again later starts a fresh shell.
+        started = false;
+        launching = undefined;
+        closed = false;
+      }
     },
   };
 }

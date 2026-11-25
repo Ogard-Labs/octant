@@ -25,6 +25,9 @@ export interface AgentRunChildCodeThread {
   readonly folder: string;
 }
 
+/** A checkout id no thread or child is ever given. */
+const UNREACHABLE_CHECKOUT = decodeCodeCheckoutId("00000000-0000-4000-8000-000000000000");
+
 /** The services only carry a managed checkout's receipt id; the worktree itself is proven per call. */
 function receiptIdOf(runId: string): string {
   const digest = createHash("sha256").update(`octant.child-receipt.v1\0${runId}`).digest("hex");
@@ -149,6 +152,19 @@ export class AgentRunChildCodeThreads {
         return child.checkout;
     }
     return undefined;
+  };
+
+  /**
+   * The child's thread as a caller sees it: as itself only for the window the
+   * child's run belongs to, which is the one its tools call with. Any other
+   * caller (another window's route naming the run's id) gets a thread whose
+   * checkout no request can name, so every read and start is refused.
+   */
+  readonly effectiveFor = (scopeId: string, thread: CodeThread): CodeThread => {
+    const host = this.#held.get(String(thread.id))?.host;
+    return host !== undefined && String(host.window() ?? "") === scopeId
+      ? thread
+      : { ...thread, executionPolicy: "plan", checkoutId: UNREACHABLE_CHECKOUT };
   };
 
   /** The parent whose Strict value, egress rules and marks also hold for this child. */

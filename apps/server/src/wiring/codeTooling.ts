@@ -806,7 +806,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         // Read from the level the turn runs at (window session grant clamped
         // to any active turn posture), never only the thread's stored level.
         effectiveThread: (scopeId, thread) => {
-          if (isChildThread(thread)) return thread;
+          if (isChildThread(thread)) return childCodeThreads.effectiveFor(String(scopeId), thread);
           const session = codeSessionAuthority.effectiveThread(scopeId, thread);
           return codeOperationRuntime?.threadWithActiveTurnPosture?.(session) ?? session;
         },
@@ -911,7 +911,9 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         readCheckout: codeOrChildCheckout,
         canAccessProject: canAccessCodeProject,
         effectiveThread: (scopeId, thread) =>
-          isChildThread(thread) ? thread : codeSessionAuthority.effectiveThread(scopeId, thread),
+          isChildThread(thread)
+            ? childCodeThreads.effectiveFor(String(scopeId), thread)
+            : codeSessionAuthority.effectiveThread(scopeId, thread),
         resolveRoot: resolveCodeOrChildRoot,
       },
       approvals: debugConfigurationApprovals,

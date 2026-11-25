@@ -1123,8 +1123,11 @@ function pullRequestRefusal(code: string | undefined): string {
 export interface AgentTerminalPort {
   /** Throws when nothing was started yet. */
   readonly read: () => Promise<CodeOperationTerminalSnapshot>;
-  /** Undefined once it runs; otherwise what the agent is told. */
-  readonly start: () => Promise<TerminalToolAnswer | undefined>;
+  /**
+   * Undefined once it runs; otherwise what the agent is told. `approved` says
+   * the person allowed this very call's start, and covers no later call.
+   */
+  readonly start: (approved: boolean) => Promise<TerminalToolAnswer | undefined>;
   /** Undefined once the input reached it; otherwise what the agent is told. */
   readonly write: (data: string) => Promise<TerminalToolAnswer | undefined>;
   readonly stop: () => Promise<TerminalToolAnswer>;
@@ -1197,12 +1200,10 @@ function codeTerminalOptions(options: CodeAppManagedToolsOptions): AgentTerminal
   return {
     terminal: {
       read: () => options.terminal.read(options.windowId, scope),
-      start: async () => {
-        const started = await options.executeOperation(
-          options.windowId,
-          approvedStart ?? startCommand(),
-        );
+      start: async (approved) => {
+        const command = (approved ? approvedStart : undefined) ?? startCommand();
         approvedStart = undefined;
+        const started = await options.executeOperation(options.windowId, command);
         return started.kind === "terminal-state" && started.state === "running"
           ? undefined
           : operationResult(started, options, scope);
@@ -1269,6 +1270,7 @@ async function terminalTool(
   // naming it, as a provider's own shell asks per command at that level. A
   // terminal the agent starts is covered by the same answer.
   const starts = input.operation === "run" && snapshot?.status !== "running";
+  let approvedStart = false;
   if (
     (input.operation === "run" || input.operation === "write") &&
     input.command !== undefined &&
@@ -1277,12 +1279,13 @@ async function terminalTool(
     if (options.approve === undefined) return failure("terminal-approval-required");
     const outcome = await options.approve({ text: input.command, starts }, signal);
     if (outcome !== "approved") return failure(`terminal-approval-${outcome}`);
+    approvedStart = starts;
     const changed = options.authorityFailure();
     if (changed !== undefined) return failure(changed, postureRefusal(changed));
     if (signal?.aborted === true) return failure("tool-interrupted");
   }
   if (starts) {
-    const refused = await terminal.start();
+    const refused = await terminal.start(approvedStart);
     if (refused !== undefined) return refused;
     snapshot = await terminal.read();
   }
