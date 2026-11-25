@@ -682,7 +682,7 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
   ],
   [
     "/api/image/offers/decide",
-    "The image-only offer answer, kept for clients built before /api/offers/decide; this repository's clients answer there. Remove with /api/image/offers.",
+    "The image-only offer answer, kept for clients built before /api/offers/decide; this repository's clients answer there. Remove once /api/image/offers goes.",
   ],
   [
     "/api/code/language/documents",
