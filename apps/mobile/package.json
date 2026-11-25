@@ -49,6 +49,7 @@
     "react-native": "0.88.1",
     "react-native-enriched-markdown": "1.2.0",
     "react-native-gesture-handler": "~3.3.0",
+    "react-native-keyboard-controller": "1.22.7",
     "react-native-nitro-modules": "0.37.1",
     "react-native-quick-base64": "3.0.1",
     "react-native-quick-crypto": "1.1.7",

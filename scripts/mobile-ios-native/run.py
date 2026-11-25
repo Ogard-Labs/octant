@@ -208,8 +208,14 @@ try:
     if os.environ.get("OCTANT_KEEP_SIMULATOR_APP") == "1":
         # The app and its test runner, before the scenarios, so a failing one
         # can be looked into by hand.
-        run(["ditto", "-c", "-k", "--keepParent",
-             str(derived_data / "Build/Products"),
+        products = derived_data / "Build/Products"
+        kept = work / "Products"
+        for name in ("Octant.app", "OctantOfflineNativeTests-Runner.app"):
+            run(["ditto", str(products / "Release-iphonesimulator" / name),
+                 str(kept / "Release-iphonesimulator" / name)], timeout=300)
+        for plan in products.glob("*.xctestrun"):
+            run(["ditto", str(plan), str(kept / "drive.xctestrun")], timeout=60)
+        run(["ditto", "-c", "-k", "--norsrc", "--keepParent", str(kept),
              str(artifacts / "Octant-simulator.zip")], timeout=300)
     for label, size, appearance, method in (
         ("standard", "large", "light", "testColdDemoReplyForegroundAndReset"),

@@ -15,7 +15,6 @@ const NEW_KEY = "new";
 // button of its own, as it is on Android.
 const IOS = Platform.OS === "ios" ? Number.parseFloat(String(Platform.Version)) : 0;
 const NEW_IS_A_TAB = IOS >= 26.1;
-const NEW_IS_PROMINENT = IOS >= 27;
 
 type AndroidIcons = Readonly<
   Partial<Record<MobilePlaceId, readonly [ImageSourcePropType, ImageSourcePropType]>>
@@ -67,10 +66,7 @@ export function PlaceTabs(props: PlaceTabsProps) {
     <View style={StyleSheet.absoluteFill}>
       <Tabs.Host
         colorScheme={scheme}
-        ios={{
-          tabBarTintColor: colors.accent,
-          ...(NEW_IS_PROMINENT && !props.newDisabled ? { prominentScreenKey: NEW_KEY } : {}),
-        }}
+        ios={{ tabBarTintColor: colors.accent }}
         navStateRequest={request}
         onTabSelected={(event) => {
           const { actionOrigin, hasTriggeredSpecialEffect, isRepeated, selectedScreenKey } =
@@ -126,7 +122,7 @@ export function PlaceTabs(props: PlaceTabsProps) {
           <Tabs.Screen
             ios={{
               icon: { type: "sfSymbol", name: "square.and.pencil" },
-              ...(NEW_IS_PROMINENT ? {} : { role: "search" as const }),
+              role: "search",
             }}
             key={NEW_KEY}
             preventNativeSelection

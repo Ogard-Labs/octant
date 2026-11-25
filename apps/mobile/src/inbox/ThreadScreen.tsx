@@ -10,6 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Icon } from "../ui/Icon";
 import {
   chatAttemptStatusLabel,
@@ -49,6 +50,7 @@ import { usePlacementHostModels } from "../session/usePlacementHostModels";
 import { mobileSpacing } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 import { ListRow, ListSection } from "../ui/NativeChrome";
+import { KeyboardRoom } from "../ui/KeyboardRoom";
 import { AttachSourceSheet } from "../ui/AttachSourceSheet";
 import { FloatingComposer } from "../ui/FloatingComposer";
 import type { MobileThreadPaneId } from "../panes/threadPanesPresentation";
@@ -119,6 +121,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const connectionStatus = useConnectionStatus(supervisor);
   const staleGate = useMemo(() => presentStaleHostSecurity(hostHealth), [hostHealth]);
   const models = usePlacementHostModels(transport);
+  // The page already ends above the bar, which the keyboard covers.
+  const insets = useSafeAreaInsets();
   const { drafts, projectName } = useMobileThreads();
   const draftKey =
     selected === undefined ? "" : `${selected.hostId}:${selected.mode}:${selected.threadId}`;
@@ -587,7 +591,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
       : MOBILE_THREAD_LEVEL_LABELS[mobileThreadLevel(levelSubject)];
 
   return (
-    <View style={styles.shell} testID="mobile-thread-screen">
+    <KeyboardRoom leaves={insets.bottom} style={styles.shell} testID="mobile-thread-screen">
       <ScreenHeader
         actions={
           offlineDemo || transport === undefined
@@ -1065,6 +1069,6 @@ export function ThreadScreen(props: ThreadScreenProps) {
         selectedId={chat.modelOptionId}
         visible={modelOpen}
       />
-    </View>
+    </KeyboardRoom>
   );
 }

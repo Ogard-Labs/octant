@@ -189,6 +189,16 @@ final class OfflineDemoTests: XCTestCase {
         replied.name = "Native sample reply"
         replied.lifetime = .keepAlways
         add(replied)
+        // Answering stays in view too: the thread's composer rides on the keyboard.
+        let followUp = element("mobile-composer-input")
+        tap(followUp)
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 15))
+        XCTAssertTrue(followUp.isHittable)
+        XCTAssertLessThanOrEqual(followUp.frame.maxY, keyboard.frame.minY)
+        let answering = XCTAttachment(screenshot: app.screenshot())
+        answering.name = "Thread composer above the system keyboard"
+        answering.lifetime = .keepAlways
+        add(answering)
     }
 
     @MainActor
