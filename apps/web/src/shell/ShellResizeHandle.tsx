@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { createPortal } from "react-dom";
 
 /**
@@ -65,6 +71,19 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
       window.removeEventListener("blur", handleWindowBlur);
     };
   }, []);
+
+  // The toggle can hide or show the panel while its edge is held. The toggle
+  // wins: the drag ends there, so its release saves no width and Escape undoes
+  // nothing. A flip the drag made itself is already in the pointer's record.
+  useLayoutEffect(() => {
+    const pointer = activePointer.current;
+    if (pointer === undefined || pointer.collapsed === collapsed) return;
+    activePointer.current = undefined;
+    setResizing(false);
+    if (!pointer.moved) return;
+    latestProps.current.onPreview(pointer.startValue);
+    latestProps.current.onCancel?.();
+  }, [collapsed]);
 
   function movePointer(event: ReactPointerEvent<HTMLElement>): void {
     const pointer = activePointer.current;

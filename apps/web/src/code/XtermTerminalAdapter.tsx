@@ -230,6 +230,8 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
       disposed = true;
       session.current?.dispose();
       session.current = undefined;
+      // A disposed session has no caret to give, so its place is forgotten.
+      setSessionNumber(0);
       latestProps.current.onSelectionReader?.(undefined);
     };
     // Callers passing a custom loadRuntime must keep its identity stable:

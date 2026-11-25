@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ShellResizeHandle } from "./ShellResizeHandle";
@@ -147,8 +147,10 @@ function renderCollapsible(startCollapsed: boolean) {
   const onCommit = vi.fn();
   const onPreview = vi.fn();
   const onCollapsedChange = vi.fn();
+  let setFromToggle: (next: boolean) => void = () => undefined;
   function Harness() {
     const [collapsed, setCollapsed] = useState(startCollapsed);
+    setFromToggle = setCollapsed;
     const [value, setValue] = useState(300);
     return (
       <ShellResizeHandle
@@ -174,13 +176,14 @@ function renderCollapsible(startCollapsed: boolean) {
   }
   render(<Harness />);
   const separator = screen.getByRole("separator", { name: "Resize navigation sidebar" });
+  const toggle = (next: boolean) => act(() => setFromToggle(next));
   const releasePointerCapture = vi.fn();
   Object.assign(separator, {
     hasPointerCapture: vi.fn(() => true),
     releasePointerCapture,
     setPointerCapture: vi.fn(),
   });
-  return { onCommit, onPreview, onCollapsedChange, releasePointerCapture, separator };
+  return { onCommit, onPreview, onCollapsedChange, releasePointerCapture, separator, toggle };
 }
 
 describe("a resize handle whose panel can be dragged shut", () => {
@@ -207,6 +210,36 @@ describe("a resize handle whose panel can be dragged shut", () => {
 
     expect(onCollapsedChange).not.toHaveBeenCalled();
     expect(onCommit).toHaveBeenCalledWith(220);
+  });
+
+  it("ends the drag when the toggle hides the panel meanwhile, saving no width", () => {
+    const { onCommit, onPreview, onCollapsedChange, separator, toggle } = renderCollapsible(false);
+
+    fireEvent.pointerDown(separator, { clientX: 300, pointerId: 3 });
+    fireEvent.pointerMove(separator, { clientX: 350, pointerId: 3 });
+    toggle(true);
+    expect(onPreview).toHaveBeenLastCalledWith(300);
+
+    fireEvent.pointerMove(separator, { clientX: 380, pointerId: 3 });
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.pointerUp(separator, { clientX: 380, pointerId: 3 });
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCollapsedChange).not.toHaveBeenCalled();
+    expect(separator).toHaveAttribute("aria-valuetext", "Hidden");
+  });
+
+  it("leaves the panel shown when the toggle shows one the drag had hidden", () => {
+    const { onCommit, onCollapsedChange, separator, toggle } = renderCollapsible(false);
+
+    fireEvent.pointerDown(separator, { clientX: 300, pointerId: 4 });
+    fireEvent.pointerMove(separator, { clientX: 100, pointerId: 4 });
+    toggle(false);
+    fireEvent.pointerMove(separator, { clientX: 90, pointerId: 4 });
+    fireEvent.pointerUp(separator, { clientX: 90, pointerId: 4 });
+
+    expect(onCollapsedChange).toHaveBeenCalledOnce();
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(separator).toHaveAttribute("aria-valuetext", "300 px");
   });
 
   it("shows the panel again when the same drag comes back", () => {

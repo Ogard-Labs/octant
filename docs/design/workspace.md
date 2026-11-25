@@ -2869,7 +2869,8 @@ way keeps the width from before the drag. While the sidebar is hidden, its edge
 it 64px out shows the sidebar, no narrower than the minimum, and the width on
 release is saved; a click or a shorter pull does nothing. Escape, losing the
 window's focus, or a cancelled pointer puts back the state and width the drag
-started with. The edge stays one separator in both states. While hidden it
+started with. Hiding or showing the sidebar another way while its edge is held
+ends the drag there, with no width saved. The edge stays one separator in both states. While hidden it
 reports 0 and "Hidden"; the arrow that widens it shows the sidebar at its saved
 width, and Home and End show it at the minimum and maximum. No key hides it from
 the separator. At 960px and narrower, the phone drawer included, there is no
