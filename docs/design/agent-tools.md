@@ -131,9 +131,16 @@ policy and Shield review, which a child is not.
   can answer them.
 - Bots get no tools; bots are not built.
 - A runtime that cannot prove it carries the tools gets none: OpenCode without
-  its exclusivity proof, an ACP agent without HTTP MCP, Pi below its verified
-  release, and OpenCode and ACP on Windows, where the bridge is not built
-  ([Provider runtimes](provider-runtimes.md); maintainer decision, 2026-11-17).
+  its exclusivity proof, an ACP agent without HTTP MCP, and Pi below its
+  verified release ([Provider runtimes](provider-runtimes.md); maintainer
+  decision, 2026-11-17). On Windows OpenCode and ACP agents reach the tool
+  bridge directly, as [Windows launches](provider-runtimes.md#windows-launches)
+  says.
+- Not built yet: `octant_code` and `octant_github` in a Work thread whose
+  folder is a Git repository (maintainer decision, 2026-11-17). Both are bound
+  to a Code thread's checkout and its confirmed delivery repository, which a
+  Work folder does not have, so until that binding exists a Work thread is
+  offered neither.
 
 "Code + tools" below means a Code thread on a provider that carries
 app-managed tools, subject to the thread profile's tool constraints.
