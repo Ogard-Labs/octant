@@ -61,6 +61,8 @@ export interface OneShotInput {
    * so an image is never dropped silently.
    */
   readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
+  /** Stops the request, and ends its connection, when the caller no longer wants the answer. */
+  readonly signal?: AbortSignal;
 }
 
 export async function completeOnceOutcome(input: OneShotInput): Promise<OneShotOutcome> {
@@ -153,6 +155,7 @@ export async function completeOnceOutcome(input: OneShotInput): Promise<OneShotO
           onSuccess: (value: OneShotOutcome) => value,
         }),
       ),
+      input.signal === undefined ? undefined : { signal: input.signal },
     );
   } catch {
     return { status: "unreached" };

@@ -660,6 +660,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "managedCodeThreadCreation"
     | "managedWorktreeService"
     | "managedWorktreeRefsList"
+    | "managedWorktreeBranchNames"
     | "managedWorktreeSourcePreview"
     | "probeProviderForThreads"
     | "providerFolderDiscoveryPorts"
@@ -695,6 +696,7 @@ export function wireCode(deps: CodeDependencies) {
     managedCodeThreadCreation,
     managedWorktreeReceipts,
     managedWorktreeRefsList,
+    managedWorktreeBranchNames,
     managedWorktreeService,
     managedWorktreeSourcePreview,
     onGithubPullRequestsUnreadable,
@@ -1075,6 +1077,14 @@ export function wireCode(deps: CodeDependencies) {
           },
           // A server Project's branches and worktrees are its server's.
           worktreeBranchSuggestion: deps.worktreeBranchSuggestion,
+          // A server Project's names are its server's, which this host cannot read:
+          // nothing proves a name is free there, so the composer uses the id name.
+          worktreeBranchNames: {
+            list: async (input, signal) =>
+              serverProjectStore.codeProject(String(input.projectId)) !== undefined
+                ? { names: [], truncated: true }
+                : managedWorktreeBranchNames(input, signal),
+          },
           worktreeRefs: {
             list: async (input, signal) =>
               (await listServerWorktreeRefs(

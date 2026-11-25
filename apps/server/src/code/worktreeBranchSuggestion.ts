@@ -4,8 +4,7 @@ import {
   type ProviderModelId,
   type TurnUsage,
 } from "@octant/contracts";
-import { slugifyPrompt } from "@octant/domain/code-worktree-naming";
-import { redactSecretsAndPrivateKeys } from "@octant/domain/secret-shaped-text-policy";
+import { promptForNameSuggestion, slugifyPrompt } from "@octant/domain/code-worktree-naming";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { completeOnceOutcome } from "../harness/nativeHarnessSingleShot";
 
@@ -51,9 +50,11 @@ export type WorktreeBranchSuggestion =
   | Readonly<{ status: "failed" }>;
 
 /**
- * One explicit, person-requested model call: the draft text, redacted and
- * bounded, goes to the model the composer has selected, and what comes back is
- * reduced to branch-safe words locally. A refusal or failure never changes
+ * One explicit, person-requested model call: the draft text, redacted, reduced
+ * to the words a branch name may carry (a clause after a password, token or key
+ * is dropped, as are paths, addresses and settings) and bounded, goes to the
+ * model the composer has selected, and what comes back is reduced to
+ * branch-safe words locally. A refusal or failure never changes
  * anything; the caller keeps the name it derived locally.
  */
 export async function suggestWorktreeBranchWords(
@@ -63,9 +64,11 @@ export async function suggestWorktreeBranchWords(
     providerInstanceId: ProviderInstanceId;
     modelId: ProviderModelId;
     draft: string;
+    /** Ends the call when the person's request goes away. */
+    signal?: AbortSignal;
   }>,
 ): Promise<WorktreeBranchSuggestion> {
-  const draft = redactSecretsAndPrivateKeys(input.draft).trim().slice(0, MAX_PROMPT_LENGTH);
+  const draft = promptForNameSuggestion(input.draft, MAX_PROMPT_LENGTH);
   if (draft === "") return { status: "failed" };
   const opened = ports.open(input);
   if (opened.status === "refused") return opened;
@@ -83,15 +86,14 @@ export async function suggestWorktreeBranchWords(
       prompt: draft,
       instructions: INSTRUCTIONS,
       timeoutMs: TIMEOUT_MS,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
   } catch {
     admission.abandon();
     return { status: "failed" };
   }
-  if (outcome.status === "unreached") {
-    admission.abandon();
-    return { status: "failed" };
-  }
+  // A request that was sent and got no answer may still have been paid for, so
+  // it is settled against the Project's ceilings, not released.
   admission.settle("usage" in outcome ? outcome.usage : undefined);
   if (outcome.status !== "completed") return { status: "failed" };
   // The reply is text a model wrote from text a person wrote: it gets the same

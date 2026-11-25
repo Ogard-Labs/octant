@@ -986,6 +986,15 @@ export const CodeCommand = Schema.Union(
    * carries the draft text and the model the composer has selected, and nothing
    * else about the Project or the checkout.
    */
+  /**
+   * The names a new worktree's branch must not collide with: local branches,
+   * remote branches without the remote's name, and tags. A bounded read of
+   * names only, apart from the display list the Where picker shows.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("list-code-worktree-branch-names"),
+    projectId: ProjectId,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("suggest-code-worktree-branch"),
     projectId: ProjectId,
@@ -1617,6 +1626,18 @@ export const CodeWorktreeRemoteFactsRetrieved = Schema.Struct({
   facts: CodeWorktreeRemoteFacts,
 }).annotations(strict);
 export type CodeWorktreeRemoteFactsRetrieved = typeof CodeWorktreeRemoteFactsRetrieved.Type;
+/** The most names one read returns; a repository with more is `truncated` and the composer falls back to the id name. */
+export const MAX_WORKTREE_BRANCH_NAMES = 20_000;
+export const CodeWorktreeBranchNamesListed = Schema.Struct({
+  kind: Schema.Literal("worktree-branch-names-listed"),
+  projectId: ProjectId,
+  names: Schema.Array(Schema.String.pipe(Schema.maxLength(255))).pipe(
+    Schema.maxItems(MAX_WORKTREE_BRANCH_NAMES),
+  ),
+  /** More names exist than were returned, or they could not be read: nothing here proves a name is free. */
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export type CodeWorktreeBranchNamesListed = typeof CodeWorktreeBranchNamesListed.Type;
 export const CodeWorktreeBranchSuggested = Schema.Struct({
   kind: Schema.Literal("worktree-branch-suggested"),
   projectId: ProjectId,
@@ -1627,10 +1648,9 @@ export type CodeWorktreeBranchSuggested = typeof CodeWorktreeBranchSuggested.Typ
 export const CodeWorktreeBranchSuggestionDeclined = Schema.Struct({
   kind: Schema.Literal("worktree-branch-suggestion-declined"),
   projectId: ProjectId,
-  reason: Schema.Literal("provider-unavailable", "not-allowed", "spend-limited", "failed"),
+  reason: Schema.Literal("provider-unavailable", "not-allowed", "spend-limited", "busy", "failed"),
 }).annotations(strict);
-export type CodeWorktreeBranchSuggestionDeclined =
-  typeof CodeWorktreeBranchSuggestionDeclined.Type;
+export type CodeWorktreeBranchSuggestionDeclined = typeof CodeWorktreeBranchSuggestionDeclined.Type;
 export const CodeWorktreeRefsListed = Schema.Struct({
   kind: Schema.Literal("worktree-refs-listed"),
   projectId: ProjectId,
@@ -1727,6 +1747,7 @@ export const CodeCommandResult = Schema.Union(
   CodeManagedThreadCreated,
   CodeWorktreeRemoteFactsRetrieved,
   CodeWorktreeRefsListed,
+  CodeWorktreeBranchNamesListed,
   CodeWorktreeBranchSuggested,
   CodeWorktreeBranchSuggestionDeclined,
   CodeThreadCheckoutRebound,

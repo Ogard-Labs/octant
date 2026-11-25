@@ -73,9 +73,14 @@ import { Effect, Schema } from "effect";
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host";
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
 import { attachWorkRequestRuntime } from "../work/workRequestRuntime";
-import type { CodeWorktreeRefsPort, CodeWorktreeSourcePreviewPort } from "../code/codeService";
+import type {
+  CodeWorktreeBranchNamesPort,
+  CodeWorktreeRefsPort,
+  CodeWorktreeSourcePreviewPort,
+} from "../code/codeService";
 import {
   createManagedWorktreeNodePorts,
+  listBranchNames,
   listWorktreeRefs,
   observeManagedWorktreeExecutionIdentity,
 } from "../code/managedWorktreeNodePorts";
@@ -1764,6 +1769,17 @@ export function wireProviders(deps: ProvidersDependencies) {
       const entries = await listWorktreeRefs(project.binding.canonicalRoot, signal);
       return entries.map((entry) => decodeCodeWorktreeRef(entry));
     };
+    const managedWorktreeBranchNames: CodeWorktreeBranchNamesPort["list"] = async (
+      input,
+      signal,
+    ) => {
+      const project = persistence.readProject(input.projectId);
+      if (project?.type !== "code") return { names: [], truncated: true };
+      const listed = await listBranchNames(project.binding.canonicalRoot, signal);
+      return listed.status === "observed"
+        ? { names: listed.names, truncated: listed.truncated }
+        : { names: [], truncated: true };
+    };
     const managedWorktreeSourcePreview: CodeWorktreeSourcePreviewPort["preview"] = async (
       input,
       signal,
@@ -2797,6 +2813,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       localUsageHistoryRoutes,
       managedCodeThreadCreation,
       managedWorktreeRefsList,
+      managedWorktreeBranchNames,
       managedWorktreeService,
       worktreePreparation,
       childWorktreeSources,

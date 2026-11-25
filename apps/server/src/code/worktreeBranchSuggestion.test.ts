@@ -17,7 +17,12 @@ function ports(overrides: Partial<WorktreeBranchSuggestionPorts> = {}) {
   const settle = vi.fn();
   const abandon = vi.fn();
   const complete = vi.fn(
-    async (_input: { prompt: string; modelId: string; instructions?: string }) => ({
+    async (_input: {
+      prompt: string;
+      modelId: string;
+      instructions?: string;
+      signal?: AbortSignal;
+    }) => ({
       status: "completed" as const,
       text: "Fix login redirect on session expiry",
     }),
@@ -60,7 +65,7 @@ describe("suggestWorktreeBranchWords", () => {
       { ...value, complete: (async () => reply) as never },
       request,
     );
-    expect(result).toEqual({ status: "suggested", words: "update-and-for-deploy" });
+    expect(result).toEqual({ status: "suggested", words: "update-and-for" });
   });
 
   it("makes no call when the model is not allowed or the spend limit refuses", async () => {
@@ -78,7 +83,7 @@ describe("suggestWorktreeBranchWords", () => {
     expect(limited.complete).not.toHaveBeenCalled();
   });
 
-  it("fails without keeping spend when the request never reached the model, and when the reply has no usable words", async () => {
+  it("fails but settles the reservation when a request that was sent got no answer, and fails on a reply with no usable words", async () => {
     const unreached = ports({});
     await expect(
       suggestWorktreeBranchWords(
@@ -86,7 +91,8 @@ describe("suggestWorktreeBranchWords", () => {
         request,
       ),
     ).resolves.toEqual({ status: "failed" });
-    expect(unreached.abandon).toHaveBeenCalledTimes(1);
+    expect(unreached.settle).toHaveBeenCalledTimes(1);
+    expect(unreached.abandon).not.toHaveBeenCalled();
     const empty = ports({});
     await expect(
       suggestWorktreeBranchWords(
@@ -106,6 +112,22 @@ describe("suggestWorktreeBranchWords", () => {
         request,
       ),
     ).resolves.toEqual({ status: "failed" });
+  });
+
+  it("sends only the words a branch name may carry, and nothing from a clause about a secret", async () => {
+    const { value, complete } = ports();
+    await suggestWorktreeBranchWords(value, {
+      ...request,
+      draft: "fix the login redirect. the password is hunter2 for staging. then add a test",
+    });
+    expect(complete.mock.calls[0]![0].prompt).toBe("fix the login redirect the then add a test");
+  });
+
+  it("passes the caller's stop signal to the model call", async () => {
+    const { value, complete } = ports();
+    const controller = new AbortController();
+    await suggestWorktreeBranchWords(value, { ...request, signal: controller.signal });
+    expect(complete.mock.calls[0]![0].signal).toBe(controller.signal);
   });
 
   it("calls nothing for an empty draft", async () => {

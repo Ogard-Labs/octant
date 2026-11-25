@@ -91,7 +91,9 @@ export function createHostWorktreeBranchSuggester(deps: {
       if (admission?.status === "refused") return { status: "refused" as const };
       return {
         status: "admitted" as const,
-        settle: (usage: { readonly inputTokens: number; readonly outputTokens: number } | undefined) =>
+        settle: (
+          usage: { readonly inputTokens: number; readonly outputTokens: number } | undefined,
+        ) =>
           deps.spendCeiling?.settle({
             reservationId,
             ...(usage === undefined
