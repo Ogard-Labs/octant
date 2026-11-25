@@ -532,19 +532,23 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
     // The pages a Browser pane held and then ended leave here and nowhere else:
     // no deletion at run time may clear the verification watermark.
     const pageCompaction = compactClosedBrowserPages(connection);
-    const compaction = {
-      eventsRemoved: checkoutCompaction.eventsRemoved + pageCompaction.eventsRemoved,
-    };
+    // A whole ended page leaves with both of its events, so every row that
+    // stays is the row the scan decoded: its deletion clears the watermark
+    // (migration 96) and this start records it again at the head that is left.
+    // Checkout compaction cuts single events out of aggregates that stay, so it
+    // leaves the clearing.
+    const compaction = { eventsRemoved: checkoutCompaction.eventsRemoved };
+    const recordedHead = pageCompaction.eventsRemoved === 0 ? scannedHead : journal.headSequence();
     if (
       compaction.eventsRemoved === 0 &&
       fingerprint !== undefined &&
-      scannedHead !== verifiedThrough
+      (recordedHead !== verifiedThrough || pageCompaction.eventsRemoved > 0)
     ) {
       // Only a scan that found the journal compatible and left its rows
-      // untouched may move the watermark; a start that removed rows leaves the
+      // untouched may move the watermark; a start that rewrote rows leaves the
       // deletion's clearing in place. The status check below clears it
       // again if it refuses the start, so a refused tail is never skipped.
-      recordJournalWatermark(connection, fingerprint, scannedHead, clock());
+      recordJournalWatermark(connection, fingerprint, recordedHead, clock());
     }
     // The status inspection trusts rows at or below the watermark only while
     // they are the same rows the earlier start verified.

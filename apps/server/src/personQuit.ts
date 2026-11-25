@@ -69,12 +69,6 @@ export interface PersonQuitRouteOptions {
   readonly desktopBridgeSecret: string | undefined;
   readonly dataDirectory: string;
   readonly now?: () => Date;
-  /**
-   * Called once the quit is accepted and recorded, before the desktop revokes
-   * its windows, so work that treats a window's end differently when the app
-   * is leaving (the Browser's session records) can tell the two apart.
-   */
-  readonly onPersonQuit?: () => void;
 }
 
 /**
@@ -114,7 +108,6 @@ export function createPersonQuitRouteHandler(
         { status: 503 },
       );
     }
-    options.onPersonQuit?.();
     return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
   };
 }

@@ -716,9 +716,10 @@ describe("PersistenceLive", () => {
       expect(watermarkRow(directory)).toMatchObject({ verified_through: 3 });
       run.close();
 
-      // The start removes the ended page, so it records no watermark itself.
+      // The start removes the ended page and records the watermark again at the
+      // head that is left, so the very next start decodes nothing.
       await startupDecodeCount(directory);
-      expect(watermarkRow(directory)).toBeUndefined();
+      expect(watermarkRow(directory)).toMatchObject({ verified_through: 6 });
       const after = openSqlite(join(directory, "octant.sqlite3"));
       expect(
         after
@@ -726,10 +727,6 @@ describe("PersistenceLive", () => {
           .all(),
       ).toEqual([{ aggregate_id: String(page(2).pageId) }]);
       after.close();
-
-      // The next start verifies once and records; the one after decodes nothing.
-      expect(await startupDecodeCount(directory)).toBeGreaterThan(0);
-      expect(watermarkRow(directory)).not.toBeUndefined();
       expect(await startupDecodeCount(directory)).toBe(0);
     });
 
