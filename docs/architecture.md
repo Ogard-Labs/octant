@@ -2259,8 +2259,8 @@ except where a bullet says otherwise.
   leaves the earlier digest. The superseded digests stay in the journal until
   the next start removes them ([Startup check](#persistence)). Its entries merge
   as before. Threads completed before memory existed are never
-  back-filled, and nothing said before memory began is read from an open
-  thread, so turning it on never starts a burst of model calls. Forgetting
+  back-filled, and nothing said before memory began (or before it was last let
+  back in) is read from an open or a put-away thread, so turning it on never starts a burst of model calls. Forgetting
   everything, switching memory back on, letting a Project back in, or allowing a
   thread again moves that start to the moment of the change, so nothing that
   ended while memory was off, kept out, or just forgotten is learned afterwards,

@@ -57,6 +57,8 @@ import {
 } from "./personMemorySweep";
 
 const START = "2026-11-01T10:00:00.000Z";
+/** When a fake thread's message with no time was said: once memory had begun, as a person's are. */
+const SAID_AT = "2026-11-01T11:00:00.000Z";
 const actor = Schema.decodeUnknownSync(EventActor)({
   kind: "local-user",
   actorId: "99999999-9999-4999-8999-999999999999",
@@ -94,7 +96,7 @@ interface FakeThread {
 function personMessagesOf(thread: FakeThread): ReadonlyArray<PersonMessage> {
   return thread.personMessages.map((text, index) => ({
     id: `message-${String(index)}`,
-    at: thread.messageTimes?.[index] ?? START,
+    at: thread.messageTimes?.[index] ?? SAID_AT,
     text,
     typed: thread.typed ?? false,
   }));
@@ -1048,6 +1050,40 @@ describe("person memory under timing and volume", () => {
     await running;
     expect(h.store.view().entries).toEqual([]);
     expect(h.store.view().rememberedThreads).toBe(0);
+  });
+
+  it("does not learn what was said before Allow memory when a reopened thread is put away again", async () => {
+    const thread: FakeThread = {
+      id: THREAD_1,
+      completedAt: later,
+      title: "Diary",
+      personMessages: ["Said before Leave no trace"],
+    };
+    const h = harness([thread]);
+    h.advance(later);
+    const mark = (leavesNoTrace: boolean) =>
+      h.store.change(
+        decodePersonMemoryCommand({
+          kind: "set-thread-leaves-no-trace",
+          mode: "chat",
+          threadId: THREAD_1,
+          leavesNoTrace,
+        }),
+      );
+    mark(true);
+    h.advance("2026-11-01T12:00:00.000Z");
+    mark(false);
+
+    // Reopened and put away again, with one new message after Allow memory.
+    thread.completedAt = "2026-11-01T13:00:00.000Z";
+    thread.personMessages = ["Said before Leave no trace", "Said after Allow memory"];
+    thread.messageTimes = [START, "2026-11-01T12:30:00.000Z"];
+    h.advance("2026-11-01T13:05:00.000Z");
+    await h.sweep.pass();
+
+    expect(h.prompts).toHaveLength(1);
+    expect(h.prompts[0]).toContain("Said after Allow memory");
+    expect(h.prompts[0]).not.toContain("Said before Leave no trace");
   });
 
   it("lets a thread mark, save and cut again once Allow memory lifts Leave no trace", () => {

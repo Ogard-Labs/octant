@@ -453,11 +453,13 @@ export class PersonMemorySweep {
         return { outcome: "skipped", settle: "no" };
       }
     }
+    // Nothing said before memory began, or before it was last let back in
+    // (Allow memory, a Project let back, Forget everything), is read, whether
+    // the thread is still open or was put away.
     const candidates = facts.personMessages
       .filter((message) => (learned === undefined ? true : message.at > learned.at))
-      .filter(
-        (message) => !open || (message.typed && (since === undefined || message.at >= since)),
-      );
+      .filter((message) => since === undefined || message.at >= since)
+      .filter((message) => !open || message.typed);
     const messages = candidates
       .map((message) => ({ ...message, text: redactForPersonMemory(message.text).trim() }))
       .filter((message) => message.text.length > 0);
