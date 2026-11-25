@@ -55,7 +55,8 @@ import {
 } from "../process/threadEgressPolicy";
 import { secretGuardRefusal } from "../process/secretGuard";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
-import { awsProfileReadPaths } from "./providerHostEnvironment";
+import { MODEL_PROVIDER_CREDENTIAL_VARIABLES } from "@octant/domain";
+import { awsProfileReadPaths, providerHostEnvironment } from "./providerHostEnvironment";
 import type { ProviderOwnChannels } from "@octant/provider-sdk";
 import { guardsForOwnChannels, launchOwnChannels } from "./providerOwnChannels";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
@@ -88,6 +89,13 @@ export interface OpenCodeServerConnection {
    * confinement.
    */
   readonly privateConfiguration?: true;
+  /**
+   * The launch reads the person's own OpenCode configuration and data folders
+   * as OpenCode does in a terminal, with Octant's rules layered on top
+   * (`openCodeRunsOnOwnConfiguration`). Never set with either attestation
+   * above: the person's plugins, agents and tool servers are in the process.
+   */
+  readonly ownConfiguration?: true;
   readonly authorization: string;
   readonly pid: number;
   /** Runtime protocol attested by the binary version probe before startup. */
@@ -183,7 +191,9 @@ export interface OpenCodeProcessStartInput {
    * The person let OpenCode run as itself with its tool servers: these are the
    * MCP servers they added to their own configuration, written into the
    * private one, and namespaced tools are no longer denied outright (the
-   * session's rules decide them). Absent keeps every tool server off.
+   * session's rules decide them). Absent keeps every tool server off. A
+   * launch on the person's own configuration (`openCodeRunsOnOwnConfiguration`)
+   * writes none of them: OpenCode starts the servers its configuration names.
    */
   readonly ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /**
@@ -238,10 +248,11 @@ export interface OpenCodeProcessDependencies {
 }
 
 /**
- * Static switches every OpenCode launch sets: no updater, no model fetch, no
- * `.claude` skills, no default plugins. The version read keeps them too, since
- * a read with no network and only a scratch home is exactly where an update or
- * fetch attempt can stall.
+ * The switches an OpenCode launch sets unless something lifts one: no updater,
+ * no model fetch, no `.claude` skills, no default plugins
+ * (`openCodeLaunchGuards`, `openCodeOwnConfigurationGuards`). The version read
+ * keeps them all, since a read with no network and only a scratch home is
+ * exactly where an update or fetch attempt can stall.
  *
  * `OPENCODE_DISABLE_CLAUDE_CODE` and `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT` are
  * not set, so OpenCode reads `CLAUDE.md` where it finds no `AGENTS.md`, as it
@@ -299,6 +310,31 @@ function openCodeLaunchGuards(
 }
 
 /**
+ * The guards a launch on the person's own configuration keeps: the default
+ * plugins and the language-server download behave as they do when the person
+ * runs OpenCode themselves, so those two switches go. The updater still
+ * follows the person's self-update switch. The model catalogue fetch stays
+ * off: it is neither telemetry nor a self-update as those two switches are
+ * defined, so neither opens it, and this launch reads the catalogue the
+ * person's own OpenCode already cached. Read from the installed opencode
+ * v2.4.1 binary, 2.x reads `OPENCODE_DISABLE_AUTOUPDATE` and
+ * `OPENCODE_DISABLE_MODELS_FETCH` and no longer reads the plugin or
+ * language-server switch at all.
+ */
+function openCodeOwnConfigurationGuards(
+  ownSkills: boolean,
+  projectConfig: boolean,
+  selfUpdate: boolean,
+): Readonly<Record<string, string>> {
+  const {
+    OPENCODE_DISABLE_DEFAULT_PLUGINS: _defaultPluginsOff,
+    OPENCODE_DISABLE_LSP_DOWNLOAD: _lspDownloadOff,
+    ...kept
+  } = openCodeLaunchGuards(ownSkills, projectConfig, selfUpdate);
+  return kept;
+}
+
+/**
  * Whether a launch keeps Strict's guards: an explicit sandbox and a Full
  * access thread that keeps the sandbox keep them as Strict does, as every
  * other provider launch does.
@@ -306,6 +342,38 @@ function openCodeLaunchGuards(
 function launchIsStrict(input: OpenCodeProcessStartInput): boolean {
   return (
     input.strict !== false || input.fullAccessSandbox === true || input.sandboxPolicy !== undefined
+  );
+}
+
+/**
+ * Whether a launch reads the person's own OpenCode configuration instead of
+ * Octant's private one: an OpenCode 2 session outside Strict, in Work or Code
+ * outside Plan, started with no Octant sandbox, whose person let OpenCode run
+ * as itself with its tool servers (maintainer decision, 2026-11-25). The
+ * private configuration kept six routing keys of the person's file, so their
+ * agents, commands, plugins, instructions, formatters and language servers
+ * never loaded. Everything else keeps the private configuration: Strict,
+ * Chat, Plan, a kept or chosen sandbox (whose wall opens only the private
+ * folders), the readiness check, a session whose setup is off or whose tool
+ * servers are off (the person's servers would start from their own file),
+ * OpenCode 1.x, and a 2.x release older than the one read for how it orders
+ * the inline configuration Octant's rules ride on
+ * (`openCodeServesOwnConfiguration`).
+ */
+export function openCodeRunsOnOwnConfiguration(
+  input: OpenCodeProcessStartInput,
+  version: string | undefined,
+): boolean {
+  return (
+    openCodeServesOwnConfiguration(version) &&
+    input.runsAsItself === true &&
+    input.ownToolServers !== undefined &&
+    input.purpose !== "probe" &&
+    !launchIsStrict(input) &&
+    (input.mode === "work" || input.mode === "code") &&
+    input.executionPolicy !== undefined &&
+    input.executionPolicy !== "plan" &&
+    openCodeStartsUnconfined(input)
   );
 }
 
@@ -864,6 +932,35 @@ export function openCodeServesCommandRoutes(version: string | undefined): boolea
   return openCode2VersionAtLeast(version, OPEN_CODE_2_COMMAND_ROUTES_SINCE);
 }
 
+/**
+ * The first 2.x release read for running on the person's own configuration:
+ * where `OPENCODE_CONFIG_CONTENT` sits among the configuration documents
+ * (`createOwnOpenCodeProfile`), and that a session's own `permissions`, set
+ * through `PATCH /api/session/{id}`, are appended after its agent's rules
+ * (installed opencode v2.4.1 binary, read 2026-11-25). An older 2.x release
+ * keeps the private configuration.
+ */
+const OPEN_CODE_2_OWN_CONFIGURATION_SINCE = [2, 4, 1] as const;
+
+/** Whether this runtime version string names a 2.x release read for the person's own configuration. */
+export function openCodeServesOwnConfiguration(version: string | undefined): boolean {
+  return openCode2VersionAtLeast(version, OPEN_CODE_2_OWN_CONFIGURATION_SINCE);
+}
+
+/**
+ * The first 2.x release whose prompt route was read for steering a running
+ * turn: `POST /api/session/{id}/prompt` with `delivery: "steer"` and
+ * `resume: false`, the body its own ACP server sends (installed opencode
+ * v2.4.1 binary, read 2026-11-25). An older release keeps its sessions and
+ * has a note queued as a follow-up instead.
+ */
+const OPEN_CODE_2_STEERING_SINCE = [2, 4, 1] as const;
+
+/** Whether this runtime version string names a 2.x release read for steering. */
+export function openCodeServesSteering(version: string | undefined): boolean {
+  return openCode2VersionAtLeast(version, OPEN_CODE_2_STEERING_SINCE);
+}
+
 /** Isolation guards are attested only for the runtime version verified by the hostile fixture. */
 export function supportsOpenCodeIsolation(version: string): boolean {
   // 2.0.x has no `--pure`; the private profile and guards alone kept the
@@ -1013,6 +1110,64 @@ export function createPrivateOpenCodeProfile(
     for (const directory of directories) rmSync(directory, { recursive: true, force: true });
     throw error;
   }
+}
+
+/**
+ * The longest inline configuration a launch carries in one environment
+ * variable: Linux caps a single variable at 128 KiB and Windows the whole
+ * block at 32,767 characters. A longer one keeps the private configuration.
+ */
+function inlineConfigLimit(platform: NodeJS.Platform): number {
+  return platform === "win32" ? 16_000 : 96_000;
+}
+
+/**
+ * The environment of a launch that runs on the person's own OpenCode
+ * configuration (`openCodeRunsOnOwnConfiguration`), or undefined when
+ * Octant's rules do not fit an environment variable. The person's config,
+ * cache, state and temporary locations are left as the host has them, so
+ * OpenCode loads what it loads in a terminal. Octant adds only its permission
+ * rules, through `OPENCODE_CONFIG_CONTENT`: read from the installed opencode
+ * v2.4.1 binary (`Config.load`), that inline document is ordered after the
+ * global, `OPENCODE_CONFIG` and Project documents, and every document's
+ * `permissions` are appended to each agent's rules in that order, so under
+ * last-match these win over the person's top-level rules. Rules the person
+ * wrote for one agent come after those, so the driver also sets the same
+ * rules on each session, which OpenCode applies last. The thread's model and
+ * Octant's tool bridge go through the server's routes, not configuration.
+ * An inline document the person's own environment already carries is kept,
+ * with Octant's rules after its own.
+ */
+export function createOwnOpenCodeProfile(
+  hostEnvironment: NodeJS.ProcessEnv,
+  betaPermissions: ReadonlyArray<PermissionV2Rule>,
+  platform: NodeJS.Platform,
+  ownSkills = false,
+  projectConfig = false,
+  selfUpdate = false,
+): PrivateOpenCodeProfile | undefined {
+  const environment = childProcessEnvironment(hostEnvironment);
+  let inline: JsonRecord = {};
+  if (environment.OPENCODE_CONFIG_CONTENT !== undefined) {
+    try {
+      const parsed = parseRoutingConfig(environment.OPENCODE_CONFIG_CONTENT);
+      if (isRecord(parsed)) inline = parsed;
+    } catch {
+      // OpenCode would reject the same text; Octant's rules replace it.
+    }
+  }
+  const content = JSON.stringify({
+    ...inline,
+    permissions: [
+      ...(Array.isArray(inline.permissions) ? (inline.permissions as ReadonlyArray<unknown>) : []),
+      ...betaPermissions,
+    ],
+  });
+  if (content.length > inlineConfigLimit(platform)) return undefined;
+  Object.assign(environment, openCodeOwnConfigurationGuards(ownSkills, projectConfig, selfUpdate), {
+    OPENCODE_CONFIG_CONTENT: content,
+  });
+  return { environment, cleanup: () => undefined };
 }
 
 function parseOpenCodeVersion(output: string): ParsedOpenCodeVersion | undefined {
@@ -1835,19 +1990,43 @@ function acquireOpenCodeServer(
     return yield* Effect.async<ManagedOpenCodeServer, ProviderFailure>((resume) => {
       const windowsChatDenyAll =
         options.platform === "win32" && input.mode === "chat" && input.purpose !== "probe";
+      // Outside Strict the launch takes the host environment less every
+      // variable of Octant's own, not only the broker variables: the rest
+      // name the host's ports and switches, which no provider should read.
+      // OpenCode signs in to any model provider itself, so every model
+      // provider's key is its own and stays.
+      const inherited = options.inheritedEnvironment ?? process.env;
+      const hostEnvironment = launchIsStrict(input)
+        ? inherited
+        : providerHostEnvironment(inherited, MODEL_PROVIDER_CREDENTIAL_VARIABLES);
+      const selfUpdate = launchOwnChannels(launchIsStrict(input), input.ownChannels).selfUpdate;
       let profile: PrivateOpenCodeProfile;
+      let ownConfiguration = false;
       try {
-        profile = createPrivateOpenCodeProfile(
-          options.runtimeConfig,
-          options.inheritedEnvironment ?? process.env,
-          tmpdir,
-          runtime === "beta" ? (input.betaPermissions ?? BETA_DENY_ALL) : undefined,
-          windowsChatDenyAll ? false : input.ownSkills === true,
-          windowsChatDenyAll ? undefined : input.ownToolServers,
-          windowsChatDenyAll ? false : launchLoadsProjectConfig(input),
-          windowsChatDenyAll,
-          launchOwnChannels(launchIsStrict(input), input.ownChannels).selfUpdate,
-        );
+        const own = openCodeRunsOnOwnConfiguration(input, version)
+          ? createOwnOpenCodeProfile(
+              hostEnvironment,
+              input.betaPermissions ?? BETA_DENY_ALL,
+              options.platform,
+              input.ownSkills === true,
+              launchLoadsProjectConfig(input),
+              selfUpdate,
+            )
+          : undefined;
+        ownConfiguration = own !== undefined;
+        profile =
+          own ??
+          createPrivateOpenCodeProfile(
+            options.runtimeConfig,
+            hostEnvironment,
+            tmpdir,
+            runtime === "beta" ? (input.betaPermissions ?? BETA_DENY_ALL) : undefined,
+            windowsChatDenyAll ? false : input.ownSkills === true,
+            windowsChatDenyAll ? undefined : input.ownToolServers,
+            windowsChatDenyAll ? false : launchLoadsProjectConfig(input),
+            windowsChatDenyAll,
+            selfUpdate,
+          );
       } catch {
         resume(
           Effect.fail(
@@ -1862,8 +2041,10 @@ function acquireOpenCodeServer(
       const password = randomBytes(32).toString("base64url");
       const username = runtime === "beta" ? "opencode" : "octant";
       const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+      // On the person's own configuration OpenCode finds their global
+      // `AGENTS.md` itself, and there is no private folder to link it into.
       const globalAgentsInstructions =
-        input.runsAsItself === true
+        input.runsAsItself === true && !ownConfiguration
           ? linkOpenCodeGlobalAgentsInstructions(
               profile,
               openCodeGlobalAgentsInstructionFile(
@@ -2044,7 +2225,9 @@ function acquireOpenCodeServer(
                   launch.command !== input.binaryPath
                     ? { isolatedConfiguration: true as const }
                     : {}),
+                  ...(ownConfiguration ? { ownConfiguration: true as const } : {}),
                   ...(isolationAttested &&
+                  !ownConfiguration &&
                   (options.platform === "win32"
                     ? input.purpose === "probe" || input.strict === false
                     : input.strict === false && openCodeStartsUnconfined(input))
@@ -2052,7 +2235,8 @@ function acquireOpenCodeServer(
                     : {}),
                   runtime,
                   version,
-                  ...(profile.environment.TMPDIR === undefined
+                  // The person's own temporary folder is not this launch's scratch.
+                  ...(ownConfiguration || profile.environment.TMPDIR === undefined
                     ? {}
                     : { temporaryDirectory: profile.environment.TMPDIR }),
                   url: controlUrl ?? url,

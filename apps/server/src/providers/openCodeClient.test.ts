@@ -429,6 +429,54 @@ describe("official OpenCode client routing", () => {
     expect(requests[0]?.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
   });
 
+  it("steers a running 2.x turn, sets a session's own rules, and cancels a form it cannot show, on the release read for each", async () => {
+    const requests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request | string, init?: RequestInit) => {
+        const request = typeof input === "string" ? new Request(input, init) : input;
+        requests.push(request.clone());
+        return new Response(null, { status: 204 });
+      }),
+    );
+    const clientAt = (version: string) =>
+      makeOfficialOpenCodeClient(
+        {
+          authorization: "Basic redacted",
+          pid: 1,
+          runtime: "beta",
+          version,
+          url: new URL("http://127.0.0.1:41728/"),
+        },
+        "/tmp/project",
+      );
+    const client = clientAt("opencode v2.4.1");
+
+    await client.steer?.("ses_1", "use the other file");
+    await client.cancelForm?.("ses_1", "frm_1", "not shown");
+    await client.setSessionPermissions?.("ses_1", [{ action: "*", resource: "*", effect: "ask" }]);
+
+    expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
+      ["POST", "/api/session/ses_1/prompt"],
+      ["DELETE", "/api/session/ses_1/form/frm_1"],
+      ["PATCH", "/api/session/ses_1"],
+    ]);
+    expect(await requests[2]?.json()).toEqual({
+      permissions: [{ action: "*", resource: "*", effect: "ask" }],
+    });
+    // `resume: false` admits the note without scheduling a run of its own.
+    expect(await requests[0]?.json()).toEqual({
+      text: "use the other file",
+      delivery: "steer",
+      resume: false,
+    });
+    expect(new URL(requests[1]?.url ?? "").searchParams.get("message")).toBe("not shown");
+    // An older release keeps its sessions and offers no steering.
+    expect(clientAt("opencode v2.2.0").steer).toBeUndefined();
+    expect(clientAt("opencode v2.2.0").setSessionPermissions).toBeUndefined();
+    expect(clientAt("opencode v2.2.0").cancelForm).toBeDefined();
+  });
+
   it("registers app-managed MCP servers through the 2.x runtime MCP route and waits until connected", async () => {
     const requests: Request[] = [];
     let listReads = 0;

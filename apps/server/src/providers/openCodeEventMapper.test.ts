@@ -1065,10 +1065,12 @@ describe("OpenCode 2.0.22 events", () => {
     }
   });
 
-  it("refuses a tool call whose name was never announced", () => {
-    expect(() =>
+  it("reports a tool call whose name was never announced under a name that says so", () => {
+    expect(
       adaptAndMap("session.tool.called", { assistantMessageID, id: "call_2", input: {} }),
-    ).toThrow("Unsupported provider event.");
+    ).toEqual([
+      expect.objectContaining({ kind: "tool-start", toolCallId: "call_2", toolName: "unknown" }),
+    ]);
   });
 
   it("reports step usage and a failed step", () => {
@@ -1165,11 +1167,12 @@ describe("OpenCode 2.0.22 events", () => {
     expect(adaptAndMap("session.compaction.ended", { reason: "auto" })).toEqual([]);
   });
 
-  it("fails closed on an event this mapping does not know", () => {
-    expect(() => adaptAndMap("session.skill.activated", { skill: "x" })).toThrow(
-      "Unsupported provider event.",
-    );
-    expect(() => adaptAndMap("session.future.event", {})).toThrow("Unsupported provider event.");
+  it("reports nothing for an event or a session status this mapping does not know", () => {
+    expect(adaptAndMap("session.skill.activated", { skill: "x" })).toEqual([]);
+    expect(adaptAndMap("session.future.event", {})).toEqual([]);
+    expect(
+      adaptAndMap("session.status", { sessionID: "ses_1", status: { type: "future-status" } }),
+    ).toEqual([]);
   });
 });
 

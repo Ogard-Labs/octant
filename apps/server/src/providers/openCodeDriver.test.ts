@@ -364,6 +364,65 @@ describe("OpenCode driver", () => {
     }
   });
 
+  it("offers app tools below Full access beside what a launch on the person's own configuration loaded", async () => {
+    for (const ownConfiguration of [true, false]) {
+      const fixture = driverFixture({
+        platform: "darwin",
+        isolatedConfiguration: false,
+        ...(ownConfiguration ? { ownConfiguration: true as const } : {}),
+      });
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+            Effect.flatMap((connection) =>
+              Effect.exit(
+                connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  strict: false,
+                  tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(Exit.isSuccess(result)).toBe(ownConfiguration);
+    }
+  });
+
+  it("sets the level's rules on the session itself only on a launch that reads the person's own configuration", async () => {
+    for (const ownConfiguration of [true, false]) {
+      const fixture = driverFixture({
+        platform: "darwin",
+        ...(ownConfiguration ? { ownConfiguration: true as const } : {}),
+      });
+      await Effect.runPromise(
+        Effect.scoped(
+          fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+            Effect.flatMap((connection) =>
+              connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+                strict: false,
+              }),
+            ),
+          ),
+        ),
+      );
+      expect(fixture.sessionPermissions).toHaveLength(ownConfiguration ? 1 : 0);
+      for (const rules of fixture.sessionPermissions) {
+        // A rule the person wrote for one agent cannot lift an edit or a
+        // command past the level: the session's own rules are read last.
+        expect(evaluateV2Permission([...rules], "edit")).toBe("ask");
+        expect(evaluateV2Permission([...rules], "shell")).toBe("ask");
+        expect(evaluateV2Permission([...rules], "read")).toBe("allow");
+      }
+    }
+  });
+
   it("offers a Full access thread app tools on a runtime that can inherit external configuration", async () => {
     const fixture = driverFixture({ isolatedConfiguration: false });
     const result = await Effect.runPromise(
@@ -1035,7 +1094,11 @@ describe("OpenCode driver", () => {
     ["approval-gated", "bash", "ask"],
     ["approval-gated", "task", "allow"],
     ["auto-accept-edits", "task", "allow"],
-    ["approval-gated", "todowrite", "ask"],
+    ["approval-gated", "todowrite", "allow"],
+    ["approval-gated", "todoread", "allow"],
+    ["approval-gated", "lsp", "allow"],
+    ["auto-accept-edits", "codesearch", "allow"],
+    ["auto-accept-edits", "bash", "ask"],
     ["approval-gated", "external_directory", "ask"],
     ["plan", "read", "allow"],
     ["approval-gated", "read", "allow"],
@@ -1070,6 +1133,55 @@ describe("OpenCode driver", () => {
       expect(evaluatePermission(fixture.createdPermissions[0]!, permission)).toBe(action);
     },
   );
+
+  it("allows at Ask first and Accept edits every tool Plan allows without asking, on both runtimes", () => {
+    const own = { rules: [], toolServers: false, webTools: true };
+    const tools = [
+      "read",
+      "glob",
+      "grep",
+      "list",
+      "todowrite",
+      "todoread",
+      "codesearch",
+      "lsp",
+      "webfetch",
+      "websearch",
+      "question",
+    ];
+    for (const level of ["approval-gated", "auto-accept-edits"] as const) {
+      for (const tool of tools) {
+        if (
+          evaluatePermission(permissionRules("plan", "code", undefined, [], false, own), tool) ===
+          "allow"
+        ) {
+          expect(
+            evaluatePermission(permissionRules(level, "code", undefined, [], false, own), tool),
+          ).toBe("allow");
+        }
+        if (
+          evaluateV2Permission(
+            [...betaSessionPermissionRules("plan", "code", undefined, [], false, own)],
+            tool,
+          ) === "allow"
+        ) {
+          expect(
+            evaluateV2Permission(
+              [...betaSessionPermissionRules(level, "code", undefined, [], false, own)],
+              tool,
+            ),
+          ).toBe("allow");
+        }
+      }
+      // Effects still follow the level.
+      expect(
+        evaluateV2Permission(
+          [...betaSessionPermissionRules(level, "code", undefined, [], false, own)],
+          "shell",
+        ),
+      ).toBe("ask");
+    }
+  });
 
   it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(
     "gives a Work session at %s the shell and task rules a Code session at that level gets",
@@ -3220,50 +3332,27 @@ describe("OpenCode driver", () => {
     expect(events.some((event) => event.kind === "failed")).toBe(false);
   });
 
-  it("refuses a 2.x permission request that names no action", async () => {
+  it("puts a 2.x permission request that names no action to the person as an approval", async () => {
     const fixture = betaDriver({
       events: [
         {
           type: "permission.v2.asked",
           properties: { id: "perm-bare", sessionID: "provider-session" },
         } as unknown as Event,
+        idleEvent("provider-session"),
       ],
     });
-    const output = await Effect.runPromise(
-      Effect.scoped(
-        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
-          Effect.flatMap((connection) =>
-            Effect.gen(function* () {
-              const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
-                Stream.runCollect(
-                  stream.pipe(
-                    Stream.takeUntil((event) =>
-                      ["completed", "failed", "interrupted"].includes(event.kind),
-                    ),
-                  ),
-                ),
-              );
-              yield* connection.start({
-                sessionId,
-                modelId,
-                executionPolicy: "approval-gated",
-              });
-              return yield* Fiber.join(collector);
-            }),
-          ),
-        ),
-      ),
+    const events = await runBetaTurn(fixture, { executionPolicy: "full-access" });
+    // Full access allows every named action; an unnamed one is still asked.
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: "approval-request",
+        requestId: "perm-bare",
+        action: "unknown",
+      }),
     );
-    const events = Array.from(output);
-    expect(
-      events.some(
-        (event) =>
-          event.kind === "failed" &&
-          event.failure.category === "unsupported" &&
-          event.failure.message.includes("cannot be mapped"),
-      ),
-    ).toBe(true);
+    expect(events.some((event) => event.kind === "failed")).toBe(false);
+    expect(events.at(-1)).toMatchObject({ kind: "completed" });
     expect(fixture.calls.some((call) => call.startsWith("permission.reply:"))).toBe(false);
   });
 
@@ -3599,44 +3688,133 @@ describe("OpenCode driver", () => {
     expect(outcome.owned._tag).toBe("Some");
   });
 
-  it("fails a 2.x turn closed on an event it cannot map, naming the event", async () => {
+  it("keeps a 2.x turn running past an event it does not know", async () => {
     const fixture = betaDriver({
       events: [
         {
           type: "session.future.event",
           properties: { sessionID: "provider-session" },
         } as unknown as Event,
+        textEvent("provider-session", "still here"),
+        idleEvent("provider-session"),
       ],
     });
-    const output = await Effect.runPromise(
+    const events = await runBetaTurn(fixture);
+    expect(events.map((event) => event.kind)).toEqual(["text-delta", "completed"]);
+  });
+
+  it("keeps a 1.x turn, and the event stream every session shares, running past an event it does not know", async () => {
+    const fixture = driverFixture({
+      events: [
+        {
+          type: "session.future.event",
+          properties: { sessionID: "provider-session" },
+        } as unknown as Event,
+        {
+          type: "session.status",
+          properties: { sessionID: "provider-session", status: { type: "future-status" } },
+        } as unknown as Event,
+        textEvent("provider-session", "still here"),
+        idleEvent("provider-session"),
+      ],
+    });
+    const events = await runBetaTurn(fixture);
+    expect(events.map((event) => event.kind)).toEqual(["text-delta", "completed"]);
+  });
+
+  it("ends only the turn whose event arrived in a shape Octant cannot read", async () => {
+    const fixture = driverFixture({
+      events: [
+        {
+          type: "session.next.step.ended",
+          properties: { sessionID: "provider-session" },
+        } as unknown as Event,
+      ],
+    });
+    const events = await runBetaTurn(fixture);
+    expect(events.at(-1)).toMatchObject({
+      kind: "failed",
+      failure: {
+        category: "protocol",
+        message: "OpenCode sent an event Octant could not read: session.next.step.ended.",
+      },
+    });
+  });
+
+  it("declines a 2.x form that is not a question, and the turn goes on", async () => {
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "form.created",
+          properties: {
+            form: { id: "frm_signin", sessionID: "provider-session", title: "Sign in", fields: [] },
+          },
+        } as unknown as Event,
+        textEvent("provider-session", "carried on"),
+        idleEvent("provider-session"),
+      ],
+    });
+    const events = await runBetaTurn(fixture);
+    expect(fixture.calls).toContain("form.cancel:provider-session:frm_signin");
+    expect(events.map((event) => event.kind)).toEqual(["text-delta", "completed"]);
+  });
+
+  it("ends the turn when a 2.x form it cannot show could not be declined either", async () => {
+    const fixture = betaDriver({
+      formCancel: "refused",
+      events: [
+        {
+          type: "form.created",
+          properties: {
+            form: { id: "frm_signin", sessionID: "provider-session", title: "Sign in", fields: [] },
+          },
+        } as unknown as Event,
+      ],
+    });
+    const events = await runBetaTurn(fixture);
+    expect(events.at(-1)).toMatchObject({
+      kind: "failed",
+      failure: { category: "unsupported" },
+    });
+  });
+
+  it("records a 2.x file change no grant covers and carries on, outside Strict", async () => {
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "file.edited",
+          properties: { sessionID: "provider-session", file: "/tmp/project/src/index.ts" },
+        } as unknown as Event,
+        idleEvent("provider-session"),
+      ],
+    });
+    const events = await runBetaTurn(fixture, { strict: false });
+    expect(events.map((event) => event.kind)).toEqual(["file-change", "completed"]);
+  });
+
+  it("steers a running 2.x turn, and refuses a note when no turn is running", async () => {
+    const fixture = betaDriver();
+    const outcomes = await Effect.runPromise(
       Effect.scoped(
         fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
-              const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
-                Stream.runCollect(
-                  stream.pipe(
-                    Stream.takeUntil((event) =>
-                      ["completed", "failed", "interrupted"].includes(event.kind),
-                    ),
-                  ),
-                ),
-              );
               yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-              return yield* Fiber.join(collector);
+              const steer = connection.steer;
+              if (steer === undefined) return [];
+              const idle = yield* steer({ sessionId, message: "too early" });
+              yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+              const running = yield* steer({ sessionId, message: "use the other file" });
+              return [idle, running];
             }),
           ),
         ),
       ),
     );
-    expect(Array.from(output).at(-1)).toMatchObject({
-      kind: "failed",
-      failure: {
-        category: "unsupported",
-        message: "OpenCode 2 sent an event Octant does not map: session.future.event.",
-      },
-    });
+    expect(outcomes).toEqual(["unsupported", "steered"]);
+    expect(fixture.calls.filter((call) => call.startsWith("session.steer:"))).toEqual([
+      "session.steer:provider-session:use the other file",
+    ]);
   });
 
   it("fails a 2.x file-change event closed in Code mode", async () => {
@@ -4154,7 +4332,7 @@ describe("OpenCode driver", () => {
     },
   );
 
-  it("fails a turn on a release before 2.0.22 when a question form arrives anyway, and asks nobody", async () => {
+  it("declines a question form on a release before 2.0.22, asks nobody, and the turn goes on", async () => {
     const fixture = driverFixture({
       process: {
         start: () =>
@@ -4192,35 +4370,12 @@ describe("OpenCode driver", () => {
             },
           },
         } as unknown as Event,
+        idleEvent("provider-session"),
       ],
     });
-    const output = await Effect.runPromise(
-      Effect.scoped(
-        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
-          Effect.flatMap((connection) =>
-            Effect.gen(function* () {
-              const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
-                Stream.runCollect(
-                  stream.pipe(
-                    Stream.takeUntil((event) =>
-                      ["completed", "failed", "interrupted"].includes(event.kind),
-                    ),
-                  ),
-                ),
-              );
-              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-              return yield* Fiber.join(collector);
-            }),
-          ),
-        ),
-      ),
-    );
-    const events = Array.from(output);
-    expect(events.some((event) => event.kind === "user-input-request")).toBe(false);
-    expect(
-      events.some((event) => event.kind === "failed" && event.failure.category === "unsupported"),
-    ).toBe(true);
+    const events = await runBetaTurn(fixture);
+    expect(fixture.calls).toContain("form.cancel:provider-session:frm_old");
+    expect(events.map((event) => event.kind)).toEqual(["completed"]);
   });
 
   it("launches with OpenCode's own skills only for a session that carries the person's setup", async () => {
@@ -4508,6 +4663,7 @@ function betaDriver(
     readonly readOwnSetup?: () => OpenCodeOwnSetup;
     readonly commands?: FixtureCommands;
     readonly commandFailure?: "context-queued";
+    readonly formCancel?: "refused";
   } = {},
 ) {
   const launchScratch = launchScratchDirectory();
@@ -4538,6 +4694,44 @@ function betaDriver(
   return { ...fixture, launchScratch, processInputs };
 }
 
+/** Starts one session and collects its events up to the turn's end. */
+async function runBetaTurn(
+  fixture: Pick<ReturnType<typeof driverFixture>, "driver">,
+  start: {
+    readonly executionPolicy?: "approval-gated" | "full-access";
+    readonly strict?: false;
+  } = {},
+) {
+  const output = await Effect.runPromise(
+    Effect.scoped(
+      fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+        Effect.flatMap((connection) =>
+          Effect.gen(function* () {
+            const stream = yield* connection.subscribe;
+            const collector = yield* Effect.fork(
+              Stream.runCollect(
+                stream.pipe(
+                  Stream.takeUntil((event) =>
+                    ["completed", "failed", "interrupted"].includes(event.kind),
+                  ),
+                ),
+              ),
+            );
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: start.executionPolicy ?? "approval-gated",
+              ...(start.strict === false ? { strict: false } : {}),
+            });
+            return yield* Fiber.join(collector);
+          }),
+        ),
+      ),
+    ),
+  );
+  return Array.from(output);
+}
+
 function launchScratchDirectory(): string {
   return realpathSync(mkdtempSync(join(tmpdir(), "octant-opencode-launch-")));
 }
@@ -4547,6 +4741,8 @@ function driverFixture(
     readonly isolatedConfiguration?: boolean;
     /** The launch ran with no Octant sandbox on Octant's private configuration. */
     readonly privateConfiguration?: true;
+    /** The launch reads the person's own OpenCode configuration. */
+    readonly ownConfiguration?: true;
     readonly process?: OpenCodeProcessPort;
     readonly events?: ReadonlyArray<OpenCodeEvent>;
     readonly permissionPersistence?:
@@ -4576,6 +4772,8 @@ function driverFixture(
     readonly commands?: FixtureCommands;
     /** The command route fails after the turn's context was queued. */
     readonly commandFailure?: "context-queued";
+    /** The server refuses to cancel a form. */
+    readonly formCancel?: "refused";
     readonly protectedPaths?: { belowFullAccess: string[]; atFullAccess: string[] };
     readonly platform?: NodeJS.Platform;
   } = {},
@@ -4585,6 +4783,7 @@ function driverFixture(
   const catalogueRoots: string[] = [];
   const processInputs: OpenCodeProcessStartInput[] = [];
   const createdPermissions: PermissionRuleset[] = [];
+  const sessionPermissions: Array<ReadonlyArray<PermissionV2Ruleset[number]>> = [];
   const mcpBridges: Array<{ readonly url: string; readonly session: string | null }> = [];
   const permissionReplies: string[] = [];
   const questionReplies: string[] = [];
@@ -4603,6 +4802,7 @@ function driverFixture(
                 ...(options.privateConfiguration === true
                   ? { privateConfiguration: true as const }
                   : {}),
+                ...(options.ownConfiguration === true ? { ownConfiguration: true as const } : {}),
                 authorization: "Basic redacted",
                 pid: process.pid,
                 url: new URL("http://127.0.0.1:1/"),
@@ -4702,6 +4902,17 @@ function driverFixture(
       calls.push(`question.reply:${answers.join("|")}`);
       questionReplies.push(`${replySession}:${id}`);
     },
+    setSessionPermissions: async (permissionSession, rules) => {
+      calls.push(`session.permissions:${permissionSession}:${rules.length}`);
+      sessionPermissions.push(rules);
+    },
+    cancelForm: async (formSession, id) => {
+      if (options.formCancel === "refused") throw new Error("form cancel -> 404");
+      calls.push(`form.cancel:${formSession}:${id}`);
+    },
+    steer: async (steeredSession, message) => {
+      calls.push(`session.steer:${steeredSession}:${message}`);
+    },
     deleteSession: async (id) => {
       calls.push(`session.delete:${id}`);
       if (options.sessionDelete === "refused") throw new Error("session delete -> 500");
@@ -4728,6 +4939,7 @@ function driverFixture(
     sessionRoots,
     processInputs,
     createdPermissions,
+    sessionPermissions,
     permissionReplies,
     questionReplies,
     mcpBridges,

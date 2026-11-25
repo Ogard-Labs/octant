@@ -264,9 +264,16 @@ function toolContentText(content: unknown): string {
   return text.slice(0, OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS);
 }
 
-function assertNever(value: never): never {
+/**
+ * An event or status this mapping does not know reports nothing, and the turn
+ * goes on. OpenCode adds event types between releases; throwing here ended the
+ * event loop and failed every session on the server over an event none of
+ * them needed. The `never` parameter keeps the switch exhaustive over the
+ * pinned SDK's types.
+ */
+function unmapped(value: never): ReadonlyArray<ProviderRuntimeEvent> {
   void value;
-  throw new Error("Unsupported provider event.");
+  return [];
 }
 
 export function mapOpenCodeEvent(
@@ -531,7 +538,7 @@ export function mapOpenCodeEvent(
         case "busy":
           return [];
         default:
-          return assertNever(event.properties.status);
+          return unmapped(event.properties.status);
       }
     case "session.idle":
       // A call the turn left without an outcome never reports one now.
@@ -613,7 +620,7 @@ export function mapOpenCodeEvent(
     case "server.instance.disposed":
       return [];
     default:
-      return assertNever(event);
+      return unmapped(event);
   }
 }
 

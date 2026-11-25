@@ -27,6 +27,7 @@ import {
 } from "@octant/domain/guardrail-policy";
 import {
   captureOpenCodeRuntimeConfig,
+  createOwnOpenCodeProfile,
   createPrivateOpenCodeProfile,
   makeOpenCodeProcessLive,
   OPENCODE_CHAT_PLAN_REFUSAL,
@@ -434,6 +435,79 @@ describe("probeOpenCodeBinary", () => {
       locked.cleanup();
       own.cleanup();
     }
+  });
+
+  it("leaves the person's config locations alone on their own configuration and layers only Octant's rules", () => {
+    const posture = [
+      { action: "*", resource: "*", effect: "ask" },
+      { action: "read", resource: "*", effect: "allow" },
+    ] as const;
+    const host = {
+      HOME: "/home/person",
+      OPENCODE_CONFIG: "/home/person/work.json",
+      OPENCODE_CONFIG_DIR: "/home/person/.opencode-work",
+      XDG_CONFIG_HOME: "/home/person/.config",
+      XDG_CACHE_HOME: "/home/person/.cache",
+      XDG_STATE_HOME: "/home/person/.state",
+      TMPDIR: "/home/person/tmp",
+      OCTANT_CREDENTIAL_BROKER_TOKEN: "broker-secret",
+    };
+    const profile = createOwnOpenCodeProfile(host, posture, "darwin");
+    expect(profile).toBeDefined();
+    const environment = profile?.environment ?? {};
+    for (const name of [
+      "HOME",
+      "OPENCODE_CONFIG",
+      "OPENCODE_CONFIG_DIR",
+      "XDG_CONFIG_HOME",
+      "XDG_CACHE_HOME",
+      "XDG_STATE_HOME",
+      "TMPDIR",
+    ] as const) {
+      expect(environment[name], name).toBe(host[name]);
+    }
+    expect(environment).not.toHaveProperty("XDG_DATA_HOME");
+    expect(environment).not.toHaveProperty("OCTANT_CREDENTIAL_BROKER_TOKEN");
+    expect(JSON.parse(environment.OPENCODE_CONFIG_CONTENT ?? "")).toEqual({ permissions: posture });
+    // Default plugins and the language-server download behave as on its own.
+    expect(environment).not.toHaveProperty("OPENCODE_DISABLE_DEFAULT_PLUGINS");
+    expect(environment).not.toHaveProperty("OPENCODE_DISABLE_LSP_DOWNLOAD");
+    // The updater follows the person's switch; the catalogue fetch and a
+    // Project's own configuration keep their guards.
+    expect(environment.OPENCODE_DISABLE_AUTOUPDATE).toBe("1");
+    expect(environment.OPENCODE_DISABLE_MODELS_FETCH).toBe("1");
+    expect(environment.OPENCODE_DISABLE_PROJECT_CONFIG).toBe("1");
+    const updating = createOwnOpenCodeProfile(host, posture, "darwin", false, false, true);
+    expect(updating?.environment).not.toHaveProperty("OPENCODE_DISABLE_AUTOUPDATE");
+    expect(updating?.environment.OPENCODE_DISABLE_MODELS_FETCH).toBe("1");
+  });
+
+  it("puts Octant's rules after the rules of an inline configuration the person's environment already carries", () => {
+    const posture = [{ action: "*", resource: "*", effect: "ask" }] as const;
+    const profile = createOwnOpenCodeProfile(
+      {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          share: "disabled",
+          permissions: [{ action: "*", resource: "*", effect: "allow" }],
+        }),
+      },
+      posture,
+      "darwin",
+    );
+    expect(JSON.parse(profile?.environment.OPENCODE_CONFIG_CONTENT ?? "")).toEqual({
+      share: "disabled",
+      permissions: [{ action: "*", resource: "*", effect: "allow" }, ...posture],
+    });
+  });
+
+  it("keeps the private configuration when Octant's rules do not fit an environment variable", () => {
+    const posture = Array.from({ length: 400 }, (_, index) => ({
+      action: "read",
+      resource: `/home/person/protected/${String(index).padStart(40, "0")}`,
+      effect: "deny" as const,
+    }));
+    expect(createOwnOpenCodeProfile({}, posture, "win32")).toBeUndefined();
+    expect(createOwnOpenCodeProfile({}, posture, "darwin")).toBeDefined();
   });
 
   it("lifts only the updater switch when the person lets providers update themselves", () => {
@@ -2177,6 +2251,120 @@ exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
     // fresh reservation instead of reporting the provider unavailable.
     expect(reservedPorts).toEqual([44_100, 44_101]);
     expect(observed.runtime).toBe("beta");
+  });
+
+  describe("a 2.x Work or Code launch outside Plan", () => {
+    const posture = [
+      { action: "*", resource: "*", effect: "ask" },
+      { action: "octant-bridge_*", resource: "*", effect: "allow" },
+    ] as const;
+    const ownSetup = { runsAsItself: true, ownToolServers: {} } as const;
+    const launch = async (input: {
+      readonly strict?: false;
+      readonly runsAsItself?: true;
+      readonly ownToolServers?: Record<string, never>;
+      readonly ownChannels?: { readonly telemetry: boolean; readonly selfUpdate: boolean };
+      readonly executionPolicy?: "plan";
+      /** The release the launch reports; the one read for own configuration by default. */
+      readonly release?: string;
+    }) => {
+      const { release = "opencode v2.4.1", ...start } = input;
+      const root = fixtureRoot();
+      const binaryPath = join(root, "opencode-own-config-fixture");
+      const recordPath = join(root, ".fake-opencode-own-config");
+      writeFileSync(
+        binaryPath,
+        `#!/bin/sh\ncd '${root}'\nif [ "$1" = "--version" ]; then echo '${release}'; exit 0; fi\nif [ "$1" = "serve" ]; then printf 'config=%s\\nconfig-home=%s\\ntmp=%s\\nplugins=%s\\nlsp=%s\\nupdate=%s\\nmodels=%s\\nhost-switch=%s\\ncontent=%s\\n' "\${OPENCODE_CONFIG-<unset>}" "\${XDG_CONFIG_HOME-<unset>}" "\${TMPDIR-<unset>}" "\${OPENCODE_DISABLE_DEFAULT_PLUGINS-<unset>}" "\${OPENCODE_DISABLE_LSP_DOWNLOAD-<unset>}" "\${OPENCODE_DISABLE_AUTOUPDATE-<unset>}" "\${OPENCODE_DISABLE_MODELS_FETCH-<unset>}" "\${OCTANT_TEST_HOST_SWITCH-<unset>}" "\${OPENCODE_CONFIG_CONTENT-<unset>}" > '${recordPath}'; fi\nOCTANT_FAKE_OPENCODE_MODE=v2-ready exec '${fakeCliPath}' "$@"\n`,
+      );
+      chmodSync(binaryPath, 0o755);
+      const server = await Effect.runPromise(
+        Effect.scoped(
+          makePort({
+            inheritedEnvironment: {
+              ...process.env,
+              XDG_CONFIG_HOME: "/home/person/.config",
+              TMPDIR: "/home/person/tmp",
+              OCTANT_TEST_HOST_SWITCH: "host-only",
+            },
+          }).start({
+            binaryPath,
+            cwd: root,
+            mode: "code",
+            executionPolicy: "approval-gated",
+            betaPermissions: posture,
+            ...start,
+          }),
+        ),
+      );
+      const recorded = Object.fromEntries(
+        readFileSync(recordPath, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => {
+            const at = line.indexOf("=");
+            return [line.slice(0, at), line.slice(at + 1)];
+          }),
+      );
+      return { server, recorded };
+    };
+
+    it("reads the person's own configuration outside Strict when the session carries their setup", async () => {
+      const { server, recorded } = await launch({ strict: false, ...ownSetup });
+      expect(server.ownConfiguration).toBe(true);
+      expect(server.privateConfiguration).toBeUndefined();
+      expect(server.isolatedConfiguration).toBeUndefined();
+      expect(recorded).toMatchObject({
+        config: "<unset>",
+        "config-home": "/home/person/.config",
+        tmp: "/home/person/tmp",
+        plugins: "<unset>",
+        lsp: "<unset>",
+        update: "1",
+        models: "1",
+        "host-switch": "<unset>",
+      });
+      expect(JSON.parse(recorded.content ?? "")).toEqual({ permissions: posture });
+    });
+
+    it("lets OpenCode update itself there once the person's self-update switch is on", async () => {
+      const { recorded } = await launch({
+        strict: false,
+        ...ownSetup,
+        ownChannels: { telemetry: false, selfUpdate: true },
+      });
+      expect(recorded.update).toBe("<unset>");
+      expect(recorded.models).toBe("1");
+    });
+
+    it.each([
+      ["under Strict", { ...ownSetup }],
+      ["outside Strict when the session's own setup is off", { strict: false }],
+      [
+        "outside Strict when the person's tool servers are off",
+        { strict: false, runsAsItself: true },
+      ],
+      ["in Plan", { strict: false, ...ownSetup, executionPolicy: "plan" }],
+      [
+        "on a 2.x release older than the one read for it",
+        { strict: false, ...ownSetup, release: "opencode v2.2.0" },
+      ],
+    ] as const)("keeps Octant's private configuration %s", async (_name, input) => {
+      const { server, recorded } = await launch(input);
+      expect(server.ownConfiguration).toBeUndefined();
+      expect(recorded.config).toMatch(/octant-config-home-.*\/opencode\.json$/);
+      expect(recorded["config-home"]).toMatch(/octant-config-home-/);
+      expect(recorded.tmp).toMatch(/octant-tmp-/);
+      expect(recorded.content).toBe("<unset>");
+      expect(recorded.plugins).toBe("1");
+      expect(recorded.lsp).toBe("1");
+      expect(recorded.update).toBe("1");
+      expect(recorded.models).toBe("1");
+    });
+
+    it("keeps every variable of Octant's own out of a launch outside Strict, and the host's under Strict as before", async () => {
+      expect((await launch({ strict: false })).recorded["host-switch"]).toBe("<unset>");
+      expect((await launch({})).recorded["host-switch"]).toBe("host-only");
+    });
   });
 
   it("does not expose managed-server authority to the provider session", async () => {

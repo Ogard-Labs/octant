@@ -80,7 +80,9 @@ import {
   openCodeChatPlanJailStartsProcesses,
   openCodeServesCommandRoutes,
   openCodeServesNativeRoutes,
+  openCodeServesOwnConfiguration,
   openCodeServesQuestionForms,
+  openCodeServesSteering,
   type OpenCodeProcessPort,
   type OpenCodeServerConnection,
 } from "./openCodeProcess";
@@ -209,6 +211,27 @@ export interface OpenCodeClientPort {
     requestId: string,
     answers: ReadonlyArray<string>,
   ) => Promise<void>;
+  /**
+   * Sets a 2.x session's own permission rules, which OpenCode applies after
+   * its agent's. Only a runtime read for it offers it
+   * (`openCodeServesOwnConfiguration`).
+   */
+  readonly setSessionPermissions?:
+    | ((sessionId: string, rules: ReadonlyArray<PermissionV2Rule>) => Promise<void>)
+    | undefined;
+  /**
+   * Cancels a pending 2.x form, telling the asker why it was not answered.
+   * Only a 2.x client offers it.
+   */
+  readonly cancelForm?:
+    | ((sessionId: string, formId: string, message: string) => Promise<void>)
+    | undefined;
+  /**
+   * Delivers a note into the session's running turn without starting a run.
+   * Only a runtime whose prompt route was read for it offers it
+   * (`openCodeServesSteering`).
+   */
+  readonly steer?: ((sessionId: string, message: string) => Promise<void>) | undefined;
 }
 
 /**
@@ -297,6 +320,8 @@ interface SessionState {
   readonly own: OwnPermissions;
   /** The host's protected paths when the session started, refused last in its rules. */
   readonly protectedPaths: OpenCodeProtectedPaths;
+  /** Whether the session runs under Strict; absent on the start is Strict. */
+  readonly strict: boolean;
   readonly approvals: Set<string>;
   /**
    * The delegated session each pending approval or question came from, when it
@@ -525,7 +550,8 @@ const capabilities = {
   nativeChildAgents: "unsupported",
   harnessAutoReview: "unsupported",
   // OpenCode compacts its own sessions only on a 2.x release whose route was
-  // read; 1.x and older 2.x releases refuse the request as too old.
+  // read; on 1.x and older 2.x releases the session runs and only a request
+  // to compact it is refused as too old.
   sessionCompaction: {
     chat: "unavailable",
     work: "unavailable",
@@ -555,9 +581,11 @@ const capabilities = {
     // them on; each call marks the thread.
     webTools: "supported",
     skills: "supported",
-    // The MCP servers in the person's own OpenCode configuration load into
-    // the launch's private one, and their tools follow the level. Plugins
-    // stay out of the launch.
+    // The MCP servers in the person's own OpenCode configuration load, and
+    // their tools follow the level: from that configuration itself where an
+    // OpenCode 2 launch reads it (`openCodeRunsOnOwnConfiguration`), with the
+    // person's plugins, and otherwise copied into the launch's private one,
+    // where plugins stay out.
     toolServers: "supported",
     hooks: "unsupported",
     // A trusted Project outside Plan loads its own `opencode.json(c)` and
@@ -622,9 +650,9 @@ function openCodeChatCapabilities(
  * the 2.x permission event and reply route. 2.0.22 serves no question routes
  * and asks through forms instead; its question forms reach the person as the
  * questionnaire 1.x questions use, from the first release read for them
- * (`openCodeServesQuestionForms`). A reported
- * file change is held to the grants the person gave (`failClosedBetaEvent`),
- * so file changes are claimed from the first release read for the event.
+ * (`openCodeServesQuestionForms`). Under Strict a reported file change is
+ * held to the grants the person gave (`failClosedBetaEvent`); file changes
+ * are claimed from the first release read for the event.
  */
 /**
  * Whether OpenCode 2 can run Chat and Plan turns on this host: macOS and Linux
@@ -758,6 +786,8 @@ const BETA_API_TIMEOUT_MS = 5_000;
 const BETA_MUTATION_TIMEOUT_MS = 10_000;
 const MCP_PROBE_TIMEOUT_MS = 5_000;
 const BETA_MCP_POLL_MS = 100;
+/** What OpenCode's asker is told when Octant cancels a form it cannot show the person. */
+const UNSHOWN_FORM_MESSAGE = "This client cannot show this form, so it was not answered.";
 const BETA_WRITE_REFUSAL_MESSAGE =
   "OpenCode 2 reported a file change that no approval or setting allowed, so the turn was stopped.";
 
@@ -1033,7 +1063,6 @@ function adaptBetaSession(body: unknown): OpenCodeSessionRecord {
 /**
  * 2.x events carry the payload on `data`. The shared mapper reads `properties`,
  * so a version-selected stream is folded into that shape before it is mapped.
- * A payload the mapper does not recognise still fails the turn closed.
  */
 function nonEmptyRecord(value: unknown): Record<string, unknown> | undefined {
   const record = asRecord(value);
@@ -1045,7 +1074,7 @@ function nonEmptyRecord(value: unknown): Record<string, unknown> | undefined {
  * 2.0.22 session events that carry nothing a runtime event reports: queueing,
  * lifecycle markers, the start and end of parts whose deltas are reported,
  * and running totals that each step's own usage already covers. Every other
- * unrecognised event still reaches the mapper and fails the turn closed.
+ * unrecognised event reaches the mapper, which reports nothing for it.
  */
 const OPENCODE_2022_BOOKKEEPING_EVENTS: ReadonlySet<string> = new Set([
   "session.inbox.enqueued",
@@ -1092,16 +1121,19 @@ function adaptOpenCode2022Event(
       return { type: type.replace("session.", "session.next."), properties };
     case "session.tool.input.started": {
       const name = betaString(properties.name);
-      // Bounded: a call past the bound keeps no name and fails closed.
+      // Bounded: a call past the bound keeps no name.
       if (callID !== undefined && name !== undefined && (calls?.size ?? 0) < 1024) {
         calls?.set(callID, name);
       }
       return undefined;
     }
     case "session.tool.called": {
-      const tool = callID === undefined ? undefined : calls?.get(callID);
-      // A call whose name was never announced stays unmapped and fails closed.
-      if (tool === undefined) return { type, properties };
+      // A call with no id names nothing its later events could update.
+      if (callID === undefined) return undefined;
+      // A call whose name was never announced (or fell past the bound above)
+      // is still a call the runtime made, so it is reported under a name that
+      // says so rather than ending the turn.
+      const tool = calls?.get(callID) ?? "unknown";
       return { type: "session.next.tool.called", properties: { ...properties, callID, tool } };
     }
     case "session.tool.progress":
@@ -1830,6 +1862,93 @@ export function makeOfficialOpenCodeClient(
         { throwOnError: true },
       );
     },
+    ...(beta
+      ? {
+          // `DELETE /api/session/{id}/form/{form}` with an optional `message`
+          // query cancels a pending form (`session.form.cancel`, read from the
+          // opencode v2.4.1 route table). A release without the route answers
+          // an error, which the caller treats as a form it could not decline.
+          cancelForm: async (sessionId: string, formId: string, message: string) => {
+            const url = new URL(
+              `/api/session/${encodeURIComponent(sessionId)}/form/${encodeURIComponent(formId)}`,
+              server.url,
+            );
+            url.searchParams.set("message", message);
+            const response = await fetch(url.toString(), {
+              method: "DELETE",
+              headers: {
+                authorization: server.authorization,
+                "x-opencode-directory": encodeURIComponent(projectRoot),
+              },
+              signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+            });
+            if (!response.ok) {
+              throw new Error(`OpenCode 2 form cancel failed with status ${response.status}.`);
+            }
+          },
+        }
+      : {}),
+    ...(beta && openCodeServesOwnConfiguration(server.version)
+      ? {
+          // `PATCH /api/session/{id}` takes `permissions`, a ruleset in the
+          // configuration's own shape; a session's rules are joined after
+          // its agent's, so under last-match they win (opencode v2.4.1,
+          // `session.update` payload and `SessionContext.select`).
+          setSessionPermissions: async (
+            sessionId: string,
+            rules: ReadonlyArray<PermissionV2Rule>,
+          ) => {
+            const response = await fetch(
+              new URL(`/api/session/${encodeURIComponent(sessionId)}`, server.url).toString(),
+              {
+                method: "PATCH",
+                headers: {
+                  authorization: server.authorization,
+                  "content-type": "application/json",
+                  "x-opencode-directory": encodeURIComponent(projectRoot),
+                },
+                body: JSON.stringify({ permissions: rules }),
+                signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+              },
+            );
+            if (!response.ok) {
+              throw new Error(
+                `OpenCode 2 session permissions failed with status ${response.status}.`,
+              );
+            }
+          },
+        }
+      : {}),
+    ...(beta && openCodeServesSteering(server.version)
+      ? {
+          // The prompt route takes `delivery: "steer"`, which hands the text
+          // to the running turn at its next step, and `resume: false`, which
+          // admits it without scheduling a run of its own. This is the body
+          // OpenCode's own ACP server sends to inject into a running turn
+          // (opencode v2.4.1, `session.prompt` payload and `cli.acp.turn`).
+          steer: async (sessionId: string, message: string) => {
+            const response = await fetch(
+              new URL(
+                `/api/session/${encodeURIComponent(sessionId)}/prompt`,
+                server.url,
+              ).toString(),
+              {
+                method: "POST",
+                headers: {
+                  authorization: server.authorization,
+                  "content-type": "application/json",
+                  "x-opencode-directory": encodeURIComponent(projectRoot),
+                },
+                body: JSON.stringify({ text: message, delivery: "steer", resume: false }),
+                signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+              },
+            );
+            if (!response.ok) {
+              throw new Error(`OpenCode 2 steering failed with status ${response.status}.`);
+            }
+          },
+        }
+      : {}),
   };
 }
 
@@ -2266,6 +2385,10 @@ function makeConnection(
     let runtimePrivateConfig = false;
     // The running launch loads a trusted Project's own OpenCode configuration.
     let runtimeProjectConfig = false;
+    // The running launch reads the person's own OpenCode configuration, so
+    // Octant's tools are offered beside whatever it loaded, as in a trusted
+    // Project.
+    let runtimeOwnConfig = false;
     let runtimeLoopbackPorts: ReadonlyArray<number> = [];
 
     const runtimeAdmitsAppTools = (
@@ -2275,6 +2398,7 @@ function makeConnection(
       runtimeIsolated ||
       (!strict && runtimePrivateConfig) ||
       runtimeProjectConfig ||
+      runtimeOwnConfig ||
       executionPolicy === "full-access";
 
     const offer = (event: ProviderRuntimeEvent) => {
@@ -2384,6 +2508,29 @@ function makeConnection(
                 );
                 retireState(state);
               });
+            },
+            cancelForm: (formId: string) => {
+              const cancel = client?.cancelForm;
+              const source = replySource ?? state.sourceId;
+              // A form nobody answers or cancels would hold the turn forever,
+              // so a cancel that did not go through still ends it.
+              const failed = () => {
+                if (state.terminal) return;
+                offer(
+                  unmappedBetaFailure(
+                    state,
+                    options.instanceId,
+                    clock,
+                    "OpenCode 2 asked through a form Octant cannot show, and the form could not be declined.",
+                  ),
+                );
+                retireState(state);
+              };
+              if (cancel === undefined || source === undefined) {
+                failed();
+                return;
+              }
+              void cancel(source, formId, UNSHOWN_FORM_MESSAGE).catch(failed);
             },
             refuseQuestion: (formId: string, count: number) => {
               const active = client;
@@ -2523,6 +2670,7 @@ function makeConnection(
       runtimeIsolated = false;
       runtimePrivateConfig = false;
       runtimeProjectConfig = false;
+      runtimeOwnConfig = false;
       runtimeLoopbackPorts = [];
       subscriptionReady = undefined;
     };
@@ -2640,6 +2788,7 @@ function makeConnection(
             runtimeIsolated = started.isolatedConfiguration === true;
             runtimePrivateConfig = started.privateConfiguration === true;
             runtimeProjectConfig = ownSetup?.projectConfig === true;
+            runtimeOwnConfig = started.ownConfiguration === true;
             runtimeLoopbackPorts = loopbackPorts;
             client = nextClient;
             void monitor.exited.then(() => {
@@ -2948,6 +3097,43 @@ function makeConnection(
                 : fail("unsupported", "OpenCode could not register app-managed tools."),
           });
 
+    /**
+     * On a launch that reads the person's own configuration, a rule they
+     * wrote for one agent comes after the rules Octant configured, and would
+     * decide before the level does. A session's own rules come after every
+     * agent rule, so the level is set there as well; a session whose rules
+     * could not be set does not start.
+     */
+    const holdSessionToLevel = (
+      runtimeClient: OpenCodeClientPort,
+      state: SessionState,
+      providerSessionId: string,
+    ): Effect.Effect<void, ProviderFailure> => {
+      if (!runtimeOwnConfig) return Effect.void;
+      const setPermissions = runtimeClient.setSessionPermissions;
+      if (setPermissions === undefined) {
+        return Effect.fail(
+          fail("unsupported", "OpenCode cannot hold this session to the thread's level."),
+        );
+      }
+      return request(() =>
+        setPermissions(
+          providerSessionId,
+          betaSessionPermissionRules(
+            state.executionPolicy,
+            mode,
+            state.managedTools?.serverName,
+            extraFolders,
+            state.nativeSetup?.skills === true,
+            state.own,
+            state.protectedPaths,
+            readOnlyFolders,
+            platform,
+          ),
+        ),
+      );
+    };
+
     const discardUnregisteredState = (
       state: SessionState,
       providerSessionId: string,
@@ -2997,6 +3183,7 @@ function makeConnection(
               options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
               input.strict !== false,
             ),
+            input.strict !== false,
           );
           return prepareManagedTools(state, input.tools ?? []).pipe(
             Effect.flatMap(() =>
@@ -3062,6 +3249,7 @@ function makeConnection(
                     }),
                   ),
                 ),
+                Effect.tap((session) => holdSessionToLevel(runtimeClient, state, session.id)),
                 Effect.tapError(() => Effect.promise(() => releaseManagedTools(state))),
                 Effect.map((session) => ({ session, state })),
               );
@@ -3177,6 +3365,7 @@ function makeConnection(
                   options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
                   input.strict !== false,
                 ),
+                input.strict !== false,
               );
               if (inheritedTools !== undefined) {
                 inheritedTools.owner.state = state;
@@ -3218,6 +3407,11 @@ function makeConnection(
                           fail("stale-resume", "Provider resume session is no longer available."),
                         ),
                       ),
+                    ),
+                    Effect.tap((session) =>
+                      session.id === input.resumeCursor.value
+                        ? holdSessionToLevel(runtimeClient, state, session.id)
+                        : Effect.void,
                     ),
                     Effect.map((session) => ({ runtimeClient, session })),
                   );
@@ -3447,6 +3641,25 @@ function makeConnection(
                 );
               }),
             );
+          }),
+        ),
+      // A note reaches the running turn through OpenCode's own steering
+      // delivery. With no turn running the same request would sit in the
+      // session unread until the next run, so it is refused here and the host
+      // queues the note as a follow-up instead.
+      steer: ({ sessionId, message }) =>
+        usableStateFor(sessionId).pipe(
+          Effect.flatMap(([source, state]) => {
+            const deliver = client?.steer;
+            if (
+              deliver === undefined ||
+              state.terminal ||
+              state.turnSent !== true ||
+              state.compaction !== undefined
+            ) {
+              return Effect.succeed("unsupported" as const);
+            }
+            return request(() => deliver(source, message)).pipe(Effect.as("steered" as const));
           }),
         ),
       compact: ({ sessionId }) =>
@@ -3769,6 +3982,7 @@ function newSessionState(
   rememberedEdits: RememberedOpenCodeEdits,
   own: OwnPermissions,
   protectedPaths: OpenCodeProtectedPaths,
+  strict: boolean,
 ): SessionState {
   return {
     sessionId,
@@ -3785,6 +3999,7 @@ function newSessionState(
     nativeSetup,
     own,
     protectedPaths,
+    strict,
     approvals: new Set(),
     requestSources: new Map(),
     approvalCalls: new Map(),
@@ -3867,7 +4082,8 @@ function failClosedBetaEvent(
     "edit",
   );
   // An edit the posture allows, or one the user already approved, may be
-  // reported. Any other file change ran without a grant, so the turn fails.
+  // reported. Under Strict any other file change ran without a grant, so the
+  // turn fails.
   if (edit === "allow") return event;
   const file = resolve(projectRoot, event.path);
   // An edit the person's own rules allow for this file ran without asking,
@@ -3884,6 +4100,11 @@ function failClosedBetaEvent(
   }
   // A grant OpenCode remembers from an `always` answer is never spent.
   if (state.rememberedEdits.has(file) || state.rememberedEdits.has("*")) return event;
+  // Outside Strict the change is recorded as one the runtime made and the
+  // turn goes on: OpenCode holds its own permission rules there, and a change
+  // it made under one Octant does not see (a plugin's write, an agent's own
+  // rule) is still what happened. Strict keeps refusing it.
+  if (!state.strict) return event;
   return {
     kind: "failed",
     instanceId: event.instanceId,
@@ -3916,15 +4137,20 @@ function mapAndOffer(
     /** An approval here is answered `always`, a grant kept in OpenCode's own store. */
     readonly remembersInOpenCode: boolean;
     readonly reply: (requestId: string, reply: "once" | "reject") => void;
+    /** Cancels a form that is not a question Octant can show. */
+    readonly cancelForm: (formId: string) => void;
     /** Answers every field of a question form with the secret refusal. */
     readonly refuseQuestion: (formId: string, count: number) => void;
   },
 ): void {
   if (state.terminal) return;
   // 2.0.22 asks its questions through forms. A question form becomes the
-  // questionnaire 1.x questions use; any other form (a sign-in, a server's
-  // own request) is not mapped, and a turn waiting on an unanswerable form
-  // would hang, so it fails instead.
+  // questionnaire 1.x questions use. Any other form (a sign-in, a server's
+  // own request, a question form of a release not read for them) is one
+  // Octant cannot show, and a turn waiting on it would hang, so it is
+  // cancelled back to OpenCode, which tells the asker it went unanswered, and
+  // the turn goes on. A form that names no id cannot be cancelled or waited
+  // on by anything Octant sends, so it is left alone.
   const questionForm =
     beta !== undefined && String(event.type) === "form.created"
       ? beta.questionForms
@@ -3932,8 +4158,8 @@ function mapAndOffer(
         : undefined
       : undefined;
   if (beta !== undefined && String(event.type) === "form.created" && questionForm === undefined) {
-    offer(unmappedBetaFailure(state, instanceId, clock, "OpenCode 2 questions are not mapped."));
-    retire(state);
+    const formId = textProperty(Reflect.get(event.properties, "form"), "id");
+    if (formId !== "") beta.cancelForm(formId);
     return;
   }
   // A form asking for a password or key is answered at once with a refusal,
@@ -3972,13 +4198,21 @@ function mapAndOffer(
     state.pendingEditGrants.delete(settled);
     return;
   }
+  // The event the mapper reads: the question a form carried, or a permission
+  // request given the action name it lacked.
+  let source: OpenCodeEvent = questionForm ?? event;
   if (beta !== undefined && event.type === "permission.v2.asked") {
     const requestId = textProperty(event.properties, "id");
     const action = textProperty(event.properties, "action");
+    // A request with no id can be neither shown nor answered; the turn goes on.
+    if (requestId === "") return;
+    // A request Octant cannot classify (it names no action, or no rule
+    // matches it) is put to the person like any other approval: never
+    // allowed on its own, and never a reason to end the turn.
     const effect =
-      requestId === "" || action === ""
-        ? undefined
-        : betaPermissionEffect(
+      action === ""
+        ? "ask"
+        : (betaPermissionEffect(
             betaSessionPermissionRules(
               state.executionPolicy,
               beta.mode,
@@ -4004,18 +4238,12 @@ function mapAndOffer(
               beta.platform,
             ),
             action,
-          );
-    if (effect === undefined) {
-      offer(
-        unmappedBetaFailure(
-          state,
-          instanceId,
-          clock,
-          "OpenCode 2 permission request cannot be mapped.",
-        ),
-      );
-      retire(state);
-      return;
+          ) ?? "ask");
+    if (action === "") {
+      source = {
+        ...event,
+        properties: { ...event.properties, action: UNNAMED_PERMISSION_ACTION },
+      };
     }
     if (effect === "deny") {
       beta.reply(requestId, "reject");
@@ -4069,22 +4297,28 @@ function mapAndOffer(
         correlationId: state.correlationId,
         occurredAt: clock() as UtcTimestamp,
       },
-      questionForm ?? event,
+      source,
     );
-  } catch (error) {
-    if (!beta) throw error;
-    // The type is provider-controlled, so only a bounded event-name spelling
-    // is echoed into the failure.
+  } catch {
+    // The mapper reports nothing for an event type it does not know, so a
+    // throw means an event it does map arrived in a shape it cannot read.
+    // That ends this turn alone, on both runtimes: rethrown, it ended the
+    // event loop and failed every session on the server. The type is
+    // provider-controlled, so only a bounded event-name spelling is echoed.
     const type = String(event.type);
     const named = /^[a-z0-9][a-z0-9._-]{0,79}$/.test(type) ? type : "an unrecognised event";
-    offer(
-      unmappedBetaFailure(
-        state,
-        instanceId,
-        clock,
-        `OpenCode 2 sent an event Octant does not map: ${named}.`,
-      ),
-    );
+    offer({
+      kind: "failed",
+      instanceId,
+      sessionId: state.sessionId,
+      sequence: state.nextSequence,
+      correlationId: state.correlationId,
+      occurredAt: clock() as UtcTimestamp,
+      failure: {
+        category: "protocol",
+        message: `OpenCode sent an event Octant could not read: ${named}.`,
+      },
+    });
     retire(state);
     return;
   }
@@ -4195,6 +4429,9 @@ function mapAndOffer(
   }
 }
 
+/** The action an approval names when OpenCode's permission request named none. */
+const UNNAMED_PERMISSION_ACTION = "unknown";
+
 /** What a 2.x approval says when approving it saves a grant in OpenCode's own store. */
 export const OPENCODE_REMEMBERED_APPROVAL_NOTE =
   "Approving saves the grant in OpenCode's own settings for this repository; clear it there to undo it.";
@@ -4258,6 +4495,18 @@ const PROJECT_READ_TOOLS = ["read", "glob", "grep", "list"] as const;
  * `task` still holds.
  */
 const OPENCODE_SUBAGENT_ALLOWS = ["task", "subagent"] as const;
+
+/**
+ * What Ask first and Accept edits allow without asking beyond file reads:
+ * subagents, and every read-only tool Plan allows unasked, so a guarded level
+ * is never stricter than Plan for a tool that only looks. Under the catch-all
+ * `ask` the task list, code and language-server lookups and web reads asked at
+ * these levels while Plan ran them (maintainer decision, 2026-11-25). Edits,
+ * the shell and outside folders still follow the level; the person's own
+ * rules come after these, so their ask or deny of one still holds, and the
+ * web tools stay denied where the setup has them off.
+ */
+const GUARDED_LEVEL_ALLOWS = [...PLAN_READ_TOOLS, ...OPENCODE_SUBAGENT_ALLOWS] as const;
 
 /**
  * OpenCode's own default agent refuses `.env` files but not their examples;
@@ -4334,7 +4583,7 @@ export function permissionRules(
     rules = [
       { permission: "*", pattern: "*", action: "ask" },
       { permission: "edit", pattern: "*", action: "allow" },
-      ...OPENCODE_SUBAGENT_ALLOWS.map((permission) => ({
+      ...GUARDED_LEVEL_ALLOWS.map((permission) => ({
         permission,
         pattern: "*",
         action: "allow" as const,
@@ -4343,7 +4592,7 @@ export function permissionRules(
   } else if (policy === "approval-gated") {
     rules = [
       { permission: "*", pattern: "*", action: "ask" },
-      ...OPENCODE_SUBAGENT_ALLOWS.map((permission) => ({
+      ...GUARDED_LEVEL_ALLOWS.map((permission) => ({
         permission,
         pattern: "*",
         action: "allow" as const,
@@ -4463,7 +4712,7 @@ export function betaAgentPermissionRules(
     rules = [
       { action: "*", resource: "*", effect: "ask" },
       { action: "edit", resource: "*", effect: "allow" },
-      ...OPENCODE_SUBAGENT_ALLOWS.map((action) => ({
+      ...GUARDED_LEVEL_ALLOWS.map((action) => ({
         action,
         resource: "*",
         effect: "allow" as const,
@@ -4472,7 +4721,7 @@ export function betaAgentPermissionRules(
   } else if (policy === "approval-gated") {
     rules = [
       { action: "*", resource: "*", effect: "ask" },
-      ...OPENCODE_SUBAGENT_ALLOWS.map((action) => ({
+      ...GUARDED_LEVEL_ALLOWS.map((action) => ({
         action,
         resource: "*",
         effect: "allow" as const,
@@ -4627,8 +4876,8 @@ export function betaSessionPermissionRules(
 }
 
 /**
- * Last matching 2.x rule for an action. An action that matches nothing is
- * unmappable: the caller refuses the turn rather than guessing ask or allow.
+ * Last matching 2.x rule for an action, or undefined for an action that
+ * matches nothing, which the caller puts to the person as an approval.
  */
 export function betaPermissionEffect(
   rules: PermissionV2Ruleset,
