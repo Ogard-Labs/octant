@@ -423,6 +423,11 @@ export class ThreadSecretService {
     return { status: "accepted" };
   }
 
+  /** Whether anything on this host can use a handle. */
+  hasConsumer(): boolean {
+    return this.#consumers.size > 0;
+  }
+
   /**
    * Admits a host tool or a plugin's operation as a redeemer of handles. The
    * agent's shell is never one, so a handle in a command is worth nothing.

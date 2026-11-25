@@ -110,6 +110,7 @@ function setup(over: Partial<Omit<ThreadSecretTurnFacts, "service">> = {}) {
       label: "Deploy token",
       kind: "token",
       reason: "Publish.",
+      delivery: "file",
     });
     const caller = request.mock.calls.at(-1)?.[0] as ThreadSecretCaller | undefined;
     return { reply, caller, operations };

@@ -1,4 +1,12 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type MouseEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type FormEvent,
+  type MouseEvent,
+} from "react";
 import type {
   ThreadSecretAnswer,
   ThreadSecretAnswerField,
@@ -14,7 +22,7 @@ import { octantButtonClassName, OctantButton, OctantIconButton } from "../ui/bas
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { Check, ExternalLink, Eye, EyeOff, Minus, ShieldCheck } from "../ui/icons";
+import { Check, ExternalLink, Eye, EyeOff, Minus, ShieldCheck, X } from "../ui/icons";
 import "./threadSecrets.css";
 
 type Card = ThreadSecretRequestCard;
@@ -66,6 +74,8 @@ const FAILURES: Readonly<Record<ThreadSecretFailure, string>> = {
 
 const NOT_A_REFERENCE = "Use a 1Password reference like op://vault/item/field.";
 const NOT_TAKEN = "This window could not send it. Try again.";
+const MAX_VALUE_LENGTH = 4096;
+const TOO_LONG = "That is longer than 4,096 characters, so none of it was pasted.";
 const UNKNOWN_OUTCOME =
   "The result is not known. What you entered was cleared and is not sent again.";
 
@@ -189,6 +199,7 @@ function PendingCard({ card, answer }: Parameters<typeof ThreadSecretCard>[0]) {
       invalid={shownError !== undefined}
       describedBy={describedBy}
       onChange={(next) => set(field, next)}
+      onProblem={setError}
       action={
         multiple ? null : (
           <OctantButton type="submit" disabled={busy || !complete} aria-busy={busy}>
@@ -299,6 +310,7 @@ function SecretField(props: {
   readonly invalid: boolean;
   readonly describedBy: string;
   readonly onChange: (next: Partial<Draft>) => void;
+  readonly onProblem: (problem: string) => void;
   readonly action: React.ReactNode;
 }) {
   const { card, field, draft, id } = props;
@@ -310,7 +322,24 @@ function SecretField(props: {
   const remembered = rememberedFor(card, field);
   const sources = card.sources.filter((source) => source !== "remembered" || remembered.length > 0);
   const typed = draft.source === "pasted";
-  const masked = typed && field.secret && !(revealed && !props.disabled);
+  const lines = typed ? linesOf(draft.text) : 1;
+  const masked = lines === 1 && typed && field.secret && !(revealed && !props.disabled);
+  // An input keeps one line and cuts at its limit, both without a word.
+  const onPaste = (event: ClipboardEvent<HTMLInputElement>) => {
+    if (!typed) return;
+    const { selectionStart, selectionEnd, value } = event.currentTarget;
+    const text =
+      value.slice(0, selectionStart ?? value.length) +
+      event.clipboardData.getData("text/plain") +
+      value.slice(selectionEnd ?? value.length);
+    if (text.length > MAX_VALUE_LENGTH) {
+      event.preventDefault();
+      props.onProblem(TOO_LONG);
+    } else if (linesOf(text) > 1) {
+      event.preventDefault();
+      props.onChange({ text });
+    }
+  };
   return (
     <div className="thread-secret-card__field">
       {props.labelled ? (
@@ -362,17 +391,30 @@ function SecretField(props: {
               data-bwignore=""
               data-mono={typed ? undefined : ""}
               placeholder={typed ? field.placeholder : "op://vault/item/field"}
-              maxLength={typed ? 4096 : 512}
-              value={draft.text}
+              maxLength={typed ? MAX_VALUE_LENGTH : 512}
+              readOnly={lines > 1}
+              value={lines > 1 ? `${String(lines)} lines pasted` : draft.text}
               disabled={props.disabled}
               aria-invalid={props.invalid || undefined}
               aria-describedby={props.describedBy}
               onChange={(event) => props.onChange({ text: event.target.value })}
+              onPaste={onPaste}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault();
               }}
             />
-            {typed && field.secret ? (
+            {lines > 1 ? (
+              <OctantIconButton
+                className="thread-secret-card__reveal"
+                type="button"
+                label={`Clear ${field.label}`}
+                size="icon-xs"
+                disabled={props.disabled}
+                onClick={() => props.onChange({ text: "" })}
+              >
+                <X size={12} />
+              </OctantIconButton>
+            ) : typed && field.secret ? (
               <OctantIconButton
                 className="thread-secret-card__reveal"
                 type="button"
@@ -403,6 +445,11 @@ function SecretField(props: {
       ) : null}
     </div>
   );
+}
+
+/** A line break at the end adds no line: an input drops it, and so does a shell's `$(…)`. */
+function linesOf(text: string): number {
+  return text.replace(/[\r\n]+$/u, "").split(/\r\n|\r|\n/u).length;
 }
 
 /** The names a card's fields were saved under carry the request's, unless it has one unnamed value. */

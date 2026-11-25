@@ -76,6 +76,47 @@ describe("the secret card", () => {
     expect(input()).toHaveValue("");
   });
 
+  it("sends a value of several lines exactly as pasted, and shows none of it", async () => {
+    const { user, send } = setup();
+    const key = "-----BEGIN KEY-----\r\nabc def\r\n-----END KEY-----\r\n";
+    await user.click(input());
+    await user.paste(key);
+    expect(input()).toHaveValue("3 lines pasted");
+    expect(input()).toHaveAttribute("readonly");
+    expect(document.body.innerHTML).not.toContain("abc def");
+    await user.click(save());
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fields: [{ name: "DEPLOY_TOKEN", source: "pasted", value: key }],
+      }),
+    );
+  });
+
+  it("starts over when pasted lines are cleared", async () => {
+    const { user } = setup();
+    await user.click(input());
+    await user.paste("one\ntwo");
+    await user.click(screen.getByRole("button", { name: "Clear Deploy token" }));
+    expect(input()).toHaveValue("");
+    expect(input()).not.toHaveAttribute("readonly");
+    expect(save()).toBeDisabled();
+  });
+
+  it("takes one line pasted with its line break as that line", async () => {
+    const { user } = setup();
+    await user.click(input());
+    await user.paste("token-value\n");
+    expect(input()).not.toHaveAttribute("readonly");
+  });
+
+  it("does not cut a value that is too long", async () => {
+    const { user } = setup();
+    await user.click(input());
+    await user.paste("x".repeat(4097));
+    expect(input()).toHaveValue("");
+    expect(screen.getByRole("alert")).toHaveTextContent("longer than 4,096 characters");
+  });
+
   it("does not take blank text for an answer", async () => {
     const { user, send } = setup();
     await user.type(input(), "   {Enter}");
