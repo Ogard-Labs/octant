@@ -31,6 +31,7 @@ const seconds = Number(process.argv[3] ?? "60");
 const dist = resolve(process.argv[4] ?? "apps/server/dist");
 const node = execFileSync(process.argv[5] ?? "node", ["-p", "process.execPath"], {
   encoding: "utf8",
+  timeout: 120_000,
 }).trim();
 const SETTLE_MS = 40_000;
 const LIVE = Math.min(10, threads);
@@ -48,6 +49,8 @@ const stop = () => controller.abort();
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
 const lifetime = setTimeout(stop, MAX_RUN_MS);
+// A blocking setup step cannot see the signal, so each has its own bound.
+const STEP_TIMEOUT_MS = 120_000;
 const root = await realpath(await mkdtemp(join(tmpdir(), "octant-idle-claude.")));
 const launches = join(root, "launches.log");
 const claude = join(root, "bin", "claude");
@@ -64,19 +67,18 @@ try {
   await writeFile(join(root, "stand-in.js"), standIn(launches));
   // Compiled, as the real program is: the host's confined probe may run the
   // program itself but not an interpreter found elsewhere on the machine.
-  execFileSync(process.execPath, [
-    "build",
-    "--compile",
-    join(root, "stand-in.js"),
-    "--outfile",
-    claude,
-  ]);
+  execFileSync(
+    process.execPath,
+    ["build", "--compile", join(root, "stand-in.js"), "--outfile", claude],
+    { timeout: STEP_TIMEOUT_MS },
+  );
   // macOS scans a new program at its first launch, for longer than the host's probe waits.
-  execFileSync(claude, ["--version"]);
+  execFileSync(claude, ["--version"], { timeout: STEP_TIMEOUT_MS });
   const git = (...args: string[]) =>
     execFileSync("/usr/bin/git", args, {
       cwd: repository,
       env: { HOME: home, PATH: "/usr/bin:/bin" },
+      timeout: STEP_TIMEOUT_MS,
     });
   git("init", "--quiet", "--initial-branch=main");
   await writeFile(join(repository, "README.md"), "Idle fixture\n");
@@ -112,7 +114,7 @@ try {
     const serverUrl = `http://127.0.0.1:${port}`;
     await until("the host to become ready", async () => {
       if (host.exitCode !== null) throw new Error(`The host exited.\n${errors}`);
-      const body: unknown = await fetch(`${serverUrl}/health`)
+      const body: unknown = await fetch(`${serverUrl}/health`, { signal: controller.signal })
         .then((response) => response.json())
         .catch(() => undefined);
       return isRecord(body) && body.storage === "ready";
@@ -127,7 +129,10 @@ try {
           logicalCpus: cpus().length,
           arch: arch(),
         },
-        node: execFileSync(node, ["--version"], { encoding: "utf8" }).trim(),
+        node: execFileSync(node, ["--version"], {
+          encoding: "utf8",
+          timeout: STEP_TIMEOUT_MS,
+        }).trim(),
         threads,
         seconds,
       }),
@@ -158,6 +163,7 @@ try {
         "/api/providers/commands",
         { kind: "probe-provider", instanceId: providerInstanceId },
         "check the account",
+        controller.signal,
       );
       return isRecord(probed) && isRecord(probed.result) && probed.result.readiness === "ready";
     });
@@ -181,6 +187,7 @@ try {
           "x-octant-code-thread-id": thread.threadId,
         },
         body: prompt,
+        signal: controller.signal,
       });
       if (!stored.ok) throw new Error(`The prompt was not stored (${await stored.text()}).`);
       const operationId = randomUUID();
@@ -202,7 +209,7 @@ try {
       await until(`a turn of ${thread.threadId}`, async () => {
         const read = await fetch(
           `${serverUrl}/api/code/threads/${thread.threadId}/conversation?afterCursor=0&limit=50`,
-          { headers: window.headers },
+          { headers: window.headers, signal: controller.signal },
         );
         const page: unknown = await read.json();
         const turns = isRecord(page) && Array.isArray(page.turns) ? page.turns : [];
@@ -279,7 +286,13 @@ try {
   }
   console.log(JSON.stringify({ standInsLeft: standIns().length }));
 } finally {
-  for (const { pid } of standIns()) {
+  let left: ReadonlyArray<{ readonly pid: number }> = [];
+  try {
+    left = standIns();
+  } catch {
+    // A listing that cannot finish still leaves the folder to remove below.
+  }
+  for (const { pid } of left) {
     try {
       process.kill(pid, "SIGKILL");
     } catch {
@@ -329,7 +342,10 @@ function percent(cpu: number, elapsed: number): number {
 
 function ps(field: string, pid: number): string | undefined {
   try {
-    return execFileSync("/bin/ps", ["-o", field, "-p", String(pid)], { encoding: "utf8" }).trim();
+    return execFileSync("/bin/ps", ["-o", field, "-p", String(pid)], {
+      encoding: "utf8",
+      timeout: STEP_TIMEOUT_MS,
+    }).trim();
   } catch {
     return undefined;
   }
@@ -347,6 +363,7 @@ function standIns(): ReadonlyArray<{ readonly pid: number }> {
   return execFileSync("/bin/ps", ["-axo", "pid=,command="], {
     encoding: "utf8",
     maxBuffer: 1 << 26,
+    timeout: STEP_TIMEOUT_MS,
   })
     .split("\n")
     .filter((line) => line.includes(`${claude} `) || line.endsWith(claude))
