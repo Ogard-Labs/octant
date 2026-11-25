@@ -2553,7 +2553,69 @@ device (maintainer decision, 2026-11-12; not built yet: today a paired device is
 refused both, because the list names folders on this computer and removal
 deletes from its disk). The receipt's
 `cleanup-pending` and `removed` states record each removal, as they do for the
-other cleanup callers.
+other cleanup callers. Cleanup on archive is on unless a person turns it off in
+Settings › Code › Worktrees.
+
+_Naming and restorable cleanup (maintainer decision, 2026-11-25)._ A new managed
+worktree's delivery branch is a configurable prefix (`octant/` unless changed)
+and either a short id, the default, or a slug of the person's own prompt. The
+slug is derived on this computer by `deriveDeliveryBranch` in the domain: words
+only, at most 40 characters, with credential-shaped text, file paths, protected
+names (`.env`, `.ssh`, `id_rsa` and the like) and long key-shaped words left
+out, numbered (`-2`, `-3`) when a branch of that name, or one above or below it,
+exists (compared without case), never the base branch, and always a valid Git
+ref (a prefix that is not one is ignored). The composer shows that name in
+Worktree options before Send, from the branches the host listed, and sends
+exactly it. A model is asked for words only when the person presses **Suggest
+name**: `suggest-code-worktree-branch` carries the draft text and the model the
+composer has selected, and nothing else about the Project or checkout. The host
+redacts and bounds the text (2,000 characters), checks the Project's provider
+rules, sign-in and spend ceilings for that Project (the request is not a turn
+and is reserved against token ceilings as 4,000 tokens, or refused where a
+monetary ceiling cannot price it), runs one short request, and reduces the reply
+with the same word rules. A refused, failed or outdated answer (the draft, the
+Project or the model changed, or the person typed a name) changes nothing, and
+the local name stays. A suggestion is not yet recorded on a thread's usage
+ledger, since the thread does not exist. A device the host's own person paired
+may ask for one; a hub-introduced or agent-gated caller may not. The delivery
+branch of a worker a coordinator starts takes the same prefix; follow-up,
+checkpoint and other host-made threads keep `octant/<short id>`.
+
+A managed worktree folder can also be removed so that it can be brought back
+(`ManagedWorktreeReclaimService`). It runs for a person's choices in
+`worktrees.cleanup`: **inactivity** (a number of days without a turn or change,
+off by default; open and archived threads alike) and **merged** (a day after the
+last activity, once the commit is pushed or merged, off by default). With
+neither on the host removes nothing. The service removes a folder only when all
+of these hold, each read fresh from the server: the receipt is Octant's own and
+`ready` (or an interrupted restorable cleanup of the same record); the thread
+and checkout it names are the host's and the folder is the one derived for that
+thread; the repository identity, branch and head match; the inventory is
+unambiguous (not locked, prunable or detached); no turn is starting, running or
+waiting on the person, checked before and again after the receipt leaves `ready`;
+the folder is clean; and it holds nothing a branch cannot give back, meaning no
+untracked file, ignored file or empty folder (read without running anything the
+repository configured; a repository whose config names a filter command, or a
+Git port that cannot look, is refused). It uses `git worktree remove` without
+force, never deletes a branch, and never releases checkpoint refs, so the
+thread's history and checkpoints survive. The receipt records the branch and
+commit (`reclaim`) when the cleanup starts and ends `reclaimed`; `cleanup-pending`
+with a record is an interrupted restorable cleanup, which the sweep resumes while
+its choice still stands, or returns to a working checkout when it does not, and
+which the plain cleanup refuses to finish as a removal. The checkout root
+resolves only for a `ready` receipt, so a thread takes no turn while its cleanup
+is under way, once it is cleaned up, and while a restore is under way. **Restore
+worktree** (Settings › Code › Worktrees › Cleaned-up worktrees) recreates the
+folder with `git worktree add` on the recorded branch and makes the receipt
+`ready` only after the new folder reports that branch and commit; a branch that
+moved or was deleted, a branch another worktree holds, or a folder that is
+already there refuses it, and a folder that does not match is taken away again.
+A restore a restart interrupted resumes the same way. The setup recipe is not
+run again by a restore; it stays under its existing explicit recovery controls.
+Listing and restoring follow the archived list's admission: a window on this
+computer, or a device the host's own person paired. No new journal event is
+involved: the choices ride on the Code settings event and the record lives in
+the receipt.
 
 _Branch naming (maintainer decision, 2026-11-25)._ A new managed worktree's
 delivery branch is a configurable prefix (`octant/` unless changed in Settings ›
