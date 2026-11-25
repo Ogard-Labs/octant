@@ -260,9 +260,9 @@ import type { AutomationWiring } from "./automation";
 import type { RoutesWiring } from "./routes";
 import { HUB_ACT_WITHDRAWN_REASON } from "../remoteCredentialLifecycleService";
 
-/** How often a hub member looks for the hub; the failover time itself is the hub's setting in the roster. */
 /** How long a thread purge waits for a worktree cleanup or restore before it fails and is tried again. */
 const PURGE_RECEIPT_WAIT_MS = 30_000;
+/** How often a hub member looks for the hub; the failover time itself is the hub's setting in the roster. */
 const FAILOVER_LOOK_MS = 15_000;
 /** How often the hub looks for an occurrence to wake a spoke for, and a spoke for a changed routine time to report. */
 const WAKE_LOOK_MS = 15_000;
