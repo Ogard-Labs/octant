@@ -921,7 +921,9 @@ function ProviderRow(props: ProviderRowProps) {
   const isGeminiImage = props.instance.driverKind === "gemini-native-image";
   const isBflImage = props.instance.driverKind === "bfl-image";
   const isIdeogramImage = props.instance.driverKind === "ideogram-image";
-  const isImageProfile = isOpenAiImage || isGeminiImage || isBflImage || isIdeogramImage;
+  const isOutsideImage = props.instance.driverKind === "outside-image";
+  const isImageProfile =
+    isOpenAiImage || isGeminiImage || isBflImage || isIdeogramImage || isOutsideImage;
   // A comparison on the instance itself, so it narrows the instance's configuration.
   const isVideoProfile =
     props.instance.driverKind === "gemini-video" ||
@@ -935,13 +937,14 @@ function ProviderRow(props: ProviderRowProps) {
       ? props.instance
       : undefined;
   const usesCredential =
-    outsideInstance?.configuration.key !== undefined ||
-    isHttp ||
-    isAnthropicHttp ||
-    isFoundry ||
-    isMediaProfile ||
-    (isClaude && props.instance.configuration.authentication !== "subscription") ||
-    acpInstance?.configuration.authentication === "api-key";
+    outsideInstance !== undefined
+      ? outsideInstance.configuration.key !== undefined
+      : isHttp ||
+        isAnthropicHttp ||
+        isFoundry ||
+        isMediaProfile ||
+        (isClaude && props.instance.configuration.authentication !== "subscription") ||
+        acpInstance?.configuration.authentication === "api-key";
   const browserClaudeKeySetup = isClaude && usesCredential && !props.credentialManagementAvailable;
   const credential = useCredentialStatus(props, !usesCredential);
   const setupGuidance = guidance(

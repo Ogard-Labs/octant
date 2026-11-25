@@ -878,6 +878,52 @@ describe("an outside image driver's later fixes", () => {
     await vi.waitFor(() => expect(streamCancelled).toBe(true));
   });
 
+  it("accepts a complete SSE data: URL with no space after the colon and refuses an unterminated one", async () => {
+    const named = "https://cdn.images.example.test/out/no-space.png";
+    const imageFetch = vi.fn(() => new Response(png, { status: 200 }));
+    for (const [payload, expectedStatus] of [
+      [`data:${named}\n\n`, "completed"],
+      [`data:${named}`, "failed"],
+    ] as const) {
+      let resolveChunkSeen: (() => void) | undefined;
+      const chunkSeen = new Promise<void>((resolve) => {
+        resolveChunkSeen = resolve;
+      });
+      const run = harness({
+        handlers: {
+          ...imageHandlers,
+          "image/generate": async (_params, context) => {
+            void context.http({
+              requestId: context.id,
+              url: "https://images.example.test/v1/stream",
+              method: "POST",
+              auth: { header: "authorization", scheme: "Bearer" },
+            });
+            await chunkSeen;
+            return { status: "completed", images: [{ url: named }] };
+          },
+        },
+        onHttpChunk: () => resolveChunkSeen?.(),
+        providerResponse: () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode(payload));
+              },
+            }),
+            { status: 200, headers: { "content-type": "text/event-stream" } },
+          ),
+        imageFetch,
+      });
+      const job = await run.service.whenTerminal((await run.enqueue({})).id);
+      expect(job.status).toBe(expectedStatus);
+      if (expectedStatus === "failed") {
+        expect(job.failure?.category).toBe("unauthorized");
+      }
+    }
+    expect(imageFetch).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses a URL prefix that has not yet been delimited in an open stream", async () => {
     const prefix = "https://cdn.images.example.test/out/part";
     const imageFetch = vi.fn(() => new Response(png, { status: 200 }));

@@ -285,9 +285,10 @@ async function executeHostImageGeneration(
   if ("error" in suggested) return { status: "refused", error: suggested.error };
 
   // A remembered model is not permission to share these particular images.
+  const keptChoice = needsReferences ? undefined : options.port.remembered();
   const unasked = imageGenerationWithoutAsking({
     profiles,
-    kept: needsReferences ? undefined : options.port.remembered(),
+    kept: keptChoice,
     fullAccess: !needsReferences && options.port.fullAccess?.() === true,
     askAgain: options.port.asksAgain?.() === true,
     defaultProfileInstanceId: options.port.defaultProfileInstanceId?.(),
@@ -298,8 +299,15 @@ async function executeHostImageGeneration(
   } else {
     // A kept choice the host can no longer generate with (its profile was
     // turned off or the model removed) is dropped and the person asked
-    // again, never swapped silently for another model.
-    if (unasked.keptUnavailable) await options.port.forget();
+    // again, never swapped silently for another model. If only this job's
+    // reference size excluded an otherwise available outside profile, ask
+    // without erasing the saved choice for future generations.
+    if (
+      unasked.keptUnavailable &&
+      (keptChoice === undefined || !isEligibleChoice(baseProfiles, keptChoice))
+    ) {
+      await options.port.forget();
+    }
     if (options.port.unattended === true) {
       return {
         status: "refused",

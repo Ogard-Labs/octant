@@ -1168,5 +1168,52 @@ describe("createImageAgentTools", () => {
     ).toMatchObject({
       outcome: { status: "generate", profileInstanceId: profileId, modelId: "gpt-image-2" },
     });
+
+    // A large parent-only revision asks without erasing a remembered outside choice.
+    const completed = job("completed");
+    const firstArtifact = completed.artifacts[0];
+    if (firstArtifact === undefined) throw new Error("Expected completed job artifact.");
+    const bigParentJob: ImageJob = {
+      ...completed,
+      artifacts: [{ ...firstArtifact, size: 3_000_000 }],
+    };
+    const forget = vi.fn();
+    const enqueue = vi.fn(async () => job());
+    const askRevision = vi.fn(async () => ({ status: "cancelled" as const }));
+    const rememberedOutside: ImageGenerationChoice = {
+      profileInstanceId: outsideId,
+      modelId: "outside-edit" as never,
+    };
+    const revisionTools = createImageAgentTools({
+      threadKind: "chat-thread",
+      scopeId,
+      port: {
+        listInstances: () => [outside, imageProfile()],
+        admitsOutsideImageDriver: () => true,
+        readImageGenerationCustomSources: () => [],
+        enqueue,
+        listJobs: () => [bigParentJob],
+        ask: askRevision,
+        remembered: () => rememberedOutside,
+        forget,
+      },
+    });
+    const declined = await call(revisionTools, {
+      prompt: "Make it brighter",
+      parentAttachmentId,
+    });
+    expect(declined.result).toMatchObject({ status: "cancelled" });
+    expect(askRevision).toHaveBeenCalledOnce();
+    expect(forget).not.toHaveBeenCalled();
+
+    // A later prompt-only generation still uses the remembered outside choice without asking.
+    await call(revisionTools, { prompt: "A quiet harbor" });
+    expect(askRevision).toHaveBeenCalledOnce();
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileInstanceId: outsideId,
+        modelId: "outside-edit",
+      }),
+    );
   });
 });
