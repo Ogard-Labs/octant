@@ -27,7 +27,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
-import type { RemoteProductClients } from "./remoteProductClients";
+import { canvasClientFor, type RemoteProductClients } from "./remoteProductClients";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import {
   ComposerStashScopeContext,
@@ -77,7 +77,17 @@ export interface RemoteWorkspaceProps {
  * session; only the thread list around it is this file's own, because the
  * desktop's sidebar is bound to a window the browser does not have.
  */
-export function RemoteWorkspace(props: RemoteWorkspaceProps) {
+export function RemoteWorkspace(rawProps: RemoteWorkspaceProps) {
+  // The host's own person's Canvas controls ride on the Canvas client only for
+  // a session that acts as that person; every surface below reads this one.
+  const clients = useMemo(
+    () => ({
+      ...rawProps.clients,
+      canvas: canvasClientFor(rawProps.clients, rawProps.actsAsHostPerson === true),
+    }),
+    [rawProps.clients, rawProps.actsAsHostPerson],
+  );
+  const props = useMemo(() => ({ ...rawProps, clients }), [rawProps, clients]);
   const replyDetail = useRemoteReplyDetail(
     props.clients.replyDetail,
     props.mode,

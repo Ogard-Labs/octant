@@ -92,6 +92,56 @@ import { platformPasskeys } from "../host/ownerPasskey";
 import { runProviderOAuthCommand } from "../providers/providerOAuthClient";
 import type { ProviderOAuthCommand } from "../providers/ProviderOAuthSignIn";
 
+/**
+ * What the host takes on a Canvas only from its own person, at a window or on
+ * a device that person paired: the network switch, public link review, export
+ * approval, comments and the Project design-system switch. The folder picker
+ * is the host's own native dialog, so a browser is never offered it.
+ */
+const PERSON_CANVAS_CONTROLS = [
+  "networkAccess",
+  "setNetworkAccess",
+  "renewNetworkPage",
+  "exportOffers",
+  "prepareExport",
+  "decideExport",
+  "dismissExportNotice",
+  "revokePublicShare",
+  "publicLinkSettings",
+  "setPublicLinkSettings",
+  "comments",
+  "comment",
+  "listDesignSystems",
+  "applyDesignSystem",
+] as const;
+
+export type PersonPairedCanvasControls = Pick<
+  CanvasClient,
+  (typeof PERSON_CANVAS_CONTROLS)[number]
+>;
+
+function pickPersonCanvasControls(canvas: CanvasClient): PersonPairedCanvasControls {
+  return Object.fromEntries(
+    PERSON_CANVAS_CONTROLS.flatMap((key) => {
+      const method = canvas[key];
+      return method === undefined ? [] : [[key, method]];
+    }),
+  ) as PersonPairedCanvasControls;
+}
+
+/**
+ * The Canvas client a session is offered: the whitelist every paired browser
+ * reads, and the host person's controls only when the host says this browser
+ * acts as that person. The host refuses them to any other session regardless.
+ */
+export function canvasClientFor(
+  clients: Pick<RemoteProductClients, "canvas" | "canvasHostPerson">,
+  actsAsHostPerson: boolean,
+): RemoteProductClients["canvas"] {
+  if (!actsAsHostPerson) return clients.canvas;
+  return { ...clients.canvas, ...clients.canvasHostPerson };
+}
+
 export interface RemoteProductClients {
   readonly conversationInputs?: ConversationInputClient;
   readonly serviceOffers?: ServiceOfferClient;
@@ -118,6 +168,11 @@ export interface RemoteProductClients {
    * a device its own person paired; the shell offers it to no other session.
    */
   readonly canvasImportHtml: NonNullable<CanvasClient["importHtml"]>;
+  /**
+   * The rest of what the host takes on a Canvas from its own person; the
+   * shell offers it to no other session, and the host refuses it to them.
+   */
+  readonly canvasHostPerson: PersonPairedCanvasControls;
   /** The device's own shell in a local or server Project; the host refuses any other session. */
   readonly projectTerminal: ProjectTerminalClient;
   /** The device's own Private page for a Project; a profile page stays at a window. */
@@ -280,6 +335,7 @@ export function createRemoteProductClients(
     syncStatus: createReplicaSyncStatusClient(port),
     canvasImportHtml: (request) =>
       canvas.importHtml?.(request) ?? Promise.reject(new Error("Import is unavailable.")),
+    canvasHostPerson: pickPersonCanvasControls(canvas),
     projectTerminal: createProjectTerminalClient(port),
     projectBrowser: createProjectBrowserClient(port),
     // Listing what a server serves is a window-on-this-computer read the remote
