@@ -51,6 +51,11 @@ export function useActiveWork(
 
   useEffect(() => {
     const live = readers.current;
+    // An answer from before a computer dropped out is not what it is doing
+    // when it comes back, so it is not shown again while the next read runs.
+    for (const host of hosts) {
+      if (host.reach !== "ready" && host.client !== undefined) lastAnswers.delete(host.client);
+    }
     const wanted = new Map(
       hosts.flatMap((host) =>
         host.reach === "ready" && host.client !== undefined

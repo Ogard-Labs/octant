@@ -82,6 +82,12 @@ export function RemoteShellView(props: RemoteShellViewProps) {
     readonly count: number;
   }>();
   const connected = canExecuteRemoteProductMutation(state);
+  // When the session was last ready, so active work can say how long ago the
+  // host last answered once it stops.
+  const [lastReadyAt, setLastReadyAt] = useState<string>();
+  useEffect(() => {
+    if (state.kind === "ready") setLastReadyAt(new Date().toISOString());
+  }, [state.kind]);
   // The host can change device access without replacing the session.
   const connection = props.bridge.connection();
   const sessionId = state.kind === "ready" ? connection?.session()?.sessionId : undefined;
@@ -249,6 +255,8 @@ export function RemoteShellView(props: RemoteShellViewProps) {
             <LazyRemoteActiveWork
               bridge={props.bridge}
               connected={connected}
+              {...(lastReadyAt === undefined ? {} : { lastReadyAt })}
+              reach={activeWorkReach(state.kind)}
               hostId={hosts[0]?.hostId ?? "paired-browser"}
               hostName={hosts[0]?.displayName ?? "Paired host"}
               onOpen={(thread) => {
@@ -369,6 +377,22 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       </OctantButton>
     </section>
   );
+}
+
+/** The browser's session, in the words active work uses for a computer. */
+function activeWorkReach(kind: string): "ready" | "connecting" | "refused" | "unreachable" {
+  switch (kind) {
+    case "ready":
+      return "ready";
+    case "unauthorized":
+      return "refused";
+    case "stale":
+    case "incompatible":
+    case "unavailable":
+      return "unreachable";
+    default:
+      return "connecting";
+  }
 }
 
 function ConnectionStatusLine(props: { readonly status: ConnectionStatus }) {

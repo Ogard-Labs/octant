@@ -188,8 +188,9 @@ export function chatActiveWork(
 }
 
 /**
- * A subagent's state, read as the Work board reads a child run: queued,
- * starting, and running are In progress, and one waiting is a wait.
+ * A subagent's own state: queued, starting, and running are In progress, and
+ * one waiting is a wait on the person. (The Work board counts a waiting child
+ * toward its parent's activity; a row of its own says what it waits on.)
  */
 export function subagentBoard(status: AgentRunLifecycleStatus): ThreadBoardDerivation {
   return deriveThreadBoardStatus({

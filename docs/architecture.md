@@ -17382,8 +17382,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   carries. Linked pull requests and issues are identities only, because a title
   on a forge is text an outsider may have written. A coordinator is derived
   without delivery evidence; a Chat thread is a row only while it runs or waits;
-  a subagent is a row only under a thread already listed, its state read as the
-  Work board reads a child run, and its task is named only to a local window the
+  a subagent is a row only under a thread already listed, In progress while
+  queued, starting or running and Waiting while it waits, and its task is named only to a local window the
   AgentRun authorization admits, the same one the Agents center applies. A Chat
   thread's subagents are listed to such a window alone. The read takes a local
   window and any paired device the overview read admits (one the person paired

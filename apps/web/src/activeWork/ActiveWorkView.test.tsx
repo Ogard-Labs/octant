@@ -150,6 +150,17 @@ describe("the active-work overview", () => {
     }
   });
 
+  it("shows no rows from before a computer dropped out while it is read again", async () => {
+    const mini = client(answered([row({ title: "Before" })]));
+    const { rerender } = render(view([host({ hostId: "mini", client: mini })]));
+    expect(await screen.findByText("Before")).toBeVisible();
+    rerender(view([host({ hostId: "mini", client: mini, reach: "unreachable" })]));
+    mini.read.mockImplementation(() => new Promise(() => undefined));
+    rerender(view([host({ hostId: "mini", client: mini, revision: 1 })]));
+    expect(screen.queryByText("Before")).toBeNull();
+    expect(screen.getByText("Reading active work…")).toBeVisible();
+  });
+
   it("tells an older Octant and a refusal apart from having no work", async () => {
     render(
       view([
