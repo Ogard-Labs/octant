@@ -291,12 +291,15 @@ export class PersonMemorySweep {
         const ref = { mode: source.mode, threadId: decodeMentionableThreadId(thread.id) };
         if (store.leavesNoTrace(ref)) continue;
         // A thread put away that was learned from at or after it ended has
-        // nothing newer to read; one reopened and put away again does.
+        // nothing newer to read, unless its last message came after the one
+        // learned from: a reply stored after the thread ended may have read it
+        // before the person's last words. One reopened and put away again does.
         const learnedBefore = store.learnedThrough(ref);
         if (
           thread.completedAt !== undefined &&
           learnedBefore !== undefined &&
-          learnedBefore.learnedAt >= thread.completedAt
+          learnedBefore.learnedAt >= thread.completedAt &&
+          (source.peek(thread.id)?.lastMessageAt ?? "") <= learnedBefore.at
         ) {
           continue;
         }

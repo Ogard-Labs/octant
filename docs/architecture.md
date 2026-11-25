@@ -2295,8 +2295,10 @@ except where a bullet says otherwise.
   thread, in any Project, mode, or provider, does. The tool step in the thread
   is the record of what was stored.
 - **What counts as the person's words.** A composer send claims
-  `typedByPerson` when the exact text it sends is what the person's own input
-  last left in a composer (typing, paste, cut, undo, dictation). A button, a
+  `typedByPerson` when the exact text it sends is one the person's own input
+  recently left in a composer in that window (typing, paste, cut, undo,
+  dictation; the last 16 are kept). Text a button writes that is the same as one
+  of those counts too, because the person did type those words. A button, a
   template, a recipe, a suggestion, or a prefilled draft (a handoff's, for
   example) writes text without that input, so it counts only once the person
   changes it, and then the whole text counts, including the stretch the button

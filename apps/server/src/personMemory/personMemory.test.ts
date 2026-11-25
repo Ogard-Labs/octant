@@ -2079,6 +2079,35 @@ describe("learning from threads still open", () => {
     expect(h.store.learnedThrough(ref())).toBeUndefined();
   });
 
+  it("learns what was said and put away while an earlier call for the same thread was still running", async () => {
+    const thread = open();
+    const h = begin([thread]);
+    h.advance(QUIET);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const slow = h.sweepWith({
+      complete: async () => {
+        await held;
+        return h.reply();
+      },
+    });
+    const running = slow.pass();
+    await Promise.resolve();
+    // The person writes once more and puts the thread away before the reply is stored.
+    thread.personMessages = [...thread.personMessages, "Use semicolons."];
+    thread.messageTimes = [MSG_AT, "2026-11-01T11:12:00.000Z"];
+    thread.completedAt = "2026-11-01T11:13:00.000Z";
+    h.advance("2026-11-01T11:20:00.000Z");
+    release();
+    await running;
+
+    h.advance("2026-11-01T12:00:00.000Z");
+    expect((await h.sweep.pass()).map((result) => result.outcome)).toEqual(["remembered"]);
+    expect(h.prompts.at(-1)).toContain("Use semicolons.");
+    // And it is not read again after that.
+    expect(await h.sweep.pass()).toEqual([]);
+  });
+
   it("learns from threads put away first, makes at most ten calls a pass, and each thread at most once in six hours", async () => {
     const finished: FakeThread[] = Array.from({ length: 4 }, (_, index) => ({
       id: `aaaaaaaa-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`,
