@@ -1081,7 +1081,11 @@ describe("carried images in the store", () => {
   });
 
   /** A design that shows the first picture, and an image block for each other one. */
-  function pictureDocument(pictures: ReadonlyArray<Picture>, text = "Hello there") {
+  function pictureDocument(
+    pictures: ReadonlyArray<Picture>,
+    // Text of several bytes a character, so a range counted in characters misses.
+    text = 'Blåbær "quoted" 🫐 \\ and a line\nbreak',
+  ) {
     const [first, ...others] = pictures.map((each) => each.entry.imageRef);
     return {
       ...documentWith([
@@ -1229,12 +1233,113 @@ describe("carried images in the store", () => {
   test("reads no image for a reader without the link's password or for an image the share lacks", async () => {
     start();
     const image = picture("image-1", 1);
-    const created = await createPictures([image], { password: "correct horse" });
-    const read = await shareBytesRead(async () => {
-      expect((await fetch(viewerImage(created.shareId, image.sha256))).status).toBe(404);
-      expect((await fetch(viewerImage(created.shareId, "0".repeat(64)))).status).toBe(404);
+    const locked = await createPictures([image], { password: "correct horse" });
+    const open = await createPictures([image]);
+    for (const [id, sha256] of [
+      [locked.shareId, image.sha256],
+      [open.shareId, "0".repeat(64)],
+    ] as const) {
+      const read = await shareBytesRead(async () => {
+        expect((await fetch(viewerImage(id, sha256))).status).toBe(404);
+      });
+      expect(read).toBeLessThan(8 * 1024);
+    }
+  });
+
+  test("closes the share file after every answer", async () => {
+    start();
+    const image = picture("image-1", 1);
+    const created = await createPictures([image]);
+    const path = sharePath(created.shareId);
+    const opened = spyOn(fs, "openSync");
+    const closed = spyOn(fs, "closeSync");
+    try {
+      const store = new ShareStore(dataDir, { clock: () => now, maxTotalBytes: 1_000_000_000 });
+      opened.mockClear();
+      closed.mockClear();
+      store.withImages(created.shareId, (share) => share.images[0]?.read());
+      expect(() =>
+        store.withImages(created.shareId, () => {
+          throw new Error("The answer failed.");
+        }),
+      ).toThrow("The answer failed.");
+      writeFileSync(path, JSON.stringify(JSON.parse(readFileSync(path, "utf8")), null, 2));
+      store.withImages(created.shareId, (share) => share.images[0]?.read());
+      const files = opened.mock.results.flatMap((result) =>
+        result.type === "return" ? [result.value] : [],
+      );
+      expect(files.length).toBeGreaterThanOrEqual(3);
+      expect(closed.mock.calls.map(([fd]) => fd)).toEqual(files);
+    } finally {
+      opened.mockRestore();
+      closed.mockRestore();
+    }
+  });
+
+  test("reads an image from the revision it was opened at when an update lands before the read", async () => {
+    start();
+    const before = picture("image-1", 1);
+    const after = picture("image-1", 2, 300 * 1024);
+    const created = await createPictures([before]);
+    const store = new ShareStore(dataDir, { clock: () => now, maxTotalBytes: 1_000_000_000 });
+    const document = decodeCanvasPublicShareDocument(pictureDocument([after]));
+    const bytes = store.withImages(created.shareId, (share) => {
+      store.replace(created.shareId, (current) => ({ ...current, document }));
+      return share.images[0]?.read();
     });
-    expect(read).toBeLessThan(16 * 1024);
+    expect(bytes?.equals(before.bytes)).toBe(true);
+    expect(
+      store.withImages(created.shareId, (share) => share.images[0]?.read())?.equals(after.bytes),
+    ).toBe(true);
+  });
+
+  test("picks the same image whichever layout holds it when block ids and digests repeat", async () => {
+    start();
+    const [first, second] = [picture("image-1", 1), picture("image-2", 2)];
+    // Two entries under one digest, and two designs under one block id: the
+    // first entry and the first design count.
+    const twin = { ...second.entry, imageRef: "image-3", sha256: first.sha256 };
+    const images = [first.entry, second.entry, twin];
+    const named = (imageRef: string) =>
+      design({
+        frames: [{ frameId: "home", title: "Home", html: '<img src="octant-asset:hero">' }],
+        assets: [{ assetId: "hero", imageRef }],
+      });
+    const document = {
+      ...documentWith([named("image-3"), named("image-2"), imageBlock("image-1")]),
+      images,
+    };
+    const created = await create({ ...createBody(), document });
+    const inFrame = await frameImage(created);
+    const served = async () => ({
+      viewer: await (await fetch(viewerImage(created.shareId, first.sha256))).bytes(),
+      frame: await (await fetch(inFrame)).bytes(),
+      otherDesign: (await fetch(inFrame.replace(first.sha256, second.sha256))).status,
+    });
+    const indexed = await served();
+    expect(first.bytes.equals(indexed.viewer)).toBe(true);
+    expect(second.bytes.equals(indexed.frame)).toBe(true);
+    expect(indexed.otherDesign).toBe(404);
+    storeAsEarlierVersion(created.shareId);
+    expect(await served()).toEqual(indexed);
+  });
+
+  test("serves no image of a share whose document the service can no longer read", async () => {
+    start();
+    const image = picture("image-1", 1);
+    const created = await createPictures([image]);
+    const path = sharePath(created.shareId);
+    // The same length, so the image's recorded range still fits.
+    writeFileSync(
+      path,
+      readFileSync(path, "utf8").replace(
+        "canvas-public-share-document",
+        "canvas-public-share-DOCUMENT",
+      ),
+    );
+    serve();
+    expect((await fetch(`${service?.publicUrl}/s/${created.shareId}`)).status).toBe(404);
+    expect((await fetch(viewerImage(created.shareId, image.sha256))).status).toBe(404);
   });
 
   test("serves a frame only the images its own design names", async () => {
@@ -1320,7 +1425,7 @@ describe("carried images in the store", () => {
   test("stores a share the earlier version still reads whole, images and text alike", async () => {
     start();
     const pictures = [picture("image-1", 1), picture("image-2", 2)] as const;
-    const document = pictureDocument(pictures, 'Blåbær "quoted" 🫐 \\ and a line\nbreak');
+    const document = pictureDocument(pictures);
     const created = await create({ ...createBody(), document });
     // The earlier version parses the file as JSON, decodes `document`, and
     // ignores keys it does not know.
@@ -1422,24 +1527,33 @@ describe("carried images in the store", () => {
     expect((await fetch(viewerImage(created.shareId, kept.sha256))).status).toBe(200);
   });
 
-  test("serves no image from a share file whose image index does not fit it", async () => {
+  test("never serves other bytes as an image when its share file was changed by hand", async () => {
     start();
     const image = picture("image-1", 1);
     const created = await createPictures([image]);
     const path = sharePath(created.shareId);
     const whole = readFileSync(path, "utf8");
+    const served = async () => {
+      const response = await fetch(viewerImage(created.shareId, image.sha256));
+      return response.status === 200 ? image.bytes.equals(await response.bytes()) : response.status;
+    };
+    const from = Number(/"start":(\d+)/.exec(whole)?.[1]);
+    // A range past the end, a longer document, and a reformatted file are read whole.
+    writeFileSync(
+      path,
+      whole.replace(`"start":${String(from)}`, `"start":${"9".repeat(String(from).length)}`),
+    );
+    expect(await served()).toBe(true);
+    writeFileSync(path, whole.replace("Quarterly plan", "Quarterly plan, longer"));
+    expect(await served()).toBe(true);
+    writeFileSync(path, JSON.stringify(JSON.parse(whole), null, 2));
+    expect(await served()).toBe(true);
+    // A range inside the file that is not a whole quoted text is no image.
+    writeFileSync(path, whole.replace(`"start":${String(from)}`, `"start":${String(from - 1)}`));
+    expect(await served()).toBe(404);
     // A truncated file is no share at all.
     writeFileSync(path, whole.slice(0, -100_000));
-    expect((await fetch(viewerImage(created.shareId, image.sha256))).status).toBe(404);
-    // A file reformatted by hand is read whole instead.
-    writeFileSync(path, JSON.stringify(JSON.parse(whole), null, 2));
-    const response = await fetch(viewerImage(created.shareId, image.sha256));
-    expect(Buffer.from(await response.arrayBuffer()).equals(image.bytes)).toBe(true);
-    // So is one whose recorded range reaches past its end.
-    const from = /"start":(\d+)/.exec(whole)?.[1] ?? "";
-    writeFileSync(path, whole.replace(`"start":${from}`, `"start":${"9".repeat(from.length)}`));
-    const ranged = await fetch(viewerImage(created.shareId, image.sha256));
-    expect(Buffer.from(await ranged.arrayBuffer()).equals(image.bytes)).toBe(true);
+    expect(await served()).toBe(404);
   });
 
   test("refuses image addresses whose id or digest is not one the service mints", async () => {
@@ -1458,8 +1572,11 @@ describe("carried images in the store", () => {
     for (const digest of ["..%2f..%2fframe-key", image.sha256.toUpperCase(), "0"]) {
       expect((await fetch(viewerImage(created.shareId, digest))).status).toBe(404);
     }
+    writeFileSync(join(dataDir, "shares", "short.json"), readFileSync(sharePath(created.shareId)));
     const store = new ShareStore(dataDir, { clock: () => now, maxTotalBytes: 1_000_000_000 });
-    expect(store.withImages("../outside", () => "read")).toBeUndefined();
+    for (const id of ["../outside", "../shares/short", "short"]) {
+      expect(store.withImages(id, () => "read")).toBeUndefined();
+    }
   });
 });
 

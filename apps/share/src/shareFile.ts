@@ -1,6 +1,5 @@
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import {
-  CANVAS_SHARE_SCHEMA_VERSION,
   CanvasDesignAssetMediaType,
   type CanvasPublicShareDocument,
   type CanvasShareImage,
@@ -38,8 +37,6 @@ interface ImageRange {
 type DesignImages = readonly [string, ReadonlyArray<number>];
 
 interface ImageIndex {
-  /** The share version the document is written in; a later one is not read here. */
-  readonly shareSchemaVersion: number;
   readonly bodyBytes: number;
   readonly images: ReadonlyArray<ImageRange>;
   readonly designs: ReadonlyArray<DesignImages>;
@@ -120,7 +117,6 @@ export function encodeShareFile<T extends { readonly document: CanvasPublicShare
   }
   append("}");
   const imageIndex: ImageIndex = {
-    shareSchemaVersion: document.shareSchemaVersion,
     bodyBytes,
     images: ranges,
     designs: designImages(document),
@@ -162,10 +158,6 @@ function readDesign(value: unknown, images: number): DesignImages | undefined {
 /** The index, or undefined unless all of it fits a file of `bodyBytes` past the head. */
 function readImageIndex(value: unknown, bodyBytes: number): ImageIndex | undefined {
   if (!isRecord(value) || value.bodyBytes !== bodyBytes) return undefined;
-  const { shareSchemaVersion } = value;
-  if (!isCount(shareSchemaVersion) || shareSchemaVersion > CANVAS_SHARE_SCHEMA_VERSION) {
-    return undefined;
-  }
   if (!Array.isArray(value.images) || !Array.isArray(value.designs)) return undefined;
   const listedImages: ReadonlyArray<unknown> = value.images;
   const listedDesigns: ReadonlyArray<unknown> = value.designs;
@@ -177,7 +169,7 @@ function readImageIndex(value: unknown, bodyBytes: number): ImageIndex | undefin
     if (design === undefined) return undefined;
     designs.push(design);
   }
-  return { shareSchemaVersion, bodyBytes, images, designs };
+  return { bodyBytes, images, designs };
 }
 
 function readBytes(fd: number, position: number, length: number): Buffer | undefined {

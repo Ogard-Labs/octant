@@ -182,6 +182,13 @@ export class ShareStore {
   readonly #clock: Clock;
   readonly #randomBytes: RandomBytes;
   readonly #maxTotalBytes: number;
+  /**
+   * The shares whose whole file this process has read or written. Their
+   * images may be served from their heads; any other share's document might
+   * be one this version cannot read, whose page and owner routes answer 404
+   * and 403, so its images must not answer either.
+   */
+  readonly #readable = new Set<string>();
   #totalBytes = 0;
   #frameKey: Buffer | undefined;
   #timer: ReturnType<typeof setInterval> | undefined;
@@ -267,12 +274,12 @@ export class ShareStore {
 
   /**
    * Answers for a live share's images, reading only its terms, its image
-   * index and the images `answer` reads. A share with no such index is read
-   * whole. Undefined when no live share has this id. Images are readable only
-   * inside `answer`.
+   * index and the images `answer` reads. A share with no such index, or one
+   * this process has not read yet, is read whole. Undefined when no live
+   * share has this id. Images are readable only inside `answer`.
    */
   withImages<T>(id: string, answer: (share: ShareImages) => T): T | undefined {
-    if (isShareId(id) && !this.#hasTombstone(id)) {
+    if (isShareId(id) && this.#readable.has(id) && !this.#hasTombstone(id)) {
       const head = withShareHead(this.#sharePath(id), ({ terms: stored, images }) => {
         const terms = readShareTerms(stored);
         // An expired or unreadable share is left to the whole lookup below.
@@ -428,9 +435,13 @@ export class ShareStore {
     try {
       share = readStoredShare(readFileSync(this.#sharePath(id), "utf8"));
     } catch {
+      // No file, or one that cannot be read: the same as no share.
+    }
+    if (share === undefined) {
+      this.#readable.delete(id);
       return undefined;
     }
-    if (share === undefined) return undefined;
+    this.#readable.add(id);
     let counted = 0;
     try {
       const value = Number(readFileSync(this.#viewsPath(id), "utf8"));
@@ -478,12 +489,14 @@ export class ShareStore {
       } satisfies Tombstone),
     );
     rmSync(this.#sharePath(id), { force: true });
+    this.#readable.delete(id);
     rmSync(this.#viewsPath(id), { force: true });
     this.#totalBytes = Math.max(0, this.#totalBytes - share.byteLength);
   }
 
   #writeShare(id: string, share: StoredShare): void {
     this.#writeAtomic(this.#sharePath(id), encodeShareFile(share));
+    this.#readable.add(id);
   }
 
   #writeAtomic(path: string, content: string): void {
