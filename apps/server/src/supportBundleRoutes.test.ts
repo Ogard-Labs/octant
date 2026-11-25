@@ -10,9 +10,11 @@ import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { openSqlite } from "./persistence/sqlitePort";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import {
+  createLoopbackSupportBundleRouteHandler,
   createSupportBundleRouteHandler,
   createSupportBundleSaveRouteHandler,
 } from "./supportBundleRoutes";
+import { categorizeSupportBundleDestination } from "@octant/domain";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const NOW = "2026-10-31T10:00:00.000Z";
@@ -76,11 +78,10 @@ function setup() {
       };
     },
   };
-  // The loopback chain asks the save route first, as the host's wiring does.
+  // The loopback chain is the host's own composition of the two.
   const deviceRoutes = createSupportBundleRouteHandler(dependencies);
   const saveRoutes = createSupportBundleSaveRouteHandler(dependencies);
-  const handler = async (request: Request) =>
-    (await saveRoutes(request)) ?? (await deviceRoutes(request));
+  const handler = createLoopbackSupportBundleRouteHandler(dependencies);
   return {
     handler,
     deviceRoutes,
@@ -155,6 +156,25 @@ describe("support bundle routes", () => {
       .prepare("SELECT payload_json AS payload FROM event_journal WHERE event_name = ?")
       .get("diagnostics.support-bundle-exported@1") as { payload: string };
     expect(JSON.parse(row.payload).receipt.destinationCategory).toBe("desktop");
+  });
+
+  it("still serves `octant diagnostics export` on the loopback chain: the list, then the files under the category it names for its target", async () => {
+    const { handler, connection } = setup();
+    const listing = await handler(
+      call("/api/diagnostics/bundle/preview", { method: "GET", capability }),
+    );
+    expect(listing?.status).toBe(200);
+    const target = join(tmpdir(), "support", "bundle.zip");
+    const category = categorizeSupportBundleDestination(target, "/Users/someone-else");
+    const exported = await handler(
+      call("/api/diagnostics/bundle", { capability, body: { destinationCategory: category } }),
+    );
+    expect(exported?.status).toBe(200);
+    expect(((await exported!.json()) as { kind: string }).kind).toBe("exported");
+    const row = connection
+      .prepare("SELECT payload_json AS payload FROM event_journal WHERE event_name = ?")
+      .get("diagnostics.support-bundle-exported@1") as { payload: string };
+    expect(JSON.parse(row.payload).receipt.destinationCategory).toBe(category);
   });
 
   it("refuses a destination that is a path rather than a category", async () => {

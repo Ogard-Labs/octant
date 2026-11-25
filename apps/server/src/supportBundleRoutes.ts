@@ -251,3 +251,17 @@ export function createSupportBundleRouteHandler(dependencies: SupportBundleRoute
     }
   };
 }
+
+/**
+ * The loopback administration chain's bundle routes: the desktop save first,
+ * then the preview and export a window and the `octant diagnostics` command
+ * (which registers its own window) take.
+ */
+export function createLoopbackSupportBundleRouteHandler(
+  dependencies: SupportBundleRouteDependencies,
+) {
+  const save = createSupportBundleSaveRouteHandler(dependencies);
+  const bundle = createSupportBundleRouteHandler(dependencies);
+  return async (request: Request): Promise<Response | undefined> =>
+    (await save(request)) ?? (await bundle(request));
+}

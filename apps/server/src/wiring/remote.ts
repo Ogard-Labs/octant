@@ -115,8 +115,8 @@ import {
 import { createHostControlRouteHandler } from "../hostControlRoutes";
 import { createPersonQuitRouteHandler } from "../personQuit";
 import {
+  createLoopbackSupportBundleRouteHandler,
   createSupportBundleRouteHandler,
-  createSupportBundleSaveRouteHandler,
 } from "../supportBundleRoutes";
 import { readEventLoopLagCounters } from "../eventLoopLag";
 import { slowStatementTally } from "../persistence/slowStatementLog";
@@ -3037,9 +3037,7 @@ export function wireRemote(deps: RemoteDependencies) {
     }),
   };
   const supportBundleDeviceRoutes = createSupportBundleRouteHandler(supportBundleDependencies);
-  const supportBundleSaveRoutes = createSupportBundleSaveRouteHandler(supportBundleDependencies);
-  const supportBundleRoutes = async (request: Request) =>
-    (await supportBundleSaveRoutes(request)) ?? (await supportBundleDeviceRoutes(request));
+  const supportBundleRoutes = createLoopbackSupportBundleRouteHandler(supportBundleDependencies);
 
   const personQuitRoutes = createPersonQuitRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
