@@ -375,7 +375,7 @@ describe("when a long-lived thread sees newer entries", () => {
                 if (statementProperty !== "get" && statementProperty !== "all") {
                   return typeof member === "function" ? member.bind(statementTarget) : member;
                 }
-                return (...params: ReadonlyArray<unknown>) => {
+                return (...params: Array<unknown>) => {
                   statements.push(sql);
                   for (const row of target
                     .prepare(`EXPLAIN QUERY PLAN ${sql}`)

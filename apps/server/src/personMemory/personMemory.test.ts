@@ -1876,7 +1876,10 @@ describe("where a thread's block is cut, and how a digest is replaced", () => {
     });
     h.advance("2026-11-01T18:00:00.000Z");
     const append = h.journal.append.bind(h.journal);
-    h.journal.append = (request, options) => {
+    h.journal.append = (
+      request: { readonly events: ReadonlyArray<{ readonly eventName: string }> },
+      options?: Parameters<typeof append>[1],
+    ) => {
       if (request.events.some((event) => event.eventName.includes("thread-distilled"))) {
         throw new Error("SQLITE_FULL");
       }
