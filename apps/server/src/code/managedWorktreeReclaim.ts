@@ -610,7 +610,16 @@ export class ManagedWorktreeReclaimService {
       // A restore that was interrupted after Git made the folder: it is
       // trusted only once it matches the record, and is otherwise undone.
       if (receipt.state !== "restoring") return { status: "refused", reason: "path-collision" };
-      return this.#settleRestored(input, receipt, reclaim, placed, observation, signal, retried);
+      return this.#settleRestored(
+        input,
+        receipt,
+        reclaim,
+        placed,
+        observation,
+        signal,
+        retried,
+        false,
+      );
     }
     try {
       if (await this.#filesystem.pathExists(receipt.canonicalWorktreePath, signal)) {
@@ -657,7 +666,16 @@ export class ManagedWorktreeReclaimService {
       // only a checkout that is truly absent goes back to cleaned up.
       const [here] = this.#presentAt(confirmation, receipt);
       if (here !== undefined) {
-        return this.#settleRestored(input, receipt, reclaim, here, observation, signal, retried);
+        return this.#settleRestored(
+          input,
+          receipt,
+          reclaim,
+          here,
+          observation,
+          signal,
+          retried,
+          false,
+        );
       }
       try {
         if (!(await this.#filesystem.pathExists(receipt.canonicalWorktreePath, signal))) {
@@ -679,7 +697,16 @@ export class ManagedWorktreeReclaimService {
     ) {
       return { status: "waiting", receipt };
     }
-    return this.#settleRestored(input, receipt, reclaim, restored, observation, signal, retried);
+    return this.#settleRestored(
+      input,
+      receipt,
+      reclaim,
+      restored,
+      observation,
+      signal,
+      retried,
+      true,
+    );
   }
 
   /**
@@ -694,6 +721,7 @@ export class ManagedWorktreeReclaimService {
     observation: AvailableObservation,
     signal: AbortSignal,
     retried: boolean,
+    createdHere: boolean,
   ): Promise<ManagedWorktreeReclaimResult> {
     const verified = await this.#verifyRestored(
       receipt,
@@ -701,6 +729,7 @@ export class ManagedWorktreeReclaimService {
       target,
       observation.repositoryRoot,
       signal,
+      createdHere,
     );
     if (verified !== "again") return verified;
     return retried ? { status: "waiting", receipt } : this.#restore(input, signal, true);
@@ -1143,6 +1172,7 @@ export class ManagedWorktreeReclaimService {
     target: PresentWorktree,
     repositoryRoot: string,
     signal: AbortSignal,
+    createdHere: boolean,
   ): Promise<ManagedWorktreeReclaimResult | "again"> {
     const listedRight =
       !target.detached &&
@@ -1178,21 +1208,60 @@ export class ManagedWorktreeReclaimService {
       }
       return this.#discardUnsound(receipt, reclaim, repositoryRoot, signal);
     }
-    // Not what was recorded: take the fresh, untouched folder away again and
-    // leave the checkout reclaimed, so no turn runs on the wrong commit.
+    return this.#keepMismatched(receipt, target, repositoryRoot, signal, createdHere);
+  }
+
+  /**
+   * A folder that is not on the recorded branch and commit is never removed on
+   * sight. Git deletes ignored files even without force, and a folder found
+   * here (a restore that was interrupted, then worked in) may hold the
+   * person's. Only the folder this very call made, and only when every file in
+   * it is the commit it is on, is taken away again; any other stays, the
+   * checkout stays cleaned up, and the person is told the folder is in the way.
+   */
+  async #keepMismatched(
+    receipt: ManagedWorktreeReceipt,
+    target: PresentWorktree,
+    repositoryRoot: string,
+    signal: AbortSignal,
+    createdHere: boolean,
+  ): Promise<ManagedWorktreeReclaimResult> {
     try {
-      const removed = await this.#git.removeWorktree(
-        { repositoryRoot, targetPath: receipt.canonicalWorktreePath },
-        this.#boundedSignal(signal),
-      );
-      if (removed.status === "removed") {
-        await this.#receipts.transition(receipt.receiptId, "reclaimed");
-        return { status: "refused", reason: "restore-mismatch" };
+      if (
+        createdHere &&
+        !target.detached &&
+        target.locked === undefined &&
+        target.prunable === undefined &&
+        !isZeroHead(target.head) &&
+        this.#git.readFolderAgainstCommit !== undefined
+      ) {
+        const compared = await this.#git.readFolderAgainstCommit(
+          {
+            repositoryRoot,
+            targetPath: receipt.canonicalWorktreePath,
+            head: target.head,
+          },
+          signal,
+        );
+        if (compared.status === "observed" && compared.matches) {
+          const removed = await this.#git.removeWorktree(
+            { repositoryRoot, targetPath: receipt.canonicalWorktreePath },
+            this.#boundedSignal(signal),
+          );
+          if (removed.status === "removed") {
+            await this.#receipts.transition(receipt.receiptId, "reclaimed");
+            return { status: "refused", reason: "restore-mismatch" };
+          }
+          return { status: "waiting", receipt };
+        }
       }
+      // Kept as found: the cleaned-up checkout stays restorable once the person
+      // moves the folder away.
+      await this.#receipts.transition(receipt.receiptId, "reclaimed");
+      return { status: "refused", reason: "path-collision" };
     } catch {
       return { status: "interrupted", receipt };
     }
-    return { status: "waiting", receipt };
   }
 
   /** The folder is not whole: it goes only when every file in it is the commit's own. */

@@ -778,6 +778,30 @@ describe("managed worktree Node ports", () => {
       expect(await readFile(join(w.created.targetPath, "tracked.txt"), "utf8")).toBe("edited\n");
     });
 
+    it("keeps a folder an interrupted restore made when its branch changed and it holds an ignored file", async () => {
+      const w = await readyWorktree();
+      await committedFile(w);
+      await expect(w.reclaim()).resolves.toMatchObject({ status: "reclaimed" });
+      const repository = await realpath(w.fixture.repository);
+      await w.git("-C", repository, "worktree", "add", w.created.targetPath, "feature/restorable");
+      await w.receipts.transition(w.receiptId, "restoring");
+      // The person moves on in the folder and keeps a local file Git ignores.
+      await w.git("-C", w.created.targetPath, "switch", "-c", "feature/someone-elses");
+      await w.git("-C", w.created.targetPath, "commit", "--allow-empty", "-m", "elsewhere");
+      const exclude = (
+        await w.git("-C", w.created.targetPath, "rev-parse", "--git-common-dir")
+      ).stdout.trim();
+      await writeFile(
+        join(exclude.startsWith("/") ? exclude : join(w.created.targetPath, exclude), "info", "exclude"),
+        ".env\n",
+      );
+      await writeFile(join(w.created.targetPath, ".env"), "SECRET=1\n");
+      await expect(w.restore()).resolves.toEqual({ status: "refused", reason: "path-collision" });
+      expect(await readFile(join(w.created.targetPath, ".env"), "utf8")).toBe("SECRET=1\n");
+      expect(await listed(w)).toContain(w.created.targetPath);
+      expect(await w.state()).not.toBe("ready");
+    });
+
     it("does not call a restored folder ready while it has no index or a lock left, and makes it whole", async () => {
       const w = await readyWorktree();
       const { admin } = await killedAdd(w);

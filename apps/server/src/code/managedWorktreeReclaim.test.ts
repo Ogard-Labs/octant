@@ -87,6 +87,8 @@ async function world(
     restoreFilesFails: false,
     /** Whether a folder Git just made has its index and no lock; see `inspectRestoredFolder`. */
     restoredWhole: true,
+    /** The commit Git's `worktree add` lands on when the branch moved after it was checked. */
+    restoredHead: undefined as string | undefined,
     /** Lets a forced removal of a folder that holds only the commit's files go through. */
     forceOk: false,
     onRemoval: undefined as undefined | ((input: { force?: boolean; overrideLock?: true }) => void),
@@ -233,7 +235,7 @@ async function world(
         }
         state.worktrees.set(input.targetPath, {
           branch: `refs/heads/${input.branch}`,
-          head: state.branchHeads.get(input.branch) ?? head,
+          head: state.restoredHead ?? state.branchHeads.get(input.branch) ?? head,
         });
         state.disk.add(input.targetPath);
         return { status: "created" as const };
@@ -759,12 +761,29 @@ describe("restoring a cleaned worktree", () => {
     await wrong.restore();
     wrong.state.worktrees.set(target, { branch: `refs/heads/${branch}`, head: moved });
     wrong.state.disk.add(target);
+    const removals = wrong.state.calls.filter((call) => call === "removalStarted").length;
+    // A folder found there was not made by this call, so it is kept, never removed.
     await expect(wrong.restore()).resolves.toEqual({
       status: "refused",
-      reason: "restore-mismatch",
+      reason: "path-collision",
     });
-    expect(wrong.state.disk.has(target)).toBe(false);
+    expect(wrong.state.disk.has(target)).toBe(true);
+    expect(wrong.state.calls.filter((call) => call === "removalStarted")).toHaveLength(removals);
     expect((await wrong.current()).state).toBe("reclaimed");
+  });
+
+  it("takes away a folder it made itself on the wrong commit only when it holds nothing but that commit's files", async () => {
+    for (const clean of [true, false]) {
+      const w = await reclaimed();
+      w.state.restoredHead = moved;
+      w.state.folderMatches = clean;
+      await expect(w.restore()).resolves.toEqual({
+        status: "refused",
+        reason: clean ? "restore-mismatch" : "path-collision",
+      });
+      expect(w.state.disk.has(target)).toBe(!clean);
+      expect((await w.current()).state).toBe("reclaimed");
+    }
   });
 
   it("lets two restores of one cleaned-up checkout overlap without leaving it stuck", async () => {
