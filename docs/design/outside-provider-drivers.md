@@ -224,7 +224,8 @@ an image driver, each rule taking the fail-closed option:
   for one that declares `removal: delete`; a declared expiry is left to it),
   each naming the remote id the start returned. Results mirror
   `VideoAdapterStart`, `VideoAdapterPoll` and `VideoAdapterForget` with no free
-  text. Images are capped at 2.5 MiB combined, as for an outside image job.
+  text. Images are capped at 2.5 MiB combined, as for an outside image job, and
+  a request past that is refused before its card.
 - **Brokered calls.** Every `http/request` names the call it serves; one that
   names none stops the driver, so nothing billable travels outside a call the
   host accounts for. Reads aside, a start may send one `POST` (another only
@@ -264,7 +265,15 @@ an image driver, each rule taking the fail-closed option:
   the profile is on, bound to the same driver and address, and admitted. When
   it is not, nothing more is sent and the clip settles at its estimate. A clip
   still in the queue ends unstarted and unbilled instead, as an image job does,
-  when the trusted digest, the address, or the model's declaration moved.
+  when the trusted digest, the address, or the model's declaration moved. A card
+  answered after any of those moved queues nothing: the person is asked again at
+  the price now.
+- **Whose clip it is.** The job journals a digest of the driver build, the
+  address and the key placement it was queued on. A remote id means nothing to
+  any other, so after a restart nothing is checked or stopped, and no copy
+  removed, through a profile that no longer matches: the clip settles at its
+  estimate and its copy stays owed until the profile matches again or the copy
+  expires.
 - **Process.** It starts at the profile's first clip, or when a restart resumes
   a clip the provider accepted; reading what is offered starts nothing.
 - **What stays the host's.** The poll interval, the job time, the reservation

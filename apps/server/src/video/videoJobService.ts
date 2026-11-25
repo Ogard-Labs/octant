@@ -149,6 +149,8 @@ export interface EnqueueVideoJobInput extends VideoJobInputs {
   readonly modelId: ProviderModelId;
   readonly prompt: string;
   readonly options: VideoClipOptions;
+  /** The terms of the quote the person answered; a job at any other is refused. */
+  readonly outsideTerms?: string;
   readonly signal?: AbortSignal;
 }
 
@@ -162,8 +164,9 @@ export type VideoQuote =
       readonly providerName: string;
       readonly model: VideoModelCapabilities;
       readonly estimate: VideoCostEstimate;
-      /** For an outside driver, the digest and price this quote is made at. */
+      /** For an outside driver, the binding and price this quote is made at. */
       readonly outsideTerms?: string;
+      readonly outsideBinding?: string;
     }
   | { readonly status: "refused"; readonly reason: string };
 
@@ -445,6 +448,8 @@ export class VideoJobService {
     readonly firstFrame: boolean;
     readonly lastFrame: boolean;
     readonly referenceCount: number;
+    /** The images' combined size, which an outside driver's channel bounds. */
+    readonly imageBytes?: number;
     readonly signal?: AbortSignal;
   }): Promise<VideoQuote> {
     if (this.#closing.signal.aborted) {
@@ -460,6 +465,15 @@ export class VideoJobService {
     const driverKind = instance.driverKind;
     if (!isVideoProfileDriverKind(driverKind)) {
       return { status: "refused", reason: "That video profile is not available." };
+    }
+    if (
+      driverKind === "outside-video" &&
+      (input.imageBytes ?? 0) > OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES
+    ) {
+      return {
+        status: "refused",
+        reason: "Images for an outside video driver cannot exceed 2.5 MiB combined.",
+      };
     }
     const adapter = this.#adapterFor(instance);
     if (adapter === undefined) {
@@ -506,7 +520,10 @@ export class VideoJobService {
       model,
       estimate,
       ...(instance.driverKind === "outside-video"
-        ? { outsideTerms: outsideVideoTerms(instance, model) }
+        ? {
+            outsideTerms: outsideVideoTerms(instance, model),
+            outsideBinding: outsideVideoBinding(instance),
+          }
         : {}),
     };
   }
@@ -531,6 +548,7 @@ export class VideoJobService {
       firstFrame: input.firstFrame !== undefined,
       lastFrame: input.lastFrame !== undefined,
       referenceCount: input.references.length,
+      imageBytes: imageBytesOf(input),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
     if (this.#closing.signal.aborted) {
@@ -540,13 +558,10 @@ export class VideoJobService {
       throw new VideoJobServiceError("ineligible", "Video generation was stopped.");
     }
     if (quote.status === "refused") throw new VideoJobServiceError("ineligible", quote.reason);
-    if (
-      quote.driverKind === "outside-video" &&
-      imageBytesOf(input) > OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES
-    ) {
+    if (input.outsideTerms !== quote.outsideTerms) {
       throw new VideoJobServiceError(
         "ineligible",
-        "Images for an outside video driver cannot exceed 2.5 MiB combined.",
+        "This video provider changed after the clip was offered. Ask again to see its price now.",
       );
     }
     if (this.#options.projection.countQueued() >= MAX_QUEUED_VIDEO_JOBS) {
@@ -580,6 +595,7 @@ export class VideoJobService {
         input.references.length,
       estimatedCostUsdMicros,
       providerCopy: "none",
+      ...(quote.outsideBinding === undefined ? {} : { outsideBinding: quote.outsideBinding }),
       version: decodeAggregateVersion(1),
       createdAt: now,
       updatedAt: now,
@@ -888,7 +904,7 @@ export class VideoJobService {
     const running = this.#running.get(String(job.id));
     if (running === undefined) return;
     const instance = this.#options.readProviderInstance(job.profileInstanceId);
-    const adapter = instance === undefined ? undefined : this.#adapterFor(instance);
+    const adapter = instance === undefined ? undefined : this.#adapterForJob(instance, job);
     const startedAt = Date.parse(job.startedAt ?? job.createdAt);
     const deadline = startedAt + VIDEO_JOB_TIMEOUT_MS;
     const remaining = deadline - this.#now();
@@ -1214,7 +1230,7 @@ export class VideoJobService {
     this.#removing.add(String(job.id));
     try {
       const instance = this.#options.readProviderInstance(job.profileInstanceId);
-      const adapter = instance === undefined ? undefined : this.#adapterFor(instance);
+      const adapter = instance === undefined ? undefined : this.#adapterForJob(instance, job);
       if (adapter === undefined) return;
       let result;
       try {
@@ -1498,6 +1514,22 @@ export class VideoJobService {
     );
   }
 
+  /**
+   * The adapter that may name this job's remote id, or nothing. An outside
+   * job's id is only ever given back to the driver build, address and key
+   * placement it was queued on; a profile that moved keeps the copy owed.
+   */
+  #adapterForJob(instance: ProviderInstance, job: VideoJob): VideoGenerationAdapter | undefined {
+    if (
+      job.driverKind === "outside-video" &&
+      (instance.driverKind !== "outside-video" ||
+        job.outsideBinding !== outsideVideoBinding(instance))
+    ) {
+      return undefined;
+    }
+    return this.#adapterFor(instance);
+  }
+
   #adapterFor(instance: ProviderInstance): VideoGenerationAdapter | undefined {
     const adapter =
       instance.driverKind === "outside-video"
@@ -1546,13 +1578,32 @@ function imageBytesOf(inputs: VideoJobInputs): number {
   );
 }
 
-/** What an outside clip was reserved against: the trusted digest, the address, and the model as declared. */
+/** The driver build, address and key placement an outside clip belongs to. It holds no key. */
+function outsideVideoBinding(instance: OutsideVideoProviderInstance): string {
+  const { driver, baseUrl, key } = instance.configuration;
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        driver.extensionId,
+        driver.packageId,
+        driver.componentId,
+        driver.version,
+        driver.digest,
+        baseUrl,
+        key?.header ?? null,
+        key?.scheme ?? null,
+      ]),
+      "utf8",
+    )
+    .digest("hex");
+}
+
+/** What an outside clip was reserved against: its binding, and the model as declared. */
 function outsideVideoTerms(
   instance: OutsideVideoProviderInstance,
   model: VideoModelCapabilities,
 ): string {
-  const { driver, baseUrl } = instance.configuration;
-  return JSON.stringify([driver, baseUrl, model]);
+  return JSON.stringify([outsideVideoBinding(instance), model]);
 }
 
 function estimateOrZero(job: VideoJob): number {

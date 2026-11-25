@@ -237,6 +237,13 @@ export const VideoJob = Schema.Struct({
    * retry loop, the safe default.
    */
   providerRemoval: Schema.optional(VideoJobControl.fields.removal),
+  /**
+   * Which driver build, address and key placement an outside job was queued
+   * on, as a digest. Its remote id means nothing to any other, so nothing is
+   * asked about the clip after a restart, or its copy, unless the profile
+   * still matches. Absent on a bundled driver's job.
+   */
+  outsideBinding: Schema.optional(ContentDigest),
   settledCostUsdMicros: Schema.optional(NonNegativeInt),
   version: AggregateVersion,
   createdAt: UtcTimestamp,

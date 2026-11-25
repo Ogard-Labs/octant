@@ -21,7 +21,7 @@ import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { SpendCeilingService } from "../spendCeilingService";
 import { VideoClipStore } from "../video/videoClipStore";
-import { VideoJobService } from "../video/videoJobService";
+import { VideoJobService, type VideoQuote } from "../video/videoJobService";
 import { OutsideDriverAdmission } from "./outsideDriverAdmission";
 import {
   FixtureDriverError,
@@ -348,24 +348,52 @@ function harness(options: HarnessOptions = {}) {
     if (snapshot === undefined || "kind" in snapshot) throw new Error("expected a snapshot");
     return snapshot.threadRemaining?.usedUsdCents;
   };
-  const enqueue = (
+  const quote = (modelId = pricedModel, imageBytes = 0) =>
+    service.quote({
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "a lighthouse at dusk",
+      options: CLIP,
+      firstFrame: false,
+      lastFrame: false,
+      referenceCount: imageBytes === 0 ? 0 : 1,
+      imageBytes,
+    });
+  /** As the agent's tool does it: at the terms its quote was made at. */
+  const enqueue = async (
     input: {
       readonly modelId?: typeof pricedModel;
       readonly references?: ReadonlyArray<{
         readonly mediaType: "image/png";
         readonly bytes: Uint8Array;
       }>;
+      readonly quoted?: VideoQuote;
     } = {},
-  ) =>
-    service.enqueue({
+  ) => {
+    const quoted = input.quoted ?? (await quote(input.modelId));
+    return service.enqueue({
       threadKind: "chat-thread",
       scopeId,
       profileInstanceId: profileId,
       modelId: input.modelId ?? pricedModel,
       prompt: "a lighthouse at dusk",
-      options: { durationSeconds: 5, resolution: "720p", aspectRatio: "16:9", audio: false },
+      options: CLIP,
       references: input.references ?? [],
+      ...(quoted.status === "ready" && quoted.outsideTerms !== undefined
+        ? { outsideTerms: quoted.outsideTerms }
+        : {}),
     });
+  };
+  /** The same profile on another trusted build of its driver. */
+  const moveToDigest = (digest: string, declared?: DeclaredOverrides) => {
+    state.package = Schema.decodeUnknownSync(ExtensionPackageState)({
+      ...Schema.encodeSync(ExtensionPackageState)(fixturePackage({}, declared)),
+      digest,
+    });
+    state.profile = outsideProfile({
+      configuration: { ...outsideProfile().configuration, driver: { ...driver, digest } as never },
+    });
+  };
   const received = (method: string) =>
     drivers.flatMap(({ fixture }) => fixture.received.filter((m) => m.method === method));
   return {
@@ -377,7 +405,9 @@ function harness(options: HarnessOptions = {}) {
     downloaded,
     setCeiling,
     used,
+    quote,
     enqueue,
+    moveToDigest,
     received,
     directory,
     /** Ends this host as a shutdown would, leaving its data for the next one. */
@@ -389,7 +419,9 @@ function harness(options: HarnessOptions = {}) {
   };
 }
 
+const CLIP = { durationSeconds: 5, resolution: "720p", aspectRatio: "16:9", audio: false };
 const PROFILE_TURNED_OFF = { enabled: false } as const;
+const OTHER_DIGEST = `sha256:${"d".repeat(64)}`;
 
 describe("an outside video driver in the video job service", () => {
   it("runs a clip at the package's declared price, stores it, and removes the provider's copy", async () => {
@@ -801,17 +833,7 @@ describe("what an outside video start may have cost", () => {
     await h.enqueue();
     await h.enqueue();
     const waiting = await h.enqueue();
-    const digest = `sha256:${"d".repeat(64)}`;
-    h.state.package = Schema.decodeUnknownSync(ExtensionPackageState)({
-      ...Schema.encodeSync(ExtensionPackageState)(h.state.package),
-      digest,
-    });
-    h.state.profile = outsideProfile({
-      configuration: {
-        ...outsideProfile().configuration,
-        driver: { ...driver, digest } as never,
-      },
-    });
+    h.moveToDigest(OTHER_DIGEST);
     gate.release();
     const done = await h.service.whenTerminal(waiting.id);
     expect(done).toMatchObject({ status: "failed", failure: { category: "unsupported" } });
@@ -1041,7 +1063,91 @@ describe("how an outside clip the provider accepted can end", () => {
   });
 });
 
+describe("an outside clip and the driver it was quoted from", () => {
+  it("refuses a clip whose driver changed its price after the person answered the card", async () => {
+    const h = harness();
+    h.setCeiling(1_000);
+    const shown = await h.quote();
+    if (shown.status !== "ready" || shown.outsideTerms === undefined) {
+      throw new Error("expected a quote with the driver's terms");
+    }
+    h.moveToDigest(OTHER_DIGEST, {
+      price: { kind: "per-second", rates: [{ resolution: "720p", usdMicrosPerSecond: 200_000 }] },
+    });
+    await expect(h.enqueue({ quoted: shown })).rejects.toMatchObject({
+      category: "ineligible",
+    });
+    expect(h.used()).toBe(0);
+    expect(h.drivers).toHaveLength(0);
+  });
+
+  it("says before the card that its images are past the channel's bound", async () => {
+    const h = harness();
+    expect(await h.quote(pricedModel, OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES + 1)).toMatchObject(
+      { status: "refused" },
+    );
+  });
+
+  it("never names a clip to another build of its driver, and keeps the copy owed", async () => {
+    const h = harness({ handlers: { "video/poll": () => ({ status: "running" }) } });
+    const queued = await h.enqueue();
+    await vi.waitFor(() => expect(h.service.getById(queued.id)?.remoteId).toBe("remote-1"));
+    h.moveToDigest(OTHER_DIGEST);
+    const done = await h.service.whenTerminal(queued.id);
+    expect(done).toMatchObject({ status: "failed", settledCostUsdMicros: 250_000 });
+    await h.service.retryOwedRemovals();
+    expect(h.received("video/forget")).toEqual([]);
+    expect(h.service.getById(queued.id)?.providerCopy).toBe("held");
+    // The build that made the clip may still remove it.
+    h.state.package = fixturePackage();
+    h.state.profile = outsideProfile();
+    await h.service.retryOwedRemovals();
+    expect(h.received("video/forget")).toHaveLength(1);
+    expect(h.service.getById(queued.id)?.providerCopy).toBe("removed");
+  });
+});
+
 describe("an outside clip across a restart", () => {
+  it.each([
+    [
+      "another build of its driver",
+      (h: ReturnType<typeof harness>) => h.moveToDigest(OTHER_DIGEST),
+    ],
+    [
+      "another address",
+      (h: ReturnType<typeof harness>) => {
+        h.state.profile = outsideProfile({
+          configuration: {
+            ...outsideProfile().configuration,
+            baseUrl: "https://other.example.com",
+          },
+        });
+      },
+    ],
+  ])("does not resume or remove a sent clip through %s", async (_label, change) => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-outside-video-"));
+    try {
+      const first = harness({ directory, handlers: { "video/poll": () => NO_ANSWER } });
+      const queued = await first.enqueue();
+      await vi.waitFor(() => expect(first.service.getById(queued.id)?.remoteId).toBe("remote-1"));
+      first.shutDown();
+      const second = harness({ directory });
+      change(second);
+      await second.service.recover();
+      expect(await second.service.whenTerminal(queued.id)).toMatchObject({
+        status: "failed",
+        failure: { category: "interrupted" },
+        settledCostUsdMicros: 250_000,
+      });
+      await second.service.retryOwedRemovals();
+      expect(second.drivers).toHaveLength(0);
+      expect(second.service.getById(queued.id)?.providerCopy).toBe("held");
+    } finally {
+      for (const close of opened.splice(0)) close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("resumes a sent clip on the next host, once, and completes it", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-outside-video-"));
     try {

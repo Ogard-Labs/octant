@@ -122,10 +122,14 @@ function harness(options: {
   readonly readClip?: () => Promise<Uint8Array>;
   readonly writeClip?: NonNullable<VideoAgentToolPort["save"]>["write"];
   readonly beforeQuote?: (signal: AbortSignal | undefined) => Promise<void>;
+  /** The terms each quote in turn is made at. */
+  readonly outsideTerms?: ReadonlyArray<string>;
 }) {
+  let quotes = 0;
   const quote = vi.fn(
     async (input: Parameters<VideoAgentToolPort["jobs"]["quote"]>[0]): Promise<VideoQuote> => {
       await options.beforeQuote?.(input.signal);
+      const outsideTerms = options.outsideTerms?.[quotes++];
       return model.resolutions.includes(input.options.resolution)
         ? {
             status: "ready",
@@ -134,6 +138,7 @@ function harness(options: {
             providerName: "Google",
             model,
             estimate: { kind: "estimate", usdMicros: 695_040 },
+            ...(outsideTerms === undefined ? {} : { outsideTerms }),
           }
         : {
             status: "refused",
@@ -286,6 +291,23 @@ describe("octant_create_video on the host", () => {
         signal: expect.any(AbortSignal),
       }),
     );
+  });
+
+  it("queues the clip at the terms of the quote the card showed, and counts its images in it", async () => {
+    const { call, quote, enqueue } = harness({
+      outsideTerms: ["shown", "moved"],
+      frameRead: async () => PNG_FIXTURE,
+      answer: { status: "video-generate", options: finished.options, rememberForThread: false },
+    });
+    await call({
+      prompt: "A paper boat on a pond",
+      firstFrame: { kind: "attachment", name: "photo.png" },
+    });
+    expect(quote).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ imageBytes: PNG_FIXTURE.length }),
+    );
+    expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ outsideTerms: "shown" }));
   });
 
   it("starts without a card where the Project keeps a choice, and sends nothing a person declined", async () => {
