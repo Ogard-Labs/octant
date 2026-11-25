@@ -261,7 +261,9 @@ describe("CodeOverview", () => {
         controller={{
           ...controller(),
           activeView: undefined,
-          errorCategory: "unavailable" as never,
+          // A failed read leaves Code connected: the controller keeps "ready"
+          // for every category but a lost or unavailable service.
+          errorCategory: "failed",
           errorMessage: "This thread could not be read.",
           status: "ready",
         }}
