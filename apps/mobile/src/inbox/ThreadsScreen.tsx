@@ -259,7 +259,13 @@ export function ThreadsScreen(props: {
               <ThreadGroup
                 folded={folded.has(group.id)}
                 key={group.id}
-                label={index === 0 && !shelf ? undefined : formatScreenshotSafeLabel(group.label)}
+                label={
+                  // A row's own state says what Status puts first; a Project's
+                  // or a day's name is nowhere else.
+                  index === 0 && !shelf && props.arrangement === "status"
+                    ? undefined
+                    : formatScreenshotSafeLabel(group.label)
+                }
                 onOpen={props.onOpenThread}
                 onToggle={
                   shelf

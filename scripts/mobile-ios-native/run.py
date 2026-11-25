@@ -212,6 +212,9 @@ try:
     ):
         # Set on the device: the test process's own switch left the app light.
         run(["xcrun", "simctl", "ui", device, "appearance", appearance], timeout=120)
+        observed_appearance = run(["xcrun", "simctl", "ui", device, "appearance"], timeout=120, capture=True).strip()
+        if observed_appearance != appearance:
+            raise RuntimeError("The owned Simulator did not adopt the requested appearance.")
         set_content_size(device, size)
         observed_size = run(["xcrun", "simctl", "ui", device, "content_size"], capture=True).strip()
         if observed_size != size:
@@ -224,7 +227,8 @@ try:
              "-maximum-test-execution-time-allowance", "300",
              "-only-testing:OctantOfflineNativeTests/OfflineDemoTests/" + method,
              "CODE_SIGNING_ALLOWED=NO"], timeout=1800)
-        checks.append({"scenario": label, "systemTextSize": observed_size})
+        checks.append({"scenario": label, "systemTextSize": observed_size,
+                       "systemAppearance": observed_appearance})
     (artifacts / "acceptance.json").write_text(json.dumps({
         "checks": checks, "simulator": device, "runtime": runtime,
         "nativeUi": True, "screenshotProtectionChanged": False,

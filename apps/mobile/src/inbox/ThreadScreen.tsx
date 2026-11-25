@@ -37,12 +37,7 @@ import {
   conversationComposerAccess,
   listMobileThreadSurfaces,
 } from "../surfaces/threadSurfacePresentation";
-import {
-  MOBILE_COPY,
-  MOBILE_SCREEN_TITLES,
-  mobileModelLabel,
-  mobileThreadComposerCopy,
-} from "../copy";
+import { MOBILE_COPY, MOBILE_SCREEN_TITLES, mobileModelLabel, mobileThreadHint } from "../copy";
 import { PullRequestReviewPanel } from "../review/PullRequestReviewPanel";
 import { CoordinatorProposalsPanel } from "../review/CoordinatorProposalsPanel";
 import { ThreadRoutinesPanel } from "../review/ThreadRoutinesPanel";
@@ -288,8 +283,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
     attachmentOffer.sources.length > 0
       ? { onPressAttach: () => setAttachOpen(true) }
       : {};
-  const followUpComposerCopy =
-    mode === "code" || mode === "work" ? mobileThreadComposerCopy(mode) : undefined;
+  const threadHint = mode === "code" || mode === "work" ? mobileThreadHint(mode) : undefined;
   const sendFollowUp = () => void (mode === "work" ? work : code).sendFollowUp();
   const liveBusy = busy || chat.activeAttempt !== undefined;
   const [resumeBusy, setResumeBusy] = useState(false);
@@ -826,8 +820,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
           visible
         >
           <ScrollView contentContainerStyle={styles.details}>
-            {followUpComposerCopy === undefined ? null : (
-              <Text style={styles.connectionStatus}>{followUpComposerCopy.footerHint}</Text>
+            {threadHint === undefined ? null : (
+              <Text style={styles.connectionStatus}>{threadHint}</Text>
             )}
             {offlineDemo || transport === undefined ? null : selected.mode === "code" &&
               code.thread !== undefined ? (

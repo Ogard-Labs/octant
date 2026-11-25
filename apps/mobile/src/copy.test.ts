@@ -3,7 +3,7 @@ import {
   collectMobileUserFacingCopy,
   mobileHostHealthLabel,
   mobileModelLabel,
-  mobileThreadComposerCopy,
+  mobileThreadHint,
   MOBILE_PRODUCT_NAME,
   MOBILE_SCREEN_TITLES,
 } from "./copy";
@@ -28,15 +28,8 @@ describe("mobile package identity", () => {
   });
 
   it("keeps Work and Code follow-up guidance mode-specific and honest about host-only steps", () => {
-    expect(mobileThreadComposerCopy("work")).toMatchObject({
-      placeholder: expect.stringContaining("Work"),
-    });
-    expect(mobileThreadComposerCopy("code")).toMatchObject({
-      placeholder: expect.stringContaining("Code"),
-    });
-    expect(mobileThreadComposerCopy("code").footerHint).toMatch(/approve/i);
-    expect(mobileThreadComposerCopy("work").footerHint).toMatch(/stay there/i);
-    expect(mobileThreadComposerCopy("code")).not.toEqual(mobileThreadComposerCopy("work"));
+    expect(mobileThreadHint("code")).toMatch(/approve/i);
+    expect(mobileThreadHint("work")).toMatch(/stay there/i);
   });
 
   it("uses host-advertised model labels instead of inventing display names", () => {

@@ -205,14 +205,12 @@ export const MOBILE_COPY = {
   workNoProject: "No active Work project on this host. Create one on the desktop first.",
   workFollowUpHint:
     "Runs on your computer in this thread's folder. Files and the shell stay there.",
-  workFollowUpPlaceholder: "Follow up on this Work thread…",
   codeFollowUpHint:
     "Runs on your computer and asks before tools run. Approve and edit files there.",
   codeReviewTitle: "Review Code on mobile",
   codeReviewEntryBody:
     "Read changes and checks, start tasks, and follow up here. Approvals and edits happen on your computer.",
   codeBrowseThreads: "Browse Code threads",
-  codeFollowUpPlaceholder: "Follow up on this Code thread…",
   transcriptEmpty: "No turns yet.",
   codeEarlierTurns: "Showing the newest turns. Open the thread on the desktop for earlier ones.",
   turnRunning: "Working on your computer…",
@@ -346,24 +344,12 @@ export const MOBILE_COPY = {
 } as const;
 
 /**
- * What the composer promises for a Work or Code follow-up: the turn runs on
- * the host under the thread's own authority, and the parts a phone cannot do
+ * What the thread's details promise for a Work or Code follow-up: the turn runs
+ * on the host under the thread's own authority, and the parts a phone cannot do
  * — approvals, file edits, shell — are named rather than implied.
  */
-export function mobileThreadComposerCopy(mode: "work" | "code"): {
-  readonly placeholder: string;
-  readonly footerHint: string;
-} {
-  if (mode === "code") {
-    return {
-      placeholder: MOBILE_COPY.codeFollowUpPlaceholder,
-      footerHint: MOBILE_COPY.codeFollowUpHint,
-    };
-  }
-  return {
-    placeholder: MOBILE_COPY.workFollowUpPlaceholder,
-    footerHint: MOBILE_COPY.workFollowUpHint,
-  };
+export function mobileThreadHint(mode: "work" | "code"): string {
+  return mode === "code" ? MOBILE_COPY.codeFollowUpHint : MOBILE_COPY.workFollowUpHint;
 }
 
 export function collectMobileUserFacingCopy(): string {

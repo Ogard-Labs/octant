@@ -27,9 +27,6 @@ export function ThreadRowMenu(props: ThreadRowMenuProps) {
     onDone: props.onChanged,
     onFailed: (message) => Alert.alert(formatScreenshotSafeLabel(props.row.title), message),
   });
-  const actions = offers.flatMap((offer) =>
-    offer.kind === "refused" ? [] : offer.kind === "choice" ? offer.actions : [offer.action],
-  );
   return (
     <>
       <MenuView
@@ -53,7 +50,17 @@ export function ThreadRowMenu(props: ThreadRowMenuProps) {
             Alert.alert(refused.label, refused.reason);
             return;
           }
-          const action = actions.find((entry) => entry.id === nativeEvent.event);
+          // A row can stand for hours before its menu opens, so a snooze is
+          // counted from the press and not from when the row was drawn.
+          const action = threadRowActions(props.row, new Date())
+            .flatMap((offer) =>
+              offer.kind === "refused"
+                ? []
+                : offer.kind === "choice"
+                  ? offer.actions
+                  : [offer.action],
+            )
+            .find((entry) => entry.id === nativeEvent.event);
           if (action !== undefined && !busy) run(action.run);
         }}
         shouldOpenOnLongPress

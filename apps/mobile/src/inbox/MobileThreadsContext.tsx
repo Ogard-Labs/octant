@@ -20,7 +20,7 @@ import {
   type MobileProviderDirectoryEntry,
 } from "@octant/client-runtime";
 import { useMobileSession } from "../session/MobileSessionContext";
-import { isUnread, markRead, parseReadCursors, seedHosts } from "./readCursors";
+import { isUnread, markRead, parseReadCursors, seedRead } from "./readCursors";
 import { keepReadCursors, loadReadCursors } from "./readCursorFile";
 import { createRequestGuard } from "./requestGuard";
 
@@ -82,32 +82,22 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
     open.current = row;
     if (row !== undefined) setCursors((current) => markRead(current, row));
   }, []);
-  const readThrough = useCallback(
-    (result: ReadonlyArray<MobileInboxRow>, failed: ReadonlySet<string>) => {
-      const seen = [open.current, left.current].filter((row) => row !== undefined);
-      left.current = undefined;
-      setCursors((current) =>
-        result
-          .filter((row) =>
-            seen.some(
-              (entry) =>
-                entry.hostId === row.hostId &&
-                entry.mode === row.mode &&
-                entry.threadId === row.threadId,
-            ),
-          )
-          // A computer read in part would start from too early a position.
-          .reduce(
-            markRead,
-            seedHosts(
-              current,
-              result.filter((row) => !failed.has(row.hostId)),
-            ),
+  const readThrough = useCallback((result: ReadonlyArray<MobileInboxRow>) => {
+    const seen = [open.current, left.current].filter((row) => row !== undefined);
+    left.current = undefined;
+    setCursors((current) =>
+      result
+        .filter((row) =>
+          seen.some(
+            (entry) =>
+              entry.hostId === row.hostId &&
+              entry.mode === row.mode &&
+              entry.threadId === row.threadId,
           ),
-      );
-    },
-    [],
-  );
+        )
+        .reduce(markRead, seedRead(current, result)),
+    );
+  }, []);
 
   const refresh = useCallback(async () => {
     // A slower, older fetch must not overwrite what a newer one already showed.
@@ -126,7 +116,7 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
       if (!requestGuard.isCurrent(request)) return;
       setRows(result.rows);
       setFailures(result.failures);
-      readThrough(result.rows, new Set(result.failures.map((failure) => failure.hostId)));
+      readThrough(result.rows);
     } catch (cause) {
       if (!requestGuard.isCurrent(request)) return;
       setFailures([]);
