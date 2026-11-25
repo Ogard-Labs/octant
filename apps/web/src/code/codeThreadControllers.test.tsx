@@ -483,7 +483,10 @@ describe("CodeThreadControllerSlots", () => {
     const asked = "70000000-0000-4000-8000-000000000003";
     const next = "70000000-0000-4000-8000-000000000004";
 
-    function host(initial: ReadonlyArray<object>) {
+    function host(
+      initial: ReadonlyArray<object>,
+      stream?: (operationId: string, signal: AbortSignal) => AsyncGenerator | undefined,
+    ) {
       const held = { turnsOfA: initial };
       const conversationWindow = vi.fn(
         async (threadId: unknown, _options?: { readonly limit?: number }) => ({
@@ -496,7 +499,8 @@ describe("CodeThreadControllerSlots", () => {
       );
       const subscribeOperation = vi.fn(
         (_t: unknown, operationId: unknown, _c: unknown, signal: AbortSignal) =>
-          String(operationId) === asked
+          stream?.(String(operationId), signal) ??
+          (String(operationId) === asked
             ? (async function* () {
                 // The host replays a turn that waits on the person and ends it.
                 yield {
@@ -507,7 +511,7 @@ describe("CodeThreadControllerSlots", () => {
                   event: { kind: "operation-state", state: "waiting" },
                 };
               })()
-            : idleStream(signal),
+            : idleStream(signal)),
       );
       const api = {
         ...client(),
@@ -564,6 +568,78 @@ describe("CodeThreadControllerSlots", () => {
           expect.anything(),
         ),
       );
+    });
+
+    it("shows a turn that started and finished elsewhere between two reads of the list", async () => {
+      const { api, conversationWindow, held } = host([providerTurn(asked, "completed")]);
+      const settled = (sequence: number): CodeBootstrap => ({
+        ...bootstrap(),
+        activity: [{ threadId: threadA, lastSequence: sequence }] as never,
+      });
+      const { registry, rerender } = open(api, settled(2));
+      await waitFor(() => expect(registry.get(threadA)?.conversationHistory).toBe("loaded"));
+      const steeredMessages = [{ messageId: "m3", body: "Keep the old name.", steeredAt: now }];
+      held.turnsOfA = [
+        providerTurn(asked, "completed"),
+        providerTurn(next, "completed", { steeredMessages }),
+      ];
+      // The list never said the thread was working; only its activity moved.
+      rerender(settled(9));
+      await waitFor(() =>
+        expect(registry.get(threadA)?.conversation.at(-1)).toMatchObject({
+          operationId: next,
+          steeredMessages,
+        }),
+      );
+      // Activity on a turn already shown takes one look at the newest turn and
+      // reads nothing whole again.
+      const wholeReads = () =>
+        conversationWindow.mock.calls.filter(([, options]) => (options?.limit ?? 0) > 2).length;
+      const before = wholeReads();
+      rerender(settled(11));
+      await waitFor(() =>
+        expect(conversationWindow).toHaveBeenLastCalledWith(threadA, { limit: 1 }, expect.anything()),
+      );
+      expect(wholeReads()).toBe(before);
+    });
+
+    it("streams the queued turn that follows the one this view followed", async () => {
+      let finishFirst = () => {};
+      const firstEnds = new Promise<void>((resolve) => {
+        finishFirst = resolve;
+      });
+      const { api, held, subscribeOperation } = host(
+        [providerTurn(asked, "incomplete")],
+        (operationId) =>
+          operationId === asked
+            ? (async function* () {
+                await firstEnds;
+                yield {
+                  threadId: threadA,
+                  operationId: asked,
+                  cursor: 1,
+                  occurredAt: now,
+                  event: { kind: "operation-state", state: "completed" },
+                };
+              })()
+            : undefined,
+      );
+      const { registry } = open(api, bootstrap());
+      await waitFor(() => expect(registry.get(threadA)?.turnStatus).toBe("running"));
+
+      // The next queued message became a turn before this view saw the first end.
+      held.turnsOfA = [providerTurn(asked, "completed"), providerTurn(next, "incomplete")];
+      finishFirst();
+
+      await waitFor(() =>
+        expect(subscribeOperation).toHaveBeenLastCalledWith(
+          threadA,
+          next,
+          expect.anything(),
+          expect.anything(),
+        ),
+      );
+      expect(registry.get(threadA)?.turnStatus).toBe("running");
     });
 
     it("reads nothing more for a thread the list already says is working when it opens", async () => {

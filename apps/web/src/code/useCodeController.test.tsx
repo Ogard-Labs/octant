@@ -3580,13 +3580,21 @@ describe("useCodeController", () => {
     it("opens no second stream for a turn this window sent when the thread list says the thread is working", async () => {
       const { client, host, say } = runningThread();
       host.threads[String(ids.thread)]?.turns.splice(0, 1);
+      // The host answers the send only when the test says so.
+      let answer = () => {};
       const sent = fakeClient({
         ...client,
-        executeOperation: vi.fn(async (command: CodeOperationCommand) => ({
-          kind: "provider-turn-state",
-          operationId: command.operationId,
-          state: "running",
-        })) as never,
+        executeOperation: vi.fn(
+          (command: CodeOperationCommand) =>
+            new Promise((resolve) => {
+              answer = () =>
+                resolve({
+                  kind: "provider-turn-state",
+                  operationId: command.operationId,
+                  state: "running",
+                });
+            }),
+        ) as never,
       });
       const working = (sequence: number): CodeBootstrap => ({
         ...bootstrap(1, sequence),
@@ -3605,8 +3613,14 @@ describe("useCodeController", () => {
       );
       await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
       void result.current.sendFollowUp("Add the index");
-      // The list hears of the turn before the host has answered the send.
+      await waitFor(() => expect(sent.executeOperation).toHaveBeenCalledOnce());
+      const readsBeforeAnswer = vi.mocked(host.client.conversationWindow).mock.calls.length;
+      // The list hears of the turn while the host has not answered the send.
       rerender({ navigationBootstrap: working(4) });
+      await act(async () => undefined);
+      expect(result.current.turnStatus).toBe("sending");
+      expect(host.client.conversationWindow).toHaveBeenCalledTimes(readsBeforeAnswer);
+      act(() => answer());
       await waitFor(() => expect(result.current.turnStatus).toBe("running"));
       rerender({ navigationBootstrap: working(6) });
       act(() => say(1, "part-1"));

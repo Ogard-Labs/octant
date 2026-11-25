@@ -404,21 +404,22 @@ function readsConversationWindow(
 }
 
 /**
- * How far a thread's activity has reached while its list entry says it is
- * working, or undefined when it is not. A new turn moves the number, so each
- * turn is noticed once.
+ * How far a thread's activity has reached in the thread list, and whether the
+ * list says it is working; undefined for a thread the list reports neither
+ * for. A turn moves the number, even one that started and ended between two
+ * reads of the list.
  */
-function threadWorkingActivity(
+function threadListActivity(
   bootstrap: CodeBootstrap | undefined,
   threadId: CodeThreadId,
-): number | undefined {
+): { readonly sequence: number; readonly working: boolean } | undefined {
   const key = String(threadId);
   const working = (bootstrap?.runtime ?? []).some(
     (entry) => String(entry.threadId) === key && entry.executing,
   );
-  if (!working) return undefined;
   const activity = (bootstrap?.activity ?? []).find((entry) => String(entry.threadId) === key);
-  return Number(activity?.lastSequence ?? 0);
+  if (!working && activity === undefined) return undefined;
+  return { sequence: Number(activity?.lastSequence ?? 0), working };
 }
 
 /**
@@ -829,7 +830,9 @@ export function useCodeController(options: CodeControllerOptions) {
    * thread's activity sequence. Set once the activation's own first read is
    * in, so it never races that read.
    */
-  const followTurnStartedElsewhere = useRef<((activity: number) => void) | undefined>(undefined);
+  const followTurnStartedElsewhere = useRef<
+    ((activity: number, working: boolean) => void) | undefined
+  >(undefined);
   // Held apart from the transcript, which the turn's stream is writing: a read
   // for these takes nothing else from the host's copy of the turn, and a
   // slower read of the conversation cannot take one of these away.
@@ -1570,6 +1573,8 @@ export function useCodeController(options: CodeControllerOptions) {
       // another thread's checkout would overwrite files nobody asked about.
       setRestoreUndo(undefined);
       setConversationHistory("loading");
+      // The first read covers the thread as the list described it now.
+      const activityAtOpen = threadListActivity(bootstrapRef.current, threadId)?.sequence ?? -1;
       const conversationRead = hydrateConversation(threadId, request, controller.signal);
       void conversationRead.catch(() => undefined);
       try {
@@ -1911,6 +1916,22 @@ export function useCodeController(options: CodeControllerOptions) {
                   return;
                 noteSteeredMessages(latest.turns);
                 if (latest.threadId !== threadId || latest.turns.at(-1)?.status === "incomplete") {
+                  // A queued turn that started as the followed one ended
+                  // runs with no stream: the ended one's stream has stopped.
+                  // It is read once and followed like a turn found at open.
+                  if (latest.threadId === threadId && operationStream === undefined) {
+                    const hydrated = await hydrateConversation(
+                      threadId,
+                      request,
+                      controller.signal,
+                    );
+                    if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
+                      return;
+                    conversationCursor = hydrated?.nextCursor ?? conversationCursor;
+                    if (hydrated?.activeOperationId !== undefined) {
+                      startConversationOperationStream(hydrated.activeOperationId);
+                    }
+                  }
                   delayMs = Math.min(delayMs * 2, 2_000);
                   continue;
                 }
@@ -1941,16 +1962,45 @@ export function useCodeController(options: CodeControllerOptions) {
 
         // A turn another window, a phone, or an agent starts is journaled on
         // the operation, not the thread, so the thread's stream below never
-        // hears of it. The thread list does: it says the thread is working.
-        // One read per newly seen activity takes the turn up through the same
-        // poll and stream a read at open would. A turn this view follows
-        // already uses the activity up; a send of its own or a read in flight
-        // only puts the look off, and a read that fails leaves the activity
-        // to be looked at again. A waiting turn is not followed: the reply that
-        // continues it may come from anywhere.
-        let triedActivity = -1;
+        // hears of it. The thread list does: its activity moves, and while the
+        // turn runs it says the thread is working. A working thread is read
+        // once and the turn followed through the same poll and stream a read
+        // at open would; activity on a settled thread takes one look at the
+        // newest turn and reads the thread only for a turn not shown, as one
+        // that started and ended between two reads of the list. A turn this
+        // view follows already uses the activity up; a send of its own or a
+        // read in flight only puts the look off, and a read that fails leaves
+        // the activity to be looked at again. A waiting turn is not followed:
+        // the reply that continues it may come from anywhere.
+        let triedActivity = activityAtOpen;
         let following = false;
-        followTurnStartedElsewhere.current = (activity) => {
+        const followTurn = async () => {
+          const hydrated = await hydrateConversation(threadId, request, controller.signal);
+          if (hydrated === undefined) return false;
+          if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) return true;
+          conversationCursor = hydrated.nextCursor ?? conversationCursor;
+          if (hydrated.incomplete) startConversationPoll();
+          if (hydrated.activeOperationId !== undefined) {
+            startConversationOperationStream(hydrated.activeOperationId);
+          }
+          return true;
+        };
+        const lookAtNewestTurn = async () => {
+          if (!readsConversationWindow(client)) return true;
+          const latest = await client.conversationWindow(threadId, { limit: 1 }, controller.signal);
+          const newest = latest.turns.at(-1);
+          if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) return true;
+          if (
+            newest === undefined ||
+            (newest.status !== "incomplete" &&
+              conversationRef.current.some(
+                (message) => String(message.operationId) === String(newest.operationId),
+              ))
+          )
+            return true;
+          return followTurn();
+        };
+        followTurnStartedElsewhere.current = (activity, working) => {
           if (
             activity <= triedActivity ||
             following ||
@@ -1970,19 +2020,9 @@ export function useCodeController(options: CodeControllerOptions) {
           const lookedAt = triedActivity;
           triedActivity = activity;
           following = true;
-          void hydrateConversation(threadId, request, controller.signal)
-            .then((hydrated) => {
-              if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
-                return;
-              if (hydrated === undefined) {
-                triedActivity = lookedAt;
-                return;
-              }
-              conversationCursor = hydrated.nextCursor ?? conversationCursor;
-              if (hydrated.incomplete) startConversationPoll();
-              if (hydrated.activeOperationId !== undefined) {
-                startConversationOperationStream(hydrated.activeOperationId);
-              }
+          void (working ? followTurn() : lookAtNewestTurn())
+            .then((read) => {
+              if (!read) triedActivity = lookedAt;
             })
             .catch(() => {
               triedActivity = lookedAt;
@@ -1991,8 +2031,10 @@ export function useCodeController(options: CodeControllerOptions) {
               following = false;
             });
         };
-        const workingNow = threadWorkingActivity(bootstrapRef.current, threadId);
-        if (workingNow !== undefined) followTurnStartedElsewhere.current(workingNow);
+        const listNow = threadListActivity(bootstrapRef.current, threadId);
+        if (listNow !== undefined) {
+          followTurnStartedElsewhere.current(listNow.sequence, listNow.working);
+        }
 
         let reconnectBackoffMs = MIN_CODE_RECONNECT_BACKOFF_MS;
         let reconnectFailed = false;
@@ -2298,15 +2340,19 @@ export function useCodeController(options: CodeControllerOptions) {
   // transcript itself records what it renders, through `markRenderedActivity`
   // and `recordSeenActivity`.
   observedActivity.current = activityByThread;
-  const openThreadWorking =
+  const openThreadList =
     options.activeThreadId === undefined
       ? undefined
-      : threadWorkingActivity(bootstrap, options.activeThreadId);
+      : threadListActivity(bootstrap, options.activeThreadId);
+  const openThreadSequence = openThreadList?.sequence;
+  const openThreadWorking = openThreadList?.working === true;
   // The turn status too: a send of this window's own that the host refused
   // leaves a turn started elsewhere still to be looked for.
   useEffect(() => {
-    if (openThreadWorking !== undefined) followTurnStartedElsewhere.current?.(openThreadWorking);
-  }, [openThreadWorking, turnStatus]);
+    if (openThreadSequence !== undefined) {
+      followTurnStartedElsewhere.current?.(openThreadSequence, openThreadWorking);
+    }
+  }, [openThreadSequence, openThreadWorking, turnStatus]);
   const plannerThreadIds = useMemo(
     () => new Set((bootstrap?.plannerThreadIds ?? []).map(String)),
     [bootstrap],
