@@ -291,21 +291,28 @@ function queueRefusal(reason: ThreadMessageQueueRefusalReason): string {
 
 /**
  * What a started child thread is doing, from the same navigation-projection
- * facts the sidebar rows read: executing is Working, waiting on the person is
- * Needs you, anything else is quiet. A row the window cannot read — the
- * thread is gone, or the navigation does not list it for this window —
- * answers nothing rather than guessing.
+ * facts the sidebar rows read: a thread parked on the person is attention,
+ * one with a turn running is working, a follow-up obligation or a Code
+ * lifecycle of waiting or interrupted is attention, and anything else is
+ * quiet. A row the window cannot read — the thread is gone, or the
+ * navigation does not list it for this window — answers nothing rather than
+ * guessing.
  */
 export function sideTaskChildState(
   row:
     | {
         readonly executing?: boolean | undefined;
         readonly awaitingInput?: boolean | undefined;
+        readonly followUp?: boolean | undefined;
+        readonly lifecycle?: string | undefined;
       }
     | undefined,
 ): SideTaskChildState | undefined {
   if (row === undefined) return undefined;
-  if (row.executing === true) return "working";
   if (row.awaitingInput === true) return "attention";
+  if (row.executing === true) return "working";
+  if (row.followUp === true || row.lifecycle === "waiting" || row.lifecycle === "interrupted") {
+    return "attention";
+  }
   return "quiet";
 }

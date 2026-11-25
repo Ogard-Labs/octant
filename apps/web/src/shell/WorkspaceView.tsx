@@ -310,6 +310,11 @@ export interface WorkspaceViewProps {
   readonly workThreads?: ReadonlyArray<WorkThread>;
   readonly workTurnClient?: WorkTurnClient;
   readonly workChangeRevision?: number;
+  /**
+   * The workspace mode's navigation revision. Side-task providers read it so
+   * a started receipt re-reads its child state when that navigation moves.
+   */
+  readonly sideTaskNavigationRevision?: number | undefined;
   readonly workRequestClient?: WorkRequestClient;
   readonly onWorkThreadUpdated?: (thread: WorkThread) => void;
   readonly codeProviderChoices: ReadonlyArray<CodeThreadProviderChoice>;
@@ -1028,7 +1033,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
                   : { focusedPaneId: props.focusedPaneId })}
                 renderSurface={(surface, paneId) => (
                   <FollowUpSuggestionContext value={followUpOffersFor(surface)}>
-                    <PaneSideTasks>
+                    <PaneSideTasks sideTaskNavigationRevision={props.sideTaskNavigationRevision}>
                       <PaneSubagents props={props} surface={surface}>
                         <ComposerSubagentsContext value={subagentsTrayFor(surface, props)}>
                           <ComposerNoticeProvider

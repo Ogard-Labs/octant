@@ -1087,19 +1087,29 @@ export function ProjectThreadList(props: ProjectThreadListProps) {
   // suggested it; grouping by checkout happens on the rest, so a worktree
   // child stays under its primary-checkout parent.
   const followUpParents = useContext(FollowUpLineageContext);
+  // Nesting runs on the whole list first: a coordinator's or worker's
+  // follow-up child must not be left at the top level just because the
+  // coordinator split removed its parent before nesting saw it.
+  const nesting = useMemo(() => {
+    if (!props.groupCoordinators) return nestFollowUpThreads(props.threads, followUpParents);
+    const parents = new Map(followUpParents);
+    // A thread can become a coordinator after it started as a follow-up.
+    // Its section and its managed workers take precedence over that origin.
+    for (const { coordinator, workers } of groupCoordinatorThreads(props.threads).coordinators) {
+      parents.delete(coordinator.threadId);
+      for (const worker of workers) parents.delete(worker.threadId);
+    }
+    return nestFollowUpThreads(props.threads, parents);
+  }, [props.groupCoordinators, props.threads, followUpParents]);
   const coordinatorSplit = useMemo(
     () =>
       props.groupCoordinators === true
-        ? groupCoordinatorThreads(props.threads)
-        : { coordinators: [], others: props.threads },
-    [props.groupCoordinators, props.threads],
-  );
-  const nesting = useMemo(
-    () => nestFollowUpThreads(coordinatorSplit.others, followUpParents),
-    [coordinatorSplit.others, followUpParents],
+        ? groupCoordinatorThreads(nesting.topLevel)
+        : { coordinators: [], others: nesting.topLevel },
+    [props.groupCoordinators, nesting.topLevel],
   );
   const groups =
-    props.groupByCheckout === true ? groupThreadsByCheckout(nesting.topLevel) : undefined;
+    props.groupByCheckout === true ? groupThreadsByCheckout(coordinatorSplit.others) : undefined;
   const rows = (threads: ReadonlyArray<ChatThreadNavigationItem>, grouped: boolean) => (
     <ProjectThreadRows
       {...(props.actions === undefined ? {} : { actions: props.actions })}
@@ -1140,13 +1150,14 @@ export function ProjectThreadList(props: ProjectThreadListProps) {
             ? {}
             : { projectNameForThread: props.projectNameForThread })}
           groups={coordinatorSplit.coordinators}
+          expandThreads={nesting.expand}
           lineageThreads={props.threads}
           onSelectThread={props.onSelectThread}
         />
       )}
       {coordinatorSplit.others.length > 0 ? (
         groups === undefined ? (
-          rows(nesting.expand(nesting.topLevel), false)
+          rows(nesting.expand(coordinatorSplit.others), false)
         ) : (
           groups.map((group) => (
             <ProjectCheckoutGroup group={group} key={group.key}>
@@ -1175,6 +1186,10 @@ function CoordinatorThreadSection(props: {
   readonly onSelectThread: (threadId: string) => void;
   readonly projectNameForThread?: (thread: ChatThreadNavigationItem) => string | undefined;
   readonly groups: ReadonlyArray<CoordinatorThreadGroup>;
+  /** Re-attaches each listed thread's nested follow-up children, depth first. */
+  readonly expandThreads: (
+    list: ReadonlyArray<ChatThreadNavigationItem>,
+  ) => ReadonlyArray<ChatThreadNavigationItem>;
   readonly lineageThreads: ReadonlyArray<ChatThreadNavigationItem>;
 }) {
   const [folded, setFolded] = useState(() => readFoldedCoordinators());
@@ -1210,6 +1225,12 @@ function CoordinatorThreadSection(props: {
         const open = !folded.has(coordinatorId);
         const listId = `${workersId}-${coordinatorId}`;
         const hasWorkers = group.workers.length > 0;
+        // The coordinator's own follow-up children sit between its row and
+        // its counted workers; a worker's children ride inside the worker
+        // rows. Neither is a managed worker, so the counts stay workers-only.
+        const childRows = props.expandThreads([group.coordinator]).slice(1);
+        const workerRows = props.expandThreads(group.workers);
+        const hasRows = hasWorkers || childRows.length > 0;
         // Workers the Show workers setting leaves out of the list: the row
         // keeps saying how many are working and how many need you, always.
         const hidden = group.coordinator.hiddenWorkers;
@@ -1220,13 +1241,15 @@ function CoordinatorThreadSection(props: {
           >
             <div className="project-coordinator__row" data-open={open ? "true" : "false"}>
               <OctantIconButton
-                aria-controls={open && hasWorkers ? listId : undefined}
+                aria-controls={open && hasRows ? listId : undefined}
                 aria-expanded={open}
                 className="project-coordinator__fold window-no-drag"
-                disabled={!hasWorkers}
+                disabled={!hasRows}
                 label={
-                  hasWorkers
-                    ? `${open ? "Hide" : "Show"} workers of ${group.coordinator.title}`
+                  hasRows
+                    ? hasWorkers
+                      ? `${open ? "Hide" : "Show"} workers of ${group.coordinator.title}`
+                      : `${open ? "Hide" : "Show"} threads of ${group.coordinator.title}`
                     : hidden !== undefined
                       ? `Workers of ${group.coordinator.title} are in its thread`
                       : `${group.coordinator.title} has no open workers`
@@ -1246,9 +1269,10 @@ function CoordinatorThreadSection(props: {
                 />
               )}
             </div>
-            {open && hasWorkers ? (
+            {open && hasRows ? (
               <div className="project-coordinator__workers" id={listId}>
-                {rows(group.workers)}
+                {childRows.length === 0 ? null : rows(childRows)}
+                {workerRows.length === 0 ? null : rows(workerRows)}
               </div>
             ) : null}
           </div>

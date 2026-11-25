@@ -983,7 +983,9 @@ describe("side tasks", () => {
         sideTasks: { tasks: Array<{ childState?: string; status: string }> };
       };
       expect(body.sideTasks.tasks[0]).toMatchObject({ status: "started", childState: "working" });
-      expect(childState).toHaveBeenCalledWith({ mode: "chat", threadId: child, windowId });
+      expect(childState).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "chat", threadId: child, windowId }),
+      );
 
       // An unreadable child carries no state rather than a guessed one.
       const quietRoute = createSideTaskRouteHandler({
@@ -1136,6 +1138,60 @@ describe("side tasks", () => {
         expect(await response?.json()).toMatchObject({ kind: "side-task-refused" });
         expect(switches.size).toBe(0);
       });
+    });
+
+    it("shares one navigation read across the children a single read enriches", async () => {
+      const store = storeOn(openConnection());
+      const sideTaskId = await offeredHere(store);
+      const child = "00000000-0000-4000-8000-000000000093";
+      await startSideTask(
+        startDependencies(store, {
+          create: async () => ({
+            kind: "created",
+            created: {
+              kind: "new-thread",
+              mode: "chat",
+              title: offer.title,
+              threadId: child,
+            } as never,
+            onSuggestingModel: true,
+          }),
+        }),
+        { threadId, windowId, sideTaskId },
+      );
+      const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId: windowId as WindowId, capability, now: 0 });
+      const reads: string[] = [];
+      const route = createSideTaskRouteHandler({
+        ...startDependencies(store),
+        store,
+        windowAuthorityStore,
+        authorizeThread: () => true,
+        now: () => 1,
+        childState: async (input) => {
+          const first = await input.share?.("work", async () => {
+            reads.push("first");
+            return "one";
+          });
+          const second = await input.share?.("work", async () => {
+            reads.push("second");
+            return "two";
+          });
+          expect(first).toBe("one");
+          expect(second).toBe("one");
+          return "quiet" as const;
+        },
+      });
+
+      const response = await route(
+        new Request(`http://127.0.0.1/api/side-tasks/${threadId}`, {
+          headers: { "x-octant-window-capability": capability },
+        }),
+      );
+
+      expect(response?.status).toBe(200);
+      expect(reads).toEqual(["first"]);
     });
   });
 
