@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { Platform, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type {
   NativeStackNavigationOptions,
@@ -47,6 +47,9 @@ export function ScreenHeader(props: {
   const leading = props.place === true && hasLiquidGlass();
   // Beside Back, where a long title keeps its room as actions join the bar.
   const leadingTitles = hasLiquidGlass();
+  const { width } = useWindowDimensions();
+  // What Back and the actions leave on the bar's one line.
+  const titleRoom = Math.max(110, width - 104 - (actions?.length ?? 0) * 50);
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -57,10 +60,10 @@ export function ScreenHeader(props: {
         },
         place: { color: colors.textPrimary, fontSize: 28, fontWeight: "700", letterSpacing: -0.4 },
         subtitle: { color: colors.textSecondary, fontSize: typography.meta.fontSize },
-        titles: { maxWidth: 190 },
+        titles: { maxWidth: titleRoom },
         actions: { flexDirection: "row", alignItems: "center" },
       }),
-    [colors],
+    [colors, titleRoom],
   );
 
   // The header keeps its options until what it shows changes. Handing the

@@ -59,6 +59,7 @@ export const MOBILE_COPY = {
   thoughtFor: (seconds: number): string =>
     seconds < 60 ? `Thought for ${seconds}s` : `Thought for ${Math.floor(seconds / 60)}m`,
   toolCallsTruncated: "Later calls are on your computer.",
+  threadChanges: "Changes",
   queueWaiting: "Queued",
   queueSending: "Sending",
   queueRemove: "Remove from queue",

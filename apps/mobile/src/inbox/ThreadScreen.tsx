@@ -48,8 +48,10 @@ import { useMobileSession } from "../session/MobileSessionContext";
 import { usePlacementHostModels } from "../session/usePlacementHostModels";
 import { mobileSpacing } from "../theme/tokens";
 import { useTheme } from "../../design-system";
+import { ListRow, ListSection } from "../ui/NativeChrome";
 import { AttachSourceSheet } from "../ui/AttachSourceSheet";
 import { FloatingComposer } from "../ui/FloatingComposer";
+import type { MobileThreadPaneId } from "../panes/threadPanesPresentation";
 import { ThreadPanesSheet, type ThreadTool } from "../panes/ThreadPanesSheet";
 import { listMobileThreadTools } from "../panes/threadPanesPresentation";
 import { CanvasHtmlImportSheet } from "../surfaces/CanvasHtmlImportSheet";
@@ -66,6 +68,7 @@ import { ThreadTranscript } from "./thread/ThreadTranscript";
 import { ResumeBar, type ResumeOffer } from "./thread/ResumeBar";
 import { useThreadReplyDetail } from "./thread/useThreadReplyDetail";
 import type { ThreadHookInput, ThreadTarget, ThreadUi } from "./thread/threadTypes";
+import { useMobileThreads } from "./MobileThreadsContext";
 import { QueuedMessages } from "./thread/QueuedMessages";
 import { isLiveWorkTurn, turnSubagents } from "./thread/turnActivity";
 import { useTurnControl } from "./thread/useTurnControl";
@@ -116,12 +119,18 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const connectionStatus = useConnectionStatus(supervisor);
   const staleGate = useMemo(() => presentStaleHostSecurity(hostHealth), [hostHealth]);
   const models = usePlacementHostModels(transport);
+  const { projectName } = useMobileThreads();
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [panesOpen, setPanesOpen] = useState(false);
+  const [initialPane, setInitialPane] = useState<MobileThreadPaneId | undefined>();
+  const openPanes = (pane: MobileThreadPaneId | undefined) => {
+    setInitialPane(pane);
+    setPanesOpen(true);
+  };
   const [detailsOpen, setDetailsOpen] = useState(false);
   const scrollRef = useRef<ScrollViewInstance>(null);
   const followsEnd = useRef(true);
@@ -553,6 +562,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
   }
 
   const title = formatScreenshotSafeLabel(selected.title);
+  const projectLabel = projectName(selected);
+  const project = projectLabel === undefined ? undefined : formatScreenshotSafeLabel(projectLabel);
   const modelLabel =
     selectedModel?.label ??
     (chat.view !== undefined
@@ -579,21 +590,35 @@ export function ThreadScreen(props: ThreadScreenProps) {
           offlineDemo || transport === undefined
             ? []
             : [
+                ...(threadTools.includes("terminal")
+                  ? [
+                      {
+                        label: MOBILE_COPY.projectTerminalTitle,
+                        icon: "terminal-outline" as const,
+                        onPress: () => setOpenTool("terminal"),
+                        testID: "mobile-thread-terminal-open",
+                      },
+                    ]
+                  : []),
+                ...(selected.mode === "code"
+                  ? [
+                      {
+                        label: MOBILE_COPY.threadChanges,
+                        icon: "git-branch-outline" as const,
+                        onPress: () => openPanes("review"),
+                        testID: "mobile-thread-changes-open",
+                      },
+                    ]
+                  : []),
                 {
                   label: MOBILE_COPY.threadDetails,
                   icon: "ellipsis-horizontal",
                   onPress: () => setDetailsOpen(true),
                   testID: "mobile-thread-details-open",
                 },
-                {
-                  label: "Views and panes",
-                  icon: "grid-outline",
-                  onPress: () => setPanesOpen(true),
-                  testID: "mobile-thread-panes-open",
-                },
               ]
         }
-        subtitle={hostLabel}
+        subtitle={[project, hostLabel].filter((part) => part !== undefined).join(" · ")}
         title={title}
       />
 
@@ -679,6 +704,9 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 codeConversation={code.conversation}
                 modelOptions={models.options}
                 providerDirectory={models.providerDirectory}
+                {...(offlineDemo || transport === undefined || selected.mode !== "code"
+                  ? {}
+                  : { onOpenReview: () => openPanes("review") })}
                 replyDetail={replyDetail}
                 turnActionsFor={turnActions.actionsFor}
                 workTurns={work.turns}
@@ -886,6 +914,21 @@ export function ThreadScreen(props: ThreadScreenProps) {
           visible
         >
           <ScrollView contentContainerStyle={styles.details}>
+            {offlineDemo || transport === undefined ? null : (
+              <ListSection>
+                <ListRow
+                  accessory="chevron"
+                  icon="grid-outline"
+                  label={MOBILE_COPY.threadViewsAndPanes}
+                  last
+                  onPress={() => {
+                    setDetailsOpen(false);
+                    openPanes(undefined);
+                  }}
+                  testID="mobile-thread-panes-open"
+                />
+              </ListSection>
+            )}
             {threadHint === undefined ? null : (
               <Text style={styles.connectionStatus}>{threadHint}</Text>
             )}
@@ -950,6 +993,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
       {offlineDemo || transport === undefined ? null : (
         <ThreadPanesSheet
           codeThread={selected.mode === "code" ? code.thread : undefined}
+          initialPane={initialPane}
           mode={selected.mode}
           onClose={() => setPanesOpen(false)}
           onOpenView={(view) => {

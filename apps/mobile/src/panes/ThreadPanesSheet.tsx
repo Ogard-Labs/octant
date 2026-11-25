@@ -37,6 +37,8 @@ import {
 
 export interface ThreadPanesSheetProps {
   readonly visible: boolean;
+  /** The pane it opens on; the last one shown otherwise. */
+  readonly initialPane?: MobileThreadPaneId | undefined;
   readonly onClose: () => void;
   readonly transport: MobileRemoteTransport;
   readonly mode: MobileInboxMode;
@@ -79,6 +81,10 @@ const TOOL_ROWS: Readonly<
 export function ThreadPanesSheet(props: ThreadPanesSheetProps) {
   const panes = useMemo(() => listMobileThreadPanes(props.mode), [props.mode]);
   const [pane, setPane] = useState<MobileThreadPaneId>(panes[0]?.id ?? "context");
+  const { initialPane, visible } = props;
+  useEffect(() => {
+    if (visible && initialPane !== undefined) setPane(initialPane);
+  }, [initialPane, visible]);
   const active = panes.some((entry) => entry.id === pane) ? pane : (panes[0]?.id ?? "context");
   const scope =
     props.codeThread === undefined
