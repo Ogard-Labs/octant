@@ -2162,6 +2162,91 @@ describe("learning from threads still open", () => {
     expect(h.prompts).toHaveLength(1);
   });
 
+  const finishedThreads = (count: number, overrides: Partial<FakeThread> = {}): FakeThread[] =>
+    Array.from({ length: count }, (_, index) => ({
+      id: `aaaaaaaa-0000-4000-8000-0000000004${String(index).padStart(2, "0")}`,
+      title: `Done ${String(index).padStart(3, "0")}`,
+      completedAt: QUIET,
+      personMessages: [`Finished message ${String(index).padStart(3, "0")}`],
+      ...overrides,
+    }));
+  const changeSettings = (h: ReturnType<typeof begin>, change: object) =>
+    h.store.change(
+      decodePersonMemoryCommand({
+        kind: "change-person-memory-settings",
+        expectedVersion: h.store.view().version,
+        settings: { ...h.store.settings(), ...change },
+      }),
+    );
+
+  it("reaches an open thread behind sixty finished ones a Project keeps from the model, and reads each refused thread once", async () => {
+    const finished = finishedThreads(60, { projectId: PROJECT_A });
+    const h = begin([...finished, open({ id: THREAD_2 })]);
+    h.advance(QUIET);
+    const sweep = h.sweepWith({ projectAllows: ({ projectId }) => projectId !== PROJECT_A });
+
+    await sweep.pass();
+    await sweep.pass();
+    await sweep.pass();
+
+    expect(h.prompts).toHaveLength(1);
+    expect(h.reads.filter((id) => id !== THREAD_2)).toHaveLength(60);
+  });
+
+  it("reads a refused thread again when a setting changes or an hour has passed", async () => {
+    const h = begin(finishedThreads(2));
+    h.advance(QUIET);
+    const sweep = h.sweepWith({ resolve: () => undefined });
+
+    await sweep.pass();
+    await sweep.pass();
+    expect(h.reads).toHaveLength(2);
+
+    changeSettings(h, { pastThreadSearch: !h.store.settings().pastThreadSearch });
+    await sweep.pass();
+    expect(h.reads).toHaveLength(4);
+
+    h.advance("2026-11-01T11:50:00.000Z");
+    await sweep.pass();
+    expect(h.reads).toHaveLength(4);
+    h.advance("2026-11-01T12:20:00.000Z");
+    await sweep.pass();
+    expect(h.reads).toHaveLength(6);
+  });
+
+  it("forgets a settled thread that is gone, so the same thread coming back is read again", async () => {
+    const threads = finishedThreads(1);
+    const h = begin([...threads]);
+    h.advance(QUIET);
+    const sweep = h.sweepWith({ resolve: () => undefined });
+
+    await sweep.pass();
+    h.setThreads([]);
+    await sweep.pass();
+    h.setThreads(threads);
+    await sweep.pass();
+
+    expect(h.reads).toHaveLength(2);
+  });
+
+  it("moves on to the threads it did not reach when a pass stops at its calls, and tries a failure again", async () => {
+    const finished = finishedThreads(25);
+    const h = begin(finished);
+    h.advance(QUIET);
+    h.setReply({ status: "unavailable" });
+
+    await h.sweep.pass();
+    await h.sweep.pass();
+    await h.sweep.pass();
+
+    const prompted = new Set(
+      h.prompts.map((prompt) => finished.find((thread) => prompt.includes(thread.title))?.id),
+    );
+    expect(prompted.size).toBe(25);
+    // The failures are still tried again: the third pass came round to the first.
+    expect(h.prompts).toHaveLength(30);
+  });
+
   it("reads an open thread in full only when it has something to learn, and not again until it changes", async () => {
     const unmarked = open({ id: THREAD_2, typed: false });
     const thread = open();

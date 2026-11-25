@@ -33,14 +33,21 @@ export const PERSON_MEMORY_FIRST_SWEEP_DELAY_MS = 5 * 60 * 1_000;
 /** Model calls one pass may make, so a busy day never turns into a burst of calls. */
 export const PERSON_MEMORY_MAX_DISTILLATIONS_PER_PASS = 10;
 /**
- * Threads one pass may read in full and settle without a call (nothing new to
- * record, or an account that is off), so a long list of them still ends the pass.
+ * Threads one pass may read in full, whether the read ends in a call or is
+ * settled without one (nothing new to record, or a model that is not allowed),
+ * so a long list of them still ends the pass.
  */
 export const PERSON_MEMORY_MAX_THREAD_READS_PER_PASS = 50;
 /** A thread still open is learned from only after the person has been quiet this long. */
 export const PERSON_MEMORY_OPEN_THREAD_IDLE_MS = 30 * 60 * 1_000;
 /** A thread still open is learned from at most once in this long. */
 export const PERSON_MEMORY_OPEN_THREAD_INTERVAL_MS = 6 * 60 * 60 * 1_000;
+/**
+ * A thread whose model was refused (an account that is off, a Project's rule,
+ * a spend ceiling) is read again after this long even if nothing visible has
+ * changed, which is how a lifted rule or ceiling is noticed: one pass later.
+ */
+export const PERSON_MEMORY_REFUSED_RETRY_MS = PERSON_MEMORY_SWEEP_INTERVAL_MS;
 const DISTILL_TIMEOUT_MS = 60_000;
 /** What a distillation may write back, which bounds its spend with what it sends. */
 const DISTILL_OUTPUT_TOKEN_BOUND = 1_024;
@@ -169,6 +176,14 @@ export type PersonMemoryDistillOutcome =
   | "not-allowed"
   | "skipped";
 
+/**
+ * What a read leaves behind: nothing, a mark that the thread had nothing to
+ * learn (read again when it changes), or a mark that the model was refused
+ * (read again when it changes, or after an hour, because a ceiling or a
+ * Project's rule may lift).
+ */
+type Settle = "no" | "idle" | "refused";
+
 /** Secret-shaped text and private-key blocks, replaced before a model sees them and before storage. */
 export function redactForPersonMemory(text: string): string {
   return redactSecretsAndPrivateKeys(text);
@@ -192,8 +207,11 @@ export class PersonMemorySweep {
    * to learn, so the next pass does not read it again until it changes. Kept
    * in memory: a restart reads each thread once more.
    */
-  readonly #settled = new Map<string, string>();
+  readonly #settled = new Map<string, { readonly key: string; readonly retryAt?: number }>();
+  /** Where each phase (finished threads, open threads) stopped, so the next pass starts there. */
+  readonly #resume: [string | undefined, string | undefined] = [undefined, undefined];
   #calls = 0;
+  #reads = 0;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #stopped = false;
 
@@ -231,73 +249,116 @@ export class PersonMemorySweep {
     if (!store.settings().enabled) return results;
     const since = store.since();
     const callsBefore = this.#calls;
-    let reads = 0;
-    for (const open of [false, true]) {
-      for (const source of this.#options.sources) {
-        for (const thread of source.threads()) {
+    const readsBefore = this.#reads;
+    const phases = [false, true].map((open) =>
+      this.#options.sources.flatMap((source) =>
+        source.threads().map((thread) => ({ source, thread, open })),
+      ),
+    );
+    // A thread that is gone takes its settled mark with it.
+    const live = new Set(
+      phases.flatMap((candidates) =>
+        candidates.map(({ source, thread }) => threadKey(source.mode, thread.id)),
+      ),
+    );
+    for (const key of this.#settled.keys()) if (!live.has(key)) this.#settled.delete(key);
+    for (const [phase, candidates] of phases.entries()) {
+      // Start where the last pass stopped, so threads behind a long run of
+      // others are reached in turn.
+      const resumeAt = candidates.findIndex(
+        ({ source, thread }) => threadKey(source.mode, thread.id) === this.#resume[phase],
+      );
+      this.#resume[phase] = undefined;
+      const ordered =
+        resumeAt <= 0
+          ? candidates
+          : [...candidates.slice(resumeAt), ...candidates.slice(0, resumeAt)];
+      for (const { source, thread, open } of ordered) {
+        if (
+          this.#stopped ||
+          this.#calls - callsBefore >= PERSON_MEMORY_MAX_DISTILLATIONS_PER_PASS ||
+          this.#reads - readsBefore >= PERSON_MEMORY_MAX_THREAD_READS_PER_PASS
+        ) {
+          if (!this.#stopped) this.#resume[phase] = threadKey(source.mode, thread.id);
+          return results;
+        }
+        // A thread the person put away keeps its lifecycle and gains a
+        // completion time; reopening it clears that time again.
+        const finished = thread.completedAt !== undefined;
+        if (finished === open) continue;
+        if (thread.completedAt !== undefined && thread.completedAt < since) continue;
+        if (!isMentionable(thread.id)) continue;
+        const ref = { mode: source.mode, threadId: decodeMentionableThreadId(thread.id) };
+        if (store.leavesNoTrace(ref)) continue;
+        // A thread put away that was learned from at or after it ended has
+        // nothing newer to read; one reopened and put away again does.
+        const learnedBefore = store.learnedThrough(ref);
+        if (
+          thread.completedAt !== undefined &&
+          learnedBefore !== undefined &&
+          learnedBefore.learnedAt >= thread.completedAt
+        ) {
+          continue;
+        }
+        let settledKey: string;
+        if (open) {
+          // An open thread was learned from lately: not before the interval is over.
           if (
-            this.#stopped ||
-            this.#calls - callsBefore >= PERSON_MEMORY_MAX_DISTILLATIONS_PER_PASS ||
-            reads >= PERSON_MEMORY_MAX_THREAD_READS_PER_PASS
-          ) {
-            return results;
-          }
-          // A thread the person put away keeps its lifecycle and gains a
-          // completion time; reopening it clears that time again.
-          const finished = thread.completedAt !== undefined;
-          if (finished === open) continue;
-          if (thread.completedAt !== undefined && thread.completedAt < since) continue;
-          if (!isMentionable(thread.id)) continue;
-          const ref = { mode: source.mode, threadId: decodeMentionableThreadId(thread.id) };
-          if (store.leavesNoTrace(ref)) continue;
-          // A thread put away that was learned from at or after it ended has
-          // nothing newer to read; one reopened and put away again does.
-          const learnedBefore = store.learnedThrough(ref);
-          if (
-            thread.completedAt !== undefined &&
             learnedBefore !== undefined &&
-            learnedBefore.learnedAt >= thread.completedAt
+            Date.parse(learnedBefore.learnedAt) + PERSON_MEMORY_OPEN_THREAD_INTERVAL_MS >
+              Date.parse(this.#clock())
           ) {
             continue;
           }
-          let settledKey: string | undefined;
-          if (open) {
-            // An open thread was learned from lately: not before the interval is over.
-            if (
-              learnedBefore !== undefined &&
-              Date.parse(learnedBefore.learnedAt) + PERSON_MEMORY_OPEN_THREAD_INTERVAL_MS >
-                Date.parse(this.#clock())
-            ) {
-              continue;
-            }
-            // Cheap facts first: most open threads have nothing to learn, most passes.
-            const check = this.#openThreadCheck(source, thread.id, ref, learnedBefore, since);
-            if (check.skip) continue;
-            settledKey = check.key;
-          }
-          let outcome: PersonMemoryDistillOutcome;
-          try {
-            outcome = await this.distill(source, thread.id, thread.completedAt, since);
-          } catch {
-            outcome = "unavailable";
-          }
-          // Only an attempt that reached the model spends its budget: a thread
-          // skipped, or settled with no call (an account that is off, nothing
-          // new to record), is bounded by the read limit instead, or the same
-          // threads would use up every pass.
-          if (outcome !== "skipped") reads += 1;
-          if (open && outcome === "skipped" && settledKey !== undefined) {
-            this.#settled.set(threadKey(source.mode, thread.id), settledKey);
-          }
-          // An open thread that is not ready to be read, and a thread learned
-          // from already with nothing newer, are no news: most are, most passes.
-          if (!(outcome === "skipped" && (open || learnedBefore !== undefined))) {
-            results.push({ mode: source.mode, threadId: thread.id, outcome });
-          }
+          // Cheap facts first: most open threads have nothing to learn, most passes.
+          const check = this.#openThreadCheck(source, thread.id, ref, learnedBefore, since);
+          if (check.skip) continue;
+          settledKey = check.key;
+        } else {
+          settledKey = this.#settledKey(
+            `${thread.completedAt ?? ""}|${learnedBefore?.learnedAt ?? ""}|${since}`,
+          );
+        }
+        if (this.#isSettled(threadKey(source.mode, thread.id), settledKey)) continue;
+        let outcome: PersonMemoryDistillOutcome;
+        let settle: Settle = "no";
+        try {
+          ({ outcome, settle } = await this.#distill(source, thread.id, thread.completedAt, since));
+        } catch {
+          outcome = "unavailable";
+        }
+        if (settle === "idle") {
+          this.#settled.set(threadKey(source.mode, thread.id), { key: settledKey });
+        } else if (settle === "refused") {
+          this.#settled.set(threadKey(source.mode, thread.id), {
+            key: settledKey,
+            retryAt: Date.parse(this.#clock()) + PERSON_MEMORY_REFUSED_RETRY_MS,
+          });
+        }
+        // An open thread that is not ready to be read, and a thread learned
+        // from already with nothing newer, are no news: most are, most passes.
+        if (!(outcome === "skipped" && (open || learnedBefore !== undefined))) {
+          results.push({ mode: source.mode, threadId: thread.id, outcome });
         }
       }
     }
     return results;
+  }
+
+  /**
+   * What a settled thread looked like: the facts that matter to it plus the
+   * settings, so a change of the account, the chosen model or the Projects kept
+   * out reads the thread again.
+   */
+  #settledKey(facts: string): string {
+    return `${facts}|${JSON.stringify(this.#options.store.settings())}`;
+  }
+
+  /** Whether a thread was settled as it looks now, and its time-based retry is not due. */
+  #isSettled(threadKeyValue: string, key: string): boolean {
+    const settled = this.#settled.get(threadKeyValue);
+    if (settled === undefined || settled.key !== key) return false;
+    return settled.retryAt === undefined || Date.parse(this.#clock()) < settled.retryAt;
   }
 
   /**
@@ -327,9 +388,7 @@ export class PersonMemorySweep {
     if (marks === 0 || this.#quietFor(activity) < PERSON_MEMORY_OPEN_THREAD_IDLE_MS) {
       return { skip: true };
     }
-    const key = `${last}|${String(marks)}|${since}`;
-    if (this.#settled.get(threadKey(source.mode, threadId)) === key) return { skip: true };
-    return { skip: false, key };
+    return { skip: false, key: this.#settledKey(`${last}|${String(marks)}|${since}`) };
   }
 
   /** How long the thread has been still, from its last activity (a message or the end of a turn). */
@@ -352,11 +411,21 @@ export class PersonMemorySweep {
     endedAt: string | undefined,
     since?: string,
   ): Promise<PersonMemoryDistillOutcome> {
+    return (await this.#distill(source, threadId, endedAt, since)).outcome;
+  }
+
+  async #distill(
+    source: PersonMemoryThreadSource,
+    threadId: string,
+    endedAt: string | undefined,
+    since?: string,
+  ): Promise<{ readonly outcome: PersonMemoryDistillOutcome; readonly settle: Settle }> {
     const { store, model } = this.#options;
+    this.#reads += 1;
     const facts = source.read(threadId);
-    if (facts === undefined) return "skipped";
+    if (facts === undefined) return { outcome: "skipped", settle: "no" };
     if (!store.threadTakesPart({ mode: source.mode, threadId, projectId: facts.projectId })) {
-      return "skipped";
+      return { outcome: "skipped", settle: "refused" };
     }
     const open = endedAt === undefined;
     const learned = store.learnedThrough({ mode: source.mode, threadId });
@@ -364,8 +433,10 @@ export class PersonMemorySweep {
     // from what the person typed after memory began.
     if (open) {
       const activity = source.peek(threadId);
-      if (activity === undefined || activity.running) return "skipped";
-      if (this.#quietFor(activity) < PERSON_MEMORY_OPEN_THREAD_IDLE_MS) return "skipped";
+      if (activity === undefined || activity.running) return { outcome: "skipped", settle: "no" };
+      if (this.#quietFor(activity) < PERSON_MEMORY_OPEN_THREAD_IDLE_MS) {
+        return { outcome: "skipped", settle: "no" };
+      }
     }
     const candidates = facts.personMessages
       .filter((message) => (learned === undefined ? true : message.at > learned.at))
@@ -380,14 +451,16 @@ export class PersonMemorySweep {
       // Nothing new the person wrote. A thread never learned from is recorded
       // as put away without a call; one learned from before, or one still
       // open, has nothing to record.
-      if (open || learned !== undefined || endedAt === undefined) return "skipped";
+      if (open || learned !== undefined || endedAt === undefined) {
+        return { outcome: "skipped", settle: "idle" };
+      }
       return store.remember({
         source: memorySourceOf(source.mode, threadId, facts, endedAt, this.#options),
         summary: "",
         entries: [],
       }) === "remembered"
-        ? "nothing-written"
-        : "skipped";
+        ? { outcome: "nothing-written", settle: "no" }
+        : { outcome: "skipped", settle: "idle" };
     }
     const memorySource = memorySourceOf(
       source.mode,
@@ -400,12 +473,14 @@ export class PersonMemorySweep {
       chosen: store.settings().distillModel,
       thread: { providerInstanceId: facts.providerInstanceId, modelId: facts.modelId },
     });
-    if (resolved === undefined) return "unavailable";
-    if (!personMemoryDistillationAllowed(resolved.driverKind)) return "not-allowed";
+    if (resolved === undefined) return { outcome: "unavailable", settle: "refused" };
+    if (!personMemoryDistillationAllowed(resolved.driverKind)) {
+      return { outcome: "not-allowed", settle: "refused" };
+    }
     // The Project's provider rule and the spend ceilings, both settled before
     // anything is sent, as a turn and a Shield review settle theirs.
     if (model.projectAllows?.({ projectId: facts.projectId, model: resolved.model }) === false) {
-      return "not-allowed";
+      return { outcome: "not-allowed", settle: "refused" };
     }
     const prompt = personMemoryDistillPrompt({
       title: memorySource.title,
@@ -421,7 +496,7 @@ export class PersonMemorySweep {
         Math.ceil((PERSON_MEMORY_DISTILL_INSTRUCTIONS.length + prompt.length) / 3) +
         DISTILL_OUTPUT_TOKEN_BOUND,
     }) ?? { status: "admitted" as const, settle: () => undefined };
-    if (spend.status === "refused") return "not-allowed";
+    if (spend.status === "refused") return { outcome: "not-allowed", settle: "refused" };
     this.#calls += 1;
     let answer: PersonMemoryModelAnswer;
     try {
@@ -442,7 +517,7 @@ export class PersonMemorySweep {
     } finally {
       spend.settle(answer.status === "unavailable" ? undefined : answer.usage);
     }
-    if (answer.status !== "answered") return "unavailable";
+    if (answer.status !== "answered") return { outcome: "unavailable", settle: "no" };
     const distilled = parsePersonMemoryDistillation(answer.text);
     // An unreadable reply still spent its one call; the messages are marked
     // learned with no entries rather than asked about again on every pass.
@@ -465,14 +540,18 @@ export class PersonMemorySweep {
             return content.length === 0 ? [] : [{ kind: entry.kind, content }];
           })
         : [];
-    return store.remember({
-      source: memorySource,
-      summary,
-      entries,
-      lastMessage: { id: last.id, at: decodeUtcTimestamp(last.at) },
-    }) === "remembered"
-      ? "remembered"
-      : "skipped";
+    return {
+      outcome:
+        store.remember({
+          source: memorySource,
+          summary,
+          entries,
+          lastMessage: { id: last.id, at: decodeUtcTimestamp(last.at) },
+        }) === "remembered"
+          ? "remembered"
+          : "skipped",
+      settle: "no",
+    };
   }
 
   #schedule(delayMs: number): void {
