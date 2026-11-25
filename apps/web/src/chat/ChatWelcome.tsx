@@ -45,6 +45,9 @@ import type { HomeListContributor, HomeListRead } from "../home/homeCards";
 import { recentThreadRows } from "../home/useStartListRows";
 import { WorkKindSwitch } from "../shell/WorkKindSwitch";
 import { ComposerInput, type ComposerInputElement } from "../composer/ComposerInput";
+import { useNewTaskComposerStash } from "../composer/useNewTaskComposerStash";
+import { MAX_CHAT_TURN_ATTACHMENTS } from "@octant/contracts/chat";
+import { MAX_COMPOSER_ATTACHMENT_BYTES } from "./composerAttachmentCapability";
 
 export interface ChatWelcomeProps {
   /**
@@ -128,6 +131,27 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     props.selectedModelId,
   );
   const textareaRef = useRef<ComposerInputElement>(null);
+  const stash = useNewTaskComposerStash({
+    mode: "chat",
+    host: props.fixedHostId ?? props.selectedHostId,
+    projectId: undefined,
+    prompt,
+    textarea: textareaRef,
+    setPrompt,
+    busy: !ready || props.creating === true || atMenu.resolving,
+    files: {
+      current: stagedFiles,
+      change: setStagedFiles,
+      attachmentLimit: MAX_CHAT_TURN_ATTACHMENTS,
+      attachmentByteLimit: MAX_COMPOSER_ATTACHMENT_BYTES,
+      readsImages: true,
+    },
+    extensions: {
+      current: extensionDraft.stagedReceipts,
+      change: extensionDraft.restore,
+      scopeKey: extensionDraft.scopeKey,
+    },
+  });
   const trimmed = prompt.trim();
   const canSubmit = trimmed.length > 0 && ready && !props.creating && !atMenu.resolving;
   const statusMessage =
@@ -190,6 +214,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
         </div>
         <div className="composer-stack">
           <ThreadComposer
+            stash={stash}
             // Connecting and reloading settle by themselves: progress. A
             // disconnect, a refusal and an attachment refusal stay until
             // resolved: cards.

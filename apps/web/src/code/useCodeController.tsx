@@ -3662,6 +3662,7 @@ export function useCodeController(options: CodeControllerOptions) {
     readonly draftReviewFindingReferencesInvalid?: boolean;
     readonly draftRevision?: number;
     readonly readDraftRevision?: (threadId: string) => number;
+    readonly restoreComposerDraft?: typeof composerDraft.restoreFor;
   } = {
     draftSideChatReturns: composerDraft.sideChatReturns,
     draftSideChatReturnsInvalid: composerDraft.sideChatReturnsInvalid,
@@ -3669,6 +3670,7 @@ export function useCodeController(options: CodeControllerOptions) {
     draftReviewFindingReferencesInvalid: composerDraft.reviewFindingReferencesInvalid,
     draftRevision: composerDraft.revisionFor(String(options.activeThreadId ?? "")),
     readDraftRevision: composerDraft.revisionFor,
+    restoreComposerDraft: composerDraft.restoreFor,
   };
   return useRetainedRecord({
     activeView: activeView?.thread.id === options.activeThreadId ? activeView : undefined,

@@ -67,6 +67,12 @@ import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerAttachmentIcon } from "../composer/ComposerAttachmentIcon";
+import {
+  composerStashContextValues,
+  recoveredComposerThreadDraft,
+} from "../composer/composerStashDraft";
+import type { ComposerStashBinding, ComposerStashSubmission } from "../composer/useComposerStash";
+import { MAX_CODE_ATTACHMENT_BYTES, MAX_CODE_TURN_ATTACHMENTS } from "@octant/contracts";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
@@ -579,6 +585,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const threadVersionRef = useRef<CodeThread["version"] | undefined>(undefined);
   const [accessChanging, setAccessChanging] = useState(false);
   const textareaRef = useRef<ComposerInputElement>(null);
+  const stashSubmission = useRef<ComposerStashSubmission>(undefined);
   useEffect(() => {
     const update = props.updateApprovalAnchor;
     const activeView = view;
@@ -1274,6 +1281,84 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.operationClient !== undefined &&
     props.nextUuid !== undefined &&
     (!decidesCodeEffectsByApproval(thread.executionPolicy) || props.requestApproval !== undefined);
+  const stash: ComposerStashBinding = {
+    submission: stashSubmission,
+    target: {
+      location: {
+        host: props.hostId ?? "local",
+        extensionScope: extensionDraft.scopeKey,
+        mode: "code",
+        projectId: thread.projectId ?? null,
+        composerId: props.threadId,
+        threadId: props.threadId,
+        binding: view.checkout.id,
+      },
+      attachmentLimit: props.attachmentClient === undefined ? 0 : MAX_CODE_TURN_ATTACHMENTS,
+      attachmentByteLimit: MAX_CODE_ATTACHMENT_BYTES,
+      readsImages: seesImages.takesImages !== false,
+      context: ["file", "thread", "extension", "side-chat", "review", "continuation"],
+    },
+    draft: {
+      text: draft,
+      caret:
+        textareaRef.current?.selectionStart ?? props.controller.pendingDraftCaret ?? draft.length,
+      files: attachments.staged.map((item) => item.file),
+      context: [
+        ...pathMentions.selectedPaths.map((value) => ({ kind: "file" as const, value })),
+        ...threadMentions.chips.map((value) => ({ kind: "thread" as const, value })),
+        ...extensionDraft.stagedReceipts.map((value) => ({ kind: "extension" as const, value })),
+        ...(props.controller.draftSideChatReturns ?? []).map((value) => ({
+          kind: "side-chat" as const,
+          value,
+        })),
+        ...(props.controller.draftReviewFindingReferences ?? []).map((value) => ({
+          kind: "review" as const,
+          value,
+        })),
+        ...(props.controller.draftSideChatReturnsInvalid
+          ? [{ kind: "side-chat" as const, value: null }]
+          : []),
+        ...(props.controller.draftReviewFindingReferencesInvalid
+          ? [{ kind: "review" as const, value: null }]
+          : []),
+        ...(continuation.policy === "text-only"
+          ? [{ kind: "continuation" as const, value: continuation.policy }]
+          : []),
+      ],
+    },
+    unavailable:
+      attachments.busy ||
+      queuePreparing ||
+      messageQueue.busy ||
+      messageQueue.uncertain ||
+      props.controller.turnStatus === "sending"
+        ? "Wait for the current attachment or send to finish."
+        : undefined,
+    prepare: async (next) => {
+      const files = await attachments.prepareDraftFiles(next.files);
+      if (files.kind === "refused") return files;
+      return {
+        ...files,
+        apply: () => {
+          files.apply();
+          pathMentions.clear();
+          pathMentions.restore(composerStashContextValues(next, "file"));
+          threadMentions.restore(composerStashContextValues(next, "thread"));
+          extensionDraft.restore(composerStashContextValues(next, "extension"));
+          continuation.change(composerStashContextValues(next, "continuation")[0] ?? "preserve");
+          setDraft(next.text);
+          if (props.controller.restoreComposerDraft === undefined) {
+            props.controller.setPendingDraft(next.text, next.caret);
+          } else {
+            props.controller.restoreComposerDraft(
+              props.threadId,
+              recoveredComposerThreadDraft(next),
+            );
+          }
+        },
+      };
+    },
+  };
   async function submitFollowUp(toolCatalogHandoff = false) {
     if (props.controller.draftReviewFindingReferencesInvalid) {
       setSendNotice(
@@ -1290,6 +1375,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
     const sideChatReturns = props.controller.draftSideChatReturns ?? [];
     if (!canSend || queuePreparingRef.current) return;
+    const retireStashRecovery = stashSubmission.current?.();
     const draftRevision = props.controller.draftRevision ?? draftRevisionRef.current;
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
@@ -1323,6 +1409,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             extensionSelections,
           },
           () => {
+            retireStashRecovery?.();
             attachments.acceptQueueClaim(captured);
             continuation.reset();
             if (!mountedRef.current || activeThreadKeyRef.current !== originThreadKey) return;
@@ -1369,6 +1456,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     if (continuation.policy === "text-only") sendArguments[12] = continuation.policy;
     const sent = await props.controller.sendFollowUp(...sendArguments);
     if (sent) {
+      retireStashRecovery?.();
       continuation.reset();
       attachments.takeForSend();
       // Only the draft that was sent is cleared: typing during the awaited send
@@ -2793,6 +2881,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         />
         <ThreadComposer
           readOnly={readOnly}
+          stash={readOnly ? undefined : stash}
           queue={
             <>
               <ThreadWakeups

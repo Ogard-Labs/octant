@@ -5,6 +5,7 @@ import {
   useNewTaskPrompt,
 } from "../composer/useNewTaskPrompt";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
+import type { ComposerStashSubmission } from "../composer/useComposerStash";
 import { ChatClientFailure, type ChatClient } from "@octant/client-runtime/chat-client";
 import { ProjectClientFailure, type ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -25,6 +26,8 @@ import {
 } from "react";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { useNewTaskComposerStash } from "../composer/useNewTaskComposerStash";
+import type { HostId } from "@octant/contracts/host";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -69,6 +72,7 @@ export interface ChatProjectOverviewModel {
 }
 
 export interface ChatProjectOverviewProps {
+  readonly hostId?: HostId;
   readonly client?: ChatClient;
   readonly controller?: ChatController;
   readonly model?: ChatProjectOverviewModel;
@@ -137,6 +141,16 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
   const [submitting, setSubmitting] = useState(false);
   const [restoreFocus, setRestoreFocus] = useState(false);
   const createAvailable = props.onCreateThread !== undefined;
+  const stashSubmission = useRef<ComposerStashSubmission>(undefined);
+  const stash = useNewTaskComposerStash({
+    mode: "chat",
+    host: props.hostId,
+    projectId: props.projectId,
+    prompt: draft,
+    textarea: input,
+    setPrompt: setDraft,
+    busy: submitting || !createAvailable,
+  });
   const visibleSections = SECTIONS.filter(([key]) => isVisibleOverviewSection(model[key]));
   const homeOnly = visibleSections.length === 0;
   const threadsEmptyMessage = model.threads.status === "empty" ? model.threads.message : undefined;
@@ -152,16 +166,21 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
     const normalized = draft.trim();
     if (!createAvailable || submitting || normalized === "") return;
     setSubmitting(true);
-    setDraft("");
+    const retireStashRecovery = stashSubmission.current?.();
+    if (retireStashRecovery === undefined) setDraft("");
     try {
       const created =
         Object.keys(modelOptionValues).length === 0
           ? await props.onCreateThread(normalized)
           : await props.onCreateThread(normalized, modelOptionValues);
-      if (!created) {
-        const current =
-          drafts === undefined || draftScope === undefined ? "" : drafts.read(draftScope);
-        if (current.trim() === "") setDraft(normalized);
+      const current =
+        drafts === undefined || draftScope === undefined ? undefined : drafts.read(draftScope);
+      if (created && retireStashRecovery !== undefined) {
+        retireStashRecovery();
+        if (current === undefined || current === draft) setDraft("");
+      } else if (!created) {
+        if (retireStashRecovery === undefined && (current ?? "").trim() === "")
+          setDraft(normalized);
         setRestoreFocus(true);
       }
     } finally {
@@ -186,6 +205,7 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
             Start a new Chat thread
           </label>
           <ThreadComposer
+            stash={{ ...stash, submission: stashSubmission }}
             notices={
               createAvailable
                 ? []

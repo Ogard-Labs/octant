@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { createServer } from "vite";
 import { expect, it } from "vitest";
+import { verifyPairedDraftPurge } from "./pairedDraftPurge.test-support";
 import { NARROW, SCENE_LIST, updateMode, WIDE } from "./sceneList";
 
 /**
@@ -217,6 +218,7 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
         const warmPage = await warm.newPage();
         await warmPage.goto(`${origin}/visual-check.html?scene=home&scheme=dark`);
         await warmPage.waitForSelector("html[data-visual-ready='true']", { timeout: 60_000 });
+        await verifyPairedDraftPurge(warmPage);
       } finally {
         await warm.close();
       }
