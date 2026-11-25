@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Octant — Mobile concepts</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="settings-review.css">
+</head>
+<body>
+<div class="stage">
+  <aside class="panel">
+    <h1>Octant · phone mockup</h1>
+    <div class="sub">Clickable prototype of the mobile redesign. Dark theme by default.</div>
+
+    <div class="ctl">
+      <div class="ctl-label">Theme</div>
+      <div class="seg-light">
+        <button data-theme="dark" class="on">Dark</button>
+        <button data-theme="light">Light</button>
+      </div>
+    </div>
+
+    <div class="ctl">
+      <label class="checkline">
+        <input type="checkbox" id="before-toggle">
+        <span>Before Bots and PRs ship</span>
+      </label>
+    </div>
+
+    <div class="ctl">
+      <label class="checkline">
+        <input type="checkbox" id="names-toggle">
+        <span>Show thread names</span>
+      </label>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <select id="device-select" class="devsel">
+          <option value="phone">iPhone</option>
+          <option value="ipad">iPad</option>
+          <option value="android">Android</option>
+          <option value="duo">iPhone Duo</option>
+          <option value="androidfold">Android foldable</option>
+        </select>
+        <select id="posture-select" class="devsel" style="display:none"></select>
+      </div>
+      <div class="sub" id="device-note" style="margin:8px 0 0"></div>
+    </div>
+
+    <div class="ctl">
+      <div class="ctl-label">Screens</div>
+      <ul class="plinks">
+        <li><a href="#/home">Home <span class="kind">tab</span></a></li>
+        <li><a href="#/threads">Threads <span class="kind">tab</span></a></li>
+        <li><a href="#/inbox">Inbox <span class="kind">tab</span></a></li>
+        <li><a href="#/prs">Pull requests <span class="kind">tab</span></a></li>
+        <li><a href="#/bots">Bots <span class="kind">tab</span></a></li>
+        <li><a href="#/thread/sync">Thread · sync worker <span class="kind">pushed</span></a></li>
+        <li><a href="#/thread/release">Thread · release notes <span class="kind">stale</span></a></li>
+        <li><a href="#/pr/2864">Pull request #2864 <span class="kind">pushed</span></a></li>
+        <li><a href="#/bot/bugscout">Bot · Bug Scout <span class="kind">pushed</span></a></li>
+        <li><a href="#/bot/navigator">Bot · Navigator <span class="kind">pushed</span></a></li>
+        <li><a href="#/settings">Settings <span class="kind">pushed</span></a></li>
+        <li><a href="#/computer/studio">Computer · Studio Mac <span class="kind">pushed</span></a></li>
+        <li><a href="#/pair">Pair a computer <span class="kind">pushed</span></a></li>
+        <li><a href="#/lock">Lock Screen <span class="kind">device</span></a></li>
+        <li><a href="#/homescreen">Home Screen <span class="kind">device</span></a></li>
+        <li><a href="#/android-notification">Android notification <span class="kind">device</span></a></li>
+      </ul>
+    </div>
+
+    <button class="share-btn" id="share-btn">Simulate share from Photos</button>
+  </aside>
+
+  <div class="phone" data-theme="dark">
+    <div class="statusbar">
+      <div class="time">9:41</div>
+      <div class="island"></div>
+      <div class="sysicons">
+        <svg viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="2.5" width="3" height="9.5" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".35"/></svg>
+        <svg viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.5 4.5a10 10 0 0 1 13 0"/><path d="M4 7a6.5 6.5 0 0 1 8 0"/><path d="M6.5 9.4a3 3 0 0 1 3 0"/><circle cx="8" cy="11" r="0.8" fill="currentColor"/></svg>
+        <svg class="battery" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="3.5" stroke="currentColor" opacity=".5"/><rect x="2" y="2" width="16" height="8" rx="2" fill="currentColor"/><path d="M23.5 4v4a2 2 0 0 0 0-4z" fill="currentColor" opacity=".5"/></svg>
+      </div>
+    </div>
+    <div class="viewport" id="viewport"></div>
+    <div class="tabbar" id="tabbar"></div>
+    <div class="sheet-root" id="sheet-root"></div>
+    <div class="menu-root" id="menu-root"></div>
+    <div class="alert-root" id="alert-root"></div>
+  </div>
+</div>
+<script src="icons.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
