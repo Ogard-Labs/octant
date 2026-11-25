@@ -1,9 +1,15 @@
-import type { AutomationDefinition, AutomationRun } from "@octant/contracts";
+import type { AutomationDefinition, AutomationRun, WindowId } from "@octant/contracts";
 
 /** One durably claimed run handed to the thread dispatcher. */
 export interface AutomationDispatchOffer {
   readonly definition: AutomationDefinition;
   readonly run: AutomationRun;
+  /**
+   * Present when a person explicitly confirmed or started this run from an
+   * authenticated window or paired device, so the first turn runs as their
+   * interactive turn rather than an unattended host run.
+   */
+  readonly confirmedByWindowId?: WindowId;
 }
 
 /**

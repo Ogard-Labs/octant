@@ -8,7 +8,7 @@ import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecove
 import { withHandoverSummary } from "../agentRun/conversationHandoff";
 import { projectExtraFolderRoots, validateQuestionnaireAnswer } from "@octant/domain";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
-import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
+import { MAX_PROVIDER_ATTACHMENTS, personalSignInRefusals } from "@octant/contracts";
 import type { AccountSessionCarrier } from "../providers/accountSessionCarry";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type {
@@ -3607,7 +3607,8 @@ type HandoffRefusal =
   | { readonly subject: "switch"; readonly reason: ProviderSwitchHandoffRefusal }
   | { readonly subject: "rewind"; readonly reason: ProviderSwitchHandoffRefusal }
   | { readonly subject: "fork"; readonly reason: CodeForkHandoffRefusal }
-  | { readonly subject: "inherited"; readonly reason: InheritedHandoffRefusal };
+  | { readonly subject: "inherited"; readonly reason: InheritedHandoffRefusal }
+  | { readonly subject: "personal-sign-in"; readonly message: string };
 
 function handoffRefusalMessage(refusal: HandoffRefusal): string {
   switch (refusal.subject) {
@@ -3619,6 +3620,8 @@ function handoffRefusalMessage(refusal: HandoffRefusal): string {
       return CODE_FORK_HANDOFF_REFUSALS[refusal.reason];
     case "inherited":
       return INHERITED_HANDOFF_REFUSALS[refusal.reason];
+    case "personal-sign-in":
+      return refusal.message;
   }
 }
 
@@ -4118,7 +4121,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         const selected = await this.#forkTextHandoff(input.thread, forkOrigin, input.windowId);
         if (selected.status === "refused") {
           await input.extensionTools?.close?.().catch(() => undefined);
-          return failStart(CODE_FORK_HANDOFF_REFUSALS[selected.reason]);
+          return failStart(
+            "message" in selected ? selected.message : CODE_FORK_HANDOFF_REFUSALS[selected.reason],
+          );
         }
         forkHandoff = selected;
       }
@@ -4669,6 +4674,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       }
     }
     if (previous === undefined) return undefined;
+    if (
+      reason === "provider-switch" &&
+      String(previous.providerInstanceId) !== String(thread.providerInstanceId)
+    ) {
+      const target = this.#options.readProviderInstance?.(thread.providerInstanceId);
+      const handoffRefusal = personalSignInRefusals(target)?.refusesManualCrossModelHandoff;
+      if (handoffRefusal !== undefined)
+        return refused({ subject: "personal-sign-in", message: handoffRefusal });
+    }
     const own = reason === "rewind" ? "rewind" : "switch";
     const select = this.#options.providerSwitchContext;
     if (select === undefined) return refused({ subject: own, reason: "unsupported" });
@@ -4877,11 +4891,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         >;
       }
     | { readonly status: "refused"; readonly reason: CodeForkHandoffRefusal }
+    | { readonly status: "refused"; readonly message: string }
   > {
     if (this.#options.forkContext === undefined)
       return { status: "refused", reason: "unsupported" };
     const readable = await this.#readableForkSource(thread, origin, windowId);
     if (readable.status === "refused") return readable;
+    if (String(readable.source.providerInstanceId) !== String(thread.providerInstanceId)) {
+      const target = this.#options.readProviderInstance?.(thread.providerInstanceId);
+      const handoffRefusal = personalSignInRefusals(target)?.refusesManualCrossModelHandoff;
+      if (handoffRefusal !== undefined) return { status: "refused", message: handoffRefusal };
+    }
     // The fork's handoff is read by the fork's own model, so its bound comes
     // from that model's window when the probe reported it, exactly as a
     // provider switch's does.
@@ -8569,6 +8589,9 @@ async function draftDeliveryText(
   const scoped = await readDraftDiff(git, observed, input);
   if (scoped.status !== "ready" || scoped.paths.length === 0) return { status: "unavailable" };
   if (scoped.diff.text.trim().length === 0) return { status: "unavailable" };
+  const instance = options.readProviderInstance?.(input.thread.providerInstanceId);
+  if (personalSignInRefusals(instance)?.refusesBackgroundModelCalls !== undefined)
+    return { status: "unavailable" };
   const driver = await options.resolveProviderDriver(input.thread);
   if (driver === undefined) return { status: "unavailable" };
   const diff = boundedDiff(scoped.diff.text);

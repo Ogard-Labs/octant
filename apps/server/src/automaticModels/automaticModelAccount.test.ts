@@ -149,4 +149,27 @@ describe("the account chosen for an automatic call", () => {
       }),
     ).toBeUndefined();
   });
+
+  it("refuses Google Antigravity on personal sign-in for automatic calls while allowing Gemini API key and Agent Platform", () => {
+    const checkProvider = (driverKind: string, authentication?: string) =>
+      createAutomaticModelAccountCheck({
+        readProviderInstance: () =>
+          ({
+            id,
+            enabled: true,
+            displayName: "Google Antigravity",
+            driverKind,
+            configuration: authentication === undefined ? {} : { authentication },
+          }) as unknown as ProviderInstance,
+        readiness: () => "ready",
+        limits: () => snapshot("allowed"),
+        nowMs: () => Date.parse("2026-11-01T10:00:00.000Z"),
+      })(id);
+
+    expect(checkProvider("antigravity")).toContain("personal Google sign-in");
+    expect(checkProvider("antigravity", "provider-owned")).toContain("personal Google sign-in");
+    expect(checkProvider("antigravity", "api-key")).toBeUndefined();
+    expect(checkProvider("antigravity", "agent-platform")).toBeUndefined();
+    expect(checkProvider("gemini")).toBeUndefined();
+  });
 });
