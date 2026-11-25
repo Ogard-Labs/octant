@@ -13,6 +13,7 @@ import {
   useOpenCodeThreadProviderRequests,
 } from "./codeThreadControllers";
 import { createCodeReadCursorStore } from "./useCodeController";
+import { ThreadActivityRevisionsContext } from "../polling/ThreadActivityRevisions";
 
 function ProviderRequestReader(props: {
   readonly controllers: ReturnType<typeof createCodeThreadControllers>;
@@ -322,6 +323,68 @@ describe("CodeThreadControllerSlots", () => {
       expect(registry.get(threadA)?.errorMessage).toBeUndefined();
     },
   );
+
+  it("reads what the person sent into an open thread's running turn when the window hears a queue change", async () => {
+    const registry = createCodeThreadControllers();
+    const steeredMessages = [{ messageId: "m1", body: "Skip the backfill.", steeredAt: now }];
+    const turn = {
+      operationId: "70000000-0000-4000-8000-000000000001",
+      providerInstanceId: "50000000-0000-4000-8000-000000000001",
+      modelId: "model-a",
+      prompt: { contentId: "p", digest: "a".repeat(64), byteLength: 1 },
+      assistant: [],
+      status: "incomplete",
+      startedAt: now,
+      updatedAt: now,
+    };
+    let held: object = turn;
+    const conversationWindow = vi.fn(async (threadId: unknown) => ({
+      version: 1,
+      threadId,
+      turns: String(threadId) === String(threadA) ? [held] : [],
+      hasEarlier: false,
+      hasLater: false,
+    }));
+    const api = {
+      ...client(),
+      conversationWindow,
+      operationContent: vi.fn(async () => new TextEncoder().encode("Add the index")),
+      subscribeOperation: vi.fn((_t: unknown, _o: unknown, _c: unknown, signal: AbortSignal) =>
+        idleStream(signal),
+      ),
+    } as unknown as CodeClient;
+    const readCursorStore = createCodeReadCursorStore();
+    const tree = (threadMessageQueue: number) => (
+      <ThreadActivityRevisionsContext.Provider
+        value={{ browserCaptures: 0, toolApprovals: 0, threadFollowUps: 0, threadMessageQueue }}
+      >
+        <CodeThreadControllerSlots
+          client={api}
+          navigationBootstrap={bootstrap()}
+          readCursorStore={readCursorStore}
+          registry={registry}
+          threadIds={[threadA, threadB]}
+        />
+      </ThreadActivityRevisionsContext.Provider>
+    );
+    const view = render(tree(1));
+    await waitFor(() => {
+      expect(registry.get(threadA)?.turnStatus).toBe("running");
+      expect(registry.get(threadB)?.conversationHistory).toBe("loaded");
+    });
+    const readsOf = (threadId: CodeThreadId) =>
+      conversationWindow.mock.calls.filter(([id]) => String(id) === String(threadId)).length;
+    const idleReads = readsOf(threadB);
+
+    held = { ...turn, steeredMessages };
+    view.rerender(tree(2));
+
+    await waitFor(() =>
+      expect(registry.get(threadA)?.conversation.at(-1)).toMatchObject({ steeredMessages }),
+    );
+    // A thread with no running turn has nothing to take in.
+    expect(readsOf(threadB)).toBe(idleReads);
+  });
 
   it("gives every open Code thread its own view instead of one shared with the front tab", async () => {
     const registry = createCodeThreadControllers();

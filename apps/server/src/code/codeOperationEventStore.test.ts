@@ -23,12 +23,16 @@ import {
 import { foldCodeTurnUsage } from "@octant/domain";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentResultSteered } from "@octant/contracts";
+import { AgentResultSteered, ThreadMessageSteered } from "@octant/contracts";
 import { decodeUtcTimestamp } from "@octant/contracts";
 import {
   AGENT_RESULT_STEERED,
   AGENT_RESULT_STEERING_AGGREGATE_TYPE,
 } from "../agentRun/agentResultSteeredRecord";
+import {
+  journalThreadMessageSteered,
+  THREAD_MESSAGE_STEERED,
+} from "../messageQueue/threadMessageSteeredRecord";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
@@ -738,6 +742,61 @@ describe("CodeOperationEventStore", () => {
     const window = reopened.conversationWindow({ threadId, limit: 10 });
     if (window.status !== "ok") throw new Error("window refused");
     expect(window.window.turns[0]?.steeredResults).toEqual(expected);
+  });
+
+  it("reads a message steered into a turn while that turn still runs, and drops it with a rewound turn", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: turnStarted("89000000-0000-4000-8000-000000000042"),
+    });
+    const steer = (messageId: string, body: string) =>
+      journalThreadMessageSteered(fixture.journal, {
+        mode: "code",
+        threadId,
+        turnKey: operationId,
+        messageId,
+        body,
+        steeredAt: now,
+        uuid: () => crypto.randomUUID(),
+        actor,
+      });
+    steer("89000000-0000-4000-8000-000000000071", "Skip the backfill.");
+    steer("89000000-0000-4000-8000-000000000072", "Use staging.");
+    const newest = () => {
+      const window = store.conversationWindow({ threadId, limit: 2 });
+      if (window.status !== "ok") throw new Error("window refused");
+      return window.window.turns;
+    };
+
+    expect(newest()).toMatchObject([
+      {
+        operationId,
+        status: "incomplete",
+        steeredMessages: [{ body: "Skip the backfill." }, { body: "Use staging." }],
+      },
+    ]);
+
+    store.append({
+      threadId,
+      operationId: otherOperationId,
+      expectedCursor: 0,
+      event: {
+        kind: "operation-result",
+        result: {
+          kind: "thread-rewound",
+          operationId: otherOperationId,
+          fromOperationId: operationId,
+          scope: "conversation",
+          removedTurns: 1,
+          files: "not-requested",
+        },
+      },
+    });
+    expect(newest()).toEqual([]);
   });
 
   it("replays a turn's tool calls and reasoning in order, folded and bounded", () => {
@@ -2065,6 +2124,7 @@ function openJournal(path = databasePath()): { journal: Journal; connection: Sql
       registry: new EventRegistry()
         .register(CODE_OPERATION_EVENT_RECORDED, 1, CodeOperationEventFrame)
         .register(AGENT_RESULT_STEERED, 1, AgentResultSteered)
+        .register(THREAD_MESSAGE_STEERED, 1, ThreadMessageSteered)
         .register(CHECKOUT_NOISE_EVENT, 1, Schema.Struct({ observedAt: Schema.String })),
       projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
       clock: () => now,

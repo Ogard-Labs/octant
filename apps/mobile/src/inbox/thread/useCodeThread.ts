@@ -7,7 +7,7 @@ import {
   type MobileCodeConversation,
 } from "@octant/client-runtime";
 import type { CodeThread } from "@octant/contracts";
-import { loadCodeConversationPage } from "./codeConversationPage";
+import { codeTurnIsLive, loadCodeConversationPage } from "./codeConversationPage";
 import { runLoad, runMutation, sendThenReload } from "./runMutation";
 import type { RefreshOptions, ThreadHookInput } from "./threadTypes";
 import { useThreadAttachments } from "./useThreadAttachments";
@@ -142,7 +142,7 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
     thread: codeThread,
     conversation,
     turns,
-    live: (turns ?? []).some((turn) => turn.status === "waiting"),
+    live: codeTurnIsLive(turns ?? []),
     refresh,
     jumpToLatest,
     sendFollowUp,

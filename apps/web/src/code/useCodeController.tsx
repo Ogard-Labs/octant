@@ -92,6 +92,8 @@ import {
 import { markInteraction } from "../polling/interactionTrace";
 import {
   framePosition,
+  holdSteeredMessages,
+  withSteeredMessages,
   applyEvent,
   applyResult,
   commandReloadsThread,
@@ -116,6 +118,7 @@ import type {
   CodeConversationMessage,
   CodeProviderRequest,
   CodeReadCursorStore,
+  CodeSteeredMessages,
   CodeTurnUsage,
 } from "./codeControllerState";
 import {
@@ -430,6 +433,12 @@ export interface CodeControllerOptions {
    */
   readonly worktreeStandingRefreshMs?: number;
   readonly changeRevision?: number;
+  /**
+   * Moves when a message queue on this host changes. A message the runtime
+   * takes into a running turn leaves the queue then, and the turn's own
+   * stream carries nothing for it.
+   */
+  readonly messageQueueRevision?: number | undefined;
   readonly reconnectDelayMs?: number;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -793,6 +802,37 @@ export function useCodeController(options: CodeControllerOptions) {
       { readonly operationId: CodeOperationId; readonly status: "running" | "waiting" }
     >(),
   );
+  // Held apart from the transcript, which the turn's stream is writing: a read
+  // for these takes nothing else from the host's copy of the turn, and a
+  // slower read of the conversation cannot take one of these away.
+  const [steeredMessages, setSteeredMessages] = useState<CodeSteeredMessages>(new Map());
+  const noteSteeredMessages = useCallback((turns: ReadonlyArray<CodeConversationTurn>) => {
+    setSteeredMessages((held) => holdSteeredMessages(held, turns));
+  }, []);
+  /** Read what the person sent into the open thread's running turn, if one runs. */
+  const readSteeredMessages = useCallback(async () => {
+    const threadId = activeThreadId.current;
+    const request = threadGeneration.current;
+    if (
+      threadId === undefined ||
+      !activeTurnOperations.current.has(String(threadId)) ||
+      !readsConversationWindow(client)
+    )
+      return;
+    try {
+      // Two, because the turn after the one that took it may already run.
+      const window = await client.conversationWindow(threadId, { limit: 2 });
+      if (isActive(request, threadGeneration, mounted)) noteSteeredMessages(window.turns);
+    } catch {
+      // The next queue change, or the turn's own end, reads them.
+    }
+  }, [client, noteSteeredMessages]);
+  const readQueueRevision = useRef(options.messageQueueRevision);
+  useEffect(() => {
+    if (readQueueRevision.current === options.messageQueueRevision) return;
+    readQueueRevision.current = options.messageQueueRevision;
+    void readSteeredMessages();
+  }, [options.messageQueueRevision, readSteeredMessages]);
   const turnAbort = useRef<AbortController | undefined>(undefined);
   const editorDrafts = useMemo(
     () => createEditorDraftStore(options.serverUrl ?? "local"),
@@ -1841,6 +1881,7 @@ export function useCodeController(options: CodeControllerOptions) {
                     );
                 if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
                   return;
+                noteSteeredMessages(latest.turns);
                 if (latest.threadId !== threadId || latest.turns.at(-1)?.status === "incomplete") {
                   delayMs = Math.min(delayMs * 2, 2_000);
                   continue;
@@ -2010,6 +2051,7 @@ export function useCodeController(options: CodeControllerOptions) {
       hydrateConversation,
       installView,
       markRenderedActivity,
+      noteSteeredMessages,
       readEarlierPage,
       reconnectDelayMs,
       recordSeenActivity,
@@ -2092,6 +2134,7 @@ export function useCodeController(options: CodeControllerOptions) {
     conversationThreadKey.current = undefined;
     conversationRef.current = [];
     setConversation([]);
+    setSteeredMessages(new Map());
     setConversationHistory("loading");
     setProviderRequests([]);
     setRefusedAnswer(undefined);
@@ -2306,6 +2349,8 @@ export function useCodeController(options: CodeControllerOptions) {
         if (cancelled || !mounted.current) return;
         applyNavigationRefresh(next, read);
         void refreshWorktreeStanding();
+        // A paired browser has no change feed to hear a queue change from.
+        void readSteeredMessages();
       } catch {
         // A refresh that fails leaves the last list on screen; the stream and
         // the retry path are what report a host that has actually gone away.
@@ -2323,6 +2368,7 @@ export function useCodeController(options: CodeControllerOptions) {
     client,
     navigationRefreshMs,
     nextNavigationRead,
+    readSteeredMessages,
     refreshWorktreeStanding,
   ]);
 
@@ -3745,6 +3791,10 @@ export function useCodeController(options: CodeControllerOptions) {
     }
   }, [activeView, client, turnStatus]);
 
+  const shownConversation = useMemo(
+    () => withSteeredMessages(conversation, steeredMessages),
+    [conversation, steeredMessages],
+  );
   // The Load earlier row's state, or undefined for a thread with nothing earlier.
   const earlierRow = useMemo(
     () =>
@@ -3807,7 +3857,7 @@ export function useCodeController(options: CodeControllerOptions) {
     sendBackTurn,
     bootstrap,
     client,
-    conversation,
+    conversation: shownConversation,
     /** The Load earlier row's state, or undefined for a thread with nothing earlier. */
     earlierConversation: earlierRow,
     loadEarlierConversation,
