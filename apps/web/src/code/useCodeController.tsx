@@ -1943,36 +1943,50 @@ export function useCodeController(options: CodeControllerOptions) {
         // the operation, not the thread, so the thread's stream below never
         // hears of it. The thread list does: it says the thread is working.
         // One read per newly seen activity takes the turn up through the same
-        // poll and stream a read at open would, unless this view already
-        // follows a turn, sent one itself, or is reading.
+        // poll and stream a read at open would. A turn this view follows
+        // already uses the activity up; a send of its own or a read in flight
+        // only puts the look off, and a read that fails leaves the activity
+        // to be looked at again. A waiting turn is not followed: the reply that
+        // continues it may come from anywhere.
         let triedActivity = -1;
         let following = false;
         followTurnStartedElsewhere.current = (activity) => {
-          if (activity <= triedActivity) return;
-          triedActivity = activity;
           if (
+            activity <= triedActivity ||
             following ||
-            operationStream !== undefined ||
-            conversationPoll !== undefined ||
-            activeTurnOperations.current.has(String(threadId)) ||
             turnStatusNow.current === "sending" ||
             !isActive(request, threadGeneration, mounted) ||
             controller.signal.aborted
           )
             return;
+          if (
+            operationStream !== undefined ||
+            conversationPoll !== undefined ||
+            activeTurnOperations.current.get(String(threadId))?.status === "running"
+          ) {
+            triedActivity = activity;
+            return;
+          }
+          const lookedAt = triedActivity;
+          triedActivity = activity;
           following = true;
           void hydrateConversation(threadId, request, controller.signal)
             .then((hydrated) => {
               if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
                 return;
-              conversationCursor = hydrated?.nextCursor ?? conversationCursor;
-              if (hydrated?.incomplete !== true) return;
-              startConversationPoll();
+              if (hydrated === undefined) {
+                triedActivity = lookedAt;
+                return;
+              }
+              conversationCursor = hydrated.nextCursor ?? conversationCursor;
+              if (hydrated.incomplete) startConversationPoll();
               if (hydrated.activeOperationId !== undefined) {
                 startConversationOperationStream(hydrated.activeOperationId);
               }
             })
-            .catch(() => undefined)
+            .catch(() => {
+              triedActivity = lookedAt;
+            })
             .finally(() => {
               following = false;
             });
@@ -2288,9 +2302,11 @@ export function useCodeController(options: CodeControllerOptions) {
     options.activeThreadId === undefined
       ? undefined
       : threadWorkingActivity(bootstrap, options.activeThreadId);
+  // The turn status too: a send of this window's own that the host refused
+  // leaves a turn started elsewhere still to be looked for.
   useEffect(() => {
     if (openThreadWorking !== undefined) followTurnStartedElsewhere.current?.(openThreadWorking);
-  }, [openThreadWorking]);
+  }, [openThreadWorking, turnStatus]);
   const plannerThreadIds = useMemo(
     () => new Set((bootstrap?.plannerThreadIds ?? []).map(String)),
     [bootstrap],

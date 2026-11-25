@@ -468,6 +468,122 @@ describe("CodeThreadControllerSlots", () => {
     expect(readsOf(threadB)).toBe(idleReadsOfB);
   });
 
+  describe("a turn started elsewhere", () => {
+    const providerTurn = (operationId: string, status: string, extra: object = {}) => ({
+      operationId,
+      providerInstanceId: "50000000-0000-4000-8000-000000000001",
+      modelId: "model-a",
+      prompt: { contentId: "p", digest: "a".repeat(64), byteLength: 1 },
+      assistant: [],
+      status,
+      startedAt: now,
+      updatedAt: now,
+      ...extra,
+    });
+    const asked = "70000000-0000-4000-8000-000000000003";
+    const next = "70000000-0000-4000-8000-000000000004";
+
+    function host(initial: ReadonlyArray<object>) {
+      const held = { turnsOfA: initial };
+      const conversationWindow = vi.fn(
+        async (threadId: unknown, _options?: { readonly limit?: number }) => ({
+          version: 1,
+          threadId,
+          turns: String(threadId) === String(threadA) ? held.turnsOfA : [],
+          hasEarlier: false,
+          hasLater: false,
+        }),
+      );
+      const subscribeOperation = vi.fn(
+        (_t: unknown, operationId: unknown, _c: unknown, signal: AbortSignal) =>
+          String(operationId) === asked
+            ? (async function* () {
+                // The host replays a turn that waits on the person and ends it.
+                yield {
+                  threadId: threadA,
+                  operationId: asked,
+                  cursor: 1,
+                  occurredAt: now,
+                  event: { kind: "operation-state", state: "waiting" },
+                };
+              })()
+            : idleStream(signal),
+      );
+      const api = {
+        ...client(),
+        conversationWindow,
+        operationContent: vi.fn(async () => new TextEncoder().encode("Add the index")),
+        subscribeOperation,
+      } as unknown as CodeClient;
+      return { api, conversationWindow, held, subscribeOperation };
+    }
+
+    const working = (sequence: number): CodeBootstrap => ({
+      ...bootstrap(),
+      activity: [{ threadId: threadA, lastSequence: sequence }] as never,
+      runtime: [{ threadId: threadA, executing: true }] as never,
+    });
+
+    function open(api: CodeClient, navigationBootstrap: CodeBootstrap) {
+      const registry = createCodeThreadControllers();
+      const readCursorStore = createCodeReadCursorStore();
+      const tree = (current: CodeBootstrap) => (
+        <CodeThreadControllerSlots
+          client={api}
+          navigationBootstrap={current}
+          readCursorStore={readCursorStore}
+          registry={registry}
+          threadIds={[threadA]}
+        />
+      );
+      const view = render(tree(navigationBootstrap));
+      return { registry, rerender: (current: CodeBootstrap) => view.rerender(tree(current)) };
+    }
+
+    it("follows the next turn in a thread whose last turn waits on the person", async () => {
+      const { api, held, subscribeOperation } = host([providerTurn(asked, "waiting")]);
+      const { registry, rerender } = open(api, bootstrap());
+      await waitFor(() => expect(registry.get(threadA)?.turnStatus).toBe("waiting"));
+
+      const steeredMessages = [{ messageId: "m2", body: "Use staging.", steeredAt: now }];
+      held.turnsOfA = [
+        providerTurn(asked, "completed"),
+        providerTurn(next, "incomplete", { steeredMessages }),
+      ];
+      rerender(working(7));
+
+      await waitFor(() => {
+        expect(registry.get(threadA)?.turnStatus).toBe("running");
+        expect(registry.get(threadA)?.conversation.at(-1)).toMatchObject({ steeredMessages });
+      });
+      await waitFor(() =>
+        expect(subscribeOperation).toHaveBeenLastCalledWith(
+          threadA,
+          next,
+          expect.anything(),
+          expect.anything(),
+        ),
+      );
+    });
+
+    it("reads nothing more for a thread the list already says is working when it opens", async () => {
+      const { api, conversationWindow, subscribeOperation } = host([
+        providerTurn(next, "incomplete"),
+      ]);
+      const { registry, rerender } = open(api, working(3));
+      await waitFor(() => expect(registry.get(threadA)?.turnStatus).toBe("running"));
+      rerender(working(4));
+      await act(async () => undefined);
+      // Only the open's own read takes the whole window; the turn's poll
+      // looks at one turn.
+      const wholeReads = conversationWindow.mock.calls.filter(
+        ([, options]) => (options?.limit ?? 0) > 2,
+      );
+      expect(wholeReads).toHaveLength(1);
+      expect(subscribeOperation).toHaveBeenCalledOnce();
+    });
+  });
+
   it("gives every open Code thread its own view instead of one shared with the front tab", async () => {
     const registry = createCodeThreadControllers();
     render(

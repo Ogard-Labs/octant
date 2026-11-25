@@ -7892,9 +7892,10 @@ ls-remote` against the thread's remote and the GitHub reads they already
   thread is working at an activity sequence the view has not looked at, the
   view reads the conversation once and follows the turn through the same poll
   and operation stream a read at open starts. It does not look while it
-  follows a turn, is sending one itself, or is still on its first read, so it
-  never opens a second stream or reopens a turn it settled.
-  Those are held apart from the transcript and only ever grow, so the read
+  follows a running turn, is sending one itself, or is still on its first
+  read, so it never opens a second stream or reopens a turn it settled; a turn
+  waiting on the person does not stop it looking, and a read that fails leaves
+  that activity to be looked at again. The steered messages are held apart from the transcript and only ever grow, so the read
   cannot roll back the reply, tool steps or tasks the stream is writing, and
   a slower read of the conversation cannot take a shown message away. Reading
   on every `code-navigation` notice was rejected because most of those say
@@ -7910,7 +7911,7 @@ ls-remote` against the thread's remote and the GitHub reads they already
   Code turn, so it re-reads the thread on a short cadence while its newest
   turn runs or a turn waits. While it shows the newest turns settled, it looks
   at the newest turn alone, without its text, every ten seconds while in
-  front, and refreshes once when one is underway; an anchored search page
+  front (the price of one poll), and refreshes once when one is underway; an anchored search page
   does not look. When the running turn is
   one the queue admitted itself, that message stays at the head as
   `accepted` until its turn settles, and the message behind it is offered to
