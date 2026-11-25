@@ -111,15 +111,18 @@ export function CodeOverview(props: CodeOverviewProps) {
           ? {}
           : { action: { label: "Retry Code", onClick: props.controller.retry } })}
         eyebrow="Code workspace"
-        message={
-          props.controller.errorMessage ??
-          (props.controller.status === "conflict-reload"
-            ? "Reloading this Code thread."
-            : "Loading the selected Code thread.")
-        }
+        {...(props.controller.errorMessage === undefined
+          ? {}
+          : { message: props.controller.errorMessage })}
         {...(unavailable === undefined ? {} : { role: "alert" as const })}
         state={unavailable === undefined ? "loading" : "warning"}
-        title={unavailable === undefined ? "Loading Code thread" : "Code thread unavailable"}
+        title={
+          unavailable !== undefined
+            ? "Code thread unavailable"
+            : props.controller.status === "conflict-reload"
+              ? "Reloading Code thread"
+              : "Loading Code thread"
+        }
       />
     );
   }

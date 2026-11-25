@@ -670,7 +670,7 @@ function AvailableDiff(
       !files.some((file) => file.path === props.requestedCodeReviewFile?.path) ? (
         <OctantAlert layout="row" tone="warning">
           The receipt’s file is not in this current comparison. Its original per-turn diff was not
-          retained here; no line has been retargeted.
+          retained here; no line has been moved to match.
         </OctantAlert>
       ) : null}
       {content.kind === "ready" && files.length === 0 ? (

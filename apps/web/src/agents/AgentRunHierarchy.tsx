@@ -293,7 +293,7 @@ export function AgentRunHierarchy(props: {
         setErrorMessage(
           error instanceof AgentRunClientFailure
             ? error.message
-            : "The acknowledgement did not go through. Refresh and try again.",
+            : "The acknowledgement did not go through. Try again in a moment.",
         );
       }
     },
@@ -316,7 +316,7 @@ export function AgentRunHierarchy(props: {
         setErrorMessage(
           error instanceof AgentRunClientFailure
             ? error.message
-            : "The agent could not be cancelled. Refresh and try again.",
+            : "The agent could not be cancelled. Try again in a moment.",
         );
       }
     },
@@ -346,7 +346,7 @@ export function AgentRunHierarchy(props: {
         setErrorMessage(
           error instanceof AgentRunClientFailure
             ? error.message
-            : "The agent could not be resumed. Refresh and try again.",
+            : "The agent could not be resumed. Try again in a moment.",
         );
       }
     },

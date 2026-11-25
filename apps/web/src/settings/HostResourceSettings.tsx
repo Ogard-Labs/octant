@@ -203,7 +203,7 @@ export function HostResourceSettings({
       key: "cpuTargetPercent",
       label: "CPU limit for new work (%)",
       description:
-        "Octant starts new work only while CPU use is under this share; work already running is not capped.",
+        "With Automatic limits on, Octant starts new work only while CPU use is under this share; work already running is not capped.",
       min: 20,
       max: 90,
     },

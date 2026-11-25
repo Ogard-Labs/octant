@@ -24,26 +24,77 @@ interface Sentence {
   readonly text: string;
 }
 
+/** A comment may quote the very words this file refuses, so it is not read. */
+function withoutComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "))
+    .replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
+}
+
+// A prop or a field whose value is shown as it stands, however short.
+const SHOWN_AS_IT_STANDS =
+  /\b(?:aria-label|label|title|placeholder|message|detail|description|eyebrow|tooltip|text|heading|summary|caption|hint|note)\s*[=:]\s*\{?\s*(?:"([^"\n]*)"|'([^'\n]*)'|`([^`\n]*)`)/g;
+const QUOTED = /"([^"\n]*)"|'([^'\n]*)'|`([^`\n]*)`/g;
+// Text between two tags on one line. A tag ends against its name, a quote or a
+// brace and the next begins at once; a comparison has a space on both sides.
+const BETWEEN_TAGS = /(?<=\S)>([^<>{}\n]+)<(?=[/A-Za-z])/g;
+const CODE_NOT_PROSE = /&&|\|\||=|;|^[([]/;
+// A line of running text inside an element: no brace, bracket, tag or
+// assignment on it, and it does not end the way a statement or a field does.
+const PROSE_LINE = /^[A-Za-z’'“"][^=(){}[\]<>]*[^=(){}[\]<>,;:]$/;
+const STARTS_A_STATEMENT =
+  /^(?:readonly|const|let|var|return|import|export|case|default|type|interface|break|continue|else|try|finally|async|await|throw|function|yield|static|public|private|declare|extends|implements)\b/;
+// An expression broken over lines can look like a line of words: it gives
+// itself away with an operator, a keyword or a member read.
+const AN_EXPRESSION =
+  /&&|\|\||\?\?|=>|\?\.|\b(?:instanceof|typeof|keyof|satisfies)\b|[A-Za-z_]\.[A-Za-z_]/;
+
+function plain(text: string): string {
+  return text
+    .replace(/\$\{[^}]*\}/g, "…")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /**
- * The strings a person can read: a quoted or template string that starts with
- * a capital and holds at least two words, and the text between two JSX tags.
- * Class lists, selectors, identifiers and Settings search keywords start in
- * lower case or hold no space, so they fall out; a comment line is skipped,
- * since it may quote the very words this file refuses.
+ * The strings a person can read. Four shapes are read: a prop or field shown
+ * as it stands (a label, a title, a message), any other quoted string that
+ * starts with a capital and holds at least two words, the text between two
+ * tags, and a line of running text inside an element. Class lists, selectors,
+ * identifiers and Settings search keywords start in lower case or hold no
+ * space, so they fall out. A sentence that starts in lower case inside a plain
+ * string is not read; that is the price of leaving keywords alone.
  */
 function readableSentences(path: string): ReadonlyArray<Sentence> {
   const sentences: Sentence[] = [];
-  const lines = readFileSync(path, "utf8").split("\n");
+  const lines = withoutComments(readFileSync(path, "utf8")).split("\n");
   for (const [index, line] of lines.entries()) {
-    const trimmed = line.trimStart();
-    if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) continue;
     const where = `${relative(webRoot, path)}:${index + 1}`;
-    for (const match of line.matchAll(/"([^"\n]*)"|`([^`\n]*)`|>([^<>{}\n]+)</g)) {
-      const quoted = match[1] ?? match[2];
-      const text = (quoted ?? match[3] ?? "").replace(/\$\{[^}]*\}/g, "…").trim();
-      if (!/\s/.test(text)) continue;
-      if (quoted !== undefined && !/^[A-Z…]/.test(text)) continue;
-      sentences.push({ where, text });
+    const add = (raw: string | undefined) => {
+      if (raw === undefined) return;
+      const text = plain(raw);
+      if (/[A-Za-z]/.test(text)) sentences.push({ where, text });
+    };
+    for (const match of line.matchAll(SHOWN_AS_IT_STANDS)) {
+      const value = match[1] ?? match[2] ?? match[3] ?? "";
+      if (/^[A-Z]/.test(value.trim())) add(value);
+    }
+    for (const match of line.matchAll(QUOTED)) {
+      const value = plain(match[1] ?? match[2] ?? match[3] ?? "");
+      if (/\s/.test(value) && /^[A-Z…]/.test(value)) add(value);
+    }
+    for (const match of line.matchAll(BETWEEN_TAGS)) {
+      if (!CODE_NOT_PROSE.test((match[1] ?? "").trim())) add(match[1]);
+    }
+    const bare = line.trim();
+    if (
+      PROSE_LINE.test(bare) &&
+      bare.split(/\s+/).length >= 3 &&
+      !STARTS_A_STATEMENT.test(bare) &&
+      !AN_EXPRESSION.test(bare) &&
+      !/["'`]/.test(bare)
+    ) {
+      add(bare);
     }
   }
   return sentences;
@@ -58,10 +109,43 @@ const COMPARED_NEVER_SHOWN: ReadonlyArray<string> = [
 ];
 
 function sentencesSaying(word: RegExp): ReadonlyArray<string> {
-  return sentences
-    .filter(({ text }) => word.test(text) && !COMPARED_NEVER_SHOWN.includes(text))
-    .map(({ where, text }) => `${where} ${text}`);
+  return [
+    ...new Set(
+      sentences
+        .filter(({ text }) => word.test(text) && !COMPARED_NEVER_SHOWN.includes(text))
+        .map(({ where, text }) => `${where} ${text}`),
+    ),
+  ];
 }
+
+/** Every opening tag in the source, whole, wherever its `>` falls. */
+function openingTags(source: string): ReadonlyArray<{ readonly at: number; readonly tag: string }> {
+  const tags: { at: number; tag: string }[] = [];
+  for (const start of source.matchAll(/<[A-Z][A-Za-z0-9.]*[\s/>]/g)) {
+    let depth = 0;
+    let quote: string | undefined;
+    for (let index = start.index + 1; index < source.length; index += 1) {
+      const char = source[index];
+      if (quote !== undefined) {
+        if (char === quote && source[index - 1] !== "\\") quote = undefined;
+      } else if (char === '"' || char === "'" || char === "`") quote = char;
+      else if (char === "{") depth += 1;
+      else if (char === "}") depth -= 1;
+      else if (char === ">" && depth === 0) {
+        tags.push({ at: start.index, tag: source.slice(start.index, index + 1) });
+        break;
+      }
+    }
+  }
+  return tags;
+}
+
+// The lines kept under a spinner: each says what its title cannot.
+const SAYS_WHAT_THE_TITLE_CANNOT: ReadonlyArray<string> = [
+  "Your draft is kept on this device. Send it once you are reconnected; nothing is sent for you.",
+  "The host will be asked to approve this browser.",
+  "This browser's key does not leave this device.",
+];
 
 describe("the interface says things in plain words", () => {
   // DESIGN.md, Voice: the word "target" does not appear in the interface. What
@@ -81,20 +165,23 @@ describe("the interface says things in plain words", () => {
     expect(sentencesSaying(/\bAgentRun\b/)).toEqual([]);
   });
 
-  // OctantEmpty: "a loading line is the title alone". A message under a
-  // spinner repeated its title on thirty screens ("Loading workspace" over
-  // "Loading workspace.").
+  // DESIGN.md, Plain words: a loading state is its title alone. A message
+  // under a spinner repeated its title on thirty screens ("Loading workspace"
+  // over "Loading workspace."). A state that is only sometimes loading passes
+  // its message through a spread, so the loading case can leave it out.
   it("draws a loading state as its title alone", () => {
     const withMessage: string[] = [];
     for (const path of productSources(webRoot)) {
-      const source = readFileSync(path, "utf8");
-      for (const block of source.matchAll(/<OctantEmpty\b[^>]*?\/>/gs)) {
-        if (!/state="loading"/.test(block[0]) || !/\bmessage="/.test(block[0])) continue;
-        // The one loading state with something to add: a lost connection says
-        // what happens to the draft while it reconnects.
-        if (/title="Reconnecting"/.test(block[0])) continue;
-        const line = source.slice(0, block.index).split("\n").length;
-        withMessage.push(`${relative(webRoot, path)}:${line}`);
+      const source = withoutComments(readFileSync(path, "utf8"));
+      for (const { at, tag } of openingTags(source)) {
+        const mayLoad = /\bstate="loading"/.test(tag)
+          ? true
+          : tag.startsWith("<OctantEmpty") && /\bstate=\{[^}]*"loading"/.test(tag);
+        if (!mayLoad) continue;
+        const message = /\bmessage=(?:"([^"]*)"|(\{))/.exec(tag);
+        if (message === null) continue;
+        if (message[1] !== undefined && SAYS_WHAT_THE_TITLE_CANNOT.includes(message[1])) continue;
+        withMessage.push(`${relative(webRoot, path)}:${source.slice(0, at).split("\n").length}`);
       }
     }
     expect(withMessage).toEqual([]);

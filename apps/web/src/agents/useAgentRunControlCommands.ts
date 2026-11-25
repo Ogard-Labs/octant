@@ -53,7 +53,7 @@ export function useAgentRunControlCommands(
           error,
           error instanceof AgentRunClientFailure
             ? error.message
-            : "The acknowledgement did not go through. Refresh and try again.",
+            : "The acknowledgement did not go through. Try again in a moment.",
         );
       }
     },
@@ -78,7 +78,7 @@ export function useAgentRunControlCommands(
           error,
           error instanceof AgentRunClientFailure
             ? error.message
-            : "The agent could not be cancelled. Refresh and try again.",
+            : "The agent could not be cancelled. Try again in a moment.",
         );
       }
     },
@@ -116,7 +116,7 @@ export function useAgentRunControlCommands(
           error,
           error instanceof AgentRunClientFailure
             ? error.message
-            : "That action did not go through. Refresh and try again.",
+            : "That action did not go through. Try again in a moment.",
         );
       }
     },

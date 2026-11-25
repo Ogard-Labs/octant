@@ -642,7 +642,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("sidebar-background"),
           label: "Sidebar background",
           scope: "app",
-          keywords: "sidebar background preset gradient overlay color opacity",
+          keywords: "sidebar background preset gradient overlay colour color opacity",
         },
       ],
     },

@@ -32,12 +32,7 @@ describe("OctantEmpty states", () => {
 
   it("renders a compact named status without turning its icon into content", () => {
     const { container } = render(
-      <OctantEmpty
-        eyebrow="Workspace"
-        message="Loading authoritative shell state."
-        state="loading"
-        title="Loading Octant"
-      />,
+      <OctantEmpty eyebrow="Workspace" state="loading" title="Loading Octant" />,
     );
 
     expect(screen.getByRole("status")).toHaveAttribute("data-state", "loading");

@@ -79,13 +79,7 @@ export function RemotePairingView(props: RemotePairingViewProps) {
         />
       );
     case "requesting-hello":
-      return (
-        <RemotePairingShellState
-          state="loading"
-          title="Contacting Octant host…"
-          message="Fetching the host identity and pairing policy."
-        />
-      );
+      return <RemotePairingShellState state="loading" title="Contacting Octant host…" />;
     case "confirm":
       return (
         <RemotePairingConfirm
@@ -106,7 +100,7 @@ export function RemotePairingView(props: RemotePairingViewProps) {
         <RemotePairingShellState
           state="loading"
           title="Resuming remote session…"
-          message="Checking this browser's paired device without exposing its key material."
+          message="This browser's key does not leave this device."
         />
       );
     case "resumed":
@@ -364,11 +358,16 @@ function RemotePairingFailed(props: RemotePairingFailedProps) {
 function RemotePairingShellState(props: {
   readonly state: "loading" | "disconnected" | "warning" | "neutral";
   readonly title: string;
-  readonly message: string;
+  /** Absent while loading, unless the line says what the title cannot. */
+  readonly message?: string;
 }) {
   return (
     <div className="remote-pairing__centered">
-      <OctantEmpty message={props.message} state={props.state} title={props.title} />
+      <OctantEmpty
+        {...(props.message === undefined ? {} : { message: props.message })}
+        state={props.state}
+        title={props.title}
+      />
     </div>
   );
 }

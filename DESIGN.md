@@ -95,11 +95,12 @@ the interface.
 **Plain words.** A sentence in the interface says what the person is waiting
 for, what happened, or what to do next, in the words they use for it. It never
 names the mechanism: nothing is "authoritative", no type's name from the code
-appears (`AgentRun`), and "shell state", "projection" and "observation" give
-way to what the person sees (the workspace, a Project's data, Git status). A
-loading state is its title alone ("Loading workspace"); a line under the
-spinner stays only where it says what the title cannot, such as what happens to
-a draft while the window reconnects. Until 2026-11-25 the first sentence the app
+appears (`AgentRun`), and "shell state" and "projection" give way to what
+the person sees (the workspace, a Project's data). A loading state is its title
+alone ("Loading workspace"); a line under the spinner stays only where it says
+what the title cannot: what to do with a draft while the window reconnects,
+that the host will be asked to approve a browser being paired, and that the
+browser's key stays on its device. Until 2026-11-25 the first sentence the app
 showed was "Loading authoritative shell state.", and thirty loading states
 repeated their title as a message (maintainer request).
 
@@ -1123,8 +1124,8 @@ is costly to render mounts only while open.
   `warning`) draws that state's glyph instead of an icon and takes `action` as
   `{ label, onClick, glyph? }`, one secondary button with a retry glyph by
   default; a loading state spins its glyph, is a `status` region and is its
-  title alone, with no `message` (see Plain words under
-  [Principles](#principles)). **page** (`layout="page"` with a `state`) is a
+  title alone; the few lines kept under a spinner are named in Plain words
+  under [Principles](#principles). **page** (`layout="page"` with a `state`) is a
   state that is the whole window. **line** (`layout="line"`) is the quiet single line a page shows
   when it has nothing on it: `title`, `detail`, `icon`, `action` and `tone`
   (`page` or `lane`). Parts Root, Header, Content, Description, Eyebrow, Media,

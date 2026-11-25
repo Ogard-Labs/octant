@@ -430,7 +430,7 @@ export function useShellController(options: ShellControllerOptions) {
           committedShell.current = undefined;
           setAuthoritative(undefined);
           const message = isCommandReload
-            ? `${failure.message} Your pending actions were cancelled. Try them again.`
+            ? `${failure.message} Your pending actions were cancelled. Reconnect, then try them again.`
             : failure.message;
           setErrorMessage(message);
           if (isCommandReload) announce(message);

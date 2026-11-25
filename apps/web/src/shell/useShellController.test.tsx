@@ -3701,7 +3701,9 @@ describe("useShellController", () => {
     expect(client.bootstrap).toHaveBeenCalledTimes(2);
     expect(client.execute).toHaveBeenCalledOnce();
     expect(result.current.status).toBe("disconnected");
-    expect(result.current.announcement).toMatch(/pending actions were cancelled.*try them again/i);
+    expect(result.current.announcement).toMatch(
+      /pending actions were cancelled.*reconnect, then try them again/i,
+    );
 
     await act(async () => result.current.retry());
     expect(result.current.status).toBe("ready");

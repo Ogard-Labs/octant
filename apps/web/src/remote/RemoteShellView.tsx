@@ -161,7 +161,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
   if (state.kind === "reconnecting") {
     return (
       <OctantEmpty
-        message="Your draft is kept on this device. Nothing is sent until you are back online."
+        message="Your draft is kept on this device. Send it once you are reconnected; nothing is sent for you."
         state="loading"
         title="Reconnecting"
       />
