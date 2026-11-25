@@ -14,6 +14,7 @@ import {
   type ProviderModelId,
 } from "@octant/contracts";
 import { activeChatTurns } from "@octant/domain";
+import { resolveModelContextWindow, type ModelContextWindowFacts } from "@octant/domain/model-context-window";
 import { isProviderAllowedByProjectPolicy } from "@octant/domain/project-provider-policy";
 import { smallestShieldModel } from "@octant/domain/shield-judge-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
@@ -25,6 +26,7 @@ import { namesProtectedPath } from "./namesProtectedPath";
 import type { PersonMemoryStore } from "./personMemoryStore";
 import {
   PersonMemorySweep,
+  type PersonMemoryModelPort,
   type PersonMemoryThreadSource,
   type PersonMessage,
 } from "./personMemorySweep";
@@ -39,6 +41,62 @@ interface WorkThreadFacts {
 }
 
 type CodeThread = ReturnType<PersistenceService["readCodeThreads"]>[number];
+
+/**
+ * What a call with no output limit may write when nothing names the model's
+ * window or its longest reply: a figure above every built-in profile's.
+ */
+const UNKNOWN_MODEL_OUTPUT_TOKEN_BOUND = 64_000;
+
+/**
+ * The spend-ceiling door for a memory call. The one-shot request carries no
+ * output limit, so the call is held to what the model could write: its longest
+ * reply (which counts its reasoning), else its window, else a large figure. A
+ * monetary ceiling refuses it, because the selected endpoint may set its own
+ * prices for any model, as it does for the other one-shot calls.
+ */
+export function personMemorySpend(input: {
+  readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle">;
+  readonly modelFacts: (model: {
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly modelId: ProviderModelId;
+  }) => ModelContextWindowFacts | undefined;
+}): NonNullable<PersonMemoryModelPort["admit"]> {
+  return ({ mode, threadId, projectId, model, inputUpperBoundTokens }) => {
+    const { spendCeiling } = input;
+    if (spendCeiling === undefined) return { status: "admitted", settle: () => undefined };
+    const facts = input.modelFacts(model);
+    const window = facts === undefined ? undefined : resolveModelContextWindow(facts);
+    const reservedTokens =
+      window?.maxOutput !== undefined
+        ? inputUpperBoundTokens + window.maxOutput
+        : window !== undefined
+          ? Math.max(window.contextWindow, inputUpperBoundTokens)
+          : inputUpperBoundTokens + UNKNOWN_MODEL_OUTPUT_TOKEN_BOUND;
+    const reservationId = decodeSpendCeilingReservationId(randomUUID());
+    const admission = spendCeiling.admit({
+      reservationId,
+      threadId,
+      threadType: `${mode}-thread`,
+      ...(projectId === undefined ? {} : { projectId }),
+      turnUpperBoundTokens: reservedTokens,
+      estimatedCostUsdMicros: "unknown",
+      // Learning is spend, not a turn of the thread's own.
+      countsAsTurn: false,
+    });
+    if (admission.status === "refused") return { status: "refused" };
+    return {
+      status: "admitted",
+      settle: (usage) =>
+        spendCeiling.settle({
+          reservationId,
+          ...(usage === undefined
+            ? {}
+            : { observedTokens: usage.inputTokens + usage.outputTokens }),
+        }),
+    };
+  };
+}
 
 /** The newest person messages a thread is distilled from; older ones are past the input cap anyway. */
 const PERSON_MESSAGE_LIMIT = 60;
@@ -327,32 +385,13 @@ export function createPersonMemorySweep(input: {
           ?.models.find((candidate) => candidate.id === model.modelId);
         return isProviderAllowedByProjectPolicy(project, instance, facts);
       },
-      admit: ({ mode, threadId, projectId, upperBoundTokens }) => {
-        if (input.spendCeiling === undefined) {
-          return { status: "admitted", settle: () => undefined };
-        }
-        const reservationId = decodeSpendCeilingReservationId(randomUUID());
-        const admission = input.spendCeiling.admit({
-          reservationId,
-          threadId,
-          threadType: `${mode}-thread`,
-          ...(projectId === undefined ? {} : { projectId }),
-          turnUpperBoundTokens: upperBoundTokens,
-          // Learning is spend, not a turn of the thread's own.
-          countsAsTurn: false,
-        });
-        if (admission.status === "refused") return { status: "refused" };
-        return {
-          status: "admitted",
-          settle: (usage) =>
-            input.spendCeiling?.settle({
-              reservationId,
-              ...(usage === undefined
-                ? {}
-                : { observedTokens: usage.inputTokens + usage.outputTokens }),
-            }),
-        };
-      },
+      admit: personMemorySpend({
+        ...(input.spendCeiling === undefined ? {} : { spendCeiling: input.spendCeiling }),
+        modelFacts: (model) =>
+          persistence
+            .readProviderCatalog?.(model.providerInstanceId)
+            ?.models.find((candidate) => candidate.id === model.modelId),
+      }),
       resolve: ({ chosen, thread }) => {
         const model =
           chosen ??

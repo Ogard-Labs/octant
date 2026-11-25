@@ -49,8 +49,6 @@ export const PERSON_MEMORY_OPEN_THREAD_INTERVAL_MS = 6 * 60 * 60 * 1_000;
  */
 export const PERSON_MEMORY_REFUSED_RETRY_MS = PERSON_MEMORY_SWEEP_INTERVAL_MS;
 const DISTILL_TIMEOUT_MS = 60_000;
-/** What a distillation may write back, which bounds its spend with what it sends. */
-const DISTILL_OUTPUT_TOKEN_BOUND = 1_024;
 
 /** One message the person wrote in a thread. */
 export interface PersonMessage {
@@ -138,8 +136,12 @@ export interface PersonMemoryModelPort {
     readonly threadId: string;
     readonly projectId: string | undefined;
     readonly model: PersonMemoryModelChoice;
-    /** The most the call can use, from the size of what it sends. */
-    readonly upperBoundTokens: number;
+    /**
+     * The most what the call sends can come to, in tokens: one for every byte,
+     * which no tokenizer exceeds. What the model may write back is the port's
+     * to add, since only it knows the model and the call cannot be capped.
+     */
+    readonly inputUpperBoundTokens: number;
   }) => PersonMemorySpend;
   readonly complete: (input: {
     readonly model: PersonMemoryModelChoice;
@@ -498,9 +500,8 @@ export class PersonMemorySweep {
       threadId,
       projectId: facts.projectId,
       model: resolved.model,
-      upperBoundTokens:
-        Math.ceil((PERSON_MEMORY_DISTILL_INSTRUCTIONS.length + prompt.length) / 3) +
-        DISTILL_OUTPUT_TOKEN_BOUND,
+      inputUpperBoundTokens:
+        Buffer.byteLength(PERSON_MEMORY_DISTILL_INSTRUCTIONS) + Buffer.byteLength(prompt),
     }) ?? { status: "admitted" as const, settle: () => undefined };
     if (spend.status === "refused") return { outcome: "not-allowed", settle: "refused" };
     this.#calls += 1;

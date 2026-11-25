@@ -18,6 +18,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { decodePersonMemoryCommand } from "@octant/contracts/person-memory";
+import { PERSON_MEMORY_DISTILL_INSTRUCTIONS } from "@octant/domain/person-memory-policy";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { readReceivedDelegationThreadIds } from "../hub/delegationJournal";
@@ -38,7 +39,7 @@ import {
   personMemoryThreadAggregateId,
   registerPersonMemoryEvents,
 } from "./personMemoryStore";
-import { chatPersonMessages } from "./personMemoryWiring";
+import { chatPersonMessages, personMemorySpend } from "./personMemoryWiring";
 import {
   PersonMemorySweep,
   type PersonMessage,
@@ -2380,9 +2381,12 @@ describe("learning from threads still open", () => {
     let ceiling: "refused" | "admitted" = "admitted";
     const sweep = h.sweepWith({
       projectAllows: () => rule,
-      admit: ({ threadId, projectId, upperBoundTokens }) => {
+      admit: ({ threadId, projectId, inputUpperBoundTokens }) => {
         asked.push({ threadId, projectId });
-        expect(upperBoundTokens).toBeGreaterThan(1_024);
+        // At least one token for every byte the call sends: the bound never undercounts.
+        expect(inputUpperBoundTokens).toBeGreaterThanOrEqual(
+          Buffer.byteLength(PERSON_MEMORY_DISTILL_INSTRUCTIONS),
+        );
         return ceiling === "refused"
           ? { status: "refused" }
           : {
@@ -2500,6 +2504,44 @@ describe("learning from threads still open", () => {
     expect(again.learnedThrough(ref(THREAD_2))).toMatchObject({ id: "thread-end", at: later });
     restarted.close();
     again.close();
+  });
+});
+
+describe("what a memory call reserves from a spend ceiling", () => {
+  const model = { providerInstanceId: PROVIDER, modelId: "small" as ProviderModelId };
+  function reserving(facts: { readonly maxOutputTokens?: number; readonly contextLimit?: number }) {
+    const requests: Array<Record<string, unknown>> = [];
+    const admit = personMemorySpend({
+      spendCeiling: {
+        admit: (request) => {
+          requests.push(request);
+          return { status: "admitted", reservedTokens: 0, reservations: [] };
+        },
+        settle: () => undefined,
+      },
+      modelFacts: () => ({ id: "small", ...facts }),
+    });
+    admit({
+      mode: "chat",
+      threadId: THREAD_1,
+      projectId: undefined,
+      model,
+      inputUpperBoundTokens: 1_000,
+    });
+    return requests;
+  }
+
+  it("holds back the model's whole output limit beside what it sends, and cannot price the call", () => {
+    const [request] = reserving({ maxOutputTokens: 8_000, contextLimit: 200_000 });
+
+    expect(request?.["turnUpperBoundTokens"]).toBe(9_000);
+    expect(request?.["estimatedCostUsdMicros"]).toBe("unknown");
+    expect(request?.["countsAsTurn"]).toBe(false);
+  });
+
+  it("holds back the window when no output limit is known, and a large figure when nothing is", () => {
+    expect(reserving({ contextLimit: 32_000 })[0]?.["turnUpperBoundTokens"]).toBe(32_000);
+    expect(reserving({})[0]?.["turnUpperBoundTokens"]).toBe(65_000);
   });
 });
 

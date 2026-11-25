@@ -2246,7 +2246,12 @@ except where a bullet says otherwise.
   judged for the model that would read the thread) and the thread's and
   Project's spend ceilings as a Shield review does (admitted before the call
   without counting as a turn, then settled with the usage), so neither is
-  bypassed by learning in the background. What was learned is recorded as
+  bypassed by learning in the background. The one-shot request carries no output
+  limit, so the reservation is what the call can really spend: one token for
+  every byte it sends, plus the model's longest reply (which covers its
+  reasoning), else its context window, else 64,000 tokens when nothing names
+  either. A monetary ceiling refuses the call, since the selected endpoint may
+  set its own prices for any model. What was learned is recorded as
   `person-memory.thread-distilled@1` (the thread, its digest, and the last
   message learned from); an old `person-memory.thread-remembered@1` replays as
   learned to the thread's end. A later pass replaces the thread's digest: each is an
