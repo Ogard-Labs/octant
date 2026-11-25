@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "./Icon";
 import { radii, space, typography, useTheme } from "../../design-system";
 import type { MobileIconName } from "./IconButton";
 
@@ -34,7 +34,7 @@ export function ToolbarButton(props: {
       ]}
       testID={props.testID}
     >
-      <Ionicons color={colors.accent} name={props.icon} size={23} />
+      <Icon color={colors.accent} name={props.icon} size={23} />
     </Pressable>
   );
 }
@@ -192,11 +192,11 @@ export function ListRow(props: ListRowProps) {
     <>
       {props.icon === undefined ? null : hasBadge ? (
         <View style={[styles.badge, { backgroundColor: props.iconTone }]}>
-          <Ionicons color={colors.primaryForeground} name={props.icon} size={17} />
+          <Icon color={colors.primaryForeground} name={props.icon} size={17} />
         </View>
       ) : (
         <View style={styles.bareIcon}>
-          <Ionicons color={colors.textSecondary} name={props.icon} size={20} />
+          <Icon color={colors.textSecondary} name={props.icon} size={20} />
         </View>
       )}
       <View style={[styles.main, props.last === true ? null : styles.separator]}>
@@ -233,9 +233,9 @@ export function ListRow(props: ListRowProps) {
           </Text>
         )}
         {props.accessory === "check" ? (
-          <Ionicons color={colors.accent} name="checkmark" size={20} />
+          <Icon color={colors.accent} name="checkmark" size={20} />
         ) : props.accessory === "none" || props.onPress === undefined ? null : (
-          <Ionicons color={colors.textTertiary} name="chevron-forward" size={17} />
+          <Icon color={colors.textTertiary} name="chevron-forward" size={17} />
         )}
       </View>
     </>

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../ui/Icon";
 import type { MobileInboxRow } from "@octant/client-runtime";
 import { space, typography, useTheme } from "../../design-system";
 import { ThreadRow } from "./ThreadRow";
@@ -44,7 +44,7 @@ export function ThreadGroup(props: {
         <Text style={styles.label}>{shown}</Text>
         <View style={styles.line} />
         {onToggle === undefined ? null : (
-          <Ionicons
+          <Icon
             color={colors.textTertiary}
             name={folded ? "chevron-down" : "chevron-up"}
             size={15}

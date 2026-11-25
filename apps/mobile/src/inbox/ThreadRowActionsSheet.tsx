@@ -15,6 +15,7 @@ import {
 import { space, typography, useTheme } from "../../design-system";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { BottomSheet } from "../ui/BottomSheet";
+import { hapticFailure, hapticSuccess } from "../ui/haptics";
 import { ListNote, ListRow, ListSection } from "../ui/NativeChrome";
 import { mobileThreadShelf } from "./threadArrangement";
 
@@ -62,9 +63,11 @@ export function ThreadRowActionsSheet(props: {
     try {
       const result = await setMobileThreadRest({ transport: props.transport, row, action });
       if (result.status === "refused") {
+        hapticFailure();
         setMessage(result.message);
         return;
       }
+      hapticSuccess();
       props.onChanged();
       props.onClose();
     } catch {

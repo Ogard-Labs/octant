@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import type { MobileIconName } from "./symbols";
+import { Icon } from "./Icon";
 import { space, typography, useTheme } from "../../design-system";
 
 export interface MessageActionItem {
   readonly id: string;
   readonly label: string;
-  readonly icon: keyof typeof Ionicons.glyphMap;
+  readonly icon: MobileIconName;
   readonly onPress: () => void | Promise<void>;
 }
 
@@ -75,7 +76,7 @@ export function MessageActions(props: {
             style={({ pressed }) => [styles.chip, pressed ? { opacity: 0.5 } : null]}
             testID={`mobile-message-action-${action.id}`}
           >
-            <Ionicons
+            <Icon
               color={active ? colors.accent : colors.textTertiary}
               name={active && action.id === "copy" ? "checkmark" : action.icon}
               size={iconSize}

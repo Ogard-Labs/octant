@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../ui/Icon";
 import { radii, space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 import { BottomSheet } from "../ui/BottomSheet";
@@ -208,7 +208,7 @@ export function HomeComposerSheet(props: {
 
       <View style={styles.context} testID="mobile-home-composer-context">
         <View style={styles.contextItem}>
-          <Ionicons
+          <Icon
             color={colors.textTertiary}
             name={
               props.mode === "code"
@@ -229,7 +229,7 @@ export function HomeComposerSheet(props: {
           </Text>
         </View>
         <View style={styles.contextItem}>
-          <Ionicons color={colors.textTertiary} name="cloud-outline" size={16} />
+          <Icon color={colors.textTertiary} name="cloud-outline" size={16} />
           <Text
             accessibilityLabel={props.placementLabel ?? "No host"}
             numberOfLines={1}
@@ -272,7 +272,7 @@ export function HomeComposerSheet(props: {
       {props.sourceLabel === undefined ? null : (
         <View style={styles.context} testID="mobile-home-composer-source">
           <View style={styles.contextItem}>
-            <Ionicons color={colors.textTertiary} name="checkmark-circle-outline" size={16} />
+            <Icon color={colors.textTertiary} name="checkmark-circle-outline" size={16} />
             <Text numberOfLines={1} style={styles.contextText}>
               {props.sourceLabel}
             </Text>
@@ -284,7 +284,7 @@ export function HomeComposerSheet(props: {
                 onPress={props.onRemoveSource}
                 testID="mobile-home-composer-source-remove"
               >
-                <Ionicons color={colors.textTertiary} name="close-circle" size={16} />
+                <Icon color={colors.textTertiary} name="close-circle" size={16} />
               </Pressable>
             )}
           </View>
@@ -347,7 +347,7 @@ export function HomeComposerSheet(props: {
           <Text numberOfLines={1} style={styles.modelText}>
             {props.modelLabel}
           </Text>
-          <Ionicons color={colors.textSecondary} name="chevron-down" size={13} />
+          <Icon color={colors.textSecondary} name="chevron-down" size={13} />
         </Pressable>
         <View style={styles.spacer} />
         {props.voice === undefined ? null : <ComposerVoiceButton size={32} voice={props.voice} />}

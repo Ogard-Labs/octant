@@ -1,6 +1,7 @@
-import { useMemo, type ComponentProps } from "react";
+import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "./Icon";
+import type { MobileIconName } from "./symbols";
 import type { MobileAttachmentSource } from "@octant/client-runtime";
 import { MOBILE_COPY } from "../copy";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
@@ -16,10 +17,7 @@ export interface AttachSourceSheetProps {
 }
 
 const SOURCE_PRESENTATION: Readonly<
-  Record<
-    MobileAttachmentSource,
-    { readonly label: string; readonly icon: ComponentProps<typeof Ionicons>["name"] }
-  >
+  Record<MobileAttachmentSource, { readonly label: string; readonly icon: MobileIconName }>
 > = {
   camera: { label: MOBILE_COPY.attachFromCamera, icon: "camera-outline" },
   library: { label: MOBILE_COPY.attachFromLibrary, icon: "image-outline" },
@@ -83,7 +81,7 @@ export function AttachSourceSheet(props: AttachSourceSheetProps) {
             testID={`mobile-attach-${source}`}
           >
             <View style={styles.icon}>
-              <Ionicons color={colors.textPrimary} name={presentation.icon} size={18} />
+              <Icon color={colors.textPrimary} name={presentation.icon} size={18} />
             </View>
             <Text style={styles.label}>{presentation.label}</Text>
           </Pressable>

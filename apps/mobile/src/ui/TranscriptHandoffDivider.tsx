@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "./Icon";
 import { PROVIDER_GLYPH_COLOR_FALLBACKS } from "@octant/theme";
 import { radii, space, typography, useTheme } from "../../design-system";
 import type {
@@ -161,7 +161,7 @@ export function TranscriptHandoffDivider(props: {
         <View style={styles.hairline} />
         <View style={styles.content}>
           <View style={styles.lead}>
-            <Ionicons color={colors.textTertiary} name={leadIconFor(entry.kind)} size={12} />
+            <Icon color={colors.textTertiary} name={leadIconFor(entry.kind)} size={12} />
             <Text style={styles.leadText}>{entry.heading}</Text>
           </View>
           {route === undefined ? null : (
@@ -172,7 +172,7 @@ export function TranscriptHandoffDivider(props: {
                   {route.from.label}
                 </Text>
               </View>
-              <Ionicons color={colors.textTertiary} name="arrow-forward" size={11} />
+              <Icon color={colors.textTertiary} name="arrow-forward" size={11} />
               <View style={styles.endpoint}>
                 {route.showToMark ? <ProviderBadge endpoint={route.to} /> : null}
                 <Text numberOfLines={1} style={styles.toModel}>

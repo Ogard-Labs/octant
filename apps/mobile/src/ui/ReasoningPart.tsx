@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "./Icon";
 import { space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 
@@ -71,7 +71,7 @@ export function ReasoningPart(props: ReasoningPartProps) {
         >
           {/* The same 20pt column as the tool rail's marks, so the two rows start their text together. */}
           <View style={styles.markColumn}>
-            <Ionicons color={colors.textTertiary} name="sparkles-outline" size={15} />
+            <Icon color={colors.textTertiary} name="sparkles-outline" size={15} />
           </View>
           <Text style={styles.title}>{MOBILE_COPY.reasoningTitle}</Text>
           {preview === "" ? null : (
@@ -84,7 +84,7 @@ export function ReasoningPart(props: ReasoningPartProps) {
               {preview}
             </Text>
           )}
-          <Ionicons
+          <Icon
             color={colors.textTertiary}
             name={expanded ? "chevron-down" : "chevron-forward"}
             size={14}

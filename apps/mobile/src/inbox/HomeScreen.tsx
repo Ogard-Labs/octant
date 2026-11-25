@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../ui/Icon";
 import { useFocusEffect } from "@react-navigation/native";
 import type { MobileInboxRow } from "@octant/client-runtime";
 import { MOBILE_COPY, mobileHostHealthLabel, MOBILE_SCREEN_TITLES } from "../copy";
@@ -244,7 +244,7 @@ export function HomeScreen(props: HomeScreenProps) {
                   testID={`mobile-workspace-${host.hostId}`}
                 >
                   <View style={styles.computerIcon}>
-                    <Ionicons color={colors.textSecondary} name="desktop-outline" size={18} />
+                    <Icon color={colors.textSecondary} name="desktop-outline" size={18} />
                   </View>
                   <View style={styles.computerBody}>
                     <Text numberOfLines={1} style={styles.computerName}>
@@ -276,7 +276,7 @@ export function HomeScreen(props: HomeScreenProps) {
               testID="mobile-workspace-add"
             >
               <View style={styles.computerIcon}>
-                <Ionicons color={colors.accent} name="add" size={20} />
+                <Icon color={colors.accent} name="add" size={20} />
               </View>
               <Text style={styles.add}>{MOBILE_COPY.addWorkspace}</Text>
             </Pressable>

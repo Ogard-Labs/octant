@@ -10,7 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../ui/Icon";
 import {
   chatAttemptStatusLabel,
   MOBILE_THREAD_LEVEL_LABELS,
@@ -563,7 +563,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
             style={({ pressed }) => [styles.viewReturn, pressed ? { opacity: 0.6 } : null]}
             testID="mobile-thread-view-return"
           >
-            <Ionicons color={colors.accent} name="chevron-back" size={15} />
+            <Icon color={colors.accent} name="chevron-back" size={15} />
             <Text style={styles.viewReturnLabel}>{MOBILE_COPY.threadViewReturn}</Text>
           </Pressable>
           <Text numberOfLines={1} style={styles.viewName}>
@@ -577,7 +577,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
             style={({ pressed }) => [styles.viewFloat, pressed ? { opacity: 0.6 } : null]}
             testID="mobile-thread-view-float"
           >
-            <Ionicons color={colors.accent} name="contract-outline" size={17} />
+            <Icon color={colors.accent} name="contract-outline" size={17} />
           </Pressable>
         </View>
       )}
@@ -736,7 +736,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 onPress={() => openSurface("chat")}
                 testID="mobile-thread-view-floating-close"
               >
-                <Ionicons color={colors.textSecondary} name="close" size={15} />
+                <Icon color={colors.textSecondary} name="close" size={15} />
               </Pressable>
             </View>
             <BrowserSurfacePanel

@@ -9,7 +9,7 @@ import {
   type MobileWorkRequestAnswer,
 } from "@octant/client-runtime";
 import type { Questionnaire, WorkRequest } from "@octant/contracts";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../ui/Icon";
 import { useTheme, withAlpha } from "../../design-system";
 import { ApprovalDecisionButtons } from "../approvals/ApprovalDecisionButtons";
 import type { LevelChangePresentation } from "../approvals/levelChangePresentation";
@@ -291,7 +291,7 @@ function Choice(props: {
       {...(props.testID === undefined ? {} : { testID: props.testID })}
     >
       {/* The mark says chosen in shape as well as colour. */}
-      <Ionicons
+      <Icon
         color={props.checked ? colors.accent : colors.textSecondary}
         name={
           props.role === "radio"

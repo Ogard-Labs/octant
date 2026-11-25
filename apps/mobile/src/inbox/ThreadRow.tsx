@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../ui/Icon";
 import type { MobileInboxRow } from "@octant/client-runtime";
 import { space, typography, useTheme, withAlpha, type ThemeColors } from "../../design-system";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
@@ -154,7 +154,7 @@ export function ThreadRow(props: {
           ]}
         >
           {letters === "" ? (
-            <Ionicons color={hue} name={threadModeIcon(row.mode)} size={14} />
+            <Icon color={hue} name={threadModeIcon(row.mode)} size={14} />
           ) : (
             <Text allowFontScaling={false} style={[styles.letters, { color: hue }]}>
               {letters}
@@ -163,14 +163,12 @@ export function ThreadRow(props: {
         </View>
         <View style={[styles.body, props.last ? null : styles.separated]}>
           <View style={[styles.line, quiet ? styles.quiet : null]}>
-            {row.pinned === true ? (
-              <Ionicons color={colors.textTertiary} name="pin" size={13} />
-            ) : null}
+            {row.pinned === true ? <Icon color={colors.textTertiary} name="pin" size={13} /> : null}
             <Text numberOfLines={1} style={styles.title}>
               {title}
             </Text>
             <View style={styles.state}>
-              {icon === undefined ? null : <Ionicons color={ink} name={icon} size={15} />}
+              {icon === undefined ? null : <Icon color={ink} name={icon} size={15} />}
               <Text numberOfLines={1} style={[styles.stateWord, { color: ink }]}>
                 {state.word}
               </Text>
@@ -178,14 +176,14 @@ export function ThreadRow(props: {
           </View>
           <View style={[styles.line, quiet ? styles.quiet : null]}>
             <View style={styles.place}>
-              <Ionicons color={colors.textTertiary} name="desktop-outline" size={13} />
+              <Icon color={colors.textTertiary} name="desktop-outline" size={13} />
               <Text numberOfLines={1} style={styles.placeText}>
                 {place}
               </Text>
             </View>
             {pullRequests === undefined ? null : (
               <View style={styles.pullRequest}>
-                <Ionicons color={pullRequestInk} name="git-pull-request-outline" size={14} />
+                <Icon color={pullRequestInk} name="git-pull-request-outline" size={14} />
                 <Text style={[styles.pullRequestText, { color: pullRequestInk }]}>
                   {pullRequestChip(pullRequests)}
                 </Text>

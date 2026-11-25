@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Tabs, type TabsHostNavStateRequest } from "react-native-screens";
 import { useTheme } from "../../design-system";
+import { hapticSelect } from "../ui/haptics";
 import { NewButton } from "./NewButton";
 import type { PlaceTabsProps } from "./PlaceTabs.types";
 import { placeFor, shippedMobilePlaces, type MobilePlaceId } from "./places";
@@ -79,6 +80,7 @@ export function PlaceTabs(props: PlaceTabsProps) {
           if (actionOrigin !== "user" && place === props.active) return;
           // The bar has already returned the place to its root.
           if (isRepeated && hasTriggeredSpecialEffect) return;
+          if (actionOrigin === "user") hapticSelect();
           props.onSelect(place);
         }}
         onTabSelectionPrevented={(event) => {

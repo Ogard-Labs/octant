@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { ActionSheetIOS, Platform, Pressable, StyleSheet, Text } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "./Icon";
 import { radii, space, typography, useTheme } from "../../design-system";
 import { BottomSheet } from "./BottomSheet";
 import { ListRow, ListSection } from "./NativeChrome";
@@ -75,7 +75,7 @@ export function ChoicePill<Id extends string>(props: {
         <Text numberOfLines={1} style={[styles.label, on ? styles.labelOn : null]}>
           {chosen?.label ?? props.title}
         </Text>
-        <Ionicons color={colors.textTertiary} name="chevron-down" size={14} />
+        <Icon color={colors.textTertiary} name="chevron-down" size={14} />
       </Pressable>
       {open ? (
         <BottomSheet

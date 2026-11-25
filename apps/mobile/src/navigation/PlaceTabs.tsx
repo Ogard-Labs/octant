@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../ui/Icon";
 import { useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 import type { PlaceTabsProps } from "./PlaceTabs.types";
@@ -81,7 +81,7 @@ export function PlaceTabs(props: PlaceTabsProps) {
                 testID={`mobile-tab-${place.id}`}
               >
                 {active ? <View style={styles.selected} /> : null}
-                <Ionicons
+                <Icon
                   color={active ? colors.accent : colors.textPrimary}
                   name={active ? place.selectedIcon : place.icon}
                   size={24}
@@ -99,7 +99,7 @@ export function PlaceTabs(props: PlaceTabsProps) {
           style={[styles.create, props.newDisabled ? styles.disabled : null]}
           testID="mobile-new-thread"
         >
-          <Ionicons color={colors.textPrimary} name="create-outline" size={23} />
+          <Icon color={colors.textPrimary} name="create-outline" size={23} />
         </Pressable>
       </View>
     </View>

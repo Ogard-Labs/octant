@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "./Icon";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 import { BottomSheet } from "./BottomSheet";
@@ -98,11 +98,11 @@ export function ModelPickerSheet(props: ModelPickerSheetProps) {
                 </View>
                 {selected ? (
                   <View style={styles.choiceIcon}>
-                    <Ionicons color={colors.success} name="checkmark" size={18} />
+                    <Icon color={colors.success} name="checkmark" size={18} />
                   </View>
                 ) : (
                   <View style={styles.choiceIcon}>
-                    <Ionicons color={colors.textTertiary} name="chevron-forward" size={16} />
+                    <Icon color={colors.textTertiary} name="chevron-forward" size={16} />
                   </View>
                 )}
               </Pressable>

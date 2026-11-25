@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Platform, Pressable, StyleSheet } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../ui/Icon";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
@@ -45,7 +45,7 @@ export function NewButton(props: { readonly disabled: boolean; readonly onPress:
       style={[styles.button, props.disabled ? styles.disabled : null]}
       testID="mobile-new-thread"
     >
-      <Ionicons color={colors.sendLabel} name="create-outline" size={24} />
+      <Icon color={colors.sendLabel} name="create-outline" size={24} />
     </Pressable>
   );
 }

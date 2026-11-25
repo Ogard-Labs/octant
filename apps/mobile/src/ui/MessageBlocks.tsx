@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "./Icon";
 import { fonts, radii, space, typography, useTheme } from "../../design-system";
 import { parseMarkdownBlocks, type MarkdownBlock } from "./messageDocument";
 
@@ -150,7 +150,7 @@ function BlockView(props: {
               }}
               testID="mobile-message-code-copy"
             >
-              <Ionicons color={props.tertiary} name="copy-outline" size={14} />
+              <Icon color={props.tertiary} name="copy-outline" size={14} />
             </Pressable>
           </View>
           <Text selectable style={styles.codeBody}>

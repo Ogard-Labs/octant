@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "./Icon";
 import { LinearGradient } from "expo-linear-gradient";
 import { mix, typography, useTheme, withAlpha } from "../../design-system";
 import type { MobileIconName } from "./IconButton";
@@ -61,7 +61,7 @@ export function CountTile(props: CountTileProps) {
   const content = (
     <>
       <View style={styles.top}>
-        <Ionicons color={ink} name={props.icon} size={16} />
+        <Icon color={ink} name={props.icon} size={16} />
         <Text
           numberOfLines={1}
           style={[styles.label, { color: solid ? colors.primaryForeground : colors.textSecondary }]}

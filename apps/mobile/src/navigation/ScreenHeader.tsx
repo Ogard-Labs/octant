@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Platform, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type {
   NativeStackNavigationOptions,
@@ -8,6 +8,7 @@ import type {
 import type { ParamListBase } from "@react-navigation/native";
 import { ToolbarButton } from "../ui/NativeChrome";
 import type { MobileIconName } from "../ui/IconButton";
+import { systemSymbol } from "../ui/symbols";
 import { typography, useTheme } from "../../design-system";
 
 // A system bar keeps its height at every text size, so two lines in it stop
@@ -71,23 +72,45 @@ export function ScreenHeader(props: {
     })),
   });
   useLayoutEffect(() => {
+    const run = (label: string) =>
+      handlers.current.actions?.find((current) => current.label === label)?.onPress();
     const options: NativeStackNavigationOptions = {
       title,
-      headerRight: () =>
-        actions === undefined || actions.length === 0 ? null : (
-          <View style={styles.actions}>
-            {actions.map((action) => (
-              <ToolbarButton
-                accessibilityLabel={action.label}
-                icon={action.icon}
-                key={action.label}
-                onPress={action.onPress}
-                {...(action.disabled === undefined ? {} : { disabled: action.disabled })}
-                {...(action.testID === undefined ? {} : { testID: action.testID })}
-              />
-            ))}
-          </View>
-        ),
+      ...(Platform.OS === "ios"
+        ? {
+            unstable_headerRightItems: () =>
+              (actions ?? []).map((action) => {
+                const symbol = systemSymbol(action.icon);
+                return {
+                  type: "button" as const,
+                  label: action.label,
+                  accessibilityLabel: action.label,
+                  ...(symbol === undefined
+                    ? {}
+                    : { icon: { type: "sfSymbol" as const, name: symbol } }),
+                  ...(action.disabled === undefined ? {} : { disabled: action.disabled }),
+                  ...(action.testID === undefined ? {} : { identifier: action.testID }),
+                  onPress: () => run(action.label),
+                };
+              }),
+          }
+        : {
+            headerRight: () =>
+              actions === undefined || actions.length === 0 ? null : (
+                <View style={styles.actions}>
+                  {actions.map((action) => (
+                    <ToolbarButton
+                      accessibilityLabel={action.label}
+                      icon={action.icon}
+                      key={action.label}
+                      onPress={action.onPress}
+                      {...(action.disabled === undefined ? {} : { disabled: action.disabled })}
+                      {...(action.testID === undefined ? {} : { testID: action.testID })}
+                    />
+                  ))}
+                </View>
+              ),
+          }),
       ...(subtitle === undefined
         ? {}
         : {

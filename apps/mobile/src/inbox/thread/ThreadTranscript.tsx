@@ -1,6 +1,6 @@
 import { useMemo, useRef } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../ui/Icon";
 import {
   chatAttemptStatusLabel,
   mobileChatMessages,
@@ -212,7 +212,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
           style={styles.chip}
           testID={`mobile-attachment-${String(attachment.id)}`}
         >
-          <Ionicons
+          <Icon
             color={colors.textTertiary}
             name={attachment.mediaType.startsWith("image/") ? "image-outline" : "document-outline"}
             size={13}

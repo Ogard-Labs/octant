@@ -1,9 +1,10 @@
 import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "./Icon";
 import { GlassSurface, radii, space, typography, useTheme } from "../../design-system";
 import type { ComposerVoice } from "../voice/useVoiceDictation";
 import { ComposerVoiceButton } from "./ComposerVoiceButton";
+import { hapticSend } from "./haptics";
 import { IconButton } from "./IconButton";
 
 // The chip shares one line with the message, so its name stops growing before
@@ -148,7 +149,7 @@ export function FloatingComposer(props: FloatingComposerProps) {
             >
               {props.modelLabel}
             </Text>
-            <Ionicons color={colors.textSecondary} name="chevron-down" size={13} />
+            <Icon color={colors.textSecondary} name="chevron-down" size={13} />
           </Pressable>
         ) : props.modelLabel !== undefined ? (
           <Text
@@ -180,7 +181,10 @@ export function FloatingComposer(props: FloatingComposerProps) {
             accessibilityLabel="Send"
             disabled={!canSend}
             name="arrow-up"
-            onPress={props.onSubmit}
+            onPress={() => {
+              hapticSend();
+              props.onSubmit?.();
+            }}
             size={34}
             testID="mobile-composer-send"
             variant="send"

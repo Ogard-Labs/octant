@@ -1,11 +1,12 @@
 import { useMemo } from "react";
 import { Pressable, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "./Icon";
+import type { MobileIconName } from "./symbols";
 import { GlassSurface, useTheme } from "../../design-system";
 
 const MIN_TAP_TARGET = 44;
 
-export type MobileIconName = keyof typeof Ionicons.glyphMap;
+export type { MobileIconName } from "./symbols";
 
 export interface IconButtonProps {
   readonly name: MobileIconName;
@@ -65,7 +66,7 @@ export function IconButton(props: IconButtonProps) {
         : colors.textPrimary);
 
   const body = (
-    <Ionicons
+    <Icon
       color={disabled && variant === "send" ? colors.textTertiary : color}
       name={props.name}
       size={iconSize}

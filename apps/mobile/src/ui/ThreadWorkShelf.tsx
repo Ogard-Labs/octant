@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { ThreadFollowUp, ThreadWorkItem } from "@octant/contracts";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "./Icon";
 import { GlassSurface, radii, space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 
@@ -109,7 +109,7 @@ export function ThreadWorkShelf(props: {
             {blockedCount} {MOBILE_COPY.workBlocked}
           </Text>
           {/* A chevron, like every other row that opens: a plus read as "add an item". */}
-          <Ionicons
+          <Icon
             color={colors.textSecondary}
             name={expanded ? "chevron-down" : "chevron-forward"}
             size={14}

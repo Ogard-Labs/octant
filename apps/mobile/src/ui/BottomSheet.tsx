@@ -60,6 +60,9 @@ export function BottomSheet(props: BottomSheetProps) {
           marginBottom: space.xs,
         },
         headerSpacer: { width: 34 },
+        page: { flex: 1 },
+        pageTop: { height: space.md },
+        pageContent: { flex: 1 },
         title: {
           flex: 1,
           textAlign: "center",
@@ -72,9 +75,48 @@ export function BottomSheet(props: BottomSheetProps) {
     [colors],
   );
 
+  const header =
+    props.headerVisible === false ? null : (
+      <View style={styles.header}>
+        <IconButton
+          accessibilityLabel="Close"
+          iconSize={17}
+          name="close"
+          onPress={props.onClose}
+          size={30}
+          testID="mobile-sheet-close"
+        />
+        <Text style={styles.title}>{props.title}</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+    );
+
+  if (Platform.OS === "ios") {
+    // The system's own sheet: its card, its swipe, and its keyboard room.
+    return (
+      <Modal
+        allowSwipeDismissal
+        animationType="slide"
+        onRequestClose={props.onClose}
+        presentationStyle="pageSheet"
+        visible={props.visible}
+      >
+        <KeyboardAvoidingView
+          behavior="padding"
+          style={[styles.page, { backgroundColor: colors.canvas }]}
+          testID={props.testID ?? "mobile-bottom-sheet"}
+        >
+          <View style={styles.pageTop} />
+          {header}
+          <View style={[styles.pageContent, props.contentStyle]}>{props.children}</View>
+        </KeyboardAvoidingView>
+      </Modal>
+    );
+  }
+
   return (
     <Modal animationType="slide" onRequestClose={props.onClose} transparent visible={props.visible}>
-      <KeyboardAvoidingView behavior="padding" enabled={Platform.OS === "ios"} style={styles.root}>
+      <View style={styles.root}>
         <Pressable onPress={props.onClose} style={styles.backdrop} testID="mobile-sheet-backdrop" />
         <GlassSurface
           contentStyle={[styles.sheetContent, props.contentStyle]}
@@ -84,23 +126,10 @@ export function BottomSheet(props: BottomSheetProps) {
           testID={props.testID ?? "mobile-bottom-sheet"}
         >
           <View style={styles.handle} />
-          {props.headerVisible === false ? null : (
-            <View style={styles.header}>
-              <IconButton
-                accessibilityLabel="Close"
-                iconSize={17}
-                name="close"
-                onPress={props.onClose}
-                size={30}
-                testID="mobile-sheet-close"
-              />
-              <Text style={styles.title}>{props.title}</Text>
-              <View style={styles.headerSpacer} />
-            </View>
-          )}
+          {header}
           {props.children}
         </GlassSurface>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
