@@ -65,6 +65,8 @@ import {
   resolveConfinedDesktopFilePath,
 } from "../codeExternalEditorRoutes";
 import { withCodeBoard, withCodeOperationRuntime } from "../wiring/codeRuntime";
+import { createCodeRouteHandler } from "../codeRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { pathIsProjectConfined } from "../wiring/providers";
 import { CodeFileListingService } from "./codeFileListingService";
 import { withProjectExtraFolders } from "./codeProjectFolderRoot";
@@ -985,6 +987,34 @@ describe("CodeService reads", () => {
     expect(view).not.toHaveProperty("worktreeCleanup");
     const plain = await serviceFixture().service.read(ids.window, ids.thread);
     expect(plain).not.toHaveProperty("worktreeCleanup");
+  });
+
+  it("names a cleaned-up worktree in the thread view through the composed production route", async () => {
+    const cleaned = serviceFixture({ worktreeCleanup: async () => "cleaned-up" });
+    // The adapters the production Code route is built from.
+    const composed = withCodeBoard(
+      withCodeOperationRuntime(cleaned.service, {} as never),
+      vi.fn() as never,
+    );
+    const store = new WindowAuthorityStore();
+    const capability = "A".repeat(43);
+    store.register({ windowId: ids.window, capability, now: 0 });
+    const route = createCodeRouteHandler({
+      service: composed,
+      windowAuthorityStore: store,
+      now: () => 1,
+    });
+    const read = async (query: string) => {
+      const response = await route(
+        new Request(`http://127.0.0.1/api/code/threads/${ids.thread}${query}`, {
+          headers: { "x-octant-window-capability": capability },
+        }),
+      );
+      expect(response?.status).toBe(200);
+      return (await response?.json()) as Record<string, unknown>;
+    };
+    expect(await read("?reads=worktree-cleanup")).toMatchObject({ worktreeCleanup: "cleaned-up" });
+    expect(await read("")).not.toHaveProperty("worktreeCleanup");
   });
 
   it("fails closed when a thread is missing or outside the authenticated window", async () => {

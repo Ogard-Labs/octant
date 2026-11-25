@@ -197,7 +197,7 @@ export function withCodeOperationRuntime(
   return {
     bootstrap: (windowId) => service.bootstrap(windowId),
     navigation: (windowId) => service.navigation(windowId),
-    read: (windowId, threadId) => service.read(windowId, threadId),
+    read: (windowId, threadId, reads) => service.read(windowId, threadId, reads),
     execute: (windowId, command, signal, context) =>
       service.execute(windowId, command, signal, context),
     executeOperation: (windowId, command, options) => runtime.execute(windowId, command, options),
@@ -279,7 +279,7 @@ export function withCodeBoard(
   return {
     bootstrap: (windowId) => service.bootstrap(windowId),
     navigation: (windowId) => service.navigation(windowId),
-    read: (windowId, threadId) => service.read(windowId, threadId),
+    read: (windowId, threadId, reads) => service.read(windowId, threadId, reads),
     execute: (windowId, command, signal, context) =>
       service.execute(windowId, command, signal, context),
     subscribe: (windowId, threadId, afterSequence, signal) =>
