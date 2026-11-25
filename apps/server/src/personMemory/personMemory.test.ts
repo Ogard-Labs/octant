@@ -1699,6 +1699,14 @@ describe("saving what the person asks to be remembered, at once", () => {
       'password = "fir\\"st left over"',
       'password: "unclosed\nleft over',
       "oauth2Token = first left over",
+      '{"password":"first","token":"second left"}',
+      '{"password":"first","token":"second\nleft over"}',
+      'password="first"token="second left over"',
+      'password: first token: "second\nleft over"',
+      "password: 'first token: \"second' left\"",
+      "1passphrase: first left over",
+      "1password=first left over",
+      "1secret: first",
     ]) {
       const redacted = redactForPersonMemory(message);
       expect({ message, redacted, left: /first|second|left/.test(redacted) }).toMatchObject({

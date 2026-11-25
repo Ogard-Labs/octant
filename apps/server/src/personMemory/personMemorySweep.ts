@@ -21,6 +21,7 @@ import {
   personMemoryDistillPrompt,
 } from "@octant/domain/person-memory-policy";
 import { redactPrivateKeys, redactSecretShaped } from "@octant/domain/secret-shaped-text-policy";
+import { redactLabelledCredentials } from "./labelledCredentials";
 import type { PersonMemoryStore } from "./personMemoryStore";
 
 /** Once an hour is often enough to learn from threads a person put away. */
@@ -202,45 +203,8 @@ type Settle = "no" | "idle" | "refused";
 export function redactForPersonMemory(text: string): string {
   // A key block goes first and whole: a label's value ends with its line, which
   // would take the block's opening marker and leave its body.
-  return redactSecretShaped(redactPrivateKeys(text).replaceAll(LABELLED_CREDENTIAL, "[redacted]"));
+  return redactSecretShaped(redactLabelledCredentials(redactPrivateKeys(text)));
 }
-
-/**
- * A credential given after its label (`password:`, `"token": …`, `DB_PASSWORD=`,
- * `the passphrase is`, `secret - `): the whole value goes, so one of several
- * words or lines is not left in part. The label may end a longer name (but not
- * the product name 1Password) and be marked up or quoted. The shared secret
- * shapes name only some labels and take one word. Where the end of a value is
- * not certain the rule takes more, never less: what it costs is a line memory
- * does not learn.
- */
-const LABELLED_CREDENTIAL = new RegExp(
-  [
-    /(?<!\b1)(?:password|passwd|passphrase|pwd|secret|credential|api[_ -]?key|token)s?/,
-    /["'`*_]{0,3}(?:[ \t]*[:=：]|[ \t]+(?:is|are)\b|[ \t]+[-–—](?=[ \t]))/,
-    "(?:",
-    // A label's closing markup, then the rest of the line.
-    /[*_]{1,3}(?=\s)[ \t]*(?:\n[ \t]*)?[^\n]*/,
-    "|",
-    /[ \t]*(?:\n[ \t]*)?/,
-    "(?:",
-    // A fenced or triple-quoted value, to its closing fence or the end of the text.
-    /(?:```[\s\S]*?(?:```|(?![\s\S]))|"""[\s\S]*?(?:"""|(?![\s\S]))|'''[\s\S]*?(?:'''|(?![\s\S])))\S*/,
-    "|",
-    // A quoted value, line breaks included, and what is joined to its closing quote.
-    /(?:"(?:\\[\s\S]|[^"\\])*(?:"|\\?(?![\s\S]))|'(?:\\[\s\S]|[^'\\])*(?:'|\\?(?![\s\S]))|`(?:\\[\s\S]|[^`\\])*(?:`|\\?(?![\s\S])))\S*/,
-    "|",
-    // An indented block (`password: |`).
-    /[|>][-+]?[ \t]*(?:\n[ \t]+[^\n]*)+/,
-    "|",
-    // Anything else: the line, and the next while a backslash ends it.
-    /(?:[^\n]*\\\n)*[^\n]*/,
-    "))",
-  ]
-    .map((part) => (typeof part === "string" ? part : part.source))
-    .join(""),
-  "gi",
-);
 
 /**
  * Learns from threads in two ways. A thread the person put away is learned
