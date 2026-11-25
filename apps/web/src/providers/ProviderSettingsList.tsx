@@ -930,10 +930,12 @@ function ProviderRow(props: ProviderRowProps) {
     props.instance.driverKind === "runway-video" ||
     props.instance.driverKind === "fal-video";
   // Image and video profiles hold a key and have no runtime to check.
-  const isMediaProfile = isImageProfile || isVideoProfile;
+  const isMediaProfile =
+    isImageProfile || isVideoProfile || props.instance.driverKind === "outside-video";
   const outsideInstance =
     props.instance.driverKind === "outside-harness-endpoint" ||
-    props.instance.driverKind === "outside-image"
+    props.instance.driverKind === "outside-image" ||
+    props.instance.driverKind === "outside-video"
       ? props.instance
       : undefined;
   const usesCredential =
@@ -973,7 +975,7 @@ function ProviderRow(props: ProviderRowProps) {
           ? ""
           : isImageProfile
             ? "Image"
-            : isVideoProfile
+            : isMediaProfile
               ? "Video"
               : "HTTP";
   const toggleEnabled = async () => {
@@ -1846,7 +1848,7 @@ function ProviderRow(props: ProviderRowProps) {
                         {String(outsideInstance.configuration.driver.digest)}
                       </span>
                     </span>
-                    {outsideInstance.driverKind === "outside-image" ? null : (
+                    {outsideInstance.driverKind !== "outside-harness-endpoint" ? null : (
                       <ProviderToolVerification
                         disabled={disabled || !props.instance.enabled}
                         instance={props.instance}

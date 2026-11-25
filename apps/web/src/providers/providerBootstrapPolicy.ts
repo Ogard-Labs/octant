@@ -52,7 +52,8 @@ export function listAutoProbeInstanceIds(
         // observation, so a background check here would start it at every
         // launch and the moment it is turned on.
         instance.driverKind !== "outside-harness-endpoint" &&
-        instance.driverKind !== "outside-image",
+        instance.driverKind !== "outside-image" &&
+        instance.driverKind !== "outside-video",
     )
     .toSorted((left, right) => {
       const leftRank = PREFERRED_DRIVERS.indexOf(left.driverKind);
