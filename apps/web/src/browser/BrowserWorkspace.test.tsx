@@ -3238,6 +3238,79 @@ describe("BrowserWorkspace reopening a page a restart took", () => {
     await waitFor(() => expect(browser.claimPageOffer).toHaveBeenCalledTimes(2));
   });
 
+  it("shows the offer again when the open answered with a failure and the next read returns the same offer", async () => {
+    const browser = offered();
+    browser.create = vi.fn(
+      async () =>
+        ({
+          status: "failed",
+          threadId,
+          evidence: [],
+          failure: { category: "unavailable", message: "Another window or device is reopening it." },
+        }) as any,
+    );
+    // A thread of its own: a held choice is kept per thread across mounts.
+    render(<BrowserWorkspace client={browser} tab={{ ...tab, threadId: "21000000-0000-4000-8000-0000000000cc" as any }} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Reopen page" }));
+    await screen.findByText(/Enter an address to open a page in Personal/);
+    fireEvent.change(screen.getByLabelText("Browser URL"), {
+      target: { value: "https://example.com/" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
+    await waitFor(() => expect(browser.releasePageOffer).toHaveBeenCalled());
+    // The poll's snapshot is unchanged, yet the offer the failure replaced is back,
+    // carrying the failure, with what the person typed still in the address.
+    expect(await screen.findByRole("button", { name: "Reopen page" })).toBeInTheDocument();
+    expect(screen.getByText(/can still be reopened/)).toBeVisible();
+    expect(screen.getByLabelText("Browser URL")).toHaveValue("https://example.com/");
+  });
+
+  it("says why when another window took the page, keeps what the person typed and keeps the offer", async () => {
+    const browser = offered();
+    browser.create = vi.fn(async () => {
+      throw new BrowserAutomationClientFailure(
+        "unavailable",
+        "Another window or device is reopening this page. Try again once it has finished.",
+      );
+    });
+    render(
+      <BrowserWorkspace
+        client={browser}
+        tab={{ ...tab, threadId: "21000000-0000-4000-8000-0000000000dd" as any }}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Reopen page" }));
+    await screen.findByText(/Enter an address to open a page in Personal/);
+    fireEvent.change(screen.getByLabelText("Browser URL"), {
+      target: { value: "https://example.com/typed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
+    expect(await screen.findByText(/Another window or device is reopening this page/)).toBeVisible();
+    expect(screen.getByLabelText("Browser URL")).toHaveValue("https://example.com/typed");
+    expect(await screen.findByRole("button", { name: "Reopen page" })).toBeInTheDocument();
+  });
+
+  it("does not move focus in the new thread when a late answer arrives after a thread switch", async () => {
+    const otherThread = "21000000-0000-4000-8000-0000000000bb";
+    const browser = offered();
+    let answer: (value: { status: "dismissed" }) => void = () => undefined;
+    browser.dismissPageOffer = vi.fn(
+      () =>
+        new Promise<{ status: "dismissed" }>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const { rerender } = render(<BrowserWorkspace client={browser} tab={tab} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(browser.dismissPageOffer).toHaveBeenCalledOnce());
+    rerender(<BrowserWorkspace client={browser} tab={{ ...tab, threadId: otherThread as any }} />);
+    await screen.findByLabelText("Browser URL");
+    (document.activeElement as HTMLElement | null)?.blur();
+    answer({ status: "dismissed" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.getByLabelText("Browser URL")).not.toHaveFocus();
+  });
+
   it("dismisses the offer without opening anything and moves focus to the address", async () => {
     const browser = offered();
     render(<BrowserWorkspace client={browser} tab={tab} />);

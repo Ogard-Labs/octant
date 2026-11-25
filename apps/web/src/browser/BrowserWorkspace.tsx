@@ -313,6 +313,21 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   // The thread whose reserved open just failed: its offer line carries the
   // failure, so the one notice row still shows the offer that is left.
   const [reopenFailedKey, setReopenFailedKey] = useState<string>();
+  // The thread's offer, read from the thread (never from the page this pane
+  // shows) whenever this pane shows no live page: a saved tab whose page is
+  // gone, a tab added fresh, or a pane with no page yet.
+  const [offerReadState, setOfferRead] = useState<{
+    key: string;
+    offer: BrowserAutomationSnapshot["reopenOffer"];
+  }>();
+  const rememberOffer = (key: string, offer: BrowserAutomationSnapshot["reopenOffer"]) =>
+    setOfferRead((previous) =>
+      previous?.key === key && JSON.stringify(previous.offer) === JSON.stringify(offer)
+        ? previous
+        : { key, offer },
+    );
+  const reopenKeyNow = useRef(reopenKey);
+  reopenKeyNow.current = reopenKey;
   const addressInput = useRef<HTMLInputElement>(null);
   const [focusAddress, setFocusAddress] = useState(0);
   useEffect(() => {
@@ -412,12 +427,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const activeContext = snapshot?.context?.state === "active";
   // The offer the host shows is this thread's: a read that arrived for another
   // thread is not shown here.
-  const snapshotIsThreads =
-    snapshot !== undefined &&
-    props.tab.threadId !== undefined &&
-    String(snapshot.threadId) === String(props.tab.threadId);
-  const reopenOffer = snapshotIsThreads ? snapshot?.reopenOffer : undefined;
-  const offerRead = snapshotIsThreads && reopenOffer === undefined;
+  const offerIsThreads = offerReadState?.key === reopenKey;
+  const reopenOffer = offerIsThreads ? offerReadState?.offer : undefined;
+  const offerRead = offerIsThreads && reopenOffer === undefined;
   useEffect(() => {
     // A page is open, or the host no longer offers the page this window held
     // (it ended another way): the held choice has nothing left to reopen.
@@ -746,10 +758,17 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         // A fresh tab reads only the thread's admission fact. Its current page
         // belongs to another tab until this one creates its own context.
         if (fresh) {
+          rememberOffer(heldReopenKey(props.tab.mode, props.tab.threadId!), next.reopenOffer);
           setThreadHasSharedPage(sharedPageIsLive(next));
           setStatus("ready");
           return;
         }
+        // The thread read carries the offer (the host sends none while a page
+        // is open); a read of this pane's own page carries none to keep.
+        rememberOffer(
+          heldReopenKey(props.tab.mode, props.tab.threadId!),
+          contextId === undefined ? next.reopenOffer : undefined,
+        );
         if (changed) {
           currentSnapshotRevision.current = revision;
           currentObservationRevision.current = next.observation?.revision;
@@ -790,6 +809,13 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           setSnapshot(undefined);
           setStatus("ready");
           setMessage(undefined);
+          // With no page, the thread may still offer the one a restart took.
+          // Only its offer is kept: another tab's live page is not adopted.
+          const thread = await props.client
+            .inspectThread({ threadId: props.tab.threadId!, freshPicture: false }, controller.signal)
+            .catch(() => undefined);
+          if (active && !controller.signal.aborted && thread !== undefined)
+            rememberOffer(heldReopenKey(props.tab.mode, props.tab.threadId!), thread.reopenOffer);
           return;
         }
         applyFailure(error, setStatus, setMessage);
@@ -1424,17 +1450,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         holdReopen({ pageId: offer.pageId, choice: browserProfileChoiceOf(result.profile) });
         setReopenFailedKey(undefined);
         noticeFor(undefined);
-        setFocusAddress((revision) => revision + 1);
+        if (reopenKeyNow.current === reopenKey) setFocusAddress((revision) => revision + 1);
         return;
       }
-      setSnapshot((previous) => {
-        // The answer landed after a thread switch: the snapshot is another
-        // thread's, and its own offer is not the one that was answered.
-        if (previous === undefined || String(previous.threadId) !== String(threadId))
-          return previous;
-        const { reopenOffer: _answered, ...rest } = previous;
-        return rest;
-      });
+      // The answer may land after a thread switch: only this thread's offer is
+      // the one that was answered.
+      setOfferRead((previous) =>
+        previous?.key === reopenKey ? { key: reopenKey, offer: undefined } : previous,
+      );
       if (result.status === "refused") {
         noticeFor(
           result.reason === "not-offered"
@@ -1447,7 +1470,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         holdReopen(undefined);
         noticeFor(undefined);
       }
-      setFocusAddress((revision) => revision + 1);
+      if (reopenKeyNow.current === reopenKey) setFocusAddress((revision) => revision + 1);
     } catch {
       noticeFor("The page could not be reopened. Try again.");
     } finally {
@@ -2641,8 +2664,6 @@ function snapshotRevision(snapshot: BrowserAutomationSnapshot | undefined): stri
     snapshot.observation?.contentHash,
     snapshot.observation?.url,
     snapshot.evidence.length,
-    snapshot.reopenOffer?.pageId,
-    snapshot.reopenOffer?.status,
     snapshot.failure?.category,
     snapshot.failure?.message,
   ]);
