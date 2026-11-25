@@ -17359,9 +17359,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   transitions and a Chat attempt's question are journaled, a Code request's ask,
   answer, and turn end are journaled stream events, and a Code tool ask that
   is withdrawn or abandoned — which journals nothing — publishes
-  `code-navigation` itself. A subagent's or a routine run's request or state
-  change publishes all three navigation topics, since either can move the
-  work lists while its thread journals nothing.
+  `code-navigation` itself. A subagent's or a routine run's request or state change, and a thread session's pause or resume (which holds or releases its subagents), publishes all three navigation topics, since each can move the work lists while its thread journals nothing.
 - **Fleet activity.** `GET /api/fleet-activity` returns the threads that need
   the calling window's person and the threads that are running, needs you
   first, at most 64 with a `truncated` flag, each naming its mode, title,
@@ -17387,7 +17385,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   another folder, whose repository it never borrows from the old one. Linked pull requests and issues are identities only, because a title
   on a forge is text an outsider may have written. A coordinator is derived
   without delivery evidence; a Chat thread is a row only while it runs or waits;
-  a subagent is a row only under a thread already listed, In progress while queued, starting, running, or waiting on what the host ends by itself, as the orchestration service decides from its own holds (room under the subagent limit, which the capacity queue fills whatever the parent session does; a free request slot or siblings on their way, unless the parent session or a restart holds the run); Waiting for a pool with no eligible model, a sibling a person must retry, and any other wait, and
+  a subagent is a row only under a thread already listed, In progress while queued, starting, running, or waiting on what the host ends by itself, as the orchestration service decides from its own holds, judging each run and reading each parent session once per read (room under the subagent limit, which the capacity queue fills whatever the parent session does; a free request slot or siblings on their way, unless the parent session or a restart holds the run); Waiting for a pool with no eligible model, a sibling a person must retry, and any other wait, and
   its task is named only to a local window the
   AgentRun authorization admits, the same one the Agents center applies. A Chat
   thread's subagents are listed to such a window alone. The read takes a local

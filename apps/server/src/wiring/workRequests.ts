@@ -656,8 +656,10 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
             facts: chatActiveWork(thread, project.project),
           };
         }),
-      subagents: () =>
-        agentRunPersistence
+      subagents: () => {
+        // One judgement per read: siblings share prerequisites and a parent.
+        const startsWithoutPerson = agentRunOrchestration.waitsOnItsOwn();
+        return agentRunPersistence
           .listCenterCandidates({ status: "active", mode: "all" })
           .map(({ run }) => ({
             runId: String(run.id),
@@ -665,7 +667,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
             mode: run.routingReceipt.mode,
             task: run.task,
             lifecycleStatus: run.lifecycleStatus,
-            startsWithoutPerson: agentRunOrchestration.startsWithoutPerson(run),
+            startsWithoutPerson: startsWithoutPerson(run),
             updatedAt: run.updatedAt,
             readableBy: (windowId) =>
               authorizeAgentRunCancellation({ persistence, workThreadProjection, run, windowId }) &&
@@ -675,7 +677,8 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
                 parentThreadId: run.parentThreadId,
                 windowId,
               }),
-          })),
+          }));
+      },
       routineThreadIds: () =>
         new Set(
           persistence.automationProjection.listDefinitions().flatMap((definition) => {

@@ -29,6 +29,7 @@ import {
   decodeNativeHarnessSlotCandidate,
   type AgentRunAuthority,
   type AgentRunCommand,
+  type AgentRun,
   type AgentRunId,
   type AgentRunRoutingReceipt,
   type AgentRunWorkspaceReceipt,
@@ -1393,6 +1394,42 @@ describe("AgentRun dependency graphs", () => {
     await settle();
     expect(persistence.getById(joined.id)?.lifecycleStatus).toBe("starting");
     expect(starts).toContain(String(joined.id));
+  });
+
+  it("judges a graph of shared prerequisites once per read: each run once and its parent's hold once", () => {
+    let holdReads = 0;
+    const harness = createHarness(createInMemoryCapacityPort(), true, undefined, {
+      isHeld: () => {
+        holdReads += 1;
+        return false;
+      },
+    });
+    const request = (n: number) =>
+      decodeAgentRunRequestId(`27272727-2727-4272-8272-${String(n).padStart(12, "0")}`);
+    const admit = (n: number, dependsOn: ReadonlyArray<string>) => {
+      const admitted = harness.orchestration.admit({
+        command: {
+          ...requestCommand(request(n)),
+          ...(dependsOn.length === 0 ? {} : { dependsOn: dependsOn as never }),
+        },
+        parentAuthority: authority,
+        confirmed: true,
+        liveAuthority: authority,
+      });
+      if (admitted.kind === "run-command-failed") throw new Error(admitted.message);
+      return admitted.run;
+    };
+    const first = admit(0, []);
+    harness.orchestration.start(first.id, first.version, authority);
+    // Each run waits on every run before it, up to the eight a request may name.
+    const parked: AgentRun[] = [];
+    for (let n = 1; n <= 9; n += 1) {
+      parked.push(admit(n, [String(first.id), ...parked.slice(-7).map((run) => String(run.id))]));
+    }
+    holdReads = 0;
+    const startsWithoutPerson = harness.orchestration.waitsOnItsOwn();
+    expect(parked.map((run) => startsWithoutPerson(run))).toEqual(parked.map(() => true));
+    expect(holdReads).toBe(1);
   });
 
   it("fails a waiting run without ever starting it when a dependency fails", async () => {

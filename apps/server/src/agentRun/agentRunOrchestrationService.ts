@@ -677,32 +677,67 @@ export class AgentRunOrchestrationService {
    * - siblings: started once they all complete, unless held since the restart
    *   or by the parent's session, and only while each sibling it still waits on
    *   is itself on its way (queued, starting, running, or a wait like this).
-   * A pool that named no eligible model, a sibling a person must retry, and
-   * every other wait need a person.
+   * A pool that named no eligible model, a sibling a person must retry, a
+   * cycle, and every other wait need a person.
    */
-  startsWithoutPerson(run: AgentRun, visited: ReadonlySet<AgentRunId> = new Set()): boolean {
-    if (run.lifecycleStatus !== "waiting") return false;
-    if (run.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON) return true;
-    if (this.#parentSessions?.isHeld(run.parentThreadId) === true) return false;
-    if (run.recoveryReason !== AGENT_RUN_DEPENDENCY_WAITING_REASON) {
-      return this.waitsForProviderSlot(run);
-    }
-    if (this.#heldSinceRestart.has(run.id) || visited.has(run.id)) return false;
-    const decision = decideAgentRunDependencies(run, (id) => this.#persistence.getById(id));
-    if (decision.kind === "ready") return true;
-    if (decision.kind !== "wait") return false;
-    const seen = new Set([...visited, run.id]);
-    return decision.pending.every((siblingId) => {
-      const sibling = this.#persistence.getById(siblingId);
-      if (sibling === undefined) return false;
-      const { lifecycleStatus } = sibling;
-      return (
-        lifecycleStatus === "queued" ||
-        lifecycleStatus === "starting" ||
-        lifecycleStatus === "running" ||
-        this.startsWithoutPerson(sibling, seen)
-      );
-    });
+  startsWithoutPerson(run: AgentRun): boolean {
+    return this.waitsOnItsOwn()(run);
+  }
+
+  /**
+   * The judgement above for one read of many runs. Siblings share
+   * prerequisites, so each run is judged once and each parent's hold is read
+   * once, whatever the number of paths that reach them: judged per path, a
+   * graph of sixteen runs read one parent session tens of thousands of times.
+   */
+  waitsOnItsOwn(): (run: AgentRun) => boolean {
+    const judged = new Map<string, boolean>();
+    const judging = new Set<string>();
+    const held = new Map<string, boolean>();
+    const parentHeld = (run: AgentRun): boolean => {
+      const key = String(run.parentThreadId);
+      const known = held.get(key);
+      if (known !== undefined) return known;
+      const read = this.#parentSessions?.isHeld(run.parentThreadId) === true;
+      held.set(key, read);
+      return read;
+    };
+    const judge = (run: AgentRun): boolean => {
+      const key = String(run.id);
+      const known = judged.get(key);
+      if (known !== undefined) return known;
+      // A run met again while it is being judged waits on itself.
+      if (judging.has(key)) return false;
+      judging.add(key);
+      const answer = decide(run);
+      judging.delete(key);
+      judged.set(key, answer);
+      return answer;
+    };
+    const decide = (run: AgentRun): boolean => {
+      if (run.lifecycleStatus !== "waiting") return false;
+      if (run.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON) return true;
+      if (parentHeld(run)) return false;
+      if (run.recoveryReason !== AGENT_RUN_DEPENDENCY_WAITING_REASON) {
+        return this.waitsForProviderSlot(run);
+      }
+      if (this.#heldSinceRestart.has(run.id)) return false;
+      const decision = decideAgentRunDependencies(run, (id) => this.#persistence.getById(id));
+      if (decision.kind === "ready") return true;
+      if (decision.kind !== "wait") return false;
+      return decision.pending.every((siblingId) => {
+        const sibling = this.#persistence.getById(siblingId);
+        if (sibling === undefined) return false;
+        const { lifecycleStatus } = sibling;
+        return (
+          lifecycleStatus === "queued" ||
+          lifecycleStatus === "starting" ||
+          lifecycleStatus === "running" ||
+          judge(sibling)
+        );
+      });
+    };
+    return judge;
   }
 
   /** Whether this child waits for a provider slot, by the host's record and not its reason text. */

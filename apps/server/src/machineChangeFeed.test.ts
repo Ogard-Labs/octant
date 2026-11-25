@@ -269,6 +269,29 @@ describe("MachineChangeFeed", () => {
     controller.abort();
   });
 
+  it("invalidates the navigation reads when a thread's session is paused or resumed", async () => {
+    const feed = new MachineChangeFeed();
+    const controller = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
+    for (const eventName of [
+      NATIVE_HARNESS_SESSION_EVENT_NAMES.paused,
+      NATIVE_HARNESS_SESSION_EVENT_NAMES.resumed,
+    ]) {
+      feed.publishCommitted({
+        events: [{ aggregateType: NATIVE_HARNESS_SESSION_AGGREGATE_TYPE, eventName }],
+      });
+    }
+    for (const sequence of [1, 2]) {
+      await expect(stream.next()).resolves.toMatchObject({
+        value: {
+          sequence,
+          topics: ["chat-navigation", "work-navigation", "code-navigation"],
+        },
+      });
+    }
+    controller.abort();
+  });
+
   it("requires a snapshot when the requested cursor fell outside replay", async () => {
     const feed = new MachineChangeFeed({ maxFrames: 1 });
     feed.publish(["chat-navigation"]);
