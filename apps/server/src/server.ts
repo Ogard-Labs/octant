@@ -43,6 +43,8 @@ import { createCredentialRequestRoutes } from "./credentials/credentialRequestRo
 import { registeredCredentialOperations } from "./credentials/credentialRequestTools";
 import { createCredentialTool } from "./credentials/credentialTool";
 import { createCodeToolHostPort } from "./credentials/codeToolHost";
+import { wireChildTools } from "./wiring/childTools";
+import { CHILD_AUTHORITY_AGGREGATES } from "./agentRun/agentRunChildTools";
 import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
 import {
   startupFailedOutput,
@@ -372,6 +374,9 @@ export function startOctantServer(
       hostResourceBudget,
       agentsManagedToolsFor,
       capacityScheduler,
+      childCodeThreads,
+      childResources,
+      childToolHost,
       contributeChildTools,
       coordinatorWorkersHolder,
       externalContentIngestionStore,
@@ -390,6 +395,8 @@ export function startOctantServer(
       threadFollowUpSuggestions,
       turnMetrics,
     } = wireAgentRuns({
+      isPairedDeviceScope,
+      isRestrictedDeviceScope,
       resolveThreadStrict,
       readResourceMemory,
       agentRunParentAuthority,
@@ -418,6 +425,15 @@ export function startOctantServer(
       workTurnProjection,
     });
     yield* Effect.addFinalizer(() => Effect.sync(() => hostResourceBudget.dispose()));
+    // What a child run started stops when a fact its grant rests on changes,
+    // not at its next call: a parent moved to Plan, archived, or relinked.
+    const unsubscribeChildAuthority = persistence.journal.subscribeCommitted((append) => {
+      if (append.events.some((event) => CHILD_AUTHORITY_AGGREGATES.has(event.aggregateType)))
+        setImmediate(() => void childResources.settle()).unref?.();
+    });
+    onWindowRevoked(() => void childResources.settle());
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribeChildAuthority));
+    yield* Effect.addFinalizer(() => Effect.promise(() => childResources.close()));
     const {
       agentMessageProjection,
       agentMessageService,
@@ -496,6 +512,9 @@ export function startOctantServer(
       stopDesktopLeases,
       webAssets,
     } = wireComputerUse({
+      childResources,
+      childToolHost,
+      contributeChildTools,
       isPairedDeviceScope,
       isRestrictedDeviceScope,
       resolveThreadStrict,
@@ -1230,12 +1249,14 @@ export function startOctantServer(
       debugConfigurationApprovals,
       debugService,
       languageServerApprovals,
+      languageService,
       localServerRoutes,
       pairedMergeUnlockSlot,
       projectTerminals,
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      childCodeThreads,
       configuredDriverOptions,
       hubActScopeSlot,
       providerRuntimeNetwork,
@@ -1877,6 +1898,37 @@ export function startOctantServer(
           (readThread()?.executionPolicy ?? thread.executionPolicy) === "full-access",
       }),
     );
+    const { settleChildDevices } = wireChildTools({
+      androidToolchainService,
+      appleToolchainService,
+      browserCaptures,
+      childCodeThreads,
+      childResources,
+      childToolHost,
+      codeOperationRuntime,
+      contributeChildTools,
+      credentialOperations,
+      credentialRequests,
+      debugService,
+      externalContentIngestionStore,
+      githubExtensionSnapshot,
+      githubReadToolService,
+      imageDescriber,
+      imageGenerationOffers,
+      imageJobService,
+      keptImageChoices,
+      languageService,
+      persistence,
+      projectMemoryAccess,
+      providerDataDirectory,
+      providerRuntimeRegistry,
+      recordAppleEvidence,
+      resolveThreadStrict,
+      windowAuthorityStore,
+    });
+    // Devices a child run had booted when the last host stopped; a boot never
+    // waits on a toolchain that may be slow or gone.
+    void settleChildDevices().catch(() => undefined);
     const credentialRequestRoutes = createCredentialRequestRoutes(
       credentialRequests,
       windowAuthorityStore,

@@ -321,6 +321,12 @@ export type NativeHarnessChildInteractions = Pick<
       readonly commandHosts: ReadonlyArray<NativeHarnessCommandHost>;
     },
   ) => Promise<NativeHarnessCommandApprovalOutcome>;
+  /** Asks for one act of an Octant tool the child was offered; nothing is remembered. */
+  readonly askTool?: (input: {
+    readonly summary: string;
+    readonly approvalClass: string;
+    readonly signal?: AbortSignal | undefined;
+  }) => Promise<"approved" | "denied" | "cancelled">;
 };
 /** Whose egress rules a proxied command runs under: a child runs under its parent's. */
 export interface HarnessEgressScope {
@@ -1603,7 +1609,11 @@ export function createNativeHarnessComposition(
         ),
         () => authority.executionPolicy === "full-access",
       );
-      const { approveCommand, ...interactions } = options.childInteractions?.(run) ?? {};
+      const {
+        approveCommand,
+        askTool: _askTool,
+        ...interactions
+      } = options.childInteractions?.(run) ?? {};
       const askApproval = interactions.approvals;
       const approvals: NativeHarnessToolPorts["approvals"] =
         askApproval === undefined

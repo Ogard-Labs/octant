@@ -28,6 +28,10 @@ export interface ProjectMemoryTurnScope {
    * Chat, which has no such level.
    */
   readonly fullAccess?: () => boolean;
+  /** Who an entry written with nobody asked names, when that is not the thread: a child run. */
+  readonly writerId?: string;
+  /** Whether nobody could confirm a write now, beyond what the scope itself says. */
+  readonly nobodyToConfirm?: () => boolean;
 }
 
 export interface ProjectMemoryAccess {
@@ -84,7 +88,9 @@ export function createProjectMemoryAccess(input: {
         readMemory: () => input.readMemory(projectId),
         proposals,
         nobodyToConfirm:
-          input.isHostScope(scope.windowId) || input.isPairedDeviceScope(scope.windowId),
+          input.isHostScope(scope.windowId) ||
+          input.isPairedDeviceScope(scope.windowId) ||
+          scope.nobodyToConfirm?.() === true,
         ...(scope.writeRefusal === undefined ? {} : { writeRefusal: scope.writeRefusal }),
         fullAccess: () => scope.fullAccess?.() === true,
         projectAllowsUnaskedWrites: () => input.agentsWriteWithoutAsking(projectId),
@@ -94,11 +100,13 @@ export function createProjectMemoryAccess(input: {
             {
               kind: "agent-authored",
               mode: scope.mode,
-              threadId: scope.threadId,
+              threadId: scope.writerId ?? scope.threadId,
               unconfirmed: true,
             },
           ),
-        outsideContent: () => input.outsideContent(scope.threadId),
+        outsideContent: () =>
+          (scope.writerId === undefined ? undefined : input.outsideContent(scope.writerId)) ??
+          input.outsideContent(scope.threadId),
       });
     },
   };

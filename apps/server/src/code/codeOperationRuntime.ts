@@ -3004,7 +3004,7 @@ async function resolveDeviceApprovalScope(
   return { thread, checkout };
 }
 
-function approvalPrompt(
+export function approvalPrompt(
   effect: CodeOperationApprovalRequest["effect"],
   thread: CodeThread,
   checkout: CodeCheckoutIdentity,

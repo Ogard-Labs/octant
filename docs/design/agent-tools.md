@@ -55,6 +55,70 @@ tools from plugins or MCP servers the person added are not listed.
   memory, files, plugins and MCP servers, and a runtime's own prompt, are not
   counted. The tool lists are upper bounds per context, kept with this page.
 
+## Child runs
+
+A child run started through `octant_agents` inherits its parent's tools by
+default (maintainer decision, 2026-11-17), each built again from the child's own
+run: its recorded workspace (its own worktree in Code, the Project's folder in
+Work, none in Chat), its clamped grant, and the model it runs on. It is never
+handed its parent's tool set, window or authority, and it never acts as its
+parent: what it starts, reads and is marked by is kept under its run, and only
+its asks appear on the parent's thread.
+
+- **A child never exceeds its parent.** A tool is offered only when the
+  child's grant holds tools, its own launch proved it carries them, the parent
+  thread's provider carries them too, and the parent's profile allows the tool.
+  Each call is judged again against the child's own run, the parent's live
+  grant (a parent turn narrowed to Plan leaves a wider child nothing), the
+  parent's tools, and the Project; a call that fails is refused.
+- **Same approvals.** Plan, the access level, per-act approval, the profile's
+  tool constraints and outside-content marks apply as for the lead, at the
+  child's own level. A child's ask is single-use on the parent's thread: no
+  remembered answer of the parent's settles it and none is kept. A child's own
+  marks and its parent's both count where the lead's would.
+- **Someone must be able to answer.** A tool that may ask is withheld from a
+  child of a routine's run or another host-started turn, from a child whose
+  window is gone, and from a child in Plan. Chat children run read-only, so
+  they get only reads.
+- **Nothing a child starts outlives it.** Terminals, debug sessions, language
+  servers it started, Simulators and emulators it booted, recordings and
+  Computer grants stop when its run ends or is cancelled, and at once when it
+  no longer holds its grant. Devices a child booted are listed on disk and shut
+  down when the host next starts; terminals, debug sessions and language
+  servers are already reaped then.
+
+| Tool                                                                | Child run                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `octant_look`                                                       | Work and Code, as the lead: the child's model cannot read images and Sees images can describe one for the Project; files of the child's own folder only, and its spend counts against the parent's ceiling as its turns do                                                                                |
+| `octant_create_image`                                               | Work and Code outside Plan, attended, with an eligible profile; the same card on the parent's thread; the child saves, revises and references only images it made and files of its own folder                                                                                                             |
+| `octant_memory`                                                     | Every child in a Project; writes follow the lead's rule at the child's level, a write that needs confirming is refused with nobody to confirm, and an entry written with nobody asked names the run                                                                                                       |
+| `octant_github`, `octant_code`                                      | Code children, Plan included, when the integration is effective or a language server covers the child's worktree                                                                                                                                                                                          |
+| `octant_terminal`, `octant_debug`, `octant_apple`, `octant_android` | Code children outside Plan, attended, with shell (and, for the terminal, network) authority, under the lead's toolchain and adapter conditions; device inputs ask each time, and a test must name the Simulator it boots                                                                                  |
+| `octant_computer`                                                   | Work and Code children outside Plan, attended, as their own owner on this Mac's screen; the first action on each app asks as for the lead. A child gets no disposable desktop                                                                                                                             |
+| `octant_credential`                                                 | Code children outside Plan, attended: `request` only, asking every time; no value reaches the child                                                                                                                                                                                                       |
+| `octant_browser`, `octant_canvas`, `octant_past_threads`            | As before: the delegated Browser, the run's own Canvas, and the lead's person memory search                                                                                                                                                                                                               |
+| Not inherited                                                       | `octant_threads`, `octant_propose_routine`, `octant_routines`, `octant_offer_side_task`, `octant_pull_request`, `octant_report_finished`, `octant_remember_person`, `octant_ask_thread`, `octant_zen`, the Side Chat tools, `octant_linear`, `octant_create_video`, `octant_narrate`, `octant_transcribe` |
+
+`octant_agents` is unchanged: whether a child may delegate further is not
+decided here. `octant_credential`'s `run-saved` is not offered to a child: a
+saved command runs in a thread's checkout under that thread's own command
+policy and Shield review, which a child is not.
+
+## Withheld on purpose
+
+- OpenCode carries Octant's tools in Chat only when its launch proves it is
+  exclusive; its "mixed" rating applies at Full access, which Chat has no level
+  for (maintainer decision, 2026-11-17).
+- Work in a server Project runs only on Octant Harness
+  ([Server Projects](server-projects.md)).
+- A routine's run has no `octant_agents` ask path and no page scripts: nobody
+  can answer them.
+- Bots get no tools; bots are not built.
+- A runtime that cannot prove it carries the tools gets none: OpenCode without
+  its exclusivity proof, an ACP agent without HTTP MCP, Pi below its verified
+  release, and OpenCode and ACP on Windows, where the bridge is not built
+  ([Provider runtimes](provider-runtimes.md); maintainer decision, 2026-11-17).
+
 "Code + tools" below means a Code thread on a provider that carries
 app-managed tools, subject to the thread profile's tool constraints.
 

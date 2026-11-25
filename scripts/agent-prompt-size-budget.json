@@ -13,15 +13,15 @@
       "laterTurnBytes": 0
     },
     "chat-child": {
-      "firstPromptBytes": 3331,
+      "firstPromptBytes": 5006,
       "laterTurnBytes": 0
     },
     "work-child": {
-      "firstPromptBytes": 16098,
+      "firstPromptBytes": 24795,
       "laterTurnBytes": 0
     },
     "code-child": {
-      "firstPromptBytes": 17183,
+      "firstPromptBytes": 35760,
       "laterTurnBytes": 0
     }
   },
@@ -39,15 +39,15 @@
       "laterTurnBytes": 0
     },
     "chat-child": {
-      "firstPromptBytes": 3403,
+      "firstPromptBytes": 5096,
       "laterTurnBytes": 0
     },
     "work-child": {
-      "firstPromptBytes": 16296,
+      "firstPromptBytes": 25065,
       "laterTurnBytes": 0
     },
     "code-child": {
-      "firstPromptBytes": 17417,
+      "firstPromptBytes": 36192,
       "laterTurnBytes": 0
     }
   },
@@ -65,15 +65,15 @@
       "laterTurnBytes": 0
     },
     "chat-child": {
-      "firstPromptBytes": 3405,
+      "firstPromptBytes": 5135,
       "laterTurnBytes": 0
     },
     "work-child": {
-      "firstPromptBytes": 16282,
+      "firstPromptBytes": 25199,
       "laterTurnBytes": 0
     },
     "code-child": {
-      "firstPromptBytes": 17367,
+      "firstPromptBytes": 36549,
       "laterTurnBytes": 0
     }
   },
@@ -91,15 +91,15 @@
       "laterTurnBytes": 8687
     },
     "chat-child": {
-      "firstPromptBytes": 3405,
+      "firstPromptBytes": 5135,
       "laterTurnBytes": 0
     },
     "work-child": {
-      "firstPromptBytes": 16282,
+      "firstPromptBytes": 25199,
       "laterTurnBytes": 0
     },
     "code-child": {
-      "firstPromptBytes": 17367,
+      "firstPromptBytes": 36549,
       "laterTurnBytes": 0
     }
   },
@@ -117,15 +117,15 @@
       "laterTurnBytes": 0
     },
     "chat-child": {
-      "firstPromptBytes": 3405,
+      "firstPromptBytes": 5135,
       "laterTurnBytes": 0
     },
     "work-child": {
-      "firstPromptBytes": 16282,
+      "firstPromptBytes": 25199,
       "laterTurnBytes": 0
     },
     "code-child": {
-      "firstPromptBytes": 17367,
+      "firstPromptBytes": 36549,
       "laterTurnBytes": 0
     }
   },
@@ -143,16 +143,16 @@
       "laterTurnBytes": 78390
     },
     "chat-child": {
-      "firstPromptBytes": 3451,
-      "laterTurnBytes": 3511
+      "firstPromptBytes": 5156,
+      "laterTurnBytes": 5217
     },
     "work-child": {
-      "firstPromptBytes": 16428,
-      "laterTurnBytes": 16490
+      "firstPromptBytes": 25245,
+      "laterTurnBytes": 25311
     },
     "code-child": {
-      "firstPromptBytes": 17794,
-      "laterTurnBytes": 17797
+      "firstPromptBytes": 36701,
+      "laterTurnBytes": 36715
     }
   }
 }

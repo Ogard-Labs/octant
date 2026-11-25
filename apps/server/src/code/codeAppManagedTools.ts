@@ -1,6 +1,7 @@
 import { askOneUsePageScriptPermission } from "../browser/browserPageScriptPermission";
 import { browserAgentAvailability, browserProfileFromChoice } from "@octant/domain";
 import { browserProfileKey, storedBrowserProfile } from "@octant/domain";
+import type { ProviderExecutionPolicy } from "@octant/contracts";
 import type { StoredBrowserProfile, BrowserDownloadSource } from "@octant/contracts";
 import type {
   BrowserAppManagedToolsOptions,
@@ -775,7 +776,7 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
         if (terminalFailure !== undefined) {
           return failure(terminalFailure, postureRefusal(terminalFailure));
         }
-        return terminalTool(options, parseTerminalInput(inputJson), signal);
+        return terminalTool(codeTerminalOptions(options), parseTerminalInput(inputJson), signal);
       }
       const postureFailure = currentAuthorityFailure(options);
       if (postureFailure !== undefined) {
@@ -1118,30 +1119,148 @@ function pullRequestRefusal(code: string | undefined): string {
   }
 }
 
+/** One agent's terminal, whoever it belongs to: a Code thread, a Work thread, or a child run. */
+export interface AgentTerminalPort {
+  /** Throws when nothing was started yet. */
+  readonly read: () => Promise<CodeOperationTerminalSnapshot>;
+  /** Undefined once it runs; otherwise what the agent is told. */
+  readonly start: () => Promise<TerminalToolAnswer | undefined>;
+  /** Undefined once the input reached it; otherwise what the agent is told. */
+  readonly write: (data: string) => Promise<TerminalToolAnswer | undefined>;
+  readonly stop: () => Promise<TerminalToolAnswer>;
+  readonly interrupt?: () => Promise<CodeOperationTerminalSnapshot>;
+  readonly terminate?: () => Promise<unknown>;
+}
+
+export interface TerminalToolAnswer {
+  readonly result: unknown;
+  readonly isError: boolean;
+}
+
+export interface AgentTerminalToolOptions {
+  readonly terminal: AgentTerminalPort;
+  readonly uuid: () => string;
+  /** What keeps the terminal from running now: a stale caller, or Plan. */
+  readonly authorityFailure: () => string | undefined;
+  readonly posture: () => ProviderExecutionPolicy;
+  /**
+   * Asks the person to let the agent type one command, naming it; `starts`
+   * says whether the same answer also starts the terminal. Absent where nobody
+   * can be asked, where the terminal then runs only at Full access.
+   */
+  readonly approve?:
+    | ((
+        input: { readonly text: string; readonly starts: boolean },
+        signal?: AbortSignal,
+      ) => Promise<"approved" | "denied" | "cancelled" | "expired" | "unavailable">)
+    | undefined;
+  readonly onActivity?: (() => void) | undefined;
+  /** Marks what a command returned as outside content; help is the host's own text and is not. */
+  readonly markResults?: ((tools: AppManagedToolSet) => AppManagedToolSet) | undefined;
+  readonly wait?: ((milliseconds: number) => Promise<void>) | undefined;
+}
+
+/** `octant_terminal` over one agent's terminal, with the same approvals and bounds everywhere. */
+export function createAgentTerminalTools(options: AgentTerminalToolOptions): AppManagedToolSet {
+  const tools: AppManagedToolSet = {
+    definitions: [terminalDefinition],
+    execute: async ({ name, inputJson, signal }) => {
+      if (signal?.aborted) return failure("tool-interrupted");
+      if (name !== CODE_TERMINAL_TOOL_NAME) return failure("tool-unavailable");
+      const refused = options.authorityFailure();
+      if (refused !== undefined) return failure(refused, postureRefusal(refused));
+      return terminalTool(options, parseTerminalInput(inputJson), signal);
+    },
+  };
+  return withToolFamilyHelp(options.markResults?.(tools) ?? tools, CODE_TOOL_HELP);
+}
+
+/** A Code thread's own terminal, through the operations its routes also run. */
+function codeTerminalOptions(options: CodeAppManagedToolsOptions): AgentTerminalToolOptions {
+  const scope = {
+    threadId: options.thread.id,
+    checkoutId: options.thread.checkoutId,
+    terminalId: options.thread.id as unknown as CodeTerminalId,
+  } as const;
+  const startCommand = (): CodeOperationCommand => ({
+    kind: "start-terminal",
+    operationId: operationId(options),
+    ...scope,
+    columns: 100,
+    rows: 30,
+    credentialRefs: [],
+  });
+  // An approval that starts the terminal is minted for exactly this command.
+  let approvedStart: CodeOperationCommand | undefined;
+  const { interrupt, terminate } = options.terminal;
+  const { terminalApproval } = options;
+  return {
+    terminal: {
+      read: () => options.terminal.read(options.windowId, scope),
+      start: async () => {
+        const started = await options.executeOperation(
+          options.windowId,
+          approvedStart ?? startCommand(),
+        );
+        approvedStart = undefined;
+        return started.kind === "terminal-state" && started.state === "running"
+          ? undefined
+          : operationResult(started, options, scope);
+      },
+      write: async (data) => {
+        const written = await options.executeOperation(options.windowId, {
+          kind: "write-terminal",
+          operationId: operationId(options),
+          ...scope,
+          data,
+        });
+        return written.kind === "operation-failed"
+          ? operationResult(written, options, scope)
+          : undefined;
+      },
+      stop: async () =>
+        operationResult(
+          await options.executeOperation(options.windowId, {
+            kind: "stop-terminal",
+            operationId: operationId(options),
+            ...scope,
+          }),
+          options,
+          scope,
+        ),
+      ...(interrupt === undefined ? {} : { interrupt: () => interrupt(options.windowId, scope) }),
+      ...(terminate === undefined ? {} : { terminate: () => terminate(options.windowId, scope) }),
+    },
+    uuid: options.uuid,
+    authorityFailure: () => terminalAuthorityFailure(options),
+    posture: () => currentPosture(options),
+    approve:
+      terminalApproval === undefined
+        ? undefined
+        : ({ text, starts }, signal) => {
+            approvedStart = starts ? startCommand() : undefined;
+            return terminalApproval.request(
+              { text, ...(approvedStart === undefined ? {} : { start: approvedStart }) },
+              signal,
+            );
+          },
+    onActivity: options.onCheckoutActivity,
+    wait: options.wait,
+  };
+}
+
 async function terminalTool(
-  options: CodeAppManagedToolsOptions,
+  options: AgentTerminalToolOptions,
   input: TerminalToolInput | undefined,
   signal?: AbortSignal,
 ) {
   if (input === undefined) return failure("invalid-terminal-input");
-  const terminalId = options.thread.id as unknown as CodeTerminalId;
-  const scope = {
-    threadId: options.thread.id,
-    checkoutId: options.thread.checkoutId,
-    terminalId,
-  } as const;
-  if (input.operation === "stop") {
-    const stopped = await options.executeOperation(options.windowId, {
-      kind: "stop-terminal",
-      operationId: operationId(options),
-      ...scope,
-    });
-    return operationResult(stopped, options, scope);
-  }
+  const { terminal } = options;
+  if (input.operation === "stop") return terminal.stop();
 
   let snapshot: CodeOperationTerminalSnapshot | undefined;
   try {
-    snapshot = await options.terminal.read(options.windowId, scope);
+    snapshot = await terminal.read();
   } catch {
     // A missing terminal is an ordinary first-run state. Starting it remains a
     // server-authorized operation, while reads never replace a UI observer.
@@ -1149,38 +1268,23 @@ async function terminalTool(
   // Below Full access each command the agent types asks the person first,
   // naming it, as a provider's own shell asks per command at that level. A
   // terminal the agent starts is covered by the same answer.
-  const startCommand: CodeOperationCommand | undefined =
-    input.operation === "run" && snapshot?.status !== "running"
-      ? {
-          kind: "start-terminal",
-          operationId: operationId(options),
-          ...scope,
-          columns: 100,
-          rows: 30,
-          credentialRefs: [],
-        }
-      : undefined;
+  const starts = input.operation === "run" && snapshot?.status !== "running";
   if (
     (input.operation === "run" || input.operation === "write") &&
     input.command !== undefined &&
-    currentPosture(options) !== "full-access"
+    options.posture() !== "full-access"
   ) {
-    if (options.terminalApproval === undefined) return failure("terminal-approval-required");
-    const outcome = await options.terminalApproval.request(
-      { text: input.command, ...(startCommand === undefined ? {} : { start: startCommand }) },
-      signal,
-    );
+    if (options.approve === undefined) return failure("terminal-approval-required");
+    const outcome = await options.approve({ text: input.command, starts }, signal);
     if (outcome !== "approved") return failure(`terminal-approval-${outcome}`);
-    const changed = terminalAuthorityFailure(options);
+    const changed = options.authorityFailure();
     if (changed !== undefined) return failure(changed, postureRefusal(changed));
     if (signal?.aborted === true) return failure("tool-interrupted");
   }
-  if (startCommand !== undefined) {
-    const started = await options.executeOperation(options.windowId, startCommand);
-    if (started.kind !== "terminal-state" || started.state !== "running") {
-      return operationResult(started, options, scope);
-    }
-    snapshot = await options.terminal.read(options.windowId, scope);
+  if (starts) {
+    const refused = await terminal.start();
+    if (refused !== undefined) return refused;
+    snapshot = await terminal.read();
   }
   if (snapshot === undefined) return failure("terminal-unavailable");
   if (snapshot.status !== "running") {
@@ -1196,57 +1300,45 @@ async function terminalTool(
       marker === undefined
         ? command
         : `${command}\rprintf '\\033]777;octant=${marker};exit=%s\\007' "$?"\r`;
-    const written = await options.executeOperation(options.windowId, {
-      kind: "write-terminal",
-      operationId: operationId(options),
-      ...scope,
-      data,
-    });
-    if (written.kind === "operation-failed") return operationResult(written, options, scope);
+    const refused = await terminal.write(data);
+    if (refused !== undefined) return refused;
     if (marker !== undefined) {
       try {
-        return await waitForTerminalCommand(options, scope, marker, signal);
+        return await waitForTerminalCommand(options, marker, signal);
       } finally {
-        if (!signal?.aborted && terminalAuthorityFailure(options) === undefined)
-          options.onCheckoutActivity?.();
+        if (!signal?.aborted && options.authorityFailure() === undefined) options.onActivity?.();
       }
     }
     await (options.wait ?? defaultWait)(200);
-    if (!signal?.aborted && terminalAuthorityFailure(options) === undefined)
-      options.onCheckoutActivity?.();
+    if (!signal?.aborted && options.authorityFailure() === undefined) options.onActivity?.();
   }
-  return terminalSnapshot(await options.terminal.read(options.windowId, scope));
+  return terminalSnapshot(await terminal.read());
 }
 
 async function waitForTerminalCommand(
-  options: CodeAppManagedToolsOptions,
-  scope: {
-    readonly threadId: CodeThread["id"];
-    readonly checkoutId: CodeThread["checkoutId"];
-    readonly terminalId: CodeTerminalId;
-  },
+  options: AgentTerminalToolOptions,
   marker: string,
   signal?: AbortSignal,
 ) {
   const deadline = Date.now() + TERMINAL_COMMAND_TIMEOUT_MS;
   const completion = new RegExp(`\\u001b\\]777;octant=${marker};exit=(\\d+)\\u0007`, "g");
   for (;;) {
-    const authorityFailure = terminalAuthorityFailure(options);
+    const authorityFailure = options.authorityFailure();
     if (signal?.aborted || authorityFailure !== undefined) {
-      await interruptTerminalCommand(options, scope, marker);
-      return signal?.aborted
+      await interruptTerminalCommand(options, marker);
+      return signal?.aborted || authorityFailure === undefined
         ? failure("tool-interrupted")
-        : failure(authorityFailure!, postureRefusal(authorityFailure!));
+        : failure(authorityFailure, postureRefusal(authorityFailure));
     }
     await (options.wait ?? defaultWait)(TERMINAL_COMPLETION_POLL_MS);
-    const postWaitAuthorityFailure = terminalAuthorityFailure(options);
+    const postWaitAuthorityFailure = options.authorityFailure();
     if (signal?.aborted || postWaitAuthorityFailure !== undefined) {
-      await interruptTerminalCommand(options, scope, marker);
-      return signal?.aborted
+      await interruptTerminalCommand(options, marker);
+      return signal?.aborted || postWaitAuthorityFailure === undefined
         ? failure("tool-interrupted")
-        : failure(postWaitAuthorityFailure!, postureRefusal(postWaitAuthorityFailure!));
+        : failure(postWaitAuthorityFailure, postureRefusal(postWaitAuthorityFailure));
     }
-    const snapshot = await options.terminal.read(options.windowId, scope);
+    const snapshot = await options.terminal.read();
     const transcript = terminalTranscriptTail(snapshot, MAX_TERMINAL_SCAN_BYTES).value;
     const matches = [...transcript.matchAll(completion)];
     const exitCode = matches.at(-1)?.[1];
@@ -1266,7 +1358,7 @@ async function waitForTerminalCommand(
       return terminalSnapshot(snapshot, { commandCompleted: false });
     }
     if (Date.now() >= deadline) {
-      await interruptTerminalCommand(options, scope, marker);
+      await interruptTerminalCommand(options, marker);
       const partial = terminalSnapshot(snapshot, { commandCompleted: false });
       return {
         result: { ...partial.result, error: "terminal-command-timeout" },
@@ -1277,26 +1369,22 @@ async function waitForTerminalCommand(
 }
 
 async function interruptTerminalCommand(
-  options: CodeAppManagedToolsOptions,
-  scope: {
-    readonly threadId: CodeThread["id"];
-    readonly checkoutId: CodeThread["checkoutId"];
-    readonly terminalId: CodeTerminalId;
-  },
+  options: AgentTerminalToolOptions,
   marker: string,
 ): Promise<void> {
+  const { interrupt, terminate, read } = options.terminal;
   try {
-    if (options.terminal.interrupt === undefined) return;
-    let snapshot = await options.terminal.interrupt(options.windowId, scope);
+    if (interrupt === undefined) return;
+    let snapshot = await interrupt();
     for (let attempt = 0; attempt < 20; attempt += 1) {
       if (snapshot.status !== "running" || terminalHasCompletionMarker(snapshot, marker)) return;
       await (options.wait ?? defaultWait)(TERMINAL_COMPLETION_POLL_MS);
-      snapshot = await options.terminal.read(options.windowId, scope);
+      snapshot = await read();
     }
-    await options.terminal.terminate?.(options.windowId, scope);
+    await terminate?.();
   } catch {
     try {
-      await options.terminal.terminate?.(options.windowId, scope);
+      await terminate?.();
     } catch {
       // The terminal may already have exited. No further provider result is accepted.
     }
@@ -2761,7 +2849,7 @@ async function operationResult(
   }
 }
 
-function terminalSnapshot(
+export function terminalSnapshot(
   snapshot: CodeOperationTerminalSnapshot,
   command?: { readonly commandCompleted: boolean; readonly commandExitCode?: number },
 ) {
