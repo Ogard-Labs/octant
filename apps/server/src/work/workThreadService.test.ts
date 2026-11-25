@@ -3625,6 +3625,7 @@ describe("forking a Work thread from one of its turns", () => {
         prompt,
         ...(requestId === first
           ? {
+              threadMentionIds: ["release-notes-thread" as never],
               attachments: [
                 {
                   attachmentId: "30000000-0000-4000-8000-000000000001" as never,
@@ -3708,6 +3709,7 @@ describe("forking a Work thread from one of its turns", () => {
     ]);
     // A carried copy names its source turn and none of the source's session.
     expect(carried[0]?.carriedFrom).toEqual({ threadId: ids.thread, requestId: first });
+    expect(carried[0]?.threadMentionIds).toEqual(["release-notes-thread"]);
     expect(carried[0]?.attachments?.[0]).toMatchObject({
       displayName: "Original.png",
       source: {

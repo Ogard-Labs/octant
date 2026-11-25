@@ -121,6 +121,7 @@ import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverP
 import { serverCodeThreadProviderGroups } from "./composer/serverCodeComposer";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
+import { SentMessageText } from "../transcript/SentMessageText";
 import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
 import { SteeredMessages } from "../messageQueue/SteeredMessages";
 import { isChildResultDelivery } from "../agents/childResultDelivery";
@@ -2376,9 +2377,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             <div className="bubble">
                               {gallery}
                               {message.text.length > 0 ? (
-                                <TrackerReferenceText
-                                  asParagraph
+                                <SentMessageText
                                   text={followUpPrompt ?? message.text}
+                                  threadMentionIds={message.threadMentionIds}
                                 />
                               ) : null}
                             </div>

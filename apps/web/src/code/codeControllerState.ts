@@ -73,6 +73,8 @@ export interface CodeConversationMessage {
   readonly sourceThreadId?: CodeThreadId;
   readonly checkoutId?: CodeConversationTurn["checkoutId"];
   readonly reviewFindingReferences?: CodeConversationTurn["reviewFindingReferences"];
+  /** The threads this message mentioned, as the turn's start event recorded them. */
+  readonly threadMentionIds?: CodeConversationTurn["threadMentionIds"];
   readonly providerInstanceId?: CodeThread["providerInstanceId"];
   readonly modelId?: CodeThread["modelId"];
   readonly status?: "waiting" | "completed" | "interrupted" | "failed" | "incomplete";
@@ -570,6 +572,7 @@ async function projectConversationTurns(
       ...(turn.reviewFindingReferences === undefined
         ? {}
         : { reviewFindingReferences: turn.reviewFindingReferences }),
+      ...(turn.threadMentionIds === undefined ? {} : { threadMentionIds: turn.threadMentionIds }),
       providerInstanceId: turn.providerInstanceId,
       modelId: turn.modelId,
       status: turn.status,

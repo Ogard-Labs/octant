@@ -2446,6 +2446,7 @@ export class WorkThreadService {
         providerSessionId: decodeProviderSessionId(this.#uuid()),
         carriedFrom: { threadId: source.id, requestId: turn.requestId },
         prompt: turn.prompt,
+        ...(turn.threadMentionIds === undefined ? {} : { threadMentionIds: turn.threadMentionIds }),
         ...(turn.attachments === undefined
           ? {}
           : {

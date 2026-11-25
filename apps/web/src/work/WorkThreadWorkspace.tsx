@@ -192,6 +192,7 @@ import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
+import { SentMessageText } from "../transcript/SentMessageText";
 import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
 import { SteeredMessages } from "../messageQueue/SteeredMessages";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
@@ -3034,7 +3035,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         onAction={(value) => onTurnAction(value, "user", row.turn)}
                       >
                         <div className="bubble">
-                          <TrackerReferenceText asParagraph text={row.entry.text} />
+                          <SentMessageText
+                            text={row.entry.text}
+                            threadMentionIds={row.turn.threadMentionIds}
+                          />
                         </div>
                         {row.at === undefined ? null : (
                           <TurnTime at={row.at} copyValue={row.entry.text} />

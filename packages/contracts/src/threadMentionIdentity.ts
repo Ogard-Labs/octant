@@ -29,3 +29,14 @@ export type MentionableThreadId = typeof MentionableThreadId.Type;
 
 /** Maximum `#thread` chips one turn may carry. */
 export const MAX_THREAD_MENTIONS_PER_TURN = 4;
+
+/**
+ * The threads a turn's message mentioned, in the order its text shows them.
+ * A command names them so the host can resolve each one; the turn keeps the
+ * ids so a reader can show which thread a `#[Title]` in the text stands for.
+ * Ids only: the turn records no title, transcript or authority of theirs, and
+ * a reader that cannot list a thread learns nothing of it from its id.
+ */
+export const ThreadMentionIds = Schema.Array(MentionableThreadId).pipe(
+  Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN),
+);
