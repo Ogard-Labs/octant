@@ -6,6 +6,7 @@
     <title>Octant — Mobile concepts</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="settings-review.css" />
+    <link rel="stylesheet" href="panes.css" />
   </head>
   <body>
     <div class="stage">
@@ -25,6 +26,14 @@
           <label class="checkline">
             <input type="checkbox" id="before-toggle" />
             <span>Before Bots and PRs ship</span>
+          </label>
+          <label class="checkline">
+            <input type="checkbox" id="empty-toggle" />
+            <span>Nothing waiting (empty counts)</span>
+          </label>
+          <label class="checkline">
+            <input type="checkbox" id="keyboard-toggle" />
+            <span>On-screen keyboard while typing</span>
           </label>
         </div>
 
@@ -56,6 +65,9 @@
               <a href="#/threads">Threads <span class="kind">tab</span></a>
             </li>
             <li>
+              <a href="#/list/review">To review <span class="kind">count</span></a>
+            </li>
+            <li>
               <a href="#/inbox">Inbox <span class="kind">tab</span></a>
             </li>
             <li>
@@ -66,6 +78,14 @@
             </li>
             <li>
               <a href="#/thread/sync">Thread · sync worker <span class="kind">pushed</span></a>
+            </li>
+            <li>
+              <a href="#/thread/pairing"
+                >Thread · pairing test <span class="kind">approval</span></a
+              >
+            </li>
+            <li>
+              <a href="#/thread/s4">Thread · settings search <span class="kind">settled</span></a>
             </li>
             <li>
               <a href="#/thread/release">Thread · release notes <span class="kind">stale</span></a>
@@ -145,12 +165,14 @@
         </div>
         <div class="viewport" id="viewport"></div>
         <div class="tabbar" id="tabbar"></div>
+        <div class="keyboard" id="keyboard" aria-hidden="true"></div>
         <div class="sheet-root" id="sheet-root"></div>
         <div class="menu-root" id="menu-root"></div>
         <div class="alert-root" id="alert-root"></div>
       </div>
     </div>
     <script src="icons.js"></script>
+    <script src="panes.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
