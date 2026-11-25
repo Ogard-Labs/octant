@@ -1,4 +1,5 @@
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
+import { SettingRow, SettingsSection } from "../settings/primitives";
 import { DiagnosticsExportControl } from "../support/DiagnosticsExportControl";
 import { JournalGrowthTable } from "../support/JournalGrowthTable";
 import { SupportBundleControl } from "../support/SupportBundleControl";
@@ -12,10 +13,35 @@ import { SupportBundleControl } from "../support/SupportBundleControl";
  */
 export default function RemoteDiagnostics(props: { readonly client: DiagnosticsExportClient }) {
   return (
-    <div className="flex flex-col gap-3">
-      <SupportBundleControl client={props.client} />
-      <DiagnosticsExportControl client={props.client} />
-      <JournalGrowthTable client={props.client} />
+    <div className="min-w-0">
+      <SettingsSection title="Diagnostics">
+        <div className="setgroup">
+          <SettingRow
+            description="Saves a file about this host for you to read and send yourself. It lists versions, provider status, recent log lines, and activity names, never messages or keys. Nothing is uploaded."
+            label="Save diagnostics"
+            scope="host"
+            settingId="save-diagnostics"
+          >
+            <SupportBundleControl client={props.client} />
+          </SettingRow>
+          <SettingRow
+            description="Saves a redacted report about one failed action, found by the ID shown with the error. Check it before sharing."
+            label="Failure report"
+            scope="host"
+            settingId="export-diagnostics"
+          >
+            <DiagnosticsExportControl client={props.client} />
+          </SettingRow>
+          <SettingRow
+            description="Events per kind over the last 14 days. Counts only. Read when this section opens."
+            label="Journal growth"
+            scope="host"
+            settingId="journal-growth"
+          >
+            <JournalGrowthTable client={props.client} />
+          </SettingRow>
+        </div>
+      </SettingsSection>
     </div>
   );
 }

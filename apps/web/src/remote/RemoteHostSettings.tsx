@@ -78,9 +78,9 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
   const [open, setOpen] = useState<HostSettingsSection>();
   if (sections.length === 0) return null;
   return (
-    <section aria-label="Host settings" className="remote-shell__device-panel">
+    <section aria-label="Host settings" className="remote-shell__device-panel min-w-0">
       <h2 className="remote-shell__section-title">Host settings</h2>
-      <div className="flex gap-1">
+      <div className="flex flex-wrap gap-1">
         {sections.map((section) => (
           <OctantButton
             aria-pressed={open === section.id}
