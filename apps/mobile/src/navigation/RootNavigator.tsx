@@ -155,6 +155,7 @@ function ThreadRoute({ navigation, route }: ScreenProps<"thread">) {
   );
   return (
     <ThreadScreen
+      key={`${row.hostId}:${row.mode}:${row.threadId}`}
       focusTurnId={route.params.focusTurnId}
       onOpenThread={(row) => navigation.replace("thread", { row })}
       selected={route.params.row}

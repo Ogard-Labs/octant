@@ -37,6 +37,8 @@ export interface MobileThreads {
   readonly refresh: () => Promise<void>;
   /** The person has this thread open, or (with none) has left it. */
   readonly reading: (row: MobileInboxRow | undefined) => void;
+  /** What was being written in a thread, kept while the app runs. */
+  readonly drafts: ThreadDrafts;
   readonly hostLabel: (hostId: string) => string;
   readonly projectName: (row: MobileInboxRow) => string | undefined;
   /** Who answers a thread; unknown until its computer's directory is read. */
@@ -49,6 +51,23 @@ export interface MobileThreads {
     readonly projectId: string;
     readonly name: string;
   }>;
+}
+
+export interface ThreadDrafts {
+  readonly read: (thread: string) => string;
+  readonly keep: (thread: string, text: string) => void;
+}
+
+/** In memory alone: an unsent message is not written to the phone's storage. */
+function createThreadDrafts(): ThreadDrafts {
+  const held = new Map<string, string>();
+  return {
+    read: (thread) => held.get(thread) ?? "",
+    keep: (thread, text) => {
+      if (text.trim().length === 0) held.delete(thread);
+      else held.set(thread, text);
+    },
+  };
 }
 
 const Context = createContext<MobileThreads | undefined>(undefined);
@@ -191,6 +210,7 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
     () => held.map((row) => (isUnread(cursors, row) ? { ...row, unread: true } : row)),
     [cursors, held],
   );
+  const [drafts] = useState(createThreadDrafts);
   const value = useMemo<MobileThreads>(() => {
     const labels = new Map(hosts.map((host) => [host.hostId, host.label]));
     const names = new Map(
@@ -203,6 +223,7 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
       loading,
       refresh,
       reading,
+      drafts,
       projects,
       hostLabel: (hostId) => labels.get(hostId) ?? hostId.slice(0, 8),
       provider: (row) =>
@@ -212,7 +233,7 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
       projectName: (row) =>
         row.projectId === undefined ? undefined : names.get(`${row.hostId}:${row.projectId}`),
     };
-  }, [error, failures, hosts, loading, projects, providers, reading, refresh, rows]);
+  }, [drafts, error, failures, hosts, loading, projects, providers, reading, refresh, rows]);
 
   return <Context.Provider value={value}>{props.children}</Context.Provider>;
 }

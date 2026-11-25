@@ -119,8 +119,11 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const connectionStatus = useConnectionStatus(supervisor);
   const staleGate = useMemo(() => presentStaleHostSecurity(hostHealth), [hostHealth]);
   const models = usePlacementHostModels(transport);
-  const { projectName } = useMobileThreads();
-  const [prompt, setPrompt] = useState("");
+  const { drafts, projectName } = useMobileThreads();
+  const draftKey =
+    selected === undefined ? "" : `${selected.hostId}:${selected.mode}:${selected.threadId}`;
+  const [prompt, setPrompt] = useState(() => drafts.read(draftKey));
+  useEffect(() => drafts.keep(draftKey, prompt), [draftKey, drafts, prompt]);
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);

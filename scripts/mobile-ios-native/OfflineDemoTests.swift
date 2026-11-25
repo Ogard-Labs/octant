@@ -36,7 +36,8 @@ final class OfflineDemoTests: XCTestCase {
         }
         tap(demo)
         XCTAssertTrue(element("mobile-mock-banner").waitForExistence(timeout: 15))
-        XCTAssertTrue(element("mobile-inbox-home").exists)
+        // The place mounts after the banner on a slow runner.
+        XCTAssertTrue(element("mobile-inbox-home").waitForExistence(timeout: 15))
     }
 
     /// Every place in the system's bar, photographed and left on Home again.
