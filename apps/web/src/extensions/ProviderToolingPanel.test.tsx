@@ -185,6 +185,15 @@ describe("ProviderToolingPanel", () => {
     expect(list).not.toHaveBeenCalled();
   });
 
+  it("still offers Plan's server marks with no Claude Code or Codex account", async () => {
+    const { user, setPlanReadOnly } = setup({ accounts: [] });
+    await user.type(await screen.findByLabelText(/Server name/), "notes");
+    await user.click(screen.getByRole("button", { name: "Allow in Plan" }));
+    expect(setPlanReadOnly).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "opencode", serverName: "notes" }),
+    );
+  });
+
   it("tells the person a tool reaches Octant threads only when the account runs as itself, and links to that switch", async () => {
     const { user, onOpenRunAsItself } = setup();
     await screen.findByText("None added yet.", {}, { timeout: 3000 }).catch(() => undefined);

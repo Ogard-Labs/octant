@@ -242,8 +242,8 @@ Its radio items are **Use default (Low)**
 levels, with short descriptions that fit a phone-width menu: "Thinking and
 finished tool calls folded", "Thinking's first line, tool calls listed",
 "Thinking, tool calls, and results open". A client that cannot change the
-level shows no menu (today a paired browser; not built yet: a paired device
-changes it as a local window does).
+level shows no menu (a paired browser the host's own person paired changes it
+as a local window does; any other paired browser shows none).
 
 **Change reply detail in this thread** (`reply-detail-cycle`, Mod+Shift+D by
 default, remappable in Settings › Keyboard shortcuts) steps the thread in front
@@ -274,8 +274,8 @@ The default and the threads' own levels live in the host's shell settings
 (`replyDetail`, `threadReplyDetail`), the document that already holds every
 other per-person presentation choice, keyed maps included. That is the
 narrowest home that keeps it a preference: it is written only by the shell
-route, which a window on the host reaches (a paired device too by maintainer
-decision, 2026-11-12; not built yet); it is not part of any thread's
+route, which a window on the host reaches (a device the host's own person
+paired too, by maintainer decision, 2026-11-12); it is not part of any thread's
 journal, so forks, exports and provider context never see it; and host export
 does not carry it. Code's pin is the one per-thread presentation choice kept on
 a thread's own record, and Chat and Work have no such record to share, so a

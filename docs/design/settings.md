@@ -400,9 +400,9 @@ focused, **Remove protection**), because every agent can then read those
 files; the host journals the confirmed removal. Paths the person added follow
 as rows with Remove (no confirmation), then one "Protect another path" row with
 a text field and an **Add** button; a refused path is said in the section's
-feedback line. A paired device edits the section as a local window does
-(maintainer decision, 2026-11-12; not built yet: today a paired device sees the
-section as set on the host machine).
+feedback line. A device the host's own person paired edits the section as a
+local window does (maintainer decision, 2026-11-12), from Permissions in the
+paired browser's Host settings; any other paired device sees none of it.
 **Blocked tools** follows Protected files in Settings › Permissions: one row
 per blocked tool, its name with the provider and "Blocked" as meta and an
 **Unblock** button, then a "Block a tool" row with a provider select (Claude
@@ -470,9 +470,9 @@ focused, **Remove worktree**), saying the folder and its ignored files go and
 the branch and its commits stay. A refusal (uncommitted changes, or a turn
 still running in the thread) is said in the
 section's feedback line and the row stays. With none kept it says so in one
-line; a paired device uses the section as a local window does (maintainer
-decision, 2026-11-12; server policy admits a person-paired device and refuses
-hub-introduced devices; paired UI follow-up remains)
+line; a device the host's own person paired uses the section as a local window
+does, from Permissions in the paired browser's Host settings (maintainer
+decision, 2026-11-12; the server refuses hub-introduced devices)
 ([rules](../architecture.md#modes-chat-work-and-code)).
 **Worktrees on this computer** follows it: a first row says when the host last
 scanned ("Not scanned since Octant started" until then) and how many it found,
