@@ -294,6 +294,7 @@ async function world(
     }).cleanup({ receiptId: created.receiptId, confirmedByLocalUser: true }, signal);
   return {
     state,
+    service,
     reclaim,
     restore,
     abandon,
@@ -1001,5 +1002,27 @@ describe("a cleanup or restore killed at any instant", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(restoreWait.state.calls.filter((call) => call === "restoreWorktree")).toHaveLength(1);
     expect(w.state.calls).toBeDefined();
+  });
+  it("gives a purge's wait for a receipt a limit, and never runs it later when the holder lets go", async () => {
+    const w = await world({ restoreWaitMs: 30 });
+    let release: () => void = () => undefined;
+    w.state.gate = new Promise<void>((resolve) => (release = resolve));
+    const cleaning = w.reclaim();
+    await vi.waitFor(() => expect(w.state.calls).toContain("removalStarted"));
+    const erased = vi.fn(async () => undefined);
+    const began = Date.now();
+    await expect(w.service.exclusiveWithin(w.receiptId, 30, erased)).resolves.toEqual({
+      status: "busy",
+    });
+    expect(Date.now() - began).toBeLessThan(2_000);
+    release();
+    await expect(cleaning).resolves.toMatchObject({ status: "reclaimed" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(erased).not.toHaveBeenCalled();
+    // With nothing holding it, the same call runs at once and hands back what it returned.
+    await expect(w.service.exclusiveWithin(w.receiptId, 30, async () => 7)).resolves.toEqual({
+      status: "ran",
+      value: 7,
+    });
   });
 });

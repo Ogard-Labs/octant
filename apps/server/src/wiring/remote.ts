@@ -261,6 +261,8 @@ import type { RoutesWiring } from "./routes";
 import { HUB_ACT_WITHDRAWN_REASON } from "../remoteCredentialLifecycleService";
 
 /** How often a hub member looks for the hub; the failover time itself is the hub's setting in the roster. */
+/** How long a thread purge waits for a worktree cleanup or restore before it fails and is tried again. */
+const PURGE_RECEIPT_WAIT_MS = 30_000;
 const FAILOVER_LOOK_MS = 15_000;
 /** How often the hub looks for an occurrence to wake a spoke for, and a spoke for a changed routine time to report. */
 const WAKE_LOOK_MS = 15_000;
@@ -2928,7 +2930,19 @@ export function wireRemote(deps: RemoteDependencies) {
         mode,
         threadId: String(threadId),
         managedWorktreeRootPath: managedWorktreeRoot,
-        whileReceiptIdle: (receiptId, run) => deps.managedWorktreeReclaim.exclusive(receiptId, run),
+        // A cleanup or restore holds a receipt for as long as one Git call may
+        // run; the purge waits a little, then fails the way its other steps do
+        // and is retried, and its removal never runs once it has given up.
+        whileReceiptIdle: async (receiptId, run) => {
+          const ran = await deps.managedWorktreeReclaim.exclusiveWithin(
+            receiptId,
+            PURGE_RECEIPT_WAIT_MS,
+            run,
+          );
+          if (ran.status === "busy") {
+            throw new Error("A worktree cleanup or restore is still running; try the purge again.");
+          }
+        },
         purgeChatAttachments: (id) => chatAttachmentStore.purgeThread(decodeChatThreadId(id)),
         purgeWorkAttachments: (id) => workAttachments.purgeThread(decodeWorkThreadId(id)),
         purgeCodeAttachments: (id) => codeAttachments.purgeThread(decodeCodeThreadId(id)),

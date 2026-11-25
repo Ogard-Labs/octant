@@ -161,21 +161,53 @@ export class ManagedWorktreeReclaimService {
    * behind it is not left to run later on its own. The wait ends at the limit
    * even when several operations are in line.
    */
-  async #whenFree(
+  #whenFree(
     receiptId: string,
     run: () => Promise<ManagedWorktreeReclaimResult>,
   ): Promise<ManagedWorktreeReclaimResult> {
+    return this.#withinWait(receiptId, this.#restoreWaitMs, run, (holder) => ({
+      status: "refused",
+      reason: holder === "restore" ? "restore-running" : "cleanup-running",
+    }));
+  }
+
+  /**
+   * Like `exclusive`, but gives up when a cleanup or restore still holds the
+   * receipt after `waitMs`: `busy`, and `run` then never runs, not even later
+   * when the holder lets go. The lock itself is the same one.
+   */
+  exclusiveWithin<T>(
+    receiptId: string,
+    waitMs: number,
+    run: () => Promise<T>,
+  ): Promise<Readonly<{ status: "ran"; value: T }> | Readonly<{ status: "busy" }>> {
+    return this.#withinWait<
+      Readonly<{ status: "ran"; value: T }> | Readonly<{ status: "busy" }>
+    >(
+      receiptId,
+      waitMs,
+      async () => ({ status: "ran", value: await run() }),
+      () => ({ status: "busy" }),
+    );
+  }
+
+  async #withinWait<T>(
+    receiptId: string,
+    waitMs: number,
+    run: () => Promise<T>,
+    busy: (holder: "cleanup" | "restore" | undefined) => T,
+  ): Promise<T> {
     let begun = false;
     let skipped = false;
     let begin: () => void = () => undefined;
     const reached = new Promise<void>((resolve) => {
       begin = resolve;
     });
-    const operation = this.#enqueue<ManagedWorktreeReclaimResult>(
+    const operation = this.#enqueue<T>(
       receiptId,
       "restore",
       async () => {
-        if (skipped) return { status: "waiting" };
+        if (skipped) return busy(undefined);
         begun = true;
         return run();
       },
@@ -185,17 +217,14 @@ export class ManagedWorktreeReclaimService {
     const waited = await Promise.race([
       reached.then(() => true),
       new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(false), this.#restoreWaitMs);
+        timer = setTimeout(() => resolve(false), waitMs);
       }),
     ]);
     clearTimeout(timer);
     if (!waited && !begun) {
       skipped = true;
       void operation.catch(() => undefined);
-      return {
-        status: "refused",
-        reason: this.#holders.get(receiptId) === "restore" ? "restore-running" : "cleanup-running",
-      };
+      return busy(this.#holders.get(receiptId));
     }
     return operation;
   }
