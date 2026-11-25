@@ -2576,6 +2576,8 @@ describe("App", () => {
       threadId: createdChatThreadId,
       expectedVersion: 2,
       prompt: "Use GPT-5",
+      // The first message was typed into the welcome composer.
+      typedByPerson: true,
     });
     const commands = execute.mock.calls.map(([command]) => command.kind);
     expect(commands.indexOf("change-chat-provider")).toBeLessThan(

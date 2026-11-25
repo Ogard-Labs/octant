@@ -1,3 +1,4 @@
+import { noteTypedComposerText } from "@octant/client-runtime/typed-composer-text";
 import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -108,7 +109,11 @@ export function FloatingComposer(props: FloatingComposerProps) {
           <TextInput
             editable={editable}
             multiline
-            onChangeText={props.onChangeText}
+            onChangeText={(value) => {
+              // What the person types here is theirs; a value a screen writes is not.
+              noteTypedComposerText(value);
+              props.onChangeText?.(value);
+            }}
             placeholder={props.placeholder}
             placeholderTextColor={colors.textTertiary}
             style={styles.input}

@@ -1,3 +1,5 @@
+import { postWithTypedClaim } from "./typedClaim";
+import { typedClaimFor } from "./typedComposerText";
 import {
   MAX_CODE_CONVERSATION_PAGE_SIZE,
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
@@ -157,11 +159,13 @@ export async function executeMobileCodeOperation(
   transport: MobileRemoteTransport,
   command: CodeOperationCommand,
 ): Promise<CodeOperationResult> {
-  const response = await transport.authenticatedFetch({
-    method: "POST",
-    path: "/api/code/commands",
-    body: JSON.stringify(command),
-  });
+  const response = await postWithTypedClaim(command, (body) =>
+    transport.authenticatedFetch({
+      method: "POST",
+      path: "/api/code/commands",
+      body: JSON.stringify(body),
+    }),
+  );
   const result = await decodeJson(
     response,
     decodeHostAnswer(CodeOperationResult),
@@ -616,6 +620,7 @@ export async function sendMobileCodeTurn(input: {
       { readonly kind: "start-provider-turn" }
     >["sessionId"],
     prompt: evidence,
+    ...typedClaimFor(prompt),
     ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
       ? {}
       : {

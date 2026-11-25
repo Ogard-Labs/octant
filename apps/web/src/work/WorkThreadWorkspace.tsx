@@ -1,3 +1,4 @@
+import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { settledThreadNotice } from "../composer/settledThreadNotice";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
@@ -2359,6 +2360,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               ...(sideChatReturns.length === 0 ? {} : { sideChatReturns }),
               fileMentionPaths,
               extensionSelections,
+              ...typedClaimFor(promptText),
             },
             () => {
               retireStashRecovery?.();
@@ -2388,6 +2390,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           threadId: props.threadId,
           turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
           prompt: promptText,
+          ...typedClaimFor(promptText),
           authority: {
             hostId: props.hostId ?? LOCAL_HOST_ID,
             projectId,

@@ -1,3 +1,5 @@
+import { postWithTypedClaim } from "./typedClaim";
+import { typedClaimFor } from "./typedComposerText";
 import {
   decodeCodeDeliveryTarget,
   decodeCodeThread,
@@ -512,18 +514,23 @@ export async function createMobileCodeFromPrompt(input: {
       "The Code task was created, but its prompt could not be staged.",
     );
     const started = await requireJson(
-      await input.transport.authenticatedFetch({
-        method: "POST",
-        path: "/api/code/commands",
-        body: JSON.stringify({
+      await postWithTypedClaim(
+        {
           kind: "start-provider-turn",
           operationId,
           threadId: thread.id,
           checkoutId: checkout.id,
           sessionId,
           prompt: evidence,
-        }),
-      }),
+          ...typedClaimFor(prompt),
+        },
+        (body) =>
+          input.transport.authenticatedFetch({
+            method: "POST",
+            path: "/api/code/commands",
+            body: JSON.stringify(body),
+          }),
+      ),
       decodeHostAnswer(CodeOperationResult),
       "The Code task was created, but its first turn could not start.",
     );

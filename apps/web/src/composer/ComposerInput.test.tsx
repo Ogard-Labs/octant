@@ -2,6 +2,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import {
+  composerTextWasTyped,
+  forgetTypedComposerText,
+} from "@octant/client-runtime/typed-composer-text";
 import { ComposerInput, type ComposerInputElement } from "./ComposerInput";
 
 const instance = "6f1e0c52-2b7d-4c1a-9f3e-0a1b2c3d4e5f";
@@ -31,6 +35,25 @@ function Prompt(props: {
   );
 }
 
+function Controlled(props: { readonly value: string }) {
+  const [value, setValue] = useState(props.value);
+  const [seen, setSeen] = useState(props.value);
+  if (seen !== props.value) {
+    setSeen(props.value);
+    setValue(props.value);
+  }
+  return (
+    <>
+      <label htmlFor="controlled">Message</label>
+      <ComposerInput
+        id="controlled"
+        onChange={(event) => setValue(event.currentTarget.value)}
+        value={value}
+      />
+    </>
+  );
+}
+
 describe("ComposerInput", () => {
   it("takes typing and reports the value and caret a text field would", async () => {
     const onValue = vi.fn();
@@ -39,6 +62,23 @@ describe("ComposerInput", () => {
     await userEvent.type(input, "hello");
     expect(input).toHaveValue("hello");
     expect(onValue).toHaveBeenLastCalledWith("hello", 5);
+  });
+
+  it("notes what the person typed or pasted, and not a value a button wrote", async () => {
+    forgetTypedComposerText();
+    const { rerender } = render(<Controlled value="Prefilled by a button" />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    expect(composerTextWasTyped("Prefilled by a button")).toBe(false);
+
+    await userEvent.type(input, "!");
+    // The person changed the draft: what the box holds now is their text.
+    const changed = (input as ComposerInputElement).value;
+    expect(changed).not.toBe("Prefilled by a button");
+    expect(composerTextWasTyped(changed)).toBe(true);
+    expect(composerTextWasTyped("Prefilled by a button")).toBe(false);
+
+    rerender(<Controlled value="Written by another button" />);
+    expect(composerTextWasTyped("Written by another button")).toBe(false);
   });
 
   it("accepts a value assigned with a change event", () => {

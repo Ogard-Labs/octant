@@ -29,6 +29,8 @@
     "./pending-request-client": "./src/pendingRequestClient.ts",
     "./work-thread-client": "./src/workThreadClient.ts",
     "./work-turn-client": "./src/workTurnClient.ts",
+    "./typed-claim": "./src/typedClaim.ts",
+    "./typed-composer-text": "./src/typedComposerText.ts",
     "./context-client": "./src/contextClient.ts",
     "./diagnostics-export-client": "./src/diagnosticsExportClient.ts",
     "./thread-export-client": "./src/threadExportClient.ts",

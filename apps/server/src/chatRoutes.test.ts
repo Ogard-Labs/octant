@@ -324,7 +324,10 @@ describe("Chat routes", () => {
   });
 
   it("believes that a message was typed only from the person's own window or a device they paired", async () => {
-    const execute = vi.fn(async () => ({ kind: "thread-updated", thread: threadFixture }));
+    const execute = vi.fn(async (_command: unknown, _context?: unknown) => ({
+      kind: "thread-updated",
+      thread: threadFixture,
+    }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "73000000-0000-4000-8000-000000000070";
     const send = (typedByPerson: boolean) => ({

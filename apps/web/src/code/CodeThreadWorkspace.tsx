@@ -1,3 +1,4 @@
+import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import "../styles/code-thread.css";
 import { settledThreadNotice } from "../composer/settledThreadNotice";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
@@ -1409,6 +1410,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             ...(reviewFindingReferences.length === 0 ? {} : { reviewFindingReferences }),
             fileMentionPaths,
             extensionSelections,
+            ...typedClaimFor(draft),
           },
           () => {
             retireStashRecovery?.();

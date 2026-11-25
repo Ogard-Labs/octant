@@ -1,3 +1,4 @@
+import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import { createEditorDraftStore } from "../editor/editorDraftStore";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import type {
@@ -2374,6 +2375,8 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly computerUseSelection?: ExtensionSelection;
       readonly extensionSelections?: ReadonlyArray<ExtensionSelection>;
       readonly toolCatalogHandoff?: boolean;
+      /** The person typed this message into the composer; a button's text is not. */
+      readonly typedByPerson?: true;
       /**
        * The posture this turn asks to run under. The host clamps it to the
        * thread's grant, so this is an intent, not a grant.
@@ -2393,6 +2396,7 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(input.contextInputPolicy === undefined
           ? {}
           : { contextInputPolicy: input.contextInputPolicy }),
+        ...(input.typedByPerson === true ? { typedByPerson: true as const } : {}),
         operationId,
         threadId: input.threadId,
         checkoutId: input.checkoutId,
@@ -2466,7 +2470,11 @@ export function useCodeController(options: CodeControllerOptions) {
         }
       };
       try {
-        const { operationId, started } = await beginProviderTurn({ ...input, prompt });
+        const { operationId, started } = await beginProviderTurn({
+          ...input,
+          prompt,
+          ...typedClaimFor(prompt),
+        });
         if (started.kind === "operation-failed") {
           failFirstTurn(started.failure.message);
           if (started.failure.usageLimit !== undefined) {
@@ -3091,6 +3099,9 @@ export function useCodeController(options: CodeControllerOptions) {
           checkoutId: view.checkout.id,
           prompt: trimmed,
           ...(toolCatalogHandoff ? { toolCatalogHandoff: true } : {}),
+          // Only the composer's own send can claim it: text a button composed
+          // (a turn's line notes) arrives through `fromOutsideComposer`.
+          ...(outsideComposer ? {} : typedClaimFor(trimmed)),
           threadMentionIds,
           sideChatReturns,
           reviewFindingReferences: reviewReferences,

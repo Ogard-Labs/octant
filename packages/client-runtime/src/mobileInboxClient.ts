@@ -1,3 +1,5 @@
+import { postWithTypedClaim } from "./typedClaim";
+import { typedClaimFor } from "./typedComposerText";
 import {
   type ChatEventFrame,
   type ChatThread,
@@ -795,10 +797,8 @@ export async function sendMobileChatTurn(input: {
     });
     expectedVersion = updated.version;
   }
-  const response = await input.transport.authenticatedFetch({
-    method: "POST",
-    path: "/api/chat/commands",
-    body: JSON.stringify({
+  const response = await postWithTypedClaim(
+    {
       kind: "send-chat-turn",
       threadId: input.threadId,
       expectedVersion,
@@ -806,8 +806,15 @@ export async function sendMobileChatTurn(input: {
       ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
         ? {}
         : { attachmentIds: [...input.attachmentIds] }),
-    }),
-  });
+      ...typedClaimFor(trimmed),
+    },
+    (body) =>
+      input.transport.authenticatedFetch({
+        method: "POST",
+        path: "/api/chat/commands",
+        body: JSON.stringify(body),
+      }),
+  );
   if (!response.ok) {
     throw new MobileInboxFailure(
       response.status === 403 ? "rejected" : "unavailable",

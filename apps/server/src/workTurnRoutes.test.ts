@@ -328,7 +328,12 @@ describe("Work turn Stop from a hub-introduced device", () => {
   });
 
   it("believes that a Work message was typed only from the person's own window or a device they paired", async () => {
-    const startFirstTurn = vi.fn(async () => ({ kind: "accepted" as const, turn: {} }));
+    const startFirstTurn = vi.fn(
+      async (_window: unknown, _command: unknown, _options?: unknown) => ({
+        kind: "accepted" as const,
+        turn: {},
+      }),
+    );
     const route = routeFixture({ startFirstTurn });
     const remoteDeviceId = "00000000-0000-4000-8000-0000000009e0";
     const turn = (typedByPerson: boolean) =>

@@ -1370,13 +1370,24 @@ describe("ChatWorkspace", () => {
       [],
       [expect.objectContaining({ kind: "plugin", componentId: "instructions" })],
       [],
+      undefined,
+      { composerDraft: "consume", typedByPerson: true },
     );
     expect(screen.queryByRole("list", { name: "Selected extensions" })).not.toBeInTheDocument();
 
     await user.clear(composer);
     await user.type(composer, "Continue without it{Enter}");
     await waitFor(() => expect(sendTurn).toHaveBeenCalledTimes(2));
-    expect(sendTurn).toHaveBeenLastCalledWith("Continue without it", [], [], [], [], []);
+    expect(sendTurn).toHaveBeenLastCalledWith(
+      "Continue without it",
+      [],
+      [],
+      [],
+      [],
+      [],
+      undefined,
+      { composerDraft: "consume", typedByPerson: true },
+    );
   });
 
   it("retains an internal extension selection when send fails so the user can retry", async () => {
@@ -1412,6 +1423,8 @@ describe("ChatWorkspace", () => {
       [],
       [expect.objectContaining({ kind: "plugin", componentId: "instructions" })],
       [],
+      undefined,
+      { composerDraft: "consume", typedByPerson: true },
     );
     expect(screen.getByRole("list", { name: "Selected extensions" })).toHaveTextContent(
       "Build guidance",
@@ -1559,6 +1572,8 @@ describe("ChatWorkspace", () => {
         }),
       ],
       [],
+      undefined,
+      { composerDraft: "consume", typedByPerson: true },
     );
   });
 
@@ -1588,7 +1603,10 @@ describe("ChatWorkspace", () => {
     );
 
     await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
-    expect(sendTurn).toHaveBeenCalledWith("Email dev@example.com", [], [], [], [], []);
+    expect(sendTurn).toHaveBeenCalledWith("Email dev@example.com", [], [], [], [], [], undefined, {
+      composerDraft: "consume",
+      typedByPerson: true,
+    });
     expect(client.snapshot).not.toHaveBeenCalled();
     expect(client.effectiveState).not.toHaveBeenCalled();
   });
@@ -1927,7 +1945,10 @@ describe("ChatWorkspace", () => {
     // Waiting is not enough: the composer's closure still holds the version
     // from before the option change, so the send must carry the version that
     // change reached or the host refuses it as stale.
-    expect(sendTurn).toHaveBeenCalledWith("Think hard", [], [], [], [], [], 4);
+    expect(sendTurn).toHaveBeenCalledWith("Think hard", [], [], [], [], [], 4, {
+      composerDraft: "consume",
+      typedByPerson: true,
+    });
   });
 
   it("keeps unavailable provider and model selections visible and fail closed", () => {
@@ -3108,6 +3129,8 @@ describe("ChatWorkspace", () => {
       [],
       [],
       ["thread-1"],
+      undefined,
+      { composerDraft: "consume", typedByPerson: true },
     );
   });
 

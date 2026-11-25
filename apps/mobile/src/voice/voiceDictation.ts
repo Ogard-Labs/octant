@@ -1,3 +1,4 @@
+import { noteTypedComposerText } from "@octant/client-runtime/typed-composer-text";
 import type { MobileTranscriptionResult } from "@octant/client-runtime";
 import { REMOTE_TRANSCRIPTION_MAX_CLIP_MS } from "@octant/domain";
 import type {
@@ -165,8 +166,10 @@ export class VoiceDictation {
 export function appendTranscript(draft: string, transcript: string): string {
   const words = transcript.trim();
   if (words.length === 0) return draft;
-  if (draft.length === 0 || /\s$/.test(draft)) return `${draft}${words}`;
-  return `${draft} ${words}`;
+  const joined = draft.length === 0 || /\s$/.test(draft) ? `${draft}${words}` : `${draft} ${words}`;
+  // What the person dictated is theirs, as what they type is.
+  noteTypedComposerText(joined);
+  return joined;
 }
 
 /**

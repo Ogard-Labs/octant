@@ -1,3 +1,4 @@
+import { sendWithTypedClaim } from "./typedClaim";
 import {
   MAX_WORK_ATTACHMENT_BYTES,
   decodeCancelWorkTurnCommand,
@@ -99,13 +100,18 @@ export function createWorkTurnClient(options: WorkTurnClientOptions): WorkTurnCl
       } catch {
         throw new WorkTurnClientFailure("Work turn command is invalid.", 0);
       }
-      return postJson(
-        fetch,
-        options,
-        "/api/work/turns",
+      return sendWithTypedClaim(
         validated,
-        decodeHostAnswer(WorkTurnLookupResult),
-        "Work turn start failed.",
+        (sent) =>
+          postJson(
+            fetch,
+            options,
+            "/api/work/turns",
+            sent,
+            decodeHostAnswer(WorkTurnLookupResult),
+            "Work turn start failed.",
+          ),
+        (error) => error instanceof WorkTurnClientFailure && error.status === 400,
       );
     },
     async lookupFirstTurn(requestId) {

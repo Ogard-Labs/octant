@@ -1,3 +1,5 @@
+import { postWithTypedClaim } from "./typedClaim";
+import { typedClaimFor } from "./typedComposerText";
 import {
   decodeBindingRevisionId,
   decodeStartWorkThreadTurnCommand,
@@ -175,6 +177,7 @@ export async function sendMobileWorkTurn(input: {
       threadId: input.thread.id,
       turnId: globalThis.crypto.randomUUID(),
       prompt,
+      ...typedClaimFor(prompt),
       authority: {
         hostId: LOCAL_HOST_ID,
         projectId: input.thread.projectId,
@@ -192,11 +195,13 @@ export async function sendMobileWorkTurn(input: {
     throw new MobileInboxFailure("unavailable", "The Work turn could not be prepared.");
   }
   const result = await decodeJson(
-    await input.transport.authenticatedFetch({
-      method: "POST",
-      path: "/api/work/turns",
-      body: JSON.stringify(command),
-    }),
+    await postWithTypedClaim(command, (body) =>
+      input.transport.authenticatedFetch({
+        method: "POST",
+        path: "/api/work/turns",
+        body: JSON.stringify(body),
+      }),
+    ),
     decodeHostAnswer(WorkTurnLookupResult),
     "The Work turn could not be started on the host.",
   );

@@ -20,6 +20,10 @@ import { foldCodeTurnUsage } from "@octant/domain";
 import { decodeProjectId } from "@octant/contracts/projects";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import {
+  forgetTypedComposerText,
+  noteTypedComposerText,
+} from "@octant/client-runtime/typed-composer-text";
 import { createCodeReadCursorStore, useCodeController } from "./useCodeController";
 import { createComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 import { sendLineNotesAsFollowUp } from "../dockModules/ReviewModule";
@@ -1471,6 +1475,41 @@ describe("useCodeController", () => {
       "Mistral Vibe resume identity does not match this Project.",
     );
     expect(result.current.turnErrorCategory).toBe("stale");
+  });
+
+  it("claims a follow-up was typed only when the person's own input left that text", async () => {
+    forgetTypedComposerText();
+    async function* frames() {
+      yield* [];
+    }
+    const startedClaims = async (text: string) => {
+      const executeOperation = vi.fn(async (command: CodeOperationCommand) => ({
+        kind: "provider-turn-state" as const,
+        operationId: command.operationId,
+        state: "running" as const,
+      }));
+      const client = fakeClient({
+        executeOperation: executeOperation as never,
+        subscribeOperation: vi.fn(() => frames()) as never,
+      });
+      const { result, unmount } = renderHook(() =>
+        useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+      );
+      await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+      await act(async () => {
+        void result.current.sendFollowUp(text);
+      });
+      await waitFor(() => expect(executeOperation).toHaveBeenCalled());
+      const command = executeOperation.mock.calls.find(
+        ([candidate]) => candidate.kind === "start-provider-turn",
+      )?.[0];
+      unmount();
+      return command;
+    };
+
+    noteTypedComposerText("I prefer short answers.");
+    expect(await startedClaims("I prefer short answers.")).toMatchObject({ typedByPerson: true });
+    expect(await startedClaims("A button wrote this.")).not.toHaveProperty("typedByPerson");
   });
 
   it("stops a running turn by cancelling the provider turn on the host", async () => {

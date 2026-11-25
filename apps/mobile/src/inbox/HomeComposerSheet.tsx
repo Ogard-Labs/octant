@@ -1,3 +1,4 @@
+import { noteTypedComposerText } from "@octant/client-runtime/typed-composer-text";
 import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -266,7 +267,10 @@ export function HomeComposerSheet(props: {
         autoFocus
         editable={editable}
         multiline
-        onChangeText={props.onChangePrompt}
+        onChangeText={(value) => {
+          noteTypedComposerText(value);
+          props.onChangePrompt(value);
+        }}
         placeholder={placeholderFor(props.mode)}
         placeholderTextColor={colors.textTertiary}
         style={[styles.input, !editable ? styles.disabled : null]}

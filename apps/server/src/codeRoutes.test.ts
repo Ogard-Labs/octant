@@ -392,10 +392,12 @@ describe("Code routes", () => {
   });
 
   it("believes that a Code message was typed only from the person's own window or a device they paired", async () => {
-    const executeOperation = vi.fn(async (_window, command) => ({
-      kind: "operation-accepted",
-      operationId: command.operationId,
-    }));
+    const executeOperation = vi.fn(
+      async (_window: unknown, command: { readonly operationId: string }, _options?: unknown) => ({
+        kind: "operation-accepted",
+        operationId: command.operationId,
+      }),
+    );
     const route = routeFixture({ execute: vi.fn(), executeOperation });
     const remoteDeviceId = "00000000-0000-4000-8000-000000000960";
     const turn = (typedByPerson: boolean) => ({

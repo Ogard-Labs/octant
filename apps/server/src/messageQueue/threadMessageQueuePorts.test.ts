@@ -1276,7 +1276,10 @@ describe("a message sent while the thread's turn runs", () => {
     const send = (
       prompt: string,
       from = windowId,
-      extra: { readonly attachmentIds?: ReadonlyArray<string> } = {},
+      extra: {
+        readonly attachmentIds?: ReadonlyArray<string>;
+        readonly typedByPerson?: true;
+      } = {},
     ) => {
       const steerQueued = port.steer;
       if (steerQueued === undefined) throw new Error("The port offers no steering.");

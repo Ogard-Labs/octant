@@ -1,3 +1,4 @@
+import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import type { RevealedThreadTurn } from "./shell/WorkspaceView";
 import { attachmentMediaType } from "./composer/attachmentMediaType";
 import { OctantEmpty } from "./ui/base/OctantEmpty";
@@ -7857,6 +7858,7 @@ function LaunchedShell(
         threadId: created.thread.id,
         turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
         prompt,
+        ...typedClaimFor(prompt),
         authority: {
           hostId: destinationHostId,
           projectId: project.id,
@@ -7964,6 +7966,7 @@ function LaunchedShell(
         threadId: thread.id,
         expectedVersion: thread.version,
         prompt,
+        ...typedClaimFor(prompt),
       });
       if (sent === undefined) {
         chatController.reportError(
@@ -8432,6 +8435,7 @@ function LaunchedShell(
             threadId: thread.id,
             expectedVersion,
             prompt,
+            ...typedClaimFor(prompt),
           });
           if (sent === undefined) {
             chatController.reportError(
@@ -8684,6 +8688,7 @@ function LaunchedShell(
             threadId: created.thread.id,
             turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
             prompt,
+            ...typedClaimFor(prompt),
             authority: {
               hostId: destinationHostId,
               projectId: project.id,

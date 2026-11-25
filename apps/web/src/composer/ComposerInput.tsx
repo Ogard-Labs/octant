@@ -1,3 +1,4 @@
+import { noteTypedComposerText } from "@octant/client-runtime/typed-composer-text";
 import { findSubagentModelTags, type SubagentModelTagMatch } from "@octant/domain";
 import {
   createElement,
@@ -364,6 +365,9 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     // reports its changes the same way, or an Enter right after typing would
     // send the draft as it was before.
     const report = (root: ComposerInputElement) => {
+      // Only the person's own edits come through here: typing, paste, cut, undo,
+      // and dictation. A value a caller writes does not.
+      noteTypedComposerText(modelRef.current);
       flushSync(() => onChangeRef.current?.({ target: root, currentTarget: root }));
     };
 
