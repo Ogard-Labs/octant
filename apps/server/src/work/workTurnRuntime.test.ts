@@ -2429,12 +2429,12 @@ describe("WorkTurnRuntime", () => {
       expect(calls.stop).toHaveBeenCalledOnce();
     });
 
-    it("a kept local Work session outside Strict with an attachments folder is relaunched when its provider's credential list changes", async () => {
-      // The host's sandbox authority resolves this turn outside Strict.
+    it("a kept local Strict Work session with an attachments folder is relaunched when its provider's let-through list changes", async () => {
+      // The host's sandbox authority resolves this turn under Strict.
       configureSandboxRestrictionsAuthority({
         beginTurn: () => ({
           status: "admitted",
-          turn: { strict: false, summary: "", current: () => true, end: () => undefined },
+          turn: { strict: true, summary: "", current: () => true, end: () => undefined },
         }),
         validateSelection: () => true,
         registerCleanup: () => () => undefined,
@@ -2467,7 +2467,7 @@ describe("WorkTurnRuntime", () => {
         });
       try {
         expect(await turn()).toMatchObject({ kind: "completed" });
-        expect(calls.start).toHaveBeenLastCalledWith(expect.objectContaining({ strict: false }));
+        expect(calls.start).toHaveBeenLastCalledWith(expect.objectContaining({ strict: true }));
         names = [];
         expect(await turn()).toMatchObject({ kind: "completed" });
         // The kept process held GH_TOKEN; the next turn launches afresh.

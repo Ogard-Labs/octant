@@ -8,7 +8,12 @@ import type {
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { launchOwnChannels, withProviderOwnChannels } from "./providerOwnChannels";
+import {
+  launchCredentialsKey,
+  launchOwnChannels,
+  strictLetThroughEnvironment,
+  withProviderOwnChannels,
+} from "./providerOwnChannels";
 
 describe("provider own channels", () => {
   it("carries the person's current switches on every start and resume, read at each one", async () => {
@@ -53,5 +58,47 @@ describe("provider own channels", () => {
 
   it("outside Strict keeps the provider's own telemetry and self-update off when the person chose nothing", () => {
     expect(launchOwnChannels(false, undefined)).toEqual({ telemetry: false, selfUpdate: false });
+  });
+
+  it("carries the names the person let through only into a Strict launch", () => {
+    const chosen = { telemetry: true, selfUpdate: false, credentialPassThrough: ["GH_TOKEN"] };
+    expect(launchOwnChannels(true, chosen)).toEqual({
+      telemetry: false,
+      selfUpdate: false,
+      credentialPassThrough: ["GH_TOKEN"],
+    });
+    expect(launchOwnChannels(false, chosen)).toEqual({ telemetry: true, selfUpdate: false });
+  });
+
+  it("a Strict launch takes a let-through name the host has, and never a model provider's key or one of Octant's own variables a stored list names", () => {
+    expect(
+      strictLetThroughEnvironment(
+        {
+          GH_TOKEN: "gh-token",
+          NPM_TOKEN: "npm-token",
+          OPENAI_API_KEY: "model-key",
+          OCTANT_DESKTOP_BRIDGE_SECRET: "bridge",
+        },
+        ["GH_TOKEN", "NOT_SET", "OPENAI_API_KEY", "OCTANT_DESKTOP_BRIDGE_SECRET"],
+      ),
+    ).toEqual({ GH_TOKEN: "gh-token" });
+  });
+
+  it("tells kept Strict sessions apart by the let-through list, and never sessions outside Strict", () => {
+    const posture = {
+      executionPolicy: "approval-gated",
+      fullAccessSandbox: false,
+      sandboxPolicy: false,
+    } as const;
+    const key = (strict: boolean, names: ReadonlyArray<string>, driverKind = "codex") =>
+      launchCredentialsKey({ providerCredentialPassThrough: { codex: names } }, driverKind, {
+        ...posture,
+        strict,
+      });
+    expect(key(true, ["GH_TOKEN"])).not.toBe(key(true, []));
+    expect(key(true, ["NPM_TOKEN", "GH_TOKEN"])).toBe(key(true, ["GH_TOKEN", "NPM_TOKEN"]));
+    expect(key(false, ["GH_TOKEN"])).toBe(key(false, []));
+    // Another provider's list is not this one's.
+    expect(key(true, ["GH_TOKEN"], "claude")).toBe(key(true, [], "claude"));
   });
 });

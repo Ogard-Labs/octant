@@ -10,8 +10,12 @@ describe("ProviderCredentialPassThroughSettings", () => {
   it("starts with nothing let through and says what the list does", () => {
     render(<ProviderCredentialPassThroughSettings onChange={vi.fn()} value={{}} />);
     expect(
-      screen.getByText("Nothing is let through. Each provider keeps only its own credentials."),
+      screen.getByText("Nothing is added. Under Strict, each provider gets only its fixed list."),
     ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Let through under Strict" })).toBeVisible();
+    expect(PROVIDER_CREDENTIAL_PASS_THROUGH_FACT).toBe(
+      "Outside Strict, a provider already gets your environment. Under Strict it gets a short fixed list. Name a variable here, such as GH_TOKEN, to add it to that list for one provider. A model provider's key can never be added. Applies from the next turn. A provider terminal also runs your shell's startup files, which may set credentials again.",
+    );
     expect(screen.getByText(PROVIDER_CREDENTIAL_PASS_THROUGH_FACT)).toBeVisible();
   });
 

@@ -1465,7 +1465,7 @@ describe("SettingsView", () => {
   it.each([
     ["Let a credential through", { claude: ["GH_TOKEN"] }],
     // An empty list has no row to focus, so its result lands on the add row.
-    ["Credentials let through", {}],
+    ["Let through under Strict", {}],
   ] as const)(
     "search for %s lands on the row that lets a credential through",
     async (label, providerCredentialPassThrough) => {
@@ -1515,7 +1515,7 @@ describe("SettingsView", () => {
     const result = options.find(
       (option) =>
         option.querySelector(".settings-search-results__label")?.textContent ===
-        "Credentials let through",
+        "Let through under Strict",
     );
     if (result === undefined) throw new Error("No search result for the credential list");
     await user.click(result);

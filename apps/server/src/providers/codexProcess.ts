@@ -76,6 +76,7 @@ import {
   type CodexRpcStderrCapture,
 } from "./codexRpcClient";
 import { awsProfileReadPaths, providerHostEnvironment } from "./providerHostEnvironment";
+import { strictLetThroughNames } from "./providerOwnChannels";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 
 /** Said when Strict is on for a thread whose provider would run on its server. */
@@ -165,6 +166,12 @@ export type CodexLaunchAuthority =
        * its memories as it does on its own.
        */
       readonly ownMemory?: true;
+      /**
+       * The person lets providers send their own telemetry and Strict is off
+       * for this lease. Codex's analytics then follow the person's own
+       * `config.toml`, as in Codex itself.
+       */
+      readonly ownTelemetry?: true;
       /**
        * Strict is off for this lease. Absent is Strict, so a caller that never
        * resolved it keeps Octant's profile and never loosens a launch.
@@ -528,17 +535,33 @@ function parseCodexVersion(output: string): string | undefined {
  * person asks for when they turn the account's own memory on, so a lease for
  * such an account leaves the override out and Codex's own configuration
  * decides, as in Codex itself. Octant never forces the feature on.
+ *
+ * Codex's analytics (anonymous usage and health data sent to OpenAI, its
+ * configuration guide, read 2026-11-25) stay off unless the launch opens the
+ * person's telemetry switch. `codex app-server --help` on codex-cli 0.172.0
+ * says analytics are off by default for the app-server and on once the
+ * person's `config.toml` opts in with `[analytics] enabled = true`, so the
+ * override is what keeps such a file from opening them; the same release
+ * refuses a non-boolean `analytics.enabled`, which shows it reads the key from
+ * the command line. With the switch on the override is left out and the
+ * person's own configuration decides. Octant never turns analytics on.
  */
 export function codexAppServerArgs(
   version: string,
-  options: { readonly ownSubagents?: true; readonly ownMemory?: true } = {},
+  options: {
+    readonly ownSubagents?: true;
+    readonly ownMemory?: true;
+    readonly ownTelemetry?: true;
+  } = {},
 ): readonly string[] {
   const memories = options.ownMemory === true ? [] : ["-c", "features.memories=false"];
+  const analytics = options.ownTelemetry === true ? [] : ["-c", "analytics.enabled=false"];
   // A lease for a thread whose person let Codex run its own subagents leaves
   // Codex's own defaults for them, as in Codex itself. Its memories follow
-  // the account's own setting either way.
+  // the account's own setting either way, and its analytics the person's
+  // telemetry switch.
   if (options.ownSubagents === true) {
-    return ["app-server", "--listen", "stdio://", ...memories];
+    return ["app-server", "--listen", "stdio://", ...memories, ...analytics];
   }
   return [
     "app-server",
@@ -549,6 +572,7 @@ export function codexAppServerArgs(
     "-c",
     "features.multi_agent_v2=false",
     ...memories,
+    ...analytics,
     ...(isAtLeastRelease(version, [0, 145, 0]) ? ["-c", "agents.enabled=false"] : []),
   ];
 }
@@ -556,8 +580,17 @@ export function codexAppServerArgs(
 export function sanitizeCodexEnvironment(
   environment: NodeJS.ProcessEnv,
   platform: NodeJS.Platform = process.platform,
+  /** The host variables the person let through to Codex under Strict, by name. */
+  letThrough: ReadonlyArray<string> = [],
 ): NodeJS.ProcessEnv {
+  // Windows names are matched upper-cased below, so the let-through names are too.
+  const letThroughNames = new Set(
+    [...strictLetThroughNames(letThrough)].map((name) =>
+      platform === "win32" ? name.toUpperCase() : name,
+    ),
+  );
   const kept = (key: string) =>
+    letThroughNames.has(key) ||
     SAFE_ENVIRONMENT.has(key) ||
     PROXY_VARIABLES.has(key) ||
     CODEX_NATIVE_VARIABLES.has(key) ||
@@ -605,7 +638,9 @@ function openCodexEnvironment(
 }
 
 /**
- * The app-server's environment. Under Strict, the fixed list above. Outside
+ * The app-server's environment. Under Strict, the fixed list above plus the
+ * names the person let through to Codex (Settings › Providers & Models), so a
+ * person who runs Strict can still hand an agent their `GH_TOKEN`. Outside
  * Strict, the host's environment less Octant's own variables and other
  * providers' keys, as Codex receives it from the person's own shell
  * (Architecture: "Octant adds no restrictions of its own unless Strict is
@@ -617,9 +652,10 @@ export function codexProcessEnvironment(
   binaryPath: string,
   environment: NodeJS.ProcessEnv,
   strict = true,
+  letThrough: ReadonlyArray<string> = [],
 ): NodeJS.ProcessEnv {
   const sanitized = strict
-    ? sanitizeCodexEnvironment(environment)
+    ? sanitizeCodexEnvironment(environment, process.platform, letThrough)
     : openCodexEnvironment(environment);
   const binaryDirectory = dirname(binaryPath);
   const path = sanitized.PATH?.split(delimiter).filter(Boolean) ?? [];
@@ -658,11 +694,14 @@ export function codexAccountProcessEnvironment(input: {
   readonly brokerApiKey?: string;
   /** Strict is off: the host's environment as `codexProcessEnvironment` opens it. */
   readonly strict?: false;
+  /** The host variables the person let through to Codex; read only under Strict. */
+  readonly credentialPassThrough?: ReadonlyArray<string>;
 }): NodeJS.ProcessEnv {
   const environment = codexProcessEnvironment(
     input.binaryPath,
     input.hostEnvironment,
     input.strict !== false,
+    input.credentialPassThrough,
   );
   if (input.inheritHostAuth !== true) {
     for (const name of ACCOUNT_AUTH_VARIABLES) {
@@ -1743,6 +1782,7 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
               codexAppServerArgs(version, {
                 ...(requested.ownSubagents === true ? { ownSubagents: true } : {}),
                 ...(requested.ownMemory === true ? { ownMemory: true } : {}),
+                ...(requested.ownTelemetry === true ? { ownTelemetry: true } : {}),
               }),
           });
         }
@@ -1887,6 +1927,7 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
                   ? {
                       ...(authority.ownSubagents === true ? { ownSubagents: true } : {}),
                       ...(authority.ownMemory === true ? { ownMemory: true } : {}),
+                      ...(authority.ownTelemetry === true ? { ownTelemetry: true } : {}),
                     }
                   : {},
               ),

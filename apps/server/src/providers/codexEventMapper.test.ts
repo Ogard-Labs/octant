@@ -980,6 +980,71 @@ describe("mapCodexMessage", () => {
     expect(JSON.stringify(result)).not.toMatch(/Users|private|secret\.txt|raw diff|file-1/);
   });
 
+  it("records a file change outside the Project as a finished step and keeps the turn, outside Strict", () => {
+    const ctx = context({ recordsOutsideChanges: true });
+    const started = map(
+      ctx,
+      notification("item/started", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "fileChange",
+          id: "file-1",
+          changes: [
+            {
+              path: "/Users/private/outside/notes.txt",
+              kind: { type: "update", move_path: null },
+              diff: "raw diff must-not-cross",
+            },
+          ],
+          status: "inProgress",
+        },
+        startedAtMs: 10,
+      }),
+    );
+    const completed = map(
+      ctx,
+      notification("item/completed", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "fileChange",
+          id: "file-1",
+          status: "completed",
+          changes: [
+            {
+              path: "/Users/private/outside/notes.txt",
+              kind: { type: "update", move_path: null },
+              diff: "raw diff must-not-cross",
+            },
+            { path: "/tmp/project/src/main.ts", kind: { type: "add" }, diff: "+secret" },
+          ],
+        },
+        completedAtMs: 20,
+      }),
+    );
+
+    expect(started).toMatchObject([
+      { kind: "event", event: { kind: "tool-start", toolCallId: "tool-1" } },
+      { kind: "event", event: { kind: "tool-progress", toolCallId: "tool-1" } },
+    ]);
+    // The file-change record names a Project-relative path, so only the file
+    // inside the Project gets one; the step itself says the rest was outside.
+    expect(completed).toMatchObject([
+      { kind: "event", event: { kind: "file-change", path: "src/main.ts", change: "created" } },
+      {
+        kind: "event",
+        event: {
+          kind: "tool-success",
+          toolCallId: "tool-1",
+          summary: "File change completed, including files outside the Project.",
+        },
+      },
+    ]);
+    expect(ctx.terminal).toBe(false);
+    expect(JSON.stringify([started, completed])).not.toMatch(/Users|private|notes\.txt|raw diff/);
+  });
+
   it.each([
     {
       name: "source traversal",

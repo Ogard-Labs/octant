@@ -1096,9 +1096,7 @@ function makeConnection(
                     executionPolicy: input.executionPolicy,
                     ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
                     ...(input.strict === false ? { strict: false } : {}),
-                    ...(input.strict === false && input.ownChannels !== undefined
-                      ? { ownChannels: input.ownChannels }
-                      : {}),
+                    ...(input.ownChannels === undefined ? {} : { ownChannels: input.ownChannels }),
                     modelProvider: selection.provider,
                     ...(tools.length === 0 ? {} : { tools }),
                     ...(managedTools === undefined ? {} : { toolBridge: managedTools.config }),

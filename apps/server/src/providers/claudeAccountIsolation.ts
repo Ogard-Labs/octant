@@ -11,6 +11,7 @@ import {
   DEFAULT_PROVIDER_OWN_CHANNELS,
   guardsForOwnChannels,
   launchOwnChannels,
+  strictLetThroughEnvironment,
 } from "./providerOwnChannels";
 
 /**
@@ -247,11 +248,16 @@ export interface IsolatedClaudeAccountEnvironmentInput {
   readonly gatewayBaseUrl?: string;
   /**
    * Whether the launch is Strict. Absent is Strict: the fixed passthrough list
-   * and every channel guard. Off, the launch gets the host's environment less
-   * Octant's own variables and other providers' keys.
+   * plus the names the person let through, and every channel guard. Off, the
+   * launch gets the host's environment less Octant's own variables and other
+   * providers' keys.
    */
   readonly strict?: boolean;
-  /** The person's provider telemetry and self-update switches; read only outside Strict. */
+  /**
+   * The person's provider telemetry and self-update switches, read only
+   * outside Strict, and the host variables they let through, read only under
+   * it.
+   */
   readonly ownChannels?: ProviderOwnChannels;
 }
 
@@ -275,20 +281,32 @@ function applyAccountCredential(
   }
 }
 
-function passthroughHostEnvironment(hostEnvironment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(
-    Object.entries(hostEnvironment).filter(
-      ([key, value]) =>
-        value !== undefined && (PASSTHROUGH_VARIABLES.has(key) || key.startsWith("LC_")),
+/**
+ * The host variables a Strict Claude launch starts from: the fixed list, and
+ * the names the person let through to Claude Code (Settings › Providers &
+ * Models), so a person who runs Strict can still hand an agent their
+ * `GH_TOKEN` (maintainer decision, 2026-11-25).
+ */
+export function strictClaudeHostEnvironment(
+  hostEnvironment: NodeJS.ProcessEnv,
+  ownChannels?: ProviderOwnChannels,
+): NodeJS.ProcessEnv {
+  return {
+    ...strictLetThroughEnvironment(hostEnvironment, ownChannels?.credentialPassThrough),
+    ...Object.fromEntries(
+      Object.entries(hostEnvironment).filter(
+        ([key, value]) =>
+          value !== undefined && (PASSTHROUGH_VARIABLES.has(key) || key.startsWith("LC_")),
+      ),
     ),
-  );
+  };
 }
 
 /**
  * Build the launch environment for one Claude account.
  *
- * Inherited Anthropic and Claude credential and routing variables are dropped
- * by the passthrough list. The account directory is applied as both
+ * Inherited Anthropic and Claude credential variables are dropped by the
+ * passthrough list, which a let-through model-provider key never joins. The account directory is applied as both
  * `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` so the Claude
  * binary keys macOS Keychain the way it expects. An explicit API-key account
  * still receives only the broker-resolved key, and a gateway account only its
@@ -298,7 +316,7 @@ export function isolatedClaudeAccountEnvironment(
   input: IsolatedClaudeAccountEnvironmentInput,
 ): NodeJS.ProcessEnv {
   if (input.strict === false) return openClaudeAccountEnvironment(input);
-  const environment = passthroughHostEnvironment(input.hostEnvironment);
+  const environment = strictClaudeHostEnvironment(input.hostEnvironment, input.ownChannels);
   environment.CLAUDE_CONFIG_DIR = input.configDirectory;
   environment.CLAUDE_SECURESTORAGE_CONFIG_DIR = input.configDirectory;
   applyAccountCredential(environment, input);

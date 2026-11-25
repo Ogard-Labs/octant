@@ -8257,6 +8257,86 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("shows the thread busy to the host's follow-on turn after an approved plan once a message the person queued has started", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const personTurn = operationId(1413);
+    // What the host's wiring reads before it starts its own turn: free when
+    // the planning turn has closed, busy once the person's message has it.
+    const busy: Array<boolean | undefined> = [];
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      changeThreadLevel: vi.fn(async () => true),
+      onPlanApproved: async (approvedThread) => {
+        busy.push(fixture.runtime.turnInProgress?.(String(approvedThread)));
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: personTurn,
+          threadId: approvedThread,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        });
+        busy.push(fixture.runtime.turnInProgress?.(String(approvedThread)));
+      },
+    });
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+    const planning = operationId(1411);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: planning,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "plan-done",
+            action: "ExitPlanMode",
+            description: "Claude asks to leave Plan.",
+            levelChange: { kind: "exit-plan", plan: "1. Fix it." },
+          }),
+        ),
+      );
+      let approvalId: CodeApprovalId | undefined;
+      await vi.waitFor(async () => {
+        const asked = (await operationEvents(fixture.runtime, planning)).find(
+          (event) => event.kind === "approval-requested",
+        );
+        expect(asked?.kind).toBe("approval-requested");
+        if (asked?.kind === "approval-requested") approvalId = asked.approvalId;
+      });
+      await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(1412),
+        threadId,
+        checkoutId,
+        approvalId: approvalId!,
+        decision: "approved",
+      });
+      await Effect.runPromise(
+        Queue.offer(queue, providerEvent({ kind: "interrupted", message: "Stopped." })),
+      );
+      await vi.waitFor(() => expect(busy).toEqual([false, true]));
+      // Only the person's message follows the plan, in the session that
+      // holds it; a host turn started beside it would be journaled and never
+      // launched.
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(2));
+      expect(fixture.conversation().turns.map((turn) => String(turn.operationId))).toEqual([
+        String(planning),
+        String(personTurn),
+      ]);
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("ends the turn when the person approves leaving Plan, even where the provider can enter Plan in place", async () => {
     const { fixture, base, answered, answeredEvent, changeLevelInPlace } =
       await answeredLevelChangeWithInPlaceDriver({

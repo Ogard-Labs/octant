@@ -60,10 +60,10 @@ export interface OutlivingSessionsOptions {
    */
   readonly currentTerms?: (key: string) => string | undefined;
   /**
-   * The host credentials a launch for this thread's provider, on this
-   * posture, would let through now (Settings › Providers & Models ›
-   * Credentials let through), as one comparable string: empty for a posture
-   * whose launch discards the list, such as Strict. A running process cannot
+   * The host variables a launch for this thread's provider, on this
+   * posture, would add to its fixed list now (Settings › Providers & Models ›
+   * Let through under Strict), as one comparable string: empty for a posture
+   * whose launch discards the list, as every one outside Strict does. A running process cannot
    * drop a variable it was started with, so a kept session launched with
    * other grants is never reused: the next turn opens a fresh one, and
    * {@link OutlivingSessions.stopSessionsWithChangedCredentials} stops an
@@ -155,7 +155,7 @@ export class OutlivingSessions {
     acquiredFor: string,
     open: Effect.Effect<ProviderConnection, ProviderFailure, R | Scope.Scope>,
     terms?: string,
-    /** The launch's posture; absent is Strict, whose grants never change. */
+    /** The launch's posture; absent is Strict, which reads the let-through list. */
     posture: CredentialLaunchPosture = STRICT_POSTURE,
   ): Effect.Effect<ProviderConnection, ProviderFailure, Exclude<R, Scope.Scope> | Scope.Scope> {
     return Effect.gen(this, function* () {

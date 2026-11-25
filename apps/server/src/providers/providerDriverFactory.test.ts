@@ -900,7 +900,6 @@ describe("Codex's open launch environment", () => {
             hostEnvironment,
             codexHome,
             inheritHostAuth: true,
-            credentialPassThrough: [],
           }),
         ).toMatchObject({
           AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",

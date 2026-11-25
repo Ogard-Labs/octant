@@ -40,6 +40,7 @@ import {
   LOCAL_HOST_ID,
   personalSignInRefusals,
   type AutomationRunReference,
+  PLAN_APPROVED_TURN_PROMPT,
   RUNTIME_STARTED_TURN_PROMPT,
   type OctantMode,
   type ProjectId,
@@ -55,7 +56,6 @@ import { readJournaledSessionHistory } from "../providers/nativeSessionHistory";
 import { createWorkSessionRouteHandler } from "../work/workSessionRoutes";
 import { stopKeptSessionsOfChangedWorkThreads } from "../work/workKeptSessions";
 import { codeThreadTurns } from "../code/codeForkPoint";
-import { PLAN_APPROVED_TURN_PROMPT } from "../code/codeOperationRuntime";
 import { SERVER_WORK_RUNTIME_NOT_HARNESS } from "../serverProjects/serverProjectThreads";
 import {
   bindServerWorkTurn,
@@ -725,8 +725,16 @@ export function wireWork(deps: WorkDependencies) {
       onUsageLimitStop: (threadId) => workThreadService.handOffAfterUsageLimit(threadId),
       // The turn that carries an approved plan out starts as a wake-up's
       // does: the host's own turn, through the ordinary admission, at the
-      // level the thread returned to.
+      // level the thread returned to. Its outcome is not read, on purpose:
+      // when a message the person queued starts first the start answers
+      // busy, and their message then runs at that level in the session that
+      // already holds the approved plan; a provider account that takes no
+      // unattended turn refuses it, and the thread waits for the person.
       onPlanApproved: async (threadId) => {
+        // A message of the person's that is still being prepared is not yet
+        // a turn the wake-up's own check sees, and a turn started beside it
+        // would run two turns in the thread.
+        if (workTurnService.isTurnStarting(threadId)) return;
         await workThreadWakeupPort.startTurn(String(threadId), PLAN_APPROVED_TURN_PROMPT);
       },
       onRequestSettled: (input, release) => workRequestService.onSettled(input, release),

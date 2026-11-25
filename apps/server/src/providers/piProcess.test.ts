@@ -133,6 +133,34 @@ describe("Pi process boundary", () => {
     });
   });
 
+  it("under Strict adds the names the person let through to Pi's fixed list, never another provider's key, and outside Strict the list changes nothing", () => {
+    const host = {
+      PATH: "/usr/bin",
+      HOME: "/Users/test",
+      GH_TOKEN: "gh-token",
+      NPM_TOKEN: "npm-token",
+      OPENAI_API_KEY: "openai-key",
+      XAI_API_KEY: "xai-key",
+    };
+    const launch = (strict: boolean, credentialPassThrough: ReadonlyArray<string>) =>
+      sanitizePiEnvironment(host, "/managed", "enabled", "xai", strict, {
+        telemetry: false,
+        selfUpdate: false,
+        credentialPassThrough,
+      });
+
+    const strict = launch(true, ["GH_TOKEN", "OPENAI_API_KEY", "HOME"]);
+    expect(strict).toMatchObject({ GH_TOKEN: "gh-token", XAI_API_KEY: "xai-key" });
+    expect(strict.NPM_TOKEN).toBeUndefined();
+    expect(strict.OPENAI_API_KEY).toBeUndefined();
+    // A let-through name never replaces what the Strict launch sets itself.
+    expect(strict.HOME).toBe("/managed");
+    expect(launch(true, [])).toEqual(sanitizePiEnvironment(host, "/managed", "enabled", "xai"));
+
+    expect(launch(false, ["GH_TOKEN"])).toEqual(launch(false, []));
+    expect(launch(false, [])).toMatchObject({ GH_TOKEN: "gh-token", NPM_TOKEN: "npm-token" });
+  });
+
   it("outside Strict gives a Pi process the host's environment, the person's own tool credentials included, less Octant's variables and other providers' keys, with telemetry off until the person turns it on", () => {
     const host = {
       PATH: "/usr/bin",
@@ -234,6 +262,32 @@ describe("Pi process boundary", () => {
       "--session-id",
       "code-1",
     ]);
+  });
+
+  it("names the same session folder for a thread whether Pi runs on the person's own home or the managed one", () => {
+    // Pi 1.6.0's help: `--session-dir` is where sessions are stored and
+    // looked up, and it outranks `PI_CODING_AGENT_SESSION_DIR`. A thread that
+    // plans on the managed home and acts on the person's must find one store.
+    const folder = (ownDiscovery: boolean, policy: "approval-gated" | "plan", resume?: string) => {
+      const args = piArguments(
+        "/managed/bridge.ts",
+        "/managed/sessions",
+        "code-1",
+        "code",
+        policy,
+        [],
+        resume,
+        undefined,
+        "1.6.0",
+        [],
+        ownDiscovery,
+      );
+      return args[args.indexOf("--session-dir") + 1];
+    };
+    expect(folder(true, "approval-gated")).toBe("/managed/sessions");
+    expect(folder(false, "plan")).toBe("/managed/sessions");
+    expect(folder(true, "approval-gated", "/managed/sessions/a.jsonl")).toBe("/managed/sessions");
+    expect(folder(false, "plan", "/managed/sessions/a.jsonl")).toBe("/managed/sessions");
   });
 
   it("outside Strict keeps Pi's telemetry guard when the person turned provider telemetry off and drops its release check when the person lets providers update themselves", () => {

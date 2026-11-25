@@ -74,6 +74,13 @@ export interface CodexEventContext {
    * session outside Strict, whose answer reaches Codex unrecorded.
    */
   readonly asksSecretQuestions?: true;
+  /**
+   * A file change outside the Project root is a finished step rather than
+   * the end of the turn: set only for a session outside Strict, where Codex
+   * writes anywhere at Full access and, below it, only where the person
+   * approved the write.
+   */
+  readonly recordsOutsideChanges?: true;
   readonly requestIds: Map<CodexRpcId, string>;
   readonly agentMessages: Map<string, CodexAgentMessageState>;
   readonly taskIds: Map<string, string>;
@@ -196,11 +203,12 @@ type ToolItem = Extract<
 
 /**
  * Ends the turn. Kept for what guards authority: a request (approval,
- * question, app tool) that cannot be tied to this turn or read safely, and a
- * file change outside the Project root. A notification that merely surprises
- * this mapper (a repeat, one for a tool it never saw, one for another turn,
- * one after the turn ended) is dropped instead, because each Codex release
- * reorders or adds some and every one of them used to fail the turn.
+ * question, app tool) that cannot be tied to this turn or read safely, and,
+ * under Strict, a file change outside the Project root. A notification that
+ * merely surprises this mapper (a repeat, one for a tool it never saw, one
+ * for another turn, one after the turn ended) is dropped instead, because
+ * each Codex release reorders or adds some and every one of them used to fail
+ * the turn.
  */
 function protocolFailure(message: string, category: ProviderFailure["category"] = "protocol") {
   return [{ kind: "protocol-failure", failure: { category, message } }] as const;
@@ -496,11 +504,22 @@ function mapFileChangeCompletion(
           ? ("deleted" as const)
           : ("modified" as const),
   }));
+  // A file-change record names a Project-relative path, which a file outside
+  // the Project does not have. Such a file gets no record, as the thread's
+  // views of changed files stay on the Project, and the step says so instead.
+  const inside = changes.flatMap(({ path, change }) =>
+    path === undefined ? [] : [event(context, { kind: "file-change", path, change })],
+  );
   return [
-    ...changes.map(({ path, change }) =>
-      event(context, { kind: "file-change", path: path as string, change }),
-    ),
-    event(context, { kind: "tool-success", toolCallId: id, summary: "File change completed." }),
+    ...inside,
+    event(context, {
+      kind: "tool-success",
+      toolCallId: id,
+      summary:
+        inside.length === changes.length
+          ? "File change completed."
+          : "File change completed, including files outside the Project.",
+    }),
   ];
 }
 
@@ -700,7 +719,15 @@ function mapLifecycle(
     case "fileChange":
     case "mcpToolCall":
     case "dynamicToolCall": {
-      if (item.type === "fileChange" && !fileChangePathsAreConfined(context, item)) {
+      // Under Strict nothing may write outside the Project, so a report of
+      // it ends the turn. Outside Strict the write was Codex's to make (Full
+      // access) or the person's to approve, and failing the turn after the
+      // fact undid nothing and lost the rest of the work.
+      if (
+        item.type === "fileChange" &&
+        context.recordsOutsideChanges !== true &&
+        !fileChangePathsAreConfined(context, item)
+      ) {
         return protocolFailure(
           "Provider reported a file change outside the authorized Project root.",
         );

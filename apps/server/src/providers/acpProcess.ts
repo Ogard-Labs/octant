@@ -35,7 +35,11 @@ import {
   type AcpSessionMode,
 } from "./acpProfiles";
 import { awsProfileReadPaths, providerHostEnvironment } from "./providerHostEnvironment";
-import { guardsForOwnChannels, launchOwnChannels } from "./providerOwnChannels";
+import {
+  guardsForOwnChannels,
+  launchOwnChannels,
+  strictLetThroughNames,
+} from "./providerOwnChannels";
 import type { ProviderOwnChannels } from "@octant/provider-sdk";
 import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } from "./acpProtocol";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
@@ -144,6 +148,11 @@ export interface AcpConfinementInput {
    * command-line argument.
    */
   readonly ownChannels?: ProviderOwnChannels;
+  /**
+   * The release the launch read from the binary, for a profile whose
+   * command-line switch only some releases accept.
+   */
+  readonly version?: string;
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly environment: NodeJS.ProcessEnv;
@@ -221,7 +230,11 @@ export interface AcpProcessStartInput {
    * its telemetry and self-update guards follow {@link ownChannels}.
    */
   readonly strict?: boolean;
-  /** The person's provider telemetry and self-update switches; read only outside Strict. */
+  /**
+   * The person's provider telemetry and self-update switches, read only
+   * outside Strict, and the host variables they let through, read only under
+   * it.
+   */
   readonly ownChannels?: ProviderOwnChannels;
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
@@ -770,6 +783,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           root,
           managedHome,
           ...(input.ownChannels === undefined ? {} : { ownChannels: input.ownChannels }),
+          ...(input.version === undefined ? {} : { version: input.version }),
         });
         const denyPaths = [
           ...hostAuthentication.forbiddenPaths,
@@ -1464,7 +1478,10 @@ export function sanitizeAcpEnvironment(
     readonly apiKey?: string;
     readonly googleCloud?: AcpAgentGoogleCloud;
     readonly nativeSetup?: ProviderNativeSetup;
-    /** Absent is Strict: the profile's fixed passthrough list and every guard. */
+    /**
+     * Absent is Strict: the profile's fixed passthrough list, the names the
+     * person let through to this agent, and every guard.
+     */
     readonly strict?: boolean;
     /**
      * For a person's interactive provider terminal, never an ACP launch: the
@@ -1472,7 +1489,11 @@ export function sanitizeAcpEnvironment(
      * variable, where the environment passes one, stays.
      */
     readonly interactive?: boolean;
-    /** The person's provider telemetry and self-update switches; read only outside Strict. */
+    /**
+     * The person's provider telemetry and self-update switches, read only
+     * outside Strict, and the host variables they let through, read only
+     * under it.
+     */
     readonly ownChannels?: ProviderOwnChannels;
     /**
      * The launch runs on the person's own home (`acpRunsOnOwnHome`): the
@@ -1516,10 +1537,16 @@ export function sanitizeAcpEnvironment(
       (name) => !passthrough.has(name) && !(ownHome && name === "HOME"),
     ),
   );
+  // Under Strict the names the person let through to this agent (Settings ›
+  // Providers & Models) join the profile's list, so a person who runs Strict
+  // can still hand an agent their `GH_TOKEN`.
+  const letThrough = strictLetThroughNames(input.ownChannels?.credentialPassThrough);
   const environment = strict
     ? Object.fromEntries(
         Object.entries(inherited).filter(
-          ([key, value]) => value !== undefined && (passthrough.has(key) || key.startsWith("LC_")),
+          ([key, value]) =>
+            value !== undefined &&
+            (passthrough.has(key) || letThrough.has(key) || key.startsWith("LC_")),
         ),
       )
     : Object.fromEntries(
@@ -1530,6 +1557,7 @@ export function sanitizeAcpEnvironment(
     executionPolicy: input.executionPolicy ?? "approval-gated",
     ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
     ...(input.googleCloud === undefined ? {} : { googleCloud: input.googleCloud }),
+    ownChannels: launchOwnChannels(strict, input.ownChannels),
   });
   return {
     ...environment,
@@ -1547,7 +1575,8 @@ export function sanitizeAcpEnvironment(
  * person's own home leaves them as the host has them, so the agent's shell
  * commands find `~/.gitconfig`, `~/.ssh` and `~/.npmrc` as the person's do; a
  * profile's own variable for the agent's data folder (`GEMINI_CLI_HOME`,
- * `COPILOT_HOME`, `VIBE_HOME` and the like) still applies.
+ * `COPILOT_HOME`, `VIBE_HOME` and the like) still applies, and is what keeps
+ * the agent's sessions in one place on either home.
  */
 const HOME_VARIABLES: ReadonlySet<string> = new Set([
   "HOME",
@@ -1565,6 +1594,16 @@ const HOME_VARIABLES: ReadonlySet<string> = new Set([
  * back and is the one home folder Octant's sandbox opens for writing, so
  * Strict, a session whose person turned its setup off, and every confined
  * launch (Chat, Plan, a kept or chosen sandbox, a readiness check) keep it.
+ *
+ * One thread therefore alternates between the two homes (Plan then act, a
+ * level that adds a sandbox, a thread older than this rule), and an agent
+ * whose sessions follow `HOME` or an XDG folder cannot load on one home the
+ * session it wrote on the other: the turn parks as a stale resume and the
+ * thread can only be replaced. So a profile whose sessions follow the home
+ * (`sessionsFollowHome`) keeps the managed home on every launch.
+ *
+ * A provider terminal has no sandbox policy object to pass, only whether
+ * the thread chose one (`sandboxPolicySelected`).
  */
 export function acpRunsOnOwnHome(input: {
   readonly profile: AcpProviderProfile;
@@ -1574,10 +1613,13 @@ export function acpRunsOnOwnHome(input: {
   readonly purpose?: "probe" | "session";
   readonly fullAccessSandbox?: boolean;
   readonly sandboxPolicy?: SandboxPolicySelection;
+  readonly sandboxPolicySelected?: boolean;
   readonly nativeSetup?: ProviderNativeSetup;
 }): boolean {
   return (
+    input.profile.process.sessionsFollowHome !== true &&
     input.sandboxPolicy === undefined &&
+    input.sandboxPolicySelected !== true &&
     input.fullAccessSandbox !== true &&
     input.purpose !== "probe" &&
     acpLoadsAllOwnSetup({ strict: input.strict, setup: input.nativeSetup }) &&
@@ -1833,7 +1875,13 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           input.fullAccessSandbox !== true &&
           input.sandboxPolicy === undefined
         );
-        const ownChannels = launchOwnChannels(environmentStrict, input.ownChannels);
+        // A sandboxed launch outside Strict takes the fixed list and closed
+        // channels, but the let-through names are Strict's alone, so the
+        // thread's own Strict value decides the list first.
+        const ownChannels = launchOwnChannels(
+          environmentStrict,
+          launchOwnChannels(input.strict !== false, input.ownChannels),
+        );
         const environment = sanitizeAcpEnvironment(profile, inheritedEnvironment, {
           managedHome: input.managedHome,
           executionPolicy: input.executionPolicy,
@@ -1841,7 +1889,8 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
           ...(input.googleCloud === undefined ? {} : { googleCloud: input.googleCloud }),
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
-          ...(environmentStrict ? {} : { strict: false, ownChannels }),
+          ...(environmentStrict ? {} : { strict: false }),
+          ownChannels,
           ...(acpRunsOnOwnHome({ ...input, profile }) ? { ownHome: true } : {}),
         });
         const wall = acpWallPolicy(input);
@@ -1892,6 +1941,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
           ...(input.strict === false ? { strict: false } : {}),
           ownChannels,
+          version: probe.version,
           ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
           ...(input.apiKey === undefined && input.googleCloud === undefined
             ? {}

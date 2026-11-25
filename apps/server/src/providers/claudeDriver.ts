@@ -4128,7 +4128,8 @@ function makeConnection(
         const terminalResult = deferred<void>();
         // Read at each launch, like every other choice here: outside Strict the
         // runtime gets the host's environment, and its telemetry and
-        // self-update follow the person's provider switches.
+        // self-update follow the person's provider switches. Under Strict it
+        // gets the fixed list plus the names the person let through.
         const strict = input.strict !== false;
         // A thread that keeps or chose a sandbox keeps the provider's own
         // channels closed as Strict does, as an ACP agent's launch does: the
@@ -4155,7 +4156,8 @@ function makeConnection(
                   ...(options.configDirectory === undefined
                     ? {}
                     : { configDirectory: options.configDirectory }),
-                  ...(strict ? {} : { strict: false, ownChannels }),
+                  ...(strict ? {} : { strict: false }),
+                  ownChannels,
                 }).pipe(Effect.provideService(Scope.Scope, scope)),
                 signal,
               );

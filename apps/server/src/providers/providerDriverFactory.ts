@@ -297,13 +297,20 @@ export function makeProviderDriver(
         runtimeRegistry: options.runtimeRegistry,
         permissionPersistence: options.permissionPersistence,
         environment: codexEnvironment,
-        openEnvironment: (credentialPassThrough) =>
-          openCodexAccountEnvironment({
+        strictEnvironment: (credentialPassThrough) =>
+          codexAccountProcessEnvironment({
             binaryPath: instance.configuration.binaryPath,
             hostEnvironment,
             codexHome,
             ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
             credentialPassThrough,
+          }),
+        openEnvironment: () =>
+          openCodexAccountEnvironment({
+            binaryPath: instance.configuration.binaryPath,
+            hostEnvironment,
+            codexHome,
+            ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
           }),
         ...(options.credentialResolver === undefined
           ? {}
@@ -503,7 +510,6 @@ export function openCodexAccountEnvironment(input: {
   readonly hostEnvironment: NodeJS.ProcessEnv;
   readonly codexHome: string;
   readonly inheritHostAuth?: true;
-  readonly credentialPassThrough: ReadonlyArray<string>;
 }): NodeJS.ProcessEnv {
   return codexAccountProcessEnvironment({ ...input, strict: false });
 }

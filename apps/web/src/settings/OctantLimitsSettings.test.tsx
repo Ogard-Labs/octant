@@ -27,6 +27,11 @@ describe("Octant's own limits in Settings", () => {
     expect(
       screen.getByText(/Default 8\. A recurring wake-up may fire as often as every minute/),
     ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /A routine you asked for starts enabled at every level, and below Full access a suggested one waits for you to confirm its card\./,
+      ),
+    ).toBeTruthy();
   });
 
   it("changes Shield's brakes, a follow-up's lateness and a shown command's time from their defaults", async () => {

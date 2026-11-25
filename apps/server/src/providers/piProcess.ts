@@ -36,7 +36,11 @@ import { approvedHomeBinDirs } from "./discoveryService";
 import { makePiRpcClient, type PiRpcClient } from "./piRpcClient";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import type { ProviderOwnChannels } from "@octant/provider-sdk";
-import { guardsForOwnChannels, launchOwnChannels } from "./providerOwnChannels";
+import {
+  guardsForOwnChannels,
+  launchOwnChannels,
+  strictLetThroughEnvironment,
+} from "./providerOwnChannels";
 import {
   makeProcessConfinementLive,
   ProcessConfinementError,
@@ -153,7 +157,11 @@ export interface PiProcessPort {
      * and Pi's telemetry and release check follow {@link ownChannels}.
      */
     readonly strict?: boolean;
-    /** The person's provider telemetry and self-update switches; read only outside Strict. */
+    /**
+     * The person's provider telemetry and self-update switches, read only
+     * outside Strict, and the host variables they let through, read only
+     * under it.
+     */
     readonly ownChannels?: ProviderOwnChannels;
     /** The Pi provider the thread's model runs on; only its credentials reach the process. */
     readonly modelProvider?: string;
@@ -513,6 +521,10 @@ export function sanitizePiEnvironment(
     };
   }
   return Object.fromEntries([
+    // Under Strict the names the person let through to Pi (Settings ›
+    // Providers & Models) join the fixed list, so a person who runs Strict
+    // can still hand an agent their `GH_TOKEN`.
+    ...Object.entries(strictLetThroughEnvironment(host, ownChannels?.credentialPassThrough)),
     ...Object.entries(host).filter(
       ([key, value]) =>
         value !== undefined &&
@@ -1303,7 +1315,10 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
             input.strict !== false ||
               input.fullAccessSandbox === true ||
               input.sandboxPolicy !== undefined,
-            input.ownChannels,
+            // A sandboxed launch outside Strict takes the fixed list, but the
+            // let-through names are Strict's alone, so the thread's own
+            // Strict value decides the list.
+            launchOwnChannels(input.strict !== false, input.ownChannels),
             piRunsOnOwnHome(input),
           );
           // On Windows the launch is decided from its own authority before

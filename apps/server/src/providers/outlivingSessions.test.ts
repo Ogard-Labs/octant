@@ -312,7 +312,7 @@ describe("OutlivingSessions", () => {
     expect(runtime.stopped).toEqual([sessionId]);
   });
 
-  it("a kept session is relaunched when its provider's credential list changes", async () => {
+  it("a kept Strict session is relaunched when its provider's let-through list changes", async () => {
     const runtime = fakeRuntime();
     let names = ["GH_TOKEN"];
     const keeper = keeperFor({ launchCredentials: settingsCredentials(() => names) });
@@ -322,7 +322,7 @@ describe("OutlivingSessions", () => {
       () => runtime.report({ tasks: [{ taskId: "dev" }] }),
       start(),
       undefined,
-      OPEN,
+      STRICT,
     );
     expect(runtime.stopped).toEqual([]);
     // The person takes GH_TOKEN back: the next turn gets a fresh launch, not
@@ -334,14 +334,14 @@ describe("OutlivingSessions", () => {
       () => runtime.report({ tasks: [{ taskId: "dev" }] }),
       start(),
       undefined,
-      OPEN,
+      STRICT,
     );
     expect(runtime.stopped[0]).toBe(sessionId);
     expect(runtime.counts().opened).toBe(2);
     expect(runtime.started).toHaveLength(2);
   });
 
-  it("stops an idle kept session once its provider's credential list changes", async () => {
+  it("stops an idle kept Strict session once its provider's let-through list changes", async () => {
     const runtime = fakeRuntime();
     let names = ["GH_TOKEN"];
     const keeper = keeperFor({ launchCredentials: settingsCredentials(() => names) });
@@ -351,7 +351,7 @@ describe("OutlivingSessions", () => {
       () => runtime.report({ tasks: [{ taskId: "dev" }] }),
       start(),
       undefined,
-      OPEN,
+      STRICT,
     );
     await keeper.stopSessionsWithChangedCredentials();
     expect(runtime.stopped).toEqual([]);
@@ -361,10 +361,10 @@ describe("OutlivingSessions", () => {
     expect(keeper.liveTasks(key)).toBeUndefined();
   });
 
-  it("editing a provider's credential list leaves a kept Strict session and its background work running", async () => {
+  it("editing a provider's let-through list leaves a kept session outside Strict and its background work running", async () => {
     for (const posture of [
-      STRICT,
-      // Claude Code drops the list for a thread that keeps its sandbox too.
+      OPEN,
+      // A thread that keeps its sandbox outside Strict reads no list either.
       { ...OPEN, executionPolicy: "full-access" as const, fullAccessSandbox: true },
     ]) {
       const runtime = fakeRuntime();

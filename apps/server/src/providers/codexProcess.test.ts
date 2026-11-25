@@ -343,6 +343,41 @@ describe("sanitizeCodexEnvironment", () => {
     expect(environment.CODEX_HOME).toBe("/Users/test/.codex-accounts/api");
   });
 
+  it("under Strict adds the names the person let through to Codex's fixed list, never another provider's key, and outside Strict the list changes nothing", () => {
+    const hostEnvironment = {
+      PATH: "/usr/bin",
+      GH_TOKEN: "host-gh",
+      NPM_TOKEN: "host-npm",
+      ANTHROPIC_API_KEY: "another-provider",
+      OCTANT_DESKTOP_BRIDGE_SECRET: "must-not-cross",
+    };
+    const launch = (strict: boolean, credentialPassThrough: ReadonlyArray<string>) =>
+      codexAccountProcessEnvironment({
+        binaryPath: "/opt/homebrew/bin/codex",
+        hostEnvironment,
+        codexHome: "/Users/test/.codex",
+        inheritHostAuth: true,
+        ...(strict ? {} : { strict: false as const }),
+        credentialPassThrough,
+      });
+
+    const strict = launch(true, ["GH_TOKEN", "ANTHROPIC_API_KEY", "OCTANT_DESKTOP_BRIDGE_SECRET"]);
+    expect(strict.GH_TOKEN).toBe("host-gh");
+    expect(strict.NPM_TOKEN).toBeUndefined();
+    expect(strict.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(strict.OCTANT_DESKTOP_BRIDGE_SECRET).toBeUndefined();
+    expect(launch(true, []).GH_TOKEN).toBeUndefined();
+
+    expect(launch(false, ["GH_TOKEN"])).toEqual(launch(false, []));
+    expect(launch(false, [])).toMatchObject({ GH_TOKEN: "host-gh", NPM_TOKEN: "host-npm" });
+  });
+
+  it("matches a let-through name in any case on Windows, where the Strict list is upper-cased", () => {
+    expect(
+      sanitizeCodexEnvironment({ Path: "C:\\bin", Gh_Token: "host-gh" }, "win32", ["GH_TOKEN"]),
+    ).toMatchObject({ PATH: "C:\\bin", GH_TOKEN: "host-gh" });
+  });
+
   it("gives a lease outside Strict the host's environment, the person's own tool credentials included, less Octant's own and other providers' keys, and under Strict the fixed list", () => {
     const hostEnvironment = {
       PATH: "/usr/bin",
@@ -514,7 +549,7 @@ describe("probeCodexBinary", () => {
 });
 
 describe("codexAppServerArgs", () => {
-  it("turns off Codex's own subagents and memories from the command line on every supported version", () => {
+  it("turns off Codex's own subagents, memories and analytics from the command line on every supported version", () => {
     const featureOverrides = [
       "-c",
       "features.multi_agent=false",
@@ -522,6 +557,8 @@ describe("codexAppServerArgs", () => {
       "features.multi_agent_v2=false",
       "-c",
       "features.memories=false",
+      "-c",
+      "analytics.enabled=false",
     ];
     // Before 0.145.0 the feature flags alone decide; `[agents]` holds role
     // tables there, so `agents.enabled` would parse as a role and fail startup.
@@ -561,10 +598,28 @@ describe("codexAppServerArgs", () => {
       "app-server",
       "--listen",
       "stdio://",
+      "-c",
+      "analytics.enabled=false",
     ]);
     expect(codexAppServerArgs("0.164.0", { ownSubagents: true })).toContain(
       "features.memories=false",
     );
+  });
+
+  it("leaves Codex's analytics to the person's own configuration only for a launch that opens provider telemetry", () => {
+    const override = "analytics.enabled=false";
+    expect(codexAppServerArgs("0.164.0")).toContain(override);
+    expect(codexAppServerArgs("0.164.0", { ownSubagents: true, ownMemory: true })).toContain(
+      override,
+    );
+    const open = codexAppServerArgs("0.164.0", { ownTelemetry: true });
+    expect(open.join(" ")).not.toContain("analytics");
+    // The other overrides are separate switches and stay.
+    expect(open).toContain("features.memories=false");
+    expect(open).toContain("agents.enabled=false");
+    expect(
+      codexAppServerArgs("0.164.0", { ownSubagents: true, ownMemory: true, ownTelemetry: true }),
+    ).toEqual(["app-server", "--listen", "stdio://"]);
   });
 });
 
@@ -627,6 +682,8 @@ describe("CodexProcessPort", () => {
         "features.multi_agent_v2=false",
         "-c",
         "features.memories=false",
+        "-c",
+        "analytics.enabled=false",
       ],
       environment: {
         openaiApiKey: true,

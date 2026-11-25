@@ -16,9 +16,9 @@ export interface ProviderCredentialPassThroughSettingsProps {
 }
 
 /**
- * The providers whose launch outside Strict keeps unrelated host credentials
- * out, by driver kind: the runtimes whose environment Octant builds from the
- * host's. OpenCode is not offered: its launch does not strip them yet.
+ * The providers whose Strict launch adds the listed names to its fixed
+ * environment list, by driver kind. OpenCode is not offered: its Strict
+ * launch does not read the list yet.
  */
 const PROVIDERS: ReadonlyArray<{ readonly id: string; readonly label: string }> = [
   { id: "claude", label: "Claude Code" },
@@ -32,10 +32,10 @@ const LABEL: ReadonlyMap<string, string> = new Map(PROVIDERS.map(({ id, label })
 
 /** What the section says the list does, in the person's words. */
 export const PROVIDER_CREDENTIAL_PASS_THROUGH_FACT =
-  "Outside Strict, a provider does not get credentials from your environment that are not its own, such as GH_TOKEN, GITHUB_TOKEN, NPM_TOKEN, AWS keys and other services' API keys. Name one here to let it through to one provider. Strict ignores this list. Applies from the next turn. A provider terminal also runs your shell's startup files, which may set credentials again.";
+  "Outside Strict, a provider already gets your environment. Under Strict it gets a short fixed list. Name a variable here, such as GH_TOKEN, to add it to that list for one provider. A model provider's key can never be added. Applies from the next turn. A provider terminal also runs your shell's startup files, which may set credentials again.";
 
 /**
- * Settings › Providers & Models › Credentials let through. Empty until the
+ * Settings › Providers & Models › Let through under Strict. Empty until the
  * person adds a name; only names are kept, never values.
  */
 export function ProviderCredentialPassThroughSettings(
@@ -81,13 +81,13 @@ export function ProviderCredentialPassThroughSettings(
     <SettingsSection
       className="provider-credentials"
       description={PROVIDER_CREDENTIAL_PASS_THROUGH_FACT}
-      title="Credentials let through"
+      title="Let through under Strict"
     >
       {/* A quiet sentence on the page ground, not a row inside the card
           (DESIGN.md "Depth and material"); the card holds only the add row. */}
       {entries.length === 0 ? (
         <SettingsState kind="empty">
-          Nothing is let through. Each provider keeps only its own credentials.
+          Nothing is added. Under Strict, each provider gets only its fixed list.
         </SettingsState>
       ) : null}
       <div className="setgroup">

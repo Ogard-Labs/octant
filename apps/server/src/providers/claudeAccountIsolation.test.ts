@@ -305,6 +305,49 @@ describe("isolatedClaudeAccountEnvironment", () => {
     expect(environment).not.toHaveProperty("ANTHROPIC_BASE_URL");
   });
 
+  it("under Strict adds the names the person let through to the fixed list, never a model provider's key, and outside Strict the list changes nothing", () => {
+    const hostEnvironment = {
+      PATH: "/usr/bin",
+      GH_TOKEN: "gh-token",
+      NPM_TOKEN: "npm-token",
+      OPENAI_API_KEY: "another-provider",
+      ANTHROPIC_API_KEY: "host-anthropic",
+      DISABLE_TELEMETRY: "0",
+    };
+    const launch = (strict: boolean, credentialPassThrough: ReadonlyArray<string>) =>
+      isolatedClaudeAccountEnvironment({
+        hostEnvironment,
+        configDirectory: "/Users/provider-user/.claude-accounts/work",
+        authentication: "subscription",
+        strict,
+        ownChannels: { telemetry: false, selfUpdate: false, credentialPassThrough },
+      });
+
+    const strict = launch(true, [
+      "GH_TOKEN",
+      "OPENAI_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "DISABLE_TELEMETRY",
+    ]);
+    expect(strict.GH_TOKEN).toBe("gh-token");
+    expect(strict.NPM_TOKEN).toBeUndefined();
+    expect(strict.OPENAI_API_KEY).toBeUndefined();
+    expect(strict.ANTHROPIC_API_KEY).toBeUndefined();
+    // A let-through name never replaces a guard the Strict launch sets.
+    expect(strict).toMatchObject(ISOLATED_CLAUDE_LAUNCH_GUARDS);
+    expect(launch(true, [])).toEqual(
+      isolatedClaudeAccountEnvironment({
+        hostEnvironment,
+        configDirectory: "/Users/provider-user/.claude-accounts/work",
+        authentication: "subscription",
+        strict: true,
+      }),
+    );
+
+    expect(launch(false, ["GH_TOKEN"])).toEqual(launch(false, []));
+    expect(launch(false, [])).toMatchObject({ GH_TOKEN: "gh-token", NPM_TOKEN: "npm-token" });
+  });
+
   it("keeps an explicit API-key account on the broker key and the same isolated directory", () => {
     const environment = isolatedClaudeAccountEnvironment({
       hostEnvironment: hostileHostEnvironment,

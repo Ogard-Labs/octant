@@ -80,6 +80,7 @@ import {
   type CodexPendingQuestion,
 } from "./codexEventMapper";
 import { providerApprovalCall } from "./providerApprovalCall";
+import { launchOwnChannels } from "./providerOwnChannels";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { isAtLeastRelease } from "./releaseVersion";
 import { secretGuardEntries, threadSecretGuardEntries } from "../process/secretGuard";
@@ -746,12 +747,17 @@ export interface CodexDriverOptions {
    */
   readonly environment?: NodeJS.ProcessEnv;
   /**
-   * The account's launch environment outside Strict: the host's, less
-   * Octant's variables, other providers' keys and the unrelated credentials
-   * the person did not let through (the names given). Absent, a lease
-   * outside Strict takes `environment`.
+   * The account's Strict launch environment with the host variables the
+   * person let through to Codex (the names given) added to the fixed list.
+   * Absent, a Strict lease takes `environment`.
    */
-  readonly openEnvironment?: (credentialPassThrough: ReadonlyArray<string>) => NodeJS.ProcessEnv;
+  readonly strictEnvironment?: (credentialPassThrough: ReadonlyArray<string>) => NodeJS.ProcessEnv;
+  /**
+   * The account's launch environment outside Strict: the host's, less
+   * Octant's variables and other providers' keys. Absent, a lease outside
+   * Strict takes `environment`.
+   */
+  readonly openEnvironment?: () => NodeJS.ProcessEnv;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly correlationId?: () => string;
   readonly requestId?: () => string;
@@ -2233,9 +2239,12 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // Strict is part of the key too: a lease outside Strict gets the host's
       // environment, and below Full access Codex's own sandbox in place of
       // Octant's profile, so a Strict and a non-Strict session never share a
-      // process.
+      // process. So is the person's telemetry switch, whose analytics
+      // override rides on the command line: a lease started after they
+      // change it is a new process, and an idle one from before is not
+      // reused with the old value.
       const leaseKey = (posture: CodexLeasePosture) => {
-        const { executionPolicy, ownSubagents, fullAccessSandbox, strict } = posture;
+        const { executionPolicy, ownSubagents, fullAccessSandbox, strict, ownTelemetry } = posture;
         const windowsConfined = isWindowsStrictConfined(posture);
         return JSON.stringify([
           // A folder on a server is not the folder of the same path here.
@@ -2248,10 +2257,10 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           threadMode,
           `${executionPolicy}${ownSubagents ? "+own-subagents" : ""}${
             keepsOwnMemory(executionPolicy, strict) ? "+own-memory" : ""
-          }${strict ? "" : "+not-strict"}`,
+          }${ownTelemetry ? "+own-telemetry" : ""}${strict ? "" : "+not-strict"}`,
           ...(fullAccessSandbox ? ["+sandbox"] : []),
-          // A process launched with other host credentials let through is
-          // not reused for this list.
+          // A Strict process launched with other host variables let through
+          // is not reused for this list.
           ...(posture.credentialPassThrough.length === 0
             ? []
             : [{ credentialPassThrough: posture.credentialPassThrough }]),
@@ -2280,6 +2289,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               executionPolicy,
               ...(ownSubagents ? { ownSubagents: true as const } : {}),
               ...(keepsOwnMemory(executionPolicy, strict) ? { ownMemory: true as const } : {}),
+              ...(posture.ownTelemetry ? { ownTelemetry: true as const } : {}),
               ...(fullAccessSandbox ? { fullAccessSandbox: true as const } : {}),
               ...(explicitStrict && executionPolicy === "full-access"
                 ? { strict: true as const }
@@ -2379,8 +2389,15 @@ interface CodexLeasePosture {
   /** True only when the caller explicitly requested canonical Strict. */
   readonly explicitStrict: boolean;
   /**
-   * The host credentials the person lets through to Codex outside Strict,
-   * sorted; empty under Strict. A process keeps the list it launched with.
+   * The person lets providers send their own telemetry and the lease is
+   * outside Strict, so Codex's analytics follow the person's own
+   * `config.toml`; under Strict the channel is closed whatever they chose.
+   */
+  readonly ownTelemetry: boolean;
+  /**
+   * The host variables the person lets through to Codex under Strict,
+   * sorted; empty outside Strict, where the list changes nothing a launch
+   * receives. A process keeps the list it launched with.
    */
   readonly credentialPassThrough: ReadonlyArray<string>;
 }
@@ -2399,9 +2416,10 @@ function codexLeasePosture(input: {
     fullAccessSandbox: input.fullAccessSandbox === true,
     strict,
     explicitStrict: input.strict === true,
+    ownTelemetry: launchOwnChannels(strict, input.ownChannels).telemetry,
     credentialPassThrough: strict
-      ? []
-      : [...new Set(input.ownChannels?.credentialPassThrough ?? [])].sort(),
+      ? [...new Set(input.ownChannels?.credentialPassThrough ?? [])].sort()
+      : [],
   };
 }
 
@@ -3029,7 +3047,7 @@ function makeConnection(
     }): CodexPermissionProfile | undefined => {
       const launchEnvironment =
         input.strict === false
-          ? (options.openEnvironment?.([]) ?? options.environment)
+          ? (options.openEnvironment?.() ?? options.environment)
           : options.environment;
       // This host's sign-in paths name nothing on a server; there the list
       // was resolved for the server's login when Codex started on it.
@@ -4734,8 +4752,8 @@ async function resolveCodexLaunchEnvironment(
   credentialPassThrough: ReadonlyArray<string> = [],
 ): Promise<NodeJS.ProcessEnv | undefined> {
   const base = strict
-    ? options.environment
-    : (options.openEnvironment?.(credentialPassThrough) ?? options.environment);
+    ? (options.strictEnvironment?.(credentialPassThrough) ?? options.environment)
+    : (options.openEnvironment?.() ?? options.environment);
   if (options.credentialResolver === undefined) return base;
   try {
     if (!(await options.credentialResolver.has(String(options.instanceId)))) return base;
@@ -4761,6 +4779,7 @@ function makeEventContext(state: SessionState, factories: ConnectionFactories): 
     terminal: false,
     ...(state.compaction === undefined ? {} : { compactionRequested: true }),
     ...(state.asksSecretQuestions ? { asksSecretQuestions: true } : {}),
+    ...(state.strict === false ? { recordsOutsideChanges: true as const } : {}),
     requestIds: new Map(),
     agentMessages: new Map(),
     taskIds: new Map(),

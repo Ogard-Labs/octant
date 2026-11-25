@@ -298,13 +298,6 @@ type Awaitable<T> = T | Promise<T>;
  * finish a host's handful quickly without a burst of them at launch.
  */
 export const UNCONFIRMED_STEP_SETTLEMENT_CONCURRENCY = 3;
-/**
- * What the host sends, as itself, to start the turn after the person approved
- * a plan. Fixed text: it tells the agent to go on and records in the thread
- * why a turn nobody typed exists.
- */
-export const PLAN_APPROVED_TURN_PROMPT =
-  "Octant started this turn: the person approved your plan and the thread has left Plan. Carry the plan out now.";
 /** How long one unconfirmed step's reads may take before it is left unconfirmed. */
 const UNCONFIRMED_STEP_TIMEOUT_MS = 20_000;
 

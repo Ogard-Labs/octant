@@ -1,5 +1,6 @@
 import type { ProviderExecutionPolicy, ShellSettings } from "@octant/contracts";
 import { isAcpAgentKind } from "@octant/contracts/acp-agent-profiles";
+import { MODEL_PROVIDER_CREDENTIAL_VARIABLES } from "@octant/domain";
 import type { ProviderDriver, ProviderOwnChannels } from "@octant/provider-sdk";
 import { Effect } from "effect";
 
@@ -18,11 +19,10 @@ const CLOSED_PROVIDER_OWN_CHANNELS: ProviderOwnChannels = { telemetry: false, se
 
 /**
  * The person's two switches in Settings › Providers & Models, and the stored
- * list of host credentials let through to this provider (by driver kind).
- * No launch environment reads that list any more: outside Strict the person's
- * credentials reach every provider, and Strict keeps its fixed list
- * (maintainer decision, 2026-11-25). It still travels with the channels, so a
- * driver that keys a kept process on it keeps doing so.
+ * list of host variables let through to this provider (by driver kind). Only
+ * a Strict launch reads that list, adding its names to the provider's fixed
+ * Strict list; outside Strict the person's environment already reaches every
+ * provider (maintainer decision, 2026-11-25).
  */
 export function providerOwnChannelsFromSettings(
   settings: Pick<
@@ -39,7 +39,7 @@ export function providerOwnChannelsFromSettings(
   };
 }
 
-/** What decides whether a launch reads the pass-through list at all. */
+/** What decides which environment a launch builds. */
 export interface CredentialLaunchPosture {
   readonly strict: boolean;
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -50,17 +50,14 @@ export interface CredentialLaunchPosture {
 }
 
 /**
- * Whether a launch of this driver kind and posture builds the environment a
- * launch outside Strict gets, as each driver decides it: the person's own
- * environment, and the telemetry and self-update switches, which close
- * wherever this refuses. The stored pass-through list is keyed on the same
- * answer (`launchCredentialsKey`). Strict never does. Claude Code and the
- * ACP agents also build the Strict environment for a thread that keeps or
- * chose a sandbox (`claudeDriver` closes its own channels there; `acpProcess`
- * sets `environmentStrict`), an ACP agent only at Full access, where its
- * driver passes the kept sandbox on. Codex and Pi read only Strict.
+ * Whether a launch of this driver kind and posture reads the person's
+ * telemetry and self-update switches, as each driver decides it; they close
+ * wherever this refuses. Strict never does. Claude Code and the ACP agents
+ * also close them for a thread that keeps or chose a sandbox (`claudeDriver`
+ * closes its own channels there; `acpProcess` sets `environmentStrict`), an
+ * ACP agent only at Full access, where its driver passes the kept sandbox on.
  */
-export function credentialPassThroughApplies(
+export function providerSwitchesApply(
   driverKind: string,
   posture: CredentialLaunchPosture,
 ): boolean {
@@ -74,11 +71,11 @@ export function credentialPassThroughApplies(
 }
 
 /**
- * The credentials a launch of this posture actually lets through, as one
- * comparable string, so a kept session launched with other grants is told
- * apart and one whose grants did not change is left alone. A posture that
- * discards the list, or a thread whose provider is gone, lets nothing
- * through.
+ * The host variables a launch of this posture adds to its fixed list, as one
+ * comparable string, so a kept Strict session launched with another list is
+ * told apart and one whose list did not change is left alone. Outside Strict
+ * the list changes nothing a launch receives, so every such session compares
+ * equal whatever the list holds. A thread whose provider is gone adds none.
  */
 export function launchCredentialsKey(
   settings: Pick<ShellSettings, "providerCredentialPassThrough"> | undefined,
@@ -86,13 +83,13 @@ export function launchCredentialsKey(
   posture: CredentialLaunchPosture,
 ): string {
   const names =
-    driverKind === undefined || !credentialPassThroughApplies(driverKind, posture)
+    driverKind === undefined || !posture.strict
       ? []
       : providerCredentialPassThrough(settings, driverKind);
   return JSON.stringify([...new Set(names)].sort());
 }
 
-/** The host credentials the person lets through to a provider of this driver kind. */
+/** The host variables the person lets through to a Strict provider of this driver kind. */
 export function providerCredentialPassThrough(
   settings: Pick<ShellSettings, "providerCredentialPassThrough"> | undefined,
   driverKind: string,
@@ -102,15 +99,59 @@ export function providerCredentialPassThrough(
 }
 
 /**
- * The channels one launch opens. Strict closes both whatever the person
- * chose, so a Strict launch keeps every telemetry and self-update guard.
+ * The channels one launch opens, and the let-through list it reads. Strict
+ * closes both channels whatever the person chose, so a Strict launch keeps
+ * every telemetry and self-update guard, and carries the list its fixed
+ * environment adds. Outside Strict the list is dropped: the launch already
+ * receives the person's environment, and a process keyed on these channels
+ * must not restart for a list that changes nothing it gets.
  */
 export function launchOwnChannels(
   strict: boolean,
   chosen: ProviderOwnChannels | undefined,
 ): ProviderOwnChannels {
-  if (strict) return CLOSED_PROVIDER_OWN_CHANNELS;
-  return chosen ?? DEFAULT_PROVIDER_OWN_CHANNELS;
+  if (strict) {
+    const letThrough = chosen?.credentialPassThrough ?? [];
+    return letThrough.length === 0
+      ? CLOSED_PROVIDER_OWN_CHANNELS
+      : { ...CLOSED_PROVIDER_OWN_CHANNELS, credentialPassThrough: letThrough };
+  }
+  const { credentialPassThrough: _strictOnly, ...channels } =
+    chosen ?? DEFAULT_PROVIDER_OWN_CHANNELS;
+  return channels;
+}
+
+/**
+ * The names a Strict launch adds to its provider's fixed list. Settings
+ * refuses Octant's own variables and every model provider's key
+ * (`hostCredentialPassThroughRefusal`), but a stored list is not trusted to
+ * hold only what Settings admits today: a name that joined the model-provider
+ * table after it was stored still never crosses.
+ */
+export function strictLetThroughNames(
+  letThrough: ReadonlyArray<string> | undefined,
+): ReadonlySet<string> {
+  return new Set(
+    (letThrough ?? []).filter((name) => {
+      const upper = name.toUpperCase();
+      return !upper.startsWith("OCTANT_") && !MODEL_PROVIDER_CREDENTIAL_VARIABLES.has(upper);
+    }),
+  );
+}
+
+/**
+ * The host's values for {@link strictLetThroughNames}, for a Strict launch to
+ * lay under its fixed list, so the launch's own variables and guards win over
+ * a name the person let through.
+ */
+export function strictLetThroughEnvironment(
+  hostEnvironment: NodeJS.ProcessEnv,
+  letThrough: ReadonlyArray<string> | undefined,
+): NodeJS.ProcessEnv {
+  const names = strictLetThroughNames(letThrough);
+  return Object.fromEntries(
+    Object.entries(hostEnvironment).filter(([key, value]) => value !== undefined && names.has(key)),
+  );
 }
 
 /** A provider's guards sorted by the channel each one closes. */

@@ -30,6 +30,7 @@ import {
   decodeCodeFailure,
   decodeCodeOperationId,
   decodeProviderSessionId,
+  PLAN_APPROVED_TURN_PROMPT,
   RUNTIME_STARTED_TURN_PROMPT,
   decodeCodeRelativePath,
   decodeCodeOperationEventFrame,
@@ -56,7 +57,6 @@ import {
   type CodeOperationRuntimeOptions,
   type CodeStoppedTurn,
   createCodeOperationRuntime,
-  PLAN_APPROVED_TURN_PROMPT,
 } from "../code/codeOperationRuntime";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { CodePlannerService } from "../code/codePlannerService";
@@ -173,7 +173,7 @@ import type { HarnessStateWiring } from "./harnessState";
 import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
-import { sessionNativeSetup } from "../providers/providerNativeSetup";
+import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
 import {
   launchCredentialsKey,
   providerOwnChannelsFromSettings,
@@ -1276,6 +1276,20 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             executionPolicy: thread.executionPolicy,
             fullAccessSandbox: thread.fullAccessSandbox,
             sandboxPolicySelected,
+            // As a turn of the thread resolves it, so an ACP agent's CLI
+            // opens on the home its turns run on.
+            ...nativeSetupOption(
+              sessionNativeSetup(
+                { ...persistence, readStrict: () => strict },
+                {
+                  providerInstanceId: thread.providerInstanceId,
+                  projectId: thread.projectId,
+                  threadId: String(thread.id),
+                  mode: "code",
+                  executionPolicy: thread.executionPolicy,
+                },
+              ),
+            ),
             ...(configuredDriverOptions.acpHome === undefined
               ? {}
               : { acpHome: configuredDriverOptions.acpHome }),
@@ -1559,12 +1573,21 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         // is. It does not go through a wake-up's start: the planning turn
         // ended interrupted, which that path reads as a thread waiting on the
         // person, and would never start.
+        // A message the person queued may start first. Their message then
+        // runs at the level the thread returned to, in the session that
+        // already holds the approved plan, so the host starts nothing: a
+        // start sent beside it was accepted and journaled, then never
+        // launched, and stayed in the thread as a turn that never ends.
+        // The result is not read either: a provider account that takes no
+        // unattended turn refuses this one, and the thread waits for the
+        // person's next message as it did before plans continued.
         onPlanApproved: async (threadId) => {
           const thread = persistence.readCodeThread(threadId);
           if (
             thread === undefined ||
             baseRouteCodeService.stageEvidence === undefined ||
-            baseRouteCodeService.executeOperation === undefined
+            baseRouteCodeService.executeOperation === undefined ||
+            codeOperationRuntime?.turnInProgress?.(String(threadId)) === true
           )
             return;
           const staged = await baseRouteCodeService.stageEvidence(

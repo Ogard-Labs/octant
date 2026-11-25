@@ -1,4 +1,4 @@
-import { decodeStartWorkThreadTurnCommand } from "@octant/contracts";
+import { decodeStartWorkThreadTurnCommand, PLAN_APPROVED_TURN_PROMPT } from "@octant/contracts";
 import { SERVER_ATTACHMENT_TRANSFER_REFUSAL } from "../serverProjects/serverAttachments";
 import { continueWorkTurns } from "../wiring/continuation";
 import { RESTART_CONTINUATION_PROMPT } from "../harness/restartContinuation";
@@ -1221,6 +1221,71 @@ describe("WorkTurnService", () => {
         // The thread is free for the host's own turn by then.
         expect(activeWhenHandedOver).toEqual([false]);
       } else expect(onPlanApproved).not.toHaveBeenCalled();
+    }
+  });
+
+  it("starts the host's turn that carries an approved plan out, and leaves the thread to a message the person sent first", async () => {
+    for (const personFirst of [false, true]) {
+      const prompts: string[] = [];
+      const person = {
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2"),
+        turnId: decodeWorkTurnId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2"),
+        prompt: "Start with the tests.",
+      };
+      const host = {
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3"),
+        turnId: decodeWorkTurnId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3"),
+        prompt: PLAN_APPROVED_TURN_PROMPT,
+      };
+      let handedOver: "started" | "busy" | undefined;
+      const release = deferred<void>();
+      const fixture = serviceFixture({
+        threadAccess: "plan",
+        // What the host's wiring does with the hand-over: a thread with a
+        // turn starting or running is busy and gets nothing; otherwise the
+        // host starts its own turn under its scope, through the ordinary
+        // admission.
+        onPlanApproved: async (threadId) => {
+          if (personFirst) await fixture.service.startFirstTurn(ids.window, person);
+          if (fixture.service.isTurnActive(threadId) || fixture.service.isTurnStarting(threadId)) {
+            handedOver = "busy";
+            return;
+          }
+          await fixture.service.startHostTurn(ROUTINE_HOST_SCOPE_ID, host);
+          handedOver = "started";
+        },
+        turnRuntime: {
+          run: async (input) => {
+            prompts.push(input.command.prompt);
+            if (prompts.length === 1) {
+              await new Promise<void>((resolve) => {
+                if (input.signal.aborted) resolve();
+                else input.signal.addEventListener("abort", () => resolve(), { once: true });
+              });
+              return { kind: "cancelled" };
+            }
+            await release.promise;
+            return { kind: "completed", response: "Done." };
+          },
+        },
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await vi.waitFor(() => expect(prompts).toHaveLength(1));
+      fixture.service.endTurnForLevelChange(ids.thread);
+      await vi.waitFor(() => expect(handedOver).toBe(personFirst ? "busy" : "started"));
+      // One turn follows the plan: the person's own message when it got
+      // there first, otherwise the host's fixed prompt.
+      await vi.waitFor(() =>
+        expect(prompts).toEqual([
+          "Summarize the brief",
+          personFirst ? person.prompt : PLAN_APPROVED_TURN_PROMPT,
+        ]),
+      );
+      release.resolve();
+      await fixture.waitForIdle(personFirst ? person.requestId : host.requestId);
+      expect(prompts).toHaveLength(2);
     }
   });
 
