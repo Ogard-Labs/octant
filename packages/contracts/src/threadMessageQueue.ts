@@ -39,6 +39,7 @@ export const ThreadMessageQueuePayload = Schema.Union(
     mode: Schema.Literal("chat"),
     contextInputPolicy: chat.contextInputPolicy,
     prompt: ThreadMessageQueuePrompt,
+    typedByPerson: Schema.optional(Schema.Literal(true)),
     attachmentIds: chat.attachmentIds,
     previewSelections: chat.previewSelections,
     canvasSelections: chat.canvasSelections,
@@ -50,6 +51,7 @@ export const ThreadMessageQueuePayload = Schema.Union(
     mode: Schema.Literal("work"),
     contextInputPolicy: work.contextInputPolicy,
     prompt: ThreadMessageQueuePrompt,
+    typedByPerson: Schema.optional(Schema.Literal(true)),
     attachmentIds: work.attachmentIds,
     extensionSelections: work.extensionSelections,
     computerUseSelection: work.computerUseSelection,
@@ -63,6 +65,7 @@ export const ThreadMessageQueuePayload = Schema.Union(
     reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
     sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
     prompt: ThreadMessageQueuePrompt,
+    typedByPerson: Schema.optional(Schema.Literal(true)),
     attachmentIds: Schema.optional(
       Schema.Array(CodeAttachmentId).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
     ),
@@ -158,6 +161,7 @@ export const ThreadMessageQueueCommand = Schema.Union(
     ...command,
     messageId: ThreadQueueMessageId,
     prompt: ThreadMessageQueuePrompt,
+    typedByPerson: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("reorder"),

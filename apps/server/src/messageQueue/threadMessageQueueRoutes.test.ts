@@ -112,6 +112,56 @@ describe("message queue routes", () => {
     expect(execute).toHaveBeenCalledWith(deviceId, expect.objectContaining({ kind: "enqueue" }));
   });
 
+  it("keeps a queued message's typed claim only from the person's own window or a device they paired", async () => {
+    const { handle, execute } = setup();
+    const deviceId = "92000000-0000-4000-8000-0000000000d2";
+    const typed = { ...enqueue, payload: { ...enqueue.payload, typedByPerson: true } };
+    const edit = {
+      kind: "edit",
+      scope: enqueue.scope,
+      expectedVersion: 1,
+      requestId: "92000000-0000-4000-8000-000000000005",
+      messageId: enqueue.messageId,
+      prompt: "Please continue, briefly.",
+      typedByPerson: true,
+    };
+    const send = async (body: unknown, admittedBy?: "host-person" | "hub-roster") => {
+      const request = new Request("http://127.0.0.1/api/thread-message-queue/commands", {
+        method: "POST",
+        headers: { origin: "http://127.0.0.1", "x-octant-window-capability": capability },
+        body: JSON.stringify(body),
+      });
+      if (admittedBy !== undefined) {
+        bindPrincipalRouteContext(request, {
+          principal: {
+            kind: "remote-device",
+            hostId: "11111111-1111-4111-8111-111111111111",
+            deviceId,
+            credentialGeneration: 1,
+            origin: "https://remote.example",
+            protocolVersion: 1,
+            capabilityDigest: "a".repeat(64),
+            sessionId: "55000000-0000-4000-8000-0000000000ab",
+            admittedBy,
+          } as never,
+          scopeId: decodeWindowId(deviceId),
+        });
+      }
+      await handle(request);
+      return execute.mock.lastCall?.[1] as Record<string, unknown>;
+    };
+
+    expect(((await send(typed)).payload as Record<string, unknown>)["typedByPerson"]).toBe(true);
+    expect(
+      ((await send(typed, "host-person")).payload as Record<string, unknown>)["typedByPerson"],
+    ).toBe(true);
+    expect((await send(edit))["typedByPerson"]).toBe(true);
+    // A device only the hub introduced is not the person: its claim is dropped.
+    const enqueued = await send(typed, "hub-roster");
+    expect((enqueued.payload as Record<string, unknown>)["typedByPerson"]).toBeUndefined();
+    expect((await send(edit, "hub-roster"))["typedByPerson"]).toBeUndefined();
+  });
+
   it("admits a paired device to the queue's read and its commands, and to nothing else there", () => {
     const action = (path: string, method: string) =>
       classifyProductAction(new Request(`https://octant.example${path}`, { method }));

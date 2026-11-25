@@ -975,6 +975,7 @@ export interface CodeOperationRuntimeOptions {
   readonly resolveFileMentionContext?: CodeOperationServiceOptions["resolveFileMentionContext"];
   /** Takes the notes the user pointed at the running product into the next turn. */
   readonly takeProductFeedbackForTurn?: CodeOperationServiceOptions["takeProductFeedbackForTurn"];
+  readonly markTurnTyped?: CodeOperationServiceOptions["markTurnTyped"];
   readonly takeIssueContextFramed?: CodeOperationServiceOptions["takeIssueContextFramed"];
   readonly peekIssueContextFramed?: CodeOperationServiceOptions["peekIssueContextFramed"];
   readonly consumeIssueContextFramed?: CodeOperationServiceOptions["consumeIssueContextFramed"];
@@ -1758,6 +1759,7 @@ export function createCodeOperationRuntime(
     ...(options.takeProductFeedbackForTurn === undefined
       ? {}
       : { takeProductFeedbackForTurn: options.takeProductFeedbackForTurn }),
+    ...(options.markTurnTyped === undefined ? {} : { markTurnTyped: options.markTurnTyped }),
     ...(options.takeIssueContextFramed === undefined
       ? {}
       : { takeIssueContextFramed: options.takeIssueContextFramed }),

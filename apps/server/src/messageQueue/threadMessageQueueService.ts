@@ -310,11 +310,15 @@ export class ThreadMessageQueueService {
           if (content === undefined) return refused("content-unavailable");
           let updated: QueueContent;
           try {
+            // An edit keeps the claim only when the person's own route made it
+            // with the edit; any other edit leaves the message as not typed.
+            const { typedByPerson: _earlier, ...kept } = content.payload;
             updated = {
               ...content,
               payload: decodeThreadMessageQueuePayload({
-                ...content.payload,
+                ...kept,
                 prompt: command.prompt,
+                ...(command.typedByPerson === true ? { typedByPerson: true } : {}),
               }),
             };
           } catch {

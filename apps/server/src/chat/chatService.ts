@@ -684,6 +684,12 @@ export interface ChatServiceExecutionContext {
    * it is not the person. Set only by the route; absent, it is not one.
    */
   readonly fromOutsideAgent?: boolean;
+  /**
+   * The person's own route said they typed this message into a composer. Set
+   * only by that route, never read from the command, so a caller inside the
+   * host and a restricted or agent session cannot claim it.
+   */
+  readonly typedByPerson?: true;
   /** One-hop coordination calls cannot expose the coordination tool again. */
   readonly coordinationDepth?: number;
   /**
@@ -871,6 +877,12 @@ export interface ChatServiceOptions {
     readonly thread: ChatThread;
     readonly windowId: WindowId | undefined;
   }) => string | undefined;
+  /** Records that the person typed a turn's message, once the turn is journaled. */
+  readonly markTurnTyped?: (input: {
+    readonly threadId: string;
+    readonly projectId?: string | undefined;
+    readonly turnId: string;
+  }) => void;
   /**
    * The instructions the person wrote for Octant, as standing blocks in their
    * order. Every turn gets them, whoever started it: they grant nothing.
@@ -1274,6 +1286,7 @@ export class ChatService {
   readonly #resolveComputerUseTools?: ChatServiceOptions["resolveComputerUseTools"];
   readonly #resolveHostRunTools?: ChatServiceOptions["resolveHostRunTools"];
   readonly #personMemoryBlock?: ChatServiceOptions["personMemoryBlock"];
+  readonly #markTurnTyped?: ChatServiceOptions["markTurnTyped"];
   readonly #octantInstructionBlocks?: ChatServiceOptions["octantInstructionBlocks"];
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
   readonly #resolveSideChatReturns: SideChatReturnResolver | undefined;
@@ -1364,6 +1377,7 @@ export class ChatService {
       this.#resolveHostRunTools = options.resolveHostRunTools;
     if (options.personMemoryBlock !== undefined)
       this.#personMemoryBlock = options.personMemoryBlock;
+    if (options.markTurnTyped !== undefined) this.#markTurnTyped = options.markTurnTyped;
     if (options.octantInstructionBlocks !== undefined)
       this.#octantInstructionBlocks = options.octantInstructionBlocks;
     if (options.contextMaintenanceTimeoutMs !== undefined) {
@@ -3338,6 +3352,15 @@ export class ChatService {
       } catch (error) {
         releaseDrain();
         throw error;
+      }
+      // After the turn, before its run: a turn with no mark is not the
+      // person's words, so a failed or missing mark is the safe side.
+      if (executionContext?.typedByPerson === true) {
+        this.#markTurnTyped?.({
+          threadId: String(thread.id),
+          projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
+          turnId: String(turn.id),
+        });
       }
       return {
         kind: "accepted" as const,

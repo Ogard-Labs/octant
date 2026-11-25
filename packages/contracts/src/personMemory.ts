@@ -176,12 +176,16 @@ export const PERSON_MEMORY_SETTINGS_AGGREGATE_TYPE = "person-memory-settings";
 export const PERSON_MEMORY_ENTRY_AGGREGATE_TYPE = "person-memory-entry";
 export const PERSON_MEMORY_THREAD_AGGREGATE_TYPE = "person-memory-thread";
 export const PERSON_MEMORY_UNTRACED_AGGREGATE_TYPE = "person-memory-untraced";
+export const PERSON_MEMORY_TYPED_AGGREGATE_TYPE = "person-memory-typed";
 
 export const PERSON_MEMORY_SETTINGS_CHANGED = "person-memory.settings-changed@1";
 export const PERSON_MEMORY_ENTRY_RECORDED = "person-memory.entry-recorded@1";
 export const PERSON_MEMORY_ENTRY_SAVED = "person-memory.entry-saved@1";
 export const PERSON_MEMORY_THREAD_REMEMBERED = "person-memory.thread-remembered@1";
 export const PERSON_MEMORY_THREAD_UNTRACED = "person-memory.thread-untraced@1";
+export const PERSON_MEMORY_TURN_TYPED = "person-memory.turn-typed@1";
+/** Marks one thread keeps: the newest turns, so a long thread cannot grow the journal without bound. */
+export const PERSON_MEMORY_MAX_TYPED_TURNS_PER_THREAD = 200;
 
 /**
  * The settings as changed, and from when threads count. `since` is set by the
@@ -190,6 +194,13 @@ export const PERSON_MEMORY_THREAD_UNTRACED = "person-memory.thread-untraced@1";
 export const PersonMemorySettingsChanged = Schema.Struct({
   settings: PersonMemorySettings,
   since: UtcTimestamp,
+  /**
+   * When this host began recording which turns the person typed. A turn that
+   * began earlier is read as it always was; one that began later counts only
+   * when marked. Kept through Forget everything, so forgetting never turns
+   * every old turn back into one that counts.
+   */
+  typedSince: Schema.optional(UtcTimestamp),
 }).annotations(strict);
 export type PersonMemorySettingsChanged = typeof PersonMemorySettingsChanged.Type;
 
@@ -230,6 +241,20 @@ export const PersonMemoryThreadUntraced = Schema.Struct({
   leavesNoTrace: Schema.Boolean,
 }).annotations(strict);
 export type PersonMemoryThreadUntraced = typeof PersonMemoryThreadUntraced.Type;
+
+/**
+ * One turn the person typed: its mode, thread, and the turn (or Code
+ * operation, or steered message) id, and nothing else. The host appends it
+ * with the turn when the person's own route said the message was typed, pasted,
+ * or dictated into a composer. A turn with no mark is not the person's words.
+ * `threadId` sits at the top so a thread purge takes the mark with the thread.
+ */
+export const PersonMemoryTurnTyped = Schema.Struct({
+  threadId: MentionableThreadId,
+  mode: OctantMode,
+  turnId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+}).annotations(strict);
+export type PersonMemoryTurnTyped = typeof PersonMemoryTurnTyped.Type;
 
 export const PAST_THREADS_TOOL_NAME = "octant_past_threads";
 export const PAST_THREADS_QUERY_MAX_CHARACTERS = 200;

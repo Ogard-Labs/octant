@@ -955,7 +955,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         uuid: randomUUID,
       });
     });
-    contributeCodeTools(({ windowId, thread }) =>
+    contributeCodeTools(({ windowId, thread, operationId }) =>
       personMemoryAccess.toolsFor({
         mode: "code",
         threadId: String(thread.id),
@@ -964,13 +964,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         windowId,
         title: thread.title,
         providerInstanceId: thread.providerInstanceId,
-        // The person's newest prompt: what the model may quote to have it
-        // remembered at once.
-        personMessages: () =>
-          codeBoardEventStore.personPromptsForThread(thread.id, 1).flatMap((prompt) => {
-            const text = codeEvidence.read(prompt);
-            return text === undefined ? [] : [text];
-          }),
+        // This turn's own prompt and the messages the person steered into it,
+        // pinned by the operation now, so a later message is never read. A tool
+        // built with no operation reads nothing.
+        turnMessages: () =>
+          operationId === undefined
+            ? []
+            : codeBoardEventStore
+                .turnPersonMessages(thread.id, operationId)
+                .flatMap(({ markId, prompt, body }) => {
+                  const text =
+                    body ?? (prompt === undefined ? undefined : codeEvidence.read(prompt));
+                  return text === undefined ? [] : [{ markId, text }];
+                }),
       }),
     );
     contributeCodeTools(({ windowId, thread, readThread, folders, operationId, askPerson }) => {
@@ -1209,6 +1215,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         shield: hostShield,
         octantInstructionBlocks: ({ thread, orchestrates }) =>
           octantInstructions.contextBlocks({ projectId: String(thread.projectId), orchestrates }),
+        markTurnTyped: ({ threadId, projectId, turnId }) =>
+          personMemoryAccess.markTurnTyped({ mode: "code", threadId, projectId, turnId }),
         personMemoryBlock: ({ thread, windowId }) =>
           personMemoryAccess.blockFor({
             mode: "code",

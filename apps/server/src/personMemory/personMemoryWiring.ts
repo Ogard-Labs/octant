@@ -31,17 +31,22 @@ const PERSON_MESSAGE_LIMIT = 60;
 export function chatPersonMessages(
   view: {
     readonly turns: ReadonlyArray<
-      Pick<ChatTurn, "id" | "supersedes" | "rewound" | "delivery" | "userMessageRef">
+      Pick<ChatTurn, "id" | "supersedes" | "rewound" | "delivery" | "userMessageRef"> & {
+        readonly createdAt?: string;
+      }
     >;
     readonly contents: ReadonlyArray<
       Pick<ChatThreadView["contents"][number], "contentId" | "body">
     >;
   },
   limit: number,
+  /** Whether a turn's message is the person's own words, as the store reads marks. */
+  counts: (turn: { readonly turnId: string; readonly began: string }) => boolean,
 ): ReadonlyArray<string> {
   const bodies = new Map(view.contents.map((content) => [String(content.contentId), content.body]));
   return activeChatTurns(view.turns)
     .filter((turn) => turn.delivery === undefined)
+    .filter((turn) => counts({ turnId: String(turn.id), began: turn.createdAt ?? "" }))
     .flatMap((turn) => bodies.get(String(turn.userMessageRef.contentId)) ?? [])
     .slice(-limit);
 }
@@ -100,7 +105,9 @@ export function createPersonMemorySweep(input: {
         projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
-        personMessages: chatPersonMessages(view, PERSON_MESSAGE_LIMIT),
+        personMessages: chatPersonMessages(view, PERSON_MESSAGE_LIMIT, (turn) =>
+          input.store.countsAsPersonWords({ mode: "chat", threadId, ...turn }),
+        ),
       };
     },
   };

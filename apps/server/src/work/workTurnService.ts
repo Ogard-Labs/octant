@@ -330,6 +330,12 @@ export interface WorkTurnStartOptions {
    * cannot carry it.
    */
   readonly runtimeTurn?: true;
+  /**
+   * Set only by the person's own route when it says they typed this message
+   * into a composer. Host-only: the wire command carries a claim the route
+   * checks, and a caller inside the host cannot set it by accident.
+   */
+  readonly typedByPerson?: true;
 }
 
 /**
@@ -580,6 +586,12 @@ export interface WorkTurnServiceDependencies {
     readonly thread: WorkThread;
     readonly windowId: WindowId;
   }) => string | undefined;
+  /** Records that the person typed a turn's message, once the turn is accepted. */
+  readonly markTurnTyped?: (input: {
+    readonly threadId: string;
+    readonly projectId: string;
+    readonly turnId: string;
+  }) => void;
   /**
    * The instructions the person wrote for Octant, as standing blocks in their
    * order. Every turn gets them, whoever started it: they grant nothing.
@@ -778,6 +790,7 @@ export class WorkTurnService {
   readonly #serverProjects: ServerWorkTurns | undefined;
   readonly #nativeHarness: WorkTurnServiceDependencies["nativeHarness"];
   readonly #personMemoryBlock: WorkTurnServiceDependencies["personMemoryBlock"];
+  readonly #markTurnTyped: WorkTurnServiceDependencies["markTurnTyped"];
   readonly #octantInstructionBlocks: WorkTurnServiceDependencies["octantInstructionBlocks"];
   readonly #spendCeiling: WorkTurnServiceDependencies["spendCeiling"];
   readonly #spendReservations = new Map<
@@ -856,6 +869,7 @@ export class WorkTurnService {
     this.#serverProjects = dependencies.serverProjects;
     this.#nativeHarness = dependencies.nativeHarness;
     this.#personMemoryBlock = dependencies.personMemoryBlock;
+    this.#markTurnTyped = dependencies.markTurnTyped;
     this.#octantInstructionBlocks = dependencies.octantInstructionBlocks;
     this.#spendCeiling = dependencies.spendCeiling;
     this.#onTurnRequested = dependencies.onTurnRequested;
@@ -2512,6 +2526,15 @@ export class WorkTurnService {
         throw this.#mapFailure(error);
       }
       this.#consumeIssueContextFramed?.(String(command.threadId));
+      // After the turn, before its run: a turn with no mark is not the
+      // person's words, so a failed or missing mark is the safe side.
+      if (options?.typedByPerson === true && command.delivery === undefined) {
+        this.#markTurnTyped?.({
+          threadId: String(command.threadId),
+          projectId: String(command.authority.projectId),
+          turnId: String(command.turnId),
+        });
+      }
 
       const accepted = this.#projection.lookup(command.requestId);
       if (accepted === undefined) {

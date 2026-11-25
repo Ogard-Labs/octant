@@ -359,6 +359,7 @@ function openFixture(options?: {
   readonly hiddenThreadIds?: () => ReadonlySet<string>;
   readonly octantInstructionBlocks?: ChatServiceOptions["octantInstructionBlocks"];
   readonly personMemoryBlock?: ChatServiceOptions["personMemoryBlock"];
+  readonly markTurnTyped?: ChatServiceOptions["markTurnTyped"];
   readonly moveHold?: (threadId: string) => boolean;
   readonly liveTurns?: import("../liveTurn/liveTurnRegistry").LiveTurnRegistry;
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
@@ -861,6 +862,7 @@ function openFixture(options?: {
     ...(options?.personMemoryBlock === undefined
       ? {}
       : { personMemoryBlock: options.personMemoryBlock }),
+    ...(options?.markTurnTyped === undefined ? {} : { markTurnTyped: options.markTurnTyped }),
     ...(options?.moveHold === undefined ? {} : { moveHold: options.moveHold }),
     ...(options?.resolveSideChatReturns === undefined
       ? {}
@@ -2525,6 +2527,41 @@ describe("ChatService", () => {
     expect(planSpy.mock.calls.at(-1)?.[0].entries.map((entry) => entry.category)).toEqual(
       expect.arrayContaining(["person-instructions", "project-instructions"]),
     );
+  });
+
+  it("marks a turn as typed by the person only when the route said so, and never from the command", async () => {
+    const markTurnTyped = vi.fn();
+    const { service } = openFixture({ markTurnTyped });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Typed",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const send = async (prompt: string, context?: { readonly typedByPerson?: true }) =>
+      service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: service.read(created.thread.id).thread.version,
+          prompt,
+          // A claim in the command is only a claim: the route decides.
+          typedByPerson: true,
+        },
+        context,
+      );
+
+    const first = await send("A button wrote this.");
+    expect(markTurnTyped).not.toHaveBeenCalled();
+    const second = await send("I typed this.", { typedByPerson: true });
+
+    if (second.kind !== "turn-created" || first.kind !== "turn-created")
+      throw new Error("Expected turns.");
+    expect(markTurnTyped).toHaveBeenCalledTimes(1);
+    expect(markTurnTyped).toHaveBeenCalledWith({
+      threadId: String(created.thread.id),
+      turnId: String(second.turn.id),
+    });
   });
 
   it("sends an unchanged Side Chat source once to a provider that keeps its own history", async () => {

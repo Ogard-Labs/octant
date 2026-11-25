@@ -689,6 +689,8 @@ export function wireWork(deps: WorkDependencies) {
       liveTurns,
       octantInstructionBlocks: ({ thread }) =>
         octantInstructions.contextBlocks({ projectId: String(thread.projectId) }),
+      markTurnTyped: ({ threadId, projectId, turnId }) =>
+        personMemoryAccess.markTurnTyped({ mode: "work", threadId, projectId, turnId }),
       personMemoryBlock: ({ thread, windowId }) =>
         personMemoryAccess.blockFor({
           mode: "work",
@@ -1153,14 +1155,22 @@ export function wireWork(deps: WorkDependencies) {
               windowId: input.windowId,
               title: input.thread.title,
               providerInstanceId: input.thread.providerInstanceId,
-              // The person's newest prompt, leaving out a turn the host
-              // accepted to deliver a subagent's result.
-              personMessages: () =>
-                workTurnProjection
+              // This turn's own prompt and the messages the person steered
+              // into it, each under the id its typed mark uses. The turn is
+              // pinned now, so a later message is never read.
+              turnMessages: () => {
+                const own = workTurnProjection
                   .listForThread(input.thread.id)
-                  .filter((turn) => turn.delivery === undefined)
-                  .slice(-1)
-                  .map((turn) => turn.prompt),
+                  .find((turn) => String(turn.turnId) === String(input.turnId));
+                if (own === undefined || own.delivery !== undefined) return [];
+                return [
+                  { markId: String(own.turnId), text: own.prompt },
+                  ...(own.steeredMessages ?? []).map((message) => ({
+                    markId: String(message.messageId),
+                    text: message.body,
+                  })),
+                ];
+              },
             });
         // Plan reads Project memory and refuses every write to it; elsewhere
         // the turn's level and the Project's setting decide whether one asks.
@@ -2050,7 +2060,7 @@ export function wireWork(deps: WorkDependencies) {
           !isPairedDeviceScope(windowId) && !isRoutineHostScope(windowId),
         // The turn that took the message is the thread's newest: it was
         // running when the runtime accepted it.
-        recordSteered: ({ scope, messageId, body }) => {
+        recordSteered: ({ scope, messageId, body, typedByPerson }) => {
           const threadId = String(scope.threadId);
           const turnKey =
             scope.mode === "work"
@@ -2076,6 +2086,15 @@ export function wireWork(deps: WorkDependencies) {
           });
           // Work keeps its turns in memory; the journal rebuilds them at start.
           if (scope.mode === "work") workTurnProjection.applySteeredMessage(record);
+          // The message is its own mark: it entered a turn the person did not
+          // start with it, so only its own mark makes it their typed words.
+          if (typedByPerson) {
+            personMemoryAccess.markTurnTyped({
+              mode: scope.mode,
+              threadId,
+              turnId: String(messageId),
+            });
+          }
         },
       },
     });

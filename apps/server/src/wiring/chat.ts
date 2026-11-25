@@ -83,7 +83,7 @@ import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "../scaffold/curatedScaf
 import { resolveAvailableTools } from "../scaffold/scaffoldFilesystem";
 import { hydrateAgentMessageProjectionFromJournal } from "../agentMessage/agentMessageProjection";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
-import { activeChatTurns, defaultShellSettings, findWorkspacePresetTarget } from "@octant/domain";
+import { defaultShellSettings, findWorkspacePresetTarget } from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import type { AppManagedToolSet } from "../chat/chatTurnRunner";
@@ -501,6 +501,8 @@ export function wireChat(deps: ChatDependencies) {
         octantInstructions.contextBlocks({
           projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
         }),
+      markTurnTyped: ({ threadId, projectId, turnId }) =>
+        personMemoryAccess.markTurnTyped({ mode: "chat", threadId, projectId, turnId }),
       personMemoryBlock: ({ thread, windowId }) =>
         personMemoryAccess.blockFor({
           mode: "chat",
@@ -790,20 +792,18 @@ export function wireChat(deps: ChatDependencies) {
                   windowId,
                   title: thread.title,
                   providerInstanceId: thread.providerInstanceId,
-                  // The person's newest message: what the model may quote to
-                  // have it remembered at once.
-                  personMessages: () => {
+                  // The message of this turn alone, pinned by its id: what the
+                  // model may quote to have it remembered at once, and only
+                  // when the host marked it typed.
+                  turnMessages: () => {
                     const view = persistence.readChatThreadView(thread.id);
-                    if (view === undefined) return [];
-                    const bodies = new Map(
-                      view.contents.map((content) => [String(content.contentId), content.body]),
-                    );
-                    const newest = activeChatTurns(view.turns).at(-1);
-                    const body =
-                      newest === undefined
-                        ? undefined
-                        : bodies.get(String(newest.userMessageRef.contentId));
-                    return body === undefined ? [] : [body];
+                    const own = view?.turns.find((turn) => String(turn.id) === String(turnId));
+                    if (view === undefined || own === undefined) return [];
+                    const body = view.contents.find(
+                      (content) =>
+                        String(content.contentId) === String(own.userMessageRef.contentId),
+                    )?.body;
+                    return body === undefined ? [] : [{ markId: String(own.id), text: body }];
                   },
                 }),
                 // Outside the taint wrapper too: it returns Project memory the

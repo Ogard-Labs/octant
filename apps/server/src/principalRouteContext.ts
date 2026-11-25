@@ -62,6 +62,15 @@ export function boundPrincipalIsRestricted(request: Request): boolean {
   return principal !== undefined && !principalActsAsHostPerson(principal);
 }
 
+/**
+ * Whether the request is the host's own person typing: a local window, or a
+ * device they paired at Full, and not an outside agent's grant. Only such a
+ * request's claim that a message was typed is believed.
+ */
+export function boundPrincipalIsThePerson(request: Request): boolean {
+  return !boundPrincipalIsRestricted(request) && !boundPrincipalIsAgent(request);
+}
+
 /** Whether the request's bound principal is a device only the hub introduced. */
 export function boundPrincipalIsHubIntroduced(request: Request): boolean {
   const principal = boundContexts.get(request)?.principal;

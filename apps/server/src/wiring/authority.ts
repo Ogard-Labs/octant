@@ -214,6 +214,9 @@ export function wireAuthority(deps: AuthorityDependencies) {
     clock: () => decodeUtcTimestamp(new Date().toISOString()),
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
   });
+  // Journals when this host began marking the turns a person typed, before any
+  // turn runs: every turn that begins later is marked or not the person's words.
+  personMemory.typedSince();
   const todos = new TodoStore({
     defaultActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     journal: persistence.journal,

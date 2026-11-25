@@ -1164,6 +1164,14 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             await dependencies.service.executeOperation(authenticatedWindowId, operation, {
               initiator: operationInitiator,
               actor: callerActor,
+              // Believed only from the person's own window or paired device,
+              // never from an outside agent's grant or a hub-introduced device.
+              ...(operation.kind === "start-provider-turn" &&
+              operation.typedByPerson === true &&
+              operationInitiator === "user" &&
+              !agentGrantSession
+                ? { typedByPerson: true as const }
+                : {}),
               ...(operation.kind === "start-provider-turn" ||
               requiresLiveCodeReviewAuthority(operation) ||
               // A switch may wait behind another Git mutation in the queue;

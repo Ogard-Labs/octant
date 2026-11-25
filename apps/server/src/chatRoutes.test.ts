@@ -1,3 +1,4 @@
+import { AGENT_ACCESS_ORIGIN } from "./clientPrincipal";
 import {
   decodeChatAttachmentId,
   decodeChatThreadId,
@@ -320,6 +321,61 @@ describe("Chat routes", () => {
         expect.objectContaining({ initiator }),
       );
     }
+  });
+
+  it("believes that a message was typed only from the person's own window or a device they paired", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated", thread: threadFixture }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "73000000-0000-4000-8000-000000000070";
+    const send = (typedByPerson: boolean) => ({
+      kind: "send-chat-turn",
+      threadId: threadFixture.id,
+      expectedVersion: 1,
+      prompt: "I prefer short answers.",
+      ...(typedByPerson ? { typedByPerson: true } : {}),
+    });
+    const post = (body: unknown) =>
+      request("/api/chat/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const from = (
+      body: unknown,
+      admittedBy?: "host-person" | "hub-roster",
+      origin = "https://octant.invalid",
+    ) => {
+      const remote = post(body);
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin,
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "73000000-0000-4000-8000-000000000071" as never,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    const sent = async (body: Request) => {
+      expect((await route(body))?.status).toBe(200);
+      return execute.mock.lastCall?.[1] as { readonly typedByPerson?: true } | undefined;
+    };
+
+    expect((await sent(post(send(true))))?.typedByPerson).toBe(true);
+    expect((await sent(from(send(true), "host-person")))?.typedByPerson).toBe(true);
+    // A claim from a hub-introduced device, a restricted device, or an outside
+    // agent's grant is ignored, and so is a send that makes no claim.
+    expect((await sent(from(send(true), "hub-roster")))?.typedByPerson).toBeUndefined();
+    expect((await sent(from(send(true))))?.typedByPerson).toBeUndefined();
+    expect(
+      (await sent(from(send(true), "host-person", AGENT_ACCESS_ORIGIN)))?.typedByPerson,
+    ).toBeUndefined();
+    expect((await sent(post(send(false))))?.typedByPerson).toBeUndefined();
   });
 
   it("rejects an attachment whose media type is not a type/subtype", async () => {

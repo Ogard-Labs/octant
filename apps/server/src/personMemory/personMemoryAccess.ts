@@ -1,7 +1,7 @@
 import type { OctantMode, ProviderInstanceId, WindowId } from "@octant/contracts";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { createPastThreadsTools } from "./pastThreadsTool";
-import { createRememberPersonTools } from "./rememberPersonTool";
+import { createRememberPersonTools, type PersonTurnMessage } from "./rememberPersonTool";
 import type { PersonMemoryStore } from "./personMemoryStore";
 
 export interface PersonMemoryTurnScope {
@@ -21,11 +21,26 @@ export interface PersonMemoryTurnScope {
 export interface PersonMemoryToolScope extends PersonMemoryTurnScope {
   readonly title?: string | undefined;
   readonly providerInstanceId?: ProviderInstanceId | undefined;
-  /** What the person wrote in this turn, newest last; read again on every save. */
-  readonly personMessages?: (() => ReadonlyArray<string>) | undefined;
+  /**
+   * The messages of the turn this scope was built for (its own prompt, and any
+   * steered into it), each with the id its typed mark is kept under. Read again
+   * on every save; absent, the turn is offered search only.
+   */
+  readonly turnMessages?: (() => ReadonlyArray<PersonTurnMessage>) | undefined;
 }
 
 export interface PersonMemoryAccess {
+  /**
+   * Records that the person typed a turn's message. Called by the host after it
+   * admitted a turn the person's own route said was typed, never from request
+   * data a service could read.
+   */
+  readonly markTurnTyped: (input: {
+    readonly mode: OctantMode;
+    readonly threadId: string;
+    readonly turnId: string;
+    readonly projectId?: string | undefined;
+  }) => void;
   readonly blockFor: (scope: PersonMemoryTurnScope) => string | undefined;
   readonly toolsFor: (scope: PersonMemoryToolScope) => AppManagedToolSet | undefined;
   readonly childBlockFor: (lead: PersonMemoryTurnScope) => string | undefined;
@@ -53,7 +68,14 @@ export interface PersonMemoryAccess {
 export function createPersonMemoryAccess(input: {
   readonly store: Pick<
     PersonMemoryStore,
-    "blockFor" | "search" | "searchOffered" | "threadTakesPart" | "saveFromOpenThread"
+    | "blockFor"
+    | "search"
+    | "searchOffered"
+    | "threadTakesPart"
+    | "saveFromOpenThread"
+    | "isTurnTyped"
+    | "markTurnTyped"
+    | "saveRefusal"
   >;
   readonly isRestrictedDeviceScope?: (scopeId: WindowId) => boolean;
   /**
@@ -94,7 +116,7 @@ export function createPersonMemoryAccess(input: {
       save.isHostScope(scope.windowId) ||
       scope.title === undefined ||
       scope.providerInstanceId === undefined ||
-      scope.personMessages === undefined ||
+      scope.turnMessages === undefined ||
       !input.store.threadTakesPart(scope)
     ) {
       return undefined;
@@ -108,11 +130,12 @@ export function createPersonMemoryAccess(input: {
         title: scope.title,
         providerInstanceId: scope.providerInstanceId,
       },
-      personMessages: scope.personMessages,
+      turnMessages: scope.turnMessages,
       namesProtectedPath: save.namesProtectedPath,
     });
   };
   return {
+    markTurnTyped: (turn) => input.store.markTurnTyped(turn),
     blockFor: (scope) =>
       scopeReadsPersonMemory(scope.windowId, scope.threadId)
         ? input.store.blockFor(scope)

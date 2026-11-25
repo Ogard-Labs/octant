@@ -1160,18 +1160,36 @@ export function wireHarness(deps: HarnessDependencies) {
           completedAt: thread.completedAt,
         })),
     },
-    // What the person wrote: each turn's prompt, leaving out the turns the
-    // host accepted to deliver a subagent's result.
+    // What the person wrote: each turn's prompt that the host marked typed (or
+    // that began before marks were kept), leaving out the turns the host
+    // accepted to deliver a subagent's result.
     workPersonMessages: (threadId, limit) =>
       workTurnProjection
         .listForThread(decodeWorkThreadId(threadId))
         .filter((turn) => turn.delivery === undefined)
+        .filter((turn) =>
+          personMemory.countsAsPersonWords({
+            mode: "work",
+            threadId,
+            turnId: String(turn.turnId),
+            began: String(turn.acceptedAt),
+          }),
+        )
         .map((turn) => turn.prompt)
         .slice(-limit),
     codePersonMessages: (threadId, limit) =>
       codeBoardEventStore
-        .personPromptsForThread(decodeCodeThreadId(threadId), limit)
-        .flatMap((prompt) => {
+        .personPromptTurnsForThread(decodeCodeThreadId(threadId), limit * 4)
+        .filter((turn) =>
+          personMemory.countsAsPersonWords({
+            mode: "code",
+            threadId,
+            turnId: turn.operationId,
+            began: turn.began,
+          }),
+        )
+        .slice(-limit)
+        .flatMap(({ prompt }) => {
           const text = codeEvidence.read(prompt);
           return text === undefined ? [] : [text];
         }),

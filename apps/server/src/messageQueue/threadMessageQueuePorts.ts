@@ -102,6 +102,8 @@ export interface ThreadMessageQueuePortDependencies {
       readonly scope: ThreadMessageQueueScope;
       readonly messageId: ThreadQueueMessageId;
       readonly body: string;
+      /** The person typed it, as the queue entry kept it. */
+      readonly typedByPerson: boolean;
     }) => void;
   };
 }
@@ -114,7 +116,13 @@ export interface ThreadMessageQueuePortDependencies {
  * reviews.
  */
 function steerableText(payload: ThreadMessageQueuePayload): string | undefined {
-  const { mode: _mode, prompt, contextInputPolicy: _policy, ...rest } = payload;
+  const {
+    mode: _mode,
+    prompt,
+    contextInputPolicy: _policy,
+    typedByPerson: _typed,
+    ...rest
+  } = payload;
   if (prompt.trim().length === 0 || prompt.trimStart().startsWith("/")) return undefined;
   const carriesMore = Object.values(rest).some(
     (value) => value !== undefined && !(Array.isArray(value) && value.length === 0),
@@ -445,7 +453,12 @@ export function createThreadMessageQueuePort(
           );
           if (outcome !== "steered") return "refused";
           try {
-            steering.recordSteered({ scope, messageId, body: text });
+            steering.recordSteered({
+              scope,
+              messageId,
+              body: text,
+              typedByPerson: payload.typedByPerson === true,
+            });
           } catch {
             // The runtime already took the message; reporting it unsteered
             // now would send it a second time as a turn of its own.
@@ -511,7 +524,10 @@ export function createThreadMessageQueuePort(
         return latest.tail?.id === current.tail?.id && latest.tail?.status === current.tail?.status;
       };
       try {
-        const { mode: _mode, ...message } = input.payload;
+        const { mode: _mode, typedByPerson: _typed, ...message } = input.payload;
+        // Kept on the entry by the person's own route, which strips the claim
+        // from every other caller, and by an edit that only a person made.
+        const typed = input.payload.typedByPerson === true ? { typedByPerson: true as const } : {};
         if (input.scope.mode === "chat") {
           const { thread } = deps.chat.read(decodeChatThreadId(input.scope.threadId));
           return await new Promise((resolve) => {
@@ -528,6 +544,7 @@ export function createThreadMessageQueuePort(
                   windowId: input.windowId,
                   admissionCurrent,
                   onTurnAccepted: () => resolve({ status: "accepted" }),
+                  ...typed,
                 },
               )
               .then(
@@ -574,7 +591,7 @@ export function createThreadMessageQueuePort(
                 modelId: thread.modelId,
               },
             },
-            { admissionCurrent },
+            { admissionCurrent, ...typed },
           );
           return result.kind === "accepted"
             ? { status: "accepted" }
@@ -611,7 +628,7 @@ export function createThreadMessageQueuePort(
             checkoutId: thread.checkoutId,
             prompt,
           }),
-          { admissionCurrent },
+          { admissionCurrent, ...typed },
         );
         if (
           (result.kind === "provider-turn-state" || result.kind === "operation-failed") &&
