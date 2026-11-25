@@ -8,7 +8,7 @@ import {
   mergeMobilePullRequest,
   setMobileMergeWhenReady,
   observeMobilePullRequest,
-  readMobileCodeTurnUnderway,
+  readMobileCodeNewestTurn,
   sendMobileCodeTurn,
 } from "./mobileCodeOperationsClient";
 import type { MobileRemoteTransport } from "./mobileInboxClient";
@@ -750,19 +750,14 @@ describe("mobile Code follow-through", () => {
     expect(requests.some((request) => request.path.endsWith("/conversation"))).toBe(false);
   });
 
-  it("looks at only the newest turn, without its text, to tell whether a turn is underway", async () => {
-    const answers = [
-      { status: "incomplete", underway: true },
-      { status: "waiting", underway: true },
-      { status: "completed", underway: false },
-    ];
-    for (const { status, underway } of answers) {
+  it("reads only the newest turn's identity and status, without its text", async () => {
+    for (const status of ["incomplete", "waiting", "completed"]) {
       const fetch = vi.fn(async (input: { method: string; path: string; query?: string }) =>
         input.path === `/api/code/threads/${threadId}/conversation/window`
           ? jsonResponse({
               version: 1,
               threadId,
-              turns: [{ ...numberedTurn(1), status }],
+              turns: [{ ...numberedTurn(7), status }],
               hasEarlier: true,
               hasLater: false,
             })
@@ -772,13 +767,16 @@ describe("mobile Code follow-through", () => {
         hostId: "host-1",
         authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
       };
-      await expect(readMobileCodeTurnUnderway(transport, threadId)).resolves.toBe(underway);
+      await expect(readMobileCodeNewestTurn(transport, threadId)).resolves.toEqual({
+        operationId: numberedTurn(7).operationId,
+        status,
+      });
       expect(fetch).toHaveBeenCalledOnce();
       expect(fetch).toHaveBeenCalledWith(expect.objectContaining({ query: "?limit=1" }));
     }
     const older = vi.fn(async () => jsonResponse({ category: "unavailable" }, 404));
     await expect(
-      readMobileCodeTurnUnderway(
+      readMobileCodeNewestTurn(
         {
           hostId: "host-1",
           authenticatedFetch: older as MobileRemoteTransport["authenticatedFetch"],

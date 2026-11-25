@@ -237,8 +237,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
 
   // A turn started on another device reaches a settled Code page no other
   // way, so the page takes one light look at the newest turn on the idle
-  // cadence; finding one underway refreshes it once, and the re-reads above
-  // take over from there.
+  // cadence; a turn it does not show, even one that already finished,
+  // refreshes it once, and for a running turn the re-reads above take over.
   const codeLooksForNewTurn = mode === "code" && code.looksForNewTurn;
   const noticeCodeTurn = code.noticeTurnStartedElsewhere;
   useEffect(() => {

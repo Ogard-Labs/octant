@@ -8,6 +8,7 @@ import {
   rereadsCodeThread,
   loadCodeConversationPage,
   looksForTurnStartedElsewhere,
+  refreshesForNewestTurn,
 } from "./codeConversationPage";
 
 vi.mock("@octant/client-runtime", async () => {
@@ -106,5 +107,23 @@ describe("whether the phone looks for a turn started elsewhere", () => {
     expect(
       looksForTurnStartedElsewhere(page(["older", "hit"], { hasEarlier: true, hasLater: true })),
     ).toBe(false);
+  });
+});
+
+describe("whether the phone's look at the newest turn refreshes the page", () => {
+  const shown = page(["a"], { hasEarlier: false, hasLater: false });
+
+  it("refreshes for a turn it does not show, even one that already finished", () => {
+    expect(refreshesForNewestTurn(shown, { operationId: "b", status: "completed" })).toBe(true);
+    expect(refreshesForNewestTurn(shown, { operationId: "b", status: "incomplete" })).toBe(true);
+  });
+
+  it("refreshes for the shown turn only once it runs or waits again", () => {
+    expect(refreshesForNewestTurn(shown, { operationId: "a", status: "completed" })).toBe(false);
+    expect(refreshesForNewestTurn(shown, { operationId: "a", status: "waiting" })).toBe(true);
+  });
+
+  it("does not refresh when the host answered nothing to compare", () => {
+    expect(refreshesForNewestTurn(shown, undefined)).toBe(false);
   });
 });

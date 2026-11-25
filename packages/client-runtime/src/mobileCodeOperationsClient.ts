@@ -422,15 +422,16 @@ export interface MobileCodeConversation {
 }
 
 /**
- * Whether a Code thread's newest turn runs or waits, from one turn of the
- * window read and none of the text behind it: the phone's light look at a
- * thread it shows settled, since a turn started elsewhere reaches it no other
- * way. Undefined from a host without the window read.
+ * A Code thread's newest turn, its identity and status alone, from one turn
+ * of the window read and none of the text behind it: the phone's light look at
+ * a thread it shows settled, since a turn started elsewhere reaches it no
+ * other way, and one may start and finish between two looks. Null for a
+ * thread with no turn; undefined from a host without the window read.
  */
-export async function readMobileCodeTurnUnderway(
+export async function readMobileCodeNewestTurn(
   transport: MobileRemoteTransport,
   threadId: string,
-): Promise<boolean | undefined> {
+): Promise<Pick<MobileCodeConversationTurn, "operationId" | "status"> | null | undefined> {
   const response = await transport.authenticatedFetch({
     method: "GET",
     path: `/api/code/threads/${encodeURIComponent(threadId)}/conversation/window`,
@@ -445,8 +446,10 @@ export async function readMobileCodeTurnUnderway(
   if (String(window.threadId) !== threadId) {
     throw new MobileInboxFailure("unavailable", "Code conversation identity mismatch.");
   }
-  const newest = window.turns.at(-1)?.status;
-  return newest === "incomplete" || newest === "waiting";
+  const newest = window.turns.at(-1);
+  return newest === undefined
+    ? null
+    : { operationId: String(newest.operationId), status: newest.status };
 }
 
 /**

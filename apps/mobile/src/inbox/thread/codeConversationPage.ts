@@ -52,3 +52,20 @@ export function rereadsCodeThread(
 export function looksForTurnStartedElsewhere(shown: MobileCodeConversation | undefined): boolean {
   return shown !== undefined && !shown.hasLater && !rereadsCodeThread(shown.turns);
 }
+
+/**
+ * Whether the light look at the newest turn calls for reading the page again:
+ * the host's newest turn is not the one shown, even if it already finished,
+ * or the shown one runs or waits again.
+ */
+export function refreshesForNewestTurn(
+  shown: MobileCodeConversation,
+  newest: Pick<MobileCodeConversation["turns"][number], "operationId" | "status"> | null | undefined,
+): boolean {
+  if (newest === undefined || newest === null) return false;
+  return (
+    newest.operationId !== shown.turns.at(-1)?.operationId ||
+    newest.status === "incomplete" ||
+    newest.status === "waiting"
+  );
+}
