@@ -14,7 +14,7 @@ import {
 } from "@react-navigation/native";
 import { useRef, type ReactNode } from "react";
 import { PlaceTabs } from "./PlaceTabs";
-import { placeFor, screenHidesBar, type MobilePlaceId } from "./places";
+import { placeFor, screenHidesNew, type MobilePlaceId } from "./places";
 
 type PlaceTabEvents = {
   tabPress: { data: undefined; canPreventDefault: true };
@@ -76,8 +76,8 @@ function PlaceTabNavigator({ onNew, newDisabled, ...options }: Props) {
     <NavigationContent>
       <PlaceTabs
         active={placeFor(focused?.name ?? "home")}
-        barHidden={
-          focused !== undefined && screenHidesBar(getFocusedRouteNameFromRoute(focused) ?? "")
+        newHidden={
+          focused !== undefined && screenHidesNew(getFocusedRouteNameFromRoute(focused) ?? "")
         }
         newDisabled={newDisabled}
         onNew={onNew}

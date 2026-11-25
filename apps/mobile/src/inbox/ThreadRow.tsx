@@ -1,54 +1,199 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import type { MobileInboxRow } from "@octant/client-runtime";
-import { useTheme } from "../../design-system";
+import { space, typography, useTheme, withAlpha, type ThemeColors } from "../../design-system";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { useMobileSession } from "../session/MobileSessionContext";
-import { ListRow } from "../ui/NativeChrome";
-import { inboxWorkStatus } from "./inboxWorkPresentation";
+import type { MobileIconName } from "../ui/IconButton";
 import { useMobileThreads } from "./MobileThreadsContext";
 import { ThreadRowActionsSheet } from "./ThreadRowActionsSheet";
+import { threadModeIcon, threadModeLabel } from "./threadRowPresentation";
 import {
-  threadModeIcon,
-  threadModeLabel,
-  threadRowDetail,
-  threadStatusTone,
-} from "./threadRowPresentation";
+  projectMonogram,
+  pullRequestChip,
+  threadRowState,
+  type ThreadRowKind,
+} from "./threadRowState";
+
+const STATE_ICON: Readonly<Record<ThreadRowKind, MobileIconName | undefined>> = {
+  waiting: "alert-circle-outline",
+  failed: "close-circle-outline",
+  review: "eye-outline",
+  working: "ellipse-outline",
+  idle: undefined,
+  settled: undefined,
+};
+
+function stateInk(kind: ThreadRowKind, colors: ThemeColors): string {
+  switch (kind) {
+    case "waiting":
+      return colors.warning;
+    case "failed":
+      return colors.danger;
+    case "review":
+      return colors.palettePurple;
+    case "working":
+      return colors.paletteBlue;
+    case "idle":
+    case "settled":
+      return colors.textTertiary;
+  }
+}
+
+/** One hue per Project name, the same on every launch. */
+function projectHue(name: string, colors: ThemeColors): string {
+  const hues = [
+    colors.palettePurple,
+    colors.paletteGreen,
+    colors.paletteBlue,
+    colors.paletteOrange,
+    colors.paletteTeal,
+  ];
+  let sum = 0;
+  for (const letter of name) sum = (sum * 31 + (letter.codePointAt(0) ?? 0)) % 9_973;
+  return hues[sum % hues.length] ?? colors.paletteBlue;
+}
+
+const PULL_REQUEST_INK = (state: string, colors: ThemeColors): string =>
+  state === "merged" ? colors.merged : state === "open" ? colors.paletteGreen : colors.textTertiary;
 
 /**
- * One thread in any list: what it is, where it runs, what it waits for, and
- * its state in words. A long press offers what the row menu offers.
+ * One thread in any list: its Project's letters and title, the computer and
+ * mode under it, and at the end its state in words with its pull requests. A
+ * long press offers what the row menu offers. A running thread steps back,
+ * since nothing is asked of the person there.
  */
 export function ThreadRow(props: {
   readonly row: MobileInboxRow;
   readonly last: boolean;
   readonly onOpen: (row: MobileInboxRow) => void;
-  /** False under a Project heading, which already names it. */
-  readonly showProject?: boolean;
 }) {
   const { row } = props;
   const { colors } = useTheme();
   const { transports } = useMobileSession();
   const { hostLabel, projectName, refresh } = useMobileThreads();
   const [actionsOpen, setActionsOpen] = useState(false);
-  const project = props.showProject === false ? undefined : projectName(row);
+  const project = projectName(row);
+  const state = threadRowState(row, new Date());
+  const quiet = state.kind === "working" || state.kind === "settled";
+  const ink = stateInk(state.kind, colors);
+  const letters = project === undefined ? "" : projectMonogram(project);
+  const hue = project === undefined ? colors.textSecondary : projectHue(project, colors);
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        row: {
+          minHeight: 64,
+          flexDirection: "row",
+          paddingLeft: space.md,
+        },
+        pressed: { backgroundColor: colors.controlHover },
+        badge: {
+          width: 26,
+          height: 26,
+          marginTop: 11,
+          marginRight: 12,
+          borderRadius: 7,
+          alignItems: "center",
+          justifyContent: "center",
+        },
+        letters: { fontSize: 11, fontWeight: "700", letterSpacing: 0.2 },
+        body: { flex: 1, paddingVertical: 11, paddingRight: space.md, gap: 4 },
+        separated: {
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: colors.hairline,
+        },
+        quiet: { opacity: 0.62 },
+        line: { flexDirection: "row", alignItems: "center", gap: space.sm },
+        title: { flex: 1, color: colors.textPrimary, fontSize: 17, fontWeight: "500" },
+        state: { flexDirection: "row", alignItems: "center", gap: 4 },
+        stateWord: { fontSize: typography.detail.fontSize, fontWeight: "600" },
+        place: { flex: 1, flexDirection: "row", alignItems: "center", gap: 5 },
+        placeText: { flexShrink: 1, color: colors.textTertiary, fontSize: 14 },
+        pullRequest: { flexDirection: "row", alignItems: "center", gap: 3 },
+        pullRequestText: { fontSize: typography.detail.fontSize, fontVariant: ["tabular-nums"] },
+      }),
+    [colors],
+  );
+  const title = formatScreenshotSafeLabel(row.title);
+  const place = `${hostLabel(row.hostId)} · ${threadModeLabel(row.mode)}`;
+  const icon = STATE_ICON[state.kind];
+  const pullRequests = row.pullRequests;
+  const pullRequestInk =
+    pullRequests === undefined ? "" : PULL_REQUEST_INK(pullRequests.state, colors);
   return (
     <>
-      <ListRow
-        accessory="none"
-        detail={threadRowDetail(row, [
-          ...(project === undefined ? [] : [formatScreenshotSafeLabel(project)]),
-          threadModeLabel(row.mode),
-          hostLabel(row.hostId),
-        ])}
-        icon={threadModeIcon(row.mode)}
-        label={formatScreenshotSafeLabel(row.title)}
-        last={props.last}
+      <Pressable
+        accessibilityActions={[{ name: "longpress", label: "Thread actions" }]}
+        accessibilityLabel={[
+          title,
+          state.spoken,
+          project === undefined ? "" : formatScreenshotSafeLabel(project),
+          place,
+          pullRequests === undefined
+            ? ""
+            : pullRequests.count === 1
+              ? `Pull request ${pullRequests.number}`
+              : `${pullRequests.count} pull requests`,
+        ]
+          .filter((part) => part.length > 0)
+          .join(", ")}
+        accessibilityRole="button"
+        onAccessibilityAction={() => setActionsOpen(true)}
         onLongPress={() => setActionsOpen(true)}
         onPress={() => props.onOpen(row)}
+        style={({ pressed }) => [styles.row, pressed ? styles.pressed : null]}
         testID={`mobile-home-thread-row-${row.mode}-${row.threadId}`}
-        value={inboxWorkStatus(row.status, row.reviewState, row.live)}
-        valueTone={threadStatusTone(row, colors)}
-      />
+      >
+        <View
+          style={[
+            styles.badge,
+            { backgroundColor: withAlpha(hue, 0.18) },
+            quiet ? styles.quiet : null,
+          ]}
+        >
+          {letters === "" ? (
+            <Ionicons color={hue} name={threadModeIcon(row.mode)} size={14} />
+          ) : (
+            <Text allowFontScaling={false} style={[styles.letters, { color: hue }]}>
+              {letters}
+            </Text>
+          )}
+        </View>
+        <View style={[styles.body, props.last ? null : styles.separated]}>
+          <View style={[styles.line, quiet ? styles.quiet : null]}>
+            {row.pinned === true ? (
+              <Ionicons color={colors.textTertiary} name="pin" size={13} />
+            ) : null}
+            <Text numberOfLines={1} style={styles.title}>
+              {title}
+            </Text>
+            <View style={styles.state}>
+              {icon === undefined ? null : <Ionicons color={ink} name={icon} size={15} />}
+              <Text numberOfLines={1} style={[styles.stateWord, { color: ink }]}>
+                {state.word}
+              </Text>
+            </View>
+          </View>
+          <View style={[styles.line, quiet ? styles.quiet : null]}>
+            <View style={styles.place}>
+              <Ionicons color={colors.textTertiary} name="desktop-outline" size={13} />
+              <Text numberOfLines={1} style={styles.placeText}>
+                {place}
+              </Text>
+            </View>
+            {pullRequests === undefined ? null : (
+              <View style={styles.pullRequest}>
+                <Ionicons color={pullRequestInk} name="git-pull-request-outline" size={14} />
+                <Text style={[styles.pullRequestText, { color: pullRequestInk }]}>
+                  {pullRequestChip(pullRequests)}
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+      </Pressable>
       {actionsOpen ? (
         <ThreadRowActionsSheet
           onChanged={() => void refresh()}

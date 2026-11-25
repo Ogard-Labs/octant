@@ -6,11 +6,10 @@ import { MOBILE_COPY } from "../copy";
 import { space, typography, useTheme } from "../../design-system";
 import type { CountedThreads } from "../navigation/routes";
 import { ScreenHeader } from "../navigation/ScreenHeader";
-import { ListSection } from "../ui/NativeChrome";
 import { inboxCountedRows } from "./inboxWorkPresentation";
 import { useMobileThreads } from "./MobileThreadsContext";
 import { ThreadListNotices } from "./ThreadListNotices";
-import { ThreadRow } from "./ThreadRow";
+import { ThreadGroup } from "./ThreadGroup";
 
 const COUNTED: Readonly<
   Record<CountedThreads, { readonly title: string; readonly empty: string }>
@@ -52,16 +51,7 @@ export function CountedThreadsScreen(props: {
       <ScrollView contentContainerStyle={styles.content} contentInsetAdjustmentBehavior="automatic">
         <ThreadListNotices />
         {counted.length > 0 ? (
-          <ListSection>
-            {counted.map((row, index) => (
-              <ThreadRow
-                key={`${row.hostId}:${row.mode}:${row.threadId}`}
-                last={index === counted.length - 1}
-                onOpen={props.onOpenThread}
-                row={row}
-              />
-            ))}
-          </ListSection>
+          <ThreadGroup onOpen={props.onOpenThread} rows={counted} />
         ) : loading ? null : (
           <Text style={styles.empty}>{COUNTED[props.view].empty}</Text>
         )}

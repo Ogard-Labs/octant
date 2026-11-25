@@ -39,7 +39,7 @@ function newestFirst(rows: ReadonlyArray<MobileInboxRow>): ReadonlyArray<MobileI
 
 /**
  * Status: Pinned, Needs input (an approval or answer waits, or review asked for
- * changes), Ready for review (a Code review waits or is approved and unmerged), Working (a turn runs), and
+ * changes), Ready for review (a Code review waits or is approved and unmerged), and
  * Idle. A thread appears once, under the first heading that holds it.
  */
 function byStatus(rows: ReadonlyArray<MobileInboxRow>): ReadonlyArray<MobileThreadGroup> {
@@ -60,7 +60,6 @@ function byStatus(rows: ReadonlyArray<MobileInboxRow>): ReadonlyArray<MobileThre
       // Pending and approved both wait on the person, as the Inbox's In review count says.
       holds: (row) => row.reviewState === "pending" || row.reviewState === "approved",
     },
-    { id: "working", label: "Working", holds: (row) => row.live === "working" },
     { id: "idle", label: "Idle", holds: () => true },
   ];
   const placed = new Set<MobileInboxRow>();
@@ -146,10 +145,17 @@ export function mobileThreadShelf(row: MobileInboxRow, now: Date): ThreadShelf {
   );
 }
 
+/** A running thread that nothing needs the person for; a pinned one stays among the pins. */
+function runs(row: MobileInboxRow): boolean {
+  return row.live === "working" && row.pinned !== true;
+}
+
 /**
- * The chosen arrangement of the active threads, then Snoozed (hidden until a
- * wake time, or until the agent needs the person) and Put away, as the
- * desktop sidebar shelves them below the list.
+ * The chosen arrangement of the active threads, then the shelves below it, as
+ * the desktop sidebar orders them: Working in Status and Activity (a running
+ * thread changes state on its own and would move rows around in the middle of
+ * the list), Snoozed (hidden until a wake time, or until the agent needs the
+ * person), and Settled.
  */
 export function arrangeMobileThreads(input: {
   readonly rows: ReadonlyArray<MobileInboxRow>;
@@ -163,15 +169,18 @@ export function arrangeMobileThreads(input: {
   const active = rows.filter((row) => shelf.get(row) === "active");
   const snoozed = rows.filter((row) => shelf.get(row) === "snoozed");
   const putAway = rows.filter((row) => shelf.get(row) === "completed");
+  const working = input.arrangement === "projects" ? [] : active.filter(runs);
+  const listed = active.filter((row) => !working.includes(row));
   const arranged =
     input.arrangement === "projects"
-      ? byProject(active, input.projectName)
+      ? byProject(listed, input.projectName)
       : input.arrangement === "activity"
-        ? byActivity(active, now)
-        : byStatus(active);
+        ? byActivity(listed, now)
+        : byStatus(listed);
   return [
     ...arranged,
+    ...(working.length > 0 ? [{ id: "working", label: "Working", rows: working }] : []),
     ...(snoozed.length > 0 ? [{ id: "snoozed", label: "Snoozed", rows: snoozed }] : []),
-    ...(putAway.length > 0 ? [{ id: "put-away", label: "Settled", rows: putAway }] : []),
+    ...(putAway.length > 0 ? [{ id: "settled", label: "Settled", rows: putAway }] : []),
   ];
 }

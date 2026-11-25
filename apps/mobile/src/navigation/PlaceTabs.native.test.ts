@@ -23,6 +23,9 @@ vi.mock("react-native-screens", () => ({
     Screen: (props: { readonly children?: ReactNode }) => props.children ?? null,
   },
 }));
+vi.mock("react-native-safe-area-context", () => ({
+  SafeAreaProvider: (props: { readonly children?: ReactNode }) => props.children ?? null,
+}));
 vi.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 vi.mock("./NewButton", () => ({ NewButton: () => null }));
 vi.mock("../../design-system", async () => ({
@@ -42,7 +45,7 @@ async function render(onSelect: PlaceTabsProps["onSelect"]): Promise<void> {
         preference: "light",
         children: createElement(PlaceTabs, {
           active: "home",
-          barHidden: false,
+          newHidden: false,
           newDisabled: false,
           onNew: () => undefined,
           onSelect,

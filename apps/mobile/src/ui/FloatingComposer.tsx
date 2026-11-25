@@ -37,37 +37,38 @@ export function FloatingComposer(props: FloatingComposerProps) {
           backgroundColor: "transparent",
         },
         card: {
-          paddingHorizontal: space.md,
-          paddingTop: 10,
-          paddingBottom: space.xs,
+          flexDirection: "row",
+          alignItems: "center",
           gap: 2,
+          paddingHorizontal: 6,
+          paddingVertical: 5,
         },
         placeholder: {
           color: colors.textTertiary,
+          flex: 1,
           fontSize: typography.body.fontSize,
-          paddingVertical: space.xs,
+          paddingHorizontal: 6,
+          paddingVertical: 8,
         },
         input: {
           color: colors.textPrimary,
           fontSize: typography.body.fontSize,
+          flex: 1,
           minHeight: 24,
           maxHeight: 140,
+          marginVertical: 6,
+          paddingHorizontal: 6,
+          paddingVertical: 0,
           textAlignVertical: "top",
           lineHeight: 21,
         },
-        toolbar: {
-          flexDirection: "row",
-          alignItems: "center",
-          gap: space.xs,
-          paddingTop: 2,
-        },
-        spacer: { flex: 1 },
         modelChip: {
-          flexShrink: 1,
+          maxWidth: 128,
           flexDirection: "row",
           alignItems: "center",
           gap: 4,
           height: 30,
+          marginVertical: 2,
           paddingHorizontal: 10,
           borderRadius: radii.pill,
           backgroundColor: colors.glassFillThin,
@@ -91,6 +92,7 @@ export function FloatingComposer(props: FloatingComposerProps) {
           color: colors.accent,
           fontSize: 12,
           fontWeight: "500",
+          alignSelf: "center",
           marginRight: space.xs,
         },
       }),
@@ -103,7 +105,17 @@ export function FloatingComposer(props: FloatingComposerProps) {
 
   return (
     <View style={styles.wrap} testID={props.testID ?? "mobile-floating-composer"}>
-      <GlassSurface contentStyle={styles.card} material="thick" radius={radii.composer}>
+      <GlassSurface contentStyle={styles.card} material="thick" radius={24}>
+        {props.onPressAttach !== undefined ? (
+          <IconButton
+            accessibilityLabel="Add attachment"
+            name="add"
+            onPress={props.onPressAttach}
+            size={34}
+            testID="mobile-composer-attach"
+            variant="ghost"
+          />
+        ) : null}
         {multiline ? (
           <TextInput
             editable={editable}
@@ -118,63 +130,50 @@ export function FloatingComposer(props: FloatingComposerProps) {
         ) : (
           <Text style={styles.placeholder}>{props.placeholder}</Text>
         )}
-        <View style={styles.toolbar}>
-          {props.onPressAttach !== undefined ? (
-            <IconButton
-              accessibilityLabel="Add attachment"
-              name="add"
-              onPress={props.onPressAttach}
-              size={34}
-              testID="mobile-composer-attach"
-              variant="ghost"
-            />
-          ) : null}
-          {props.modelLabel !== undefined && props.onPressModel !== undefined ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={props.onPressModel}
-              style={styles.modelChip}
-              testID="mobile-composer-model"
-            >
-              <Text style={styles.modelLabel} numberOfLines={1}>
-                {props.modelLabel}
-              </Text>
-              <Ionicons color={colors.textSecondary} name="chevron-down" size={13} />
-            </Pressable>
-          ) : props.modelLabel !== undefined ? (
+        {props.modelLabel !== undefined && props.onPressModel !== undefined ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={props.onPressModel}
+            style={styles.modelChip}
+            testID="mobile-composer-model"
+          >
             <Text style={styles.modelLabel} numberOfLines={1}>
               {props.modelLabel}
             </Text>
-          ) : null}
-          <View style={styles.spacer} />
-          {props.busy === true ? (
-            <Text style={styles.busyHint} testID="mobile-composer-busy">
-              {props.busyLabel ?? "Working"}
-            </Text>
-          ) : props.voice !== undefined ? (
-            <ComposerVoiceButton size={34} voice={props.voice} />
-          ) : null}
-          {props.busy === true && props.onStop !== undefined ? (
-            <IconButton
-              accessibilityLabel="Stop"
-              name="stop"
-              onPress={props.onStop}
-              size={34}
-              testID="mobile-composer-stop"
-              variant="send"
-            />
-          ) : props.onSubmit !== undefined ? (
-            <IconButton
-              accessibilityLabel="Send"
-              disabled={!canSend}
-              name="arrow-up"
-              onPress={props.onSubmit}
-              size={34}
-              testID="mobile-composer-send"
-              variant="send"
-            />
-          ) : null}
-        </View>
+            <Ionicons color={colors.textSecondary} name="chevron-down" size={13} />
+          </Pressable>
+        ) : props.modelLabel !== undefined ? (
+          <Text style={styles.modelLabel} numberOfLines={1}>
+            {props.modelLabel}
+          </Text>
+        ) : null}
+        {props.busy === true ? (
+          <Text style={styles.busyHint} testID="mobile-composer-busy">
+            {props.busyLabel ?? "Working"}
+          </Text>
+        ) : props.voice !== undefined ? (
+          <ComposerVoiceButton size={34} voice={props.voice} />
+        ) : null}
+        {props.busy === true && props.onStop !== undefined ? (
+          <IconButton
+            accessibilityLabel="Stop"
+            name="stop"
+            onPress={props.onStop}
+            size={34}
+            testID="mobile-composer-stop"
+            variant="send"
+          />
+        ) : props.onSubmit !== undefined ? (
+          <IconButton
+            accessibilityLabel="Send"
+            disabled={!canSend}
+            name="arrow-up"
+            onPress={props.onSubmit}
+            size={34}
+            testID="mobile-composer-send"
+            variant="send"
+          />
+        ) : null}
       </GlassSurface>
       {props.voice?.notice !== undefined ? (
         <Text style={styles.footerHint} testID="mobile-composer-voice-notice">

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MOBILE_PLACES, placeFor, shippedMobilePlaces, screenHidesBar } from "./places";
+import { MOBILE_PLACES, placeFor, shippedMobilePlaces, screenHidesNew } from "./places";
 
 describe("the phone's places", () => {
   it("shows Home, Threads and Inbox, while Bots and PRs stay hidden until their work lands", () => {
@@ -17,10 +17,10 @@ describe("the phone's places", () => {
     for (const place of MOBILE_PLACES) expect(place.label.length).toBeGreaterThan(0);
   });
 
-  it("puts the bar away in a thread and keeps it on a place and its lists", () => {
-    expect(screenHidesBar("thread")).toBe(true);
+  it("puts New away over a thread's composer and keeps it on a place and its lists", () => {
+    expect(screenHidesNew("thread")).toBe(true);
     for (const screen of ["home", "threads", "inbox", "counted", "settings", "todos"])
-      expect(screenHidesBar(screen)).toBe(false);
+      expect(screenHidesNew(screen)).toBe(false);
   });
 
   it("falls back to Home for a place that has not shipped", () => {

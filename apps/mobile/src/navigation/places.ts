@@ -73,9 +73,8 @@ export function placeFor(id: string): MobilePlaceId {
   return shippedMobilePlaces().find((place) => place.id === id)?.id ?? "home";
 }
 
-/** A thread takes the bottom of the window for its composer, as a pushed
- * conversation does in the system's own apps. */
-export function screenHidesBar(screen: string): boolean {
+/** New drawn over the list's corner would cover a thread's composer. */
+export function screenHidesNew(screen: string): boolean {
   return screen === "thread";
 }
 

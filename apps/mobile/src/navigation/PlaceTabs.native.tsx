@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Platform, StyleSheet, View, type ImageSourcePropType } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Tabs, type TabsHostNavStateRequest } from "react-native-screens";
 import { useTheme } from "../../design-system";
 import { NewButton } from "./NewButton";
@@ -83,7 +84,6 @@ export function PlaceTabs(props: PlaceTabsProps) {
         onTabSelectionPrevented={(event) => {
           if (event.nativeEvent.preventedScreenKey === NEW_KEY) props.onNew();
         }}
-        tabBarHidden={props.barHidden}
       >
         {shippedMobilePlaces().map((place) => {
           const icons = androidIcons[place.id];
@@ -111,7 +111,8 @@ export function PlaceTabs(props: PlaceTabsProps) {
               tabBarItemAccessibilityLabel={place.label}
               tabBarItemTestID={`mobile-tab-${place.id}`}
             >
-              {props.screens[place.id]}
+              {/* Its own provider, so a screen's bottom inset includes the bar over it. */}
+              <SafeAreaProvider>{props.screens[place.id]}</SafeAreaProvider>
             </Tabs.Screen>
           );
         })}
@@ -126,7 +127,7 @@ export function PlaceTabs(props: PlaceTabsProps) {
           />
         ) : null}
       </Tabs.Host>
-      {NEW_IS_A_TAB || props.barHidden ? null : (
+      {NEW_IS_A_TAB || props.newHidden ? null : (
         <NewButton disabled={props.newDisabled} onPress={props.onNew} />
       )}
     </View>

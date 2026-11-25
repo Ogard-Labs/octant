@@ -38,6 +38,7 @@ vi.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 vi.mock("../../design-system", async () => ({
   ...(await import("../../design-system/theme")),
   ...(await import("../../design-system/tokens")),
+  ...(await import("../../design-system/tone")),
   ...(await import("../../design-system/GlassSurface")),
 }));
 vi.mock("../session/MobileSessionContext", () => ({ useMobileSession: () => session }));

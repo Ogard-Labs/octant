@@ -26,12 +26,12 @@ export function MessageActions(props: {
         row: {
           flexDirection: "row",
           alignItems: "center",
-          gap: space.md,
+          gap: space.lg,
           marginTop: 2,
           marginBottom: space.sm,
         },
-        // Plain glyph and word in the muted ink, as a system toolbar draws them;
-        // the slop keeps a 44pt target without boxing each one.
+        // Plain glyphs in the muted ink, each with its name spoken; the slop
+        // keeps a 44pt target without boxing each one.
         chip: {
           minHeight: 28,
           flexDirection: "row",
@@ -68,18 +68,18 @@ export function MessageActions(props: {
                 setTimeout(() => setActiveId(undefined), 1200);
               })();
             }}
-            hitSlop={8}
+            hitSlop={12}
             style={({ pressed }) => [styles.chip, pressed ? { opacity: 0.5 } : null]}
             testID={`mobile-message-action-${action.id}`}
           >
             <Ionicons
               color={active ? colors.accent : colors.textTertiary}
               name={active && action.id === "copy" ? "checkmark" : action.icon}
-              size={14}
+              size={16}
             />
-            <Text style={[styles.label, active ? styles.labelActive : null]}>
-              {active && action.id === "copy" ? "Copied" : action.label}
-            </Text>
+            {active && action.id === "copy" ? (
+              <Text style={[styles.label, styles.labelActive]}>Copied</Text>
+            ) : null}
           </Pressable>
         );
       })}

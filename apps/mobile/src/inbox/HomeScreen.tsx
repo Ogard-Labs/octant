@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import type { MobileInboxRow } from "@octant/client-runtime";
 import { MOBILE_COPY, mobileHostHealthLabel, MOBILE_SCREEN_TITLES } from "../copy";
@@ -10,12 +11,11 @@ import { NEW_BUTTON_CLEARANCE } from "../navigation/places";
 import { ScreenHeader } from "../navigation/ScreenHeader";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { CountTile } from "../ui/CountTile";
-import { ListRow, ListSection } from "../ui/NativeChrome";
 import { inboxEmptyState } from "./inboxEmptyState";
 import { inboxPriorityRows, inboxStatusCounts } from "./inboxWorkPresentation";
 import { useMobileThreads } from "./MobileThreadsContext";
 import { ThreadListNotices } from "./ThreadListNotices";
-import { ThreadRow } from "./ThreadRow";
+import { ThreadGroup } from "./ThreadGroup";
 
 export interface HomeScreenProps {
   readonly onOpenCounted: (view: CountedThreads) => void;
@@ -34,7 +34,7 @@ const HOME_RECENT_LIMIT = 5;
 
 export function HomeScreen(props: HomeScreenProps) {
   const { colors } = useTheme();
-  const { transports, hosts, hostsLoaded, health } = useMobileSession();
+  const { hosts, hostsLoaded, health } = useMobileSession();
   const { rows, loading, refresh } = useMobileThreads();
   const emptyState = inboxEmptyState({ hosts, hostsLoaded });
   useFocusEffect(
@@ -97,6 +97,37 @@ export function HomeScreen(props: HomeScreenProps) {
           fontSize: 17,
         },
         loader: { marginVertical: space.md },
+        heading: { minHeight: 44, justifyContent: "flex-end", paddingHorizontal: space.md },
+        headingLabel: {
+          color: colors.textSecondary,
+          fontSize: typography.detail.fontSize,
+          fontWeight: "600",
+          paddingBottom: space.sm,
+        },
+        computer: {
+          minHeight: 60,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 12,
+          paddingHorizontal: space.md,
+        },
+        pressed: { backgroundColor: colors.controlHover },
+        computerIcon: {
+          width: 36,
+          height: 36,
+          borderRadius: 10,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: colors.control,
+        },
+        computerBody: { flex: 1, gap: 2 },
+        computerName: { color: colors.textPrimary, fontSize: 16, fontWeight: "500" },
+        computerState: { flexDirection: "row", alignItems: "center", gap: 6 },
+        computerDetail: { flex: 1, color: colors.textTertiary, fontSize: 13 },
+        dot: { width: 7, height: 7, borderRadius: 4 },
+        add: { color: colors.accent, fontSize: 16, fontWeight: "500" },
+        seeAll: { minHeight: 44, justifyContent: "center", paddingHorizontal: space.md },
+        seeAllLabel: { color: colors.accent, fontSize: typography.detail.fontSize },
       }),
     [colors],
   );
@@ -110,6 +141,12 @@ export function HomeScreen(props: HomeScreenProps) {
             icon: "search",
             onPress: props.onOpenThreads,
             testID: "mobile-home-search",
+          },
+          {
+            label: MOBILE_SCREEN_TITLES.todos,
+            icon: "checkmark-circle-outline",
+            onPress: props.onOpenTodos,
+            testID: "mobile-home-open-todos",
           },
           {
             label: "Settings",
@@ -168,81 +205,81 @@ export function HomeScreen(props: HomeScreenProps) {
               />
             </View>
 
-            {transports.length === 0 ? null : (
-              <ListSection testID="mobile-home-todos">
-                <ListRow
-                  accessory="chevron"
-                  icon="checkmark-circle-outline"
-                  label={MOBILE_SCREEN_TITLES.todos}
-                  last
-                  onPress={props.onOpenTodos}
-                  testID="mobile-home-open-todos"
-                />
-              </ListSection>
-            )}
-
             {priorityRows.length > 0 ? (
-              <ListSection
-                action={{
-                  label: MOBILE_COPY.homeSeeAll,
-                  onPress: props.onOpenThreads,
-                  testID: "mobile-home-see-all",
-                }}
-                testID="mobile-home-recent"
-                title={MOBILE_COPY.homeRecent}
-              >
-                {priorityRows.map((row, index) => (
-                  <ThreadRow
-                    key={`${row.hostId}:${row.mode}:${row.threadId}`}
-                    last={index === priorityRows.length - 1}
-                    onOpen={props.onOpenThread}
-                    row={row}
-                  />
-                ))}
-              </ListSection>
+              <View testID="mobile-home-recent">
+                <ThreadGroup
+                  label={MOBILE_COPY.homeRecent}
+                  onOpen={props.onOpenThread}
+                  rows={priorityRows}
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  hitSlop={8}
+                  onPress={props.onOpenThreads}
+                  style={styles.seeAll}
+                  testID="mobile-home-see-all"
+                >
+                  <Text style={styles.seeAllLabel}>{MOBILE_COPY.homeSeeAll}</Text>
+                </Pressable>
+              </View>
             ) : null}
 
             {loading ? <ActivityIndicator color={colors.accent} style={styles.loader} /> : null}
-            <ListSection title={MOBILE_COPY.workspaces}>
-              {hosts.map((host) => {
-                const hostWorkCount = rows.filter(
-                  (row) => row.hostId === host.hostId && row.mode !== "chat",
-                ).length;
-                const hostHealth = health.find((entry) => entry.hostId === host.hostId);
-                const tone = hostHealthTone(hostHealth?.kind ?? "idle");
-                return (
-                  <ListRow
-                    detail={`${mobileHostHealthLabel(hostHealth?.kind ?? "idle")}${
-                      hostHealth?.detail !== undefined ? ` · ${hostHealth.detail}` : ""
-                    }`}
-                    detailTone={
-                      tone === "neutral" ? undefined : hostToneColor(hostHealth?.kind ?? "idle")
-                    }
-                    icon="desktop"
-                    iconTone={
-                      tone === "neutral"
-                        ? colors.paletteBlue
-                        : hostToneColor(hostHealth?.kind ?? "idle")
-                    }
-                    key={host.hostId}
-                    label={host.label}
-                    onPress={() => props.onOpenWorkspace(host.hostId)}
-                    testID={`mobile-workspace-${host.hostId}`}
-                    value={hostWorkCount > 0 ? String(hostWorkCount) : undefined}
-                  />
-                );
-              })}
-              <ListRow
-                accessory="none"
-                icon="add"
-                iconTone={colors.textTertiary}
-                label={MOBILE_COPY.addWorkspace}
-                labelTone={colors.accent}
-                last
-                onPress={props.onAddWorkspace}
-                testID="mobile-workspace-add"
-              />
-            </ListSection>
+            <View accessibilityRole="header" accessible style={styles.heading}>
+              <Text style={styles.headingLabel}>{MOBILE_COPY.workspaces}</Text>
+            </View>
+            {hosts.map((host) => {
+              const kind = health.find((entry) => entry.hostId === host.hostId);
+              const ready = kind?.kind === "ready";
+              const detail = `${mobileHostHealthLabel(kind?.kind ?? "idle")}${
+                kind?.detail !== undefined ? ` · ${kind.detail}` : ""
+              }`;
+              return (
+                <Pressable
+                  accessibilityLabel={`${host.label}, ${detail}`}
+                  accessibilityRole="button"
+                  key={host.hostId}
+                  onPress={() => props.onOpenWorkspace(host.hostId)}
+                  style={({ pressed }) => [styles.computer, pressed ? styles.pressed : null]}
+                  testID={`mobile-workspace-${host.hostId}`}
+                >
+                  <View style={styles.computerIcon}>
+                    <Ionicons color={colors.textSecondary} name="desktop-outline" size={18} />
+                  </View>
+                  <View style={styles.computerBody}>
+                    <Text numberOfLines={1} style={styles.computerName}>
+                      {host.label}
+                    </Text>
+                    <View style={styles.computerState}>
+                      <View
+                        style={[
+                          styles.dot,
+                          {
+                            backgroundColor: ready
+                              ? colors.success
+                              : hostToneColor(kind?.kind ?? "idle"),
+                          },
+                        ]}
+                      />
+                      <Text numberOfLines={1} style={styles.computerDetail}>
+                        {detail}
+                      </Text>
+                    </View>
+                  </View>
+                </Pressable>
+              );
+            })}
+            <Pressable
+              accessibilityRole="button"
+              onPress={props.onAddWorkspace}
+              style={({ pressed }) => [styles.computer, pressed ? styles.pressed : null]}
+              testID="mobile-workspace-add"
+            >
+              <View style={styles.computerIcon}>
+                <Ionicons color={colors.accent} name="add" size={20} />
+              </View>
+              <Text style={styles.add}>{MOBILE_COPY.addWorkspace}</Text>
+            </Pressable>
           </View>
         )}
       </ScrollView>

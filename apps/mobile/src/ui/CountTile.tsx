@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { mix, radii, typography, useTheme, withAlpha } from "../../design-system";
+import { mix, typography, useTheme, withAlpha } from "../../design-system";
 import type { MobileIconName } from "./IconButton";
 
 export interface CountTileProps {
@@ -31,28 +31,28 @@ export function CountTile(props: CountTileProps) {
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        pressable: { flex: 1, borderRadius: radii.md },
+        pressable: { flex: 1, borderRadius: 16 },
         face: {
-          minHeight: 64,
+          minHeight: 86,
           justifyContent: "space-between",
           paddingHorizontal: 12,
-          paddingVertical: 10,
-          borderRadius: radii.md,
+          paddingVertical: 12,
+          borderRadius: 16,
           borderWidth: StyleSheet.hairlineWidth,
           overflow: "hidden",
         },
-        top: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+        top: { flexDirection: "row", alignItems: "center", gap: 7 },
         count: {
           fontSize: 24,
-          fontWeight: "600",
-          letterSpacing: -0.6,
+          fontWeight: "700",
+          letterSpacing: -0.4,
           fontVariant: ["tabular-nums"],
           lineHeight: 28,
         },
         label: {
           fontSize: typography.detail.fontSize,
-          fontWeight: "500",
-          marginTop: 2,
+          flexShrink: 1,
+          fontWeight: "600",
         },
       }),
     [],
@@ -61,15 +61,15 @@ export function CountTile(props: CountTileProps) {
   const content = (
     <>
       <View style={styles.top}>
-        <Text style={[styles.count, { color: ink }]}>{props.count}</Text>
-        <Ionicons color={ink} name={props.icon} size={19} />
+        <Ionicons color={ink} name={props.icon} size={16} />
+        <Text
+          numberOfLines={1}
+          style={[styles.label, { color: solid ? colors.primaryForeground : colors.textSecondary }]}
+        >
+          {props.label}
+        </Text>
       </View>
-      <Text
-        numberOfLines={1}
-        style={[styles.label, { color: solid ? colors.primaryForeground : colors.textSecondary }]}
-      >
-        {props.label}
-      </Text>
+      <Text style={[styles.count, { color: ink }]}>{props.count}</Text>
     </>
   );
 

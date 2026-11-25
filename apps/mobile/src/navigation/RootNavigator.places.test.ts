@@ -35,6 +35,8 @@ vi.mock("expo-linear-gradient", () => ({ LinearGradient: () => null }));
 vi.mock("../../design-system", async () => ({
   ...(await import("../../design-system/theme")),
   ...(await import("../../design-system/tokens")),
+  ...(await import("../../design-system/tone")),
+  ...(await import("../../design-system/GlassSurface")),
   ScreenCanvas: (props: { readonly children: unknown }) => props.children,
 }));
 vi.mock("../appearance/AppearanceContext", () => ({
@@ -149,7 +151,7 @@ async function render(props: RootNavigatorProps = {}): Promise<void> {
 }
 /** The element of that name a person can see: places kept in the background are not shown. */
 function seen(testId: string): HTMLElement | undefined {
-  return [...container.querySelectorAll<HTMLElement>(`[data-testid="${testId}"]`)].find(
+  return [...document.querySelectorAll<HTMLElement>(`[data-testid="${testId}"]`)].find(
     (element) => {
       for (let node: HTMLElement | null = element; node !== null; node = node.parentElement)
         if (
@@ -211,6 +213,7 @@ describe("the phone's navigation", () => {
     await press("mobile-tab-threads");
     for (const name of ["code-code", "work-work", "chat-chat"])
       expect(seen(`mobile-home-thread-row-${name}`)).toBeDefined();
+    await press("mobile-threads-mode");
     await press("mobile-threads-mode-code");
     expect(seen("mobile-home-thread-row-code-code")).toBeDefined();
     expect(seen("mobile-home-thread-row-work-work")).toBeUndefined();
@@ -227,13 +230,12 @@ describe("the phone's navigation", () => {
     expect(seen("new-thread-sheet")).toBeDefined();
   });
 
-  it("puts the bar and New away in a thread, and Back returns to the list it was opened from", async () => {
+  it("keeps the bar in a thread, and Back returns to the list it was opened from", async () => {
     await render();
     await press("mobile-tab-inbox");
     await press("mobile-home-thread-row-code-waiting");
     expect(seen("thread")?.textContent).toBe("waiting");
-    expect(seen("mobile-tab-bar")).toBeUndefined();
-    expect(seen("mobile-new-thread")).toBeUndefined();
+    expect(seen("mobile-tab-bar")).toBeDefined();
     await back();
     expect(seen("mobile-inbox")).toBeDefined();
     expect(seen("mobile-tab-bar")).toBeDefined();

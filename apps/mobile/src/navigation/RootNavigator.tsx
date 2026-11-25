@@ -8,7 +8,7 @@ import {
   useState,
   type JSX,
 } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import {
   createNavigationContainerRef,
   DarkTheme,
@@ -187,9 +187,11 @@ function TodosRoute() {
   );
 }
 
-// A root's list runs under the bar; a pushed screen owns the bottom edge.
+// A root's list runs under the bar; a pushed screen ends above it. Android lays
+// the place out above its bar, so there is nothing left to keep clear of.
 const ROOT_EDGES: ReadonlyArray<Edge> = ["left", "right"];
-const PUSHED_EDGES: ReadonlyArray<Edge> = ["left", "right", "bottom"];
+const PUSHED_EDGES: ReadonlyArray<Edge> =
+  Platform.OS === "android" ? ["left", "right"] : ["left", "right", "bottom"];
 
 function PlaceStack(props: { readonly place: "home" | "threads" | "inbox" }) {
   const appearance = useAppearance();
@@ -211,7 +213,12 @@ function PlaceStack(props: { readonly place: "home" | "threads" | "inbox" }) {
           </SafeAreaView>
         </ScreenCanvas>
       )}
-      screenOptions={{ headerTintColor: colors.accent, headerBackButtonDisplayMode: "minimal" }}
+      screenOptions={{
+        headerTintColor: colors.accent,
+        headerTitleStyle: { color: colors.textPrimary },
+        headerLargeTitleStyle: { color: colors.textPrimary },
+        headerBackButtonDisplayMode: "minimal",
+      }}
     >
       {props.place === "home" ? (
         <Stack.Screen component={HomeRoute} name="homeRoot" options={ROOT_OPTIONS} />

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import {
   searchMobileTranscripts,
@@ -7,16 +7,17 @@ import {
   type MobileTranscriptHit,
 } from "@octant/client-runtime";
 import { MOBILE_COPY, MOBILE_SCREEN_TITLES } from "../copy";
-import { radii, space, typography, useTheme } from "../../design-system";
+import { space, typography, useTheme } from "../../design-system";
 import { NEW_BUTTON_CLEARANCE } from "../navigation/places";
 import { ScreenHeader } from "../navigation/ScreenHeader";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { useMobileSession } from "../session/MobileSessionContext";
-import { ListRow, ListSection, SegmentedControl } from "../ui/NativeChrome";
+import { ChoicePill } from "../ui/ChoicePill";
+import { ListRow, ListSection } from "../ui/NativeChrome";
 import { searchHitsBesideList } from "./agentsListPresentation";
 import { useMobileThreads } from "./MobileThreadsContext";
 import { ThreadListNotices } from "./ThreadListNotices";
-import { ThreadRow } from "./ThreadRow";
+import { ThreadGroup } from "./ThreadGroup";
 import { filterThreads, type MobileThreadFilter } from "./threadFilters";
 import {
   arrangeMobileThreads,
@@ -35,6 +36,9 @@ const MODE_OPTIONS: ReadonlyArray<{
   { id: "code", label: "Code" },
 ];
 
+// Below the list, and the person's to fold.
+const SHELVES: ReadonlySet<string> = new Set(["working", "snoozed", "settled"]);
+
 /** Chat, Work and Code threads from every paired computer, in one list. */
 export function ThreadsScreen(props: {
   readonly arrangement: MobileThreadArrangement;
@@ -48,7 +52,8 @@ export function ThreadsScreen(props: {
   const { transports, hosts, inboxHostFilter, setInboxHostFilter } = useMobileSession();
   const { rows, loading, refresh, projects, projectName } = useMobileThreads();
   const [project, setProject] = useState<MobileThreadFilter["project"]>("all");
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  // Working is open and the shelves are folded until the person says otherwise.
+  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set(["snoozed", "settled"]));
   const [query, setQuery] = useState("");
   const [messageHits, setMessageHits] = useState<ReadonlyArray<MobileTranscriptHit>>([]);
   useFocusEffect(
@@ -108,23 +113,13 @@ export function ThreadsScreen(props: {
     () =>
       StyleSheet.create({
         content: { paddingBottom: NEW_BUTTON_CLEARANCE, flexGrow: 1 },
-        control: { paddingHorizontal: space.md, paddingBottom: space.sm },
-        chips: { gap: space.sm, paddingHorizontal: space.md },
-        chipRow: { flexGrow: 0, marginBottom: space.sm },
-        chip: {
-          height: 32,
-          justifyContent: "center",
-          paddingHorizontal: 12,
-          borderRadius: radii.pill,
-          backgroundColor: colors.control,
+        pills: {
+          gap: space.sm,
+          paddingHorizontal: space.md,
+          paddingTop: space.xs,
+          paddingBottom: space.sm,
         },
-        chipActive: { backgroundColor: colors.accent },
-        chipLabel: {
-          color: colors.textPrimary,
-          fontSize: typography.detail.fontSize,
-          fontWeight: "500",
-        },
-        chipLabelActive: { color: colors.sendLabel },
+        pillRow: { flexGrow: 0 },
         empty: {
           color: colors.textSecondary,
           fontSize: typography.detail.fontSize,
@@ -134,30 +129,12 @@ export function ThreadsScreen(props: {
       }),
     [colors],
   );
-  const chip = (id: string, label: string, active: boolean, onPress: () => void) => (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected: active }}
-      key={id}
-      onPress={onPress}
-      style={[styles.chip, active ? styles.chipActive : null]}
-      testID={`mobile-threads-filter-${id}`}
-    >
-      <Text style={[styles.chipLabel, active ? styles.chipLabelActive : null]}>{label}</Text>
-    </Pressable>
-  );
+  const projectId =
+    heldProject === "all" ? "all" : `${heldProject.hostId}:${heldProject.projectId}`;
 
   return (
     <View style={{ flex: 1 }} testID="mobile-threads">
       <ScreenHeader
-        actions={[
-          {
-            label: filtered ? "Filters, on" : "Filters",
-            icon: filtered ? "filter-circle" : "filter-circle-outline",
-            onPress: () => setFiltersOpen((open) => !open),
-            testID: "mobile-threads-filter",
-          },
-        ]}
         search={{ placeholder: MOBILE_COPY.searchThreads, onChangeText: setQuery }}
         title={MOBILE_SCREEN_TITLES.threads}
       />
@@ -167,69 +144,66 @@ export function ThreadsScreen(props: {
         keyboardDismissMode="on-drag"
       >
         <ThreadListNotices />
-        <View style={styles.control}>
-          <SegmentedControl
+        <ScrollView
+          contentContainerStyle={styles.pills}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.pillRow}
+        >
+          <ChoicePill
+            neutral="all"
+            onSelect={(hostId) => {
+              setInboxHostFilter(hostId);
+              // A Project leaves the filter with the computer that holds it.
+              setProject((held) => (held !== "all" && held.hostId !== hostId ? "all" : held));
+            }}
+            options={[
+              { id: "all", label: MOBILE_COPY.allHosts },
+              ...hosts.map((host) => ({ id: host.hostId, label: host.label })),
+            ]}
+            selected={inboxHostFilter}
+            testID="mobile-threads-filter-host"
+            title={MOBILE_COPY.workspaces}
+          />
+          <ChoicePill
+            neutral="all"
+            onSelect={(id) => {
+              const chosen = offeredProjects.find(
+                (entry) => `${entry.hostId}:${entry.projectId}` === id,
+              );
+              setProject(
+                chosen === undefined
+                  ? "all"
+                  : { hostId: chosen.hostId, projectId: chosen.projectId },
+              );
+            }}
+            options={[
+              { id: "all", label: MOBILE_COPY.allProjects },
+              ...offeredProjects.map((entry) => ({
+                id: `${entry.hostId}:${entry.projectId}`,
+                label: formatScreenshotSafeLabel(entry.name),
+              })),
+            ]}
+            selected={projectId}
+            testID="mobile-threads-filter-project"
+            title={MOBILE_COPY.projects}
+          />
+          <ChoicePill
+            neutral="all"
             onSelect={props.onSelectMode}
-            optionTestID={(id) => `mobile-threads-mode-${id}`}
             options={MODE_OPTIONS}
             selected={props.mode}
-            testID="mobile-threads-modes"
+            testID="mobile-threads-mode"
+            title={MOBILE_COPY.modes}
           />
-        </View>
-        {filtersOpen ? (
-          <>
-            <ScrollView
-              contentContainerStyle={styles.chips}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.chipRow}
-            >
-              {chip("host-all", MOBILE_COPY.allHosts, inboxHostFilter === "all", () =>
-                setInboxHostFilter("all"),
-              )}
-              {hosts.map((host) =>
-                chip(`host-${host.hostId}`, host.label, inboxHostFilter === host.hostId, () => {
-                  setInboxHostFilter(host.hostId);
-                  // A Project leaves the filter with the computer that holds it.
-                  setProject((held) =>
-                    held !== "all" && held.hostId !== host.hostId ? "all" : held,
-                  );
-                }),
-              )}
-            </ScrollView>
-            {offeredProjects.length === 0 ? null : (
-              <ScrollView
-                contentContainerStyle={styles.chips}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.chipRow}
-              >
-                {chip("project-all", MOBILE_COPY.allProjects, heldProject === "all", () =>
-                  setProject("all"),
-                )}
-                {offeredProjects.map((entry) =>
-                  chip(
-                    `project-${entry.hostId}-${entry.projectId}`,
-                    formatScreenshotSafeLabel(entry.name),
-                    heldProject !== "all" &&
-                      heldProject.hostId === entry.hostId &&
-                      heldProject.projectId === entry.projectId,
-                    () => setProject({ hostId: entry.hostId, projectId: entry.projectId }),
-                  ),
-                )}
-              </ScrollView>
-            )}
-            <View style={styles.control}>
-              <SegmentedControl
-                onSelect={props.onSelectArrangement}
-                optionTestID={(id) => `mobile-home-arrangement-${id}`}
-                options={MOBILE_THREAD_ARRANGEMENTS}
-                selected={props.arrangement}
-                testID="mobile-home-arrangement"
-              />
-            </View>
-          </>
-        ) : null}
+          <ChoicePill
+            onSelect={props.onSelectArrangement}
+            options={MOBILE_THREAD_ARRANGEMENTS}
+            selected={props.arrangement}
+            testID="mobile-home-arrangement"
+            title={MOBILE_COPY.arrangement}
+          />
+        </ScrollView>
         {loading && rows.length === 0 ? <ActivityIndicator color={colors.accent} /> : null}
         {!(loading && rows.length === 0) && groups.length === 0 && threadHits.length === 0 ? (
           <Text style={styles.empty}>
@@ -279,23 +253,29 @@ export function ThreadsScreen(props: {
           </ListSection>
         ) : null}
         <View testID="mobile-home-thread-list">
-          {groups.map((group) => (
-            <ListSection
-              key={group.id}
-              testID={`mobile-home-group-${group.id}`}
-              title={`${formatScreenshotSafeLabel(group.label)}  ${group.rows.length}`}
-            >
-              {group.rows.map((row, index) => (
-                <ThreadRow
-                  key={`${row.hostId}:${row.mode}:${row.threadId}`}
-                  last={index === group.rows.length - 1}
-                  onOpen={props.onOpenThread}
-                  row={row}
-                  showProject={props.arrangement !== "projects"}
-                />
-              ))}
-            </ListSection>
-          ))}
+          {groups.map((group, index) => {
+            const shelf = SHELVES.has(group.id);
+            return (
+              <ThreadGroup
+                folded={folded.has(group.id)}
+                key={group.id}
+                label={index === 0 && !shelf ? undefined : formatScreenshotSafeLabel(group.label)}
+                onOpen={props.onOpenThread}
+                onToggle={
+                  shelf
+                    ? () =>
+                        setFolded((current) => {
+                          const next = new Set(current);
+                          if (!next.delete(group.id)) next.add(group.id);
+                          return next;
+                        })
+                    : undefined
+                }
+                rows={group.rows}
+                testID={`mobile-home-group-${group.id}`}
+              />
+            );
+          })}
         </View>
       </ScrollView>
     </View>

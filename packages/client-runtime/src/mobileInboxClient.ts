@@ -6,6 +6,7 @@ import {
   CodeBoardView,
   type CodeThread,
   type CodeThreadReviewState,
+  type ThreadBoardPullRequestSummary,
   type WorkThread,
   ChatBootstrap,
   ChatCommandResult,
@@ -59,6 +60,14 @@ export function mobileWaitingAskLine(ask: MobileWaitingAsk): string {
   return ask.text === undefined ? ask.label : `${ask.label}: ${ask.text}`;
 }
 
+/** The pull requests the host's Code board names for a thread. */
+export interface MobileRowPullRequests {
+  /** The first one's number. */
+  readonly number: number;
+  readonly count: number;
+  readonly state: ThreadBoardPullRequestSummary["state"];
+}
+
 export interface MobileInboxRow {
   readonly hostId: string;
   readonly mode: MobileInboxMode;
@@ -67,6 +76,7 @@ export interface MobileInboxRow {
   readonly status: string;
   readonly freshness: string;
   readonly reviewState?: MobileCodeReviewState;
+  readonly pullRequests?: MobileRowPullRequests;
   /** The thread's Project; a Chat with no folder has none. */
   readonly projectId?: string;
   readonly pinned?: boolean;
@@ -340,7 +350,7 @@ function rowsFromMobileInboxBootstrap(
   input: MobileInboxBootstrapRows,
   board?: CodeBoardView,
 ): ReadonlyArray<MobileInboxRow> {
-  return normalizeMobileInbox({
+  const rows = normalizeMobileInbox({
     ...input,
     ...(board === undefined
       ? {}
@@ -350,6 +360,29 @@ function rowsFromMobileInboxBootstrap(
           ),
         }),
   });
+  if (board === undefined) return rows;
+  const pullRequests = new Map(
+    board.cards.map((card) => [String(card.threadId), cardPullRequests(card)] as const),
+  );
+  return rows.map((row) => {
+    const held = row.mode === "code" ? pullRequests.get(row.threadId) : undefined;
+    return held === undefined ? row : { ...row, pullRequests: held };
+  });
+}
+
+/** A delivery branch's linked pull request stands in until the board has summaries. */
+function cardPullRequests(card: CodeBoardView["cards"][number]): MobileRowPullRequests | undefined {
+  const [first] = card.pullRequestSummaries.items;
+  if (first !== undefined) {
+    return {
+      number: first.identity.number,
+      count: card.pullRequestSummaries.items.length + card.pullRequestSummaries.hiddenCount,
+      state: first.state,
+    };
+  }
+  return card.linkedPullRequest.kind === "linked"
+    ? { number: card.linkedPullRequest.number, count: 1, state: card.linkedPullRequest.state }
+    : undefined;
 }
 
 /** Fan-out Chat/Work/Code bootstraps over an authenticated remote transport. */

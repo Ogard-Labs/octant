@@ -13,12 +13,15 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import {
   chatAttemptStatusLabel,
+  MOBILE_THREAD_LEVEL_LABELS,
   mobileAttachmentOffer,
+  mobileThreadLevel,
   setMobileUsageResume,
   type MobileAttachmentSource,
   type MobileInboxRow,
 } from "@octant/client-runtime";
 import { ScreenHeader } from "../navigation/ScreenHeader";
+import { BottomSheet } from "../ui/BottomSheet";
 import { useConnectionStatus } from "@octant/client-runtime/use-connection-status";
 import { presentStaleHostSecurity } from "@octant/domain";
 import type { RemoteThreadSurfaceKind } from "@octant/client-runtime";
@@ -119,7 +122,9 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const [modelOpen, setModelOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [panesOpen, setPanesOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const scrollRef = useRef<ScrollViewInstance>(null);
+  const followsEnd = useRef(true);
   const [surface, setSurface] = useState<RemoteThreadSurfaceKind>("chat");
   // The surfaces on offer come from the shared remote matrix, so a host that
   // would refuse one never has it shown here.
@@ -405,6 +410,11 @@ export function ThreadScreen(props: ThreadScreenProps) {
       StyleSheet.create({
         shell: { flex: 1, backgroundColor: "transparent" },
         scroll: { flex: 1 },
+        details: {
+          gap: mobileSpacing.md,
+          paddingHorizontal: mobileSpacing.md,
+          paddingBottom: mobileSpacing.xl,
+        },
         content: {
           paddingHorizontal: mobileSpacing.md,
           paddingBottom: mobileSpacing.xl,
@@ -503,6 +513,18 @@ export function ThreadScreen(props: ThreadScreenProps) {
       ? mobileModelLabel(models.options, String(chat.view.thread.modelId))
       : MOBILE_COPY.modelHostOnly);
   const codePolicy = code.policy;
+  // The mode the next turn runs under, named where the turn is written. A
+  // restricted session is shown no mode, as the panel itself shows it none.
+  const levelSubject =
+    selected.mode === "code" && code.thread !== undefined
+      ? ({ mode: "code", thread: code.thread } as const)
+      : selected.mode === "work" && work.thread !== undefined
+        ? ({ mode: "work", thread: work.thread } as const)
+        : undefined;
+  const levelLabel =
+    levelSubject === undefined || offlineDemo || !standing.actsAsHostPerson
+      ? undefined
+      : MOBILE_THREAD_LEVEL_LABELS[mobileThreadLevel(levelSubject)];
 
   return (
     <View style={styles.shell} testID="mobile-thread-screen">
@@ -511,6 +533,12 @@ export function ThreadScreen(props: ThreadScreenProps) {
           offlineDemo || transport === undefined
             ? []
             : [
+                {
+                  label: MOBILE_COPY.threadDetails,
+                  icon: "ellipsis-horizontal",
+                  onPress: () => setDetailsOpen(true),
+                  testID: "mobile-thread-details-open",
+                },
                 {
                   label: "Views and panes",
                   icon: "grid-outline",
@@ -558,6 +586,18 @@ export function ThreadScreen(props: ThreadScreenProps) {
         <ScrollView
           ref={scrollRef}
           contentContainerStyle={styles.content}
+          onContentSizeChange={() => {
+            // A thread opens on its newest turn and stays there as it grows,
+            // until the person scrolls up to read or a search names a turn.
+            if (followsEnd.current && props.focusTurnId === undefined)
+              scrollRef.current?.scrollToEnd({ animated: false });
+          }}
+          onScroll={(event) => {
+            const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+            followsEnd.current =
+              contentSize.height - contentOffset.y - layoutMeasurement.height < 48;
+          }}
+          scrollEventThrottle={64}
           keyboardShouldPersistTaps="handled"
           style={styles.scroll}
           testID="mobile-thread-transcript"
@@ -578,6 +618,38 @@ export function ThreadScreen(props: ThreadScreenProps) {
           ) : null}
           {fullView ? null : (
             <>
+              <ThreadTranscript
+                {...(props.focusTurnId === undefined
+                  ? {}
+                  : {
+                      focus: {
+                        turnId: props.focusTurnId,
+                        onFound: (y: number) =>
+                          scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true }),
+                      },
+                    })}
+                allowProductMutations={staleGate.allowProductMutations}
+                chat={chat}
+                codeConversation={code.conversation}
+                modelOptions={models.options}
+                providerDirectory={models.providerDirectory}
+                replyDetail={replyDetail}
+                turnActionsFor={turnActions.actionsFor}
+                workTurns={work.turns}
+              />
+              {!offlineDemo &&
+              Platform.OS !== "web" &&
+              selectedHost !== undefined &&
+              hostHealth !== "unauthorized" ? (
+                <ThreadVideoClips
+                  key={`${selected.hostId}:${selectedHost.credentialGeneration}:${selected.mode}:${selected.threadId}`}
+                  hostId={selected.hostId}
+                  threadId={selected.threadId}
+                  threadKind={`${selected.mode}-thread`}
+                  transport={hostHealth === "ready" ? transport : undefined}
+                />
+              ) : null}
+              {/* What waits on the person comes last, beside the composer. */}
               {offlineDemo || transport === undefined ? null : (
                 <ExtensionToolApprovalCard
                   actsAsHostPerson={standing.actsAsHostPerson}
@@ -629,59 +701,6 @@ export function ThreadScreen(props: ThreadScreenProps) {
                   watchingOnly={watchingOnly}
                 />
               )}
-              {busy && chat.activeAttempt === undefined ? (
-                <ActivityIndicator color={colors.accent} />
-              ) : null}
-              {error !== undefined ? <Text style={styles.error}>{error}</Text> : null}
-              {turnActions.notice !== undefined ? (
-                <Text style={styles.connectionStatus} testID="mobile-thread-notice">
-                  {turnActions.notice}
-                </Text>
-              ) : null}
-              {offlineDemo || transport === undefined ? null : selected.mode === "code" &&
-                code.thread !== undefined ? (
-                <ThreadLevelPanel
-                  actsAsHostPerson={standing.actsAsHostPerson}
-                  warnings={fullAccessWarnings}
-                  onChanged={() => void code.refresh({ quiet: true })}
-                  subject={{ mode: "code", thread: code.thread }}
-                  transport={transport}
-                />
-              ) : selected.mode === "work" && work.thread !== undefined ? (
-                <ThreadLevelPanel
-                  actsAsHostPerson={standing.actsAsHostPerson}
-                  warnings={fullAccessWarnings}
-                  onChanged={() => void work.refresh({ quiet: true })}
-                  subject={{ mode: "work", thread: work.thread }}
-                  transport={transport}
-                />
-              ) : null}
-              {!offlineDemo &&
-              transport !== undefined &&
-              (selected.mode === "work" || selected.mode === "code") &&
-              routinesProjectId !== undefined ? (
-                <DefaultLevelsPanel
-                  actsAsHostPerson={standing.actsAsHostPerson}
-                  warnings={fullAccessWarnings}
-                  mode={selected.mode}
-                  projectId={routinesProjectId}
-                  transport={transport}
-                />
-              ) : null}
-              {!offlineDemo &&
-              selected.mode === "code" &&
-              (codePolicy === "approval-gated" || codePolicy === "auto-accept-edits") ? (
-                <ApprovalDeferralSheet
-                  executionPolicy={codePolicy}
-                  mode="code"
-                  operationSummary="Approval-gated Code operations"
-                  threadTitle={title}
-                  {...(hostLabel === undefined ? {} : { hostLabel })}
-                />
-              ) : null}
-              {!offlineDemo && selected.mode === "code" && transport !== undefined ? (
-                <PullRequestReviewPanel threadId={selected.threadId} transport={transport} />
-              ) : null}
               {!offlineDemo &&
               selected.mode === "code" &&
               transport !== undefined &&
@@ -692,47 +711,14 @@ export function ThreadScreen(props: ThreadScreenProps) {
                   transport={transport}
                 />
               ) : null}
-              {!offlineDemo &&
-              transport !== undefined &&
-              (selected.mode === "work" || selected.mode === "code") &&
-              routinesProjectId !== undefined ? (
-                <ThreadRoutinesPanel
-                  mode={selected.mode}
-                  projectId={routinesProjectId}
-                  threadId={selected.threadId}
-                  transport={transport}
-                />
+              {busy && chat.activeAttempt === undefined ? (
+                <ActivityIndicator color={colors.accent} />
               ) : null}
-              <ThreadTranscript
-                {...(props.focusTurnId === undefined
-                  ? {}
-                  : {
-                      focus: {
-                        turnId: props.focusTurnId,
-                        onFound: (y: number) =>
-                          scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true }),
-                      },
-                    })}
-                allowProductMutations={staleGate.allowProductMutations}
-                chat={chat}
-                codeConversation={code.conversation}
-                modelOptions={models.options}
-                providerDirectory={models.providerDirectory}
-                replyDetail={replyDetail}
-                turnActionsFor={turnActions.actionsFor}
-                workTurns={work.turns}
-              />
-              {!offlineDemo &&
-              Platform.OS !== "web" &&
-              selectedHost !== undefined &&
-              hostHealth !== "unauthorized" ? (
-                <ThreadVideoClips
-                  key={`${selected.hostId}:${selectedHost.credentialGeneration}:${selected.mode}:${selected.threadId}`}
-                  hostId={selected.hostId}
-                  threadId={selected.threadId}
-                  threadKind={`${selected.mode}-thread`}
-                  transport={hostHealth === "ready" ? transport : undefined}
-                />
+              {error !== undefined ? <Text style={styles.error}>{error}</Text> : null}
+              {turnActions.notice !== undefined ? (
+                <Text style={styles.connectionStatus} testID="mobile-thread-notice">
+                  {turnActions.notice}
+                </Text>
               ) : null}
             </>
           )}
@@ -819,21 +805,88 @@ export function ThreadScreen(props: ThreadScreenProps) {
               : MOBILE_COPY.turnRunning
           }
           editable={composerEditable}
-          footerHint={composerAccess.reason ?? followUpComposerCopy?.footerHint}
-          modelLabel={
-            selected.mode === "work" && work.thread !== undefined
-              ? mobileModelLabel(models.options, String(work.thread.modelId))
-              : MOBILE_COPY.modelHostOnly
-          }
+          footerHint={composerAccess.reason}
+          {...(levelLabel === undefined
+            ? {}
+            : { modelLabel: levelLabel, onPressModel: () => setDetailsOpen(true) })}
           onChangeText={setPrompt}
           onSubmit={sendFollowUp}
           {...(workTurnLive || codeTurnLive ? {} : attachProps)}
-          placeholder={followUpComposerCopy?.placeholder ?? MOBILE_COPY.composerFollowUp}
+          placeholder={MOBILE_COPY.composerFollowUp}
           testID="mobile-thread-composer"
           value={prompt}
           voice={voice}
         />
       )}
+      {detailsOpen ? (
+        <BottomSheet
+          onClose={() => setDetailsOpen(false)}
+          testID="mobile-thread-details"
+          title={MOBILE_COPY.threadDetails}
+          visible
+        >
+          <ScrollView contentContainerStyle={styles.details}>
+            {followUpComposerCopy === undefined ? null : (
+              <Text style={styles.connectionStatus}>{followUpComposerCopy.footerHint}</Text>
+            )}
+            {offlineDemo || transport === undefined ? null : selected.mode === "code" &&
+              code.thread !== undefined ? (
+              <ThreadLevelPanel
+                actsAsHostPerson={standing.actsAsHostPerson}
+                warnings={fullAccessWarnings}
+                onChanged={() => void code.refresh({ quiet: true })}
+                subject={{ mode: "code", thread: code.thread }}
+                transport={transport}
+              />
+            ) : selected.mode === "work" && work.thread !== undefined ? (
+              <ThreadLevelPanel
+                actsAsHostPerson={standing.actsAsHostPerson}
+                warnings={fullAccessWarnings}
+                onChanged={() => void work.refresh({ quiet: true })}
+                subject={{ mode: "work", thread: work.thread }}
+                transport={transport}
+              />
+            ) : null}
+            {!offlineDemo &&
+            transport !== undefined &&
+            (selected.mode === "work" || selected.mode === "code") &&
+            routinesProjectId !== undefined ? (
+              <DefaultLevelsPanel
+                actsAsHostPerson={standing.actsAsHostPerson}
+                warnings={fullAccessWarnings}
+                mode={selected.mode}
+                projectId={routinesProjectId}
+                transport={transport}
+              />
+            ) : null}
+            {!offlineDemo &&
+            selected.mode === "code" &&
+            (codePolicy === "approval-gated" || codePolicy === "auto-accept-edits") ? (
+              <ApprovalDeferralSheet
+                executionPolicy={codePolicy}
+                mode="code"
+                operationSummary="Approval-gated Code operations"
+                threadTitle={title}
+                {...(hostLabel === undefined ? {} : { hostLabel })}
+              />
+            ) : null}
+            {!offlineDemo && selected.mode === "code" && transport !== undefined ? (
+              <PullRequestReviewPanel threadId={selected.threadId} transport={transport} />
+            ) : null}
+            {!offlineDemo &&
+            transport !== undefined &&
+            (selected.mode === "work" || selected.mode === "code") &&
+            routinesProjectId !== undefined ? (
+              <ThreadRoutinesPanel
+                mode={selected.mode}
+                projectId={routinesProjectId}
+                threadId={selected.threadId}
+                transport={transport}
+              />
+            ) : null}
+          </ScrollView>
+        </BottomSheet>
+      ) : null}
       {offlineDemo || transport === undefined ? null : (
         <ThreadPanesSheet
           codeThread={selected.mode === "code" ? code.thread : undefined}
