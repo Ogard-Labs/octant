@@ -1754,6 +1754,18 @@ html[data-octant-increased-contrast="true"] .project-row[data-active="true"] {
   padding-inline-start: calc(var(--oct-nav-inset) + var(--oct-space-5));
 }
 
+/* A worker already sits one step in, so its own child takes a step of its own. */
+.project-coordinator__worker-rows .sidebar-navigation__thread[data-nested-task="true"] {
+  padding-inline-start: calc(var(--oct-nav-inset) + var(--oct-space-5) + var(--oct-space-3));
+}
+
+.project-coordinator__worker-rows
+  .sidebar-navigation__thread-row:has(
+    > .sidebar-navigation__thread[data-nested-task="true"]
+  )::before {
+  left: calc(var(--oct-nav-inset) + var(--oct-space-2) + var(--oct-space-3));
+}
+
 @media (prefers-reduced-motion: reduce) {
   .project-coordinator__fold svg {
     transition: none;
