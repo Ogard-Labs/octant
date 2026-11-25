@@ -1406,11 +1406,11 @@ describe("AgentRun dependency graphs", () => {
     });
     const request = (n: number) =>
       decodeAgentRunRequestId(`27272727-2727-4272-8272-${String(n).padStart(12, "0")}`);
-    const admit = (n: number, dependsOn: ReadonlyArray<string>) => {
+    const admit = (n: number, dependsOn: ReadonlyArray<AgentRunId>) => {
       const admitted = harness.orchestration.admit({
         command: {
           ...requestCommand(request(n)),
-          ...(dependsOn.length === 0 ? {} : { dependsOn: dependsOn as never }),
+          ...(dependsOn.length === 0 ? {} : { dependsOn }),
         },
         parentAuthority: authority,
         confirmed: true,
@@ -1424,12 +1424,18 @@ describe("AgentRun dependency graphs", () => {
     // Each run waits on every run before it, up to the eight a request may name.
     const parked: AgentRun[] = [];
     for (let n = 1; n <= 9; n += 1) {
-      parked.push(admit(n, [String(first.id), ...parked.slice(-7).map((run) => String(run.id))]));
+      parked.push(admit(n, [first.id, ...parked.slice(-7).map((run) => run.id)]));
     }
+    const edges = parked.reduce((total, run) => total + (run.dependsOn?.length ?? 0), 0);
     holdReads = 0;
+    const reads = vi.spyOn(harness.persistence, "getById");
     const startsWithoutPerson = harness.orchestration.waitsOnItsOwn();
     expect(parked.map((run) => startsWithoutPerson(run))).toEqual(parked.map(() => true));
     expect(holdReads).toBe(1);
+    // Judged once each, a run reads each prerequisite at most twice: once to
+    // decide and once to look at what it still waits on. Judged again on
+    // every path, the reads grow with the paths, not the edges.
+    expect(reads.mock.calls.length).toBeLessThanOrEqual(2 * edges);
   });
 
   it("fails a waiting run without ever starting it when a dependency fails", async () => {
