@@ -47,6 +47,7 @@ import type {
 } from "@octant/contracts/providers";
 import {
   draftThreadModePresentation,
+  findPickerModel,
   type CreateHostViewScope,
   type PickerGroup,
 } from "@octant/domain";
@@ -861,7 +862,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const choiceScope = `${props.projectId ?? ""}\0${submittedBaseBranch}`;
   const [branchChoice, setBranchChoice] = useState<{
     readonly name: string;
-    readonly source: "edited" | "suggested";
     readonly scope: string;
   }>();
   const [branchSuggestion, setBranchSuggestion] = useState<BranchSuggestionStatus>("idle");
@@ -906,9 +906,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       }
       // What the person typed outranks an answer still on its way.
       stopSuggestion();
-      setBranchChoice(
-        name === derivedBranch ? undefined : { name, source: "edited", scope: choiceScope },
-      );
+      setBranchChoice(name === derivedBranch ? undefined : { name, scope: choiceScope });
       return undefined;
     },
     [choiceScope, derivedBranch, existingBranchNames, stopSuggestion, submittedBaseBranch],
@@ -917,6 +915,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
       ? undefined
       : { providerInstanceId: props.selectedProviderInstanceId, modelId: props.selectedModelId };
+  const suggestModelLabel = findPickerModel(providerGroups, suggestModel)?.model.displayName;
   const suggestModelKey =
     suggestModel === undefined ? "" : `${suggestModel.providerInstanceId}/${suggestModel.modelId}`;
   // What the model is sent: the draft after redaction, reduced to the words a
@@ -975,7 +974,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           prompt: result.words,
           existingBranches: existingBranchNames,
         });
-        setBranchChoice({ name, source: "suggested", scope: choiceScope });
+        setBranchChoice({ name, scope: choiceScope });
         setBranchSuggestion("idle");
       });
   }, [
@@ -1195,6 +1194,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             {...(props.execute === undefined || suggestModel === undefined
               ? {}
               : { onSuggest: suggestBranchName })}
+            {...(suggestModelLabel === undefined ? {} : { modelLabel: suggestModelLabel })}
             suggestDisabled={suggestDraft === ""}
             suggestion={branchSuggestion}
             value={worktreeBranch}

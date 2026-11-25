@@ -111,6 +111,7 @@ export function createHostWorktreeBranchSuggester(deps: {
         providerInstanceId: input.providerInstanceId,
         modelId: input.modelId,
         draft: input.draft,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
       }),
   };
 }
