@@ -78,7 +78,6 @@ export function useTurnControl(
   // A turn is running, so the screen is busy already and cannot say that a
   // message is on its way: a second press would queue the same words again.
   const changing = useRef(false);
-  const unanswered = useRef<{ readonly words: string; readonly id: string } | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const change = async (
     run: (snapshot: ThreadMessageQueueSnapshot) => Promise<MobileSendResult>,
