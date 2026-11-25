@@ -62,7 +62,7 @@ export function useWorkThread(input: ThreadHookInput) {
       ui.setError(followUp.message);
       return;
     }
-    await runMutation({
+    return runMutation({
       guard,
       identity,
       gate,

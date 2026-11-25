@@ -14,6 +14,8 @@ import {
 } from "./outbox";
 
 const now = new Date("2026-11-25T12:00:00.000Z");
+const pairing = { hostKeyFingerprint: "studio-key", keyId: "phone-1" };
+const studio = { hostId: "studio", pairing };
 const message = (id: string, fields: Partial<WaitingMessage> = {}): WaitingMessage => ({
   id,
   hostId: "studio",
@@ -21,6 +23,7 @@ const message = (id: string, fields: Partial<WaitingMessage> = {}): WaitingMessa
   threadId: "thread",
   text: `Message ${id}`,
   writtenAt: "2026-11-25T11:00:00.000Z",
+  pairing,
   ...fields,
 });
 const added = (...messages: ReadonlyArray<WaitingMessage>) =>
@@ -30,34 +33,51 @@ const ids = (messages: ReadonlyArray<WaitingMessage>) => messages.map((entry) =>
 describe("messages waiting for a computer", () => {
   it("sends a thread's messages in the order they were written, one at a time", () => {
     const outbox = added(message("1"), message("2"), message("3", { threadId: "other" }));
-    expect(ids(dueMessages(outbox, "studio", now).send)).toEqual(["1", "3"]);
-    expect(ids(dueMessages(removeWaiting(outbox, "1"), "studio", now).send)).toEqual(["2", "3"]);
+    expect(ids(dueMessages(outbox, studio, now).send)).toEqual(["1", "3"]);
+    expect(ids(dueMessages(removeWaiting(outbox, "1"), studio, now).send)).toEqual(["2", "3"]);
   });
 
   it("holds what follows a message the computer refused, until the person decides", () => {
     const outbox = markRefused(added(message("1"), message("2")), "1", "The queue is full.");
-    expect(dueMessages(outbox, "studio", now).send).toEqual([]);
+    expect(dueMessages(outbox, studio, now).send).toEqual([]);
     expect(waitingFor(outbox, message("x"))[0]?.refused).toBe("The queue is full.");
-    expect(ids(dueMessages(removeWaiting(outbox, "1"), "studio", now).send)).toEqual(["2"]);
+    expect(ids(dueMessages(removeWaiting(outbox, "1"), studio, now).send)).toEqual(["2"]);
   });
 
   it("does not send yesterday's words on its own", () => {
     const outbox = added(message("1", { writtenAt: "2026-11-24T11:59:00.000Z" }));
-    const due = dueMessages(outbox, "studio", now);
+    const due = dueMessages(outbox, studio, now);
     expect(due.send).toEqual([]);
-    expect(ids(due.tooOld)).toEqual(["1"]);
+    expect(due.held.map((entry) => `${entry.message.id} ${entry.why}`)).toEqual(["1 tooOld"]);
   });
 
   it("sends words the person says still apply, under the same id", () => {
     const outbox = markRefused(added(message("1")), "1", "Too old.");
     const again = tryAgain(outbox, "1", now);
-    expect(ids(dueMessages(again, "studio", now).send)).toEqual(["1"]);
+    expect(ids(dueMessages(again, studio, now).send)).toEqual(["1"]);
     expect(markAttempted(again, "1").messages[0]?.attempted).toBe(true);
     expect(markAttempted(again, "other")).toBe(again);
   });
 
   it("sends nothing to a computer it was not written for", () => {
-    expect(dueMessages(added(message("1")), "laptop", now).send).toEqual([]);
+    expect(dueMessages(added(message("1")), { ...studio, hostId: "laptop" }, now).send).toEqual([]);
+  });
+
+  it("is never sent to another computer that took its computer's id", () => {
+    const other = { hostId: "studio", pairing: { hostKeyFingerprint: "evil", keyId: "phone-1" } };
+    const due = dueMessages(added(message("1")), other, now);
+    expect(due.send).toEqual([]);
+    expect(due.held[0]?.why).toBe("otherComputer");
+    const again = tryAgain(added(message("1")), "1", now, other.pairing);
+    expect(dueMessages(again, other, now).send).toEqual([]);
+  });
+
+  it("waits for the person when its computer was paired again", () => {
+    const repaired = { hostId: "studio", pairing: { ...pairing, keyId: "phone-2" } };
+    const due = dueMessages(added(message("1")), repaired, now);
+    expect(due.held[0]?.why).toBe("pairedAgain");
+    const again = tryAgain(added(message("1")), "1", now, repaired.pairing);
+    expect(ids(dueMessages(again, repaired, now).send)).toEqual(["1"]);
   });
 
   it("leaves with its computer", () => {

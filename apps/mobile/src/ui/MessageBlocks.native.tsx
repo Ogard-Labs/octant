@@ -1,13 +1,29 @@
 import { useMemo } from "react";
-import { Linking, StyleSheet, View } from "react-native";
+import * as Clipboard from "expo-clipboard";
+import { Alert, Linking, StyleSheet, View } from "react-native";
+import { MOBILE_COPY } from "../copy";
 import { EnrichedMarkdownText, type MarkdownStyle } from "react-native-enriched-markdown";
 import { fonts, radii, space, typography, useTheme } from "../../design-system";
 import { PlainBlocks, ReplyCode, type MessageBlocksProps } from "./PlainBlocks";
 import { replySegments } from "./replyMarkdown";
 
-function openLink(url: string): void {
-  // A reply may name any scheme; only a web page leaves the app.
-  if (/^https?:\/\//i.test(url)) void Linking.openURL(url);
+/**
+ * Asks first, with the address written out: a reply can name one place and
+ * lead to another, and opening it tells that place whatever the address holds.
+ */
+function offerLink(url: string): void {
+  if (!/^https?:\/\//i.test(url)) return;
+  let host = url;
+  try {
+    host = new URL(url).host;
+  } catch {
+    return;
+  }
+  Alert.alert(MOBILE_COPY.linkOpen(host), url, [
+    { text: "Cancel", style: "cancel" },
+    { text: MOBILE_COPY.linkCopy, onPress: () => void Clipboard.setStringAsync(url) },
+    { text: MOBILE_COPY.linkOpenAction, onPress: () => void Linking.openURL(url) },
+  ]);
 }
 
 /** A reply as the system's own text: selection, the edit menu, links and tables. */
@@ -97,7 +113,10 @@ function Reply(props: MessageBlocksProps) {
             key={index}
             markdown={segment.markdown}
             markdownStyle={markdownStyle}
-            onLinkPress={({ url }) => openLink(url)}
+            onLinkLongPress={({ url }) => offerLink(url)}
+            onLinkPress={({ url }) => offerLink(url)}
+            // The parser is given no picture; this is what it would be answered.
+            resolveImageSource={() => ({ uri: "" })}
             selectable
           />
         ),

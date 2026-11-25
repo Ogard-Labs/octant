@@ -9,6 +9,7 @@ import type { WaitingMessage } from "./outbox";
 /** What this phone still holds for the thread, at the end of its transcript. */
 export function WaitingMessages(props: {
   readonly messages: ReadonlyArray<WaitingMessage>;
+  readonly unsaved: boolean;
   readonly onEdit: (message: WaitingMessage) => void;
   readonly onDelete: (message: WaitingMessage) => void;
   readonly onTryAgain: (message: WaitingMessage) => void;
@@ -46,7 +47,11 @@ export function WaitingMessages(props: {
   return props.messages.map((message) => {
     const state =
       message.refused ??
-      (message.attempted === true ? MOBILE_COPY.outboxMayBeSent : MOBILE_COPY.outboxWaiting);
+      (props.unsaved
+        ? MOBILE_COPY.outboxUnsaved
+        : message.attempted === true
+          ? MOBILE_COPY.outboxMayBeSent
+          : MOBILE_COPY.outboxWaiting);
     const action = (label: string, onPress: () => void) => (
       <Pressable accessibilityRole="button" hitSlop={8} key={label} onPress={onPress}>
         <Text style={styles.action}>{label}</Text>

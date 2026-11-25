@@ -4,6 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OutboxProvider, useOutbox, type OutboxApi } from "./OutboxContext";
 import type { WaitingMessage } from "./outbox";
+import { OutboxStore } from "./outboxStore";
+import { queueMobileMessage } from "@octant/client-runtime";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -17,21 +19,15 @@ vi.mock("../session/MobileSessionContext", () => ({ useMobileSession: () => held
 vi.mock("../inbox/MobileThreadsContext", () => ({
   useMobileThreads: () => ({ refresh: async () => undefined }),
 }));
-vi.mock("./sealedText", () => ({
-  createSealedText: () => ({
-    load: async () => held.kept,
-    keep: async (text: string | undefined) => {
-      held.kept = text ?? null;
-    },
-  }),
-}));
 
 type Answer = (body: Record<string, unknown>) => unknown;
 let sent: Array<Record<string, unknown>>;
 let answer: Answer;
 let outbox: OutboxApi;
+let store: OutboxStore;
 let root: Root;
 
+const pairing = { hostKeyFingerprint: "studio-key", keyId: "phone-1" };
 const snapshot = { scope: { mode: "code", threadId }, version: 1, paused: false, items: [] };
 const transport = {
   hostId: "studio",
@@ -54,6 +50,7 @@ const message = (fields: Partial<WaitingMessage> = {}): WaitingMessage => ({
   mode: "code",
   threadId,
   text: "And the docs",
+  pairing,
   writtenAt: new Date().toISOString(),
   ...fields,
 });
@@ -65,7 +62,7 @@ function Reader() {
 async function render(health: string, fields: object = {}): Promise<void> {
   held.session = {
     environment: { kind: "live" },
-    hosts: [{ hostId: "studio" }],
+    hosts: [{ hostId: "studio", ...pairing }],
     hostsLoaded: true,
     hostsError: undefined,
     health: [{ hostId: "studio", kind: health }],
@@ -73,7 +70,7 @@ async function render(health: string, fields: object = {}): Promise<void> {
     ...fields,
   };
   await act(async () =>
-    root.render(createElement(OutboxProvider, { children: createElement(Reader) })),
+    root.render(createElement(OutboxProvider, { store, children: createElement(Reader) })),
   );
   await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 20)));
 }
@@ -83,6 +80,22 @@ beforeEach(() => {
   sent = [];
   answer = applied;
   held.kept = null;
+  store = new OutboxStore({
+    load: async () => held.kept,
+    keep: async (text) => {
+      held.kept = text ?? null;
+    },
+    send: ({ message: entry, stillWanted, transport: to }) =>
+      queueMobileMessage({
+        transport: to,
+        scope: { mode: entry.mode, threadId: entry.threadId },
+        messageId: entry.id,
+        prompt: entry.text,
+        stillWanted,
+      }),
+    reasons: { tooOld: "old", otherComputer: "other", pairedAgain: "again" },
+    now: () => new Date(),
+  });
   root = createRoot(document.createElement("div"));
 });
 afterEach(() => act(() => root.unmount()));

@@ -204,6 +204,8 @@ try:
     run(["xcodebuild", "build-for-testing", "-workspace", str(ios / "Octant.xcworkspace"),
          "-scheme", "OctantOfflineNativeTests", "-configuration", "Release",
          "-destination", "id=" + device, "-derivedDataPath", str(derived_data),
+         # A Release build makes every architecture; the Simulator runs one.
+         "ONLY_ACTIVE_ARCH=YES",
          "CODE_SIGNING_ALLOWED=NO"], timeout=1800)
     if os.environ.get("OCTANT_KEEP_SIMULATOR_APP") == "1":
         # The app and its test runner, before the scenarios, so a failing one

@@ -1,6 +1,13 @@
 import type { MobileInboxRow } from "@octant/client-runtime";
 import { describe, expect, it } from "vitest";
-import { isUnread, markRead, NO_READ_CURSORS, parseReadCursors, seedRead } from "./readCursors";
+import {
+  forgetHosts,
+  isUnread,
+  markRead,
+  NO_READ_CURSORS,
+  parseReadCursors,
+  seedRead,
+} from "./readCursors";
 
 const row = (threadId: string, lastSequence?: number, hostId = "studio"): MobileInboxRow => ({
   hostId,
@@ -42,6 +49,12 @@ describe("what this phone has read", () => {
     const chat = { ...row("c", 90), mode: "chat" as const };
     expect(isUnread(codeOnly, chat)).toBe(false);
     expect(isUnread(seedRead(codeOnly, [row("a", 4), chat]), chat)).toBe(false);
+  });
+
+  it("forgets a computer that was taken off the phone", () => {
+    const both = seedRead(NO_READ_CURSORS, [row("a", 4), row("b", 4, "laptop")]);
+    expect(Object.keys(forgetHosts(both, new Set(["laptop"])))).toEqual(["laptop:code"]);
+    expect(forgetHosts(both, new Set(["laptop", "studio"]))).toBe(both);
   });
 
   it("says nothing of a thread whose computer reports no position", () => {

@@ -71,20 +71,25 @@ export function createSealedText(ports: {
       // A key that could not be read this time is not a key that is gone, so
       // this may throw and leave the text where it lies.
       const raw = await storage.getItem(KEY_NAME);
-      try {
-        if (raw === null) throw new Error("The key is gone.");
-        const whole = fromBase64(sealed);
-        const text = await crypto.subtle.decrypt(
-          { name: "AES-GCM", iv: whole.slice(0, IV_BYTES) },
-          await imported(fromBase64(raw)),
-          whole.slice(IV_BYTES),
-        );
-        return new TextDecoder().decode(text);
-      } catch {
-        // Never shown, never sent: what cannot be opened whole is let go.
+      if (raw === null) {
         await forget().catch(() => undefined);
         return null;
       }
+      const key = await imported(fromBase64(raw));
+      let text: ArrayBuffer;
+      try {
+        const whole = fromBase64(sealed);
+        text = await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv: whole.slice(0, IV_BYTES) },
+          key,
+          whole.slice(IV_BYTES),
+        );
+      } catch {
+        // Its seal is broken: never shown, never sent.
+        await forget().catch(() => undefined);
+        return null;
+      }
+      return new TextDecoder().decode(text);
     },
     keep: (text) => {
       last = last.then(

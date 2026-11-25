@@ -45,6 +45,37 @@ describe("a reply's Markdown", () => {
       if (segment.kind === "prose") expect(segment.markdown).not.toContain("![");
   });
 
+  it.each([
+    "[call](tel:123)",
+    "[call](<tel:123>)",
+    "[call]( TEL:123)",
+    "[call](&#116;el:123)",
+    "[call](t&#101;l:123)",
+    "[app](octant://pair?x)",
+    "[js](javascript:alert(1))",
+    "[call][ref]\n\n[ref]: tel:123",
+    "<tel:123>",
+    "<octant://pair>",
+  ])("makes no link of %s", (written) => {
+    for (const segment of replySegments(written))
+      if (segment.kind === "prose") {
+        expect(segment.markdown).toContain("\u200B");
+        expect(segment.markdown).not.toMatch(/\]\(\s*<?(?:tel|&|t&|octant|javascript)/i);
+      }
+  });
+
+  it("keeps a link to a web page, however it is written", () => {
+    for (const written of [
+      "[page](https://example.com/a:b?c=d&e)",
+      "[page](<https://example.com>)",
+      "<https://example.com>",
+      "[page][ref]\n\n[ref]: https://example.com",
+      "[file](src/a.ts)",
+      "See [1]: it works",
+    ])
+      expect(replySegments(written)).toEqual([{ kind: "prose", markdown: written }]);
+  });
+
   it("leaves no markup that loads something", () => {
     const [segment] = replySegments('<IMG src="http://e/a.png"> <video src="x"> </picture> <b>');
     expect(segment?.kind === "prose" ? segment.markdown : "").toBe(

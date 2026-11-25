@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-nati
 import { Icon } from "./Icon";
 import { space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
+import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 
 export type ToolCallStatus = "running" | "done" | "failed";
 
@@ -181,7 +182,9 @@ function CallRow(props: {
           />
         ) : null}
       </Pressable>
-      {showSummary ? <Text style={styles.summary}>{call.summary}</Text> : null}
+      {showSummary ? (
+        <Text style={styles.summary}>{formatScreenshotSafeLabel(call.summary, 600)}</Text>
+      ) : null}
     </RailRow>
   );
 }

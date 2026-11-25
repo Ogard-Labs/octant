@@ -87,6 +87,9 @@ export async function stopMobileCodeTurn(input: {
     checkoutId: input.checkoutId as Cancel["checkoutId"],
     turnOperationId: input.turnOperationId as NonNullable<Cancel["turnOperationId"]>,
   });
+  // A stop that came too late answers as that turn's state, which is no stop.
+  if (result.kind === "provider-turn-state" && result.state === "failed")
+    return { status: "refused", message: result.failure?.message ?? STOP_FAILED };
   return result.kind === "operation-failed"
     ? { status: "refused", message: result.failure.message }
     : { status: "stopped" };
@@ -101,8 +104,14 @@ export type MobileQueueResult =
   | { readonly status: "queued"; readonly snapshot: ThreadMessageQueueSnapshot }
   | { readonly status: "refused"; readonly message: string };
 
-/** A send also ends with no answer at all, which says nothing of the message. */
-export type MobileSendResult = MobileQueueResult | { readonly status: "unreachable" };
+/**
+ * A send also ends with no answer at all, which says nothing of the message, or
+ * withdrawn by the person before it left.
+ */
+export type MobileSendResult =
+  | MobileQueueResult
+  | { readonly status: "unreachable" }
+  | { readonly status: "withdrawn" };
 
 const REFUSAL: Readonly<Partial<Record<ThreadMessageQueueRefusalReason, string>>> = {
   unauthorized: "This phone may not queue messages here.",
@@ -173,9 +182,11 @@ async function change(
   transport: MobileRemoteTransport,
   snapshot: ThreadMessageQueueSnapshot,
   fields: Readonly<Record<string, unknown>>,
-): Promise<MobileQueueResult> {
+  stillWanted?: () => boolean,
+): Promise<MobileSendResult> {
   let held = snapshot;
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (stillWanted?.() === false) return { status: "withdrawn" };
     const result = await send(
       transport,
       decodeThreadMessageQueueCommand({
@@ -211,6 +222,8 @@ export async function queueMobileMessage(input: {
   readonly messageId: string;
   readonly prompt: string;
   readonly attachmentIds?: ReadonlyArray<string>;
+  /** Asked each time just before the message leaves. */
+  readonly stillWanted?: () => boolean;
 }): Promise<MobileSendResult> {
   const payload = {
     mode: input.scope.mode,
@@ -228,16 +241,18 @@ export async function queueMobileMessage(input: {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const snapshot = await loadMobileMessageQueue(input.transport, input.scope);
+      if (input.stillWanted?.() === false) return { status: "withdrawn" };
       if (snapshot === undefined)
         return {
           status: "refused",
           message: "This computer takes no message from this phone here.",
         };
-      return await change(input.transport, snapshot, {
-        kind: "enqueue",
-        messageId: input.messageId,
-        payload,
-      });
+      return await change(
+        input.transport,
+        snapshot,
+        { kind: "enqueue", messageId: input.messageId, payload },
+        input.stillWanted,
+      );
     } catch {
       // Lost, or an answer this build cannot read: asked again, then left open.
     }
@@ -249,7 +264,7 @@ export async function removeMobileQueuedMessage(input: {
   readonly transport: MobileRemoteTransport;
   readonly snapshot: ThreadMessageQueueSnapshot;
   readonly messageId: string;
-}): Promise<MobileQueueResult> {
+}): Promise<MobileSendResult> {
   try {
     return await change(input.transport, input.snapshot, {
       kind: "remove",

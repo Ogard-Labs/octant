@@ -54,6 +54,14 @@ export function markRead(cursors: ReadCursors, row: MobileInboxRow): ReadCursors
   };
 }
 
+/** A computer taken off the phone leaves no trace of its threads here. */
+export function forgetHosts(cursors: ReadCursors, kept: ReadonlySet<string>): ReadCursors {
+  const entries = Object.entries(cursors).filter(([key]) =>
+    kept.has(key.slice(0, key.lastIndexOf(":"))),
+  );
+  return entries.length === Object.keys(cursors).length ? cursors : Object.fromEntries(entries);
+}
+
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -20,8 +20,9 @@ import {
   type MobileProviderDirectoryEntry,
 } from "@octant/client-runtime";
 import { useMobileSession } from "../session/MobileSessionContext";
-import { isUnread, markRead, parseReadCursors, seedRead } from "./readCursors";
+import { forgetHosts, isUnread, markRead, parseReadCursors, seedRead } from "./readCursors";
 import { keepReadCursors, loadReadCursors } from "./readCursorFile";
+import { createThreadDrafts, liveThreadDrafts, type ThreadDrafts } from "./threadDrafts";
 import { createRequestGuard } from "./requestGuard";
 
 /**
@@ -58,23 +59,6 @@ export interface MobileThreads {
   }>;
 }
 
-export interface ThreadDrafts {
-  readonly read: (thread: string) => string;
-  readonly keep: (thread: string, text: string) => void;
-}
-
-/** In memory alone: an unsent message is not written to the phone's storage. */
-function createThreadDrafts(): ThreadDrafts {
-  const held = new Map<string, string>();
-  return {
-    read: (thread) => held.get(thread) ?? "",
-    keep: (thread, text) => {
-      if (text.trim().length === 0) held.delete(thread);
-      else held.set(thread, text);
-    },
-  };
-}
-
 const Context = createContext<MobileThreads | undefined>(undefined);
 
 export function useMobileThreads(): MobileThreads {
@@ -84,7 +68,7 @@ export function useMobileThreads(): MobileThreads {
 }
 
 export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
-  const { transports, hosts, environment } = useMobileSession();
+  const { transports, hosts, hostsLoaded, hostsError, environment } = useMobileSession();
   const [held, setRows] = useState<ReadonlyArray<MobileInboxRow>>([]);
   const [failures, setFailures] = useState<ReadonlyArray<MobileInboxHostFailure>>([]);
   const [error, setError] = useState<string | undefined>();
@@ -97,6 +81,10 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
   useEffect(() => {
     if (keeps) keepReadCursors(JSON.stringify(cursors));
   }, [cursors, keeps]);
+  useEffect(() => {
+    if (keeps && hostsLoaded && hostsError === undefined)
+      setCursors((current) => forgetHosts(current, new Set(hosts.map((host) => host.hostId))));
+  }, [hosts, hostsError, hostsLoaded, keeps]);
   // The thread on screen. What it did while it was read is read as well, which
   // the first list after it is left still has to know.
   const open = useRef<MobileInboxRow | undefined>(undefined);
@@ -215,7 +203,7 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
     () => held.map((row) => (isUnread(cursors, row) ? { ...row, unread: true } : row)),
     [cursors, held],
   );
-  const [drafts] = useState(createThreadDrafts);
+  const [drafts] = useState(() => (keeps ? liveThreadDrafts : createThreadDrafts()));
   const [undoable, settled] = useState<MobileInboxRow | undefined>();
   const clearUndo = useCallback(() => settled(undefined), []);
   const value = useMemo<MobileThreads>(() => {

@@ -130,7 +130,7 @@ export function useChatThread(
       decoded !== undefined &&
       (decoded.providerInstanceId !== String(view.thread.providerInstanceId) ||
         decoded.modelId !== String(view.thread.modelId));
-    await runMutation({
+    return runMutation({
       guard,
       identity,
       gate,

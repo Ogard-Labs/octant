@@ -5,6 +5,13 @@ import type { MobileInboxMode } from "@octant/client-runtime";
  * alone: an approval, an answer, a stop or any other action is taken by the
  * computer when it is made, or not at all.
  */
+export interface Pairing {
+  /** The computer's own key, which another that takes its id does not have. */
+  readonly hostKeyFingerprint: string;
+  /** This phone's key there, new each time it is paired. */
+  readonly keyId: string;
+}
+
 export interface WaitingMessage {
   /** The computer's own id for it, the same for every attempt, so it is taken once. */
   readonly id: string;
@@ -12,6 +19,8 @@ export interface WaitingMessage {
   readonly mode: MobileInboxMode;
   readonly threadId: string;
   readonly text: string;
+  /** The pairing it was written under; it is sent by itself under no other. */
+  readonly pairing: Pairing;
   readonly writtenAt: string;
   /** Why it waits on the person: the computer's refusal, or its age. */
   readonly refused?: string;
@@ -67,12 +76,23 @@ export function markAttempted(outbox: Outbox, id: string): Outbox {
 }
 
 /** The person says it still applies. It keeps its id, so it is still taken once. */
-export function tryAgain(outbox: Outbox, id: string, now: Date): Outbox {
+export function tryAgain(
+  outbox: Outbox,
+  id: string,
+  now: Date,
+  pairing?: Pairing | undefined,
+): Outbox {
   return {
     messages: outbox.messages.map((message) => {
       if (message.id !== id) return message;
       const { refused: _refused, ...rest } = message;
-      return { ...rest, writtenAt: now.toISOString() };
+      // A new pairing with the same computer is the person's to accept. Another
+      // computer under its id is not the one they wrote to.
+      const under =
+        pairing !== undefined && pairing.hostKeyFingerprint === message.pairing.hostKeyFingerprint
+          ? pairing
+          : message.pairing;
+      return { ...rest, pairing: under, writtenAt: now.toISOString() };
     }),
   };
 }
@@ -93,29 +113,45 @@ export function waitingFor(outbox: Outbox, thread: Thread): ReadonlyArray<Waitin
  */
 export function dueMessages(
   outbox: Outbox,
-  hostId: string,
+  target: { readonly hostId: string; readonly pairing: Pairing },
   now: Date,
 ): {
   readonly send: ReadonlyArray<WaitingMessage>;
-  readonly tooOld: ReadonlyArray<WaitingMessage>;
+  readonly held: ReadonlyArray<{
+    readonly message: WaitingMessage;
+    readonly why: "tooOld" | "otherComputer" | "pairedAgain";
+  }>;
 } {
   const seen = new Set<string>();
   const send: WaitingMessage[] = [];
-  const tooOld: WaitingMessage[] = [];
+  const held: Array<{
+    message: WaitingMessage;
+    why: "tooOld" | "otherComputer" | "pairedAgain";
+  }> = [];
   for (const message of outbox.messages) {
-    if (message.hostId !== hostId || seen.has(threadKey(message))) continue;
+    if (message.hostId !== target.hostId || seen.has(threadKey(message))) continue;
     seen.add(threadKey(message));
     if (message.refused !== undefined) continue;
-    const age = now.getTime() - Date.parse(message.writtenAt);
-    (age < SENT_WITHIN_MS ? send : tooOld).push(message);
+    if (message.pairing.hostKeyFingerprint !== target.pairing.hostKeyFingerprint)
+      held.push({ message, why: "otherComputer" });
+    else if (message.pairing.keyId !== target.pairing.keyId)
+      held.push({ message, why: "pairedAgain" });
+    else if (now.getTime() - Date.parse(message.writtenAt) >= SENT_WITHIN_MS)
+      held.push({ message, why: "tooOld" });
+    else send.push(message);
   }
-  return { send, tooOld };
+  return { send, held };
 }
 
 function isMessage(value: unknown): value is WaitingMessage {
   if (typeof value !== "object" || value === null) return false;
   const entry = value as Readonly<Record<string, unknown>>;
+  const pairing = entry.pairing as Readonly<Record<string, unknown>> | null | undefined;
   return (
+    typeof pairing === "object" &&
+    pairing !== null &&
+    typeof pairing.hostKeyFingerprint === "string" &&
+    typeof pairing.keyId === "string" &&
     ["id", "hostId", "threadId", "text", "writtenAt"].every(
       (key) => typeof entry[key] === "string",
     ) &&

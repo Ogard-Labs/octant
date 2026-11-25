@@ -3,6 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { MobileRemoteTransport } from "@octant/client-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { UnansweredMessage } from "../threadDrafts";
 import { createSelectedThreadGuard } from "./selectedThreadGuard";
 import { useTurnControl, type TurnControl } from "./useTurnControl";
 
@@ -18,6 +19,7 @@ let control: TurnControl;
 let prompts: string[];
 let errors: Array<string | undefined>;
 let keeps: boolean;
+let noted: UnansweredMessage | undefined;
 let unanswered: Array<{ readonly id: string; readonly text: string }>;
 
 function Harness(props: { readonly transport: MobileRemoteTransport }) {
@@ -33,6 +35,10 @@ function Harness(props: { readonly transport: MobileRemoteTransport }) {
     stopTurn: undefined,
     attachmentIds: [],
     onQueued: () => {},
+    unanswered: noted,
+    noteUnanswered: (message) => {
+      noted = message;
+    },
     onUnanswered: (message) => {
       unanswered.push(message);
       return keeps;
@@ -44,7 +50,9 @@ function Harness(props: { readonly transport: MobileRemoteTransport }) {
 const guard = createSelectedThreadGuard();
 const ui = { setBusy: () => {}, setError: (message: string | undefined) => errors.push(message) };
 
+let last: MobileRemoteTransport;
 async function render(transport: MobileRemoteTransport): Promise<void> {
+  last = transport;
   guard.select("host:thread");
   await act(async () => root.render(createElement(Harness, { transport })));
 }
@@ -55,6 +63,7 @@ beforeEach(() => {
   errors = [];
   unanswered = [];
   keeps = true;
+  noted = undefined;
   root = createRoot(document.createElement("div"));
 });
 afterEach(() => {
@@ -134,6 +143,7 @@ describe("queueing behind a running turn", () => {
     });
     await act(async () => control.queueMessage());
     expect(prompts).toEqual([]);
+    await act(async () => root.render(createElement(Harness, { transport: last })));
     await act(async () => control.queueMessage());
     expect(new Set(sent).size).toBe(1);
   });

@@ -9,6 +9,7 @@ import {
 } from "@octant/client-runtime";
 import type { ThreadMessageQueueSnapshot } from "@octant/contracts";
 import { hapticFailure, hapticSuccess } from "../../ui/haptics";
+import type { UnansweredMessage } from "../threadDrafts";
 import { runMutation } from "./runMutation";
 import type { ThreadHookInput } from "./threadTypes";
 
@@ -34,6 +35,9 @@ export function useTurnControl(
     readonly stopTurn: (() => Promise<MobileStopResult>) | undefined;
     readonly attachmentIds: ReadonlyArray<string>;
     readonly onQueued: () => void;
+    /** The thread's message whose answer was lost, if it is still the draft. */
+    readonly unanswered: UnansweredMessage | undefined;
+    readonly noteUnanswered: (message: UnansweredMessage | undefined) => void;
     /** Sent, and no answer came: kept under its id until the computer says. */
     readonly onUnanswered: (message: { readonly id: string; readonly text: string }) => boolean;
     readonly onStopped: () => void;
@@ -97,6 +101,7 @@ export function useTurnControl(
           ui.setError(result.message);
           return;
         }
+        if (result.status === "withdrawn") return;
         if (result.status === "queued") setQueue(result.snapshot);
         onDone(result.status);
       },
@@ -115,10 +120,7 @@ export function useTurnControl(
       // has answered for it.
       const words = JSON.stringify([prompt, input.attachmentIds]);
       const messageId =
-        unanswered.current?.words === words
-          ? unanswered.current.id
-          : globalThis.crypto.randomUUID();
-      unanswered.current = undefined;
+        input.unanswered?.words === words ? input.unanswered.id : globalThis.crypto.randomUUID();
       await change(
         ({ scope }) =>
           queueMobileMessage({
@@ -136,11 +138,12 @@ export function useTurnControl(
               input.attachmentIds.length === 0 &&
               input.onUnanswered({ id: messageId, text: prompt });
             if (!held) {
-              unanswered.current = { words, id: messageId };
+              input.noteUnanswered({ words, id: messageId });
               ui.setError("No answer came. Your draft stays here; send it again.");
               return;
             }
           } else hapticSuccess();
+          input.noteUnanswered(undefined);
           input.setPrompt("");
           input.onQueued();
         },

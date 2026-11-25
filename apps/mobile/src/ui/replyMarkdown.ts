@@ -64,7 +64,7 @@ const APART = "\u200B";
  * that loads something is parted the same way.
  */
 function withoutRemoteMedia(markdown: string): string {
-  return markdown
+  return withoutOtherSchemes(markdown)
     .replace(
       /(^|[^`\\])!\[([^[\]\n\\]{0,300})\]\(([^\s()<>]{1,2000})(?:[ \t]+["'][^"'\n]{0,300}["'])?\)/g,
       (_whole, before: string, alt: string, url: string) =>
@@ -74,5 +74,25 @@ function withoutRemoteMedia(markdown: string): string {
     .replace(
       /<(?=\/?(?:img|image|video|audio|source|track|picture|iframe|object|embed|svg|link|style)\b)/gi,
       `<${APART}`,
+    );
+}
+
+/**
+ * A link in a reply leads to a web page or nowhere. The system opens some
+ * schemes by itself, a call or another app, so any other is no link at all. A
+ * destination is read as it is written, before Markdown's own escapes, so one
+ * that uses them to spell a scheme is not a link either.
+ */
+function withoutOtherSchemes(markdown: string): string {
+  const leadsNowhere = (destination: string) =>
+    !/^<?https?:\/\//i.test(destination) && /[:&\\%]/.test(destination);
+  return markdown
+    .replace(
+      /\](\(|:)(\s{0,10})([^\s)]{1,2000})/g,
+      (whole, mark: string, gap: string, destination: string) =>
+        leadsNowhere(destination) ? `]${APART}${mark}${gap}${destination}` : whole,
+    )
+    .replace(/<([a-z][a-z0-9+.-]{0,30}:[^\s<>]{0,2000})>/gi, (whole, destination: string) =>
+      leadsNowhere(destination) ? `<${APART}${destination}>` : whole,
     );
 }

@@ -14,7 +14,9 @@ export function loadReadCursors(): string | null {
 
 export function keepReadCursors(text: string): void {
   try {
-    kept().write(text);
+    const file = kept();
+    if (!file.exists) file.create();
+    file.writeSync(text);
   } catch {
     // The count starts over next time.
   }

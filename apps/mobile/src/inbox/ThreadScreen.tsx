@@ -131,6 +131,19 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const draftKey =
     selected === undefined ? "" : `${selected.hostId}:${selected.mode}:${selected.threadId}`;
   const [prompt, setPrompt] = useState(() => drafts.read(draftKey));
+  // A send can land after this screen is gone, on the draft or on a later screen
+  // of the same thread, so the words are cleared by what was sent.
+  const sentPrompt = (next: string) => {
+    if (next === "") drafts.sent(draftKey, prompt);
+    else setPrompt(next);
+  };
+  useEffect(
+    () =>
+      drafts.onSent((thread, text) => {
+        if (thread === draftKey) setPrompt((current) => (current === text ? "" : current));
+      }),
+    [draftKey, drafts],
+  );
   useEffect(() => drafts.keep(draftKey, prompt), [draftKey, drafts, prompt]);
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
@@ -191,7 +204,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
     ui,
     gate: staleGate,
     prompt,
-    setPrompt,
+    setPrompt: sentPrompt,
   });
 
   const chat = useChatThread({ ...shared(targetFor("chat")), modelOptions: models.options });
@@ -352,8 +365,27 @@ export function ThreadScreen(props: ThreadScreenProps) {
   // Files stay with the draft: they go through the computer as they are added.
   const sendLater = () => {
     if (pendingAttachments.length > 0) ui.setError(MOBILE_COPY.outboxNoFiles);
-    else if (keepForLater(prompt.trim())) setPrompt("");
+    else
+      unlessMayBeSent(() => {
+        if (keepForLater(prompt.trim())) sentPrompt("");
+      });
   };
+  // Words that a failed send may have delivered are not queued as new ones
+  // without the person: the queue would deliver them a second time.
+  const unlessMayBeSent = (send: () => void) => {
+    if (drafts.mayBeSent(draftKey) !== prompt.trim()) {
+      send();
+      return;
+    }
+    Alert.alert(MOBILE_COPY.outboxMayBeSentTitle, MOBILE_COPY.outboxMayBeSentBody, [
+      { text: "Cancel", style: "cancel" },
+      { text: MOBILE_COPY.outboxSendAnyway, onPress: send },
+    ]);
+  };
+  const sendNow = async (send: () => Promise<unknown>) => {
+    if ((await send()) === "failed") drafts.noteMayBeSent(draftKey, prompt);
+  };
+  const queueNow = () => unlessMayBeSent(() => void turnControl.queueMessage());
   const runningWorkTurn = workTurnLive
     ? work.turns?.findLast((turn) => isLiveWorkTurn(turn))
     : undefined;
@@ -396,6 +428,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
     attachmentIds: pendingAttachments.map((attachment) => attachment.id),
     onQueued: () => threadAttachments.attachmentsSent(),
     onStopped: () => void refresh({ quiet: true }),
+    unanswered: drafts.unanswered(draftKey),
+    noteUnanswered: (message) => drafts.noteUnanswered(draftKey, message),
     onUnanswered: ({ id, text }) => keepForLater(text, id),
   });
   // Where the queue cannot be read, a running turn still closes the composer.
@@ -403,7 +437,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const subagents = runningWorkTurn === undefined ? [] : turnSubagents(runningWorkTurn);
   const subagentsWorking = subagents.filter((agent) => agent.working).length;
   const threadHint = mode === "code" || mode === "work" ? mobileThreadHint(mode) : undefined;
-  const sendFollowUp = () => void (mode === "work" ? work : code).sendFollowUp();
+  const sendFollowUp = () => void sendNow(() => (mode === "work" ? work : code).sendFollowUp());
   const runningChatTurn = chat.view?.turns.at(-1);
   const liveBusy = busy || chat.activeAttempt !== undefined;
   const [resumeBusy, setResumeBusy] = useState(false);
@@ -771,6 +805,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 workTurns={work.turns}
               />
               <WaitingMessages
+                unsaved={outbox.unsaved}
                 messages={waiting}
                 onDelete={(message) =>
                   message.attempted === true
@@ -790,7 +825,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
                     draft.trim().length === 0 ? message.text : `${message.text}\n\n${draft}`,
                   );
                 }}
-                onTryAgain={(message) => outbox.tryAgain(message.id)}
+                onTryAgain={outbox.tryAgain}
               />
               {!offlineDemo &&
               Platform.OS !== "web" &&
@@ -949,7 +984,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
             onChangeText={setPrompt}
             onPressModel={() => setModelOpen(true)}
             onSubmit={() =>
-              unreached ? sendLater() : void (queues ? turnControl.queueMessage() : chat.send())
+              unreached ? sendLater() : void (queues ? queueNow() : sendNow(chat.send))
             }
             queues={queues}
             sending={turnControl.pending}
@@ -980,9 +1015,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
             ? {}
             : { modelLabel: levelLabel, onPressModel: () => setDetailsOpen(true) })}
           onChangeText={setPrompt}
-          onSubmit={
-            unreached ? sendLater : queues ? () => void turnControl.queueMessage() : sendFollowUp
-          }
+          onSubmit={unreached ? sendLater : queues ? queueNow : sendFollowUp}
           queues={queues}
           sending={turnControl.pending}
           {...(turnControl.stop === undefined ? {} : { onStop: () => void turnControl.stop?.() })}

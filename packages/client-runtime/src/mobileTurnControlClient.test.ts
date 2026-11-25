@@ -75,6 +75,20 @@ describe("stopping a turn from the phone", () => {
     });
   });
 
+  it("does not call a stop that came too late a stop", async () => {
+    const { transport } = host((entry) =>
+      Response.json({
+        kind: "provider-turn-state",
+        operationId: entry.body.operationId,
+        state: "failed",
+        failure: { category: "failed", message: "That turn has already ended." },
+      }),
+    );
+    expect(
+      await stopMobileCodeTurn({ transport, threadId, checkoutId, turnOperationId: turnId }),
+    ).toMatchObject({ status: "refused" });
+  });
+
   it("gives the reason when the computer refuses", async () => {
     const { transport } = host(() =>
       Response.json({ message: "This device may not stop turns here." }, { status: 403 }),
@@ -149,6 +163,24 @@ describe("sending a message through the thread's queue", () => {
       messageId,
       messageId,
     ]);
+  });
+
+  it("does not send a message the person took back while the queue was read", async () => {
+    let wanted = true;
+    const { sent, transport } = host((entry) => {
+      wanted = false;
+      return isCommand(entry) ? new Response("", { status: 500 }) : ready(4);
+    });
+    expect(
+      await queueMobileMessage({
+        transport,
+        scope,
+        messageId,
+        prompt: "And the docs",
+        stillWanted: () => wanted,
+      }),
+    ).toEqual({ status: "withdrawn" });
+    expect(sent.filter(isCommand)).toEqual([]);
   });
 
   it("says nothing of a message while the computer cannot be reached", async () => {

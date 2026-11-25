@@ -106,7 +106,7 @@ function renderChatTranscript(view: ChatThreadView): HTMLElement {
     refresh: vi.fn(async () => {}),
     attach: vi.fn(async () => {}),
     attachmentsSent: () => undefined,
-    send: vi.fn(async () => {}),
+    send: vi.fn(async () => undefined),
     stop: vi.fn(async () => {}),
     retry: vi.fn(async () => {}),
     completeWorkItem: vi.fn(),

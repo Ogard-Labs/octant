@@ -95,7 +95,7 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
     if (!enabled || transport === undefined || identity === undefined || threadId === undefined) {
       return;
     }
-    await runMutation({
+    return runMutation({
       guard,
       identity,
       gate,
