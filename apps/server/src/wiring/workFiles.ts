@@ -6,6 +6,7 @@ import {
   type ProjectId,
   type Project,
   type WindowId,
+  type OutsideImageProviderInstance,
 } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
 import { createWorkMutationRouteHandler } from "../workMutationRoutes";
@@ -63,6 +64,7 @@ import { createServerWorkFileListing } from "../serverProjects/serverWorkFiles";
 export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     AuthorityWiring,
+    | "imageGenerationOffers"
     | "isAuthenticatedPairedDeviceSessionCurrent"
     | "onWindowRevoked"
     | "serviceOffers"
@@ -88,6 +90,7 @@ export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence">
 export function wireWorkFiles(deps: WorkFilesDependencies) {
   const {
     credentialResolver,
+    imageGenerationOffers,
     serviceOffers,
     imageJobService,
     videoJobService,
@@ -201,13 +204,19 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
   });
   const imageProfiles = {
     listInstances: () => persistence.readProviderInstances(),
+    admitsOutsideImageDriver: (instance: OutsideImageProviderInstance) =>
+      imageJobService.admitsOutsideDriver(instance),
     readImageGenerationSettings: () =>
       (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration,
   };
   const serviceOfferRoutes = createServiceOfferRouteHandler({
     offers: serviceOffers,
     rules: {
-      ...imageOfferDecisionRules({ ...imageProfiles, kept: keptImageChoices }),
+      ...imageOfferDecisionRules({
+        ...imageProfiles,
+        referenceBytesForOffer: (offerId) => imageGenerationOffers.referenceBytes(offerId),
+        kept: keptImageChoices,
+      }),
       ...videoOfferDecisionRules({ kept: keptVideoChoices }),
       transcribe: transcriptionDecision,
       narrate: narrationDecision,
@@ -216,6 +225,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
       listEligibleImageProfiles(
         imageProfiles.listInstances(),
         imageProfiles.readImageGenerationSettings().customSources,
+        imageProfiles.admitsOutsideImageDriver,
       ),
     authorizeScope: (windowId, threadKind, scopeId, principal) =>
       windowCanOpenThread(windowId, threadKind, String(scopeId), principal),

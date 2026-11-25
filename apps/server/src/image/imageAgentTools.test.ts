@@ -22,6 +22,7 @@ import type {
   ImageGenerationOfferOutcome,
 } from "./imageGenerationOfferService";
 import { ImageJobService } from "./imageJobService";
+import { imageOfferDecisionRules } from "./imageOfferDecisionRules";
 
 const now = "2026-08-28T12:00:00.000Z";
 const scopeId = "a3000000-0000-4000-8000-000000000002" as never;
@@ -1037,5 +1038,182 @@ describe("createImageAgentTools", () => {
       });
       expect(generate).not.toHaveBeenCalled();
     });
+  });
+
+  it("excludes outside image drivers from offers and decisions when references exceed 2.5 MiB", async () => {
+    const outsideId = "a3000000-0000-4000-8000-000000000099" as ProviderInstance["id"];
+    const outside: ProviderInstance = {
+      id: outsideId,
+      displayName: "Example Outside Image",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1 as ProviderInstance["version"],
+      createdAt: now as ProviderInstance["createdAt"],
+      updatedAt: now as ProviderInstance["updatedAt"],
+      driverKind: "outside-image",
+      configuration: {
+        kind: "outside-image",
+        driver: {
+          extensionId: "00000000-0000-4000-8000-000000000099" as never,
+          packageId: "example.outside-image" as never,
+          componentId: "driver" as never,
+          version: "1.0.0" as never,
+          digest: `sha256:${"a".repeat(64)}` as never,
+        },
+        baseUrl: "https://images.example.test",
+        key: { header: "authorization", scheme: "Bearer" },
+        modelAllowlist: ["outside-edit" as never],
+        defaultModel: "outside-edit" as never,
+      },
+    };
+    const read = vi.fn(async () => Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10));
+    const oversizedSource = {
+      latestAttachments: () => [{ label: "big.png", size: 2_621_441, read }],
+    };
+
+    // Only outside profile enabled: refuses upfront without opening a card or reading bytes.
+    const onlyOutside = createImageAgentTools({
+      threadKind: "chat-thread",
+      scopeId,
+      port: {
+        listInstances: () => [outside],
+        admitsOutsideImageDriver: () => true,
+        readImageGenerationCustomSources: () => [],
+        enqueue: vi.fn(async () => job()),
+        listJobs: () => [],
+        ask: vi.fn(),
+        remembered: () => undefined,
+        forget: () => undefined,
+        imageSources: oversizedSource,
+      },
+    });
+    await expect(
+      call(onlyOutside, { prompt: "Restyle", references: [{ kind: "attachment" }] }),
+    ).resolves.toMatchObject({
+      isError: true,
+      result: {
+        error: "Reference images for an outside image driver cannot exceed 2.5 MiB combined.",
+      },
+    });
+    expect(read).not.toHaveBeenCalled();
+
+    // Outside + bundled enabled: offer preselects bundled and passes referenceBytes.
+    const ask = vi.fn(async () => ({ status: "cancelled" as const }));
+    const both = createImageAgentTools({
+      threadKind: "chat-thread",
+      scopeId,
+      port: {
+        listInstances: () => [outside, imageProfile()],
+        admitsOutsideImageDriver: () => true,
+        readImageGenerationCustomSources: () => [],
+        enqueue: vi.fn(async () => job()),
+        listJobs: () => [],
+        ask,
+        remembered: () => undefined,
+        forget: () => undefined,
+        imageSources: oversizedSource,
+      },
+    });
+    await call(both, { prompt: "Restyle", references: [{ kind: "attachment" }] });
+    expect(ask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        referenceBytes: 2_621_441,
+        offer: expect.objectContaining({
+          suggested: { profileInstanceId: profileId, modelId: "gpt-image-2" },
+        }),
+      }),
+    );
+
+    // Server decision rules also refuse manually selecting the outside profile on an >2.5 MiB offer.
+    const rules = imageOfferDecisionRules({
+      listInstances: () => [outside, imageProfile()],
+      admitsOutsideImageDriver: () => true,
+      readImageGenerationSettings: () => ({ customSources: [] }),
+      referenceBytesForOffer: () => 2_621_441,
+    });
+    const offer = {
+      kind: "generate" as const,
+      offerId: "offer-1" as never,
+      threadKind: "chat-thread" as const,
+      scopeId,
+      prompt: "Restyle",
+      variantCount: 1,
+      revision: false,
+      suggested: { profileInstanceId: profileId, modelId: "gpt-image-2" as never },
+      references: [{ kind: "attachment" as const, label: "big.png" }],
+      requestedAt: now as never,
+    };
+    expect(
+      rules.generate(offer, {
+        offerId: offer.offerId,
+        decision: "generate",
+        profileInstanceId: outsideId,
+        modelId: "outside-edit" as never,
+        rememberForThread: false,
+        referenceImagesConfirmed: true,
+      }),
+    ).toEqual({
+      reason:
+        "Outside image drivers accept at most 2.5 MiB of reference images combined. Choose another model.",
+    });
+    expect(
+      rules.generate(offer, {
+        offerId: offer.offerId,
+        decision: "generate",
+        profileInstanceId: profileId,
+        modelId: "gpt-image-2" as never,
+        rememberForThread: false,
+        referenceImagesConfirmed: true,
+      }),
+    ).toMatchObject({
+      outcome: { status: "generate", profileInstanceId: profileId, modelId: "gpt-image-2" },
+    });
+
+    // A large parent-only revision asks without erasing a remembered outside choice.
+    const completed = job("completed");
+    const firstArtifact = completed.artifacts[0];
+    if (firstArtifact === undefined) throw new Error("Expected completed job artifact.");
+    const bigParentJob: ImageJob = {
+      ...completed,
+      artifacts: [{ ...firstArtifact, size: 3_000_000 }],
+    };
+    const forget = vi.fn();
+    const enqueue = vi.fn(async () => job());
+    const askRevision = vi.fn(async () => ({ status: "cancelled" as const }));
+    const rememberedOutside: ImageGenerationChoice = {
+      profileInstanceId: outsideId,
+      modelId: "outside-edit" as never,
+    };
+    const revisionTools = createImageAgentTools({
+      threadKind: "chat-thread",
+      scopeId,
+      port: {
+        listInstances: () => [outside, imageProfile()],
+        admitsOutsideImageDriver: () => true,
+        readImageGenerationCustomSources: () => [],
+        enqueue,
+        listJobs: () => [bigParentJob],
+        ask: askRevision,
+        remembered: () => rememberedOutside,
+        forget,
+      },
+    });
+    const declined = await call(revisionTools, {
+      prompt: "Make it brighter",
+      parentAttachmentId,
+    });
+    expect(declined.result).toMatchObject({ status: "cancelled" });
+    expect(askRevision).toHaveBeenCalledOnce();
+    expect(forget).not.toHaveBeenCalled();
+
+    // A later prompt-only generation still uses the remembered outside choice without asking.
+    await call(revisionTools, { prompt: "A quiet harbor" });
+    expect(askRevision).toHaveBeenCalledOnce();
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileInstanceId: outsideId,
+        modelId: "outside-edit",
+      }),
+    );
   });
 });

@@ -921,7 +921,9 @@ function ProviderRow(props: ProviderRowProps) {
   const isGeminiImage = props.instance.driverKind === "gemini-native-image";
   const isBflImage = props.instance.driverKind === "bfl-image";
   const isIdeogramImage = props.instance.driverKind === "ideogram-image";
-  const isImageProfile = isOpenAiImage || isGeminiImage || isBflImage || isIdeogramImage;
+  const isOutsideImage = props.instance.driverKind === "outside-image";
+  const isImageProfile =
+    isOpenAiImage || isGeminiImage || isBflImage || isIdeogramImage || isOutsideImage;
   // A comparison on the instance itself, so it narrows the instance's configuration.
   const isVideoProfile =
     props.instance.driverKind === "gemini-video" ||
@@ -930,15 +932,19 @@ function ProviderRow(props: ProviderRowProps) {
   // Image and video profiles hold a key and have no runtime to check.
   const isMediaProfile = isImageProfile || isVideoProfile;
   const outsideInstance =
-    props.instance.driverKind === "outside-harness-endpoint" ? props.instance : undefined;
+    props.instance.driverKind === "outside-harness-endpoint" ||
+    props.instance.driverKind === "outside-image"
+      ? props.instance
+      : undefined;
   const usesCredential =
-    outsideInstance?.configuration.key !== undefined ||
-    isHttp ||
-    isAnthropicHttp ||
-    isFoundry ||
-    isMediaProfile ||
-    (isClaude && props.instance.configuration.authentication !== "subscription") ||
-    acpInstance?.configuration.authentication === "api-key";
+    outsideInstance !== undefined
+      ? outsideInstance.configuration.key !== undefined
+      : isHttp ||
+        isAnthropicHttp ||
+        isFoundry ||
+        isMediaProfile ||
+        (isClaude && props.instance.configuration.authentication !== "subscription") ||
+        acpInstance?.configuration.authentication === "api-key";
   const browserClaudeKeySetup = isClaude && usesCredential && !props.credentialManagementAvailable;
   const credential = useCredentialStatus(props, !usesCredential);
   const setupGuidance = guidance(
@@ -1576,7 +1582,7 @@ function ProviderRow(props: ProviderRowProps) {
                     ? {}
                     : { onOpenExternalUrl: props.onOpenExternalUrl })}
                 />
-              ) : outsideInstance !== undefined &&
+              ) : outsideInstance?.driverKind === "outside-harness-endpoint" &&
                 props.onChangeOutsideHarnessEndpointConfiguration !== undefined ? (
                 <OutsideDriverConfigurationForm
                   credentialManagementAvailable={props.credentialManagementAvailable}
@@ -1840,12 +1846,14 @@ function ProviderRow(props: ProviderRowProps) {
                         {String(outsideInstance.configuration.driver.digest)}
                       </span>
                     </span>
-                    <ProviderToolVerification
-                      disabled={disabled || !props.instance.enabled}
-                      instance={props.instance}
-                      observed={props.observed}
-                      onVerify={props.onVerifyModelTools}
-                    />
+                    {outsideInstance.driverKind === "outside-image" ? null : (
+                      <ProviderToolVerification
+                        disabled={disabled || !props.instance.enabled}
+                        instance={props.instance}
+                        observed={props.observed}
+                        onVerify={props.onVerifyModelTools}
+                      />
+                    )}
                   </div>
                 )}
                 {!isClaude ? null : (

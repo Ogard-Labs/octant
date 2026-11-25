@@ -13,6 +13,13 @@ import {
   type ImageGenerationPorts,
   type ImageHttpAuth,
 } from "@octant/provider-sdk/image-generation";
+import { lookup } from "node:dns/promises";
+import { request as httpRequest, type IncomingMessage } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { isIP } from "node:net";
+import type { Readable } from "node:stream";
+import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
+import { isPublicNetworkAddress } from "@octant/domain/network-address-policy";
 import type {
   ProviderCredentialLease,
   ProviderCredentialResolver,
@@ -186,9 +193,21 @@ export function makeImageGenerationPorts(options: {
   readonly credentialResolver: ProviderCredentialResolver;
   readonly endpoint: ImageGenerationEndpoint;
   readonly fetch?: ImageHttpFetch;
+  /**
+   * The transport for the one unauthenticated approved-image GET. The job
+   * service always passes the pinned transport here; absent, a supplied
+   * `fetch` is used (a test's own), else the pinned transport, which allows a
+   * private address only on the profile's own configured base URL origin.
+   */
+  readonly approvedFetch?: ImageHttpFetch;
   readonly limits?: Partial<ImageHttpLimits>;
 }): ImageGenerationPorts {
   const fetch = options.fetch ?? globalThis.fetch;
+  const allowedOrigin = configuredOrigin(options.endpoint.baseUrl);
+  const approvedFetch =
+    options.approvedFetch ??
+    options.fetch ??
+    makePinnedImageFetch(allowedOrigin === undefined ? {} : { allowedOrigin });
   const limits: ImageHttpLimits = { ...IMAGE_HTTP_DEFAULT_LIMITS, ...options.limits };
   return {
     request: async (request) => {
@@ -211,12 +230,275 @@ export function makeImageGenerationPorts(options: {
     fetchApprovedImageUrl: (input) =>
       fetchApprovedImageUrl({
         url: input.url,
-        fetch,
+        fetch: approvedFetch,
         maxBytes: MAX_GENERATED_IMAGE_BYTES,
         timeoutMs: limits.connectionTimeoutMs,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       }),
     sniffMediaType: sniffGeneratedImageMediaType,
+  };
+}
+
+function configuredOrigin(baseUrl: string | undefined): string | undefined {
+  if (baseUrl === undefined) return undefined;
+  try {
+    return new URL(baseUrl).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveAllAddresses(hostname: string): Promise<ReadonlyArray<string>> {
+  return (await lookup(hostname, { all: true })).map((entry) => entry.address);
+}
+
+/**
+ * The transport for an approved image download: it connects only to an
+ * address it has just checked. A name resolved once for a check and again by
+ * the fetch could answer a public address and then a private one (DNS
+ * rebinding); here the one resolution that is checked is the one the socket
+ * connects to, through `node:http`'s `lookup`, and the original name still
+ * reaches the server as `Host` and, over HTTPS, as the TLS server name the
+ * certificate is verified against. Every address must be publicly routable,
+ * except on `allowedOrigin`, the profile's own configured base URL, which the
+ * person chose and may be on this computer. It follows no redirect: a
+ * redirect is answered as the response it is, which the caller refuses, so
+ * every hop is this one.
+ */
+export function makePinnedImageFetch(
+  options: {
+    readonly allowedOrigin?: string;
+    readonly resolveAll?: (hostname: string) => Promise<ReadonlyArray<string>>;
+  } = {},
+): ImageHttpFetch {
+  const resolveAll = options.resolveAll ?? resolveAllAddresses;
+  return (input, init) =>
+    new Promise<Response>((resolve, reject) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const secure = url.protocol === "https:";
+      if (!secure && url.protocol !== "http:") {
+        reject(new Error("The approved image address is not HTTP or HTTPS."));
+        return;
+      }
+      const mayBePrivate =
+        options.allowedOrigin !== undefined && url.origin === options.allowedOrigin;
+      const host = url.hostname.replace(/^\[|\]$/g, "");
+      // `node:http` connects to a literal address without calling `lookup`.
+      if (isIP(host) !== 0 && !mayBePrivate && !isPublicNetworkAddress(host)) {
+        reject(new Error("The approved image address is on a private network."));
+        return;
+      }
+      const pinnedLookup = (
+        hostname: string,
+        lookupOptions: { readonly all?: boolean } | undefined,
+        callback: (
+          error: Error | null,
+          address?: string | ReadonlyArray<{ readonly address: string; readonly family: number }>,
+          family?: number,
+        ) => void,
+      ) => {
+        resolveAll(hostname).then(
+          (addresses) => {
+            if (addresses.length === 0) {
+              callback(new Error("The approved image address does not resolve."));
+              return;
+            }
+            if (!mayBePrivate && !addresses.every((address) => isPublicNetworkAddress(address))) {
+              callback(new Error("The approved image address resolves to a private network."));
+              return;
+            }
+            const entries = addresses.map((address) => ({ address, family: isIP(address) }));
+            if (lookupOptions?.all === true) callback(null, entries);
+            else callback(null, entries[0]?.address, entries[0]?.family);
+          },
+          (error: unknown) => callback(error instanceof Error ? error : new Error(String(error))),
+        );
+      };
+      const request = (secure ? httpsRequest : httpRequest)(
+        {
+          host,
+          port: url.port.length > 0 ? Number(url.port) : secure ? 443 : 80,
+          path: `${url.pathname}${url.search}`,
+          method: "GET",
+          headers: { host: url.host, "accept-encoding": "gzip, deflate, br" },
+          // A fresh connection each time: a pooled socket opened for an
+          // earlier answer would skip this lookup and its check.
+          agent: false,
+          lookup: pinnedLookup as never,
+          ...(init?.signal === undefined || init.signal === null ? {} : { signal: init.signal }),
+          ...(secure ? { servername: host } : {}),
+        },
+        (incoming) => {
+          const headers = new Headers();
+          for (const [name, value] of Object.entries(incoming.headers)) {
+            if (typeof value === "string") headers.set(name, value);
+            else if (Array.isArray(value)) headers.set(name, value.join(", "));
+          }
+          const status = incoming.statusCode ?? 502;
+          const nullBody = status === 204 || status === 205 || status === 304;
+          if (nullBody) incoming.resume();
+          const decoded = nullBody
+            ? {
+                ok: true as const,
+                stream: undefined,
+                waitForUpstream: async () => undefined,
+                destroy: () => incoming.destroy(),
+              }
+            : decodeHttpBodyStream(incoming, headers);
+          if (!decoded.ok) {
+            incoming.destroy();
+            reject(new Error(decoded.reason));
+            return;
+          }
+          const chunks = decoded.stream?.[Symbol.asyncIterator]();
+          const body =
+            chunks === undefined
+              ? null
+              : new ReadableStream<Uint8Array>({
+                  async pull(controller) {
+                    try {
+                      const next: IteratorResult<unknown> = await chunks.next();
+                      if (next.done === true) {
+                        await decoded.waitForUpstream();
+                        controller.close();
+                        return;
+                      }
+                      controller.enqueue(
+                        next.value instanceof Uint8Array
+                          ? next.value
+                          : new TextEncoder().encode(String(next.value)),
+                      );
+                    } catch (error) {
+                      decoded.destroy();
+                      controller.error(error);
+                    }
+                  },
+                  cancel() {
+                    decoded.destroy();
+                  },
+                });
+          try {
+            resolve(new Response(body, { status, headers }));
+          } catch (error) {
+            decoded.destroy();
+            reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        },
+      );
+      request.on("error", reject);
+      request.end();
+    });
+}
+
+const MAX_CONTENT_ENCODING_LAYERS = 4;
+
+/**
+ * Decodes HTTP `Content-Encoding` layers in reverse order so `makePinnedImageFetch`
+ * matches `fetch`'s transparent decompression while streaming decoded bytes
+ * through `boundResponse`'s size ceiling. Strips `content-encoding` and the
+ * wire `content-length` once decoded so the decoded stream is checked directly,
+ * and keeps the upstream HTTP response under the same lifecycle so an early
+ * decoder EOF (deflate/Brotli with trailing bytes) still waits for clean HTTP
+ * completion and never leaves an unguarded decoder error listener behind.
+ */
+function decodeHttpBodyStream(
+  incoming: IncomingMessage,
+  headers: Headers,
+):
+  | {
+      readonly ok: true;
+      readonly stream: Readable;
+      readonly waitForUpstream: () => Promise<void>;
+      readonly destroy: () => void;
+    }
+  | { readonly ok: false; readonly reason: string } {
+  const raw = headers.get("content-encoding");
+  const encodings =
+    raw === null
+      ? []
+      : raw
+          .split(",")
+          .map((token) => token.trim().toLowerCase())
+          .filter((token) => token.length > 0 && token !== "identity");
+  const upstreamCompleted = new Promise<void>((resolve, reject) => {
+    const fail = (error: unknown) =>
+      reject(error instanceof Error ? error : new Error("The image download was truncated."));
+    incoming.once("end", () => {
+      if (incoming.complete) resolve();
+      else fail(new Error("The image download ended before the HTTP response completed."));
+    });
+    incoming.once("aborted", () => fail(new Error("The image download was aborted.")));
+    incoming.once("error", fail);
+    incoming.once("close", () => {
+      if (incoming.complete) resolve();
+      else fail(new Error("The image download closed before the HTTP response completed."));
+    });
+  });
+  // Prevent Node unhandled-rejection warnings when a caller cancels early.
+  upstreamCompleted.catch(() => undefined);
+
+  if (encodings.length === 0) {
+    return {
+      ok: true,
+      stream: incoming,
+      waitForUpstream: () => upstreamCompleted,
+      destroy: () => incoming.destroy(),
+    };
+  }
+  if (encodings.length > MAX_CONTENT_ENCODING_LAYERS) {
+    return { ok: false, reason: "The image response declared too many content encodings." };
+  }
+  const streams: Array<Readable> = [incoming];
+  let current: Readable = incoming;
+  let closed = false;
+  const destroyAll = () => {
+    if (closed) return;
+    closed = true;
+    for (let index = streams.length - 1; index >= 0; index -= 1) {
+      streams[index]?.destroy();
+    }
+  };
+  for (let index = encodings.length - 1; index >= 0; index -= 1) {
+    const encoding = encodings[index];
+    const decoder =
+      encoding === "gzip" || encoding === "x-gzip"
+        ? createGunzip()
+        : encoding === "deflate"
+          ? createInflate()
+          : encoding === "br"
+            ? createBrotliDecompress()
+            : undefined;
+    if (decoder === undefined) {
+      destroyAll();
+      return { ok: false, reason: "The image response used an unsupported content encoding." };
+    }
+    const upstream = current;
+    // Keep a permanent error listener on every transform so a late upstream
+    // disconnect after decoder EOF can never emit an uncaught `'error'` event.
+    decoder.on("error", () => undefined);
+    upstream.on("error", (error) => {
+      if (!decoder.destroyed && !decoder.readableEnded) decoder.destroy(error);
+    });
+    upstream.pipe(decoder);
+    streams.push(decoder);
+    current = decoder;
+  }
+  headers.delete("content-encoding");
+  headers.delete("content-length");
+  return {
+    ok: true,
+    stream: current,
+    waitForUpstream: () => {
+      // If the decoder ended before the HTTP response finished (e.g. trailing
+      // bytes after a deflate/Brotli stream), resume the HTTP stream so it
+      // either completes cleanly or surfaces the truncation/disconnect error.
+      if (!incoming.complete && !incoming.destroyed) {
+        incoming.unpipe();
+        incoming.resume();
+      }
+      return upstreamCompleted;
+    },
+    destroy: destroyAll,
   };
 }
 

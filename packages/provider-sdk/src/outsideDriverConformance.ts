@@ -262,6 +262,9 @@ export async function runOutsideDriverConformance(
       }
       return;
     }
+    if (message.method !== OUTSIDE_DRIVER_METHODS.httpRequest) {
+      return violate(`a harness-endpoint driver sent ${message.method}`);
+    }
     if (brokeredIds.has(message.id)) return violate("a brokered request reused an id");
     brokeredIds.add(message.id);
     void broker(message.id, message.params);

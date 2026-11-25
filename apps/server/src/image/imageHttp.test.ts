@@ -1,6 +1,14 @@
 import { MAX_GENERATED_IMAGE_BYTES, MAX_IMAGE_VARIANTS } from "@octant/contracts";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { brotliCompressSync, deflateSync, gzipSync } from "node:zlib";
 import { describe, expect, it, vi } from "vitest";
-import { fetchApprovedImageUrl, makeImageGenerationPorts, type ImageHttpFetch } from "./imageHttp";
+import {
+  fetchApprovedImageUrl,
+  makeImageGenerationPorts,
+  makePinnedImageFetch,
+  type ImageHttpFetch,
+} from "./imageHttp";
 
 const APPROVED_URL = "https://provider.example/signed/generated.png?token=secret";
 const png = Uint8Array.from(
@@ -153,5 +161,233 @@ describe("image generation ports", () => {
     });
 
     expect(response.status).toBe(200);
+  });
+});
+
+describe("the pinned approved-image transport", () => {
+  const fetchWith = (fetch: ImageHttpFetch, url: string) =>
+    fetchApprovedImageUrl({ url, fetch, maxBytes: 1_000_000, timeoutMs: 5_000 });
+
+  it("refuses a name whose answer at connect time is private, without opening a connection", async () => {
+    const resolveAll = vi.fn(async () => ["10.0.0.7"]);
+    const result = await fetchWith(
+      makePinnedImageFetch({ resolveAll }),
+      "https://cdn.provider.example/out.png",
+    );
+    expect(result).toMatchObject({ failure: { category: "unavailable" } });
+    expect(resolveAll).toHaveBeenCalledWith("cdn.provider.example");
+  });
+
+  it("refuses a literal private address and any address beside a private one", async () => {
+    const literal = await fetchWith(makePinnedImageFetch(), "https://10.0.0.7/out.png");
+    expect("failure" in literal).toBe(true);
+    const mixed = await fetchWith(
+      makePinnedImageFetch({ resolveAll: async () => ["93.184.216.34", "127.0.0.1"] }),
+      "https://cdn.provider.example/out.png",
+    );
+    expect("failure" in mixed).toBe(true);
+  });
+
+  it("connects to the address it checked, sending the original name as Host, and allows the profile's own configured origin", async () => {
+    const hosts: Array<string | undefined> = [];
+    const server = createServer((request, response) => {
+      hosts.push(request.headers.host);
+      response.writeHead(200, { "content-type": "image/png" });
+      response.end(Buffer.from(png));
+    });
+    await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const origin = `http://images.proxy.test:${port}`;
+      const resolveAll = vi.fn(async () => ["127.0.0.1"]);
+      const allowed = await fetchWith(
+        makePinnedImageFetch({ resolveAll, allowedOrigin: origin }),
+        `${origin}/out.png`,
+      );
+      expect(allowed).toEqual({ bytes: png });
+      expect(hosts).toEqual([`images.proxy.test:${port}`]);
+      // The same loopback answer for any other origin is refused.
+      const refused = await fetchWith(
+        makePinnedImageFetch({ resolveAll }),
+        `http://images.proxy.test:${port}/out.png`,
+      );
+      expect("failure" in refused).toBe(true);
+      expect(hosts).toHaveLength(1);
+    } finally {
+      await new Promise<void>((closed) => server.close(() => closed()));
+    }
+  });
+
+  it("handles HTTP 205 without throwing outside the promise or crashing the host", async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(205);
+      response.end();
+    });
+    await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const origin = `http://images.proxy.test:${port}`;
+      const result = await fetchWith(
+        makePinnedImageFetch({ resolveAll: async () => ["127.0.0.1"], allowedOrigin: origin }),
+        `${origin}/reset.png`,
+      );
+      expect(result).toEqual({ bytes: new Uint8Array() });
+    } finally {
+      await new Promise<void>((closed) => server.close(() => closed()));
+    }
+  });
+
+  it("decodes gzip responses and enforces maxBytes on decoded bytes", async () => {
+    const gzippedPng = gzipSync(Buffer.from(png));
+    const gzippedLarge = gzipSync(Buffer.alloc(10_000, 0x41));
+    expect(gzippedLarge.byteLength).toBeLessThan(200);
+    const server = createServer((request, response) => {
+      if (request.url === "/gzip.png") {
+        response.writeHead(200, {
+          "content-type": "image/png",
+          "content-encoding": "gzip",
+          "content-length": String(gzippedPng.byteLength),
+        });
+        response.end(gzippedPng);
+        return;
+      }
+      if (request.url === "/bomb.png") {
+        response.writeHead(200, {
+          "content-type": "image/png",
+          "content-encoding": "gzip",
+          "content-length": String(gzippedLarge.byteLength),
+        });
+        response.end(gzippedLarge);
+        return;
+      }
+      response.writeHead(200, {
+        "content-type": "image/png",
+        "content-encoding": "unknown-codec",
+      });
+      response.end(Buffer.from(png));
+    });
+    await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const origin = `http://images.proxy.test:${port}`;
+      const fetch = makePinnedImageFetch({
+        resolveAll: async () => ["127.0.0.1"],
+        allowedOrigin: origin,
+      });
+
+      const decoded = await fetchWith(fetch, `${origin}/gzip.png`);
+      expect(decoded).toEqual({ bytes: png });
+
+      const oversized = await fetchApprovedImageUrl({
+        url: `${origin}/bomb.png`,
+        fetch,
+        maxBytes: 1_000,
+        timeoutMs: 5_000,
+      });
+      expect(oversized).toMatchObject({ failure: { category: "protocol" } });
+
+      const unsupported = await fetchWith(fetch, `${origin}/unknown.png`);
+      expect("failure" in unsupported).toBe(true);
+    } finally {
+      await new Promise<void>((closed) => server.close(() => closed()));
+    }
+  });
+
+  it("fails cleanly without uncaught errors when a deflate or Brotli response disconnects after decoder EOF", async () => {
+    const payloads = {
+      "/deflate-truncated.png": {
+        encoding: "deflate",
+        body: deflateSync(Buffer.from(png)),
+      },
+      "/brotli-truncated.png": {
+        encoding: "br",
+        body: brotliCompressSync(Buffer.from(png)),
+      },
+    } as const;
+    const server = createServer((request, response) => {
+      const entry =
+        request.url === "/deflate-truncated.png" || request.url === "/brotli-truncated.png"
+          ? payloads[request.url]
+          : undefined;
+      if (entry === undefined) {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
+      // Declare more bytes than will ever arrive, write the complete compressed
+      // image plus one trailing byte, then abruptly drop the socket.
+      response.writeHead(200, {
+        "content-type": "image/png",
+        "content-encoding": entry.encoding,
+        "content-length": String(entry.body.byteLength + 16),
+      });
+      response.write(Buffer.concat([entry.body, Buffer.from([0x00])]), () => {
+        setTimeout(() => response.socket?.destroy(), 10);
+      });
+    });
+    await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const origin = `http://images.proxy.test:${port}`;
+      const fetch = makePinnedImageFetch({
+        resolveAll: async () => ["127.0.0.1"],
+        allowedOrigin: origin,
+      });
+      for (const path of ["/deflate-truncated.png", "/brotli-truncated.png"] as const) {
+        const result = await fetchWith(fetch, `${origin}${path}`);
+        expect("failure" in result).toBe(true);
+      }
+    } finally {
+      await new Promise<void>((closed) => server.close(() => closed()));
+    }
+  });
+
+  it("succeeds when a deflate or Brotli response cleanly finishes trailing bytes after decoder EOF", async () => {
+    const payloads = {
+      "/deflate-trailing.png": {
+        encoding: "deflate",
+        body: deflateSync(Buffer.from(png)),
+      },
+      "/brotli-trailing.png": {
+        encoding: "br",
+        body: brotliCompressSync(Buffer.from(png)),
+      },
+    } as const;
+    const server = createServer((request, response) => {
+      const entry =
+        request.url === "/deflate-trailing.png" || request.url === "/brotli-trailing.png"
+          ? payloads[request.url]
+          : undefined;
+      if (entry === undefined) {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
+      response.writeHead(200, {
+        "content-type": "image/png",
+        "content-encoding": entry.encoding,
+        "content-length": String(entry.body.byteLength + 2),
+      });
+      // Send the full compressed stream plus one trailing byte so the decoder
+      // reaches EOF while the HTTP response is still open, then finish cleanly.
+      response.write(Buffer.concat([entry.body, Buffer.from([0x00])]), () => {
+        setTimeout(() => response.end(Buffer.from([0x00])), 20);
+      });
+    });
+    await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const origin = `http://images.proxy.test:${port}`;
+      const fetch = makePinnedImageFetch({
+        resolveAll: async () => ["127.0.0.1"],
+        allowedOrigin: origin,
+      });
+      for (const path of ["/deflate-trailing.png", "/brotli-trailing.png"] as const) {
+        const result = await fetchWith(fetch, `${origin}${path}`);
+        expect(result).toEqual({ bytes: png });
+      }
+    } finally {
+      await new Promise<void>((closed) => server.close(() => closed()));
+    }
   });
 });

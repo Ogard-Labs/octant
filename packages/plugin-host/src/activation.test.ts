@@ -6,8 +6,10 @@ import {
   isExtensionComponentModeSafe,
   resolveExtensionActivation,
   outsideDriverHostLaunch,
+  listOutsideImageDriverChoices,
   resolveOutsideDriverActivation,
   resolveOutsideDriverRebind,
+  resolveOutsideImageDriverActivation,
 } from "./activation";
 
 const effective: ExtensionActivationState = {
@@ -394,5 +396,123 @@ describe("outside driver activation for a provider instance", () => {
         }),
       ).toBeUndefined();
     });
+  });
+});
+
+describe("outside image drivers as choices in the image tools", () => {
+  const driver = {
+    extensionId: "00000000-0000-4000-8000-000000000921",
+    packageId: "00000000-0000-4000-8000-000000000922",
+    componentId: "images",
+    version: "1.2.0",
+    digest: `sha256:${"f".repeat(64)}`,
+  } as const;
+  const mediaGeneration = {
+    media: "image",
+    models: [{ modelId: "example-image-1", usdMicrosPerImage: 40_000 }],
+  } as const;
+  // A fixture package as the extension projection holds it after install.
+  const fixturePackage = (
+    activation: Partial<ExtensionActivationState> = {},
+    component: Record<string, unknown> = { mediaGeneration },
+  ) =>
+    Schema.decodeUnknownSync(ExtensionPackageState)({
+      extensionId: driver.extensionId,
+      packageId: driver.packageId,
+      slug: "example-images",
+      displayName: "Example images",
+      stateVersion: 3,
+      version: driver.version,
+      digest: driver.digest,
+      source: { kind: "local-folder", sourceRef: "folder-images" },
+      compatibility: {
+        platforms: ["macos"],
+        modes: ["chat", "work", "code"],
+        providerFamilies: [],
+      },
+      activation: { ...effective, ...activation },
+      components: [
+        {
+          component: {
+            id: "images",
+            kind: "provider-driver",
+            displayName: "Example images",
+            declaredCapabilities: [],
+            entryPoint: "dist/images.mjs",
+            ...component,
+          },
+          activation: { ...effective, ...activation },
+          effectiveState: { kind: "effective" },
+        },
+      ],
+      diagnostics: [],
+    });
+  const choices = (packages: ReadonlyArray<ExtensionPackageState>) =>
+    listOutsideImageDriverChoices({ platform: "darwin", packages, compatible: () => true });
+
+  it("offers an installed, trusted and enabled image driver with the models and prices it declares", () => {
+    expect(choices([fixturePackage()])).toEqual([
+      {
+        driver,
+        displayName: "Example images",
+        source: { kind: "local-folder", sourceRef: "folder-images" },
+        models: mediaGeneration.models,
+      },
+    ]);
+    expect(
+      resolveOutsideImageDriverActivation({
+        platform: "darwin",
+        packageState: fixturePackage(),
+        compatible: true,
+        driver,
+      }),
+    ).toEqual({ kind: "effective" });
+  });
+
+  it.each([
+    ["untrusted", { trusted: false }],
+    ["plugin-disabled", { pluginDesired: false }],
+    ["component-disabled", { componentDesired: false }],
+    ["quarantined", { quarantined: true }],
+  ] as const)("does not offer a driver that is %s", (reason, activation) => {
+    expect(choices([fixturePackage(activation)])).toEqual([]);
+    expect(
+      resolveOutsideImageDriverActivation({
+        platform: "darwin",
+        packageState: fixturePackage(activation),
+        compatible: true,
+        driver,
+      }),
+    ).toEqual({ kind: "blocked", reason });
+  });
+
+  it("does not offer a harness endpoint driver to the image tools, or an image driver on a host that runs none", () => {
+    expect(choices([fixturePackage({}, {})])).toEqual([]);
+    expect(
+      resolveOutsideImageDriverActivation({
+        platform: "darwin",
+        packageState: fixturePackage({}, {}),
+        compatible: true,
+        driver,
+      }),
+    ).toEqual({ kind: "blocked", reason: "incompatible" });
+    expect(
+      listOutsideImageDriverChoices({
+        platform: "win32",
+        packages: [fixturePackage()],
+        compatible: () => true,
+      }),
+    ).toEqual([]);
+  });
+
+  it("stops offering a profile's driver once the package selects another digest", () => {
+    expect(
+      resolveOutsideImageDriverActivation({
+        platform: "darwin",
+        packageState: fixturePackage(),
+        compatible: true,
+        driver: { ...driver, digest: `sha256:${"0".repeat(64)}` },
+      }),
+    ).toEqual({ kind: "blocked", reason: "superseded" });
   });
 });

@@ -1548,6 +1548,7 @@ export function startOctantServer(
       isAuthenticatedPairedDeviceSessionCurrent,
       speechGates,
       credentialResolver,
+      imageGenerationOffers,
       serviceOffers,
       keptImageChoices,
       keptVideoChoices,

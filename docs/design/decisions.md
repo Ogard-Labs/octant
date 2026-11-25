@@ -61,14 +61,14 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Browser](#browser)                                                                   | 8         | 4       | 4            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 7         | 4       | 2            | 1                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
-| [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 2       | 1            | 0                   |
+| [Outside provider drivers](#outside-provider-drivers)                                 | 4         | 2       | 2            | 0                   |
 | [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 4       | 4            | 0                   |
 | [Hubs and Nightly](#hubs-and-nightly)                                                 | 6         | 0       | 6            | 0                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **298**   | **180** | **114**      | **4**               |
+| **All areas**                                                                         | **299**   | **180** | **115**      | **4**               |
 
 ## Principles and hard lines
 
@@ -3861,9 +3861,9 @@ Status: Partly built. Since: 2026-10-26. Detail: [Enterprise provider identity: 
 
 ### Admission of an outside driver
 
-An outside driver is a harness-endpoint transport only, installed from outside Octant. Review, install, trust and enable are one flow for the person, at a local window or a device the host's own person paired, and each later step to use is a separate action that the flow does not imply (maintainer decision, 2026-11-12; built for that device, journaled with it as actor).
+An outside driver is a harness-endpoint transport or a media generator ([Outside media generation drivers](#outside-media-generation-drivers)), installed from outside Octant. Review, install, trust and enable are one flow for the person, at a local window or a device the host's own person paired, and each later step to use is a separate action that the flow does not imply (maintainer decision, 2026-11-12; built for that device, journaled with it as actor).
 
-- Only harness endpoints are admitted; outside agent CLIs and managed processes are not.
+- Harness endpoints and media generators are admitted; outside agent CLIs and managed processes are not.
 - One "Install and trust" flow covers inspect, install, trust and enable, as for any plugin or connector; digest-bound trust and confinement are unchanged, and add provider, connection check and Verify tools stay separate actions (maintainer request, 2026-11-12). Built for a package that holds a provider driver: the package review is the one confirmation, the host runs the steps in order through the separate actions' own lifecycle methods, and a refused step stops the flow with the earlier steps standing and is named to the person. Each step stays available on its own. Not built yet: today the host refuses the flow for a package that holds no provider driver. Structured references, tool calls, routines, hubs, peer hosts and agent grants cannot perform them; a device the host's own person paired can, as a local window does (maintainer decision, 2026-11-12; built), and a device the hub's roster introduced cannot.
 - A driver is a single ES module on the server's runtime, with no executables, native addons or install scripts.
 - Outside harness endpoints work in Chat, Work and Code with verified-model tools, like bundled endpoints.
@@ -3892,6 +3892,17 @@ Updates are never automatic, and trust binds a content digest. Marketplace packa
 - Publishing the author kit to npm needs an npm organization and stays a maintainer action.
 
 Status: Built. Since: 2026-10-26. Detail: [Outside provider drivers: provenance and updates](outside-provider-drivers.md#provenance-and-updates), [signature rules](outside-provider-drivers.md#signature-rules) and [npm source](outside-provider-drivers.md#npm-source).
+
+### Outside media generation drivers
+
+An outside package can provide an image or video generation driver, installed, trusted and enabled like any other plugin, and Octant's media tools use it as they use a bundled driver: the same card, price, spend limits, storage and restart rules (maintainer approval, 2026-11-22).
+
+- The package declares its models and published prices as manifest data; the host reads a price only there, at the digest the profile binds, reserves before dispatch and never settles above the reservation, and refuses an unpriced model under a spend limit.
+- The driver runs in the same confined process and reaches its provider only through the brokered call to the configured origin; the host checks the images it returns and fetches an image address only when the provider's own answer named it.
+- A driver that is not installed, trusted and enabled at its digest is not offered, and its jobs are refused before anything is reserved.
+- Built for image generation. Video follows once the video seam exists in code.
+
+Status: Partly built. Since: 2026-11-22. Detail: [Outside provider drivers: outside media generation drivers](outside-provider-drivers.md#outside-media-generation-drivers).
 
 ## Device workbench and mobile
 

@@ -849,6 +849,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         kept: keptImageChoices,
         fullAccess: () => level() === "full-access",
         jobs: imageJobService,
+        admitsOutsideImageDriver: (instance) => imageJobService.admitsOutsideDriver(instance),
         imageSources: codeImageSources,
         listInstances: () => persistence.readProviderInstances(),
         readImageGenerationCustomSources: () =>

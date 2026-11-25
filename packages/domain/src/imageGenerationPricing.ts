@@ -41,6 +41,12 @@ export interface ImageGenerationPricingInput {
   readonly quality?: string;
   readonly size?: string;
   readonly resolution?: string;
+  /**
+   * For an outside image driver only: the per-image price its trusted
+   * package declares for this model, or absent when it declares none. The
+   * host reads it from the package manifest, never from the running driver.
+   */
+  readonly declaredUsdMicrosPerImage?: number;
 }
 
 type OpenAiConcreteQuality = "low" | "medium" | "high";
@@ -192,6 +198,11 @@ function resolvePerImageMicros(
       return BFL_IMAGE_RATES.get(input.modelId) ?? "unknown-model";
     case "ideogram-image":
       return IDEOGRAM_IMAGE_RATES.get(input.modelId) ?? "unknown-model";
+    case "outside-image": {
+      const declared = input.declaredUsdMicrosPerImage;
+      if (declared === undefined) return "unknown-model";
+      return Number.isSafeInteger(declared) && declared > 0 ? declared : "unknown-option";
+    }
     default:
       return "unknown-provider";
   }

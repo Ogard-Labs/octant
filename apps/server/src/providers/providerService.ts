@@ -15,7 +15,9 @@ import {
   decodeProviderRegistryCommand,
   decodeProviderRegistryCommandResult,
   decodeProviderRegistrySnapshot,
-  type OutsideHarnessEndpointProviderInstance,
+  isOutsideDriverProviderInstance,
+  type OutsideDriverProviderInstance,
+  type OutsideImageProviderConfiguration,
   type OutsideProviderDriverListing,
   type OutsideProviderDriverReference,
   type ProviderDriverKind,
@@ -66,6 +68,7 @@ import {
   changeGeminiImageConfiguration,
   changeOllamaConfiguration,
   changeOutsideHarnessEndpointConfiguration,
+  changeOutsideImageConfiguration,
   changePiConfiguration,
   changeOpenAiCompatibleConfiguration,
   changeOpenAiImageConfiguration,
@@ -92,9 +95,10 @@ import {
   createCodexProvider,
   createOllamaProvider,
   createOutsideHarnessEndpointProvider,
-  rebindOutsideHarnessEndpointDriver,
+  createOutsideImageProvider,
+  rebindOutsideProviderDriver,
   isOutsideDriverQuarantined,
-  quarantineOutsideHarnessEndpointDriver,
+  quarantineOutsideProviderDriver,
   createPiProvider,
   createOhMyPiProvider,
   changeOhMyPiConfiguration,
@@ -258,14 +262,22 @@ export interface ProviderServiceOptions {
    * Absent on a host that admits no outside driver, where every outside
    * instance is blocked.
    */
-  readonly isOutsideDriverAdmitted?: (instance: OutsideHarnessEndpointProviderInstance) => boolean;
+  readonly isOutsideDriverAdmitted?: (instance: OutsideDriverProviderInstance) => boolean;
   /**
    * The digest an outside instance moves to because its person trusted it, or
    * nothing. Absent on a host that admits no outside driver.
    */
   readonly outsideDriverRebindTarget?: (
-    instance: OutsideHarnessEndpointProviderInstance,
+    instance: OutsideDriverProviderInstance,
   ) => OutsideProviderDriverReference | undefined;
+  /**
+   * The image model ids an outside image driver's package declares at the
+   * exact digest named, or nothing for any other driver. Absent on a host
+   * that admits no outside driver.
+   */
+  readonly outsideImageDriverModelIds?: (
+    driver: OutsideProviderDriverReference,
+  ) => ReadonlyArray<string> | undefined;
   /** The outside drivers the provider catalog lists. Reading them starts nothing. */
   readonly outsideDriverListings?: () => ReadonlyArray<OutsideProviderDriverListing>;
   readonly clearResumeIdentities?: (instanceId: ProviderInstanceId) => Promise<void>;
@@ -337,7 +349,10 @@ export class ProviderService implements ProviderServiceApi {
   readonly #clock: () => string;
   readonly #driverProvider: ProviderServiceOptions["driver"];
   readonly #isDriverPluginEffective: (driverKind: ProviderDriverKind) => boolean;
-  readonly #isOutsideDriverAdmitted: (instance: OutsideHarnessEndpointProviderInstance) => boolean;
+  readonly #isOutsideDriverAdmitted: (instance: OutsideDriverProviderInstance) => boolean;
+  readonly #outsideImageDriverModelIds: NonNullable<
+    ProviderServiceOptions["outsideImageDriverModelIds"]
+  >;
   readonly #outsideDriverRebindTarget: NonNullable<
     ProviderServiceOptions["outsideDriverRebindTarget"]
   >;
@@ -383,6 +398,7 @@ export class ProviderService implements ProviderServiceApi {
     this.#isOutsideDriverAdmitted = options.isOutsideDriverAdmitted ?? (() => false);
     this.#outsideDriverRebindTarget = options.outsideDriverRebindTarget ?? (() => undefined);
     this.#outsideDriverListings = options.outsideDriverListings ?? (() => []);
+    this.#outsideImageDriverModelIds = options.outsideImageDriverModelIds ?? (() => undefined);
     this.#clearResumeIdentities = options.clearResumeIdentities;
     this.#clearRuntimeUsageLimits = options.clearRuntimeUsageLimits;
     this.#ensureAccountDirectory =
@@ -625,18 +641,18 @@ export class ProviderService implements ProviderServiceApi {
   async rebindOutsideDrivers(): Promise<ReadonlyArray<ProviderInstanceId>> {
     const moved: Array<ProviderInstanceId> = [];
     for (const candidate of this.#persistence.readProviderInstances()) {
-      if (candidate.driverKind !== "outside-harness-endpoint") continue;
+      if (!isOutsideDriverProviderInstance(candidate)) continue;
       if (this.#outsideDriverRebindTarget(candidate) === undefined) continue;
       const rebound = await this.#withInstanceOperation(candidate.id, async () => {
         this.#assertReady();
         // Read again inside the instance's queue: a change that landed while
         // this waited is the one to move.
         const current = this.#persistence.readProviderInstance(candidate.id);
-        if (current?.driverKind !== "outside-harness-endpoint") return false;
+        if (current === undefined || !isOutsideDriverProviderInstance(current)) return false;
         const driver = this.#outsideDriverRebindTarget(current);
         if (driver === undefined) return false;
         const updatedAt = decodeTimestamp(this.#clock());
-        const instance = rebindOutsideHarnessEndpointDriver(current, driver, updatedAt);
+        const instance = rebindOutsideProviderDriver(current, driver, updatedAt);
         // A turn still holding the old digest's runtime keeps it until it
         // ends; that process is already stopped, so the turn fails at once.
         await this.#runtime.invalidateRuntime(current.id).catch((error: unknown) => {
@@ -668,7 +684,7 @@ export class ProviderService implements ProviderServiceApi {
    */
   async forgetOutsideDriverVerification(extensionId: string): Promise<void> {
     for (const candidate of this.#persistence.readProviderInstances()) {
-      if (candidate.driverKind !== "outside-harness-endpoint") continue;
+      if (!isOutsideDriverProviderInstance(candidate)) continue;
       if (String(candidate.configuration.driver.extensionId) !== extensionId) continue;
       await this.#withInstanceOperation(candidate.id, async () => {
         this.#assertReady();
@@ -700,12 +716,9 @@ export class ProviderService implements ProviderServiceApi {
     await this.#withInstanceOperation(instanceId, async () => {
       this.#assertReady();
       const current = this.#persistence.readProviderInstance(instanceId);
-      if (current?.driverKind !== "outside-harness-endpoint") return;
+      if (current === undefined || !isOutsideDriverProviderInstance(current)) return;
       if (String(current.configuration.driver.digest) !== String(digest)) return;
-      const instance = quarantineOutsideHarnessEndpointDriver(
-        current,
-        decodeTimestamp(this.#clock()),
-      );
+      const instance = quarantineOutsideProviderDriver(current, decodeTimestamp(this.#clock()));
       if (instance === current) return;
       this.#appendInstance(current.version, "provider.instance-driver-quarantined@1", instance);
       this.#authoritativeInstance(instance);
@@ -1107,7 +1120,8 @@ export class ProviderService implements ProviderServiceApi {
             command.kind === "create-gemini-video-provider" ||
             command.kind === "create-runway-video-provider" ||
             command.kind === "create-fal-video-provider" ||
-            command.kind === "create-outside-harness-endpoint-provider"
+            command.kind === "create-outside-harness-endpoint-provider" ||
+            command.kind === "create-outside-image-provider"
           ) {
             if (current !== undefined || command.expectedVersion !== 0) {
               throw this.#invalid("Provider configuration changed; reload and retry.");
@@ -1268,6 +1282,18 @@ export class ProviderService implements ProviderServiceApi {
               case "create-outside-harness-endpoint-provider":
                 // Always created off; the command carries no switch.
                 instance = createOutsideHarnessEndpointProvider({
+                  id: common.id,
+                  displayName: common.displayName,
+                  existingInstances: common.existingInstances,
+                  expectedVersion: common.expectedVersion,
+                  createdAt: common.createdAt,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-outside-image-provider":
+                this.#assertOutsideImageModelsDeclared(command.configuration);
+                // Always created off; the command carries no switch.
+                instance = createOutsideImageProvider({
                   id: common.id,
                   displayName: common.displayName,
                   existingInstances: common.existingInstances,
@@ -1714,6 +1740,16 @@ export class ProviderService implements ProviderServiceApi {
             );
             await this.#runtime.invalidateRuntime(current.id);
             eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-outside-image-configuration") {
+            if (current.driverKind !== "outside-image") {
+              throw this.#unsupported("This provider is not from an outside image driver.");
+            }
+            // As for a harness endpoint, reconfiguring starts, trusts, and
+            // enables nothing; the listed models must still be declared.
+            this.#assertOutsideImageModelsDeclared(command.configuration);
+            instance = changeOutsideImageConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
           } else if (command.kind === "install-acp-agent") {
             if (!isAddedAcpAgentInstance(current)) {
               throw this.#unsupported("Only an added ACP agent is installed this way.");
@@ -1961,10 +1997,7 @@ export class ProviderService implements ProviderServiceApi {
               "This provider driver is not available.",
           );
         }
-        if (
-          instance.driverKind === "outside-harness-endpoint" &&
-          isOutsideDriverQuarantined(instance)
-        ) {
+        if (isOutsideDriverProviderInstance(instance) && isOutsideDriverQuarantined(instance)) {
           // Decided from the journal before the driver is asked to start.
           this.#runtime.setObservedState(
             outsideDriverQuarantinedObservation(instanceId, decodeTimestamp(this.#clock())),
@@ -2326,10 +2359,7 @@ export class ProviderService implements ProviderServiceApi {
     }
     // A journaled crash-limit hold is reported without starting the driver,
     // so a restarted host shows it before anyone checks the connection.
-    if (
-      instance.driverKind === "outside-harness-endpoint" &&
-      isOutsideDriverQuarantined(instance)
-    ) {
+    if (isOutsideDriverProviderInstance(instance) && isOutsideDriverQuarantined(instance)) {
       return outsideDriverQuarantinedObservation(instance.id, decodeTimestamp(this.#clock()));
     }
     if (this.#claudeAccountNeedsOwnConfigDirectory(instance)) {
@@ -2960,6 +2990,21 @@ export class ProviderService implements ProviderServiceApi {
       throw this.#invalid("Provider configuration changed; reload and retry.");
   }
 
+  /**
+   * Every model an outside image profile lists must be one its package
+   * declares at the digest it binds: only a declared model has a price the
+   * host can reserve before a job, or a refusal when it states none.
+   */
+  #assertOutsideImageModelsDeclared(configuration: OutsideImageProviderConfiguration): void {
+    const declared = this.#outsideImageDriverModelIds(configuration.driver);
+    if (
+      declared === undefined ||
+      !configuration.modelAllowlist.every((id) => declared.includes(String(id)))
+    ) {
+      throw this.#invalid("List only image models this driver declares.");
+    }
+  }
+
   #assertDriverPluginEffective(instance: ProviderInstance): void {
     if (!this.#isInstanceDriverAvailable(instance)) {
       throw this.#unsupported("This provider driver is not available.");
@@ -2972,7 +3017,7 @@ export class ProviderService implements ProviderServiceApi {
    * covers every outside driver, so the kind alone admits none of them.
    */
   #isInstanceDriverAvailable(instance: ProviderInstance): boolean {
-    if (instance.driverKind === "outside-harness-endpoint") {
+    if (isOutsideDriverProviderInstance(instance)) {
       return this.#isOutsideDriverAdmitted(instance);
     }
     return (
@@ -3112,7 +3157,8 @@ function credentialBinding(instance: ProviderInstance): string | undefined {
         String(cloudIam.roleName),
       ].join("\n");
     }
-    case "outside-harness-endpoint": {
+    case "outside-harness-endpoint":
+    case "outside-image": {
       // The key is sent to one address, and a provider that stops sending one
       // has no use for what the host holds.
       const { baseUrl, key } = instance.configuration;

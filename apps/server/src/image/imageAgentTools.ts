@@ -6,12 +6,14 @@ import {
   type ImageGenerationSaveResult,
   type ImageGenerationScopeId,
   type ImageJob,
+  type OutsideImageProviderInstance,
   type ProviderInstance,
   type ProviderInstanceId,
   type ProviderModelId,
   type ProviderToolImage,
   type WindowId,
 } from "@octant/contracts";
+import { OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES } from "@octant/contracts/outside-driver-protocol";
 import {
   hasEligibleImageProfile,
   imageGenerationWithoutAsking,
@@ -54,6 +56,8 @@ export const IMAGE_TOOL_NAME = CREATE_IMAGE_TOOL_NAME;
 
 export interface ImageAgentToolPort {
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
+  /** Whether the host admits an outside image profile's driver now; absent admits none. */
+  readonly admitsOutsideImageDriver?: (instance: OutsideImageProviderInstance) => boolean;
   readonly readImageGenerationCustomSources: () => ReadonlyArray<ImageGenerationCustomSource>;
   readonly enqueue: (input: EnqueueImageJobInput) => Promise<ImageJob>;
   readonly listJobs: ImageJobService["listByScope"];
@@ -66,6 +70,7 @@ export interface ImageAgentToolPort {
    */
   readonly ask: (input: {
     readonly offer: ImageOfferAsk;
+    readonly referenceBytes?: number;
     readonly signal?: AbortSignal;
   }) => Promise<ImageGenerationOfferOutcome>;
   /** The choice the person said to keep using without asking, for the thread's Project. */
@@ -177,6 +182,7 @@ export function createImageAgentTools(options: {
         hasEligibleImageProfile(
           options.port.listInstances(),
           options.port.readImageGenerationCustomSources(),
+          options.port.admitsOutsideImageDriver,
         ),
       ...(options.port.refusal === undefined ? {} : { refusal: options.port.refusal }),
       generate: (request) => executeHostImageGeneration(options, request),
@@ -205,8 +211,8 @@ async function executeHostImageGeneration(
 ): Promise<MediaImageGenerateOutcome> {
   const { signal } = request;
   const needsReferences = request.references.length > 0;
-  const profiles = eligibleProfiles(options.port, needsReferences);
-  if (profiles.length === 0) {
+  const baseProfiles = eligibleProfiles(options.port, needsReferences);
+  if (baseProfiles.length === 0) {
     return {
       status: "refused",
       error: needsReferences
@@ -214,15 +220,6 @@ async function executeHostImageGeneration(
         : "No enabled image profile is configured.",
     };
   }
-  const suggested = suggestedChoice(
-    profiles,
-    needsReferences &&
-      request.profileInstanceId !== undefined &&
-      !profiles.some((profile) => String(profile.instanceId) === String(request.profileInstanceId))
-      ? {}
-      : request,
-  );
-  if ("error" in suggested) return { status: "refused", error: suggested.error };
 
   let parentArtifactRef: EnqueueImageJobInput["parentArtifactRef"];
   if (request.parentAttachmentId !== undefined && !needsReferences) {
@@ -268,10 +265,30 @@ async function executeHostImageGeneration(
   if ("error" in references) return { status: "refused", error: references.error };
   if (signal?.aborted) return { status: "cancelled", reason: "aborted" };
 
+  const describedReferenceBytes =
+    (parentArtifactRef?.size ?? 0) + references.reduce((sum, item) => sum + item.source.size, 0);
+  const profiles = eligibleProfiles(options.port, needsReferences, describedReferenceBytes);
+  if (profiles.length === 0) {
+    return {
+      status: "refused",
+      error: "Reference images for an outside image driver cannot exceed 2.5 MiB combined.",
+    };
+  }
+  const suggested = suggestedChoice(
+    profiles,
+    (needsReferences || describedReferenceBytes > OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES) &&
+      request.profileInstanceId !== undefined &&
+      !profiles.some((profile) => String(profile.instanceId) === String(request.profileInstanceId))
+      ? {}
+      : request,
+  );
+  if ("error" in suggested) return { status: "refused", error: suggested.error };
+
   // A remembered model is not permission to share these particular images.
+  const keptChoice = needsReferences ? undefined : options.port.remembered();
   const unasked = imageGenerationWithoutAsking({
     profiles,
-    kept: needsReferences ? undefined : options.port.remembered(),
+    kept: keptChoice,
     fullAccess: !needsReferences && options.port.fullAccess?.() === true,
     askAgain: options.port.asksAgain?.() === true,
     defaultProfileInstanceId: options.port.defaultProfileInstanceId?.(),
@@ -282,8 +299,15 @@ async function executeHostImageGeneration(
   } else {
     // A kept choice the host can no longer generate with (its profile was
     // turned off or the model removed) is dropped and the person asked
-    // again, never swapped silently for another model.
-    if (unasked.keptUnavailable) await options.port.forget();
+    // again, never swapped silently for another model. If only this job's
+    // reference size excluded an otherwise available outside profile, ask
+    // without erasing the saved choice for future generations.
+    if (
+      unasked.keptUnavailable &&
+      (keptChoice === undefined || !isEligibleChoice(baseProfiles, keptChoice))
+    ) {
+      await options.port.forget();
+    }
     if (options.port.unattended === true) {
       return {
         status: "refused",
@@ -300,6 +324,7 @@ async function executeHostImageGeneration(
         suggested,
         ...(needsReferences ? { references: references.map(({ reference }) => reference) } : {}),
       },
+      ...(describedReferenceBytes > 0 ? { referenceBytes: describedReferenceBytes } : {}),
       ...(signal === undefined ? {} : { signal }),
     });
     switch (outcome.status) {
@@ -326,22 +351,36 @@ async function executeHostImageGeneration(
   // while the card was open must not run.
   if (
     choice === undefined ||
-    !isEligibleChoice(eligibleProfiles(options.port, needsReferences), choice)
+    !isEligibleChoice(
+      eligibleProfiles(options.port, needsReferences, describedReferenceBytes),
+      choice,
+    )
   ) {
-    return { status: "refused", error: "The chosen image model is no longer available." };
+    return { status: "refused", error: "The chosen image model is not available." };
   }
 
   try {
     const images = await readImageSources(references, signal);
     if ("error" in images) return { status: "refused", error: images.error };
     if (signal?.aborted) return { status: "cancelled", reason: "aborted" };
-    if (needsReferences) {
+    const actualReferenceBytes =
+      (parentArtifactRef?.size ?? 0) +
+      images.reduce((sum, image) => sum + image.bytes.byteLength, 0);
+    if (needsReferences || actualReferenceBytes > OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES) {
       const refusalAfterRead = options.port.refusal?.();
       if (refusalAfterRead !== undefined) return { status: "refused", error: refusalAfterRead };
-      if (!isEligibleChoice(eligibleProfiles(options.port, true), choice)) {
+      if (
+        !isEligibleChoice(
+          eligibleProfiles(options.port, needsReferences, actualReferenceBytes),
+          choice,
+        )
+      ) {
         return {
           status: "refused",
-          error: "The chosen image model can no longer use reference images.",
+          error:
+            actualReferenceBytes > OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES
+              ? "Reference images for an outside image driver cannot exceed 2.5 MiB combined."
+              : "The chosen image model can no longer use reference images.",
         };
       }
     }
@@ -687,6 +726,8 @@ export function createThreadImageAgentTools(input: {
   readonly defaultProfileInstanceId?: () => string | undefined;
   readonly jobs: Pick<ImageJobService, "enqueue" | "listByScope" | "whenTerminal" | "readArtifact">;
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
+  /** Whether the host admits an outside image profile's driver now; absent admits none. */
+  readonly admitsOutsideImageDriver?: (instance: OutsideImageProviderInstance) => boolean;
   readonly readImageGenerationCustomSources: () => ReadonlyArray<ImageGenerationCustomSource>;
   readonly refusal?: () => string | undefined;
   /** Whether the model driving this turn accepts images in a tool result. */
@@ -704,15 +745,19 @@ export function createThreadImageAgentTools(input: {
     ...scope,
     port: {
       listInstances: input.listInstances,
+      ...(input.admitsOutsideImageDriver === undefined
+        ? {}
+        : { admitsOutsideImageDriver: input.admitsOutsideImageDriver }),
       readImageGenerationCustomSources: input.readImageGenerationCustomSources,
       enqueue: (job) => input.jobs.enqueue(job),
       listJobs: (scopeId) => input.jobs.listByScope(scopeId),
-      ask: async ({ offer, signal }) => {
+      ask: async ({ offer, referenceBytes, signal }) => {
         const options = signal === undefined ? {} : { signal };
         if (offer.kind === "generate") {
           return input.offers.offer({
             windowId: input.windowId,
             offer: { ...offer, threadKind, scopeId },
+            ...(referenceBytes === undefined ? {} : { referenceBytes }),
             ...options,
           });
         }
@@ -748,12 +793,17 @@ export function createThreadImageAgentTools(input: {
 function eligibleProfiles(
   port: ImageAgentToolPort,
   references: boolean,
+  referenceBytes = 0,
 ): ReadonlyArray<ImageGenerationProfileView> {
   const profiles = listEligibleImageProfiles(
     port.listInstances(),
     port.readImageGenerationCustomSources(),
+    port.admitsOutsideImageDriver,
   );
-  return references ? profiles.filter(imageProfileSupportsReferences) : profiles;
+  const filtered = references ? profiles.filter(imageProfileSupportsReferences) : profiles;
+  return referenceBytes > OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES
+    ? filtered.filter((profile) => profile.driverKind !== "outside-image")
+    : filtered;
 }
 
 function isEligibleChoice(
