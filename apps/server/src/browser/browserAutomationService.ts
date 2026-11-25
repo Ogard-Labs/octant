@@ -133,6 +133,8 @@ export interface BrowserTaskProfileSwitchInput {
   readonly profile: BrowserProfile;
   readonly expectedContextId?: BrowserContextId;
   readonly url?: string;
+  /** The actor of the request, for the Browser session record the switch writes. */
+  readonly actor?: EventActor;
   readonly isCurrent: () => boolean;
   readonly save: (commit: (persist: () => void) => boolean) => Promise<BrowserTaskProfileCommit>;
   /** Registers an identity-only pending binding before the shared page is exposed. */
@@ -1055,8 +1057,16 @@ export class BrowserAutomationService {
           // teardown starts synchronously, then finishes after this commit.
           persist();
           input.bind(replacement.record.contextId, replacement.record.authority);
-          retired = this.#destroy(previous, "user-requested", "ready");
           replacement.dedicated = false;
+          // A page the person opened is still the person's open page in the new
+          // profile: record the replacement and end the old record, which the
+          // switch superseded rather than the person closing.
+          if (previous.pageRecorded)
+            this.#notePageOpened(replacement, {
+              openedByPerson: true,
+              ...(input.actor === undefined ? {} : { actor: input.actor }),
+            });
+          retired = this.#destroy(previous, "user-requested", "ready", "superseded", input.actor);
           committed = true;
           return true;
         });

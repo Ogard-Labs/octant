@@ -54,6 +54,10 @@ const otherWindowId = "10000000-0000-4000-8000-000000000002" as WindowId;
 const threadOne = "20000000-0000-4000-8000-000000000001" as BrowserThreadId;
 const threadTwo = "20000000-0000-4000-8000-000000000002" as BrowserThreadId;
 const contextOne = "30000000-0000-4000-8000-000000000001" as BrowserContextId;
+const personActor = decodeEventActor({
+  kind: "local-user",
+  actorId: "00000000-0000-4000-8000-000000000002",
+});
 const authorityOne: ToolActionAuthority = {
   hostId: "40000000-0000-4000-8000-000000000001" as any,
   mode: "work",
@@ -2784,6 +2788,48 @@ describe("BrowserAutomationService", () => {
     await fixture.service.close();
   });
 
+  it("records the replacement of the person's page when a profile switch commits, and ends the old record as superseded", async () => {
+    const pageSessions = { opened: vi.fn(), ended: vi.fn(() => true), hold: vi.fn() };
+    const fixture = harness({ pageSessions });
+    await fixture.service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy,
+      openedByPerson: true,
+    });
+    await fixture.service.act({ windowId, request: request() });
+    pageSessions.opened.mockClear();
+    const result = await fixture.service.switchTaskProfile({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      profile: { kind: "personal" },
+      expectedContextId: contextOne,
+      actor: personActor,
+      isCurrent: () => true,
+      save: async (commit) => {
+        commit(() => undefined);
+        return { status: "saved" };
+      },
+      bind: () => undefined,
+    });
+    expect(result.status).toBe("changed");
+    expect(pageSessions.opened).toHaveBeenCalledOnce();
+    expect(pageSessions.opened.mock.calls[0]?.[0]).toMatchObject({
+      threadId: threadOne,
+      profileKind: "personal",
+    });
+    expect(pageSessions.opened.mock.calls[0]?.[1]).toMatchObject({ actor: personActor });
+    expect(pageSessions.ended).toHaveBeenCalledWith(
+      contextOne,
+      threadOne,
+      "superseded",
+      personActor,
+    );
+    await fixture.service.close();
+  });
+
   it.each(["creation", "storage", "revision"] as const)(
     "keeps the original shared page and choice when %s fails",
     async (failure) => {
@@ -4367,10 +4413,6 @@ it("carries the held download's source receipt to its per-file review without su
 });
 
 describe("Browser session recording", () => {
-  const personActor = decodeEventActor({
-    kind: "local-user",
-    actorId: "00000000-0000-4000-8000-000000000002",
-  });
   const recorder = () => ({ opened: vi.fn(), ended: vi.fn(() => true), hold: vi.fn() });
   const open = async (
     f: ReturnType<typeof harness>,

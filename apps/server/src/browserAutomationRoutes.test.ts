@@ -189,6 +189,10 @@ describe("browser automation routes", () => {
       });
       expect(f.save).toHaveBeenCalledOnce();
       expect(f.bind).toHaveBeenCalledWith(contextId, "model-a", authority);
+      // The switch's record carries the request's own actor.
+      expect(f.switchTaskProfile.mock.calls[0]?.[0]).toMatchObject({
+        actor: { kind: "local-user" },
+      });
     });
     it("detects a concurrent task/model edit while staging", async () => {
       const f = fixture();

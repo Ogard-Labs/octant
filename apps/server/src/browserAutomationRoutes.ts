@@ -568,6 +568,7 @@ export function createBrowserAutomationRouteHandler(
             ? {}
             : { expectedContextId: selection.expectedContextId }),
           ...(selection.url === undefined ? {} : { url: selection.url }),
+          actor,
           isCurrent: () => {
             const live = profiles.read(selection.threadId, selection.mode);
             const granted = dependencies.authority.resolve(selection.threadId, selection.mode);
