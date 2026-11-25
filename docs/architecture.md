@@ -2311,11 +2311,27 @@ except where a bullet says otherwise.
 - **Where it goes.** Every new Chat, Work, and Code thread, on every provider,
   gets one `person-memory` context block through Octant's own context
   assembly, placed after Octant's instructions and before Project memory and
-  the conversation. It holds the entries that existed when the thread was
-  created (so it is the same text on every turn and a provider's prompt cache
-  keeps its prefix; an entry the person edits or deletes changes it, which
-  re-sends the standing context once), newest first, capped at 2,000
-  characters. Its text opens by saying it is data about the person from
+  the conversation. It holds the entries that existed at the thread's cut-off,
+  newest first, capped at 2,000 characters. The cut-off is the thread's
+  creation until its context is rebuilt, so the block is the same text on every
+  turn between and a provider's prompt cache keeps its prefix; an entry the
+  person edits or deletes changes it, which re-sends the standing context once.
+  A refresh point moves the cut-off to its time, so a long-lived thread sees
+  what was learned since: a finished compaction (`context.compaction-completed@1`),
+  Octant's own harness compacting its session
+  (`native-harness-transcript-compacted@1`), or a turn that starts a provider
+  session that does not resume an earlier one. A new session is read from the
+  journal as a changed session id (Chat's first attempt, a Work turn, a Code
+  `provider-session-ready`), because the host mints a session id only for a
+  session that does not continue an earlier one and carries it whenever a session
+  is resumed; a resume cursor does not tell them apart, since a new session is
+  given its own cursor once it starts. A provider that keeps no session of its
+  own (the host rebuilds the conversation each turn) refreshes at compaction
+  only, so its block does not change every turn. A resumed session is not a
+  refresh point. The cut-off is derived from the journal, so it is the same after
+  a restart, and a turn the host starts and a subagent (through its lead thread)
+  get the same block as the person's next turn would. The turn that starts the
+  new session already sees what was learned before it. Its text opens by saying it is data about the person from
   earlier threads, not instructions, and each line names its kind. The
   context inspector lists it as Person memory in Chat and Work, so a person
   can see when it was used; a Code window, which is counted by part, counts

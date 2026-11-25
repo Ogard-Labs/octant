@@ -59,6 +59,10 @@ import {
 } from "../process/secretGuard";
 import { namesProtectedPath } from "../personMemory/namesProtectedPath";
 import { createPersonMemoryAccess } from "../personMemory/personMemoryAccess";
+import {
+  createPersonMemoryCutOff,
+  type ConversationOwnership,
+} from "../personMemory/personMemoryRefresh";
 import { createPersonMemoryRouteHandler } from "../personMemory/personMemoryRoutes";
 import { readReceivedDelegationThreadIds } from "../hub/delegationJournal";
 import { createTodoRouteHandler } from "../todos/todoRoutes";
@@ -214,6 +218,11 @@ export function wireAuthority(deps: AuthorityDependencies) {
     clock: () => decodeUtcTimestamp(new Date().toISOString()),
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
   });
+  // How a provider keeps its conversation is known once drivers resolve, which
+  // is after this wiring; the refresh point asks through this slot.
+  const conversationOwnershipSlot: {
+    current?: (providerInstanceId: string) => ConversationOwnership;
+  } = {};
   // Journals when this host began marking the turns a person typed, before any
   // turn runs: every turn that begins later is marked or not the person's words.
   personMemory.typedSince();
@@ -308,8 +317,14 @@ export function wireAuthority(deps: AuthorityDependencies) {
   const withholdThreadFromPersonMemory = (threadId: string): void => {
     peerDelegatedThreads.add(threadId);
   };
+  const personMemoryCutOff = createPersonMemoryCutOff({
+    connection: persistence.connection,
+    ownership: (providerInstanceId) => conversationOwnershipSlot.current?.(providerInstanceId),
+    clock: () => new Date().toISOString(),
+  });
   const personMemoryAccess = createPersonMemoryAccess({
     store: personMemory,
+    cutOff: personMemoryCutOff,
     isRestrictedDeviceScope,
     isThreadWithheld: (threadId) => peerDelegatedThreads.has(threadId),
     projectLabel: (projectId) => persistence.readProject(decodeProjectId(projectId))?.name,
@@ -612,6 +627,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     processAuthorityTime,
     onWindowRevoked,
     personMemory,
+    conversationOwnershipSlot,
     personMemoryAccess,
     personMemoryRoutes,
     withholdThreadFromPersonMemory,

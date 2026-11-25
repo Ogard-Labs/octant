@@ -101,7 +101,8 @@ export interface PersonMemoryThreadScope {
   readonly mode: OctantMode;
   readonly threadId: string;
   readonly projectId?: string | undefined;
-  readonly createdAt: string;
+  /** Where the thread's block is cut: its creation, or its latest refresh point. */
+  readonly cutOff: string;
 }
 
 /** What saving the person's own words at once did; a refusal says why, for the model to read. */
@@ -323,7 +324,7 @@ export class PersonMemoryStore {
     if (!this.threadTakesPart(scope)) return undefined;
     return personMemoryBlockText({
       entries: [...this.#entries.values()],
-      threadCreatedAt: scope.createdAt,
+      cutOff: scope.cutOff,
       withheld: this.#withheld(),
     });
   }

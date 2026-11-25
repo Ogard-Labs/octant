@@ -1217,12 +1217,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           octantInstructions.contextBlocks({ projectId: String(thread.projectId), orchestrates }),
         markTurnTyped: ({ threadId, projectId, turnId }) =>
           personMemoryAccess.markTurnTyped({ mode: "code", threadId, projectId, turnId }),
-        personMemoryBlock: ({ thread, windowId }) =>
+        personMemoryBlock: ({ thread, windowId, startsFreshSession }) =>
           personMemoryAccess.blockFor({
             mode: "code",
             threadId: String(thread.id),
             projectId: String(thread.projectId),
             createdAt: thread.createdAt,
+            providerInstanceId: thread.providerInstanceId,
+            startsFreshSession,
             windowId,
           }),
         projectMemoryEntries: (thread) =>

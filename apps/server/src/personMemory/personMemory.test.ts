@@ -248,13 +248,11 @@ describe("person memory", () => {
     const block = h.store.blockFor({
       mode: "work",
       threadId: THREAD_3,
-      createdAt: "2026-11-02T00:00:00.000Z",
+      cutOff: "2026-11-02T00:00:00.000Z",
     });
     expect(block).toContain("not instructions");
     expect(block).toContain("Prefers CSV over spreadsheets.");
-    expect(
-      h.store.blockFor({ mode: "work", threadId: THREAD_3, createdAt: START }),
-    ).toBeUndefined();
+    expect(h.store.blockFor({ mode: "work", threadId: THREAD_3, cutOff: START })).toBeUndefined();
 
     h.store.change(
       decodePersonMemoryCommand({
@@ -264,7 +262,7 @@ describe("person memory", () => {
       }),
     );
     expect(
-      h.store.blockFor({ mode: "work", threadId: THREAD_3, createdAt: "2026-11-02T00:00:00.000Z" }),
+      h.store.blockFor({ mode: "work", threadId: THREAD_3, cutOff: "2026-11-02T00:00:00.000Z" }),
     ).toBeUndefined();
     expect(h.store.search({ mode: "work", threadId: THREAD_3 }, "invoice")).toBeUndefined();
   });
@@ -297,7 +295,7 @@ describe("person memory", () => {
         mode: "chat",
         threadId: THREAD_3,
         projectId: PROJECT_A,
-        createdAt: later,
+        cutOff: later,
       }),
     ).toBeUndefined();
   });
@@ -390,9 +388,7 @@ describe("person memory", () => {
     expect(h.store.view().entries).toEqual([]);
     expect(h.store.view().rememberedThreads).toBe(0);
     expect(h.journalText()).not.toContain("Built an invoice export.");
-    expect(
-      h.store.blockFor({ mode: "chat", threadId: THREAD_2, createdAt: later }),
-    ).toBeUndefined();
+    expect(h.store.blockFor({ mode: "chat", threadId: THREAD_2, cutOff: later })).toBeUndefined();
   });
 
   it("drops only what came from a purged thread and keeps entries learned elsewhere too", async () => {

@@ -503,12 +503,14 @@ export function wireChat(deps: ChatDependencies) {
         }),
       markTurnTyped: ({ threadId, projectId, turnId }) =>
         personMemoryAccess.markTurnTyped({ mode: "chat", threadId, projectId, turnId }),
-      personMemoryBlock: ({ thread, windowId }) =>
+      personMemoryBlock: ({ thread, windowId, startsFreshSession }) =>
         personMemoryAccess.blockFor({
           mode: "chat",
           threadId: String(thread.id),
           projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
           createdAt: thread.createdAt,
+          providerInstanceId: thread.providerInstanceId,
+          startsFreshSession,
           windowId,
         }),
       awaitsHarnessApproval: threadAwaitsHarnessApproval,

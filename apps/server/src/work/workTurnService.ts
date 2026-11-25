@@ -585,6 +585,8 @@ export interface WorkTurnServiceDependencies {
   readonly personMemoryBlock?: (input: {
     readonly thread: WorkThread;
     readonly windowId: WindowId;
+    /** The turn starts a provider session that does not resume an earlier one. */
+    readonly startsFreshSession: boolean;
   }) => string | undefined;
   /** Records that the person typed a turn's message, once the turn is accepted. */
   readonly markTurnTyped?: (input: {
@@ -2276,7 +2278,11 @@ export class WorkTurnService {
           ...personMemoryContributions(
             thread === undefined
               ? undefined
-              : this.#personMemoryBlock?.({ thread, windowId: authenticatedWindowId }),
+              : this.#personMemoryBlock?.({
+                  thread,
+                  windowId: authenticatedWindowId,
+                  startsFreshSession: continuing === undefined,
+                }),
           ),
           ...(project === undefined
             ? []

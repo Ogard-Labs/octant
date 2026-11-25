@@ -876,6 +876,8 @@ export interface ChatServiceOptions {
   readonly personMemoryBlock?: (input: {
     readonly thread: ChatThread;
     readonly windowId: WindowId | undefined;
+    /** The turn starts a provider session that does not resume an earlier one. */
+    readonly startsFreshSession: boolean;
   }) => string | undefined;
   /** Records that the person typed a turn's message, once the turn is journaled. */
   readonly markTurnTyped?: (input: {
@@ -5509,6 +5511,7 @@ export class ChatService {
       const personMemoryText = this.#personMemoryBlock?.({
         thread,
         windowId: executionContext?.windowId,
+        startsFreshSession: sessionDecision.kind !== "continue-session",
       });
       const instructionBlocks = this.#octantInstructionBlocks?.({ thread }) ?? [];
       const priorTurnAttachedTexts =

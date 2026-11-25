@@ -691,12 +691,14 @@ export function wireWork(deps: WorkDependencies) {
         octantInstructions.contextBlocks({ projectId: String(thread.projectId) }),
       markTurnTyped: ({ threadId, projectId, turnId }) =>
         personMemoryAccess.markTurnTyped({ mode: "work", threadId, projectId, turnId }),
-      personMemoryBlock: ({ thread, windowId }) =>
+      personMemoryBlock: ({ thread, windowId, startsFreshSession }) =>
         personMemoryAccess.blockFor({
           mode: "work",
           threadId: String(thread.id),
           projectId: String(thread.projectId),
           createdAt: thread.createdAt,
+          providerInstanceId: thread.providerInstanceId,
+          startsFreshSession,
           windowId,
         }),
       onTurnCancelled: (threadId) => {

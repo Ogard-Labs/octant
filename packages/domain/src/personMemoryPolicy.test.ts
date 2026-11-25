@@ -133,7 +133,7 @@ describe("the person-memory block", () => {
     const later = entry("Writes in Norwegian.", [source("t2")], "2026-11-01T12:00:00.000Z");
     const text = personMemoryBlockText({
       entries: [old, later],
-      threadCreatedAt: "2026-11-01T10:00:00.000Z",
+      cutOff: "2026-11-01T10:00:00.000Z",
       withheld: NONE,
     });
     expect(text).toBe(`${PERSON_MEMORY_BLOCK_PREAMBLE}\n- Preference: Prefers metric units.`);
@@ -147,7 +147,7 @@ describe("the person-memory block", () => {
     ]);
     const text = personMemoryBlockText({
       entries: [hidden, shared],
-      threadCreatedAt: "2026-11-02T00:00:00.000Z",
+      cutOff: "2026-11-02T00:00:00.000Z",
       withheld: { excludedProjectIds: [PROJECT_A], untraced: [] },
     });
     expect(text).toContain("Likes short answers.");
@@ -160,7 +160,7 @@ describe("the person-memory block", () => {
     );
     const text = personMemoryBlockText({
       entries: many,
-      threadCreatedAt: "2026-11-02T00:00:00.000Z",
+      cutOff: "2026-11-02T00:00:00.000Z",
       withheld: NONE,
     });
     expect(text?.length).toBeLessThanOrEqual(PERSON_MEMORY_BLOCK_MAX_CHARACTERS);

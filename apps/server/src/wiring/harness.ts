@@ -150,6 +150,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "codeParentActiveTurn"
     | "codeSessionAuthority"
     | "personMemory"
+    | "conversationOwnershipSlot"
     | "processAuthorityTime"
     | "toolEffectLedger"
     | "windowAuthorityStore"
@@ -925,6 +926,10 @@ export function wireHarness(deps: HarnessDependencies) {
       return undefined;
     }
   };
+  // The refresh point of a thread's person-memory block asks how a provider keeps
+  // its conversation: only one that keeps sessions of its own refreshes at a new one.
+  deps.conversationOwnershipSlot.current = (providerInstanceId) =>
+    resolveConfiguredDriver(providerInstanceId as ProviderInstanceId)?.conversationOwnership;
   // The account the person chose for an automatic call is asked as it is: off,
   // not ready or at its limit, it is reported and no other account is tried.
   const automaticModelAccountUnavailable = createAutomaticModelAccountCheck({

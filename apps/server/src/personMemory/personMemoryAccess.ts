@@ -9,6 +9,10 @@ export interface PersonMemoryTurnScope {
   readonly threadId: string;
   readonly projectId?: string | undefined;
   readonly createdAt: string;
+  /** The thread's provider account, which says whether it keeps sessions of its own. */
+  readonly providerInstanceId?: ProviderInstanceId | undefined;
+  /** This turn starts a session that does not resume an earlier one. */
+  readonly startsFreshSession?: boolean | undefined;
   /** The turn's principal scope; absent when no window or host scope started it. */
   readonly windowId: WindowId | undefined;
 }
@@ -20,7 +24,6 @@ export interface PersonMemoryTurnScope {
  */
 export interface PersonMemoryToolScope extends PersonMemoryTurnScope {
   readonly title?: string | undefined;
-  readonly providerInstanceId?: ProviderInstanceId | undefined;
   /**
    * The messages of the turn this scope was built for (its own prompt, and any
    * steered into it), each with the id its typed mark is kept under. Read again
@@ -85,6 +88,11 @@ export function createPersonMemoryAccess(input: {
   readonly isThreadWithheld?: (threadId: string) => boolean;
   readonly projectLabel: (projectId: string) => string | undefined;
   /**
+   * Where a thread's block is cut now (see `createPersonMemoryCutOff`). Absent,
+   * the block is cut at the thread's creation.
+   */
+  readonly cutOff?: (scope: PersonMemoryTurnScope) => string;
+  /**
    * Saving what the person asks to be remembered. Absent, no turn is offered
    * the save tool.
    */
@@ -134,12 +142,17 @@ export function createPersonMemoryAccess(input: {
       namesProtectedPath: save.namesProtectedPath,
     });
   };
+  const blockOf = (scope: PersonMemoryTurnScope): string | undefined =>
+    input.store.blockFor({
+      mode: scope.mode,
+      threadId: scope.threadId,
+      projectId: scope.projectId,
+      cutOff: input.cutOff?.(scope) ?? scope.createdAt,
+    });
   return {
     markTurnTyped: (turn) => input.store.markTurnTyped(turn),
     blockFor: (scope) =>
-      scopeReadsPersonMemory(scope.windowId, scope.threadId)
-        ? input.store.blockFor(scope)
-        : undefined,
+      scopeReadsPersonMemory(scope.windowId, scope.threadId) ? blockOf(scope) : undefined,
     toolsFor: (scope) => {
       if (!scopeReadsPersonMemory(scope.windowId, scope.threadId)) return undefined;
       const search = toolsForThread(scope);
@@ -148,8 +161,11 @@ export function createPersonMemoryAccess(input: {
         ? undefined
         : combineAppManagedToolSets(search, remember);
     },
+    // The lead's own cut: a child sees what its lead thread's next turn would.
     childBlockFor: (lead) =>
-      scopeReadsPersonMemory(lead.windowId, lead.threadId) ? input.store.blockFor(lead) : undefined,
+      scopeReadsPersonMemory(lead.windowId, lead.threadId)
+        ? blockOf({ ...lead, startsFreshSession: false })
+        : undefined,
     childToolsFor: (lead, authority, currentWindowId) => {
       if (!authority.tools || !scopeReadsPersonMemory(lead.windowId, lead.threadId)) {
         return undefined;
