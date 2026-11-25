@@ -2591,8 +2591,10 @@ With neither on the host removes nothing. The service removes a folder only when
 all of these hold, each read fresh from the server: the receipt is Octant's own
 and `ready` (or an interrupted restorable cleanup of the same record); the thread
 and checkout it names are the host's and the folder is the one derived for that
-thread; the repository identity, branch and head match; the inventory is
-unambiguous (not locked, prunable or detached); nothing the host tracks for the
+thread; the repository identity, branch and head match; the receipt's own worktrees
+are unambiguous (its folder and any worktree holding one of its branches are not
+locked, prunable or detached; a locked, missing or prunable worktree of
+something else in the repository never refuses it); nothing the host tracks for the
 thread is working (the idle check below), asked before and again after the
 receipt leaves `ready`; the folder is clean; it holds nothing a branch cannot
 give back, meaning no untracked file, ignored file or empty folder; and Git is
@@ -2608,16 +2610,43 @@ scanning: a turn starting, running or waiting on the person; a live turn; a chil
 run or a task handed to another member; a debug session; a running shell or
 development server of the thread's Project (a shell records its Project, not a
 folder, so any of the Project's running shells holds every one of its worktrees);
-a queued message; and a waiting wake-up. A read that cannot answer counts as
-work. It uses `git worktree remove` without force and never deletes a branch or
+a queued message, paused and held ones included, since it is a person's unsent
+work; and a waiting wake-up. A read that cannot answer counts as work. Removal
+on archive makes the same check, except that it does not count a shell
+somewhere in the Project: the host cannot say which folder a shell is in (it can
+move between the Project's folders), and archive has never waited for one. A
+language server the host started for the folder is not stopped by cleanup,
+because the host has no per-folder stop; it ends with its own idle sweep. It
+uses `git worktree remove` without force and never deletes a branch or
 releases checkpoint refs, so the thread's history and checkpoints survive. Git
 is not stopped once it has started deleting: the host's stop does not reach the
 removal. A removal Git rejects while the folder is still whole returns the
-receipt to `ready`. A folder that a cut-short removal left with tracked files
-missing, and nothing else changed, is finished with force on the next pass
-(the recorded branch and commit hold every file), or by a person's Restore;
-missing files beside other changes leave the cleanup pending and the folder
-untouched. The receipt records the branch and commit (`reclaim`) when the
+receipt to `ready`. A cut-short removal is settled by what it left,
+and never leaves the thread without a way back. A folder with tracked files
+missing and nothing else changed is finished with force on the next pass (the
+recorded branch and commit hold every file). That forced removal, the only one
+the service makes, is proven fresh each time: the folder is still registered on
+the recorded branch and commit, no hidden flag, sparse checkout, submodule or
+operation is present, only tracked files are missing, and the thread is idle;
+any failing proof hands the folder back instead. A folder with other changes
+beside the missing files, or with a hidden flag, is handed back whole: the
+missing tracked files are put back from the folder's own index with
+`checkout-index`, which replaces no existing file, the cleanup is dropped and the
+receipt is `ready`; nothing is deleted. A person's Restore of a cleanup still
+pending does the same and never forces a removal. A removal that stopped after
+Git deleted the folder's `.git` file leaves the receipt's own registration
+(its path, branch and commit, listed as prunable). If the folder is gone, that
+one registration is dropped with `git worktree remove` on its path, which deletes
+that admin entry and nothing else (never the repository-wide `git worktree
+prune`, which would also drop other worktrees' entries), and the cleanup
+finishes. If the folder remains, its `.git` file is written back, naming the
+registration's own admin directory and replacing nothing, so Git lists it as the
+worktree it was and any file the commit does not hold is an ordinary change;
+the rules above then decide between finishing and handing back. A folder Octant
+cannot relink asks the person to move it away. A Git removal is bounded (15
+minutes, then it is stopped and the cleanup left pending), so the receipt's lock
+cannot be held for ever, and a person's Restore that finds a cleanup still
+running for more than 10 seconds answers that it is running. The receipt records the branch and commit (`reclaim`) when the
 cleanup starts and ends `reclaimed`; `cleanup-pending` with a record is an
 interrupted restorable cleanup, which the sweep resumes while its choice still
 stands, or returns to a working checkout when it does not and the folder is
@@ -2626,9 +2655,14 @@ changes one step at a time: cleanup, resume, abandon and restore, and the
 archive cleanup of the same receipt, take turns on one in-memory lock per
 receipt in the service, so a restore of a row still cleaning up waits for the
 removal and then restores what it left. A restore never demotes `restoring` to
-`reclaimed` while a matching folder is there. Erasing a thread removes receipt
-files directly and does not take the lock, since nothing can restore a thread
-that is gone. The checkout root resolves only for a `ready` receipt, and every
+`reclaimed` while a matching folder is there. Erasing a thread (one
+receipt at a time, holding no other) and a Benchmarks discard take the same
+lock, so a restore in flight cannot recreate a folder and branch for a thread
+being erased. A turn cannot start between the `ready` read and the receipt
+leaving `ready`: a turn holds its thread as starting before it reads any
+receipt, and the second idle check, made after the receipt has left `ready`,
+sees that hold or the live turn it became, while a turn that reads the receipt
+after that finds it not `ready` and is refused. The checkout root resolves only for a `ready` receipt, and every
 reader of a managed receipt's folder (turns, tools, terminals, child runs,
 mentions, Files) checks that state, so a thread takes no turn while its cleanup
 is under way, once it is cleaned up, and while a restore is under way. The
@@ -2642,12 +2676,17 @@ worktrees) recreates the folder with `git worktree add` on the recorded branch
 and makes the receipt `ready` only after the new folder reports that branch and
 commit; a branch that moved or was deleted, a branch another worktree holds, or
 a folder that is already there refuses it, and a folder that does not match is
-taken away again. A restore a restart interrupted resumes the same way. The
+taken away again. A refusal that needs the person says what to do (move or
+unlock the folder, look at the repository's worktrees); "try again in a moment"
+is said only where waiting can help. A restore a restart interrupted resumes the same way. The
 setup recipe is not run again by a restore; it stays under its existing explicit
 recovery controls. Listing and restoring follow the archived list's admission: a
-window on this computer, or a device the host's own person paired; a
-hub-introduced or restricted device reads the sentence and gets neither the button
-nor the route. No new journal event is involved: the choices ride on the Code
+window on this computer, or a device the host's own person paired, whose
+browser restores over its session (`/api/code/cleaned-up-worktrees/restore` is
+forwarded with a one-thread body limit); a hub-introduced or restricted device
+reads the sentence and gets neither the button nor the route. The notice goes
+with the host's answer, and a worktree another window already restored counts
+as back. No new journal event is involved: the choices ride on the Code
 settings event and the record lives in the receipt.
 
 _Version skew._ `worktrees` is an optional field of `CodeSettings` and
@@ -2655,8 +2694,10 @@ _Version skew._ `worktrees` is an optional field of `CodeSettings` and
 answer through `decodeHostAnswer`, which drops a field its build does not know,
 so an earlier client reads the settings without the worktree choices and keeps
 the stored choice when it saves (an update without `worktrees` keeps them). The
-host's own decodes stay strict, as for every optional settings field before
-these. A receipt in a state or with a `reclaim` record an earlier host does not
+host's own decodes stay strict, so an earlier host rejects an update that names
+`worktrees`: a host that has the choices therefore always answers with them
+(empty for the defaults, though storage keeps none), and a window shows the
+worktree controls only for an answer that carries them. A receipt in a state or with a `reclaim` record an earlier host does not
 know fails that host's strict receipt decode, so the receipt reads as invalid
 and the thread takes no turn rather than running in a folder that is gone.
 

@@ -51,14 +51,17 @@ thread are kept, and the thread takes no new turn until the worktree is
 restored." (`cleanedUpWorktreeSentence` in `@octant/domain`, with its two
 variants for a cleanup or a restore still under way). The card carries
 **Restore worktree**, which asks the host's existing restore route and then
-reads the thread again; a refusal, such as a branch that moved, shows as a
-second quiet line and the card stays. Sending is held while the card shows: the
+reads the thread again; the card goes with the host's answer, even when that
+read fails and waits for the next refresh, and a worktree another window already
+restored counts as back. A refusal, such as a branch that moved, shows as a
+second quiet line (naming what to do where waiting would not help) and the card
+stays. Sending is held while the card shows: the
 send button is disabled, Enter sends nothing, and the draft stays. The files and
 terminal surfaces of that thread say the same in place of "This checkout can't
 be read" and do not offer to move the thread to the Project's checkout. The host
 answers a send, a queued message or a wake-up that fires for such a thread with
 the same sentence. A window on this computer or a device the host's own person
-paired gets the button; a hub-introduced or restricted device reads the sentence
+paired gets the button, a paired browser's over its session; a hub-introduced or restricted device reads the sentence
 without it. `cleanedUpWorktreeNotice` in `apps/web/src/composer/` is the one
 recipe, and `CodeThreadView.worktreeCleanup` is what the host reports.
 

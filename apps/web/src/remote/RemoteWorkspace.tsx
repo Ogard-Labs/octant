@@ -523,6 +523,7 @@ export interface RemoteCodeSurfaceProps extends Omit<RemoteSurfaceProps, "client
     readonly serviceOffers?: RemoteProductClients["serviceOffers"];
     readonly imageResults?: RemoteProductClients["imageResults"];
     readonly folderBrowse?: RemoteProductClients["folderBrowse"];
+    readonly worktrees?: RemoteProductClients["worktrees"];
   };
   /**
    * False in a desktop window showing a paired computer's threads: the page's
