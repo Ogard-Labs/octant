@@ -59,7 +59,7 @@ export function AppVaultGate(props: {
     setState("unlocking");
     try {
       const result = await unlockAppVault(props.authenticator);
-      completeUnlock(attempt, result, AppState.currentState);
+      completeUnlock(attempt, result, AppState.currentState ?? null);
     } finally {
       unlockInFlight.current = false;
     }

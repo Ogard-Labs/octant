@@ -80,7 +80,10 @@ const config: ExpoConfig = {
     ],
   },
   plugins: [
-    ["expo-build-properties", { ios: { enableSceneSupport: true } }],
+    // SDK 58 shrinks Android release builds by default. Shrinking removes code
+    // reached only by reflection, so a break would show only in a release
+    // build. It stays off until a release build has been run on a device.
+    ["expo-build-properties", { android: { enableMinifyInReleaseBuilds: false } }],
     // The push entitlement, the Keychain group shared with the notification
     // service extension, and the extension target itself. Off until the build
     // is made with the push capability on its App ID (`OCTANT_MOBILE_PUSH=1`,
