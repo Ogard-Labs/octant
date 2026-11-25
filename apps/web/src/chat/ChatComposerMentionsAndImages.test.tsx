@@ -1,4 +1,5 @@
 import { act, render, screen, within } from "@testing-library/react";
+import { ThreadReferencesContext } from "../threadReferences/ThreadReferences";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -118,6 +119,58 @@ describe("ChatComposer thread mentions", () => {
     expect(onQueryChange).toHaveBeenLastCalledWith("rel");
     expect(screen.getByRole("listbox", { name: "Threads you can mention" })).toBeVisible();
     expect(message).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("shows a listed thread's Project, state and model beside its hit", async () => {
+    const user = userEvent.setup();
+    render(
+      <ThreadReferencesContext.Provider
+        value={{
+          find: () => ({
+            mode: "code",
+            projectName: "octant",
+            thread: {
+              threadId: "thread-release-notes",
+              title: "Release notes",
+              projectId: "project-1",
+              activity: "attention",
+              awaitingKind: "approval",
+              provider: { displayName: "Claude", driverKind: "claude" },
+              modelId: "claude-opus-5-5",
+            },
+          }),
+        }}
+      >
+        <ControlledComposer
+          isSending={false}
+          model={{ options: [{ id: "model-a", label: "Model A" }], value: "model-a" }}
+          onFileSelected={vi.fn()}
+          onModelChange={vi.fn()}
+          onProviderChange={vi.fn()}
+          onResearchEnabledChange={vi.fn()}
+          onResearchRoutingChange={vi.fn()}
+          onSend={vi.fn(async () => true)}
+          provider={{ options: [{ id: "provider-a", label: "Provider A" }], value: "provider-a" }}
+          research={{ backend: { kind: "disabled" }, enabled: false, routing: "automatic" }}
+          threadMentions={mentions({
+            candidates: [
+              candidate("Release notes", {
+                mode: "code",
+                placement: { kind: "project", label: "octant" },
+              }),
+            ],
+          })}
+        />
+      </ThreadReferencesContext.Provider>,
+    );
+
+    await user.type(screen.getByLabelText("Message"), "#rel");
+
+    const option = await screen.findByRole("option", { name: /Release notes/ });
+    expect(option).toHaveTextContent("Needs you");
+    expect(option).toHaveTextContent("Opus 5.5");
+    expect(option).toHaveTextContent("Code · octant");
+    expect(option.querySelector(".project-mark, .project-icon")).not.toBeNull();
   });
 
   it("closes the typeahead on Escape without touching the draft", async () => {

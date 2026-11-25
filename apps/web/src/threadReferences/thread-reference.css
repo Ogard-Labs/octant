@@ -3,7 +3,14 @@
 .thread-reference {
   max-width: 100%;
   vertical-align: baseline;
+  white-space: nowrap;
   cursor: pointer;
+}
+
+/* The prompt breaks long words anywhere; a tile's two letters stay a pair. */
+.thread-reference .project-mark__letters {
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .thread-reference > svg {

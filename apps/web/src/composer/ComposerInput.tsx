@@ -13,6 +13,7 @@ import {
   type ClipboardEvent,
   type DragEvent,
   type FocusEvent,
+  type FormEvent,
   type HTMLAttributes,
   type KeyboardEvent,
   type MouseEvent,
@@ -193,6 +194,10 @@ function textOf(node: Node): string {
   for (const child of node.childNodes) text += textOf(child);
   const blockBreak = BLOCK_TAGS.has(node.tagName) && node.previousSibling !== null ? "\n" : "";
   return blockBreak + text;
+}
+
+function lineBreaks(text: string): number {
+  return text.split("\n").length - 1;
 }
 
 function serialize(root: HTMLElement): string {
@@ -849,11 +854,19 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       },
       // Through React's own `onInput`, so the caller's state update lands
       // before the next key event, as it does for a text field's `onChange`.
-      onInput: () => {
+      onInput: (event: FormEvent<ComposerInputElement>) => {
         const root = rootRef.current;
         if (root === null) return;
-        const next = serialize(root);
-        const caret = readSelection(root)?.start ?? next.length;
+        const read = serialize(root);
+        // Deleting the text after a chip leaves a line break that holds the
+        // line open. A deletion adds no line, so it is no part of the prompt.
+        const held =
+          event.nativeEvent instanceof InputEvent &&
+          event.nativeEvent.inputType.startsWith("delete") &&
+          read.endsWith("\n") &&
+          lineBreaks(read) > lineBreaks(modelRef.current);
+        const next = held ? read.slice(0, -1) : read;
+        const caret = Math.min(readSelection(root)?.start ?? next.length, next.length);
         if (next === modelRef.current && next === reportedRef.current) return;
         const chipsChanged =
           chipsOf(next, findInlineRef.current).length !==

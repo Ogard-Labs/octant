@@ -826,6 +826,8 @@ describe("ProjectThreadRows", () => {
 
     const card = await findThreadDetails();
     expect(card).toHaveTextContent("Claude · Opus 5.5");
+    // The provider's own glyph stands before its name, not a generic mark.
+    expect(card.querySelector('[data-driver-kind="claude"]')).not.toBeNull();
   });
 
   it("names a thread on the shelf Settled in its info card", async () => {

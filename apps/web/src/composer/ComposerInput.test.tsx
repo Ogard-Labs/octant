@@ -182,4 +182,18 @@ describe("ComposerInput", () => {
     await userEvent.click(screen.getByText("chip"));
     expect(onPress).toHaveBeenCalledOnce();
   });
+
+  it("keeps no line break the browser leaves when the text after a chip is deleted", () => {
+    const onValue = vi.fn();
+    render(<Prompt initial={`${tag} `} onValue={onValue} />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    // What Chromium does for Backspace on the last character after a chip.
+    input.lastChild?.remove();
+    input.append(document.createElement("br"));
+    fireEvent(
+      input,
+      new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }),
+    );
+    expect(onValue).toHaveBeenLastCalledWith(tag, tag.length);
+  });
 });
