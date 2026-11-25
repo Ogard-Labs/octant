@@ -1124,6 +1124,14 @@ describe("an outside clip across a restart", () => {
         });
       },
     ],
+    [
+      "another key placement",
+      (h: ReturnType<typeof harness>) => {
+        h.state.profile = outsideProfile({
+          configuration: { ...outsideProfile().configuration, key: { header: "x-api-key" } },
+        });
+      },
+    ],
   ])("does not resume or remove a sent clip through %s", async (_label, change) => {
     const directory = mkdtempSync(join(tmpdir(), "octant-outside-video-"));
     try {
