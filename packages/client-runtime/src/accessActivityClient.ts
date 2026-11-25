@@ -8,6 +8,7 @@ import {
   type ChangeNoticeList as ChangeNoticeListType,
 } from "@octant/contracts/access-activity";
 import { decodeHostAnswer } from "@octant/contracts";
+import type { MobileRemoteTransport } from "./mobileInboxClient";
 
 /** What a notice action came back with: done, or the host's reason it refused. */
 export type ChangeNoticeActionResult =
@@ -88,4 +89,28 @@ export function createAccessActivityClient(port: AccessActivityPort): AccessActi
       }
     },
   };
+}
+
+/**
+ * The phone's client for one paired computer, over its own device session: the
+ * session carries who the phone is, so no window capability is sent. The host
+ * decides what the phone may read and which actions each notice offers it.
+ */
+export function createMobileAccessActivityClient(
+  transport: MobileRemoteTransport,
+): AccessActivityClient {
+  return createAccessActivityClient({
+    // Only the path of a request is used; the session owns the destination.
+    baseUrl: "https://paired-host.invalid",
+    fetch: async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const body = typeof init?.body === "string" ? init.body : undefined;
+      return transport.authenticatedFetch({
+        method: init?.method ?? "GET",
+        path: url.pathname,
+        ...(body === undefined ? {} : { body, contentType: "application/json" }),
+        ...(init?.signal === undefined || init.signal === null ? {} : { signal: init.signal }),
+      });
+    },
+  });
 }

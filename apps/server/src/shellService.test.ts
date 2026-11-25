@@ -31,8 +31,10 @@ import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { readShellSettings } from "./persistence/shellProjection";
 import { openSqlite } from "./persistence/sqlitePort";
 import { retimeDeviceRegistrations } from "./remote/deviceRegistrationLifetime";
-import { createHostPersonScopes } from "./hostPersonScope";
-import { createBrowserRememberCallbacks } from "./wiring/browser";
+import { createHostPersonScopes, createRestrictedDeviceScope } from "./hostPersonScope";
+import { BrowserToolApprovalService } from "./browser/browserToolApprovalService";
+import { isRoutineHostScope } from "./routineHostScope";
+import { createBrowserRememberCallbacks, isRestrictedBrowserDevice } from "./wiring/browser";
 import { ConcurrencyConflict, JournalWriteFailed } from "./persistence/journalErrors";
 import type { PersistenceService } from "./persistence/persistenceService";
 import { SHELL_SETTINGS_AGGREGATE_ID } from "./persistence/shellProjection";
@@ -2370,6 +2372,7 @@ describe("ShellService", () => {
         { device_id: String(hubIntroducedDeviceId), state: "active" },
       ],
       approvedByPerson: (deviceId) => deviceId === String(personPairedDeviceId),
+      hasFullAccess: () => true,
     });
     const callbacks = createBrowserRememberCallbacks({
       persistence: livePersistence,
@@ -2415,6 +2418,155 @@ describe("ShellService", () => {
           }),
       ),
     ).toBe(true);
+  });
+
+  it("remembers an Always allow answer only from the person's window or a Full device, and approves one transfer or refuses for a device below Full, hub-introduced or read-only", async () => {
+    const fullId = decodeWindowId("90000000-0000-4000-8000-0000000000e1");
+    const steerId = decodeWindowId("90000000-0000-4000-8000-0000000000e2");
+    const readOnlyId = decodeWindowId("90000000-0000-4000-8000-0000000000e3");
+    const hubId = decodeWindowId("90000000-0000-4000-8000-0000000000e4");
+    const levels: Record<string, "full" | "approve-and-steer" | "read-only"> = {
+      [String(fullId)]: "full",
+      [String(steerId)]: "approve-and-steer",
+      [String(readOnlyId)]: "read-only",
+      [String(hubId)]: "full",
+    };
+    let storedSettings = defaultShellSettings();
+    let storedVersion = 0;
+    const { persistence } = persistenceStub();
+    const livePersistence: PersistenceService = {
+      ...persistence,
+      readShellSettings: () => ({
+        settings: storedSettings,
+        aggregateVersion: storedVersion as never,
+        updatedAt: now as never,
+      }),
+      journal: {
+        ...persistence.journal,
+        append: vi.fn((command) => {
+          const event = command.events[0] as {
+            readonly payload: { readonly settings: typeof storedSettings };
+          };
+          storedSettings = event.payload.settings;
+          storedVersion += 1;
+          return { aggregateVersion: storedVersion, events: [] } as never;
+        }),
+      } as unknown as PersistenceService["journal"],
+    };
+    const service = new ShellService({
+      persistence: livePersistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    });
+    const devices = Object.keys(levels);
+    const approvedByPerson = (deviceId: string) => deviceId !== String(hubId);
+    const hasFullAccess = (deviceId: string) => levels[deviceId] === "full";
+    const hostPersonScopes = createHostPersonScopes({
+      localWindows: () => [],
+      devices: () => devices.map((device_id) => ({ device_id, state: "active" as const })),
+      approvedByPerson,
+      hasFullAccess,
+    });
+    const isRestrictedDeviceScope = createRestrictedDeviceScope({
+      isPairedDeviceScope: (scopeId) => devices.includes(String(scopeId)),
+      approvedByPerson,
+      hasFullAccess,
+    });
+    const callbacks = createBrowserRememberCallbacks({
+      persistence: livePersistence,
+      shellService: service,
+      hostPersonScopes,
+    });
+    const threadId = "50000000-0000-4000-8000-0000000000e1";
+    const authority = {
+      mode: "work",
+      authorityEpoch: 1,
+      hostId: "host",
+      toolAuthorityId: "tool",
+    } as never;
+    let counter = 0;
+    const approvals = new BrowserToolApprovalService({
+      uuid: () => `40000000-0000-4000-8000-${String(++counter).padStart(12, "0")}`,
+      now: () => Date.parse("2026-11-25T10:00:00.000Z"),
+      authorityIsCurrent: () => true,
+      rememberTransfer: (transfer, windowId) =>
+        callbacks.rememberBrowserTransfer(windowId, transfer),
+      rememberOrigin: (origin, windowId) => callbacks.rememberBrowserOrigin(windowId, origin),
+      isHostScope: isRoutineHostScope,
+      isLocalWindow: hostPersonScopes.actsAsHostPerson,
+      isRestrictedDevice: (windowId) =>
+        isRestrictedBrowserDevice({
+          hostPersonScopes,
+          isRestrictedDeviceScope,
+          isRoutineHostScope,
+          windowId,
+        }),
+    });
+    const download = {
+      name: "report.pdf",
+      sizeBytes: 4,
+      mediaType: "application/pdf",
+    };
+    const answerAlways = async (scope: typeof fullId) => {
+      const answered = approvals.request({
+        windowId: scope,
+        threadId,
+        authority,
+        origin: "https://files.example",
+        workspaceRoot: "/Users/example/Work/Reports",
+        download,
+      });
+      const [listed] = approvals.list(scope);
+      const accepted =
+        listed === undefined
+          ? false
+          : approvals.decide(scope, {
+              approvalId: listed.approvalId,
+              decision: "approved",
+              remember: true,
+            });
+      return { accepted, outcome: accepted ? await answered : undefined };
+    };
+
+    // The device the person paired below Full, and a read-only one, approve this
+    // one transfer and remember nothing; a hub-introduced device the same.
+    for (const scope of [steerId, readOnlyId, hubId]) {
+      expect(await answerAlways(scope)).toEqual({ accepted: true, outcome: "approved" });
+      expect(storedSettings.rememberedBrowserTransfers).toEqual([]);
+    }
+    // A signed-in page's prompt never reaches a device below Full.
+    const signedIn = approvals.request({
+      windowId: fullId,
+      threadId,
+      authority,
+      origin: "https://github.com",
+      profile: { kind: "personal" },
+    });
+    expect(approvals.list(steerId)).toEqual([]);
+    expect(approvals.list(readOnlyId)).toEqual([]);
+    expect(approvals.list(fullId)).toHaveLength(1);
+    const [prompt] = approvals.list(fullId);
+    expect(
+      approvals.decide(steerId, {
+        approvalId: prompt!.approvalId,
+        decision: "approved",
+        remember: true,
+      }),
+    ).toBe(false);
+    expect(
+      approvals.decide(fullId, {
+        approvalId: prompt!.approvalId,
+        decision: "approved",
+        rememberProfile: true,
+      }),
+    ).toBe(true);
+    await expect(signedIn).resolves.toBe("approved");
+
+    // The Full device is the person: its answer is remembered, journaled.
+    expect(await answerAlways(fullId)).toEqual({ accepted: true, outcome: "approved" });
+    expect(storedSettings.rememberedBrowserTransfers).toEqual([
+      expect.objectContaining({ direction: "download", origin: "https://files.example" }),
+    ]);
   });
 
   it("keeps reporting a folder stored under Documents after the host default moved", () => {

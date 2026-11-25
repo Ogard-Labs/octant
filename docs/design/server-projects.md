@@ -581,7 +581,7 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
   The Work server Project's **Show developer tools** switch is off by default
   in its existing Settings → Permissions → Servers row. A
   `set-server-work-developer-tools` command, from a local window or a paired
-  device (maintainer decision, 2026-11-12; not built yet: today local-only), journals who and when as
+  device (maintainer decision, 2026-11-12; built), journals who and when as
   `server-projects.work-developer-tools-changed@1`. It reveals the action editor,
   saved-action buttons, the person's Project terminal in this Settings row,
   and active Work header/palette entries. It changes no task authority and

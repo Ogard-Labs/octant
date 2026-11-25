@@ -584,6 +584,7 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
         path.startsWith("/api/speech/") ||
         path.startsWith("/api/agent-profiles") ||
         path.startsWith("/api/agent-grants") ||
+        path.startsWith("/api/diagnostics/") ||
         path.startsWith("/api/protected-files") ||
         path.startsWith("/api/access/safe-networks") ||
         path.startsWith("/api/shield/servers") ||

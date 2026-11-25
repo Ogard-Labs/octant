@@ -63,7 +63,10 @@ import { ThreadMessageQueueService } from "../messageQueue/threadMessageQueueSer
 import { createThreadMessageQueuePort } from "../messageQueue/threadMessageQueuePorts";
 import { journalThreadMessageSteered } from "../messageQueue/threadMessageSteeredRecord";
 import { createThreadMessageQueueAuthority } from "../messageQueue/threadMessageQueueAuthority";
-import { readDeviceAccessLevel } from "../persistence/remoteAccessProjection";
+import {
+  readDeviceAccessLevel,
+  readDeviceApprovedByPerson,
+} from "../persistence/remoteAccessProjection";
 import { createThreadMessageQueueAttachments } from "../messageQueue/threadMessageQueueAttachments";
 import { createThreadMessageQueueRouteHandler } from "../messageQueue/threadMessageQueueRoutes";
 import { createThreadWakeupRouteHandler } from "../wakeups/threadWakeupRoutes";
@@ -658,8 +661,8 @@ export function wireWork(deps: WorkDependencies) {
         agentMessageService.confirmDelivered(messageIds),
       // A Work thread started from a provider session begun outside Octant
       // is journaled on the thread, marked as carrying outside content first.
-      recordAdoptedSession: (thread, adopted, history) =>
-        workThreadService.recordAdoptedSession(thread, adopted, history),
+      recordAdoptedSession: (thread, adopted, history, actor) =>
+        workThreadService.recordAdoptedSession(thread, adopted, history, actor),
       readImportedSessionHistory: (threadId) =>
         readJournaledSessionHistory(persistence.journal, String(threadId), "work"),
       // A compaction stops the session kept past the thread's last turn.
@@ -2010,10 +2013,12 @@ export function wireWork(deps: WorkDependencies) {
           isRoutineHostScope(windowId) ||
           windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
         isPairedDevice: isPairedDeviceScope,
+        // Only a device the person paired has a level; the queue holds one
+        // below Full to its catalogue and a hub-introduced one to the hub's.
         deviceAccessLevel: (windowId) =>
-          isRestrictedDeviceScope(windowId)
-            ? undefined
-            : readDeviceAccessLevel(persistence.connection, String(windowId)),
+          readDeviceApprovedByPerson(persistence.connection, String(windowId))
+            ? readDeviceAccessLevel(persistence.connection, String(windowId))
+            : undefined,
         localWindowCanAccess: (windowId, mode, projectId) => {
           if (isRoutineHostScope(windowId) && mode === "work")
             return projectId !== undefined && persistence.readProject(projectId)?.type === "work";
@@ -2026,7 +2031,11 @@ export function wireWork(deps: WorkDependencies) {
         },
         projectType: (projectId) => persistence.readProject(projectId)?.type,
         hasActiveCodeProject: (projectId) => codeProjectAccess.hasActiveCodeProject(projectId),
-        isRestrictedDevice: isRestrictedDeviceScope,
+        // The hub's Act item holds only a device the hub introduced; a device
+        // the person paired below Full is held to its level instead.
+        isRestrictedDevice: (windowId) =>
+          isPairedDeviceScope(windowId) &&
+          !readDeviceApprovedByPerson(persistence.connection, String(windowId)),
         hubActScope: deps.hubActScopeSlot.current,
       }),
       effectiveCodeThread: (windowId, thread) =>
@@ -2299,8 +2308,8 @@ export function wireWork(deps: WorkDependencies) {
       stopLiveTasks: (threadId) => outlivingWorkSessions.stopThread(workSessionKey(threadId)),
       isPerson: (windowId) => !isRoutineHostScope(windowId) && !isRestrictedDeviceScope(windowId),
       nativeSessions: (windowId, threadId) => workTurnService.nativeSessions(windowId, threadId),
-      adoptNativeSession: (windowId, threadId, nativeSessionId) =>
-        workTurnService.adoptNativeSession(windowId, threadId, nativeSessionId),
+      adoptNativeSession: (windowId, threadId, nativeSessionId, actor) =>
+        workTurnService.adoptNativeSession(windowId, threadId, nativeSessionId, actor),
     });
     // A message wakes a Work thread whose switch is on, as it wakes a Code
     // thread, counted in the store Code's wakes use so a restart keeps the

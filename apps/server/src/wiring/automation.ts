@@ -82,6 +82,7 @@ import {
 import { createPushGatewaySetting } from "../remote/pushGatewaySetting";
 import type { HostSigningPort } from "../remote/remoteProtocolService";
 import {
+  readDeviceAccessLevel,
   readDeviceApprovedByPerson,
   readDeviceRegistrations,
 } from "../persistence/remoteAccessProjection";
@@ -1123,11 +1124,13 @@ export function wireAutomation(deps: AutomationDependencies) {
     historyAvailable: () => automationHistoryAvailable,
     personPairedDeviceCurrent: (scopeId) =>
       createHostPersonScopes({
-        localWindows: () => windowAuthorityStore.listWindowIds(),
+        localWindows: () => [],
         devices: () => readDeviceRegistrations(persistence.connection),
         approvedByPerson: (deviceId) =>
           readDeviceApprovedByPerson(persistence.connection, deviceId),
-      }).deviceActor(scopeId) !== undefined,
+        hasFullAccess: (deviceId) =>
+          readDeviceAccessLevel(persistence.connection, deviceId) === "full",
+      }).actsAsHostPerson(scopeId),
     prepareFileRearm: (input) => automationFileSources.prepareRearm(input),
     prepareFileSource: async ({ command, current, signal }) => {
       const previous = persistence.automationProjection.getDefinition(command.automationId);

@@ -526,6 +526,8 @@ export class WorkThreadService {
     current: WorkThread,
     adopted: WorkThreadAdoptedSession,
     history?: ImportedSessionHistory,
+    /** Who asked: the local person or the paired device; absent, the local person. */
+    actor?: EventActor,
   ):
     | { readonly status: "recorded"; readonly thread: WorkThread }
     | { readonly status: "refused"; readonly message: string } {
@@ -541,6 +543,7 @@ export class WorkThreadService {
         .digest("hex")}`,
       correlationId: this.#uuid(),
       authorized: true,
+      actor: actor ?? { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
     });
     if (marked === undefined || (marked.kind !== "recorded" && marked.kind !== "already-recorded"))
       return {
@@ -556,10 +559,13 @@ export class WorkThreadService {
     // One journal unit: the adoption and the earlier conversation it imports
     // are recorded together or not at all.
     const record = () => {
-      this.#append(latest.id, latest.version, "work.thread-updated@1", {
-        kind: "thread-updated",
-        thread: updated,
-      });
+      this.#append(
+        latest.id,
+        latest.version,
+        "work.thread-updated@1",
+        { kind: "thread-updated", thread: updated },
+        actor,
+      );
       if (history === undefined) return;
       this.#persistence.journal.append(
         nativeSessionHistoryAppend({
@@ -570,7 +576,7 @@ export class WorkThreadService {
           history,
           eventId: this.#uuid(),
           correlationId: this.#uuid(),
-          actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          actor: actor ?? { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
           occurredAt: this.#clock(),
         }),
       );
