@@ -24,8 +24,8 @@ device's routes and screens for the wake switches, the proposal review
 prefilled from the request, the proposal card on paired clients (approve as
 asked or decline from a device the person paired, read-only elsewhere), and
 counts that survive a restart are built. None of it has run against a real
-provider or on the desktop app; whether each runtime's own tools honour the
-read-only gate is a maintainer live check.
+provider or on the desktop app; whether each runtime's own tools honour
+Strict's read-only gate is a maintainer live check.
 
 ## What a coordinator is
 
@@ -52,7 +52,8 @@ read-only gate is a maintainer live check.
   [Octant's own limits become settings](../architecture.md#security-and-authority)).
 - **It replaces the planner role.** The Project's designated planner reads as a
   coordinator whose starts always need approval, derived from the designation
-  with no journal change: it takes the read-only gate and the roster, its
+  with no journal change: it takes the roster and, under Strict, the read-only
+  gate, its
   `start` always proposes whatever the start setting, its pending proposals
   stay pending, and it counts toward that number. Designating a worker or a
   coordinator past the number is refused (`thread-is-worker`,
@@ -68,7 +69,7 @@ read-only gate is a maintainer live check.
   on, under the same bounds as Code (maintainer decision, 2026-11-13;
   [Architecture: modes](../architecture.md#modes-chat-work-and-code)). That
   removes what kept a Work coordinator from hearing back while idle. The
-  role itself (`start`, the roster, the read-only gate, state notices) is
+  role itself (`start`, the roster, Strict's read-only gate, state notices) is
   still Code's: Work coordinators are not built.
 
 Rationale: a role on an existing thread, rather than a fourth thread kind, keeps
@@ -84,19 +85,21 @@ An ordinary thread does one task and finishes. A coordinator stays open for as
 long as its line of work lasts, and its job is to direct workers rather than to
 make changes itself.
 
-- **It reads; its workers write.** Below Full access a coordinator's own
-  file, shell, and Git actions go through the same read-only gate Plan mode
-  applies. Reading the checkout, GitHub reads, Canvas, `ask-user`, Project
-  memory, and the coordinator operations below stay offered, and child runs it
-  delegates take the same read-only gate. At Full access its own turn runs at
-  that level instead (maintainer decision, 2026-11-16; built, under
-  [Octant's own limits become settings](../architecture.md#security-and-authority)):
-  the person chose to let the thread act without asking. Under the thread's
-  Strict, read as each turn starts, its own actions keep Plan's read-only
-  gate at every level, Full access included (built). Below Full access
-  its guardrail level does not govern its own actions; at every level it is
-  the ceiling for the workers it starts. It opens no pull request of its own
-  (`octant_pull_request` is not offered).
+- **It directs; its workers do the work.** Outside Strict a coordinator's
+  own turn runs at its thread's level, like any thread's (maintainer
+  decision, 2026-11-25, replacing the 2026-11-16 rule that lifted the
+  read-only gate only at Full access; built, under
+  [Octant adds no restrictions of its own unless Strict is on](../architecture.md#security-and-authority)).
+  Rationale: the gate was a limit Octant added, and a coordinator that could
+  not write handed every small edit to a worker. Under the thread's Strict,
+  read as each turn starts, it reads and its workers write: its own file,
+  shell, and Git actions go through the same read-only gate Plan mode
+  applies, at every level, Full access included (built). Reading the
+  checkout, GitHub reads, Canvas, `ask-user`, Project memory, and the
+  coordinator operations below stay offered there, and child runs it
+  delegates take the same read-only gate. At every level its guardrail level
+  is the ceiling for the workers it starts. It opens no pull request of its
+  own (`octant_pull_request` is not offered).
 - **No delivery target and no Done.** A coordinator has no delivery target,
   never appears as a board card, and is never Done. A person stops it with
   **Stop coordinating**, or puts it away or archives it like any thread.
@@ -172,8 +175,9 @@ A coordinator starts a worker with the `start` operation of `octant_threads`.
   ([the Full access rule](../architecture.md#security-and-authority);
   maintainer request, 2026-11-12). With no fixed level, the worker's guardrail
   level is the one named, or the coordinator's level when none is named, and
-  never higher than the coordinator's, and a worker started by a marked
-  coordinator never starts at Full access. The person picks the fixed level
+  never higher than the coordinator's. Under Strict a worker started by a
+  marked coordinator never starts at Full access; outside Strict it may, and
+  it starts marked (maintainer decision, 2026-11-25). The person picks the fixed level
   in the New coordinator draft (**Workers start at**); the host accepts it
   only on the command that makes the thread a coordinator, journals it on the
   thread (`coordinatorWorkerLevel`), refuses a later change to it, and drops
@@ -660,14 +664,12 @@ a worker whose model cannot read one
 
 When this is built, the tests that matter are the authority edges: `start`
 refused for a non-coordinator, a worker, Plan, and a profile without
-`octant_threads.start`; the level ceiling and the Full access cap for a marked
-coordinator; **Propose for approval** creating nothing until a person confirms;
+`octant_threads.start`; the level ceiling and, under Strict, the Full access cap for a marked coordinator; **Propose for approval** creating nothing until a person confirms;
 the start setting and the role refused from an agent, a routine, and a paired
 device; a marked coordinator's worker starting marked, and a mark that cannot be
 journaled refusing the start; the open-worker and hourly bounds; state notices
 not marking the coordinator; the hop count stopping a coordinator and worker
-after the round bound; and a coordinator's own write, shell, and Git actions
-refused by the read-only gate. For the model choice: every hard rule, the size
+after the round bound; and, under Strict, a coordinator's own write, shell, and Git actions refused by the read-only gate. For the model choice: every hard rule, the size
 map, an empty role using Builder, a Project's role beating Settings, a retry
 climbing and never dropping, borrowing and the lower-tier flag, a review
 avoiding the reviewed provider, an override without `why` refused, a named

@@ -284,7 +284,7 @@ treats the rest as optional). `approved` and `denied` are verdicts; `timedOut`,
 `aborted`, and `inProgress` are not. Claude Code reports a refusal by its
 automatic-mode reviewer as a `permission_denied` system message with the reason
 type `classifier` (Agent SDK 0.3.211), and nothing for a call it approved. A
-denial for any other reason keeps being an unsupported message. Mistral Vibe's
+denial for any other reason is ignored. Mistral Vibe's
 `auto-approve` mode sends no per-call verdict over ACP.
 
 ### Mistral Vibe surface
@@ -438,6 +438,57 @@ and below Full access the launch's Seatbelt profile confines those reads to
 what the session may already read. Refusing Vibe at Guarded over them would
 be stricter than Vibe's own app.
 
+## Reading what a runtime sends
+
+What a provider runtime sends is read tolerantly (maintainer decision,
+2026-11-25; built for Claude Code, Codex, OpenCode and the ACP agents). An
+unknown message type, subtype, field or value is dropped, or read as a neutral
+value, and never fails the turn or closes the connection. Rationale: each
+runtime release adds or reorders some, and each one used to fail the turn, on
+OpenCode for every session of the server. The host still reads its own inputs
+strictly
+([Architecture: Overview and principles](../architecture.md#overview-and-principles)).
+
+What stays fatal is what guards authority or the transport:
+
+- A Claude Code launch that reports another working directory, permission
+  mode, MCP server or tool than it was given, or a second initialization; a
+  status naming another permission mode; a `tool_use` for a tool the session
+  was not offered; and a write Plan disabled that the runtime reports as
+  succeeded.
+- A malformed approval or question request. It is never answered allow.
+- Transport corruption: malformed JSON framing or an oversize line.
+
+Per runtime:
+
+- **Claude Code.** A frame that does not follow from what the turn knows (a
+  result for a call it never saw, a second report under one id, an unknown
+  task, a frame after the turn ended, a message kind this build does not
+  know) is dropped, and the first report stands. Usage figures the runtime
+  left out, or sent in a shape this build cannot count, are omitted: the
+  spend for that frame is unreported, never zero, and the turn's running
+  total stands.
+- **Codex.** A notification that cannot be read is dropped, a request that
+  cannot be read is answered `-32601` (method not found), and a response
+  nobody waits for is dropped. Only transport corruption closes the
+  app-server connection. `turn/completed` always ends the turn.
+- **OpenCode.** An unknown event or status reports nothing, on 1.x and 2.x. A
+  2.x permission request Octant cannot classify becomes an ordinary approval,
+  its action shown as `unknown` when the request names none. A 2.x form that
+  is not a question is cancelled back to OpenCode with a message saying this
+  client cannot show it; the turn fails only when that cancel cannot be
+  sent. A file change no grant names is recorded and the turn continues
+  outside Strict, and fails the turn under Strict.
+- **ACP agents.** Every agent's session updates are read tolerantly: an
+  update after the prompt answered, an update under another session id, a
+  repeated start or finish, and an update for a call never started are
+  ignored or read as the start they imply. A tool-call update that arrives
+  for a finished turn is applied to no turn and does not fail the finished
+  one; the driver closes that process at stop instead of keeping it warm,
+  because the agent is still working for a turn that is over. A profile with
+  `toleratesStrayUpdates` keeps its process there
+  ([Google Antigravity](#google-antigravity)).
+
 ## Claude Code
 
 For a selected Haiku model in Plan, the adapter supplies a query-local
@@ -469,9 +520,12 @@ A Claude Plan turn may report an attempted `Write` or `Edit` before the runtime
 returns its disabled-tool error (observed with Claude Code 2.1.301). The adapter
 recognizes those two unoffered file tools only in Plan and records their failed
 activity without treating their inputs as an applied file change. A success
-result for either disabled tool, a changed tool correlation, or a successful
-turn that omits the refusal fails closed. Other unoffered tools and malformed
-messages remain protocol failures. Recognition grants no tool authority: the
+result for either disabled tool, or a successful turn that omits the refusal,
+fails closed, and so does a call to any other tool the session was not
+offered. A changed tool correlation and a malformed or unknown message are
+dropped, and the turn continues
+([Reading what a runtime sends](#reading-what-a-runtime-sends)). Recognition
+grants no tool authority: the
 launch tool list, permission hooks, OS confinement, and Keychain policy remain
 as specified in [Security and authority](../architecture.md#security-and-authority).
 
@@ -1038,11 +1092,31 @@ A call's working directory follows the session, as it does in Claude Code:
 after `cd apps/web` the hook names that folder, and the gate accepts any
 working directory inside the folders the session holds (the Project root,
 its extra folders, everything beneath them, and a worktree the session
-was let into), judging a shell command or
-a search with no folder of its own there. A working directory outside them
-is refused (maintainer decision, 2026-11-14). Rationale: the port used to
-refuse every hook whose working directory was not the Project root, so one
-`cd` into a subfolder refused every later call of the turn.
+was let into), judging a shell command or a search with no folder of its own there.
+Outside Strict, in Work and Code, Claude may also work in a directory outside
+them, as it does on its own (maintainer decision, 2026-11-25, replacing the
+2026-11-14 refusal). At Full access the call runs, as any path does there.
+Below Full access a call from such a directory asks through the
+outside-path ask, whatever the tool. The directory becomes one the session
+holds only when the person keeps the allow; an allow that covers one call (a
+one-call answer, an automatic reviewer's, one given for a helper) leaves the
+next call from it asking, so no call nobody reviewed runs there unasked. Plan, Chat, Strict and a Full access thread that keeps its
+sandbox still refuse it, and a shell call whose own `cwd` input names an
+outside folder is refused at every level. Rationale: the port used to refuse
+every hook whose working directory was not the Project root, so one `cd` into
+a subfolder refused every later call of the turn, and a `cd` out of the
+Project then refused every call for the rest of the session.
+
+An approval the person keeps for the session goes back to Claude Code as its
+own session rule (maintainer decision, 2026-11-25; built). Outside Strict, in
+Work and Code outside Plan, the answer carries the allow rules Claude Code
+suggested for the call, each rewritten to session scope, so Claude stops
+asking for that kind of call as it does on its own and no settings file of
+the person's is written. A suggested mode switch, added directory or deny
+rule is dropped. A one-call answer, a reviewer's answer, a helper's reviewer
+answer, Plan, and the asks Octant keeps per call (a command leaving the
+sandbox, an outside path, a publish, a worktree switch, a wake-up) carry no
+rule. Strict answers with a bare allow, as before.
 
 Where Octant reads a `CLAUDE.md` itself (a Project the runtime may not read
 because it is not trusted), it expands the file's `@path` imports as Claude
@@ -1256,7 +1330,8 @@ workflow asks below Full access, unlike `Agent`: its script runs as
 JavaScript in the runtime process (a Node `vm` context, Claude Code 2.1.211),
 so the person sees the script before it runs. A `remote` workflow, which a
 cloud session would run on a clone of the Project, is refused before the
-gate, and a `remote_agent` task stays an unsupported frame. Rationale: a
+gate, and a `remote_agent` task frame is dropped while the turn continues.
+Rationale: a
 workflow is a batch of subagents, so the subagent switch, display, and gate
 cover it unchanged, and the held turn covers its background lifetime.
 
@@ -1378,6 +1453,20 @@ ends as before.
   and a read-only sandbox. No runtime control adds a tool or widens a
   sandbox in place, and Octant never applies inside a session a widening it
   cannot hold to its rules.
+- _An approved plan is carried out without another message_ (maintainer
+  decision, 2026-11-25; built for Claude Code in Work and Code). When the
+  person approves leaving Plan from Claude Code's plan hand-over, the host
+  itself starts the follow-on turn once the planning turn has ended, at the
+  level the thread returned to, resuming the same session, with the fixed
+  prompt "Octant started this turn: the person approved your plan and the
+  thread has left Plan. Carry the plan out now." It goes through the
+  ordinary turn admission as the host's own turn. The host starts nothing
+  when a turn of the person's is starting or running, since their message
+  then runs at the new level in the session that holds the plan, or when
+  the account refuses unattended host turns, where the thread waits for the
+  person. Declining starts nothing. Not built yet: a continuation for
+  Codex, which has no plan card to approve; its proposed plan is reply text
+  ([Native plan capture](#native-plan-capture)).
 - _Codex_ sets its approval policy and sandbox on each `turn/start`, so it
   has no change inside a session. Its approval ends the turn as today, and
   the next turn starts at the new level.
@@ -1598,15 +1687,32 @@ run every command unasked (below).
   first `untrusted`.
 - Codex's ask to run one command outside its sandbox arrives as an ordinary
   command approval and reaches the person, or Reviewed's reviewer, as an
-  Octant approval. An approval is answered `accept`, never `acceptForSession`,
-  so it runs that one command, and denied or unanswered stays refused.
+  Octant approval. Denied or unanswered stays refused. An approval the
+  person keeps for the session is answered `acceptForSession`, so Codex stops
+  asking for a matching command as it does on its own (maintainer decision,
+  2026-11-25; built). A one-call answer, a reviewer's answer and an ask that
+  reaches outside the Project's folders are answered `accept` and nothing is
+  remembered. Under Strict every approval is answered `accept`.
+- An approval that reaches outside the Project's folders is put to the
+  person below Full access, for that one request and never remembered
+  (maintainer decision, 2026-11-25; built). At Full access Codex starts with
+  its approval policy at `never`; an approval request it sends anyway is
+  accepted and the turn continues. Under Strict the first is declined unseen
+  and the second fails the turn, as before.
+- A file change Codex reports outside the Project's folders is journaled as
+  a step with no file-change record for the outside file, under the summary
+  "File change completed, including files outside the Project.", and the turn
+  continues (maintainer decision, 2026-11-25; built). Under Strict it still
+  fails the turn.
 - The lease key carries Strict, so a Strict and a non-Strict session never
   share a process, and the launch takes the account's open environment: the
-  host's less Octant's variables, other providers' keys and the unrelated
-  credentials the person did not let through for Codex (its own keys stay,
-  and the AWS credentials its Bedrock sign-in takes stay only while the
-  account's `config.toml` selects Amazon Bedrock). The lease key also
-  carries that pass-through list, so a changed list starts a new process. A Plan or Chat
+  host's less Octant's variables and other providers' keys (its own keys
+  stay, and `GH_TOKEN`, AWS keys and the person's other credentials cross as
+  their shell has them; maintainer decision, 2026-11-25). A Strict lease
+  keeps the fixed list plus the names the person let through for Codex, and
+  its key carries that list, so a changed list starts a new Strict process
+  ([Architecture: Security and authority](../architecture.md#security-and-authority),
+  the Environment rule). A Plan or Chat
   lease outside Strict keeps Octant's read-only profile, with only other
   providers' sign-ins refused among the protected files.
 - Octant's protected paths become Codex deny rules. Codex's built-in
@@ -1940,8 +2046,8 @@ sent as items; a listing that fails sends none, and Codex still reads a
 
 The installed OpenCode binary's
 version selects its routes: 1.x keeps the legacy session API and its
-per-session permission ruleset. 2.x accepts no per-session ruleset, so each
-launch writes its session posture — the same rules in 2.x action names
+per-session permission ruleset. On its private configuration a 2.x launch
+sets no per-session ruleset, so each launch writes its session posture — the same rules in 2.x action names
 (`shell`, `subagent`), every namespaced tool and skill denied, and only that
 connection's app-managed tool bridge allowed — into the private
 configuration, where OpenCode appends it after every agent's built-in rules
@@ -1980,8 +2086,10 @@ runs outside Octant's sandbox, so no OS rule narrows with it; one that kept
 its sandbox keeps the Accept edits wall and its whole OS deny list. Plan also allows
 OpenCode's other read-only tools without asking: `todowrite`, `todoread`,
 `codesearch`, `lsp`, `webfetch`, and `websearch` (maintainer decision,
-2026-11-14). A web read or code search still marks the thread as outside
-content, as in Work and Code; edits, the shell, delegation, and outside
+2026-11-14), and outside Strict so do Ask first and Accept edits, on 1.x and
+2.x (maintainer decision, 2026-11-25; built); under Strict those two levels
+keep asking for them. A web read or code search still marks the thread as outside
+content, as in Work and Code; in Plan edits, the shell, delegation, and outside
 folders stay denied, and the person's own deny rules still apply. 2.0.22 answers the 1.x `POST /mcp` registration with
 405 and has no per-launch MCP flag; it registers runtime MCP servers through
 `PUT /api/experimental/mcp/{server}` (removed with `DELETE`), which Octant
@@ -2036,7 +2144,7 @@ share one mapping. `session.execution.succeeded` completes the turn, its
 interruption holds it, below), and a scheduled retry reports nothing, so
 the turn keeps running while OpenCode retries. Queueing, lifecycle, part start and end, and running
 usage totals report nothing (each step reports its own usage); any other
-event fails the turn closed with an error naming it. Approvals map
+event is ignored ([Reading what a runtime sends](#reading-what-a-runtime-sends)). Approvals map
 through 2.0.22's `permission.asked` event and its reply route, whose body
 is `{decision}`. An approval is answered `once` unless approvals are
 remembered for the Project and the person let OpenCode run as itself
@@ -2072,14 +2180,23 @@ Octant's (built). Octant reads the
 OpenCode configuration when a session starts, in the order they wrote them,
 and places them ahead of the level's first deny. It drops a bare catch-all
 rule, because only the guardrail level may lift a whole thread, and the
-rules for `external_directory`, `question`, `skill`, and `*_*`, which Octant
-owns. An edit their rules allow for a file is admitted by the file-change
+rules for `external_directory`, `question`, and `*_*`, which Octant
+owns. Their `skill` rules are read apart: on OpenCode 2 outside Strict with
+skills on they apply in place of the level's ask for every skill, so an
+allow loads a skill unasked and a deny holds (maintainer decision,
+2026-11-25; built); elsewhere they are dropped. Not built yet: a person's
+catch-all deny and their `external_directory` deny are not honoured, because
+the level's own ask for outside folders must hold and a catch-all is never
+restated. At most 200 rules are read. An edit their rules allow for a file is admitted by the file-change
 check, as OpenCode itself would make it; a shell command allowed this way
 runs without an approval card and without Reviewed's reviewer. Clearing the
 saved grants or the rules in OpenCode restores the prompts. A 2.x reject settles every pending request
 in the session, so each settled request is forgotten. With the setup on, the
 MCP servers in the person's own configuration (local commands and remote URLs,
-at most 32) are written into the launch's private configuration and their
+at most 32, read in both shapes OpenCode has written them: `mcp.<name>` with
+`enabled: false`, and OpenCode 2's `mcp.servers.<name>` with `disabled: true`)
+are written into the launch's private configuration as `mcp.<name>`, which
+2.4.1 still reads, and their
 tools follow the level instead of being denied outright; a server's environment and
 headers keep only a reference to a variable the host has (`{env:NAME}`), and a
 server whose command line or URL carries a credential is left out, so the
@@ -2113,7 +2230,9 @@ format, as on 1.x. A form with a question that asks for a password,
 passphrase, API key, access token, or private key is never shown or
 journaled: each of its fields is answered at once with the refusal Codex
 gets, telling the model Octant does not collect secrets in chat. Any other form (a sign-in, a server's own request)
-still fails the turn rather than hang on an unanswerable form. Resume,
+is cancelled back to OpenCode with a message saying this client cannot show
+it, and the turn continues; it fails only when the cancel cannot be sent,
+rather than hang on an unanswerable form. Resume,
 interruption, and tool activity are reported. A Stop the person asked for
 (`user`) and OpenCode's own `superseded` and `inactivity` interruptions stay
 ordinary interruptions; a `shutdown` interruption, or the OpenCode process
@@ -2123,8 +2242,10 @@ with a reason naming what happened, and nothing sends it again on its own
 request admits one reported change to each file it names (resolved against
 the project root; `*` admits one change to any file), rejecting one request
 never withdraws another's grant, and a change to a file no remaining grant
-names fails the turn; and anything not mapped fails
-closed. The probe also asks the confined 2.x server to answer for a
+names fails the turn under Strict; outside Strict it is recorded as a change
+the runtime made and the turn continues, since OpenCode holds its own
+permission rules there (maintainer decision, 2026-11-25). An event Octant
+does not map is ignored. The probe also asks the confined 2.x server to answer for a
 directory carrying a Git marker, made in the launch's own scratch directory
 because every launch profile denies the host temporary directory beneath
 `/private`; it attests by creating a session there and then deletes that
@@ -2142,8 +2263,8 @@ changes and compaction `unavailable`, and 1.x reports compaction
 server was read). Reading a local 2.2.0 server with no prompt sent showed
 the `file.edited` and `session.diff` events, `GET /api/session/{id}/diff`,
 and `POST /api/session/{id}/compact`. A reported file change is held to the
-grants described above, so the capability adds no authority: a change no
-grant names still fails the turn. Compaction sends the route with
+grants described above, so the capability adds no authority: under Strict a
+change no grant names still fails the turn. Compaction sends the route with
 `delivery: "queue"`, which returns the queued item at once; the compaction is
 reported by `session.compaction.ended` or `session.compaction.failed` and then
 the idle that closes its run. The adapter holds the request open until that
@@ -2219,6 +2340,71 @@ makes `modelSwitch` supported: a follow-up on another model of the same
 instance resumes the same native session on the thread's current model and
 re-records it on the cursor's binding, instead of refusing the session it can
 carry.
+
+### OpenCode 2 on the person's own configuration
+
+From OpenCode 2.4.1, outside Strict, a Work or Code session outside Plan
+whose person let OpenCode run as itself reads the person's own OpenCode
+configuration, cache, state and temporary locations, as OpenCode does in a
+terminal (maintainer decision, 2026-11-25; built,
+`openCodeRunsOnOwnConfiguration`). Their agents, commands, plugins,
+instructions, formatters, language servers and tool servers load from their
+own configuration, and OpenCode finds their global `AGENTS.md` itself.
+Rationale: the private configuration kept six routing keys of the person's
+file, so none of those loaded.
+
+- **What Octant adds.** Only its permission rules for the level, through
+  `OPENCODE_CONFIG_CONTENT`. Read from the installed 2.4.1 binary, that
+  inline document is ordered after the global, `OPENCODE_CONFIG` and Project
+  documents, and each document's `permissions` are appended to every agent's
+  rules in that order, so under last-match Octant's win over the person's
+  top-level rules. Rules the person wrote for one agent come after those, so
+  the driver also sets the same rules on each session
+  (`PATCH /api/session/{id}`), which OpenCode applies last. An inline
+  document the person's own environment already carries is kept, with
+  Octant's rules after its own. A rule set too long for one environment
+  variable keeps the private configuration. The thread's model and Octant's
+  tool bridge go through the server's routes, not configuration.
+- **Every session of the thread is held to the level.** Below Full access
+  each subagent session gets the level's rules when its `session.created`
+  arrives. One that cannot be held is aborted, its requests are declined, and
+  a failed child run is reported. On resume the existing children and
+  grandchildren are listed (paged, at most 256 sessions in three pages; more
+  than that is a stale resume and the thread starts a new session), set to
+  the level, and adopted. At Full access a new child is left untouched.
+- **Tool servers off, setup on.** The session still runs on the person's own
+  configuration, with an inline policy that denies every MCP server and then
+  allows Octant's own bridge (`mcp.use * deny`, then `mcp.use octant-*
+allow`). OpenCode ranks a policy in the person's own file above the inline
+  one, so when that file carries an `mcp.use` allow policy the launch keeps
+  the private configuration instead. Residual: a Project's own configuration
+  with an `mcp.use` allow policy can still start that server, which is no
+  wider than before.
+- **Guards.** `OPENCODE_DISABLE_DEFAULT_PLUGINS` and
+  `OPENCODE_DISABLE_LSP_DOWNLOAD` are not set on this launch (2.4.1 no longer
+  reads either). The updater guard follows the person's self-update switch.
+  The model-catalogue fetch stays guarded: it is neither telemetry nor a
+  self-update, and the launch reads the catalogue the person's own OpenCode
+  cached ([Provider channel switches](#provider-channel-switches)).
+- **What keeps the private configuration.** Strict, a session whose setup is
+  off, Chat, Plan, a kept or chosen sandbox (whose wall opens only the
+  private folders), the readiness check, OpenCode 1.x, and a 2.x release
+  older than 2.4.1, the first read for how it orders the inline
+  configuration.
+- **Steering.** From 2.4.1 a message the person sends into a running turn is
+  steered into it (`POST /api/session/{id}/prompt` with `delivery: "steer"`
+  and `resume: false`, the body OpenCode's own ACP server sends). An older
+  release offers no `steer`, and the note waits as a follow-up.
+
+Not built yet:
+
+- **Octant's tools below Full access on the person's own configuration.**
+  The capability report still says app-managed tools are unsupported for
+  OpenCode 2.4.1 there, so they are not offered below Full access. Offering
+  them needs a capability fact per level that the host does not carry.
+- **A level change in place, and warm reuse of the server between turns.**
+  OpenCode starts a new server process for every turn.
+- **A person's catch-all deny and `external_directory` deny**, as above.
 
 ### OpenCode subagents, Strict and sessions
 
@@ -2312,10 +2498,24 @@ name.
 
 ## Pi
 
-Octant launches Pi in RPC mode with `--no-extensions`, which since Pi 0.99
-also turns off its built-in extensions (the MCP client, codemode, and tool
-search), and loads Octant's own extension by path. A user-level or
-project-level `mcp.json` therefore starts no server.
+On its managed home Octant launches Pi in RPC mode with `--no-extensions`,
+which since Pi 0.99 also turns off its built-in extensions (the MCP client,
+codemode, and tool search), and loads Octant's own extension by path. A
+user-level or project-level `mcp.json` therefore starts no server there.
+
+Outside Strict, in Work and Code outside Plan, where the launch has no Octant
+sandbox, Pi runs on the person's real home and Pi agent folder with its own
+discovery on (maintainer decision, 2026-11-25; built, `piRunsOnOwnHome`).
+`HOME` and `PI_CODING_AGENT_DIR` stay as the host has them, so Pi's shell
+commands find `~/.gitconfig`, `~/.ssh` and `~/.npmrc`, and Pi loads its
+extensions, skills, prompt templates, themes, context files and the packages
+its own settings list, as in the person's terminal. The launch is
+`--mode rpc --no-approve --extension <bridge> --tools … --session-dir …`:
+Octant's bridge still loads, `--no-approve` still keeps a Project's own
+`.pi` files out, and `--session-dir` keeps the thread's sessions in Octant's
+Pi session folder on either home. Strict, Chat, Plan and a kept or chosen
+sandbox keep the managed home, the one home folder the sandbox opens for
+writing, and the rest of this section describes that launch.
 
 Pi runs as it does on its own (maintainer decision, 2026-11-14): the
 person's own Pi setup in `~/.pi/agent` loads by default. Pi is not a key
@@ -2329,7 +2529,7 @@ provider list and the contract, which this change leaves alone.
 | Plan                           | Skills (`--skill`), prompt templates (`--prompt-template`), context files                       | `read`, `grep`, `find`, `ls`                                                            |
 | Work and Code, any other level | As Plan, plus each top-level extension file or folder in `extensions`, named with `--extension` | Pi's seven built-ins, Octant's app tools, and, from Pi 1.1.0, the extensions' own tools |
 
-Pi's own discovery stays off (`--no-skills`, `--no-prompt-templates`,
+On the managed home Pi's own discovery stays off (`--no-skills`, `--no-prompt-templates`,
 `--no-extensions`) and the person's resources are named by path, because
 discovery would also start Pi's built-in extensions and read a Project's own
 `.pi` resources, which are that Project's code. Context files are Pi's own
@@ -2449,8 +2649,8 @@ ACP agents; `openCodeStartsUnconfined` (`openCodeProcess.ts`) and
 - **Pi** has an approval channel of its own: Octant's bridge extension asks
   Octant, by the thread's level, before every tool call but `read`, `grep`,
   `find`, `ls` and Octant's app tools, so `bash`, `edit` and `write` and an
-  extension's own tools all ask. The launch is otherwise the one the
-  sandbox wrapped: the same arguments, the same environment, approvals on.
+  extension's own tools all ask. The launch runs on the person's real home
+  with Pi's own discovery on ([Pi](#pi)), approvals on.
 - **Still wrapped:** Chat, Plan, Strict, a Full access thread that keeps its
   sandbox, a chosen sandbox policy, and the readiness check and version
   read. Open Full access stays unwrapped as before.
@@ -2601,6 +2801,70 @@ command such as `update-config` may do. The earlier refusal everywhere was
 Octant's default, not a protocol limit: ACP carries the command as prompt
 text.
 
+### The home an ACP agent runs on
+
+Outside Strict an ACP agent runs on the person's real home, with the host's
+`HOME` and XDG folders, so its commands find `~/.gitconfig`, `~/.ssh` and
+`~/.npmrc` as the person's own do (maintainer decision, 2026-11-25; built,
+`acpRunsOnOwnHome`). Three things must all hold:
+
+1. The session carries the person's setup (`acpLoadsAllOwnSetup`).
+2. The launch has no Octant sandbox.
+3. The agent's session store is the same place on both homes, and a confined
+   launch can write it.
+
+Every other launch keeps the profile's managed home: Strict, a session whose
+person turned the setup off, Chat, Plan, a kept or chosen sandbox, and a
+readiness check. The managed home holds an agent's own configuration back and
+is the one home folder Octant's sandbox opens for writing. A profile's own
+variable for the agent's data folder (`GEMINI_CLI_HOME`, `COPILOT_HOME`,
+`VIBE_HOME` and the like) applies on either home, and is what keeps the
+agent's sessions in one place.
+
+Rationale for the third condition: one thread alternates between the two
+homes (plan then act, act then plan, a level that adds a sandbox, a thread
+older than this rule). An agent whose sessions follow `HOME` or an XDG folder
+answers `session/load` on one home as if the session written on the other
+never existed, which parks the thread as a stale resume for good. So no
+thread changes its session location between launches.
+
+Not built yet: Devin, Goose, fx and any added ACP agent on the person's real
+home. They keep the managed home on every launch, as before
+(`sessionsFollowHome`), because nothing confirmed can pin their session
+stores to one place. In the table, class 1 is a store independent of the
+home, class 3 a store that follows the home with nothing confirmed to pin it,
+and class 4 a store whose place is not confirmed.
+
+| Agent                            | Where sessions live                                                   | Controlling variable or flag                                                                      | Source and release                                  | Class | Real home outside Strict     |
+| -------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ----- | ---------------------------- |
+| OpenCode 2 (ACP)                 | `$XDG_DATA_HOME/opencode/opencode.db`                                 | `XDG_DATA_HOME`; the profile sets neither it nor `HOME`                                           | Installed binary 2.4.1                              | 1     | Yes                          |
+| Kilo                             | Under `$XDG_DATA_HOME/kilo` (database location inferred, unconfirmed) | `XDG_DATA_HOME`; the profile sets no home variable                                                | Vendor source on main, read 2026-11-25              | 1     | Yes                          |
+| Devin                            | `$XDG_DATA_HOME/devin/cli/sessions.db`                                | Follows `HOME`; `DEVIN_SESSIONS_DIR` exists from 3000.11.92, layout unconfirmed                   | `devin acp --help` 3000.14.30821; vendor changelog  | 3     | No                           |
+| Mistral Vibe                     | `$VIBE_HOME/logs/session`                                             | `VIBE_HOME`, set to the real `~/.vibe` on every launch                                            | Installed source 3.1.4                              | 1     | Yes                          |
+| Kimi Code                        | `$KIMI_CODE_HOME/sessions/...`                                        | `KIMI_CODE_HOME`, set to the real `~/.kimi-code`                                                  | Vendor "Data locations" page, read 2026-11-25       | 1     | Yes                          |
+| Grok Build                       | `~/.grok/sessions`                                                    | `GROK_HOME`, set to the real `~/.grok`                                                            | Bundled guide, 1.0.92                               | 1     | Yes                          |
+| Goose                            | `$XDG_DATA_HOME/goose/sessions/sessions.db`                           | Follows `XDG_DATA_HOME` and `HOME`; only `GOOSE_PATH_ROOT` moves it, with configuration and state | Vendor source on main, read 2026-11-25              | 3     | No                           |
+| GLM Agent                        | `ACP_GLM_SESSION_DIR`                                                 | Set to the managed path on every launch                                                           | Its README and source on main, read 2026-11-25      | 1     | Yes                          |
+| Gemini CLI                       | `<GEMINI_CLI_HOME>/.gemini/tmp/<project>/chats`                       | `GEMINI_CLI_HOME`, set to the real home                                                           | Vendor source on main, read 2026-11-25              | 1     | Yes                          |
+| GitHub Copilot                   | `$COPILOT_HOME/session-state`                                         | `COPILOT_HOME`, set to the real `~/.copilot`                                                      | GitHub CLI configuration reference, read 2026-11-25 | 1     | Yes                          |
+| Cline                            | `$CLINE_DATA_DIR/sessions`                                            | `CLINE_DATA_DIR`, set to the real `~/.cline/data`                                                 | Vendor source on main, read 2026-11-25              | 1     | Yes                          |
+| Qwen Code                        | `<QWEN_HOME>/projects/<cwd>/chats`                                    | `QWEN_HOME`, set to the real `~/.qwen` (unconfirmed on the 0.23.0 minimum)                        | Vendor source on main, read 2026-11-25              | 1     | Yes                          |
+| fx                               | `$HOME/.fx`                                                           | None                                                                                              | The profile's own probe note, 0.0.10 and 0.0.13     | 3     | No                           |
+| Google Antigravity               | Under `~/.gemini` (exact subfolder unconfirmed)                       | `GEMINI_HOME` or `--gemini-dir`; the profile sets no home variable                                | `agy acp --help` 1.5.13                             | 1     | Yes                          |
+| Added agent (any ACP)            | Unknown                                                               | Unknown                                                                                           | Not confirmed                                       | 4     | No (managed home, as before) |
+| Pi (not an ACP agent; [Pi](#pi)) | `<managed Pi home>/sessions`                                          | `--session-dir` on every launch                                                                   | `pi --help` 1.6.0                                   | n/a   | Yes                          |
+
+Two caveats. If the person exports `XDG_DATA_HOME`, the OpenCode, Kilo and
+Devin stores differ between a Strict and a non-Strict launch, as they did
+before this rule. A Mistral Vibe `save_dir` that starts with `~` in the
+person's own configuration would follow `HOME`.
+
+A [provider terminal](workspace.md) for an ACP agent (only Gemini CLI and
+Google Antigravity have one) opens on the same home a turn of that thread
+runs on: the thread's own setup decides it, a kept sandbox counts only at
+Full access, and a chosen sandbox policy closes the terminal's environment as
+it does for turns.
+
 ### Approvals kept for the session, and steering
 
 Decided (maintainer decision, 2026-11-21; built): both apply to every ACP
@@ -2610,7 +2874,8 @@ agent, shipped profile or added.
   `allow_always` option and the person keeps approvals for the session
   (permission persistence `current-session`), an approval chooses it, so the
   agent stops asking for that call as Octant itself would. A one-call answer
-  (`scope: "once"`: an automatic reviewer's, or one on a child run's behalf)
+  (`scope: "once"`: an automatic reviewer's, or under Strict one on a child
+  run's behalf)
   and persistence `project-default` choose `allow_once`. The driver reads
   the host's default persistence, which every ACP driver (shipped profile or
   added agent) is given; one built without it fails closed to
@@ -3185,11 +3450,13 @@ can be loosened or tightened in one line without rewriting enforcement sites:
   instance back to the personal sign-in refuses its next unattended run.
   As a helper target, the outcome by sign-in is:
   - **Gemini API key:** an ordinary target.
-  - **Agent Platform:** not a target. A helper child launches with no
-    Strict override of its own, since nothing passes it the parent's
-    setting, and admitting unsandboxed helpers would widen helper
-    authority, which needs its own decision; a confined helper cannot read
-    the Application Default Credentials (below). So the target list names
+  - **Agent Platform:** not a target. A confined helper cannot read the
+    Application Default Credentials (below), and the refusal dates from when
+    every helper launched Strict. A helper now takes its parent thread's
+    Strict value (maintainer decision, 2026-11-25), so one outside Strict
+    could read them; admitting it as a target is not built yet, because the
+    refusal is decided from the instance's sign-in alone and has not been
+    revisited. So the target list names
     it unavailable as `helper-runs-refused`, with the sentence "Google
     Antigravity can't run as a helper on Agent Platform: helpers can't
     read your Application Default Credentials. Use a Gemini API key
@@ -3201,10 +3468,8 @@ can be loosened or tightened in one line without rewriting enforcement sites:
 
 - **No sandbox in Work and Code outside Strict.** There the CLI starts as the
   person's own terminal would start it, at every level: no Octant sandbox, no
-  network allowlist, the person's environment less unrelated credentials
-  (`GH_TOKEN`, AWS keys, other services' `*_API_KEY`) that the person did
-  not let through for this provider in Settings › Providers & Models ›
-  Credentials let through
+  network allowlist, the person's environment less Octant's own variables
+  and other model providers' keys
   ([Architecture: Security and authority](../architecture.md#security-and-authority),
   the Environment rule), and its own sign-in read as it reads it. Every ACP agent now runs this way
   (`providerHoldsLevelWithoutSandbox`, maintainer decision, 2026-11-21), the
@@ -3302,21 +3567,27 @@ can be loosened or tightened in one line without rewriting enforcement sites:
   the CLI, so no approval is recorded that the CLI never got: the request
   stays pending, and Code keeps the ask open for a denial, which sends the
   reject; Work keeps the request pending and shows the person the agent's
-  reason. A helper run's answers hold for one call (its sessions start with
-  `answersOncePerCall`), so no answer could approve such a request there: it
+  reason. Under Strict a helper run's answers each cover one call (its
+  sessions start with `answersOncePerCall`; outside Strict a helper keeps the
+  person's answer as its parent's persistence setting says, maintainer
+  decision, 2026-11-25), so no answer could approve such a request there: it
   is denied on arrival, the agent gets the reject and carries on, no one is
   asked and nothing is recorded approved, and the call shows "<agent> only
   offers Always allow, which a helper run can't grant; denied."
-- **Turns that do not fail on stray updates** (`toleratesStrayUpdates`).
-  Updates after the prompt answered (usage, background-command replies,
-  scheduled wakes), a subagent's updates under its own session id, a repeated
-  tool start, a repeated finish and an update for a call never started are
-  ignored or read as the start they imply, as other ACP clients of the CLI
-  accept them; a call still running when the turn ends (a subagent's read
-  the CLI never finishes) is marked done with it. A late update that
-  reaches the process parked between turns is dropped rather than closing
-  it; a request there still closes it. Every other profile keeps the strict
-  mapper and closes a parked process on any message. A turn the CLI ends with `refusal` says the account's
+- **A warm process that survives stray updates** (`toleratesStrayUpdates`).
+  Every ACP agent's session updates are read tolerantly
+  ([Reading what a runtime sends](#reading-what-a-runtime-sends)): updates
+  after the prompt answered (usage, background-command replies, scheduled
+  wakes), a subagent's updates under its own session id, a repeated tool
+  start, a repeated finish and an update for a call never started are
+  ignored or read as the start they imply, and a call still running when the
+  turn ends (a subagent's read the CLI never finishes) is marked done with
+  it. The flag now decides two things only. A late update that reaches this
+  CLI's process parked between turns, or a tool-call update for a turn that
+  has finished, is dropped and the process stays warm; a request there still
+  closes it. Every other profile closes a parked process on any message, and
+  closes at stop a process that sent a tool-call update for a finished turn.
+  And a permission request with no plain allow option is read as above. A turn the CLI ends with `refusal` says the account's
   usage limit may be reached (`refusalMessage`).
 - **Prompts.** A prompt that opens with `/` is one of the CLI's own commands
   (`/plan`, `/goal`, `/compact`), which it runs only from the start of the
@@ -3742,36 +4013,80 @@ against Strict with `launchOwnChannels`: Strict keeps both closed whatever the
 switches say, as do an explicit sandbox and a Full access thread that keeps the
 sandbox. A version read always keeps every guard. A process kept warm across
 turns keeps the guards it started with; ACP and Pi runtimes do not reuse a warm
-process across a change, and an OpenCode 1.x server takes the change at its
-next start. A [provider terminal](workspace.md) reads both switches by the same
-rule when its program starts, for Claude Code and for an ACP agent's
-environment guards; Google Antigravity's program runs bare there, so the
-`--disable-telemetry` argument is its turns' alone.
+process across a change, a Codex app-server lease is keyed on the telemetry
+switch, so a change starts a new lease, and an OpenCode server takes the
+change at its next start. A [provider terminal](workspace.md) reads both
+switches by the same rule when its program starts, for Claude Code and for an
+ACP agent's environment guards; Google Antigravity's program runs bare there,
+so the `--disable-telemetry` argument is its turns' alone, and the interactive
+`codex` there carries no analytics override in either switch position.
 
-| Runtime             | Telemetry guards (set while telemetry is off)                                                                                            | Self-update guards (set while self-update is off) |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| Claude Code         | `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, `DISABLE_BUG_COMMAND`, `DISABLE_FEEDBACK_COMMAND`, `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` | `DISABLE_AUTOUPDATER`                             |
-| Kimi Code           | `KIMI_DISABLE_TELEMETRY`                                                                                                                 | `KIMI_CODE_NO_AUTO_UPDATE`                        |
-| Grok Build          | `GROK_TELEMETRY_ENABLED`, `GROK_TELEMETRY_TRACE_UPLOAD`, `GROK_TELEMETRY_MIXPANEL_ENABLED`, `GROK_FEEDBACK_ENABLED`                      | `GROK_DISABLE_AUTOUPDATER`                        |
-| Mistral Vibe        | `VIBE_ENABLE_TELEMETRY`                                                                                                                  | `VIBE_ENABLE_UPDATE_CHECKS`                       |
-| Kilo                | `KILO_TELEMETRY_LEVEL`                                                                                                                   | `KILO_DISABLE_AUTOUPDATE`                         |
-| Google Antigravity  | the `--disable-telemetry` argument                                                                                                       | `AGY_CLI_DISABLE_AUTO_UPDATE`                     |
-| fx                  | none                                                                                                                                     | `FX_AUTO_UPGRADE`                                 |
-| OpenCode (ACP, 1.x) | none                                                                                                                                     | `OPENCODE_DISABLE_AUTOUPDATE`                     |
-| Pi                  | `PI_TELEMETRY`                                                                                                                           | `PI_SKIP_VERSION_CHECK`                           |
+Both switches are off by default, and for a store saved before they existed
+(maintainer decision, 2026-11-21). Off means Octant sets the provider's guard
+wherever the provider has a documented switch a launch can set: a variable, an
+argument, or a key in configuration Octant itself writes. It does not mean
+telemetry is off for every provider (maintainer decision, 2026-11-25,
+correcting that claim): several providers have no such switch, and Octant
+does not write the person's own provider configuration. Self-update is off by
+default because Octant installs and updates provider CLIs itself through
+**Update CLI** below, which the switch does not touch. Marketplace
+auto-install, memory and the built-in subagents keep their own rules.
 
-Telemetry is off by default, for every provider and for a store saved before
-the switch existed (maintainer decision, 2026-11-21), so a launch outside Strict
-keeps its telemetry guards as every launch did before the switch; self-update
-is off by default, since Octant
-installs and updates provider CLIs itself through **Update CLI** below, which
-the switch does not touch. Marketplace auto-install, memory and the built-in
-subagents keep their own rules. Codex's app server takes neither kind of guard
-from Octant, and an added ACP agent's registry environment (Factory Droid's and
-Auggie's update switches) is the registry entry's own, so the switches change
-nothing for either. Telemetry guards that were set outside Strict before the switch existed,
-Kilo's and Antigravity's `--disable-telemetry` among them, stay set by default
-and are lifted only when the person turns the switch on.
+The table states the facts per provider as researched on 2026-11-25. "What it
+may send" is only what a primary source states. "Octant sets by default" and
+the two switch columns are what the code does. Under Strict every guard is
+always set and neither switch lifts it. Every provider's requests to its model
+endpoint carry the conversation and cannot be stopped, and anything the
+person's own provider configuration enables also stays, except where a guard
+outranks it.
+
+| Provider               | What it may send, by the vendor's own account                                                                                                                                                                                                                 | Octant sets by default                                                                                                                                                                                                                                            | Telemetry switch on, outside Strict                                                                                      | Self-update switch on, outside Strict                                        | Octant cannot stop                                                                                                                                                                                  | Source, read 2026-11-25                                                                                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code            | Not verified in this research                                                                                                                                                                                                                                 | `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, `DISABLE_BUG_COMMAND`, `DISABLE_FEEDBACK_COMMAND`, `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`, `DISABLE_AUTOUPDATER` (all `1`); a host `DO_NOT_TRACK` or `DISABLE_TELEMETRY` is carried as `DO_NOT_TRACK=1`            | The five telemetry variables are left out; the person's Claude Code settings decide                                      | `DISABLE_AUTOUPDATER` is left out                                            | Model requests; a thread that enables Claude artifacts launches without `DISABLE_TELEMETRY`; `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is deliberately not set                                     | Octant's code                                                                                                                                                           |
+| Codex                  | "Anonymous usage and health data" to OpenAI; `/feedback` uploads; an update-check key; OpenTelemetry export, off unless configured. The app-server keeps analytics off unless the person's `config.toml` opts in                                              | `-c analytics.enabled=false` on the app-server                                                                                                                                                                                                                    | The override is left out                                                                                                 | Nothing: no guard; whether the app-server checks for updates is not verified | Model requests; `/feedback` if the person uses it; OpenTelemetry export the person configured; the interactive `codex` in a provider terminal carries no override                                   | Vendor configuration reference; installed binary 0.172.0                                                                                                                |
+| OpenCode               | A model-catalogue fetch (models.opencode.ai); an update check (opencode.ai/update); telemetry only as OTLP export when the person set `OTEL_EXPORTER_OTLP_ENDPOINT`; plugin and provider packages from registry.npmjs.org; session sharing was removed in 2.x | `OPENCODE_DISABLE_AUTOUPDATE=1`, `OPENCODE_DISABLE_MODELS_FETCH=1`; no telemetry guard, since none exists                                                                                                                                                         | Nothing changes                                                                                                          | `OPENCODE_DISABLE_AUTOUPDATE` is left out                                    | Model requests; package installs (no switch found); an OTLP endpoint the person exported passes through outside Strict                                                                              | Installed binary 2.4.1, not vendor documentation; no other analytics endpoint found, not exhaustively confirmed; whether `serve` runs the update check is not confirmed |
+| Pi                     | Install and update telemetry and provider attribution headers; a latest-version request to pi.dev                                                                                                                                                             | `PI_TELEMETRY=0`, `PI_SKIP_VERSION_CHECK=1`                                                                                                                                                                                                                       | `PI_TELEMETRY` is left out                                                                                               | `PI_SKIP_VERSION_CHECK` is left out                                          | Model requests; the model-catalogue refresh (`PI_OFFLINE` is not set)                                                                                                                               | Installed package 1.6.0                                                                                                                                                 |
+| Oh My Pi               | Not documented                                                                                                                                                                                                                                                | Nothing; not wired to either switch                                                                                                                                                                                                                               | Nothing                                                                                                                  | Nothing                                                                      | Model requests; everything else is unknown                                                                                                                                                          | Installed binary 19.1.1, which contains neither Pi variable                                                                                                             |
+| Kilo                   | Product telemetry; auto-update                                                                                                                                                                                                                                | `KILO_TELEMETRY_LEVEL=off`, `KILO_DISABLE_AUTOUPDATE=1`, and `KILO_DISABLE_SHARE`, `KILO_DISABLE_SESSION_INGEST`, `KILO_DISABLE_PRESENCE`                                                                                                                         | `KILO_TELEMETRY_LEVEL` is left out                                                                                       | `KILO_DISABLE_AUTOUPDATE` is left out                                        | Model requests; the share, ingest and presence guards stay set whatever the switch says                                                                                                             | Names found in the vendor repository; behaviour not verified                                                                                                            |
+| Devin                  | Not documented                                                                                                                                                                                                                                                | Managed configuration `auto_update: false`, `attribution: false`, `notify: "never"`; no telemetry guard                                                                                                                                                           | Nothing changes                                                                                                          | The `auto_update` key is left out                                            | Model requests; any telemetry (no switch found)                                                                                                                                                     | Installed binary 3000.14                                                                                                                                                |
+| Mistral Vibe           | Telemetry (`enable_telemetry`, default true); update checks                                                                                                                                                                                                   | `VIBE_ENABLE_TELEMETRY=false`, `VIBE_ENABLE_UPDATE_CHECKS=false`                                                                                                                                                                                                  | The telemetry variable is left out                                                                                       | The update variable is left out                                              | Model requests                                                                                                                                                                                      | Installed package 3.1.4                                                                                                                                                 |
+| Grok Build             | Product analytics, Mixpanel, session trace upload and crash reports (which follow telemetry); feedback; an update check on launch; a remote model-catalogue fetch                                                                                             | `GROK_TELEMETRY_ENABLED=0`, `GROK_TELEMETRY_TRACE_UPLOAD=0`, `GROK_TELEMETRY_MIXPANEL_ENABLED=0`, `GROK_FEEDBACK_ENABLED=0`, `GROK_DISABLE_AUTOUPDATER=1`; a `GROK_CONFIG` overlay with `telemetry`, `feedback`, `codebase_indexing` and `remote_fetch` all false | The four variables and the overlay's `telemetry` and `feedback` keys are left out; the person's own Grok settings decide | `GROK_DISABLE_AUTOUPDATER` is left out                                       | Model requests; the `x-grok-experiments` header, sent "whatever the telemetry mode"                                                                                                                 | Bundled guide in installed binary 1.0.92                                                                                                                                |
+| Goose                  | Opt-in anonymous usage data (OS, version, provider and model, tool names and counts, session metrics, error types)                                                                                                                                            | `GOOSE_TELEMETRY_ENABLED=false`                                                                                                                                                                                                                                   | Left out; the person's own choice decides                                                                                | Nothing: no guard, and none is documented                                    | Model requests; OpenTelemetry or Langfuse export the person configured                                                                                                                              | Vendor documentation and source, main                                                                                                                                   |
+| GLM Agent              | Not documented                                                                                                                                                                                                                                                | Nothing (`ACP_GLM_DEBUG=false` only)                                                                                                                                                                                                                              | Nothing                                                                                                                  | Nothing                                                                      | Model requests; anything else is unknown                                                                                                                                                            | Vendor README, which does not mention telemetry                                                                                                                         |
+| Gemini CLI             | Usage statistics (default on); OpenTelemetry (default off); auto-update (default on)                                                                                                                                                                          | Nothing                                                                                                                                                                                                                                                           | Nothing                                                                                                                  | Nothing                                                                      | Model requests; usage statistics and auto-update, both settings-only (`privacy.usageStatisticsEnabled`, `general.enableAutoUpdate` in the person's own Gemini settings); no variable or flag exists | Vendor documentation and source, main                                                                                                                                   |
+| GitHub Copilot         | First-party client telemetry; server-side collection of session data; automatic updates of the CLI and first-party plugins; OpenTelemetry (off by default)                                                                                                    | `COPILOT_AUTO_UPDATE=false`; `--disable-client-telemetry` on 1.0.100 and later                                                                                                                                                                                    | The flag is dropped                                                                                                      | `COPILOT_AUTO_UPDATE` is left out                                            | Model requests; GitHub's server-side collection at any version; client telemetry before 1.0.100, the release that added the flag                                                                    | Vendor documentation and changelog                                                                                                                                      |
+| Cline                  | Telemetry exists in its source, contents not documented for the CLI; an auto-update check at start                                                                                                                                                            | `CLINE_NO_AUTO_UPDATE=1`                                                                                                                                                                                                                                          | Nothing                                                                                                                  | Left out                                                                     | Model requests; its telemetry (no confirmed switch: `CLINE_TELEMETRY_DISABLED` appears only in Cline's own test helpers)                                                                            | Vendor source, main                                                                                                                                                     |
+| Qwen Code              | Anonymised usage statistics to an Alibaba Cloud endpoint (tool names, model, durations; no prompt content); OpenTelemetry, opt-in; auto-update (default on); a models.dev catalogue refresh                                                                   | `QWEN_USAGE_STATISTICS_ENABLED=false`, which per its guide also stops the models.dev catalogue refresh                                                                                                                                                            | Left out                                                                                                                 | Nothing                                                                      | Model requests; auto-update, settings-only (`general.enableAutoUpdate`)                                                                                                                             | Vendor documentation, 0.23.0 and main                                                                                                                                   |
+| fx                     | Not verified                                                                                                                                                                                                                                                  | `FX_AUTO_UPGRADE=0`                                                                                                                                                                                                                                               | Nothing                                                                                                                  | Left out                                                                     | Model requests; any telemetry (no switch found; fx was not installed to check)                                                                                                                      | Not verified                                                                                                                                                            |
+| Kimi Code              | Telemetry; auto-update                                                                                                                                                                                                                                        | `KIMI_DISABLE_TELEMETRY=1`, `KIMI_CODE_NO_AUTO_UPDATE=1`                                                                                                                                                                                                          | The telemetry guard is left out                                                                                          | The update guard is left out                                                 | Model requests                                                                                                                                                                                      | Names found in vendor documentation; behaviour not verified                                                                                                             |
+| Google Antigravity     | Telemetry (the flag exists; contents not verified); auto-update                                                                                                                                                                                               | The `--disable-telemetry` argument, `AGY_CLI_DISABLE_AUTO_UPDATE=1`                                                                                                                                                                                               | The argument is left out                                                                                                 | The variable is left out                                                     | Model requests; the provider terminal runs the program bare, without the argument                                                                                                                   | Installed binary 1.5.13                                                                                                                                                 |
+| Added ACP agents (any) | Unknown                                                                                                                                                                                                                                                       | Nothing                                                                                                                                                                                                                                                           | Nothing                                                                                                                  | Nothing                                                                      | Everything the agent sends                                                                                                                                                                          | Not verified                                                                                                                                                            |
+
+Providers for which Octant sets no telemetry off-switch, and why:
+
+- **Gemini CLI.** Only a key in the person's own settings file turns usage
+  statistics off, and Octant does not write the person's provider
+  configuration. Not built yet: a Gemini CLI telemetry off-switch, because no
+  variable or flag exists to set per launch.
+- **Cline, GLM Agent, Devin, fx and Oh My Pi.** No documented or confirmed
+  per-launch switch. Oh My Pi is wired to neither of the person's switches.
+- **OpenCode.** No telemetry of its own was found beyond the OTLP export the
+  person configures.
+- **GitHub Copilot before 1.0.100**, and GitHub's server-side collection at
+  any version.
+- **Added ACP agents.** An added agent's registry environment (Factory
+  Droid's and Auggie's update switches) is the registry entry's own, so the
+  switches change nothing for it.
+
+What a person can do themselves:
+
+- **Gemini CLI:** set `privacy.usageStatisticsEnabled: false` and
+  `general.enableAutoUpdate: false` in their own Gemini settings.
+- **Qwen Code:** set `general.enableAutoUpdate: false` in their own settings.
+- **Codex:** the interactive `codex` in a terminal follows their own
+  `config.toml`.
+- **Any provider:** turn Strict on to keep every guard set whatever the
+  switches say, or use the provider's own configuration options.
 
 ## Runtime updates
 

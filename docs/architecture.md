@@ -168,9 +168,20 @@ The design rests on a small set of invariants that every package obeys:
   Effect Schema definitions and nothing else. `@octant/domain` holds pure
   policy and state transitions with no I/O.
 - **The host reads strictly; a client ignores what it does not know.**
-  Everything the host decodes refuses unknown fields: requests and commands
-  from any client, the journal, projections it rebuilds, provider and extension
-  payloads, and plugin manifests. A client reading a host answer (a response
+  The host refuses unknown fields in requests and commands from any client,
+  the journal, projections it rebuilds, extension payloads, and plugin
+  manifests. What a provider runtime sends is read tolerantly (maintainer
+  decision, 2026-11-25): an unknown message, subtype, field or value is
+  dropped, or read as a neutral value, and the turn continues, because each
+  runtime release adds or reorders some. The authority checks on a runtime's
+  output stay fatal: a launch that reports another working directory,
+  permission mode, tool server or tool than it was given, a call to a tool the
+  session was not offered, a write Plan disabled that the runtime reports as
+  made, an approval or question that cannot be tied to its call (never
+  answered allow), and a corrupt transport (malformed framing, an oversize
+  line)
+  ([Provider runtimes: Reading what a runtime sends](design/provider-runtimes.md#reading-what-a-runtime-sends)).
+  A client reading a host answer (a response
   body or a stream frame) decodes it with `decodeHostAnswer`, which drops fields
   it does not know, so a newer host can add an optional field without an older
   phone, browser, or CLI losing the thread. A known field with the wrong type
@@ -3625,9 +3636,30 @@ separately. Result reads do not consume or acknowledge delivery.
 
 Settled managed attempts record active milliseconds and the chosen limit through the existing subject-owned result evidence, atomically with lifecycle persistence. Waiting intervals are excluded. The child detail shows its latest recorded attempt and cumulative recorded time, and labels historical, cancelled or lost-startup gaps as unavailable rather than inventing wall-time totals. Existing cumulative Project/thread ceilings remain independent and authoritative.
 
+A managed child takes its parent thread's Strict value when it starts and
+when it resumes (maintainer decision, 2026-11-25; built): a helper of a thread
+outside Strict runs as that thread's own provider does, and a helper of a
+Strict thread keeps every Strict protection; a value that cannot be read is
+Strict. Work and Code share one capability set, so the Work mode ceiling
+equals Code's. Outside Strict a Work parent's grant follows the Work thread's
+level as a Code parent's does (`authorizeAgentRunCreation`): shell, Git and
+network outside Plan, a read-only helper under a Plan parent, and Accept
+edits under a Full access thread that keeps its sandbox, whose helper carries
+a posture and not the sandbox choice. The level read is the lower of the level the Work
+thread's running turn holds and the level the thread stores now, and the
+helper is sandboxed when either keeps the sandbox, as a Code parent is
+clamped: a helper never keeps Full access after the person lowered the thread
+mid-turn. Under Strict a Work parent's helpers
+stay approval-gated with no shell, Git or network. Outside Strict the
+person's answer to a helper's request is kept as the parent's persistence
+setting says, while a reviewer's allow covers that one call; under Strict
+every answer covers one call. A helper's turn has no event budget of its own
+(the fixed 256-event stop is removed). The concurrency, depth and
+unfinished-run caps are unchanged.
+
 A managed child's lifecycle moves from Starting to Running once its workspace
 is verified and its provider session starts, not at completion. One turn,
-from provider acquisition to its terminal event, has a default 120-minute working-time limit, and at Full access the person may choose none (maintainer request, 2026-11-12). None is one Helper agents setting (`noWorkingTimeLimitAtFullAccess`): it applies to a child whose thread has Full access when the attempt starts (a Code thread's `executionPolicy` or a Work thread's `access`), never to a child of any other thread, and such an attempt records its working time with no limit. With no limit nothing local ends a child whose provider goes silent after startup: it keeps its capacity slot until it is cancelled or the host restarts, which the setting's description says. The person can choose 1–240 minutes in Helper agents settings before the next attempt; agents cannot change that setting. Retry and Resume each read the current setting and start a fresh timer, never inherit the old attempt's remainder. Provider acquisition and startup each have an independent two-minute readiness bound, so raising the task limit does not enlarge a stuck startup. A turn that reaches its working-time bound
+from provider acquisition to its terminal event, has a default 120-minute working-time limit, and none by default under a parent thread at Full access (maintainer decision, 2026-11-25, replacing the opt-in of 2026-11-12: a Full access thread's own turn has no such limit). None is one Helper agents setting (`noWorkingTimeLimitAtFullAccess`), on unless the person turns it off, and absent reads as on: it applies to a child whose thread has Full access when the attempt starts (a Code thread's `executionPolicy` or a Work thread's `access`), never to a child of any other thread, and such an attempt records its working time with no limit. With no limit nothing local ends a child whose provider goes silent after startup: it keeps its capacity slot until it is cancelled or the host restarts, which the setting's description says. The person can choose 1–240 minutes in Helper agents settings before the next attempt; agents cannot change that setting. Retry and Resume each read the current setting and start a fresh timer, never inherit the old attempt's remainder. Provider acquisition and startup each have an independent two-minute readiness bound, so raising the task limit does not enlarge a stuck startup. A turn that reaches its working-time bound
 is recorded as Interrupted and releases its capacity. The bound counts working
 time only: it pauses while the child waits for a person's approval or answer and
 resumes with the remaining time once every pending request is answered, because
@@ -4704,19 +4736,19 @@ Octant-operated hosted service stays out of scope
 ([Current Release Boundary](#current-release-boundary)).
 
 **Coordinator threads start and direct worker threads.** A person may make a
-Code thread a coordinator: a long-lived thread whose own actions are read-only
-below Full access and follow the level at Full access
-([Octant's own limits become settings](#security-and-authority); built),
+Code thread a coordinator: a long-lived thread whose own actions follow its
+thread's level outside Strict and are read-only under Strict (maintainer
+decision, 2026-11-25; built;
+[Coordinator threads](design/coordinator-threads.md)),
 which starts worker threads without asking (or proposes them, when the person
 restricts that globally or per Project), messages them, receives their state,
 and brings their requests to the person. Its wake, round and start bounds
 are per-coordinator settings with defaults of 30 wakes an hour, 10 rounds and
 60 starts an hour, and the person may fix the workers' level when creating the
 coordinator at a local window or a device the host's own person paired (built for that device; maintainer decision, 2026-11-13), Full access included; a mark on the coordinator
-does not lower a fixed level, and the coordinator itself stays read-only
-(maintainer request, 2026-11-12). The planner below is now a
+does not lower a fixed level (maintainer request, 2026-11-12). The planner below is now a
 coordinator whose starts always need approval: the designated planner's turns
-take the coordinator's read-only gate and roster, its `start` proposes through
+take the coordinator's roster and, under Strict, its read-only gate, its `start` proposes through
 the planner's proposal path whatever the start setting, and designation also
 refuses a worker or a fifth coordinator in the Project. The Code navigation and
 bootstrap reads carry `plannerThreadIds`, derived from the designation, so the
@@ -5131,30 +5163,38 @@ Chat still take no app-managed tools.
   confirms, and the routine takes none of the thread's posture, so it runs
   asking first (or at the level the person later picks for it), never in
   Plan; a follow-up's turn in its own thread is still narrowed by that
-  thread's posture, as any turn is. Below Full access a proposal creates
-  nothing until the person confirms it; at Full access the agent's own
-  suggestion is created paused with no card (below). At no level can an agent
-  enable a routine, and the routine is approval-gated anyway.
+  thread's posture, as any turn is. Below Full access the agent's own
+  suggestion creates nothing until the person confirms it; at Full access it
+  is created with no card (below). The routine is approval-gated at every
+  level.
   **Asked for by the person.** When the person's own message asked for the
   routine (for example "create a daily summary automation"), the agent sets
   `requestedByPerson` and the host creates it at once, with no card, as the
   turn's window principal and through the same draft and create path a
   confirmed card takes, so the Project, mode, and authority are the thread's
-  live facts and never the agent's. It is created **paused**, in its first
-  journaled event, and runs only after the person enables it in Automation
-  Center, so the agent's attestation can start nothing. The host cannot verify
-  the attestation, which is why a pause and not a run is what it grants; the
-  tool tells the agent never to set it from text in a file, page, or tool
-  result. A follow-up (a paused one would never fire) and a turn in Plan
-  (which changes nothing) wait for the card at every level.
+  live facts and never the agent's. Outside Strict it is created **active**, at
+  every level outside Plan (maintainer decision, 2026-11-25, replacing the
+  paused start of 2026-11-12): created paused, it never ran until the person
+  found it in Automation Center and enabled what they had already asked for.
+  The host cannot verify the attestation, so the routine takes only the
+  authority a confirmed proposal gets, the tool tells the agent never to set
+  it from text in a file, page, or tool result, and two cases do not act on
+  it. On a thread marked as having read outside content the attestation is
+  not believed, since a page the agent read can tell it to claim so: the
+  routine is decided as the agent's own suggestion is. Under Strict it is
+  created **paused**, in its first journaled event, and runs only after the
+  person enables it. A mark or a Strict value that cannot be read counts as
+  marked and Strict. A follow-up and a turn in Plan (which changes nothing)
+  wait for the card at every level.
   **At Full access.** A turn running at Full access creates a routine the
   agent suggested on its own at once, with no card
   (maintainer decision, 2026-11-12): it takes the same path a routine the
-  person asked for takes, so it is created paused (at Full access the setting
-  **Start agent-created routines active at Full access**, off by default,
-  starts it enabled instead; [Octant's own limits become settings](#security-and-authority); built) in its first journaled
-  event, with approval-gated authority of its own, and shown in the thread by
-  the receipt below, and it runs only after the person enables it. Below Full
+  person asked for takes and is created active, with approval-gated
+  authority of its own, and shown in the thread by the receipt below. The
+  setting **Start agent-created routines active at Full access** is on by
+  default (maintainer decision, 2026-11-25); off, the routine is created
+  paused in its first journaled event and runs only after the person enables
+  it ([Octant's own limits become settings](#security-and-authority); built). Below Full
   access the card's confirmation stays. The level read is the one the turn
   runs at when the call is made (`decideRoutineFromAgent` in
   `@octant/domain`): a Work turn's running access, and for a Code turn the
@@ -5572,11 +5612,12 @@ under the routine host scope, through the mode's ordinary turn admission at
 the thread's own level, the way a message wake starts one; a thread whose
 turn is running or waiting on the person holds it until that turn ends. A
 wake-up the host could not fire on time, because the host was down or asleep
-at its due time or its timer ran more than two minutes late, is journaled as
-**missed** and never fired later on its own: the thread shows it as missed
-with **Run now** and Cancel, and only the person's Run now starts its turn,
-unless the person turned on **Run missed wake-ups on return** in Settings ›
-Permissions, which runs it once when the host is back.
+at its due time or its timer ran more than two minutes late, runs once when the host is back, since **Run missed wake-ups on return** in
+Settings › Permissions is on by default (maintainer decision, 2026-11-25: a
+wake-up the host slept through otherwise never ran). With the switch off it
+is journaled as **missed** and never fired later on its own: the thread shows
+it as missed with **Run now** and Cancel, and only the person's Run now
+starts its turn.
 Bounds: at most 8 waiting wake-ups a thread, or the number in Settings ›
 Permissions, a first fire at least a minute away (a delayed one held to one
 minute to one hour, the runtime's own range), a recurring one as often as
@@ -6180,11 +6221,13 @@ have no row.
   person cannot get back, so it is a default; the bytes it used to cost are
   gone with the next rule. A turn's event budget follows the same setting
   (maintainer decision, 2026-11-14, replacing the fixed 4,096-event stop of
-  2026-11-13): a Chat, Work or Code turn stops after 64 discrete runtime
-  events (streamed text does not count) for each tool step its limit keeps,
-  so the default 64 steps keep the 4,096 events a turn had, and a limit that
-  is off (Full access at 0, the default there) stops no turn on an event
-  count; the spend ceiling, the stalled-turn limit, the streamed-output budget
+  2026-11-13): the budget is 64 discrete runtime events (streamed text does
+  not count) for each tool step the turn's limit keeps, so the default 64
+  steps give the 4,096 events a turn had, and a limit that is off (Full
+  access at 0, the default there) gives none. The budget stops a Work or
+  Code turn only under Strict (maintainer decision, 2026-11-25): outside
+  Strict the turn keeps running past it and nothing is journaled for it. A
+  Chat turn still stops at it. The spend ceiling, the stalled-turn limit, the streamed-output budget
   and Stop still bound it. Code reads the same two numbers by the level its
   turn runs at. No ceiling ends a turn the person did not choose to bound.
   Memory stays bounded without the count: the answered-request ids a runner
@@ -6690,11 +6733,14 @@ flowchart LR
     thread's next turn records it before it starts, or is refused with the
     same reason, so retrying cannot resume the provider session that read it
     while the thread is unmarked. A host restart forgets what is owed.
-  - Marking does not gate a tool the runtime executes itself. A Code turn
-    whose approvals the runtime's own reviewer answers (harness auto-review)
-    is stopped at the mark and tells the person why, because the reviewer was
-    chosen for the session while the thread was unmarked. The next turn
-    starts without it, as auto-review is off on a marked thread.
+  - Marking does not gate a tool the runtime executes itself. Under Strict a
+    Code turn whose approvals the runtime's own reviewer answers (harness
+    auto-review) is stopped at the mark and tells the person why, because the
+    reviewer was chosen for the session while the thread was unmarked; the
+    next turn starts without it, as auto-review is off on a marked thread
+    there. Outside Strict the read only marks the thread, the turn continues
+    and the reviewer keeps answering, as in the provider's own app
+    (maintainer decision, 2026-11-25; built).
   - A single-shot request (a context summary, a hand-off document, a commit or
     pull-request draft, a harness single shot) has no thread of its own to
     mark, so an answer written after such a read is not used.
@@ -8114,12 +8160,12 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   own folder-trust list that Octant does not set at launch, that list applies
   as well.
 
-  | Provider     | With the setup off                                                                                                                                                                            | Rule                                                                                                                                                                                                     | Built                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-  | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | Claude Code  | Own subagents off; `WebSearch` and `WebFetch` kept only in Work and Code outside Plan, asking below Full access; Project skills off; no setting sources, so home config and skills never read | All on by default: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers, claude.ai connectors, and installed plugins start in every Project at every level but Plan, where only the servers the person marked "Read-only — allowed in Plan" start ([Plan and Chat tool parity](#security-and-authority)); a Project's `.mcp.json` waits for that Project's trust (maintainer decision, 2026-11-14; [detail](design/provider-runtimes.md#key-providers)). `EnterWorktree`, `ExitWorktree`, and `REPL` are offered outside Plan and take the shell's approval rules. In Work and Code outside Plan, Claude Code's whole built-in tool set less a short withheld list, with any tool Octant has no rule of its own for asking below Full access (the account's claude.ai service tools included) and session-internal tools such as `ToolSearch` and the task tools running unasked, and no cap on tool calls in a turn ([detail](design/provider-runtimes.md#full-built-in-tool-set)); background commands and `Monitor` command watches, which in Code keep running as live tasks after the person's turn completes, each turn the runtime then starts opened as a runtime-started turn, and in Work are held inside the person's turn ([detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)); `Workflow` with subagents on, its agents shown as child runs under the call and its run held inside the person's turn ([detail](design/provider-runtimes.md#workflows)); `ScheduleWakeup`, `CronCreate`, `CronList`, and `CronDelete`, answered from the thread's Octant-owned wake-ups ([detail](design/provider-runtimes.md#wake-ups-the-model-schedules)); Claude Code's own `EnterPlanMode` and `ExitPlanMode` in Code as level changes the person approves, applied from the next session, except that entering Plan applies inside the running turn, the gate holding the session to Plan ([detail](design/provider-runtimes.md#plan-mode-as-level-changes)); an empty Code thread started from a session of the same account and folder begun outside Octant, adopted only by the person, journaled, and marked as carrying outside content ([detail](design/provider-runtimes.md#sessions-started-outside-octant)) |
-  | Codex        | Own subagents off (the app-server leased with its subagent switches false); Project skills disabled by path; in Chat every person-added tool server switched off by name                      | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                   | Reviewed with its own reviewer, in Work and Code; with the setup on, Project skills on, the person's tool servers on in Chat, and its own subagents at every level, each shown as a child run with its approvals and app-tool calls answered through the parent's approval path; with the account's setup off, its own subagents stay off (the app-server leased with its subagent switches false) unless the thread chose On, the Project lists Codex under Trusted providers, or a Work or Code thread runs at Full access                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-  | Mistral Vibe | Project and home skills off; Project context off. It runs through the ACP bridge either way                                                                                                   | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                   | Reviewed with its auto-approve mode, in Work and Code; with the setup on, its skills (registry skills included where the person's configuration opts in), Project context, the account's MCP servers, connectors, and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins, and agents; its own subagents in Work and Code outside Plan, shown as child runs; a subagent's request names no tool (3.0.3 source, read 2026-11-14), so its approval says "A Mistral Vibe subagent asks to run a tool. Vibe doesn't say which." with Allow and Deny under the thread's level; a subagent runs as one of the person's own custom or installed agents at every level there, and may approve its own tools as in Vibe itself; Octant cannot see those calls, so each child run names the agent and says so, and a run as any agent but Vibe's read-only `explore` marks the thread as having read outside content (maintainer decisions, 2026-11-14); its `accept-edits` mode at Accept edits in Work and Code; its questions on 3.0.3 through the shared questionnaire (maintainer decision, 2026-11-14). Stays on the ACP bridge by choice ([why](design/provider-runtimes.md#mistral-vibe-surface))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-  | OpenCode     | Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`. Shell and delegation follow the level in Work as in Code either way                | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                     | With the setup on: its skills on, and a remembered 2.x approval answered `always` and saying the grant lives in OpenCode's own store. its delegation followed as child runs, the MCP servers and permission rules in the person's own OpenCode configuration, and a tool the person's rules allow running without a card; Reviewed through Octant Shield at Auto. At every level, Plan included, it reads, finds, searches and lists inside the Project and its extra folders without asking, as Octant's Claude Code file gate allows, with `.env` files and Octant's protected files refused (at Full access only the provider sign-ins, as Octant's own file tools; maintainer decision, 2026-11-15); any other outside folder asks below Full access and is refused in Plan (maintainer decision, 2026-11-14). At Full access it reaches outside folders, and in a trusted Project outside Plan it loads the Project's own `opencode.json(c)` and `.opencode` agents, commands, plugins, and tools as on its own, `OPENCODE_DISABLE_PROJECT_CONFIG` unset, accepting that their rules can override Octant's in that Project ([why](design/provider-runtimes.md#key-providers); maintainer decision, 2026-11-14). In Plan on both runtimes, its other read-only tools (task list, code search, language server, web fetch and search) run without asking, web reads still marking the thread; edits, shell, delegation and outside folders stay denied (maintainer decision, 2026-11-14)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+  | Provider     | With the setup off                                                                                                                                                                            | Rule                                                                                                                                                                                                     | Built                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+  | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Claude Code  | Own subagents off; `WebSearch` and `WebFetch` kept only in Work and Code outside Plan, asking below Full access; Project skills off; no setting sources, so home config and skills never read | All on by default: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers, claude.ai connectors, and installed plugins start in every Project at every level but Plan, where only the servers the person marked "Read-only — allowed in Plan" start ([Plan and Chat tool parity](#security-and-authority)); a Project's `.mcp.json` waits for that Project's trust (maintainer decision, 2026-11-14; [detail](design/provider-runtimes.md#key-providers)). `EnterWorktree`, `ExitWorktree`, and `REPL` are offered outside Plan and take the shell's approval rules. In Work and Code outside Plan, Claude Code's whole built-in tool set less a short withheld list, with any tool Octant has no rule of its own for asking below Full access (the account's claude.ai service tools included) and session-internal tools such as `ToolSearch` and the task tools running unasked, and no cap on tool calls in a turn ([detail](design/provider-runtimes.md#full-built-in-tool-set)); background commands and `Monitor` command watches, which in Code keep running as live tasks after the person's turn completes, each turn the runtime then starts opened as a runtime-started turn, and in Work are held inside the person's turn ([detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)); `Workflow` with subagents on, its agents shown as child runs under the call and its run held inside the person's turn ([detail](design/provider-runtimes.md#workflows)); `ScheduleWakeup`, `CronCreate`, `CronList`, and `CronDelete`, answered from the thread's Octant-owned wake-ups ([detail](design/provider-runtimes.md#wake-ups-the-model-schedules)); Claude Code's own `EnterPlanMode` and `ExitPlanMode` in Work and Code as level changes the person approves, applied from the next session, except that entering Plan applies inside the running turn, the gate holding the session to Plan, and that the host itself starts the turn that carries an approved plan out ([detail](design/provider-runtimes.md#plan-mode-as-level-changes)); an empty Code thread started from a session of the same account and folder begun outside Octant, adopted only by the person, journaled, and marked as carrying outside content ([detail](design/provider-runtimes.md#sessions-started-outside-octant)) |
+  | Codex        | Own subagents off (the app-server leased with its subagent switches false); Project skills disabled by path; in Chat every person-added tool server switched off by name                      | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                   | Reviewed with its own reviewer, in Work and Code; with the setup on, Project skills on, the person's tool servers on in Chat, and its own subagents at every level, each shown as a child run with its approvals and app-tool calls answered through the parent's approval path; with the account's setup off, its own subagents stay off (the app-server leased with its subagent switches false) unless the thread chose On, the Project lists Codex under Trusted providers, or a Work or Code thread runs at Full access                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+  | Mistral Vibe | Project and home skills off; Project context off. It runs through the ACP bridge either way                                                                                                   | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                   | Reviewed with its auto-approve mode, in Work and Code; with the setup on, its skills (registry skills included where the person's configuration opts in), Project context, the account's MCP servers, connectors, and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins, and agents; its own subagents in Work and Code outside Plan, shown as child runs; a subagent's request names no tool (3.0.3 source, read 2026-11-14), so its approval says "A Mistral Vibe subagent asks to run a tool. Vibe doesn't say which." with Allow and Deny under the thread's level; a subagent runs as one of the person's own custom or installed agents at every level there, and may approve its own tools as in Vibe itself; Octant cannot see those calls, so each child run names the agent and says so, and a run as any agent but Vibe's read-only `explore` marks the thread as having read outside content (maintainer decisions, 2026-11-14); its `accept-edits` mode at Accept edits in Work and Code; its questions on 3.0.3 through the shared questionnaire (maintainer decision, 2026-11-14). Stays on the ACP bridge by choice ([why](design/provider-runtimes.md#mistral-vibe-surface))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+  | OpenCode     | Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`. Shell and delegation follow the level in Work as in Code either way                | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                     | With the setup on: its skills on, and a remembered 2.x approval answered `always` and saying the grant lives in OpenCode's own store. its delegation followed as child runs, the MCP servers and permission rules in the person's own OpenCode configuration, and a tool the person's rules allow running without a card; Reviewed through Octant Shield at Auto. At every level, Plan included, it reads, finds, searches and lists inside the Project and its extra folders without asking, as Octant's Claude Code file gate allows, with `.env` files and Octant's protected files refused (at Full access only the provider sign-ins, as Octant's own file tools; maintainer decision, 2026-11-15); any other outside folder asks below Full access and is refused in Plan (maintainer decision, 2026-11-14). At Full access it reaches outside folders, and in a trusted Project outside Plan it loads the Project's own `opencode.json(c)` and `.opencode` agents, commands, plugins, and tools as on its own, `OPENCODE_DISABLE_PROJECT_CONFIG` unset, accepting that their rules can override Octant's in that Project ([why](design/provider-runtimes.md#key-providers); maintainer decision, 2026-11-14). In Plan on both runtimes, its other read-only tools (task list, code search, language server, web fetch and search) run without asking, web reads still marking the thread; edits, shell, delegation and outside folders stay denied (maintainer decision, 2026-11-14)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
   A turn has an origin. A person's send starts one; a runtime may also
   start one by itself when background work it ran finishes or reports.
@@ -8608,8 +8654,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   Project and let OpenCode run as itself, with the approval saying the grant
   lives in OpenCode's own store; Octant's denies outrank grants saved in
   OpenCode itself; app-managed tools are reported only for the exact release the
-  hostile-configuration check covered, and only on macOS; and anything not mapped fails the turn
-  closed. fx runs in a per-instance managed
+  hostile-configuration check covered, and only on macOS; and an event Octant
+  does not map is ignored. From 2.4.1, outside Strict, a Work or Code session
+  outside Plan runs on the person's own OpenCode configuration with Octant's
+  permission rules layered on top
+  ([detail](design/provider-runtimes.md#opencode-2-on-the-persons-own-configuration)). fx runs in a per-instance managed
   home because its ACP entrypoint exposes no profile-path variable. fx is refused in Chat
   and Plan before any process starts, runs its `ask` mode below Full access
   and `code` only on Full access, authenticates only with a broker-held AI
@@ -15764,8 +15813,8 @@ mechanisms are:
     when the person chose that level for the grant (maintainer decision,
     2026-11-12). An agent creating
     or confirming a routine is not on the list either: at this level the
-    routine is created paused and shown in the thread, which is behavior, not
-    an ask. Built: the server takes the thread, Project, and default
+    routine is created, active unless the person's Settings keep it paused,
+    and shown in the thread, which is behavior, not an ask. Built: the server takes the thread, Project, and default
     commands from such a device in Work and Code and journals the device as
     their actor; the paired browser's shell and the phone show the thread
     mode, the Project default, and the default for new threads, with the
@@ -16265,7 +16314,7 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   own approval review (`approvalsReviewer: "auto_review"`) are built for Code
   through `autoApprove`, and so is Mistral Vibe's auto-approve mode: a Code
   thread at Reviewed opens its Vibe session in the `auto-approve` mode,
-  inside the same confined launch as Guarded, and the host withdraws it on a
+  inside the same confined launch as Guarded, and under Strict the host withdraws it on a
   thread marked by outside content as it does the others'.
   - **The provider is the recorded approver.** A verdict the provider reports
     is journaled with the provider as approver ("Approved by the provider's
@@ -16419,51 +16468,57 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   answers them on the server and journals them. At Full access Octant adds
   nothing. Strict, set per thread, per Project or in Settings as above,
   restores each of these protections:
-  - **Environment.** A provider receives the host's environment (proxies,
-    custom certificate authorities, `ANTHROPIC_BASE_URL`, Bedrock and Vertex
-    routing and the rest), less Octant's own secrets, other providers' keys,
-    and well-known credentials unrelated to it (maintainer decision,
-    2026-11-22): `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`,
-    `GITHUB_ENTERPRISE_TOKEN`, `GITLAB_TOKEN`, `NPM_TOKEN`,
-    `NODE_AUTH_TOKEN`, AWS access keys, session tokens and the Bedrock bearer
-    token, and any other `*_API_KEY` (`hostCredentialCrosses`). A provider's
-    own credential is never stripped: Codex keeps its keys, and the AWS
-    credentials its Bedrock sign-in takes only while the account's
-    `config.toml` selects Amazon Bedrock (`codexConfiguresBedrock`, read at
-    each launch); Claude Code keeps the AWS credentials while the host routes
-    it through Bedrock (`CLAUDE_CODE_USE_BEDROCK`); Pi keeps the keys of the
-    thread's model provider; and an account's own key is applied by Octant
-    after the filter. Settings › Providers & Models › Credentials let through
-    keeps a per-provider list of names the person lets through anyway (such
-    as `GH_TOKEN` for an agent that runs `gh`), at most 64 per provider; it
-    holds names only, never values, is read at each launch, and applies to
-    that provider's turns and its provider terminal. Settings refuses, with
-    its reason, a name the launch would still keep out: an `OCTANT_*`
-    variable or a model provider's key (`hostCredentialPassThroughRefusal`).
-    A running process cannot drop a variable it started with, so a changed
-    list never reaches one: a Codex lease is keyed on the list, a Code or
-    Work session kept past its turn for background work is not reused by
-    the next turn once the grants its launch actually took changed, and is
-    stopped when idle (`OutlivingSessions.launchCredentials`). Those grants
-    follow the session's posture (`credentialPassThroughApplies`): a Strict
-    session, and a Claude Code or ACP session that keeps or chose a sandbox,
-    takes none, so editing the list leaves it and its background work
-    running. A provider terminal runs the
-    person's shell as a login shell outside Strict, so the shell's own
-    startup files run and may export a credential again; Octant does not
-    read or change them. Strict keeps each runtime's fixed list and ignores
-    the pass-through list. OpenCode does not strip these yet: its launch receives the host's
-    environment as before. Built for
-    Claude Code, Pi and the ACP agents, read at each launch; OpenCode already
-    received the host's environment. Built for Codex: each account has a
-    Strict and an open launch environment, and a lease takes the one its
-    session's Strict value names (the lease is keyed on Strict, so the two
-    never share a process); an extra account still loses the host's Codex
-    keys either way.
+  - **Environment.** Outside Strict a provider receives the host's
+    environment as the person's shell has it (maintainer decision,
+    2026-11-25, replacing the 2026-11-22 rule that also kept unrelated
+    credentials out): proxies, custom certificate authorities,
+    `ANTHROPIC_BASE_URL`, Bedrock and Vertex routing, and the credentials the
+    person's own tools sign in with, such as `GH_TOKEN`, `GITHUB_TOKEN`,
+    `GITLAB_TOKEN`, `NPM_TOKEN`, `NODE_AUTH_TOKEN`, AWS keys (the Bedrock
+    bearer token included) and their own services' `*_API_KEY`, so `gh`,
+    `npm publish` and `aws` work inside an agent's commands. Two kinds of
+    variable never cross (`providerHostEnvironment`): Octant's own
+    (`OCTANT_*`, which name the host's bridges, ports and switches), and
+    another model provider's named key
+    (`MODEL_PROVIDER_CREDENTIAL_VARIABLES`), since one provider never
+    receives another's credentials. A provider's own key stays: Codex keeps
+    its keys, Pi the keys of the thread's model provider, and an account's
+    own key is applied by Octant after the filter. OpenCode keeps every model
+    provider's key, because it signs in to any provider itself. No rule ties
+    AWS credentials to a Bedrock sign-in any more. Under Strict Claude Code,
+    Codex, Pi and the ACP agents each keep a fixed list. Settings › Providers & Models › Let through under
+    Strict keeps a per-provider list of names (such as `GH_TOKEN` for an
+    agent that runs `gh`), at most 64 per provider, names only and never
+    values. Outside Strict the list is not read. Under Strict a name on it
+    is added to that provider's fixed list for its turns and its provider
+    terminal (`strictLetThroughNames`). Settings refuses, with its reason, a
+    name that can never be added: an `OCTANT_*` variable, a model provider's
+    key or a 65th name (`hostCredentialPassThroughRefusal`), and a stored
+    name of either kind is dropped at launch. A running process cannot drop
+    a variable it started with, so under Strict a changed list starts a new
+    process: a Codex lease is keyed on the list, and a Strict Code or Work
+    session kept past its turn for background work is not reused by the
+    next turn once its provider's list changed, and is stopped when idle
+    (`OutlivingSessions.launchCredentials`). A session outside Strict is
+    left running, since the list changes nothing it receives. A provider
+    terminal runs the person's shell as a login shell outside Strict, so the
+    shell's own startup files run and may export a credential again; Octant
+    does not read or change them. Built for Claude Code, Codex, Pi, the ACP
+    agents and OpenCode outside Strict, read at each launch, and the list
+    under Strict for Claude Code, Codex, Pi and the ACP agents. Not built
+    yet: OpenCode's Strict launch has no fixed list (it still receives the
+    host's environment less the broker variables) and does not read the
+    person's list, so Settings offers no OpenCode row; and the list is not
+    read by an ACP or Pi launch that keeps or chose a sandbox
+    outside Strict, by a version read, by a provider's tooling commands, or
+    by a runtime placed on a server; each of those launches builds its
+    fixed environment on a path the list was not wired into.
   - **Outside content.** Reading outside content still marks the thread
     and shows it, but no longer withdraws the provider's own web search or
     turns off Claude's `auto` or Codex's `auto_review` reviewer. Strict
-    keeps today's withdrawal. Built: Code's Auto keeps the provider's
+    keeps today's withdrawal, and only under Strict is a running Code turn
+    under the provider's reviewer stopped at the mark. Built: Code's Auto
+    keeps the provider's
     reviewer (`harnessAutoReviewEffective`), and an Octant Harness turn
     keeps its provider's own search for the whole turn
     (`decideHarnessProviderSearch`).
@@ -16501,20 +16556,23 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     provider's command runs unasked and is journaled
     (`shield-forge-changes.observed@1`) with the hard line it crossed.
   - **Provider channels.** Marketplace installs follow the person's own
-    provider settings. Telemetry, error reports, `/bug` and `/feedback` stay
-    off unless the person turns provider telemetry on, and self-update stays
-    off unless the person lets providers update themselves, because Octant
-    installs and updates provider CLIs itself (below). Strict turns every
-    channel off, as today. Octant itself
-    still sends nothing. Built for Claude Code, Pi, Mistral Vibe, Grok Build,
-    Kilo, Google Antigravity and Kimi Code; Codex and OpenCode set no
-    telemetry guard of Octant's.
+    provider settings. Wherever a provider has a per-launch switch Octant can
+    set, telemetry, error reports, `/bug` and `/feedback` stay off unless the
+    person turns provider telemetry on, and self-update stays off unless the
+    person lets providers update themselves, because Octant installs and
+    updates provider CLIs itself (below). Strict keeps every such guard set.
+    Octant itself still sends nothing. Some providers have no such switch, so
+    Octant cannot turn their telemetry off; the per-provider table, with what
+    each may send and what Octant cannot stop, is in
+    [Provider runtimes](design/provider-runtimes.md#provider-channel-switches).
   - **Provider telemetry and self-update switches.** Two host switches in
     Settings › Providers & Models replace the hard line that kept both off
     (maintainer decision, 2026-11-21): **Let providers send their own
     telemetry** and **Let providers update themselves**, both off by default,
-    for every provider and for a store saved before the switches existed.
-    Telemetry off keeps the provider's telemetry guards on every launch
+    including for a store saved before the switches existed. Off sets the
+    guard wherever the provider has a documented per-launch switch; it does
+    not mean telemetry is off for every provider (maintainer decision,
+    2026-11-25). Telemetry off keeps the provider's telemetry guards on every launch
     outside Strict, as every launch carried them before the switch, in line
     with Octant's local-first stance; on, its telemetry guards are left out
     and the provider's own settings decide. Self-update on leaves its
@@ -16729,15 +16787,15 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   today's text with a pointer here:
   - **Agent wake-ups.** A recurring wake-up may fire as often as every
     minute, as cron does, instead of every 5 minutes; the cap of 8 waiting a
-    thread and what happens to a missed run (today journaled as missed and
-    run only by the person's **Run now**; the setting may run it once on
-    return) become settings ([Scheduled wake-ups](#person-memory)).
+    thread and what happens to a missed run (run once on return by default;
+    with the setting off, journaled as missed and run only by the person's
+    **Run now**) become settings ([Scheduled wake-ups](#person-memory)).
   - **Message wakes.** The wake bounds a thread outside a coordinator takes
     (one wake turn at a time, 30 an hour, a hop count of ten) become settings
     for every thread, as they already are per coordinator.
   - **Coordinators.** How many coordinators a Code Project may hold becomes a
-    setting, default 4, and at Full access a coordinator's own file, shell
-    and Git actions follow the level instead of Plan's read-only gate
+    setting, default 4, and outside Strict a coordinator's own file, shell
+    and Git actions follow its thread's level
     ([Coordinator threads](design/coordinator-threads.md)). The one place
     that decides a coordinator turn's posture, `coordinatorTurnPosture` in
     `@octant/domain`, keeps Plan's gate at every level under the thread's
@@ -16764,9 +16822,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     on a newly queued thread message; neither protected anything a person
     would tune, and each refused or lost real work.
   - **Routines.** A file routine's 64-run activity window can be cleared or
-    raised, and a setting, off by default, **Start agent-created routines
-    active at Full access** lets a routine an agent creates at Full access
-    start enabled instead of paused. The window is raised (up to 1,024 runs)
+    raised, and a setting, on by default (maintainer decision, 2026-11-25),
+    **Start agent-created routines active at Full access** starts a routine
+    an agent suggests at Full access enabled; off, it starts paused. The window is raised (up to 1,024 runs)
     or cleared on the routine's detail and journaled with the routine, so
     replay rebuilds the same overflow.
 
@@ -17173,9 +17231,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   denies still win, and Octant never writes such a grant; the
   [OpenCode runtime specification](design/provider-runtimes.md#opencode) states the details.
   [Octant Shield](#octant-shield) answers these prompts at Reviewed.
-  Three provider tool requests denied in one Code turn end it as
-  interrupted, with the reason journaled, so a provider cannot loop a
-  person's refusals.
+  A denial goes back to the model, and no count of denials ends a Code turn.
   An approval answered after the thread's posture changed asks again
   (maintainer decision, 2026-11-12). Each pending approval records the
   posture it was asked under: the mode, who answers prompts (`autoApprove`),
@@ -17876,8 +17932,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `sandboxPolicy: { type: "workspaceWrite" }` with the Project's folders as
   `writableRoots` and `networkAccess` true unless the launch took the egress
   proxy (Network limits on), which the runtime's own traffic keeps, and an
-  approved command is answered `accept`, never `acceptForSession`, so it runs
-  that one command and nothing is remembered. The thread starts
+  approved command is answered `accept` for one call, or `acceptForSession`
+  when the person keeps the approval for the session (maintainer decision,
+  2026-11-25; never for a reviewer's answer, an ask outside the Project's
+  folders, or under Strict). The thread starts
   `workspace-write`, with the approval policies above except Accept edits,
   which runs `on-request` in Codex's own sandbox (maintainer decision,
   2026-11-21): Codex decides when to ask, as in its own CLI, and its sandbox
@@ -18021,9 +18079,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Strict. Outside Strict (built, under
   [Octant adds no restrictions of its own unless Strict is on](#security-and-authority))
   a Claude launch gets the host's environment less Octant's own variables
-  (`OCTANT_*`), every other model provider's credential and the unrelated
-  credentials the person did not let through (`providerHostEnvironment`,
-  under the Environment rule above); the account's own sign-in still decides
+  (`OCTANT_*`) and every other model provider's credential
+  (`providerHostEnvironment`, under the Environment rule above), with the
+  person's `MCP_TOOL_TIMEOUT` kept where the host sets one and 660000
+  otherwise; the account's own sign-in still decides
   which account a turn runs as, so no host Anthropic key or token crosses,
   Octant's account directory is applied, an API-key account gets its
   broker key, and a gateway account gets its own address and broker token
@@ -18038,12 +18097,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Code settings, as marketplace auto-install always does, and the Claude
   artifacts switch lifts nothing, because nothing of Octant's sits on
   telemetry there. Pi's telemetry and the ACP agents' telemetry
-  guards (Mistral Vibe, Grok Build, Kilo, Kimi Code; `channelGuards`, and
-  Google Antigravity's `--disable-telemetry`) follow the same switch, their
-  self-update guards (`selfUpdateGuards`, Pi's release check) the other, and
-  those launches get the host's environment on the same terms. OpenCode
-  already launches with the host's environment and sets no telemetry guard;
-  its updater guard follows the self-update switch.
+  guards (`channelGuards`, and the arguments Google Antigravity and GitHub
+  Copilot take) follow the same switch, their self-update guards
+  (`selfUpdateGuards`, Pi's release check) the other, and those launches get
+  the host's environment on the same terms. Codex's app-server takes one
+  analytics override on the same switch. OpenCode has no telemetry guard to
+  set; its updater guard follows the self-update switch. Which guard each
+  provider takes, and which providers have none, is in
+  [Provider runtimes](design/provider-runtimes.md#provider-channel-switches).
   **Claude artifacts (a person-authorized external publish and an opt-in
   telemetry exception).** The one place a Claude launch sends Project content
   to Anthropic other than as inference, and the one place it sends the
@@ -18781,8 +18842,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   (Google Antigravity's `agy`, Gemini CLI's `gemini`, both bare) with the
   environment `sanitizeAcpEnvironment` builds for its launch, less the guards
   that only keep the piped ACP stream clean (`PROTOCOL_STREAM_GUARDS`:
-  `NO_COLOR`), its managed home and its host sign-in folder's variables, and
-  no API key. A Work task's start journals `program: "provider"` on
+  `NO_COLOR`), on the home a turn of that thread runs on (the person's real
+  home outside Strict where the profile's sessions stay in one place, else
+  its managed home;
+  [Provider runtimes](design/provider-runtimes.md#the-home-an-acp-agent-runs-on)),
+  with its host sign-in folder's variables, and no API key. A Work task's start journals `program: "provider"` on
   `code.project-terminal-started@1` (optional; absent is a shell), and a Zen
   card pinned for it records the same, with the program's name, from the
   host's answer. A Work task's runs
@@ -22189,11 +22253,7 @@ contents, a tool's output, and the runtime's own reason stay out. Codex's
 request to widen its own sandbox is a privilege change, which Shield hands to
 the person. An allow or deny goes straight back to the runtime for that one
 call; an ask is
-the ordinary approval. Every automatic answer, and every answer on a child
-run's behalf, carries the seam's one-call scope (`ProviderApprovalAnswer.scope:
-"once"`): no driver remembers it for the session or the Project or asks the
-runtime to, whatever the person's persistence setting, so one allow never
-authorizes a later call nobody reviewed. An OpenCode v2 permission's
+the ordinary approval. Every automatic answer carries the seam's one-call scope (`ProviderApprovalAnswer.scope: "once"`): no driver remembers it for the session or the Project or asks the runtime to, whatever the person's persistence setting, so one allow never authorizes a later call nobody reviewed. Under Strict every answer on a child run's behalf carries it too; outside Strict the person's own answer to a child's request is kept as the parent's persistence setting says (maintainer decision, 2026-11-25). An OpenCode v2 permission's
 `resources` are read as the paths, command, or address it targets. Claude Code and Codex keep their own reviewer at Auto
 by default; once the person chooses Shield for the account or the Project,
 the thread starts without the provider's reviewer, so its prompts reach
