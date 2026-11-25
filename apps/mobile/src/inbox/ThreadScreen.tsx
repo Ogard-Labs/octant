@@ -17,6 +17,8 @@ import {
   mobileAttachmentOffer,
   mobileThreadLevel,
   setMobileUsageResume,
+  stopMobileCodeTurn,
+  stopMobileWorkTurn,
   type MobileAttachmentSource,
   type MobileInboxRow,
 } from "@octant/client-runtime";
@@ -64,6 +66,9 @@ import { ThreadTranscript } from "./thread/ThreadTranscript";
 import { ResumeBar, type ResumeOffer } from "./thread/ResumeBar";
 import { useThreadReplyDetail } from "./thread/useThreadReplyDetail";
 import type { ThreadHookInput, ThreadTarget, ThreadUi } from "./thread/threadTypes";
+import { QueuedMessages } from "./thread/QueuedMessages";
+import { isLiveWorkTurn, turnSubagents } from "./thread/turnActivity";
+import { useTurnControl } from "./thread/useTurnControl";
 import { useChatThread } from "./thread/useChatThread";
 import { useCodeThread } from "./thread/useCodeThread";
 import { useThreadTurnActions } from "./thread/useThreadTurnActions";
@@ -283,6 +288,53 @@ export function ThreadScreen(props: ThreadScreenProps) {
     attachmentOffer.sources.length > 0
       ? { onPressAttach: () => setAttachOpen(true) }
       : {};
+  const runningWorkTurn = workTurnLive
+    ? work.turns?.findLast((turn) => isLiveWorkTurn(turn))
+    : undefined;
+  const runningCodeTurn = codeTurnLive
+    ? code.turns?.findLast((turn) => turn.status === "waiting")
+    : undefined;
+  const mayAct = !offlineDemo && composerAccess.editable && staleGate.allowProductMutations;
+  const turnLive = chat.activeAttempt !== undefined || workTurnLive || codeTurnLive;
+  const turnControl = useTurnControl({
+    ...shared(
+      identity === undefined ||
+        offlineDemo ||
+        hostId === undefined ||
+        threadId === undefined ||
+        mode === undefined
+        ? undefined
+        : { identity, hostId, threadId, mode },
+    ),
+    live: turnLive,
+    stopTurn:
+      !mayAct || transport === undefined
+        ? undefined
+        : runningWorkTurn !== undefined
+          ? () =>
+              stopMobileWorkTurn({
+                transport,
+                threadId: String(runningWorkTurn.threadId),
+                turnId: String(runningWorkTurn.turnId),
+                requestId: String(runningWorkTurn.requestId),
+              })
+          : runningCodeTurn !== undefined && code.thread !== undefined
+            ? () =>
+                stopMobileCodeTurn({
+                  transport,
+                  threadId: String(code.thread?.id),
+                  checkoutId: String(code.thread?.checkoutId),
+                  turnOperationId: runningCodeTurn.operationId,
+                })
+            : undefined,
+    attachmentIds: pendingAttachments.map((attachment) => attachment.id),
+    onQueued: () => threadAttachments.attachmentsSent(),
+    onStopped: () => void refresh({ quiet: true }),
+  });
+  // Where the queue cannot be read, a running turn still closes the composer.
+  const queues = mayAct && turnLive && turnControl.queue !== undefined;
+  const subagents = runningWorkTurn === undefined ? [] : turnSubagents(runningWorkTurn);
+  const subagentsWorking = subagents.filter((agent) => agent.working).length;
   const threadHint = mode === "code" || mode === "work" ? mobileThreadHint(mode) : undefined;
   const sendFollowUp = () => void (mode === "work" ? work : code).sendFollowUp();
   const runningChatTurn = chat.view?.turns.at(-1);
@@ -384,10 +436,9 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const composerEditable =
     composerAccess.editable &&
     (mode === "chat"
-      ? staleGate.allowProductMutations && chat.activeAttempt === undefined
+      ? staleGate.allowProductMutations && (chat.activeAttempt === undefined || queues)
       : staleGate.allowProductMutations &&
-        !workTurnLive &&
-        !codeTurnLive &&
+        ((!workTurnLive && !codeTurnLive) || queues) &&
         (mode === "code" || work.thread !== undefined));
   const appendToDraft = useCallback(
     (text: string) => setPrompt((draft) => appendTranscript(draft, text)),
@@ -765,6 +816,12 @@ export function ThreadScreen(props: ThreadScreenProps) {
           }}
         />
       ) : null}
+      {turnControl.queue === undefined ? null : (
+        <QueuedMessages
+          onRemove={mayAct ? (messageId) => void turnControl.removeQueued(messageId) : undefined}
+          queue={turnControl.queue}
+        />
+      )}
       {resumeOffer === undefined ? null : <ResumeBar busy={resumeBusy} offer={resumeOffer} />}
       {selected.mode === "chat" ? (
         <>
@@ -782,7 +839,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
             modelLabel={modelLabel}
             onChangeText={setPrompt}
             onPressModel={() => setModelOpen(true)}
-            onSubmit={() => void chat.send()}
+            onSubmit={() => void (queues ? turnControl.queueMessage() : chat.send())}
+            queues={queues}
             {...(chat.activeAttempt === undefined ? attachProps : {})}
             {...(chat.activeAttempt !== undefined && staleGate.allowProductMutations
               ? { onStop: () => void chat.stop() }
@@ -799,16 +857,20 @@ export function ThreadScreen(props: ThreadScreenProps) {
           busyLabel={
             !busy && latestTurnAtUsageLimit
               ? MOBILE_COPY.turnWaitingOnUsageLimit
-              : MOBILE_COPY.turnRunning
+              : subagentsWorking > 0
+                ? MOBILE_COPY.waitingOnSubagents(subagentsWorking)
+                : MOBILE_COPY.working
           }
-          busySince={workTurnLive ? work.turns?.at(-1)?.acceptedAt : undefined}
+          busySince={runningWorkTurn?.acceptedAt ?? runningCodeTurn?.startedAt}
           editable={composerEditable}
           footerHint={composerAccess.reason}
           {...(levelLabel === undefined
             ? {}
             : { modelLabel: levelLabel, onPressModel: () => setDetailsOpen(true) })}
           onChangeText={setPrompt}
-          onSubmit={sendFollowUp}
+          onSubmit={queues ? () => void turnControl.queueMessage() : sendFollowUp}
+          queues={queues}
+          {...(turnControl.stop === undefined ? {} : { onStop: () => void turnControl.stop?.() })}
           {...(workTurnLive || codeTurnLive ? {} : attachProps)}
           placeholder={MOBILE_COPY.composerFollowUp}
           testID="mobile-thread-composer"

@@ -13,6 +13,7 @@ export const SYSTEM_SYMBOLS: Readonly<Partial<Record<MobileIconName, SystemSymbo
   "arrow-undo-outline": "arrow.uturn.backward",
   "arrow-up": "arrow.up",
   "briefcase-outline": "briefcase",
+  "bulb-outline": "lightbulb",
   "calendar-outline": "calendar",
   "camera-outline": "camera",
   "chatbubble-outline": "bubble.left",

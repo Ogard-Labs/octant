@@ -55,6 +55,30 @@ export const MOBILE_COPY = {
   threadStart: "Start the conversation with your host.",
   threadStartHelp: "Follow-ups stream on the paired host. Pick a model, then send.",
   reasoningTitle: "Reasoning",
+  thinking: "Thinking",
+  thoughtFor: (seconds: number): string =>
+    seconds < 60 ? `Thought for ${seconds}s` : `Thought for ${Math.floor(seconds / 60)}m`,
+  toolCallsTruncated: "Later calls are on your computer.",
+  queueWaiting: "Queued",
+  queueSending: "Sending",
+  queueRemove: "Remove from queue",
+  queueUnreadable: "This message cannot be read here.",
+  queueHeld: "The queue is held. Continue it on your computer.",
+  queueSend: "Queue message",
+  waitingOnSubagents: (count: number): string =>
+    `Waiting on ${count} ${count === 1 ? "subagent" : "subagents"}`,
+  planProgress: (done: number, total: number): string => `Plan · ${done} of ${total}`,
+  planTaskState: {
+    pending: "To do",
+    running: "Running",
+    waiting: "Waiting",
+    completed: "Done",
+    failed: "Failed",
+  },
+  /** The computer saw files change; it cannot know who changed them. */
+  filesChanged: (total: number, truncated: boolean): string =>
+    `${truncated ? "At least " : ""}${total} ${total === 1 ? "file" : "files"} changed while this ran`,
+  filesMore: (count: number): string => `${count} more`,
   toolStatusRunning: "Running",
   toolStatusDone: "Done",
   toolStatusFailed: "Failed",

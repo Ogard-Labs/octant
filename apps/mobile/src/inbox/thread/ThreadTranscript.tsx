@@ -27,6 +27,13 @@ import {
   type MobileTranscriptHandoffEntry,
 } from "../../ui/transcriptHandoffPresentation";
 import type { MessageActionItem } from "../../ui/MessageActions";
+import {
+  codeTurnActivity,
+  isLiveWorkTurn,
+  workTurnActivity,
+  type TurnActivity,
+} from "./turnActivity";
+import { TurnActivityView, TurnFilesView } from "./TurnActivityView";
 import { ThreadWorkShelf } from "../../ui/ThreadWorkShelf";
 import { placeAttachments } from "./attachmentPlacement";
 import type { useChatThread } from "./useChatThread";
@@ -37,6 +44,8 @@ export interface ThreadTranscriptProps {
   readonly workTurns: ReadonlyArray<WorkTurnState> | undefined;
   readonly codeConversation: MobileCodeConversation | undefined;
   readonly chat: ChatThread;
+  /** Opens a Code thread's changes; absent where they cannot be read. */
+  readonly onOpenReview?: (() => void) | undefined;
   readonly allowProductMutations: boolean;
   /** Fork from here and Rewind to here for one message; empty where none can run. */
   readonly turnActionsFor: (
@@ -84,6 +93,16 @@ function SteeredMessages(props: {
       />
     </View>
   ));
+}
+
+function TurnFiles(props: {
+  readonly activity: TurnActivity;
+  readonly onReview?: (() => void) | undefined;
+  readonly testID: string;
+}) {
+  return props.activity.files === undefined ? null : (
+    <TurnFilesView files={props.activity.files} onReview={props.onReview} testID={props.testID} />
+  );
 }
 
 export function ThreadTranscript(props: ThreadTranscriptProps) {
@@ -297,6 +316,12 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                       mobileWorkTurnTargets(workTurns, index, "user"),
                     )}
                   />
+                  <TurnActivityView
+                    activity={workTurnActivity(turn)}
+                    live={isLiveWorkTurn(turn)}
+                    replyDetail={props.replyDetail}
+                    testID={`mobile-work-activity-${String(turn.turnId)}`}
+                  />
                   {turn.response !== undefined && turn.response.length > 0 ? (
                     <MessageBubble
                       {...(turn.status === "completed" ? { at: turn.updatedAt } : {})}
@@ -312,15 +337,15 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                     />
                   ) : turn.failure !== undefined ? (
                     <Text style={styles.warningText}>{turn.failure.message}</Text>
-                  ) : turn.status === "accepted" ||
-                    turn.status === "running" ||
-                    turn.status === "waiting" ? (
-                    <Text style={styles.metaText}>{MOBILE_COPY.turnRunning}</Text>
                   ) : null}
                   <SteeredMessages
                     replyDetail={props.replyDetail}
                     steered={turn.steeredMessages}
                     testID={`mobile-work-steered-${String(turn.turnId)}`}
+                  />
+                  <TurnFiles
+                    activity={workTurnActivity(turn)}
+                    testID={`mobile-work-files-${String(turn.turnId)}`}
                   />
                   {threadRoutineReceipts(turn.toolSteps).map((routine) => (
                     <RoutineReceiptCard
@@ -359,6 +384,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                   )}
                   {turn.prompt.length === 0 ? null : (
                     <MessageBubble
+                      at={turn.startedAt}
                       replyDetail={props.replyDetail}
                       body={turn.prompt}
                       role="user"
@@ -369,6 +395,12 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                       )}
                     />
                   )}
+                  <TurnActivityView
+                    activity={codeTurnActivity(turn)}
+                    live={turn.status === "waiting"}
+                    replyDetail={props.replyDetail}
+                    testID={`mobile-code-activity-${turn.operationId}`}
+                  />
                   {turn.assistant.map((part, index) => (
                     <MessageBubble
                       replyDetail={props.replyDetail}
@@ -391,15 +423,16 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                     steered={turn.steeredMessages}
                     testID={`mobile-code-steered-${turn.operationId}`}
                   />
-                  {turn.status === "waiting" ? (
-                    <Text style={styles.metaText}>
-                      {turn.usageLimit === undefined
-                        ? MOBILE_COPY.turnRunning
-                        : MOBILE_COPY.turnWaitingOnUsageLimit}
-                    </Text>
+                  {turn.status === "waiting" && turn.usageLimit !== undefined ? (
+                    <Text style={styles.metaText}>{MOBILE_COPY.turnWaitingOnUsageLimit}</Text>
                   ) : turn.status === "failed" || turn.status === "interrupted" ? (
                     <Text style={styles.warningText}>{chatAttemptStatusLabel(turn.status)}</Text>
                   ) : null}
+                  <TurnFiles
+                    activity={codeTurnActivity(turn)}
+                    onReview={props.onOpenReview}
+                    testID={`mobile-code-files-${turn.operationId}`}
+                  />
                   {turn.routines.map((routine) => (
                     <RoutineReceiptCard
                       key={routine.routineId}

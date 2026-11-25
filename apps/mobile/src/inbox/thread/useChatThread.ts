@@ -244,6 +244,7 @@ export function useChatThread(
     reconnecting,
     refresh,
     attach: attachments.attach,
+    attachmentsSent: attachments.sent,
     send,
     stop,
     retry,

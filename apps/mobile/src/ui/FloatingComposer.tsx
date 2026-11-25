@@ -5,6 +5,7 @@ import { radii, space, typography, useTheme } from "../../design-system";
 import type { ComposerVoice } from "../voice/useVoiceDictation";
 import { ComposerSurface } from "./ComposerSurface";
 import { ComposerVoiceButton } from "./ComposerVoiceButton";
+import { MOBILE_COPY } from "../copy";
 import { hapticSend } from "./haptics";
 import { IconButton } from "./IconButton";
 import { hasProviderMark, ProviderMark } from "./ProviderMark";
@@ -27,6 +28,8 @@ export interface FloatingComposerProps {
   readonly onPressModel?: () => void;
   readonly onPressAttach?: () => void;
   readonly busy?: boolean;
+  /** While a turn runs, a message may still be written and waits behind it. */
+  readonly queues?: boolean;
   readonly editable?: boolean;
   readonly testID?: string;
   readonly footerHint?: string | undefined;
@@ -108,7 +111,8 @@ export function FloatingComposer(props: FloatingComposerProps) {
 
   const marked = props.modelDriverKind !== undefined && hasProviderMark(props.modelDriverKind);
   const multiline = props.value !== undefined;
-  const editable = props.editable !== false && !props.busy;
+  const queues = props.busy === true && props.queues === true;
+  const editable = props.editable !== false && (props.busy !== true || queues);
   const canSend = editable && (props.value ?? "").trim().length > 0 && props.onSubmit !== undefined;
 
   return (
@@ -172,10 +176,10 @@ export function FloatingComposer(props: FloatingComposerProps) {
             {props.modelLabel}
           </Text>
         ) : null}
-        {props.busy === true ? null : props.voice !== undefined ? (
+        {props.busy === true && !queues ? null : props.voice !== undefined ? (
           <ComposerVoiceButton size={34} voice={props.voice} />
         ) : null}
-        {props.busy === true && props.onStop !== undefined ? (
+        {props.busy === true && props.onStop !== undefined && !(queues && canSend) ? (
           <IconButton
             accessibilityLabel="Stop"
             name="stop"
@@ -186,7 +190,7 @@ export function FloatingComposer(props: FloatingComposerProps) {
           />
         ) : props.onSubmit !== undefined ? (
           <IconButton
-            accessibilityLabel="Send"
+            accessibilityLabel={queues ? MOBILE_COPY.queueSend : "Send"}
             disabled={!canSend}
             name="arrow-up"
             onPress={() => {

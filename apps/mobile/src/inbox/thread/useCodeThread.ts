@@ -146,5 +146,6 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
     threadModel,
     pendingAttachments: attachments.pending,
     attach: attachments.attach,
+    attachmentsSent: attachments.sent,
   };
 }

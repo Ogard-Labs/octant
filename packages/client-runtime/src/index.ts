@@ -104,6 +104,7 @@ export * from "./threadExportClient";
 export * from "./expoSecureDeviceKeyStore";
 export * from "./mobileInboxClient";
 export * from "./mobileThreadRestClient";
+export * from "./mobileTurnControlClient";
 export * from "./mobileTranscriptSearchClient";
 export * from "./mobileAttachmentClient";
 export * from "./mobileThreadSurfaceClient";

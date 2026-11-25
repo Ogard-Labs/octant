@@ -378,6 +378,14 @@ export interface MobileCodeConversationTurn {
   readonly handoff?: CodeConversationTurn["handoff"];
   readonly prompt: string;
   readonly assistant: ReadonlyArray<string>;
+  /** What the turn did besides writing its message, oldest first; reasoning text is not read. */
+  readonly steps: ReadonlyArray<MobileCodeTurnStep>;
+  readonly stepsTruncated: boolean;
+  readonly reasoningMs?: number;
+  /** What changed in the checkout while the turn ran; absent when the host did not observe it. */
+  readonly changedFiles?: NonNullable<CodeConversationTurn["changedFiles"]>;
+  readonly loopNotice?: NonNullable<CodeConversationTurn["loopNotice"]>;
+  readonly stallNotice?: NonNullable<CodeConversationTurn["stallNotice"]>;
   /** The routines the turn's tool calls created, for the receipt cards under it. */
   readonly routines: ReadonlyArray<ThreadRoutineReceipt>;
   /**
@@ -387,8 +395,14 @@ export interface MobileCodeConversationTurn {
   readonly usageLimit?: NonNullable<CodeConversationTurn["failure"]>["usageLimit"];
   /** The person's messages the runtime took into this turn while it ran; absent when none. */
   readonly steeredMessages?: NonNullable<CodeConversationTurn["steeredMessages"]>;
+  readonly startedAt: string;
   readonly updatedAt: string;
 }
+
+export type MobileCodeTurnStep = Extract<
+  NonNullable<CodeConversationTurn["steps"]>[number],
+  { readonly kind: "tool" | "review" }
+>;
 
 /**
  * How many of a Code thread's turns the phone shows: the newest, or those
@@ -475,6 +489,14 @@ export async function loadMobileCodeConversation(
       assistant: turn.assistant
         .map((part) => resolve(String(turn.operationId), String(part.contentId)))
         .filter((part) => part.length > 0),
+      steps: (turn.steps ?? []).filter(
+        (step): step is MobileCodeTurnStep => step.kind !== "reasoning",
+      ),
+      stepsTruncated: turn.stepsTruncated === true,
+      ...(turn.reasoningMs === undefined ? {} : { reasoningMs: turn.reasoningMs }),
+      ...(turn.changedFiles === undefined ? {} : { changedFiles: turn.changedFiles }),
+      ...(turn.loopNotice === undefined ? {} : { loopNotice: turn.loopNotice }),
+      ...(turn.stallNotice === undefined ? {} : { stallNotice: turn.stallNotice }),
       routines: threadRoutineReceipts(
         (turn.steps ?? []).flatMap((step) => (step.kind === "tool" ? [step] : [])),
       ),
@@ -484,6 +506,7 @@ export async function loadMobileCodeConversation(
       ...(turn.steeredMessages === undefined || turn.steeredMessages.length === 0
         ? {}
         : { steeredMessages: turn.steeredMessages }),
+      startedAt: turn.startedAt,
       updatedAt: turn.updatedAt,
     })),
     hasEarlier: read.hasEarlier || kept.length < read.turns.length,
