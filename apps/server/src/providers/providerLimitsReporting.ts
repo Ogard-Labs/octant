@@ -12,8 +12,10 @@ import type { ProviderRuntimeTurnReport } from "./providerRuntimeUsageLimitsStor
  * - `usage-windows`: the CLI runtime narrates rolling usage windows during a
  *   turn (Claude Code, Codex app-server).
  * - `account-endpoint`: Octant reads the account's plan windows from the
- *   provider's usage endpoint with the sign-in the CLI saved (Devin,
- *   OpenCode Go). No figures means that sign-in is missing.
+ *   provider's usage endpoint with the credential already on the host
+ *   (Devin and OpenCode Go from the sign-in the CLI saved; Mistral Vibe
+ *   from the API key Settings holds). No figures means that credential is
+ *   missing.
  * - `response-headers`: the HTTP endpoint attaches quota headers to the
  *   responses Octant already requests.
  * - `runtime-does-not-report`: the protocol has no limits channel; the
@@ -28,13 +30,15 @@ export type ProviderLimitsReporting =
   | "local-runtime";
 
 export function providerLimitsReporting(kind: ProviderDriverKind): ProviderLimitsReporting {
-  // The ACP protocol has no limits channel. Devin differs only because Octant
-  // reads its plan windows from Devin's own usage endpoint. Google
+  // The ACP protocol has no limits channel. Devin and Mistral Vibe differ
+  // because Octant reads their plan windows from an account endpoint. Google
   // Antigravity's own `/usage` is reached only through its headless mode,
   // which Google does not support wrapping inside another application on
   // consumer plans, so Octant does not read it.
   if (isAcpAgentKind(kind)) {
-    return kind === "devin" ? "account-endpoint" : "runtime-does-not-report";
+    return kind === "devin" || kind === "mistral-vibe"
+      ? "account-endpoint"
+      : "runtime-does-not-report";
   }
   switch (kind) {
     case "claude":

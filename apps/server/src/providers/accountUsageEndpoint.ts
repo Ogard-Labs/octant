@@ -32,12 +32,21 @@ export function requestAccountUsage(
   url: string,
   init: RequestInit,
   now: () => number,
+  /**
+   * A 403 is otherwise the same refused sign-in as a 401. Pass a different
+   * failure when the endpoint uses 403 for a key that cannot view usage, so
+   * that reading is not shown as 0% used.
+   */
+  forbidden?: ProviderFailure,
 ): Effect.Effect<unknown, ProviderFailure> {
   return Effect.gen(function* () {
     const response = yield* Effect.tryPromise({
       try: (signal) => fetch(url, { ...init, signal, redirect: "error" }),
       catch: () => accountUsageFailure("provider-failed", `${name} usage could not be reached.`),
     });
+    if (response.status === 403 && forbidden !== undefined) {
+      return yield* Effect.fail(forbidden);
+    }
     if (response.status === 401 || response.status === 403) {
       return yield* Effect.fail(
         accountUsageFailure("unauthenticated", `${name} refused the saved sign-in.`),
