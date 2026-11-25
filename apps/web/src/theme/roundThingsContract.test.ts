@@ -43,6 +43,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".canvas-mockup__avatar",
   ".provider-glyph--monogram",
   // Status dots, live marks and unread marks.
+  ".octant-status-dot",
   ".tag .dot",
   ".statuslist .dot",
   ".st",
@@ -118,9 +119,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".canvas-flow-board__callout",
   ".canvas-mockup__callout-mark",
   ".settings-app-background__preset-mark",
-  // Spinners.
-  ".spinner",
-  ".device-spinner",
+  // A touch on the device's screen.
   ".device-touch",
   // Round colour swatches.
   ".browser-markup__swatch",

@@ -502,7 +502,7 @@ function Labels() {
       </Specimen>
       <Specimen
         adapters={["OctantStatusDot"]}
-        props={`tone="neutral | active | success | warning | danger | accent"; size={6 | 8}; live`}
+        props={`tone="neutral | active | success | warning | danger | accent"; small; live`}
         note="a state's dot, always beside the word that says the state"
         wide
       >
@@ -515,7 +515,7 @@ function Labels() {
             ),
           )}
           <span className="oct-row-detail">
-            <OctantStatusDot size={6} tone="success" /> small
+            <OctantStatusDot small tone="success" /> small
           </span>
           <span className="oct-row-detail">
             <OctantStatusDot live tone="active" /> live

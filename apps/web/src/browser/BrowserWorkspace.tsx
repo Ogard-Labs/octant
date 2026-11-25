@@ -58,7 +58,6 @@ import {
   Hand,
   KeyRound,
   Laptop,
-  LoaderCircle,
   LockKeyhole,
   LogOut,
   MessageSquarePlus,
@@ -122,6 +121,7 @@ import {
 } from "./browserProfileCopy";
 import { makeBrowserToolAction, normalizeBrowserUrl } from "./browserNavigation";
 import { RENDERER_OVERLAY_SELECTOR } from "./rendererOverlaySelector";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
 
 const BROWSER_REFRESH_INTERVAL_MS = 500;
 const BROWSER_MAX_REFRESH_INTERVAL_MS = 5_000;
@@ -2123,11 +2123,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             title={statusText}
           >
             {nativeState?.loading || agentDriving ? (
-              <LoaderCircle
-                aria-hidden="true"
-                className="browser-workspace__control-spinner"
-                size={16}
-              />
+              <OctantSpinner />
             ) : (
               <Eye aria-hidden="true" size={16} />
             )}

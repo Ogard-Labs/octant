@@ -1759,13 +1759,6 @@ html[data-octant-native-host="true"]
   white-space: nowrap;
 }
 
-.workspace-pane__status .spinner {
-  width: 10px;
-  height: 10px;
-  border-width: 1.5px;
-  vertical-align: 0;
-}
-
 .workspace-drop-overlay {
   position: absolute;
   z-index: 4;
@@ -2307,16 +2300,6 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   display: none;
 }
 
-.shell-state__spinner {
-  animation: octant-spin 1s linear infinite;
-}
-
-@keyframes octant-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .folder-picker {
   --octant-dialog-width: 520px;
   --octant-dialog-height: min(720px, 84vh);
@@ -2623,10 +2606,6 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .shell-state__spinner {
-    animation: none;
-  }
-
   .remote-pairing * {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;

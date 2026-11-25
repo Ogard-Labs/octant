@@ -180,10 +180,6 @@
   text-overflow: ellipsis;
 }
 
-.browser-workspace__control-spinner {
-  animation: browser-spin var(--oct-motion-spin) linear infinite;
-}
-
 /* A Browser notice is the callout's quiet row: no fill and no rule, one line
    at the panel's own inset that wraps its action underneath when narrow. */
 .browser-workspace__message {
@@ -406,12 +402,6 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   background: var(--octant-surface-canvas);
   cursor: crosshair;
   user-select: none;
-}
-
-@keyframes browser-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* ─── the Browser's empty and error states are left-aligned lines ─────── */

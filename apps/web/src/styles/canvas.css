@@ -3796,22 +3796,6 @@
   font-weight: var(--oct-weight-medium);
 }
 
-.canvas-action__spinner {
-  animation: canvas-action-spin var(--oct-motion-spin) linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .canvas-action__spinner {
-    animation: none;
-  }
-}
-
-@keyframes canvas-action-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* Canvas refresh (C2) and skill provenance. Status is carried by an icon and
    words together, never color alone, and provenance is inert read-only text. */
 
@@ -3860,16 +3844,6 @@
 .canvas-refresh__status[data-run="partial"] {
   color: var(--oct-fg);
   font-weight: var(--oct-weight-medium);
-}
-
-.canvas-refresh__spinner {
-  animation: canvas-action-spin var(--oct-motion-spin) linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .canvas-refresh__spinner {
-    animation: none;
-  }
 }
 
 .canvas-skill-provenance {

@@ -61,7 +61,7 @@ describe("OctantStatusDot", () => {
   });
 
   it("rests neutral, and says when it is small or live", () => {
-    const { container } = render(<OctantStatusDot live size={6} />);
+    const { container } = render(<OctantStatusDot live small />);
     const dot = container.querySelector(".octant-status-dot");
     expect(dot).toHaveAttribute("data-tone", "neutral");
     expect(dot).toHaveAttribute("data-size", "sm");

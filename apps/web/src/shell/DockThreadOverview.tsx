@@ -6,7 +6,6 @@ import {
   Folder,
   GitBranch,
   LayoutPanelTop,
-  LoaderCircle,
   Monitor,
   Radio,
 } from "../ui/icons";
@@ -15,6 +14,7 @@ import type { ThreadBoardPullRequestSummary } from "@octant/contracts";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import type { RunningThreadFact } from "./dockThreadOverviewModel";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
 
 export interface DockThreadFacts {
   readonly project?: string;
@@ -266,7 +266,7 @@ export function DockThreadOverview(props: DockThreadOverviewProps) {
               type="button"
               variant="bare"
             >
-              <LoaderCircle aria-hidden="true" className="dock-card__spinner" size={14} />
+              <OctantSpinner className="dock-card__spinner" size={14} />
               <span className="dock-card__label">{thread.title}</span>
               {thread.projectName === undefined ? null : (
                 <span className="dock-card__meta">{thread.projectName}</span>
@@ -335,7 +335,7 @@ function TaskRow(props: { readonly task: DockThreadBackgroundTask; readonly runn
       variant="bare"
     >
       {props.running ? (
-        <LoaderCircle aria-hidden="true" className="dock-card__spinner" size={14} />
+        <OctantSpinner className="dock-card__spinner" size={14} />
       ) : (
         <Check aria-hidden="true" className="dock-card__icon" size={14} />
       )}

@@ -1,6 +1,7 @@
 import type { ThreadBoardFinishedMark } from "@octant/contracts";
-import { Check, GitBranch, LoaderCircle } from "../ui/icons";
+import { Check, GitBranch } from "../ui/icons";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
 
 /**
  * The mark at the head of a status column. Ready is a hollow ring (nothing has
@@ -22,7 +23,7 @@ export function ThreadBoardStatusMark(props: {
       data-status={props.status}
     >
       {turning ? (
-        <LoaderCircle className="board-status-mark__spin" size={12} />
+        <OctantSpinner size={12} />
       ) : props.status === "done" ? (
         <Check size={12} />
       ) : (
@@ -103,7 +104,7 @@ export function ThreadBoardCardMeta(props: ThreadBoardCardMetaProps) {
 export function ThreadBoardCardLive(props: { readonly summary: string | undefined }) {
   return (
     <span className="board-card-live">
-      <LoaderCircle aria-hidden="true" className="board-card-live__spin" size={12} />
+      <OctantSpinner size={12} />
       <span className="board-card-live__text" title={props.summary}>
         {props.summary ?? "Working…"}
       </span>

@@ -489,21 +489,7 @@
 }
 
 .dock-card__spinner {
-  flex: none;
   color: var(--oct-muted);
-  animation: dock-card-spin var(--oct-motion-spin) linear infinite;
-}
-
-@keyframes dock-card-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .dock-card__spinner {
-    animation: none;
-  }
 }
 
 .right-utility-dock__tool[hidden] {

@@ -6,6 +6,7 @@ import { CoordinatorMark, WorkerMark } from "./coordinatorMarks";
 import type { ReactNode } from "react";
 import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { OctantSpinner } from "../ui/base/OctantSpinner";
 import type { ThreadCheckoutChip, ThreadProviderIdentity } from "../shell/navigationModel";
 
 type ThreadRowPullRequest = ThreadBoardPullRequestSummaries["items"][number];
@@ -146,7 +147,11 @@ export function SidebarThreadRowContent(props: {
         data-activity={props.state.status}
         title={props.state.text}
       >
-        {StateIcon === undefined ? null : <StateIcon aria-hidden="true" size={12} />}
+        {props.state.status === "working" ? (
+          <OctantSpinner size={12} />
+        ) : StateIcon === undefined ? null : (
+          <StateIcon aria-hidden="true" size={12} />
+        )}
         <span>{props.state.text}</span>
       </span>
     ) : props.age === undefined && props.unread !== true ? null : (

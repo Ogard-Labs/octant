@@ -8,8 +8,8 @@ export type OctantStatusTone = "neutral" | "active" | "success" | "warning" | "d
 
 export interface OctantStatusDotProps {
   readonly tone?: OctantStatusTone;
-  /** 8 beside a row's text, 6 inside a chip or a dense list. */
-  readonly size?: 6 | 8;
+  /** 6px for a chip or a dense list; the dot is 8px beside a row's text. */
+  readonly small?: boolean;
   /** A live dot breathes while the thing it marks is going on. */
   readonly live?: boolean;
   readonly className?: string;
@@ -23,7 +23,7 @@ export interface OctantStatusDotProps {
 export function OctantStatusDot({
   className,
   live,
-  size = 8,
+  small,
   tone = "neutral",
 }: OctantStatusDotProps) {
   return (
@@ -31,7 +31,7 @@ export function OctantStatusDot({
       aria-hidden="true"
       className={cn("octant-status-dot", className)}
       data-live={live === true ? "true" : undefined}
-      data-size={size === 6 ? "sm" : undefined}
+      data-size={small === true ? "sm" : undefined}
       data-tone={tone}
     />
   );

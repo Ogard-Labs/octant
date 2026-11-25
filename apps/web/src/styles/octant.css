@@ -2141,29 +2141,6 @@ input.switch:checked::after {
   box-shadow: 0 0 0 2px var(--oct-bg);
 }
 
-/* ─── spinner ─────────────────────────────────────────────────────────
-   Under prefers-reduced-motion the rotation stops, so the arc alone has
-   to read as "busy" — that is why it is a visible three-quarter ring. */
-.spinner {
-  display: inline-block;
-  width: var(--oct-icon-md);
-  height: var(--oct-icon-md);
-  border: 2px solid var(--oct-border);
-  border-top-color: var(--oct-accent-fg);
-  border-radius: var(--oct-radius-pill);
-  animation: oct-spin var(--oct-motion-spin) linear infinite;
-  vertical-align: -3px;
-}
-.spinner-sm {
-  width: var(--oct-icon-sm);
-  height: var(--oct-icon-sm);
-  border-width: 2px;
-}
-.spinner-lg {
-  width: 28px;
-  height: 28px;
-  border-width: 3px;
-}
 @keyframes oct-spin {
   to {
     transform: rotate(360deg);
@@ -3229,12 +3206,6 @@ html[data-octant-reduced-motion="true"] .octant-status-dot[data-live="true"] {
 .runstatus .sep {
   opacity: 0.6;
 }
-.runstatus .spinner {
-  width: 11px;
-  height: 11px;
-  border-width: 1.5px;
-  vertical-align: 0;
-}
 
 /* ─── dock rows ───────────────────────────────────────────────────────
    The Environment-panel pattern: an icon, a label, and either a value or
@@ -3717,8 +3688,7 @@ html[data-octant-reduced-motion="true"] .octant-status-dot[data-live="true"] {
 .check-row.is-fail .icon {
   color: var(--oct-danger-fg);
 }
-.check-row.is-pending .icon,
-.check-row.is-pending .spinner {
+.check-row.is-pending .icon {
   color: var(--oct-warn-fg);
 }
 .check-row.is-unknown .icon {
@@ -10163,7 +10133,6 @@ html[data-octant-native-host="true"]
   }
   /* the spinner keeps turning — a frozen spinner reads as a hung app —
      but slowly enough not to trigger anyone */
-  .spinner,
   .octant-spinner {
     animation-duration: var(--oct-motion-spin-slow) !important;
   }
