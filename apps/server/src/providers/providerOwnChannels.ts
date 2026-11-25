@@ -17,8 +17,12 @@ export const DEFAULT_PROVIDER_OWN_CHANNELS: ProviderOwnChannels = {
 const CLOSED_PROVIDER_OWN_CHANNELS: ProviderOwnChannels = { telemetry: false, selfUpdate: false };
 
 /**
- * The person's two switches in Settings › Providers & Models, and the host
- * credentials they let through to this provider (by driver kind).
+ * The person's two switches in Settings › Providers & Models, and the stored
+ * list of host credentials let through to this provider (by driver kind).
+ * No launch environment reads that list any more: outside Strict the person's
+ * credentials reach every provider, and Strict keeps its fixed list
+ * (maintainer decision, 2026-11-25). It still travels with the channels, so a
+ * driver that keys a kept process on it keeps doing so.
  */
 export function providerOwnChannelsFromSettings(
   settings: Pick<
@@ -46,10 +50,11 @@ export interface CredentialLaunchPosture {
 }
 
 /**
- * Whether a launch of this driver kind and posture takes the person's
- * pass-through list, as each driver builds its environment. A provider
- * terminal reads the same answer for the telemetry and self-update switches,
- * which close wherever this refuses. Strict never does. Claude Code and the
+ * Whether a launch of this driver kind and posture builds the environment a
+ * launch outside Strict gets, as each driver decides it: the person's own
+ * environment, and the telemetry and self-update switches, which close
+ * wherever this refuses. The stored pass-through list is keyed on the same
+ * answer (`launchCredentialsKey`). Strict never does. Claude Code and the
  * ACP agents also build the Strict environment for a thread that keeps or
  * chose a sandbox (`claudeDriver` closes its own channels there; `acpProcess`
  * sets `environmentStrict`), an ACP agent only at Full access, where its

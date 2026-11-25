@@ -25,6 +25,7 @@ import {
   makePiConfinementLive,
   makePiProcessLive,
   piArguments,
+  piRunsOnOwnHome,
   piExtensionSource,
   piProcessEnvironment,
   sanitizePiEnvironment,
@@ -132,13 +133,15 @@ describe("Pi process boundary", () => {
     });
   });
 
-  it("outside Strict gives a Pi process the host's environment less Octant's variables, other providers' keys and unrelated credentials it was not let through, with telemetry off until the person turns it on", () => {
+  it("outside Strict gives a Pi process the host's environment, the person's own tool credentials included, less Octant's variables and other providers' keys, with telemetry off until the person turns it on", () => {
     const host = {
       PATH: "/usr/bin",
       HOME: "/Users/test",
       HTTPS_PROXY: "http://proxy.invalid:8080",
       GH_TOKEN: "gh-token",
+      NPM_TOKEN: "npm-token",
       AWS_ACCESS_KEY_ID: "aws-key",
+      SOME_SERVICE_API_KEY: "service-key",
       ANTHROPIC_API_KEY: "anthropic-key",
       OPENAI_API_KEY: "openai-key",
       OCTANT_PI_TOOL_BRIDGE_TOKEN: "octant-secret",
@@ -149,24 +152,88 @@ describe("Pi process boundary", () => {
       HOME: "/managed",
       PI_CODING_AGENT_DIR: "/managed",
       HTTPS_PROXY: "http://proxy.invalid:8080",
+      GH_TOKEN: "gh-token",
+      NPM_TOKEN: "npm-token",
+      AWS_ACCESS_KEY_ID: "aws-key",
+      SOME_SERVICE_API_KEY: "service-key",
       OPENAI_API_KEY: "openai-key",
       PI_SKIP_VERSION_CHECK: "1",
       PI_TELEMETRY: "0",
     });
     expect(open).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(open).not.toHaveProperty("OCTANT_PI_TOOL_BRIDGE_TOKEN");
-    expect(open).not.toHaveProperty("GH_TOKEN");
-    expect(open).not.toHaveProperty("AWS_ACCESS_KEY_ID");
-    const letThrough = sanitizePiEnvironment(host, "/managed", "enabled", "openai", false, {
-      telemetry: false,
-      selfUpdate: false,
-      credentialPassThrough: ["GH_TOKEN"],
-    });
-    expect(letThrough).toMatchObject({ GH_TOKEN: "gh-token", OPENAI_API_KEY: "openai-key" });
-    expect(letThrough).not.toHaveProperty("AWS_ACCESS_KEY_ID");
     const strict = sanitizePiEnvironment(host, "/managed", "enabled", "openai");
-    expect(strict).toMatchObject({ PI_TELEMETRY: "0" });
-    expect(strict).not.toHaveProperty("GH_TOKEN");
+    expect(strict).toMatchObject({ PI_TELEMETRY: "0", OPENAI_API_KEY: "openai-key" });
+    for (const name of ["GH_TOKEN", "NPM_TOKEN", "AWS_ACCESS_KEY_ID", "SOME_SERVICE_API_KEY"]) {
+      expect(strict, name).not.toHaveProperty(name);
+    }
+  });
+
+  it("runs Pi on the person's own home and agent folder only for a launch outside Strict that says so", () => {
+    const host = { PATH: "/usr/bin", HOME: "/Users/test", PI_CODING_AGENT_DIR: "/Users/test/pi" };
+    const own = sanitizePiEnvironment(
+      host,
+      "/managed",
+      "enabled",
+      "openai",
+      false,
+      undefined,
+      true,
+    );
+    expect(own).toMatchObject({
+      HOME: "/Users/test",
+      PI_CODING_AGENT_DIR: "/Users/test/pi",
+      PI_TELEMETRY: "0",
+      PI_SKIP_VERSION_CHECK: "1",
+      OCTANT_PI_APPROVALS: "enabled",
+    });
+    // Strict keeps the managed home whatever the launch asks.
+    expect(
+      sanitizePiEnvironment(host, "/managed", "enabled", "openai", true, undefined, true),
+    ).toMatchObject({ HOME: "/managed", PI_CODING_AGENT_DIR: "/managed" });
+  });
+
+  it("chooses the person's own home for Work and Code outside Strict and Plan, and the managed home everywhere Octant's sandbox or Strict applies", () => {
+    const open = { mode: "code", executionPolicy: "approval-gated", strict: false } as const;
+    expect(piRunsOnOwnHome(open)).toBe(true);
+    expect(piRunsOnOwnHome({ ...open, mode: "work", executionPolicy: "full-access" })).toBe(true);
+    expect(piRunsOnOwnHome({ ...open, strict: true })).toBe(false);
+    expect(piRunsOnOwnHome({ mode: "code", executionPolicy: "full-access" })).toBe(false);
+    expect(piRunsOnOwnHome({ ...open, executionPolicy: "plan" })).toBe(false);
+    expect(piRunsOnOwnHome({ ...open, mode: "chat" })).toBe(false);
+    expect(piRunsOnOwnHome({ ...open, fullAccessSandbox: true })).toBe(false);
+  });
+
+  it("leaves discovery to Pi on the person's own home, keeping Octant's bridge, its tools and a Project's own files out", () => {
+    const args = piArguments(
+      "/managed/bridge.ts",
+      "/sessions",
+      "code-1",
+      "code",
+      "approval-gated",
+      [],
+      undefined,
+      {
+        skills: "/Users/test/.pi/agent/skills",
+        extensions: ["/Users/test/.pi/agent/extensions/x"],
+      },
+      "1.6.0",
+      [],
+      true,
+    );
+    expect(args).toEqual([
+      "--mode",
+      "rpc",
+      "--no-approve",
+      "--extension",
+      "/managed/bridge.ts",
+      "--tools",
+      "+grep,+find,+ls",
+      "--session-dir",
+      "/sessions",
+      "--session-id",
+      "code-1",
+    ]);
   });
 
   it("outside Strict keeps Pi's telemetry guard when the person turned provider telemetry off and drops its release check when the person lets providers update themselves", () => {

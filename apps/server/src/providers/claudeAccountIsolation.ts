@@ -6,10 +6,7 @@ import type { ClaudeAuthentication } from "@octant/contracts";
 
 import type { ProviderOwnChannels } from "@octant/provider-sdk";
 
-import {
-  AWS_BEDROCK_CREDENTIAL_VARIABLES,
-  providerHostEnvironment,
-} from "./providerHostEnvironment";
+import { providerHostEnvironment } from "./providerHostEnvironment";
 import {
   DEFAULT_PROVIDER_OWN_CHANNELS,
   guardsForOwnChannels,
@@ -313,23 +310,14 @@ export function isolatedClaudeAccountEnvironment(
 }
 
 /**
- * The host environment a Claude launch outside Strict starts from. AWS keys
- * are Claude's own only while the host routes Claude through Amazon Bedrock
- * (`CLAUDE_CODE_USE_BEDROCK`), which signs in with them; otherwise they are
- * unrelated credentials and cross only when the person lets them through.
+ * The host environment a Claude launch outside Strict starts from: the
+ * person's own, credentials for their other tools included, less Octant's
+ * variables and every model provider's key. Claude names none as its own
+ * here, since the Octant account's sign-in decides which account a turn runs
+ * as.
  */
-export function openClaudeHostEnvironment(
-  hostEnvironment: NodeJS.ProcessEnv,
-  ownChannels: ProviderOwnChannels | undefined,
-): NodeJS.ProcessEnv {
-  const bedrock = hostEnvironment.CLAUDE_CODE_USE_BEDROCK?.trim().toLowerCase();
-  const routesThroughBedrock =
-    bedrock !== undefined && bedrock !== "" && bedrock !== "0" && bedrock !== "false";
-  return providerHostEnvironment(
-    hostEnvironment,
-    new Set(routesThroughBedrock ? AWS_BEDROCK_CREDENTIAL_VARIABLES : []),
-    launchOwnChannels(false, ownChannels).credentialPassThrough,
-  );
+export function openClaudeHostEnvironment(hostEnvironment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return providerHostEnvironment(hostEnvironment);
 }
 
 /**
@@ -344,7 +332,7 @@ export function openClaudeHostEnvironment(
 function openClaudeAccountEnvironment(
   input: IsolatedClaudeAccountEnvironmentInput,
 ): NodeJS.ProcessEnv {
-  const environment = openClaudeHostEnvironment(input.hostEnvironment, input.ownChannels);
+  const environment = openClaudeHostEnvironment(input.hostEnvironment);
   environment.CLAUDE_CONFIG_DIR = input.configDirectory;
   environment.CLAUDE_SECURESTORAGE_CONFIG_DIR = input.configDirectory;
   if (input.authentication === "gateway") {

@@ -159,6 +159,11 @@ export interface AcpProcessProfile {
     readonly executionPolicy: ProviderExecutionPolicy;
     /** The agent's own subagents run in this launch (`acpSubagentsRun`). */
     readonly ownSubagents?: boolean;
+    /**
+     * The launch lets the agent update itself (the person's switch, outside
+     * Strict), for a profile whose self-update guard is a managed setting.
+     */
+    readonly selfUpdate?: boolean;
   }) => ReadonlyArray<AcpManagedFile>;
   readonly hostAuthentication?: AcpHostAuthentication;
   /**
@@ -777,6 +782,11 @@ const DEVIN_CONFIGURATION = {
   attribution: false,
 } as const;
 
+function devinConfigurationWithoutUpdateGuard() {
+  const { auto_update: _guard, ...configuration } = DEVIN_CONFIGURATION;
+  return configuration;
+}
+
 function devinConfigPath(managedHome: string): string {
   return join(managedHome, ".config/devin/config.json");
 }
@@ -857,11 +867,17 @@ const devinProfile: AcpProviderProfile = {
     // Its own subagents follow the person's setup in Work and Code outside
     // Plan (`acpSubagentsRun`); everywhere else the managed configuration
     // keeps `subagents_enabled` false.
-    managedFiles: ({ managedHome, ownSubagents }) => [
+    // `auto_update: false` is Devin's self-update guard. A launch that lets
+    // providers update themselves leaves the key out, so Devin's own default
+    // decides, as the other agents' guards are left out.
+    managedFiles: ({ managedHome, ownSubagents, selfUpdate }) => [
       {
         path: devinConfigPath(managedHome),
         content: `${JSON.stringify(
-          { ...DEVIN_CONFIGURATION, subagents_enabled: ownSubagents === true },
+          {
+            ...(selfUpdate === true ? devinConfigurationWithoutUpdateGuard() : DEVIN_CONFIGURATION),
+            subagents_enabled: ownSubagents === true,
+          },
           null,
           2,
         )}\n`,

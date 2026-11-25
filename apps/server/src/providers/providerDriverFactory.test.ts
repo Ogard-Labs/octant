@@ -880,47 +880,36 @@ function runProbe(driver: ReturnType<typeof makeProviderDriver>): Promise<unknow
   return Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
 }
 
-describe("Codex's open launch environment and its Bedrock sign-in", () => {
+describe("Codex's open launch environment", () => {
   const hostEnvironment = {
     PATH: "/usr/bin",
     AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
     AWS_SECRET_ACCESS_KEY: "aws-secret",
     OPENAI_API_KEY: "codex-own",
   };
-  const launchWithConfig = (config: string | undefined) => {
-    const codexHome = mkdtempSync(join(tmpdir(), "octant-codex-home-"));
-    try {
-      if (config !== undefined) writeFileSync(join(codexHome, "config.toml"), config);
-      return openCodexAccountEnvironment({
-        binaryPath: "/opt/homebrew/bin/codex",
-        hostEnvironment,
-        codexHome,
-        inheritHostAuth: true,
-        credentialPassThrough: [],
-      });
-    } finally {
-      rmSync(codexHome, { recursive: true, force: true });
-    }
-  };
 
-  it.each([
-    ['model_provider = "amazon-bedrock"\n'],
-    ['"model_provider" = "amazon-bedrock"\n'],
-    ["'model_provider' = 'amazon-bedrock-runtime'\n"],
-  ])("keeps the AWS keys for an account whose config.toml reads %j", (config) => {
-    expect(launchWithConfig(config)).toMatchObject({
-      AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
-      AWS_SECRET_ACCESS_KEY: "aws-secret",
-    });
-  });
-
-  it.each([['model_provider = "openai"\n'], ['model = "gpt-5"\n'], [undefined]])(
-    "an OpenAI-backed Codex launch outside Strict gets no exported AWS keys (config %j)",
+  it.each([['model_provider = "amazon-bedrock"\n'], ['model_provider = "openai"\n'], [undefined]])(
+    "keeps the person's exported AWS keys outside Strict whichever provider the account's config.toml selects (config %j)",
     (config) => {
-      const environment = launchWithConfig(config);
-      expect(environment.AWS_ACCESS_KEY_ID).toBeUndefined();
-      expect(environment.AWS_SECRET_ACCESS_KEY).toBeUndefined();
-      expect(environment.OPENAI_API_KEY).toBe("codex-own");
+      const codexHome = mkdtempSync(join(tmpdir(), "octant-codex-home-"));
+      try {
+        if (config !== undefined) writeFileSync(join(codexHome, "config.toml"), config);
+        expect(
+          openCodexAccountEnvironment({
+            binaryPath: "/opt/homebrew/bin/codex",
+            hostEnvironment,
+            codexHome,
+            inheritHostAuth: true,
+            credentialPassThrough: [],
+          }),
+        ).toMatchObject({
+          AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
+          AWS_SECRET_ACCESS_KEY: "aws-secret",
+          OPENAI_API_KEY: "codex-own",
+        });
+      } finally {
+        rmSync(codexHome, { recursive: true, force: true });
+      }
     },
   );
 });

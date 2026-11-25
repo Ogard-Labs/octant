@@ -100,28 +100,23 @@ describe("provider terminal", () => {
     expect(launch.environment.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
-  it("opens a provider terminal outside Strict without GH_TOKEN unless that provider's pass-through list names it", () => {
+  it("opens a provider terminal outside Strict with the person's own tool credentials, and under Strict without them", () => {
     for (const kind of ["claude", "codex"] as const) {
-      const open = (credentialPassThrough: ReadonlyArray<string>) => {
+      const open = (strict: boolean) => {
         const launch = resolveProviderTerminal({
           instance: instance(kind),
           hostEnvironment: { ...HOST, GH_TOKEN: "gh-canary", NPM_TOKEN: "npm-canary" },
           homeDirectory: "/Users/person",
           platform: "darwin",
           shell: "/bin/zsh",
-          strict: false,
-          ownChannels: (driverKind) => ({
-            telemetry: false,
-            selfUpdate: false,
-            ...(driverKind === kind ? { credentialPassThrough } : {}),
-          }),
+          strict,
         });
         if (launch.status !== "resolved") throw new Error("expected a launch");
         return launch.environment;
       };
-      expect(open([]).GH_TOKEN, kind).toBeUndefined();
-      expect(open(["GH_TOKEN"]).GH_TOKEN, kind).toBe("gh-canary");
-      expect(open(["GH_TOKEN"]).NPM_TOKEN, kind).toBeUndefined();
+      expect(open(false), kind).toMatchObject({ GH_TOKEN: "gh-canary", NPM_TOKEN: "npm-canary" });
+      expect(open(true).GH_TOKEN, kind).toBeUndefined();
+      expect(open(true).NPM_TOKEN, kind).toBeUndefined();
     }
   });
 

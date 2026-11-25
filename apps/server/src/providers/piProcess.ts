@@ -217,6 +217,31 @@ function piStartsUnconfined(input: {
   );
 }
 
+/**
+ * Whether a launch runs on the person's own home and Pi agent folder, with
+ * Pi's own discovery on, instead of Octant's managed home: outside Strict,
+ * where the launch starts with no Octant sandbox and loads the person's
+ * extensions (`piOwnSetup`), so Work and Code outside Plan (maintainer
+ * decision, 2026-11-25). On the managed home Pi's shell commands found no
+ * `~/.gitconfig`, `~/.ssh` or `~/.npmrc`, and Pi loaded only the top-level
+ * resources Octant named, not the packages its own settings list. Strict,
+ * Chat, Plan and a kept or chosen sandbox keep the managed home, the one
+ * home folder the sandbox opens for writing.
+ */
+export function piRunsOnOwnHome(input: {
+  readonly mode: PiSessionMode;
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly fullAccessSandbox?: boolean;
+  readonly strict?: boolean;
+  readonly sandboxPolicy?: SandboxPolicySelection;
+}): boolean {
+  return (
+    input.strict === false &&
+    piStartsUnconfined(input) &&
+    piOwnSetup(input.mode, input.executionPolicy).extensions
+  );
+}
+
 /** How one Pi launch runs on Windows, from that launch's own authority. */
 function piWindowsLaunch(input: {
   readonly mode: PiSessionMode;
@@ -469,18 +494,19 @@ export function sanitizePiEnvironment(
   modelProvider?: string,
   strict = true,
   ownChannels?: ProviderOwnChannels,
+  ownHome = false,
 ): NodeJS.ProcessEnv {
   const credentials = new Set(
     modelProvider === undefined ? [] : (PROVIDER_CREDENTIALS.get(modelProvider) ?? []),
   );
   if (!strict) {
-    // The thread's own provider's variables are its own; Pi's account home
-    // stays Octant's, so the account it signs in as stays the thread's.
+    // The thread's own provider's variables are its own. On the person's own
+    // home (`piRunsOnOwnHome`) `HOME` and `PI_CODING_AGENT_DIR` stay as the
+    // host has them; otherwise both name Octant's managed home.
     const chosen = launchOwnChannels(false, ownChannels);
     return {
-      ...providerHostEnvironment(host, credentials, chosen.credentialPassThrough),
-      HOME: piHome,
-      PI_CODING_AGENT_DIR: piHome,
+      ...providerHostEnvironment(host, credentials),
+      ...(ownHome ? {} : { HOME: piHome, PI_CODING_AGENT_DIR: piHome }),
       ...guardsForOwnChannels(PI_GUARDS, PI_CHANNEL_GUARD_NAMES, chosen),
       OCTANT_PI_APPROVALS: approvals,
       NO_COLOR: "1",
@@ -513,6 +539,7 @@ export function piProcessEnvironment(
   modelProvider?: string,
   strict = true,
   ownChannels?: ProviderOwnChannels,
+  ownHome = false,
 ): NodeJS.ProcessEnv {
   const sanitized = sanitizePiEnvironment(
     host,
@@ -521,6 +548,7 @@ export function piProcessEnvironment(
     modelProvider,
     strict,
     ownChannels,
+    ownHome,
   );
   const binaryDirectory = dirname(binaryPath);
   const path = sanitized.PATH?.split(delimiter).filter(Boolean) ?? [];
@@ -558,13 +586,15 @@ function piWallPolicy(input: {
  * Pi's built-ins and Octant's own tools, so the approval bridge still decides
  * every side effect below Full access.
  *
- * Pi's own discovery stays off (`--no-extensions`, `--no-skills`,
- * `--no-prompt-templates`) and the person's resources are named by path:
- * discovery would also start Pi's built-in extensions, its MCP client among
- * them, and a Project's own `.pi` resources are a Project's code, which Pi
- * is never trusted with here. Context files are Pi's own discovery, since a
- * Project's `AGENTS.md` is instruction text every runtime may read; the
- * person's global one is linked into the managed home where Pi looks for it.
+ * On Octant's managed home Pi's own discovery stays off (`--no-extensions`,
+ * `--no-skills`, `--no-prompt-templates`) and the person's resources are
+ * named by path: discovery would also start Pi's built-in extensions, its MCP
+ * client among them. A launch on the person's own home (`piRunsOnOwnHome`)
+ * leaves discovery to Pi, as in their terminal. Either way a Project's own
+ * `.pi` resources are a Project's code, which Pi is never trusted with here.
+ * Context files are Pi's own discovery, since a Project's `AGENTS.md` is
+ * instruction text every runtime may read; the person's global one is linked
+ * into the managed home where Pi looks for it.
  */
 export function piOwnSetup(
   mode: PiSessionMode,
@@ -654,6 +684,7 @@ export function piArguments(
   ownResources: PiOwnResources = NO_OWN_RESOURCES,
   version?: string,
   blockedTools: ReadonlyArray<string> = [],
+  ownDiscovery = false,
 ): ReadonlyArray<string> {
   // Work and Code share one capability set at the thread's level, so a Work
   // session starts with Pi's bash as a Code session does.
@@ -675,14 +706,30 @@ export function piArguments(
   // tools plus these instead, with no allowlist, so their tools are offered
   // as in Pi itself; the bridge asks for each one by the thread's level. An
   // older or unknown release keeps the allowlist.
+  // With Pi's own discovery on, an extension its settings list or its
+  // built-in MCP client may register tools too, whatever the folder holds.
   const extensionTools =
-    own.extensions && ownResources.extensions.length > 0 && piTakesToolModifiers(version);
+    own.extensions &&
+    (ownDiscovery || ownResources.extensions.length > 0) &&
+    piTakesToolModifiers(version);
   const tools =
     selectedTools.length === 0
       ? ["--no-tools"]
       : extensionTools
         ? ["--tools", piToolModifiers(selectedTools).join(",")]
         : ["--tools", selectedTools.join(",")];
+  const session = [
+    "--session-dir",
+    sessionDirectory,
+    ...(resumePath === undefined ? ["--session-id", sessionId] : ["--session", resumePath]),
+  ];
+  if (ownDiscovery) {
+    // On the person's own home Pi discovers its extensions, skills, prompt
+    // templates, themes and context files itself, as in their terminal, so
+    // none is named by path. Octant's bridge still loads, and `--no-approve`
+    // still keeps a Project's own `.pi` files out.
+    return ["--mode", "rpc", "--no-approve", "--extension", bridgePath, ...tools, ...session];
+  }
   return [
     "--mode",
     "rpc",
@@ -700,9 +747,7 @@ export function piArguments(
     "--no-themes",
     ...(own.resources ? [] : ["--no-context-files"]),
     ...tools,
-    "--session-dir",
-    sessionDirectory,
-    ...(resumePath === undefined ? ["--session-id", sessionId] : ["--session", resumePath]),
+    ...session,
   ];
 }
 
@@ -977,6 +1022,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
           ownResources,
           input.version,
           input.blockedTools ?? [],
+          piRunsOnOwnHome(input),
         );
         const wall = piWallPolicy(input);
         if (platform === "win32") {
@@ -1258,6 +1304,7 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
               input.fullAccessSandbox === true ||
               input.sandboxPolicy !== undefined,
             input.ownChannels,
+            piRunsOnOwnHome(input),
           );
           // On Windows the launch is decided from its own authority before
           // anything runs; an admitted one reads its version unconfined, as

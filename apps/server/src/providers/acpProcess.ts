@@ -485,6 +485,7 @@ function writeManagedFiles(
     readonly managedHome: string;
     readonly executionPolicy: ProviderExecutionPolicy;
     readonly ownSubagents?: boolean;
+    readonly selfUpdate?: boolean;
   },
 ): Effect.Effect<void, ProviderFailure> {
   return Effect.try({
@@ -755,6 +756,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           managedHome,
           executionPolicy: input.executionPolicy,
           ownSubagents: acpSubagentsRun(input.mode, input.executionPolicy, input.nativeSetup),
+          selfUpdate: input.ownChannels?.selfUpdate === true,
         });
         const root =
           input.root === input.managedHome
@@ -1472,9 +1474,16 @@ export function sanitizeAcpEnvironment(
     readonly interactive?: boolean;
     /** The person's provider telemetry and self-update switches; read only outside Strict. */
     readonly ownChannels?: ProviderOwnChannels;
+    /**
+     * The launch runs on the person's own home (`acpRunsOnOwnHome`): the
+     * host's `HOME` and XDG folders stay, and the profile's managed ones are
+     * left out. Read only outside Strict.
+     */
+    readonly ownHome?: boolean;
   },
 ): NodeJS.ProcessEnv {
   const strict = input.strict !== false;
+  const ownHome = !strict && input.ownHome === true;
   const streamGuards = new Set(input.interactive === true ? PROTOCOL_STREAM_GUARDS : []);
   const released = releasedByNativeSetup(profile, input.nativeSetup, {
     executionPolicy: input.executionPolicy ?? "approval-gated",
@@ -1498,14 +1507,15 @@ export function sanitizeAcpEnvironment(
   );
   const passthrough = new Set(profile.process.passthroughVariables);
   // Outside Strict the agent gets the host's environment as in the person's
-  // own shell, less Octant's variables, other providers' keys and unrelated
-  // credentials the person did not let through; a standard host variable the
-  // profile deliberately leaves out (Kimi's HOME) stays out. The agent's own
-  // key comes from its account below, never from the host.
-  const withheld = new Set(HOST_PASSTHROUGH_VARIABLES.filter((name) => !passthrough.has(name)));
-  const credentialPassThrough = strict
-    ? []
-    : (launchOwnChannels(false, input.ownChannels).credentialPassThrough ?? []);
+  // own shell, less Octant's variables and other providers' keys; a standard
+  // host variable the profile deliberately leaves out (Kimi's HOME) stays
+  // out unless the launch runs on the person's own home. The agent's own key
+  // comes from its account below, never from the host.
+  const withheld = new Set(
+    HOST_PASSTHROUGH_VARIABLES.filter(
+      (name) => !passthrough.has(name) && !(ownHome && name === "HOME"),
+    ),
+  );
   const environment = strict
     ? Object.fromEntries(
         Object.entries(inherited).filter(
@@ -1513,20 +1523,66 @@ export function sanitizeAcpEnvironment(
         ),
       )
     : Object.fromEntries(
-        Object.entries(providerHostEnvironment(inherited, new Set(), credentialPassThrough)).filter(
-          ([key]) => !withheld.has(key),
-        ),
+        Object.entries(providerHostEnvironment(inherited)).filter(([key]) => !withheld.has(key)),
       );
+  const profileEnvironment = profile.process.environment({
+    managedHome: input.managedHome,
+    executionPolicy: input.executionPolicy ?? "approval-gated",
+    ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+    ...(input.googleCloud === undefined ? {} : { googleCloud: input.googleCloud }),
+  });
   return {
     ...environment,
-    ...profile.process.environment({
-      managedHome: input.managedHome,
-      executionPolicy: input.executionPolicy ?? "approval-gated",
-      ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
-      ...(input.googleCloud === undefined ? {} : { googleCloud: input.googleCloud }),
-    }),
+    ...(ownHome
+      ? Object.fromEntries(
+          Object.entries(profileEnvironment).filter(([name]) => !HOME_VARIABLES.has(name)),
+        )
+      : profileEnvironment),
     ...guards,
   };
+}
+
+/**
+ * The variables a profile points at its managed home. A launch on the
+ * person's own home leaves them as the host has them, so the agent's shell
+ * commands find `~/.gitconfig`, `~/.ssh` and `~/.npmrc` as the person's do; a
+ * profile's own variable for the agent's data folder (`GEMINI_CLI_HOME`,
+ * `COPILOT_HOME`, `VIBE_HOME` and the like) still applies.
+ */
+const HOME_VARIABLES: ReadonlySet<string> = new Set([
+  "HOME",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_STATE_HOME",
+]);
+
+/**
+ * Whether a launch keeps the person's own home instead of the profile's
+ * managed one: outside Strict, where the session carries the person's own
+ * setup (`acpLoadsAllOwnSetup`) and starts with no Octant sandbox (maintainer
+ * decision, 2026-11-25). The managed home holds an agent's own configuration
+ * back and is the one home folder Octant's sandbox opens for writing, so
+ * Strict, a session whose person turned its setup off, and every confined
+ * launch (Chat, Plan, a kept or chosen sandbox, a readiness check) keep it.
+ */
+export function acpRunsOnOwnHome(input: {
+  readonly profile: AcpProviderProfile;
+  readonly mode: AcpSessionMode;
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly strict?: boolean;
+  readonly purpose?: "probe" | "session";
+  readonly fullAccessSandbox?: boolean;
+  readonly sandboxPolicy?: SandboxPolicySelection;
+  readonly nativeSetup?: ProviderNativeSetup;
+}): boolean {
+  return (
+    input.sandboxPolicy === undefined &&
+    input.fullAccessSandbox !== true &&
+    input.purpose !== "probe" &&
+    acpLoadsAllOwnSetup({ strict: input.strict, setup: input.nativeSetup }) &&
+    (input.executionPolicy === "full-access" || acpStartsUnconfinedBelowFullAccess(input))
+  );
 }
 
 interface ManagedConnection {
@@ -1786,6 +1842,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ...(input.googleCloud === undefined ? {} : { googleCloud: input.googleCloud }),
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
           ...(environmentStrict ? {} : { strict: false, ownChannels }),
+          ...(acpRunsOnOwnHome({ ...input, profile }) ? { ownHome: true } : {}),
         });
         const wall = acpWallPolicy(input);
         const profileHosts = profile.runtimeHosts?.(input);

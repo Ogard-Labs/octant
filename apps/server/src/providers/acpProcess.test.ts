@@ -26,6 +26,7 @@ import {
   makeAcpConfinementLive,
   makeAcpProcessLive,
   probeAcpBinary,
+  acpRunsOnOwnHome,
   sanitizeAcpEnvironment,
   type AcpConfinementPort,
   type AcpProbeOptions,
@@ -246,14 +247,15 @@ afterAll(() => {
 });
 
 describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
-  it("outside Strict passes the host's environment less Octant's variables, other providers' keys, unrelated credentials and the host names the profile withholds, and lifts only channel guards once the person turns provider telemetry on", () => {
+  it("outside Strict passes the host's environment, the person's own tool credentials included, less Octant's variables, other providers' keys and the host names the profile withholds, and lifts only channel guards once the person turns provider telemetry on", () => {
     const host = {
       PATH: "/usr/bin",
       HOME: "/Users/test",
       HTTPS_PROXY: "http://proxy.invalid",
-      GH_TOKEN: "must-not-cross",
-      AWS_SECRET_ACCESS_KEY: "must-not-cross",
-      STRIPE_API_KEY: "must-not-cross",
+      GH_TOKEN: "gh-token",
+      NPM_TOKEN: "npm-token",
+      AWS_SECRET_ACCESS_KEY: "aws-secret",
+      SOME_SERVICE_API_KEY: "service-key",
       MISTRAL_API_KEY: "must-not-cross",
       ANTHROPIC_API_KEY: "must-not-cross",
       OCTANT_SECRET: "must-not-cross",
@@ -275,6 +277,10 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
     expect(environment).toMatchObject({
       PATH: "/usr/bin",
       HTTPS_PROXY: "http://proxy.invalid",
+      GH_TOKEN: "gh-token",
+      NPM_TOKEN: "npm-token",
+      AWS_SECRET_ACCESS_KEY: "aws-secret",
+      SOME_SERVICE_API_KEY: "service-key",
       ...Object.fromEntries(
         Object.entries(profile.process.guards).filter(([name]) => !channels.has(name)),
       ),
@@ -288,27 +294,57 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
     expect(JSON.stringify(environment)).not.toContain("must-not-cross");
   });
 
-  it("a provider launched outside Strict does not receive GH_TOKEN unless its pass-through list names it, and Strict ignores the list", () => {
-    const host = { PATH: "/usr/bin", GH_TOKEN: "gh-token", NPM_TOKEN: "npm-token" };
-    const base = { managedHome: "/private/tmp/octant-acp-home" };
-    const passThrough = {
-      telemetry: false,
-      selfUpdate: false,
-      credentialPassThrough: ["GH_TOKEN"],
+  it("under Strict passes none of the person's tool credentials, whatever the person's switches say", () => {
+    const environment = sanitizeAcpEnvironment(
+      profile,
+      {
+        PATH: "/usr/bin",
+        GH_TOKEN: "gh-token",
+        NPM_TOKEN: "npm-token",
+        AWS_SECRET_ACCESS_KEY: "aws-secret",
+        SOME_SERVICE_API_KEY: "service-key",
+      },
+      {
+        managedHome: "/private/tmp/octant-acp-home",
+        ownChannels: { telemetry: true, selfUpdate: true, credentialPassThrough: ["GH_TOKEN"] },
+      },
+    );
+    expect(environment.PATH).toBe("/usr/bin");
+    for (const name of ["GH_TOKEN", "NPM_TOKEN", "AWS_SECRET_ACCESS_KEY", "SOME_SERVICE_API_KEY"]) {
+      expect(environment[name], name).toBeUndefined();
+    }
+  });
+
+  it("keeps the person's own home outside Strict only for a launch that runs on it, and the managed home under Strict", () => {
+    const managedHome = "/private/tmp/octant-acp-home";
+    const host = {
+      PATH: "/usr/bin",
+      HOME: "/Users/test",
+      XDG_CONFIG_HOME: "/Users/test/.config",
+      XDG_DATA_HOME: "/Users/test/.local/share",
     };
-    expect(
-      sanitizeAcpEnvironment(profile, host, { ...base, strict: false }).GH_TOKEN,
-    ).toBeUndefined();
-    const named = sanitizeAcpEnvironment(profile, host, {
-      ...base,
+    const managed = profile.process.environment({ managedHome, executionPolicy: "approval-gated" });
+    const own = sanitizeAcpEnvironment(profile, host, {
+      managedHome,
       strict: false,
-      ownChannels: passThrough,
+      ownHome: true,
     });
-    expect(named.GH_TOKEN).toBe("gh-token");
-    expect(named.NPM_TOKEN).toBeUndefined();
-    expect(
-      sanitizeAcpEnvironment(profile, host, { ...base, ownChannels: passThrough }).GH_TOKEN,
-    ).toBeUndefined();
+    expect(own).toMatchObject(host);
+    for (const [name, value] of Object.entries(managed)) {
+      // Every other variable of the profile, the agent's own key and data
+      // folder among them, still applies.
+      if (name !== "HOME" && !name.startsWith("XDG_")) expect(own[name], name).toBe(value);
+      else if (!(name in host)) expect(own[name], name).toBeUndefined();
+    }
+    // Without it, and under Strict whatever the launch asks, the profile's
+    // managed home stays.
+    for (const environment of [
+      sanitizeAcpEnvironment(profile, host, { managedHome, strict: false }),
+      sanitizeAcpEnvironment(profile, host, { managedHome, ownHome: true }),
+    ]) {
+      expect(environment).toMatchObject(managed);
+      if (managed.HOME !== undefined) expect(environment.HOME).toBe(managedHome);
+    }
   });
 
   it("outside Strict keeps its telemetry guards when the person turned provider telemetry off and drops its self-update guards when the person lets providers update themselves", () => {
@@ -519,6 +555,46 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
 });
 
 describe("ACP process lifecycle", () => {
+  it("starts an agent outside Strict on the person's own home when the session carries their setup, and on the managed home when it does not", async () => {
+    const setup = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: true,
+    } as const;
+    const homeOf = async (nativeSetup: typeof setup | undefined) => {
+      const target = fixture(goose);
+      const processPort = port({
+        inheritedEnvironment: { PATH: process.env.PATH, HOME: "/Users/person" },
+      });
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            yield* processPort.start({
+              profile: goose,
+              binaryPath: target.binaryPath,
+              root: target.root,
+              managedHome: target.root,
+              mode: "code",
+              executionPolicy: "approval-gated",
+              strict: false,
+              ...(nativeSetup === undefined ? {} : { nativeSetup }),
+            });
+            yield* Effect.promise(() =>
+              expect.poll(() => spawnRecord(target.root) !== undefined).toBe(true),
+            );
+          }),
+        ),
+      );
+      return { home: spawnRecord(target.root)?.environment.HOME, managedHome: target.root };
+    };
+    expect((await homeOf(setup)).home).toBe("/Users/person");
+    const off = await homeOf(undefined);
+    expect(off.home).toBe(off.managedHome);
+  });
+
   it("reports a bounded classified diagnostic when the provider rejects startup arguments", async () => {
     const target = fixture(devin, "startup-argument-error");
     const result = await failureOf(
@@ -594,6 +670,19 @@ describe("ACP process lifecycle", () => {
       copilot: false,
       agents_standard: false,
     });
+  });
+
+  it("keeps Devin from updating itself unless the launch lets providers update themselves", () => {
+    const managedHome = "/private/tmp/octant-devin-home";
+    const configuration = (selfUpdate: boolean) =>
+      JSON.parse(
+        devin.process
+          .managedFiles({ managedHome, executionPolicy: "approval-gated", selfUpdate })
+          .find((file) => file.path === join(managedHome, ".config/devin/config.json"))?.content ??
+          "{}",
+      ) as Readonly<Record<string, unknown>>;
+    expect(configuration(false).auto_update).toBe(false);
+    expect(configuration(true)).not.toHaveProperty("auto_update");
   });
 
   it("does not send the unsupported session close method to Devin", () => {
@@ -3352,6 +3441,34 @@ describe("ACP agents running as themselves", () => {
         expect(release(everything, launch).releasedRootEntries, profile.kind).toContain(entry);
         expect(named.has(entry), `${profile.kind} ${entry}`).toBe(true);
       }
+    }
+  });
+
+  it("runs an agent on the person's own home in Work and Code outside Strict with their setup on, and on the managed home under Strict, with the setup off, or inside Octant's sandbox", () => {
+    for (const profile of Object.values(acpProviderProfiles)) {
+      if (profile.shellWithoutRequest === true) continue;
+      const open = {
+        profile,
+        mode: "code",
+        executionPolicy: "approval-gated",
+        strict: false,
+        nativeSetup: everything,
+      } as const;
+      expect(acpRunsOnOwnHome(open), profile.kind).toBe(true);
+      expect(acpRunsOnOwnHome({ ...open, mode: "work", executionPolicy: "full-access" })).toBe(
+        true,
+      );
+      expect(acpRunsOnOwnHome({ ...open, strict: true }), profile.kind).toBe(false);
+      expect(
+        acpRunsOnOwnHome({ profile, mode: "code", executionPolicy: "full-access" }),
+        profile.kind,
+      ).toBe(false);
+      const { nativeSetup: _off, ...setupOff } = open;
+      expect(acpRunsOnOwnHome(setupOff), profile.kind).toBe(false);
+      expect(acpRunsOnOwnHome({ ...open, executionPolicy: "plan" }), profile.kind).toBe(false);
+      expect(acpRunsOnOwnHome({ ...open, mode: "chat" }), profile.kind).toBe(false);
+      expect(acpRunsOnOwnHome({ ...open, fullAccessSandbox: true }), profile.kind).toBe(false);
+      expect(acpRunsOnOwnHome({ ...open, purpose: "probe" }), profile.kind).toBe(false);
     }
   });
 

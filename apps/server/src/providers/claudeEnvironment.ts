@@ -132,7 +132,7 @@ export function sanitizeClaudeEnvironment(
     // host's Claude account directories, with the telemetry and self-update
     // guards the person's provider switches keep.
     return {
-      ...openClaudeHostEnvironment(hostEnvironment, overrides.ownChannels),
+      ...openClaudeHostEnvironment(hostEnvironment),
       ...packagedSmokeObserverEnvironment(hostEnvironment),
       ...openLaunchTelemetryOptOut(hostEnvironment, overrides.ownChannels),
       ...openClaudeLaunchGuards(launchOwnChannels(false, overrides.ownChannels)),
