@@ -672,15 +672,37 @@ export const CodeBranchPrefix = Schema.String.pipe(
   }),
 );
 
+/**
+ * When the host removes a managed worktree folder. Every field is optional;
+ * absent is what the host did before the setting existed.
+ */
+export const CodeWorktreeCleanupSettings = Schema.Struct({
+  /** Remove a clean, delivered worktree when its thread is archived. Absent is on. */
+  onArchive: Schema.optional(Schema.Boolean),
+  /**
+   * Also remove, from a thread still open, a clean worktree whose commit is
+   * contained in another local branch. The checkout can be restored. Absent
+   * is off.
+   */
+  whenMerged: Schema.optional(Schema.Boolean),
+  /**
+   * Remove a clean worktree nobody has worked in for this many days, from an
+   * open or archived thread. The checkout can be restored. Absent is off.
+   */
+  inactivityDays: Schema.optional(Schema.Int.pipe(Schema.between(1, 365))),
+}).annotations(strict);
+export type CodeWorktreeCleanupSettings = typeof CodeWorktreeCleanupSettings.Type;
+
 export const CodeWorktreeNaming = Schema.Literal("short-id", "prompt");
 export type CodeWorktreeNaming = typeof CodeWorktreeNaming.Type;
 
-/** Settings › Code › Worktrees: how new worktrees are named. */
+/** Settings › Code › Worktrees: how new worktrees are named and when they are cleaned up. */
 export const CodeWorktreeSettings = Schema.Struct({
   /** Absent is `octant/`. */
   branchPrefix: Schema.optional(CodeBranchPrefix),
   /** Absent is `short-id`: the prefix and a short id, with no words from the prompt. */
   branchNaming: Schema.optional(CodeWorktreeNaming),
+  cleanup: Schema.optional(CodeWorktreeCleanupSettings),
 }).annotations(strict);
 export type CodeWorktreeSettings = typeof CodeWorktreeSettings.Type;
 

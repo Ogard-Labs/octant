@@ -1341,7 +1341,7 @@ describe("CodeService commands", () => {
     expect(back.settings.windowsTerminalShell).toBeUndefined();
   });
 
-  it("stores worktree naming choices, keeps them across later default changes, and stores nothing for the defaults", async () => {
+  it("stores worktree naming and cleanup choices, keeps them across later default changes, and stores nothing for the defaults", async () => {
     const fixture = serviceFixture();
     const defaults = {
       kind: "update-code-settings",
@@ -1351,6 +1351,7 @@ describe("CodeService commands", () => {
     const worktrees = {
       branchPrefix: "henrik/",
       branchNaming: "prompt",
+      cleanup: { whenMerged: true, inactivityDays: 30 },
     } as const;
     const chosen = await fixture.service.execute(ids.window, {
       ...defaults,

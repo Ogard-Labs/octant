@@ -1,6 +1,5 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { decodeHostAnswer } from "./hostAnswer";
 import * as codeContracts from "./code";
 import { decodeHostAnswer } from "./hostAnswer";
 import {
@@ -173,6 +172,7 @@ describe("Code aggregate contracts", () => {
     const worktrees = {
       branchPrefix: "feat/team-a/",
       branchNaming: "prompt",
+      cleanup: { onArchive: false, whenMerged: true, inactivityDays: 14 },
     } as const;
     expect(decodeCodeSettings({ ...settings, worktrees })).toMatchObject({ worktrees });
     for (const branchPrefix of [
@@ -188,6 +188,11 @@ describe("Code aggregate contracts", () => {
       expect(
         () => decodeCodeSettings({ ...settings, worktrees: { branchPrefix } }),
         branchPrefix,
+      ).toThrow();
+    }
+    for (const inactivityDays of [0, 366, 1.5]) {
+      expect(() =>
+        decodeCodeSettings({ ...settings, worktrees: { cleanup: { inactivityDays } } }),
       ).toThrow();
     }
   });

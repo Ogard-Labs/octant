@@ -849,6 +849,30 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "worktree branch name prompt words slug short id naming suggest",
         },
         {
+          id: settingId("code-worktree-cleanup-archive"),
+          label: "Clean up when a thread is archived",
+          scope: "app",
+          keywords: "worktree cleanup archive remove folder delete disk space delivered",
+        },
+        {
+          id: settingId("code-worktree-cleanup-merged"),
+          label: "Clean up merged worktrees",
+          scope: "app",
+          keywords: "worktree cleanup merged remove folder disk space restore open thread",
+        },
+        {
+          id: settingId("code-worktree-cleanup-inactivity"),
+          label: "Clean up after inactivity",
+          scope: "app",
+          keywords: "worktree cleanup inactive inactivity days old idle remove folder restore",
+        },
+        {
+          id: settingId("code-worktree-cleanup-days"),
+          label: "Days of inactivity",
+          scope: "app",
+          keywords: "worktree cleanup inactivity days idle period",
+        },
+        {
           id: settingId("code-editor-executable"),
           label: "External editor",
           scope: "app",

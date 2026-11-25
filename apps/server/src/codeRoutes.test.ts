@@ -650,7 +650,7 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledTimes(4);
   });
 
-  it("lets a device the host's own person paired change Strict, restart continuation, worktree naming, branch suggestions and account choices, as that device, and refuses any other device", async () => {
+  it("lets a device the host's own person paired change Strict, restart continuation, worktree naming and cleanup, branch suggestions and account choices, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
@@ -688,7 +688,7 @@ describe("Code routes", () => {
         expectedVersion: 1,
         defaultExecutionPolicy: "approval-gated",
         defaultPermissionPersistence: "current-session",
-        worktrees: { branchPrefix: "henrik/" },
+        worktrees: { branchPrefix: "henrik/", cleanup: { inactivityDays: 30 } },
       },
       {
         kind: "suggest-code-worktree-branch",

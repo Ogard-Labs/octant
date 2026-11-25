@@ -66,11 +66,17 @@ describe("CodeSettingsView", () => {
     );
   });
 
-  it("shows today's worktree behaviour for a default install and saves a prefix and naming choice whole", async () => {
+  it("shows today's worktree behaviour for a default install and saves a prefix, naming and cleanup choices whole", async () => {
     const update = vi.fn(async (_input: CodeSettingsUpdate) => true);
     render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
     const user = userEvent.setup();
     expect(screen.getByRole("textbox", { name: "Branch prefix" })).toHaveValue("octant/");
+    expect(
+      screen.getByRole("switch", { name: "Clean up when a thread is archived" }),
+    ).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Clean up merged worktrees" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Clean up after inactivity" })).not.toBeChecked();
+    expect(screen.queryByRole("textbox", { name: "Days of inactivity" })).toBeNull();
 
     const prefix = screen.getByRole("textbox", { name: "Branch prefix" });
     await user.clear(prefix);
@@ -78,6 +84,11 @@ describe("CodeSettingsView", () => {
     await user.tab();
     expect(update).toHaveBeenLastCalledWith(
       expect.objectContaining({ worktrees: { branchPrefix: "henrik/" } }),
+    );
+
+    await user.click(screen.getByRole("switch", { name: "Clean up after inactivity" }));
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ worktrees: { cleanup: { inactivityDays: 30 } } }),
     );
   });
 

@@ -1038,7 +1038,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               {
                 category: "unauthorized",
                 message:
-                  "Only you, from a window or a device you paired, can change worktree naming.",
+                  "Only you, from a window or a device you paired, can change worktree naming and cleanup.",
               },
               403,
               origin,
