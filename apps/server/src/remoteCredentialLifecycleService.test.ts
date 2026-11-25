@@ -282,6 +282,7 @@ describe("RemoteCredentialLifecycleService", () => {
 
   it("rotates one generation, invalidates its sessions, audits redacted facts, and is idempotent", () => {
     const { connection, journal, runtime } = createFixture();
+    const replacementKey = testKey("replacement-public-key");
     const service = new RemoteCredentialLifecycleService({
       connection,
       journal,
@@ -303,8 +304,8 @@ describe("RemoteCredentialLifecycleService", () => {
       commandId: "99999999-9999-4999-8999-999999999999",
       hostId,
       deviceId,
-      newDeviceKeyFingerprint: testKey("replacement-public-key").fingerprint,
-      newDevicePublicKey: testKey("replacement-public-key").publicPem,
+      newDeviceKeyFingerprint: replacementKey.fingerprint,
+      newDevicePublicKey: replacementKey.publicPem,
     });
     expect(first).toMatchObject({
       result: "applied",
@@ -312,7 +313,8 @@ describe("RemoteCredentialLifecycleService", () => {
     });
     expect(readDeviceRegistration(connection, deviceId)).toMatchObject({
       credential_generation: 2,
-      device_key_fingerprint: testKey("replacement-public-key").fingerprint,
+      device_key_fingerprint: replacementKey.fingerprint,
+      device_public_key: replacementKey.publicPem,
       state: "active",
     });
     expect(readRemoteSessionInvalidation(connection, sessionIdDigest)).toMatchObject({
@@ -321,19 +323,24 @@ describe("RemoteCredentialLifecycleService", () => {
     });
     const journalHead = journal.headSequence();
     const auditRows = connection.prepare("SELECT * FROM remote_security_audit_projection").all();
-    expect(JSON.stringify(auditRows)).not.toMatch(
-      /private|proof|cookie|csrf|authorization|\/Users|192\.168/i,
+    const sensitiveDetails = /private|proof|cookie|csrf|authorization|\/Users|192\.168/i;
+    expect(JSON.stringify(auditRows)).not.toMatch(sensitiveDetails);
+    // A public key's base64 can happen to contain one of the redaction keywords.
+    const journalJson = JSON.stringify(
+      journal.replay({ afterSequence: 0, limit: 100 } as never),
+      (field, value: unknown) =>
+        field === "devicePublicKey" && value === replacementKey.publicPem
+          ? "[public device key]"
+          : value,
     );
-    expect(JSON.stringify(journal.replay({ afterSequence: 0, limit: 100 } as never))).not.toMatch(
-      /private|proof|cookie|csrf|authorization|\/Users|192\.168/i,
-    );
+    expect(journalJson).not.toMatch(sensitiveDetails);
 
     const second = service.rotateDevice({
       commandId: "99999999-9999-4999-8999-999999999999",
       hostId,
       deviceId,
-      newDeviceKeyFingerprint: testKey("replacement-public-key").fingerprint,
-      newDevicePublicKey: testKey("replacement-public-key").publicPem,
+      newDeviceKeyFingerprint: replacementKey.fingerprint,
+      newDevicePublicKey: replacementKey.publicPem,
     });
     expect(second.result).toBe("already-applied");
     expect(journal.headSequence()).toBe(journalHead);
@@ -346,7 +353,7 @@ describe("RemoteCredentialLifecycleService", () => {
     });
     expect(readDeviceRegistration(connection, deviceId)).toMatchObject({
       credential_generation: 2,
-      device_key_fingerprint: testKey("replacement-public-key").fingerprint,
+      device_key_fingerprint: replacementKey.fingerprint,
     });
     expect(readRemoteSessionInvalidation(connection, sessionIdDigest)).toMatchObject({
       state: "invalidated",
