@@ -191,6 +191,9 @@ open in a thread's Browser pane. The pane offers it back (maintainer decision,
   after two minutes; the open that names the page then takes it again, or, when
   another window or device holds it now, says so and keeps the address the
   person typed.
+  A first load that failed and then came back through the desktop's own Reload is
+  not seen by the host as a navigation, so the old record stays: closing that page
+  offers the profile again, and Dismiss ends it.
 - The offer shows in the thread's Browser wherever it appears: the pane, and a
   dock tab whose saved page is gone or that was just added. A tab beside another
   tab's live page shows no offer and does not take that page.
