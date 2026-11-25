@@ -8,21 +8,17 @@ import {
   touchedIssuePlace,
   touchedIssueReference,
 } from "../environment/touchedIssues";
-import { readableModelId } from "../providers/providerModelLabel";
-import type { ChatThreadNavigationItem } from "../shell/navigationModel";
+import { liveStepLine } from "../home/liveStepLine";
+import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { threadRowActivity, type ChatThreadNavigationItem } from "../shell/navigationModel";
 import { describePullRequestSummary } from "../threadBoard/ThreadBoardPullRequestSummaries";
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
-import {
-  CircleCheck,
-  CircleDot,
-  Cpu,
-  ExternalLink,
-  FolderGit2,
-  GitBranch,
-  GitFork,
-} from "../ui/icons";
-import type { IconComponent } from "../ui/icons";
+import { CircleCheck, CircleDot, Cpu, ExternalLink, GitBranch, GitFork } from "../ui/icons";
+import type { ReactNode } from "react";
+import { ProjectMark } from "./ProjectMark";
+import { threadEngine } from "./threadEngine";
+import { threadRowState } from "./threadRowState";
 import type { ThreadRowActions } from "./ThreadRowMenu";
 import { pullRequestKey } from "./threadRowPullRequests";
 
@@ -56,11 +52,48 @@ function threadRowAge(updatedAt: string | undefined): string | undefined {
   return date.toLocaleDateString();
 }
 
-/** One icon-and-label line of the info card. */
+/** One mark-and-label line of the info card. */
 interface ThreadRowFact {
-  readonly icon: IconComponent;
+  readonly mark: ReactNode;
   readonly key: string;
   readonly label: string;
+}
+
+/**
+ * The thread's live state in the words its row uses, with the running turn's
+ * step or what it waits on. A thread that is neither working nor waiting on the
+ * person has none: unread and a snooze's end are markers of their own above.
+ */
+function threadLiveFact(thread: ChatThreadNavigationItem):
+  | {
+      readonly mark: ReactNode;
+      readonly status: "working" | "attention";
+      readonly label: string;
+      readonly step?: string;
+    }
+  | undefined {
+  const { state } = threadRowState({
+    activity: threadRowActivity(thread),
+    unread: false,
+    woke: false,
+    startedAt: thread.turnStartedAt,
+  });
+  if (state === undefined || (state.status !== "working" && state.status !== "attention")) {
+    return undefined;
+  }
+  const step =
+    thread.liveStep !== undefined
+      ? liveStepLine(thread.liveStep).text
+      : thread.awaitingKind !== undefined
+        ? liveStepLine({ kind: "waiting", reason: thread.awaitingKind }).text
+        : undefined;
+  const Icon = state.icon;
+  return {
+    mark: Icon === undefined ? null : <Icon aria-hidden="true" size={14} />,
+    status: state.status,
+    label: state.text,
+    ...(step === undefined ? {} : { step }),
+  };
 }
 
 /**
@@ -75,32 +108,50 @@ function threadRowFacts(props: {
 }): ReadonlyArray<ThreadRowFact> {
   const facts: ThreadRowFact[] = [];
   if (props.projectName !== undefined) {
-    facts.push({ icon: FolderGit2, key: "project", label: props.projectName });
+    facts.push({
+      mark: (
+        <ProjectMark
+          name={props.projectName}
+          {...(props.thread.projectId === undefined ? {} : { projectId: props.thread.projectId })}
+        />
+      ),
+      key: "project",
+      label: props.projectName,
+    });
   }
   if (props.thread.checkoutChip !== undefined) {
-    facts.push({ icon: GitBranch, key: "checkout", label: props.thread.checkoutChip.label });
+    facts.push({
+      mark: <GitBranch aria-hidden="true" size={14} />,
+      key: "checkout",
+      label: props.thread.checkoutChip.label,
+    });
   }
-  // The model rides beside its provider ("Claude · Opus 5.5"). The card has
-  // no model catalogue to ask, so it reads the id the way the composer does
-  // for a model no catalogue described, without repeating the provider's name.
-  const providerName = props.thread.provider?.displayName;
-  const readable =
-    props.thread.modelId === undefined ? undefined : readableModelId(props.thread.modelId);
-  const model =
-    readable !== undefined && providerName !== undefined && readable.startsWith(`${providerName} `)
-      ? readable.slice(providerName.length + 1)
-      : readable;
-  const engine = [providerName, model].filter(
-    (part): part is string => part !== undefined && part !== "",
-  );
-  if (engine.length > 0) {
-    facts.push({ icon: Cpu, key: "provider", label: engine.join(" · ") });
+  const engine = threadEngine(props.thread);
+  if (engine !== undefined) {
+    facts.push({
+      mark:
+        props.thread.provider === undefined ? (
+          <Cpu aria-hidden="true" size={14} />
+        ) : (
+          <ProviderGlyph
+            displayName={props.thread.provider.displayName}
+            driverKind={props.thread.provider.driverKind}
+            size={14}
+          />
+        ),
+      key: "provider",
+      label: engine,
+    });
   }
   if (props.lineageParentTitle !== undefined) {
-    facts.push({ icon: GitFork, key: "lineage", label: `Forked from ${props.lineageParentTitle}` });
+    facts.push({
+      mark: <GitFork aria-hidden="true" size={14} />,
+      key: "lineage",
+      label: `Forked from ${props.lineageParentTitle}`,
+    });
   } else if (props.thread.lineageParentThreadId !== undefined) {
     facts.push({
-      icon: GitFork,
+      mark: <GitFork aria-hidden="true" size={14} />,
       key: "lineage",
       label: "Forked from a thread no longer available",
     });
@@ -311,6 +362,7 @@ export function ThreadRowInfoCard(props: {
 }) {
   const states = threadRowStates(props.thread);
   const age = threadRowAge(props.thread.updatedAt);
+  const live = threadLiveFact(props.thread);
   const facts = threadRowFacts({
     ...(props.lineageParentTitle === undefined
       ? {}
@@ -333,11 +385,22 @@ export function ThreadRowInfoCard(props: {
           ))}
         </span>
       )}
-      {facts.length === 0 ? null : (
+      {facts.length === 0 && live === undefined ? null : (
         <span className="thread-row-info-card__facts">
+          {live === undefined ? null : (
+            <span className="thread-row-info-card__fact" data-live={live.status}>
+              <span className="thread-row-info-card__mark">{live.mark}</span>
+              <span className="thread-row-info-card__fact-label">
+                {live.label}
+                {live.step === undefined ? null : (
+                  <span className="thread-row-info-card__step">{` · ${live.step}`}</span>
+                )}
+              </span>
+            </span>
+          )}
           {facts.map((fact) => (
             <span className="thread-row-info-card__fact" key={fact.key}>
-              <fact.icon aria-hidden="true" size={14} />
+              <span className="thread-row-info-card__mark">{fact.mark}</span>
               <span className="thread-row-info-card__fact-label">{fact.label}</span>
             </span>
           ))}

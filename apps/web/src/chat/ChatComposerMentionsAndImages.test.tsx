@@ -213,11 +213,13 @@ describe("ChatComposer thread mentions", () => {
     expect(onSend).toHaveBeenCalledWith("#nothing");
   });
 
-  it("renders a chip as a read-only receipt with a removable control", async () => {
+  it("shows a mention as one inline chip whose card says it is read-only and removes it with its text", async () => {
     const user = userEvent.setup();
     const onRemoveChip = vi.fn();
+    const onDraftChange = vi.fn();
     renderComposer({
-      draft: "#[Release notes] ",
+      draft: "See #[Release notes] first",
+      onDraftChange,
       threadMentions: mentions({
         chips: [
           {
@@ -231,16 +233,22 @@ describe("ChatComposer thread mentions", () => {
       }),
     });
 
-    const list = screen.getByRole("list", { name: "Mentioned threads" });
-    expect(list).toHaveTextContent("Work · Launch · Read-only");
-    const remove = screen.getByRole("button", { name: "Remove Release notes thread mention" });
-    remove.focus();
+    const chip = await screen.findByRole("button", {
+      name: "Thread: Release notes, Work, Launch, Read-only",
+    });
+    expect(screen.getByRole("textbox", { name: "Message" })).toContainElement(chip);
+    expect(screen.getByRole("textbox", { name: "Message" })).not.toHaveTextContent("#[");
+    chip.focus();
     await user.keyboard("{Enter}");
+    const card = await screen.findByRole("dialog", { name: "Thread details" });
+    expect(card).toHaveTextContent("This turn reads up to its last 12 messages, read-only.");
+    await user.click(within(card).getByRole("button", { name: "Remove" }));
 
     expect(onRemoveChip).toHaveBeenCalledWith("thread-1");
+    expect(onDraftChange).toHaveBeenLastCalledWith("See first", 4);
   });
 
-  it("labels an explicitly mentioned Chat as able to receive a message", () => {
+  it("labels an explicitly mentioned Chat as able to receive a message", async () => {
     renderComposer({
       draft: "#[Target Chat] ",
       threadMentions: mentions({
@@ -256,12 +264,15 @@ describe("ChatComposer thread mentions", () => {
       }),
     });
 
-    expect(screen.getByRole("list", { name: "Mentioned threads" })).toHaveTextContent(
-      "Chat · Recents · Can receive a message",
-    );
+    expect(
+      await screen.findByRole("button", {
+        name: "Thread: Target Chat, Chat, Recents, Can receive a message",
+      }),
+    ).toBeVisible();
   });
 
-  it("shows an unavailable chip without a Side Chat affordance", () => {
+  it("shows why a chip is unavailable and no fact about its thread", async () => {
+    const user = userEvent.setup();
     renderComposer({
       draft: "#[Secret] ",
       threadMentions: mentions({
@@ -271,17 +282,24 @@ describe("ChatComposer thread mentions", () => {
             title: "Secret",
             mode: "chat",
             placementLabel: "Unfiled",
-            unavailableReason: "You cannot open this thread.",
+            unavailableReason: "you cannot open this thread",
           },
         ],
         onOpenSideChat: vi.fn(),
       }),
     });
 
-    expect(screen.getByRole("list", { name: "Mentioned threads" })).toHaveTextContent(
-      "Unavailable: You cannot open this thread.",
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Thread: Secret, Unavailable: you cannot open this thread",
+      }),
     );
-    expect(screen.getByRole("button", { name: "Open Side Chat about Secret" })).toBeDisabled();
+    const card = await screen.findByRole("dialog", { name: "Thread details" });
+    expect(card).toHaveTextContent(
+      "Unavailable: you cannot open this thread. Nothing from it is included.",
+    );
+    expect(card).not.toHaveTextContent("Unfiled");
+    expect(within(card).getByRole("button", { name: "Side Chat" })).toBeDisabled();
   });
 
   it("offers to reopen an existing Side Chat sidecar from a chip", async () => {
@@ -303,12 +321,10 @@ describe("ChatComposer thread mentions", () => {
       }),
     });
 
-    await user.click(screen.getByRole("button", { name: "Open Side Chat about Release notes" }));
+    await user.click(await screen.findByRole("button", { name: /^Thread: Release notes/ }));
+    await user.click(await screen.findByRole("button", { name: "Reopen Side Chat" }));
 
     expect(onOpenSideChat).toHaveBeenCalledWith("thread-1");
-    expect(
-      screen.getByRole("button", { name: "Open Side Chat about Release notes" }),
-    ).toHaveTextContent("Reopen Side Chat");
   });
 });
 

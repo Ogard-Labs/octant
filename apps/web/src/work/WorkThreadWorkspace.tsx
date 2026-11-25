@@ -163,11 +163,7 @@ import {
 } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
-import {
-  ThreadMentionChips,
-  ThreadMentionTypeahead,
-  useThreadMentionTypeahead,
-} from "../chat/ThreadMentionPicker";
+import { ThreadMentionTypeahead, useThreadMentionTypeahead } from "../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../chat/useThreadMentions";
 import { useComposerThreadDropRegistration } from "../chat/composerThreadDrop";
 import { clipboardHasImage } from "../chat/composerImagePaste";
@@ -3601,18 +3597,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   ))}
                 </ul>
               ) : null}
-              <ThreadMentionChips
-                chips={threadMentions.chips}
-                onRemove={(mentionedThreadId) =>
-                  threadMentions.composer?.onRemoveChip(mentionedThreadId)
-                }
-              />
               <TrackerReferenceComposerHints draft={prompt} />
               <WorkImageAttachmentChips images={images} withMessage={false} />
             </>
           }
           input={
             <ComposerInput
+              inlineChips={mention.inlineChips}
               renderModelChip={atMenu.renderModelChip}
               aria-label="Work prompt"
               aria-autocomplete="list"

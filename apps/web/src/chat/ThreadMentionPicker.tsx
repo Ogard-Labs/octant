@@ -1,13 +1,27 @@
-import type { MentionableThreadId, ThreadMentionCandidate } from "@octant/contracts";
+import {
+  MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES,
+  type MentionableThreadId,
+  type ThreadMentionCandidate,
+} from "@octant/contracts";
 import {
   applyThreadMentionChip,
+  findThreadMentionTags,
   parseThreadMentionToken,
   type ThreadMentionToken,
 } from "@octant/domain";
-import { Hash, MessagesSquare, X } from "../ui/icons";
+import { Hash } from "../ui/icons";
 import { useState, type KeyboardEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import type { ComposerInputElement } from "../composer/ComposerInput";
+import type { ComposerInlineChips, ComposerInputElement } from "../composer/ComposerInput";
+import { ProjectMark } from "../projects/ProjectMark";
+import { threadModelName } from "../projects/threadEngine";
+import { threadRowShortAge } from "../projects/threadRowShortAge";
+import { threadRowState } from "../projects/threadRowState";
+import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { threadRowActivity } from "../shell/navigationModel";
+import { LazyThreadReferenceChip } from "../threadReferences/LazyThreadReferenceChip";
+import { threadModeLabel } from "../threadReferences/threadModeLabel";
+import { useThreadReferences } from "../threadReferences/ThreadReferences";
 
 /**
  * A `#thread` chip a composer is currently carrying. The chip is a structured
@@ -55,6 +69,8 @@ export interface ThreadMentionTypeaheadController {
   /** Returns `true` when the typeahead consumed the key. */
   readonly handleKeyDown: (event: KeyboardEvent<ComposerInputElement>) => boolean;
   readonly choose: (candidate: ThreadMentionCandidate) => void;
+  /** The mentioned threads as chips in the prompt's own text. */
+  readonly inlineChips: ComposerInlineChips | undefined;
 }
 
 /**
@@ -134,7 +150,86 @@ export function useThreadMentionTypeahead(input: {
     return false;
   }
 
-  return { open, activeIndex, activeCandidate, setActiveIndex, sync, handleKeyDown, choose };
+  // The mention and the text that shows it leave together: text left behind
+  // would read as a mention the turn no longer carries.
+  function remove(chip: ThreadMentionChip) {
+    if (mentions === undefined) return;
+    let draft = input.draft;
+    let caretIndex = draft.length;
+    for (const tag of findThreadMentionTags(draft, mentions.chips).toReversed()) {
+      if (String(tag.chip.threadId) !== String(chip.threadId)) continue;
+      // A chip is written with one space after it; taking the chip takes that
+      // space where it would leave two, or one at the start of the draft.
+      const opensWithSpace = tag.start === 0 || /\s/.test(draft[tag.start - 1] ?? "");
+      const end = opensWithSpace && draft[tag.end] === " " ? tag.end + 1 : tag.end;
+      draft = `${draft.slice(0, tag.start)}${draft.slice(end)}`;
+      caretIndex = tag.start;
+    }
+    mentions.onRemoveChip(chip.threadId);
+    input.onDraftChange(draft, caretIndex);
+    queueMicrotask(() => {
+      const element = input.textarea();
+      if (element === null) return;
+      element.focus();
+      element.setSelectionRange(caretIndex, caretIndex);
+    });
+  }
+
+  const inlineChips: ComposerInlineChips | undefined =
+    mentions === undefined
+      ? undefined
+      : {
+          find: (value) =>
+            findThreadMentionTags(value, mentions.chips).map((tag) => ({
+              start: tag.start,
+              end: tag.end,
+              text: tag.text,
+              id: String(tag.chip.threadId),
+            })),
+          render: (id) => {
+            const chip = mentions.chips.find((each) => String(each.threadId) === id);
+            if (chip === undefined) return null;
+            const canReceive = mentions.dialogueEnabled === true && chip.mode === "chat";
+            const openSideChat = mentions.onOpenSideChat;
+            return (
+              <LazyThreadReferenceChip
+                access={canReceive ? "Can receive a message" : "Read-only"}
+                actions={[
+                  ...(openSideChat === undefined
+                    ? []
+                    : [
+                        {
+                          label: chip.hasSideChat === true ? "Reopen Side Chat" : "Side Chat",
+                          onSelect: () => openSideChat(chip.threadId),
+                          disabled: chip.unavailableReason !== undefined,
+                        },
+                      ]),
+                  { label: "Remove", onSelect: () => remove(chip) },
+                ]}
+                fallback={{ mode: chip.mode, placement: chip.placementLabel }}
+                receipt={`This turn reads up to its last ${String(
+                  MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES,
+                )} messages${canReceive ? ", and it can receive a message." : ", read-only."}`}
+                threadId={id}
+                title={chip.title}
+                {...(chip.unavailableReason === undefined
+                  ? {}
+                  : { unavailableReason: chip.unavailableReason })}
+              />
+            );
+          },
+        };
+
+  return {
+    open,
+    activeIndex,
+    activeCandidate,
+    setActiveIndex,
+    sync,
+    handleKeyDown,
+    choose,
+    inlineChips,
+  };
 }
 
 /**
@@ -181,11 +276,7 @@ export function ThreadMentionTypeahead(props: {
                 type="button"
                 variant={index === props.activeIndex ? "secondary" : "ghost"}
               >
-                <Hash aria-hidden="true" size={12} />
-                <span>{candidate.title}</span>
-                <span className="thread-mention__meta">
-                  {`${threadModeLabel(candidate.mode)} · ${threadPlacementLabel(candidate.placement)}`}
-                </span>
+                <ThreadMentionOption candidate={candidate} />
               </OctantButton>
             </li>
           ))}
@@ -196,67 +287,58 @@ export function ThreadMentionTypeahead(props: {
 }
 
 /**
- * The chips the current turn will carry. Each chip states, in words, that the
- * mention is read-only, and reports the host's refusal instead of quietly
- * dropping a selection the user still sees in the draft.
+ * One hit, with the facts this window already lists about its thread: the
+ * Project's mark, what it runs, and whether it works or waits on the person. A
+ * thread the window does not list shows what the host's search said.
  */
-export function ThreadMentionChips(props: {
-  readonly chips: ReadonlyArray<ThreadMentionChip>;
-  readonly dialogueEnabled?: boolean;
-  readonly disabled?: boolean;
-  readonly onRemove: (threadId: MentionableThreadId) => void;
-  readonly onOpenSideChat?: (threadId: MentionableThreadId) => void;
-}) {
-  if (props.chips.length === 0) return null;
+function ThreadMentionOption(props: { readonly candidate: ThreadMentionCandidate }) {
+  const { candidate } = props;
+  const reference = useThreadReferences().find(String(candidate.threadId));
+  const thread = reference?.thread;
+  const state =
+    thread === undefined
+      ? undefined
+      : threadRowState({
+          activity: threadRowActivity(thread),
+          unread: false,
+          woke: false,
+          startedAt: thread.turnStartedAt,
+        }).state;
+  const model = thread === undefined ? undefined : threadModelName(thread);
+  const age = threadRowShortAge(candidate.updatedAt);
   return (
-    <ul aria-label="Mentioned threads" className="thread-mention__chips">
-      {props.chips.map((chip) => (
-        <li className="chip thread-mention__chip" key={String(chip.threadId)}>
+    <>
+      {reference?.projectName === undefined || thread?.projectId === undefined ? (
+        <span className="thread-mention__mark">
           <Hash aria-hidden="true" size={12} />
-          <span>{chip.title}</span>
-          <span className="thread-mention__chip-receipt">
-            {chip.unavailableReason === undefined
-              ? `${threadModeLabel(chip.mode)} · ${chip.placementLabel} · ${
-                  props.dialogueEnabled && chip.mode === "chat"
-                    ? "Can receive a message"
-                    : "Read-only"
-                }`
-              : `Unavailable: ${chip.unavailableReason}`}
+        </span>
+      ) : (
+        <ProjectMark name={reference.projectName} projectId={thread.projectId} />
+      )}
+      <span className="thread-mention__title">{candidate.title}</span>
+      <span className="thread-mention__meta">
+        {state === undefined ? null : (
+          <span className="thread-mention__state" data-status={state.status}>
+            {state.text}
           </span>
-          {props.onOpenSideChat === undefined ? null : (
-            <OctantButton
-              aria-label={`Open Side Chat about ${chip.title}`}
-              disabled={props.disabled === true || chip.unavailableReason !== undefined}
-              onClick={() => props.onOpenSideChat?.(chip.threadId)}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              <MessagesSquare aria-hidden="true" size={12} />
-              <span>{chip.hasSideChat === true ? "Reopen Side Chat" : "Side Chat"}</span>
-            </OctantButton>
-          )}
-          <OctantButton
-            aria-label={`Remove ${chip.title} thread mention`}
-            className="chip-x window-no-drag"
-            disabled={props.disabled === true}
-            onClick={() => props.onRemove(chip.threadId)}
-            type="button"
-            variant="bare"
-          >
-            <X aria-hidden="true" size={12} />
-          </OctantButton>
-        </li>
-      ))}
-    </ul>
+        )}
+        {thread?.provider === undefined ? null : (
+          <span className="thread-mention__engine">
+            <ProviderGlyph
+              displayName={thread.provider.displayName}
+              driverKind={thread.provider.driverKind}
+              size={12}
+            />
+            {model ?? thread.provider.displayName}
+          </span>
+        )}
+        <span>
+          {`${threadModeLabel(candidate.mode)} · ${threadPlacementLabel(candidate.placement)}`}
+        </span>
+        {state !== undefined || age === undefined ? null : <span>{age}</span>}
+      </span>
+    </>
   );
-}
-
-/** Words, never colour alone, for the mode a mentioned thread belongs to. */
-export function threadModeLabel(mode: "chat" | "work" | "code"): string {
-  if (mode === "work") return "Work";
-  if (mode === "code") return "Code";
-  return "Chat";
 }
 
 /** Words for where the host says a mentionable thread is filed. */

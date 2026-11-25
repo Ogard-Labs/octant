@@ -145,14 +145,30 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
   draftRef.current = draft;
   const chipsRef = useRef(chips);
   chipsRef.current = chips;
+  // What an edit took out of this draft, so an undo or a cut and paste that
+  // brings a chip's text back brings its thread back with it.
+  const droppedRef = useRef<ReadonlyArray<ChatComposerThreadMentionChip>>([]);
+  const reconciledDraftRef = useRef(draft);
   useEffect(() => {
-    setChips((current) => {
-      const kept = reconcileThreadMentionChips(draft, current);
-      return kept.length === current.length ? current : kept;
+    droppedRef.current = [];
+  }, [readerThreadId]);
+  useEffect(() => {
+    const before = reconciledDraftRef.current;
+    reconciledDraftRef.current = draft;
+    const current = chipsRef.current;
+    const kept = reconcileThreadMentionChips(draft, current, {
+      draft: before,
+      dropped: droppedRef.current,
     });
+    if (kept.length === current.length && kept.every((chip, index) => chip === current[index])) {
+      return;
+    }
+    droppedRef.current = [...droppedRef.current, ...current].filter((chip) => !kept.includes(chip));
+    setChips(kept);
   }, [draft]);
 
   const clear = useCallback(() => {
+    droppedRef.current = [];
     setChips([]);
     setCandidates([]);
     setQuery(undefined);
@@ -160,6 +176,7 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
   }, []);
 
   const restore = useCallback((next: ReadonlyArray<ChatComposerThreadMentionChip>) => {
+    droppedRef.current = [];
     setChips([...next]);
     setCandidates([]);
     setQuery(undefined);
