@@ -14,6 +14,10 @@ const { listInbox, createChat, createWork, createCode } = vi.hoisted(() => ({
   createWork: vi.fn(),
   createCode: vi.fn(),
 }));
+vi.mock("../outbox/OutboxContext", () => ({
+  OutboxProvider: (props: { readonly children: unknown }) => props.children,
+  useOutbox: () => ({ waitingFor: () => [] }),
+}));
 vi.mock("@octant/client-runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@octant/client-runtime")>()),
   listAllHostsMobileInbox: listInbox,

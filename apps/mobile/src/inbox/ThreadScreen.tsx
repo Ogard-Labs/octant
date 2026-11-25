@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   Platform,
   Pressable,
@@ -71,6 +72,8 @@ import { ResumeBar, type ResumeOffer } from "./thread/ResumeBar";
 import { useThreadReplyDetail } from "./thread/useThreadReplyDetail";
 import type { ThreadHookInput, ThreadTarget, ThreadUi } from "./thread/threadTypes";
 import { useMobileThreads } from "./MobileThreadsContext";
+import { useOutbox } from "../outbox/OutboxContext";
+import { WaitingMessages } from "../outbox/WaitingMessages";
 import { QueuedMessages } from "./thread/QueuedMessages";
 import { isLiveWorkTurn, turnSubagents } from "./thread/turnActivity";
 import { useTurnControl } from "./thread/useTurnControl";
@@ -304,6 +307,40 @@ export function ThreadScreen(props: ThreadScreenProps) {
     attachmentOffer.sources.length > 0
       ? { onPressAttach: () => setAttachOpen(true) }
       : {};
+  // Only a computer that cannot be reached right now is written to for later;
+  // one that rejected this phone, or that the phone may only watch, is not.
+  const unreached =
+    !offlineDemo &&
+    composerAccess.editable &&
+    ["idle", "connecting", "stale", "unavailable"].includes(hostHealth);
+  const outbox = useOutbox();
+  const waiting =
+    selected === undefined
+      ? []
+      : outbox.waitingFor({
+          hostId: selected.hostId,
+          mode: selected.mode,
+          threadId: selected.threadId,
+        });
+  const keepForLater = (text: string, unansweredId?: string): boolean => {
+    if (selected === undefined) return false;
+    const refused = outbox.keep({
+      id: unansweredId ?? globalThis.crypto.randomUUID(),
+      hostId: selected.hostId,
+      mode: selected.mode,
+      threadId: selected.threadId,
+      text,
+      writtenAt: new Date().toISOString(),
+      ...(unansweredId === undefined ? {} : { attempted: true }),
+    });
+    if (refused !== undefined && refused !== "") ui.setError(refused);
+    return refused === undefined;
+  };
+  // Files stay with the draft: they go through the computer as they are added.
+  const sendLater = () => {
+    if (pendingAttachments.length > 0) ui.setError(MOBILE_COPY.outboxNoFiles);
+    else if (keepForLater(prompt.trim())) setPrompt("");
+  };
   const runningWorkTurn = workTurnLive
     ? work.turns?.findLast((turn) => isLiveWorkTurn(turn))
     : undefined;
@@ -346,6 +383,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
     attachmentIds: pendingAttachments.map((attachment) => attachment.id),
     onQueued: () => threadAttachments.attachmentsSent(),
     onStopped: () => void refresh({ quiet: true }),
+    onUnanswered: ({ id, text }) => void keepForLater(text, id),
   });
   // Where the queue cannot be read, a running turn still closes the composer.
   const queues = mayAct && turnLive && turnControl.queue !== undefined;
@@ -451,11 +489,12 @@ export function ThreadScreen(props: ThreadScreenProps) {
   })();
   const composerEditable =
     composerAccess.editable &&
-    (mode === "chat"
-      ? staleGate.allowProductMutations && (chat.activeAttempt === undefined || queues)
-      : staleGate.allowProductMutations &&
-        ((!workTurnLive && !codeTurnLive) || queues) &&
-        (mode === "code" || work.thread !== undefined));
+    (unreached ||
+      (mode === "chat"
+        ? staleGate.allowProductMutations && (chat.activeAttempt === undefined || queues)
+        : staleGate.allowProductMutations &&
+          ((!workTurnLive && !codeTurnLive) || queues) &&
+          (mode === "code" || work.thread !== undefined)));
   const appendToDraft = useCallback(
     (text: string) => setPrompt((draft) => appendTranscript(draft, text)),
     [],
@@ -718,6 +757,28 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 turnActionsFor={turnActions.actionsFor}
                 workTurns={work.turns}
               />
+              <WaitingMessages
+                messages={waiting}
+                onDelete={(message) =>
+                  message.attempted === true && message.refused === undefined
+                    ? Alert.alert(MOBILE_COPY.outboxDeleteTitle, MOBILE_COPY.outboxDeleteSent, [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: MOBILE_COPY.outboxDelete,
+                          style: "destructive",
+                          onPress: () => outbox.remove(message.id),
+                        },
+                      ])
+                    : outbox.remove(message.id)
+                }
+                onEdit={(message) => {
+                  outbox.remove(message.id);
+                  setPrompt((draft) =>
+                    draft.trim().length === 0 ? message.text : `${message.text}\n\n${draft}`,
+                  );
+                }}
+                onTryAgain={(message) => outbox.tryAgain(message.id)}
+              />
               {!offlineDemo &&
               Platform.OS !== "web" &&
               selectedHost !== undefined &&
@@ -861,7 +922,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
       {selected.mode === "chat" ? (
         <>
           <FloatingComposer
-            busy={liveBusy}
+            busy={!unreached && liveBusy}
             busyLabel={
               chat.activeAttempt !== undefined
                 ? chatAttemptStatusLabel(chat.activeAttempt.outcome)
@@ -874,14 +935,16 @@ export function ThreadScreen(props: ThreadScreenProps) {
             modelLabel={modelLabel}
             onChangeText={setPrompt}
             onPressModel={() => setModelOpen(true)}
-            onSubmit={() => void (queues ? turnControl.queueMessage() : chat.send())}
+            onSubmit={() =>
+              unreached ? sendLater() : void (queues ? turnControl.queueMessage() : chat.send())
+            }
             queues={queues}
             sending={turnControl.pending}
             {...(chat.activeAttempt === undefined ? attachProps : {})}
             {...(chat.activeAttempt !== undefined && staleGate.allowProductMutations
               ? { onStop: () => void chat.stop() }
               : {})}
-            placeholder={MOBILE_COPY.composerFollowUp}
+            placeholder={unreached ? MOBILE_COPY.outboxComposer : MOBILE_COPY.composerFollowUp}
             testID="mobile-thread-composer"
             value={prompt}
             voice={voice}
@@ -889,7 +952,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
         </>
       ) : (
         <FloatingComposer
-          busy={busy || workTurnLive || codeTurnLive}
+          busy={!unreached && (busy || workTurnLive || codeTurnLive)}
           busyLabel={
             !busy && latestTurnAtUsageLimit
               ? MOBILE_COPY.turnWaitingOnUsageLimit
@@ -904,12 +967,14 @@ export function ThreadScreen(props: ThreadScreenProps) {
             ? {}
             : { modelLabel: levelLabel, onPressModel: () => setDetailsOpen(true) })}
           onChangeText={setPrompt}
-          onSubmit={queues ? () => void turnControl.queueMessage() : sendFollowUp}
+          onSubmit={
+            unreached ? sendLater : queues ? () => void turnControl.queueMessage() : sendFollowUp
+          }
           queues={queues}
           sending={turnControl.pending}
           {...(turnControl.stop === undefined ? {} : { onStop: () => void turnControl.stop?.() })}
           {...(workTurnLive || codeTurnLive ? {} : attachProps)}
-          placeholder={MOBILE_COPY.composerFollowUp}
+          placeholder={unreached ? MOBILE_COPY.outboxComposer : MOBILE_COPY.composerFollowUp}
           testID="mobile-thread-composer"
           value={prompt}
           voice={voice}

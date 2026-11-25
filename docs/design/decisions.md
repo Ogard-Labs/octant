@@ -3988,6 +3988,8 @@ The host is authoritative for mode, Project, thread, provider, approval and Done
 - On a host whose own person paired it, the phone sets a thread's mode, the open thread's Project mode and the default for new threads, Full access included, with the one-time warning kept per host and no owner unlock, and offers Always allow in this Project on a rememberable tool prompt (maintainer decision, 2026-11-12). A restricted session sees neither. Not built yet: the rest of what the host accepts from such a device (packages, providers and keys, paired devices, host controls) has no phone screen.
 - Sensors are touched only on an explicit, visible user act.
 - The app receives no over-the-air code updates; every build carries its own JavaScript.
+- Words are the one thing that may wait on the phone (maintainer decision, 2026-11-25): a plain follow-up to an existing thread, written while its computer cannot be reached. It is sealed on the phone, sent once by an unlocked, foreground session the computer authenticates, through the thread's own queue there, and the computer decides when it arrives. No approval, answer, stop, merge, setting, row action, file or new thread waits. Detail: [Mobile maturity](mobile-maturity.md).
+- A running turn can be stopped from the phone, naming the turn the person saw, and a message written meanwhile goes to the thread's queue on the computer (maintainer request, 2026-11-25).
 
 Status: Partly built. Since: 2026-10-26. Detail: [Mobile maturity: the phone stays a remote client](mobile-maturity.md#the-phone-stays-a-remote-client).
 

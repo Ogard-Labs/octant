@@ -17,6 +17,7 @@ let root: Root;
 let control: TurnControl;
 let prompts: string[];
 let errors: Array<string | undefined>;
+let unanswered: Array<{ readonly id: string; readonly text: string }>;
 
 function Harness(props: { readonly transport: MobileRemoteTransport }) {
   control = useTurnControl({
@@ -31,6 +32,7 @@ function Harness(props: { readonly transport: MobileRemoteTransport }) {
     stopTurn: undefined,
     attachmentIds: [],
     onQueued: () => {},
+    onUnanswered: (message) => unanswered.push(message),
     onStopped: () => {},
   });
   return null;
@@ -47,6 +49,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   prompts = [];
   errors = [];
+  unanswered = [];
   root = createRoot(document.createElement("div"));
 });
 afterEach(() => {
@@ -93,6 +96,23 @@ describe("queueing behind a running turn", () => {
     lost = true;
     await act(async () => vi.advanceTimersByTimeAsync(9_000));
     expect(control.queue?.version).toBe(1);
+  });
+
+  it("hands a message that got no answer on under its id, and does not offer it for a second send", async () => {
+    const sent: string[] = [];
+    await render({
+      hostId: "host",
+      authenticatedFetch: async ({ path, body }) => {
+        if (path !== "/api/thread-message-queue/commands")
+          return Response.json({ status: "ready", snapshot });
+        sent.push((JSON.parse(String(body)) as { messageId: string }).messageId);
+        throw new TypeError("Network request failed");
+      },
+    });
+    await act(async () => control.queueMessage());
+    expect(new Set(sent)).toEqual(new Set([unanswered[0]?.id]));
+    expect(unanswered).toEqual([{ id: sent[0], text: "And the docs" }]);
+    expect(prompts).toEqual([""]);
   });
 
   it("offers no queue where the computer refuses one", async () => {

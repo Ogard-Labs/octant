@@ -27,6 +27,7 @@ import type { MobileInboxRow } from "@octant/client-runtime";
 import type { Todo } from "@octant/contracts/todos";
 import { ScreenCanvas, space, typography, useTheme } from "../../design-system";
 import { useAppearance } from "../appearance/AppearanceContext";
+import { OutboxProvider } from "../outbox/OutboxContext";
 import { HostsScreen } from "../hosts/HostsScreen";
 import { CountedThreadsScreen } from "../inbox/CountedThreadsScreen";
 import { HomeScreen } from "../inbox/HomeScreen";
@@ -495,16 +496,18 @@ export function RootNavigator(props: RootNavigatorProps) {
       )}
       <ShellContext.Provider value={shell}>
         <MobileThreadsProvider>
-          <NewThreadProvider
-            onOpenThread={(row) => navigation.dispatch(StackActions.push("thread", { row }))}
-            onTodoLinked={recordTodoLink}
-            onTodoStartOpened={() => setTodoStart(undefined)}
-            todoStart={todoStart}
-          >
-            <NavigationContainer onReady={() => setReady(true)} ref={navigation} theme={theme}>
-              <PlacesShell />
-            </NavigationContainer>
-          </NewThreadProvider>
+          <OutboxProvider>
+            <NewThreadProvider
+              onOpenThread={(row) => navigation.dispatch(StackActions.push("thread", { row }))}
+              onTodoLinked={recordTodoLink}
+              onTodoStartOpened={() => setTodoStart(undefined)}
+              todoStart={todoStart}
+            >
+              <NavigationContainer onReady={() => setReady(true)} ref={navigation} theme={theme}>
+                <PlacesShell />
+              </NavigationContainer>
+            </NewThreadProvider>
+          </OutboxProvider>
         </MobileThreadsProvider>
       </ShellContext.Provider>
     </View>

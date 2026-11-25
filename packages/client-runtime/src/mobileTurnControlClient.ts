@@ -3,6 +3,7 @@ import {
   decodeCancelWorkTurnCommand,
   decodeHostAnswer,
   decodeThreadMessageQueueCommand,
+  decodeThreadMessageQueuePayload,
   decodeThreadMessageQueueScope,
   type ThreadMessageQueueCommand,
   ThreadMessageQueueReadResult,
@@ -100,6 +101,9 @@ export type MobileQueueResult =
   | { readonly status: "queued"; readonly snapshot: ThreadMessageQueueSnapshot }
   | { readonly status: "refused"; readonly message: string };
 
+/** A send also ends with no answer at all, which says nothing of the message. */
+export type MobileSendResult = MobileQueueResult | { readonly status: "unreachable" };
+
 const REFUSAL: Readonly<Partial<Record<ThreadMessageQueueRefusalReason, string>>> = {
   unauthorized: "This phone may not queue messages here.",
   "authority-revoked": "This phone may not queue messages here.",
@@ -132,8 +136,12 @@ export async function loadMobileMessageQueue(
     path: "/api/thread-message-queue",
     query: `?${new URLSearchParams({ mode: scope.mode, threadId: scope.threadId })}`,
   });
-  // An older computer has no queue, and some sessions may not read one.
-  if (!response.ok) return undefined;
+  // An older computer has no queue, and some sessions may not read one. Any
+  // other failure says nothing about the queue.
+  if (response.status === 401 || response.status === 403 || response.status === 404)
+    return undefined;
+  if (!response.ok)
+    throw new MobileInboxFailure("unavailable", "The message queue could not be read.");
   const result = decodeHostAnswer(ThreadMessageQueueReadResult)(await response.json());
   return result.status === "refused" ? undefined : heldFor(result.snapshot, scope);
 }
@@ -147,6 +155,8 @@ async function send(
     path: "/api/thread-message-queue/commands",
     body: JSON.stringify(command),
   });
+  if (response.status >= 500)
+    throw new MobileInboxFailure("unavailable", "The message queue did not answer.");
   if (!response.ok) return refusalMessage(response, QUEUE_FAILED);
   const result = decodeHostAnswer(ThreadMessageQueueResult)(await response.json());
   if (result.requestId !== command.requestId) return QUEUE_FAILED;
@@ -186,36 +196,53 @@ async function change(
 
 /**
  * Queues a message behind the running turn, or offers it to that turn where
- * the thread steers: which of the two is the computer's setting.
+ * the thread steers: which of the two is the computer's setting. An idle thread
+ * starts on it at once.
+ *
+ * The computer keeps the id of every message it accepted, also once the message
+ * has left the queue, and answers a second send of it without taking it again.
+ * So a lost answer is asked for with the same id, now or by a later call: never
+ * by looking for the message in the queue, which it may already have left.
  */
 export async function queueMobileMessage(input: {
   readonly transport: MobileRemoteTransport;
-  readonly snapshot: ThreadMessageQueueSnapshot;
+  readonly scope: MobileQueueScope;
+  /** The same for every attempt to send one message. */
+  readonly messageId: string;
   readonly prompt: string;
   readonly attachmentIds?: ReadonlyArray<string>;
-}): Promise<MobileQueueResult> {
-  const { transport, snapshot } = input;
-  const scope = { mode: snapshot.scope.mode, threadId: String(snapshot.scope.threadId) };
-  const messageId = globalThis.crypto.randomUUID();
+}): Promise<MobileSendResult> {
+  const payload = {
+    mode: input.scope.mode,
+    prompt: input.prompt,
+    ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
+      ? {}
+      : { attachmentIds: input.attachmentIds }),
+  };
   try {
-    return await change(transport, snapshot, {
-      kind: "enqueue",
-      messageId,
-      payload: {
-        mode: scope.mode,
-        prompt: input.prompt,
-        ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
-          ? {}
-          : { attachmentIds: input.attachmentIds }),
-      },
-    });
+    decodeThreadMessageQueuePayload(payload);
   } catch {
-    // The answer was lost, not necessarily the message: only the computer knows.
-    const held = await loadMobileMessageQueue(transport, scope).catch(() => undefined);
-    return held !== undefined && held.items.some((item) => String(item.messageId) === messageId)
-      ? { status: "queued", snapshot: held }
-      : { status: "refused", message: QUEUE_FAILED };
+    // A message the contract does not take will not be taken later either.
+    return { status: "refused", message: "This message cannot be queued." };
   }
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const snapshot = await loadMobileMessageQueue(input.transport, input.scope);
+      if (snapshot === undefined)
+        return {
+          status: "refused",
+          message: "This computer takes no message from this phone here.",
+        };
+      return await change(input.transport, snapshot, {
+        kind: "enqueue",
+        messageId: input.messageId,
+        payload,
+      });
+    } catch {
+      // Lost, or an answer this build cannot read: asked again, then left open.
+    }
+  }
+  return { status: "unreachable" };
 }
 
 export async function removeMobileQueuedMessage(input: {

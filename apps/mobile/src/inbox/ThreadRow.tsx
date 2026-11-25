@@ -6,6 +6,8 @@ import { space, typography, useTheme, withAlpha, type ThemeColors } from "../../
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { useMobileSession } from "../session/MobileSessionContext";
 import type { MobileIconName } from "../ui/IconButton";
+import { MOBILE_COPY } from "../copy";
+import { useOutbox } from "../outbox/OutboxContext";
 import { ProviderMark } from "../ui/ProviderMark";
 import { useMobileThreads } from "./MobileThreadsContext";
 import { threadRowActions } from "./threadRowActions";
@@ -87,7 +89,10 @@ export function ThreadRow(props: {
   const transport = transports.find((entry) => entry.hostId === row.hostId);
   const project = projectName(row);
   const provider = providerOf(row);
-  const state = threadRowState(row, new Date());
+  const outgoing = useOutbox().waitingFor(row).length > 0;
+  const state = outgoing
+    ? ({ kind: "waiting", word: MOBILE_COPY.outboxRow, spoken: MOBILE_COPY.outboxWaiting } as const)
+    : threadRowState(row, new Date());
   const quiet = state.kind === "working" || state.kind === "settled";
   const ink = stateInk(state.kind, colors);
   const letters = project === undefined ? "" : projectMonogram(project);

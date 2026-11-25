@@ -4,7 +4,7 @@ import {
   loadMobileMessageQueue,
   queueMobileMessage,
   removeMobileQueuedMessage,
-  type MobileQueueResult,
+  type MobileSendResult,
   type MobileStopResult,
 } from "@octant/client-runtime";
 import type { ThreadMessageQueueSnapshot } from "@octant/contracts";
@@ -34,6 +34,8 @@ export function useTurnControl(
     readonly stopTurn: (() => Promise<MobileStopResult>) | undefined;
     readonly attachmentIds: ReadonlyArray<string>;
     readonly onQueued: () => void;
+    /** Sent, and no answer came: kept under its id until the computer says. */
+    readonly onUnanswered: (message: { readonly id: string; readonly text: string }) => void;
     readonly onStopped: () => void;
   },
 ): TurnControl {
@@ -74,9 +76,9 @@ export function useTurnControl(
   const changing = useRef(false);
   const [pending, setPending] = useState(false);
   const change = async (
-    run: (snapshot: ThreadMessageQueueSnapshot) => Promise<MobileQueueResult>,
+    run: (snapshot: ThreadMessageQueueSnapshot) => Promise<MobileSendResult>,
     failure: string,
-    onDone: () => void,
+    onDone: (status: "queued" | "unreachable") => void,
   ) => {
     if (identity === undefined || queue === undefined || changing.current) return;
     changing.current = true;
@@ -94,8 +96,8 @@ export function useTurnControl(
           ui.setError(result.message);
           return;
         }
-        setQueue(result.snapshot);
-        onDone();
+        if (result.status === "queued") setQueue(result.snapshot);
+        onDone(result.status);
       },
     });
     changing.current = false;
@@ -108,17 +110,20 @@ export function useTurnControl(
     queueMessage: async () => {
       const prompt = input.prompt.trim();
       if (transport === undefined || prompt.length === 0) return;
+      const messageId = globalThis.crypto.randomUUID();
       await change(
-        (snapshot) =>
+        ({ scope }) =>
           queueMobileMessage({
             transport,
-            snapshot,
+            scope: { mode: scope.mode, threadId: String(scope.threadId) },
+            messageId,
             prompt,
             attachmentIds: input.attachmentIds,
           }),
         "The message could not be queued.",
-        () => {
-          hapticSuccess();
+        (status) => {
+          if (status === "unreachable") input.onUnanswered({ id: messageId, text: prompt });
+          else hapticSuccess();
           input.setPrompt("");
           input.onQueued();
         },

@@ -22,6 +22,10 @@ const context = vi.hoisted(() => {
   return { current: undefined as unknown };
 });
 
+vi.mock("../outbox/OutboxContext", () => ({
+  OutboxProvider: (props: { readonly children: unknown }) => props.children,
+  useOutbox: () => ({ waitingFor: () => [] }),
+}));
 vi.mock("react-native", () => vi.importActual("react-native-web"));
 vi.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 vi.mock("../../design-system/themeAtmospheres", () => ({

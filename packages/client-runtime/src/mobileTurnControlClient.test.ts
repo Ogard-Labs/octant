@@ -86,26 +86,30 @@ describe("stopping a turn from the phone", () => {
   });
 });
 
-describe("queueing a message from the phone", () => {
-  it("queues on the version the phone read, and returns what the computer holds", async () => {
+describe("sending a message through the thread's queue", () => {
+  const ready = (version: number, prompts: ReadonlyArray<string> = []) =>
+    Response.json({ status: "ready", snapshot: snapshot(version, prompts) });
+  const isCommand = (sent: Sent) => sent.path.endsWith("/commands");
+  const sendTo = (transport: MobileRemoteTransport) =>
+    queueMobileMessage({ transport, scope, messageId, prompt: "And the docs" });
+
+  it("queues on the version the computer is at, and returns what it holds", async () => {
     const { sent, transport } = host((entry) =>
-      Response.json({
-        status: "applied",
-        requestId: entry.body.requestId,
-        snapshot: snapshot(5, ["And the docs"]),
-      }),
+      isCommand(entry)
+        ? Response.json({
+            status: "applied",
+            requestId: entry.body.requestId,
+            snapshot: snapshot(5, ["And the docs"]),
+          })
+        : ready(4),
     );
-    const result = await queueMobileMessage({
-      transport,
-      snapshot: snapshot(4) as never,
-      prompt: "And the docs",
-    });
-    expect(result.status).toBe("queued");
-    expect(sent[0]).toMatchObject({
+    expect((await sendTo(transport)).status).toBe("queued");
+    expect(sent[1]).toMatchObject({
       path: "/api/thread-message-queue/commands",
       body: {
         kind: "enqueue",
         scope,
+        messageId,
         expectedVersion: 4,
         payload: { mode: "code", prompt: "And the docs" },
       },
@@ -113,68 +117,70 @@ describe("queueing a message from the phone", () => {
   });
 
   it("queues once more on the computer's version when another client got there first", async () => {
-    let calls = 0;
+    let commands = 0;
     const { sent, transport } = host((entry) => {
-      calls += 1;
+      if (!isCommand(entry)) return ready(4);
+      commands += 1;
       return Response.json({
-        status: calls === 1 ? "conflict" : "applied",
+        status: commands === 1 ? "conflict" : "applied",
         requestId: entry.body.requestId,
-        snapshot: snapshot(calls === 1 ? 7 : 8, ["x"]),
+        snapshot: snapshot(commands === 1 ? 7 : 8),
       });
     });
-    const result = await queueMobileMessage({
-      transport,
-      snapshot: snapshot(4) as never,
-      prompt: "x",
+    expect((await sendTo(transport)).status).toBe("queued");
+    expect(sent.filter(isCommand).map((entry) => entry.body.expectedVersion)).toEqual([4, 7]);
+  });
+
+  it("asks again with the same id when the answer is lost, and takes a repeat as sent", async () => {
+    let commands = 0;
+    const { sent, transport } = host((entry) => {
+      if (!isCommand(entry)) return ready(4);
+      commands += 1;
+      if (commands === 1) throw new TypeError("Network request failed");
+      // Accepted the first time, and already out of the queue.
+      return Response.json({
+        status: "duplicate",
+        requestId: entry.body.requestId,
+        snapshot: snapshot(6),
+      });
     });
-    expect(result.status).toBe("queued");
-    expect(sent.map((entry) => entry.body.expectedVersion)).toEqual([4, 7]);
-    // The same message, so it can never be queued twice.
-    expect(sent[0]?.body.messageId).toBe(sent[1]?.body.messageId);
+    expect((await sendTo(transport)).status).toBe("queued");
+    expect(sent.filter(isCommand).map((entry) => entry.body.messageId)).toEqual([
+      messageId,
+      messageId,
+    ]);
   });
 
-  it("takes a lost answer as queued only when the computer holds the message", async () => {
-    const prompt = "x";
-    for (const held of [true, false]) {
-      let queued = "";
-      const { transport } = host((entry) => {
-        if (entry.path.endsWith("/commands")) {
-          queued = String(entry.body.messageId);
-          throw new TypeError("Network request failed");
-        }
-        const read = snapshot(5, held ? [prompt] : []);
-        return Response.json({
-          status: "ready",
-          snapshot: {
-            ...read,
-            items: read.items.map((item) => ({ ...item, messageId: queued })),
-          },
-        });
-      });
-      const result = await queueMobileMessage({
-        transport,
-        snapshot: snapshot(4) as never,
-        prompt,
-      });
-      expect(result.status).toBe(held ? "queued" : "refused");
-    }
+  it("says nothing of a message while the computer cannot be reached", async () => {
+    for (const answer of [
+      () => {
+        throw new TypeError("Network request failed");
+      },
+      () => new Response("", { status: 503 }),
+    ])
+      expect((await sendTo(host(answer).transport)).status).toBe("unreachable");
   });
 
-  it("says why the computer refused, and refuses an answer about another thread", async () => {
+  it("says why the computer refused, and refuses where it offers no queue", async () => {
     const refusing = host((entry) =>
-      Response.json({
-        status: "refused",
-        requestId: entry.body.requestId,
-        reason: "queue-full",
-      }),
+      isCommand(entry)
+        ? Response.json({
+            status: "refused",
+            requestId: entry.body.requestId,
+            reason: "queue-full",
+          })
+        : ready(4),
     );
-    expect(
-      await queueMobileMessage({
-        transport: refusing.transport,
-        snapshot: snapshot(4) as never,
-        prompt: "x",
-      }),
-    ).toEqual({ status: "refused", message: "The queue is full." });
+    expect(await sendTo(refusing.transport)).toEqual({
+      status: "refused",
+      message: "The queue is full.",
+    });
+    expect((await sendTo(host(() => new Response("", { status: 403 })).transport)).status).toBe(
+      "refused",
+    );
+  });
+
+  it("refuses an answer about another thread", async () => {
     const other = host(() =>
       Response.json({
         status: "ready",

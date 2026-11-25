@@ -92,8 +92,24 @@ These rules hold for every phase and are not reopened by any slice:
   approves, denies, sends, or mutates; opening it lands on the thread, where the
   ordinary authenticated session and biometric gate apply.
 - Revoking a device on the host ends its sessions, streams, and notifications
-  together. Disconnected or stale hosts present read-only; the phone queues no
-  mutation for later delivery, including through a notification path.
+  together. Disconnected or stale hosts present read-only, and the phone holds
+  nothing to do later, including through a notification path, with one
+  exception (maintainer decision, 2026-11-25): words.
+- **A message may wait on the phone.** A plain follow-up to an existing thread,
+  written while its computer cannot be reached, waits on the phone and is sent
+  when the computer's session is ready, the app is unlocked and in front
+  (`apps/mobile/src/outbox/`). Never an approval, an answer, a stop, a merge, a
+  setting, a row action, a file or a new thread, and never from a pairing that
+  may only watch, a session the computer rejected, or the demo. It goes through
+  the thread's queue on the computer under one id for every attempt; the
+  computer keeps the ids it accepted, so it takes the message once even when an
+  answer was lost. The computer decides when it arrives, and a refusal brings
+  the message back with the reason, holding the thread's later ones. One written
+  more than a day ago waits for the person to say it still applies. It is shown
+  as waiting in its thread and its row, and can be edited or deleted; one that
+  was sent without an answer can be deleted, which says it may have arrived. The
+  phone keeps at most 50, sealed under a key in its secure storage, and drops
+  them with their computer.
 - Sensors (camera, microphone, photo library, files) are touched only on an
   explicit, visible user act, never in the background, and their permission
   strings name each use.
@@ -167,7 +183,7 @@ a sent message ([Architecture: modes](../architecture.md#modes-chat-work-and-cod
   writing turn in another thread on the checkout, is shown as it is.
 - **While a turn runs.** The actions are not drawn while a turn starts, runs,
   or waits, and not while the host is stale or disconnected; the host refuses
-  the same cases. The phone queues nothing.
+  the same cases. Neither action waits on the phone.
 - **The composer.** After a rewind of the conversation, the removed message
   returns to the phone's composer above any draft already there.
 
