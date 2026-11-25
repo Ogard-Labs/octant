@@ -1,3 +1,4 @@
+import { postWithTypedClaim } from "./typedClaim";
 import {
   decodeBindingRevisionId,
   decodeStartWorkThreadTurnCommand,
@@ -151,6 +152,8 @@ export async function loadMobileWorkTranscript(
  * reach past what the thread was created with.
  */
 export async function sendMobileWorkTurn(input: {
+  /** The person typed the prompt into the composer; a claim, believed only on their own routes. */
+  readonly typedByPerson?: true;
   readonly transport: MobileRemoteTransport;
   readonly thread: WorkThread;
   readonly prompt: string;
@@ -175,6 +178,7 @@ export async function sendMobileWorkTurn(input: {
       threadId: input.thread.id,
       turnId: globalThis.crypto.randomUUID(),
       prompt,
+      ...(input.typedByPerson === true ? { typedByPerson: true as const } : {}),
       authority: {
         hostId: LOCAL_HOST_ID,
         projectId: input.thread.projectId,
@@ -192,11 +196,13 @@ export async function sendMobileWorkTurn(input: {
     throw new MobileInboxFailure("unavailable", "The Work turn could not be prepared.");
   }
   const result = await decodeJson(
-    await input.transport.authenticatedFetch({
-      method: "POST",
-      path: "/api/work/turns",
-      body: JSON.stringify(command),
-    }),
+    await postWithTypedClaim(command, (body) =>
+      input.transport.authenticatedFetch({
+        method: "POST",
+        path: "/api/work/turns",
+        body: JSON.stringify(body),
+      }),
+    ),
     decodeHostAnswer(WorkTurnLookupResult),
     "The Work turn could not be started on the host.",
   );
@@ -283,6 +289,8 @@ async function createWorkThreadOnHost(input: {
  * what the user typed.
  */
 export async function createMobileWorkFromPrompt(input: {
+  /** The person typed the prompt into the composer; a claim, believed only on their own routes. */
+  readonly typedByPerson?: true;
   readonly transport: MobileRemoteTransport;
   readonly prompt: string;
   readonly projectId: string;
@@ -322,6 +330,7 @@ export async function createMobileWorkFromPrompt(input: {
           thread.bindingRevisionId ?? decodeBindingRevisionId(input.bindingRevisionId),
       },
       prompt: trimmed,
+      ...(input.typedByPerson === true ? { typedByPerson: true as const } : {}),
     });
   } catch (cause) {
     throw new MobileInboxFailure(

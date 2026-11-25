@@ -2939,6 +2939,22 @@ CREATE INDEX validation_evidence_authority_idx
     name: "create_browser_page_projection",
     sql: BROWSER_PAGE_PROJECTION_SQL,
   },
+  {
+    version: 114,
+    name: "index_compaction_events_for_person_memory",
+    // A thread's person-memory block is cut at its newest compaction, found on
+    // every turn. A thread's context ledger and a harness session's transcript
+    // hold every context event or message of the thread, so finding the one
+    // compaction filtered the whole aggregate. These indexes hold only the
+    // compaction rows, so the lookup reads one row whatever the thread's length.
+    sql: `
+      CREATE INDEX event_journal_context_compaction ON event_journal (aggregate_id, global_sequence)
+        WHERE aggregate_type = 'context-ledger' AND event_name = 'context.compaction-completed@1';
+      CREATE INDEX event_journal_harness_compaction ON event_journal (aggregate_id, global_sequence)
+        WHERE aggregate_type = 'native-harness-transcript'
+          AND event_name = 'native-harness-transcript-compacted@1';
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

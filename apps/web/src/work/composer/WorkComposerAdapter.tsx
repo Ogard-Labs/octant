@@ -1,3 +1,4 @@
+import { withTypedSend } from "@octant/client-runtime/typed-composer-text";
 import { useDroppedFolderMentions } from "../../composer/useDroppedFolderMentions";
 import { MAX_WORK_ATTACHMENT_BYTES, MAX_WORK_TURN_ATTACHMENTS } from "@octant/contracts";
 import {
@@ -13,6 +14,7 @@ import {
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
   useNewTaskPrompt,
+  useNewTaskTypedScope,
 } from "../../composer/useNewTaskPrompt";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
@@ -123,6 +125,7 @@ export interface WorkComposerAdapterProps {
 
 export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   const [prompt, setPrompt] = useNewTaskPrompt();
+  const typedScope = useNewTaskTypedScope();
   const drafts = useContext(NewTaskDraftsContext);
   const draftScope = useContext(NewTaskDraftScopeContext);
   const storedMentionChips = mentionChipsFromDraft(
@@ -299,7 +302,12 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
         if (extensionSelections.length > 0 || Object.keys(modelOptionValues).length > 0)
           options[1] = extensionSelections.length === 0 ? undefined : extensionSelections;
         if (Object.keys(modelOptionValues).length > 0) options[2] = modelOptionValues;
-        const created = await props.onCreateThread(trimmed, staged, threadMentionIds, ...options);
+        const created = await withTypedSend(props.onCreateThread, typedScope, trimmed)(
+          trimmed,
+          staged,
+          threadMentionIds,
+          ...options,
+        );
         if (created !== false) images.clearAfterAccepted();
         return created;
       })
@@ -523,6 +531,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
             }
             input={
               <ComposerInput
+                typedScope={typedScope}
                 inlineChips={mention.inlineChips}
                 renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"
@@ -630,7 +639,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 <ComposerVoiceButton
                   disabled={props.creating === true}
                   onTranscript={(transcript) =>
-                    setPrompt((current) => appendTranscript(current, transcript))
+                    setPrompt((current) => appendTranscript(typedScope, current, transcript))
                   }
                 />
               ),

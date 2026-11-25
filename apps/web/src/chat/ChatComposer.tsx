@@ -115,6 +115,8 @@ export interface ChatComposerModelOption {
 const MODEL_OPTION_DEFAULT_ID = "(provider default)";
 
 export interface ChatComposerProps {
+  /** The draft this composer holds (see `threadDraftScope`). */
+  readonly typedScope?: string | undefined;
   readonly stash?: ComposerStashBinding | undefined;
   readonly readOnly?: boolean;
   readonly benchmarkProjectId?: ProjectId | undefined;
@@ -660,6 +662,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
   const input = (
     <ComposerInput
+      typedScope={props.typedScope}
       inlineChips={mention.inlineChips}
       renderModelChip={atMenu.renderModelChip}
       aria-activedescendant={
@@ -946,7 +949,11 @@ export function ChatComposer(props: ChatComposerProps) {
   const rowDictate = (
     <ComposerVoiceButton
       disabled={props.isSending}
-      onTranscript={(transcript) => props.onDraftChange(appendTranscript(props.draft, transcript))}
+      onTranscript={(transcript) =>
+        props.onDraftChange(
+          appendTranscript(props.typedScope ?? "chat-composer", props.draft, transcript),
+        )
+      }
     />
   );
 

@@ -210,6 +210,7 @@ function readAgentRunLeadPersonMemoryScope(
           threadId: String(thread.id),
           projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
           createdAt: thread.createdAt,
+          providerInstanceId: thread.providerInstanceId,
           windowId,
         };
       }
@@ -221,6 +222,7 @@ function readAgentRunLeadPersonMemoryScope(
           threadId: String(thread.id),
           projectId: String(thread.projectId),
           createdAt: thread.createdAt,
+          providerInstanceId: thread.providerInstanceId,
           windowId,
         };
       }
@@ -232,6 +234,7 @@ function readAgentRunLeadPersonMemoryScope(
           threadId: String(thread.id),
           projectId: String(thread.projectId),
           createdAt: thread.createdAt,
+          providerInstanceId: thread.providerInstanceId,
           windowId,
         };
       }

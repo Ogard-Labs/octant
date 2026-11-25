@@ -1,3 +1,4 @@
+import { sendWithTypedClaim } from "./typedClaim";
 import {
   CodeProviderFileReviewRead,
   decodeCodeProviderFileReviewRequest,
@@ -573,20 +574,26 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       } catch {
         throw invalidCommand();
       }
-      return request(
-        fetch,
-        new URL("/api/code/commands", options.baseUrl).toString(),
-        {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify(validated),
-          ...(signal === undefined ? {} : { signal }),
-        },
-        (value) => {
-          const result = decodeHostAnswer(CodeOperationResult)(value);
-          if (result.operationId !== validated.operationId) throw new Error("operation mismatch");
-          return result;
-        },
+      return sendWithTypedClaim(
+        validated,
+        (sent) =>
+          request(
+            fetch,
+            new URL("/api/code/commands", options.baseUrl).toString(),
+            {
+              method: "POST",
+              headers: { ...headers, "content-type": "application/json" },
+              body: JSON.stringify(sent),
+              ...(signal === undefined ? {} : { signal }),
+            },
+            (value) => {
+              const result = decodeHostAnswer(CodeOperationResult)(value);
+              if (result.operationId !== validated.operationId)
+                throw new Error("operation mismatch");
+              return result;
+            },
+          ),
+        (error) => error instanceof CodeClientFailure && error.category === "invalid",
       );
     },
     async inspectTerminal(input) {

@@ -2209,28 +2209,174 @@ except where a bullet says otherwise.
   duplicate). The person can read, edit, and delete each entry and see its
   sources in Settings › Memory, and Forget everything erases all entries and
   digests at once.
-- **When it is written.** After a thread ends: a Chat, Work, or Code thread
-  the person completed (settled) after memory was turned on. A sweep of the
-  three modes' completed threads runs five minutes after start and then
-  hourly, and distills
-  each such thread at most once, so a thread that was reopened and completed
-  again is not distilled twice. Threads completed before memory existed are
-  never back-filled, so turning it on never starts a burst of model calls.
-  Forgetting everything, switching memory back on, letting a Project back
-  in, or allowing a thread again moves that start to the moment of the
-  change, so nothing that ended while memory was off, kept out, or just
-  forgotten is learned afterwards. A
-  thread with nothing the person wrote is recorded as remembered without a
+- **When it is written.** After a thread ends, and while one is still open. A
+  sweep of the three modes' threads runs five minutes after start and then
+  hourly. A Chat, Work, or Code thread the person completed (settled) after
+  memory was turned on is learned from once, from everything they wrote in it;
+  if it is reopened and completed again, only what they wrote after what was
+  learned goes to the model, and none means no call. A thread still open is
+  learned from when no turn is running in it, the thread has been still for 30
+  minutes (measured from its last activity, which includes when its last turn
+  ended, not from when the last message began), they typed something (a message
+  the host marked, never one older than the marks) after memory began and after
+  what was learned before, and it was last learned from over 6 hours ago. A pass
+  checks cheap facts first (whether a turn runs, the time of the last message
+  and of the last activity, whether any turn was marked typed) and lists each
+  mode's threads once; a thread with nothing to learn is not read. A thread
+  that was read and had nothing to learn, a thread put away that had nothing
+  newer, and a thread whose model was refused (the account is off, not ready or
+  at its limit, or the Project's rule or a spend ceiling refused it) are
+  settled: they are not read again until something relevant changes (a new
+  typed message or mark, the person's Settings, the chosen model, or the time
+  it was put away) or, for a refusal, an hour has passed, so a lifted rule or
+  ceiling is noticed on a later pass. Settled marks are kept in memory (a
+  restart reads each thread once more) and leave with the thread. The two share
+  one budget of 10 model calls a pass, threads put away first, so a busy day
+  never turns into a burst; only a thread that reached the model spends it.
+  Every thread read in full, whether it ends in a call or is settled without
+  one, counts against a second bound of 50 reads a pass, and each pass starts
+  where the last one stopped, so a long run of threads that make no call never
+  keeps the later ones from being reached. A terminal's output in a Code thread
+  is not activity, so a dev server left running never keeps the thread from
+  being quiet; a Work thread's last activity is the newest change of any of its
+  turns.
+  A thread that could not be read (the account, the rule, a ceiling, or the
+  call failed) is tried again on a later pass, on the same account. The call
+  passes the Project's provider rule (the rule a turn passes before it sends,
+  judged for the model that would read the thread) and the thread's and
+  Project's spend ceilings as a Shield review does (admitted before the call
+  without counting as a turn, then settled with the usage), so neither is
+  bypassed by learning in the background. The one-shot request carries no output
+  limit, so the reservation is what the call can really spend: one token for
+  every byte it sends, plus the model's longest reply (which covers its
+  reasoning), else its context window, else 64,000 tokens when nothing names
+  either. A monetary ceiling refuses the call, since the selected endpoint may
+  set its own prices for any model. What was learned is recorded as
+  `person-memory.thread-distilled@1` (the thread, its digest, and the last
+  message learned from); an old `person-memory.thread-remembered@1` replays as
+  learned to the thread's end. A later pass replaces the thread's digest: each is an
+  aggregate of its own and the newest by journal order wins, so a failed write
+  leaves the earlier digest. The superseded digests stay in the journal until
+  the next start removes them ([Startup check](#persistence)). Its entries merge
+  as before. Threads completed before memory existed are never
+  back-filled, and nothing said before memory began (or before it was last let
+  back in) is read from an open or a put-away thread, so turning it on never starts a burst of model calls. Forgetting
+  everything, switching memory back on, letting a Project back in, or allowing a
+  thread again moves that start to the moment of the change, so nothing that
+  ended while memory was off, kept out, or just forgotten is learned afterwards,
+  and a call that was running when the person forgot everything stores nothing.
+  A thread allowed again after Leave no trace takes part from then on (its new
+  turns are marked and it may save), while a call that began before the erasure
+  still writes nothing.
+  A thread with nothing the person wrote is recorded as remembered without a
   call.
+- **Saving at once.** Telling an agent "remember that I prefer X" does not wait
+  for the sweep (maintainer decision, 2026-11-16). `octant_remember_person` is a
+  host tool offered beside `octant_past_threads` in Chat (a thread with no
+  Project too, but not a Side Chat), Work, and Code, under the same rules as the
+  block (memory on, Project not kept out, thread not Leave no trace), to a turn
+  a local window or a paired device the host's own person approved started. It
+  takes the text and a kind, and the host keeps the text only if it is a
+  quotation from a message of the turn the tool was built for that the person
+  typed (see [What counts as the person's words](#what-counts-as-the-persons-words)),
+  compared without regard to whitespace or letter case; the entry stores the
+  person's stretch of that message, never the model's copy. The tool is pinned
+  to its own turn when it is built, so a message that arrives later, or any
+  message the person did not type, is not a source. This holds on every thread,
+  including one that has read outside content: a tool result, a web page, a
+  side task's text, a delivered result, or the agent's own words are not the
+  person's and are refused with a reason the model can read, so outside
+  content cannot create an entry by this route. The
+  text is redacted as above before storage, judged with the message around it:
+  a quotation whose start or end falls inside a stretch the redaction would
+  replace (a credential's value quoted without its label, half a token, any word
+  of a value that has several) or inside a path that names a protected file is
+  refused, so quoting part of a secret cannot store it. It is also refused when
+  it is over 400 characters or names a protected path; the caps run through the
+  same merge as the sweep. A routine's run, another turn the host starts as itself, and a
+  subagent are not offered the tool at all: they read person memory but carry no
+  words of the person's own. The entry names the open thread as its source, with
+  the moment the person said it as the source's end time (an open thread has not
+  ended, and keeping the one source shape lets every stored event decode as
+  before). It is journaled as its own event, `person-memory.entry-saved@1`, which
+  an edit, a new source, deletion, Forget everything, Leave no trace, and a
+  purge treat like any entry. Saving writes no digest and does not mark the
+  thread remembered, so the sweep still learns from the thread when it ends and
+  a wording already saved gains no duplicate. The thread's own block does not
+  show the entry (it holds only entries older than the thread); every later
+  thread, in any Project, mode, or provider, does. The tool step in the thread
+  is the record of what was stored.
+- **What counts as the person's words.** A composer send claims
+  `typedByPerson` when the exact text it sends is the last text the person's own
+  input (typing, paste, cut, undo, redo, dictation) left in the draft it sends
+  from. Provenance belongs to the draft: each composer holds one note per draft
+  scope (a thread's, a new task's, a queued message's editor, else the composer
+  itself), so typing in one composer never makes the same words in another
+  count, and a send asks the scope it sends from. A button, a template, a
+  recipe, a suggestion, or a prefilled draft (a handoff's, for example) writes
+  text without that input and forgets the draft's note, so it counts only once
+  the person changes it, and then the whole text counts, including the stretch
+  the button supplied: the claim is about the exact text sent, not about who
+  wrote each part. A thread switch brings the note back with the draft it
+  belongs to (the note outlives the composer, and a draft shown again is the
+  text the note holds), and a stash carries it with the draft it saves and
+  restores; a restore joined to text already in the composer counts only when
+  both parts were typed. A send that fails and leaves the draft in place keeps
+  its claim, and a first message put back in the composer of the thread that was
+  created for it carries its claim to that thread's draft. The claim reaches the
+  handler that builds the command with the call that hands the text over (a
+  phone's send carries it as a field), never through state that outlives the
+  call, so a submit that fails leaves nothing behind and another submit cannot
+  take it; a relay that waits before the handler reads it loses the claim and
+  never gains one. Undo or redo that lands on text counts only if that text was left
+  by the person's input when it was current, so undoing back to what a button
+  wrote does not count; deleting back to it by hand does, because that is the
+  person's own input. A person's own edit in a queued message's editor claims
+  typing the same way, but only for a message that already carried the claim; a
+  save that changes nothing keeps the claim the message had and gives none. A message that carries a quote of transcript text does not
+  count. Side tasks (start and "Do it here"),
+  thread dialogue, answers to pending requests that build a prompt, pull
+  request and review buttons, Canvas and planner sends, routines, goal rounds,
+  restart and usage continuations, deliveries, coordinator and hub-delegated
+  turns, and outside agents through agent access never claim it. The host
+  believes the claim only on the person's own routes, where the authenticated
+  principal is a local window or a device the host's own person paired at
+  Full; from a hub-introduced, restricted, or agent-grant session, and from any
+  caller inside the host, it is ignored. The host records a believed claim as
+  `person-memory.turn-typed@1` (mode, thread id, and the turn, Code operation,
+  or steered message id; no text, hash, or excerpt) appended with the turn, so
+  a turn with no mark is not the person's words. A queued message keeps its
+  claim on the queue entry; an edit never gives a message the claim; a message
+  that carried it keeps it through an edit only when the person's own route made
+  the claim again with the edit, and any other changing edit clears it. A message steered into a running turn is marked on its own. The marks are
+  erased with their thread, with Leave no trace, and by Forget everything, and
+  a thread counts only its newest 200. A mark beyond the 200 stays in the
+  journal until the next start removes it, so a turn whose mark was compacted
+  counts as not typed for new learning, as a turn with no mark does. A client that sends nothing (an older
+  one) leaves its turns unmarked, so nothing from them is quotable and nothing
+  new is learned from them; a client whose host predates the field sends the
+  message again without it when the host refuses the unknown field. The sweep
+  and the save tool read only marked turns among those that began after this
+  host began recording marks (`typedSince`, journaled in the settings and kept
+  through Forget everything); turns that began earlier are read as they always
+  were.
 - **What the distiller reads.** Only what the person wrote in the thread and
-  its title: never the agent's answers, tool output, attachments, or files.
+  its title: never the agent's answers, tool output, attachments, or files. A
+  message steered into a running Work or Code turn is read with the prompts, in
+  the order it was said, on its own mark as a prompt is, and it counts as the
+  newest thing the person wrote when the sweep decides whether a thread has
+  anything new. A thread's newest steered messages are read (as many as the
+  distiller keeps), and the check for anything new reads only the newest one.
   Rationale: an agent's answer can carry outside content (a web page, a tool
   result the Watcher marked) or the contents of a file it read, and a memory
   entry must never be made on outside content's say-so or from a protected
   path; the person's own words carry neither unless the person put them there.
   It also reads the same way in every mode, through reads the host already
   makes for Octant Shield. Secrets are redacted (the same secret shapes as
-  approvals, plus private-key blocks) before the text reaches the model and
+  approvals, private-key blocks, and the whole value after a credential label such
+  as `password:`, `token =` or `the passphrase is`: to its closing quote or
+  fence, over an indented block, else to the end of the line; a value given with
+  no label and no known shape cannot be told from other words) before the text reaches the model and
   again before anything is stored, and an entry or summary that still names a
   protected path is dropped.
 - **The model call.** One tool-less, single-use session per ended thread, in a
@@ -2239,7 +2385,7 @@ except where a bullet says otherwise.
   model calls picks another account. Its usage
   is recorded against the thread as a `person-memory` usage row, so the person
   sees it in the usage dashboard. A reply that read outside content is thrown
-  away. The call sits behind one seam (`personMemoryDistillationAllowed`) that
+  away. Right before it is stored, the thread's facts are read again (that one thread, not the list): a thread moved into a Project kept out, set to leave no trace, or deleted while a long pass ran stores nothing, and one that moved is stored under its Project as it is. The call sits behind one seam (`personMemoryDistillationAllowed`) that
   answers per provider kind, so background use can later be limited for one
   provider without touching the rest; today it allows every kind. Open risk:
   whether a provider's terms allow background calls on a subscription sign-in
@@ -2252,11 +2398,47 @@ except where a bullet says otherwise.
 - **Where it goes.** Every new Chat, Work, and Code thread, on every provider,
   gets one `person-memory` context block through Octant's own context
   assembly, placed after Octant's instructions and before Project memory and
-  the conversation. It holds the entries that existed when the thread was
-  created (so it is the same text on every turn and a provider's prompt cache
-  keeps its prefix; an entry the person edits or deletes changes it, which
-  re-sends the standing context once), newest first, capped at 2,000
-  characters. Its text opens by saying it is data about the person from
+  the conversation. It holds the entries that existed at the thread's cut-off,
+  newest first, capped at 2,000 characters. An entry whose only eligible source
+  is the receiving thread (for a subagent, its lead thread) is never in it,
+  however late the cut falls, so a thread is not handed its own words back as
+  earlier threads' memory; a source that had not ended by the cut was not in
+  the entry then, so it does not change the block between refresh points. Limit: the journal keeps no time per source, and an edit or deletion erases an entry's earlier events, so "had not ended" is the only test. A thread put away after the cut, but with an end time before it (learned later), gives an entry already in the block a second source, and the block of the thread that said it can then show that entry once before its next refresh point. The
+  cut-off is the thread's creation until its context is rebuilt, so the block is the same text on every
+  turn between and a provider's prompt cache keeps its prefix; an entry the
+  person edits or deletes changes it, which re-sends the standing context once.
+  A refresh point moves the cut-off to its time, so a long-lived thread sees
+  what was learned since: a finished compaction (`context.compaction-completed@1`),
+  Octant's own harness compacting its session
+  (`native-harness-transcript-compacted@1`), or a turn that starts a provider
+  session that does not resume an earlier one (also a Chat retry that starts one
+  on its newest attempt). A turn whose plan drops or truncates earlier conversation, so that
+  the host rebuilds the history in a fresh session instead of continuing one
+  (Chat and Work), is such a turn: it cuts anew and plans once more with the new
+  block, so its first rebuilt turn and the continuations after it carry the same
+  text. A Code turn decides its session before it builds the block. A turn that starts a session cuts its block at the
+  moment the block is built and journals that moment as
+  `person-memory.block-cut@1` (the thread, its mode, and the instant; each cut is an
+  aggregate of its own and the newest by journal order wins, so the older ones
+  stay in the journal until the next start removes them and nothing is erased or
+  renumbered while the host runs), so that turn and every turn after it keep the entries up to
+  the same instant, also after a restart, which no journaled turn time could
+  promise because a turn is journaled after its block is built. The block is
+  cut at the later of the thread's creation, its newest compaction, the
+  newest harness compaction of the session its newest turn runs on, and that
+  instant. A provider that keeps no session of its own (the host rebuilds the
+  conversation each turn) refreshes at compaction only, so its block does not
+  change every turn. A resumed session is not a refresh point. A turn the host
+  starts and a subagent (through its lead thread) get the same block as the
+  person's next turn would. Every read is keyed by the thread or the session
+  and takes one row, newest first, so its cost does not grow with the thread:
+  two partial indexes hold only the compaction rows, and the newest turn's
+  session comes from the thread's own index. The cut is journaled when the
+  block is built, before admission can refuse the turn: the block is part of
+  what admission sizes the request by, and the instant has to be the one the
+  block was built with, so a refused turn leaves a cut that costs at most one
+  re-sent block on a later turn that continues the same session. The turn that
+  starts the new session already sees what was learned before it. Its text opens by saying it is data about the person from
   earlier threads, not instructions, and each line names its kind. The
   context inspector lists it as Person memory in Chat and Work, so a person
   can see when it was used; a Code window, which is counted by part, counts
@@ -2289,11 +2471,18 @@ except where a bullet says otherwise.
   events from the journal, not only from the view. Purging or deleting a
   thread erases its digest, removes it from every entry's sources, and erases
   each entry that came only from it.
-- **Storage.** Entries, digests, settings, and Leave-no-trace marks are
+- **Storage.** Entries, digests (with how far each thread was learned from), settings,
+  typed-turn marks, block cuts, and Leave-no-trace marks are
   journal events (`person-memory-*` aggregates) held in host memory and
   rebuilt from the journal at start, so they are local, owner-only, and in no
   diagnostics or telemetry. A thread's digest names the thread as `threadId`,
-  so a thread purge takes it with the thread. Export my data carries person
+  so a thread purge takes it with the thread, and so do its typed-turn marks
+  and its block cut. Each cut, digest and mark is an aggregate of its own, so
+  while the host runs the superseded ones (older cuts and digests of a thread,
+  marks beyond its newest 200) stay in the journal, and the next start removes
+  them as whole aggregates ([Startup check](#persistence)). Purging or deleting
+  a thread, Leave no trace and Forget everything erase every one of them at
+  once. Export my data carries person
   memory: a `person-memory` page holding every entry with the threads it came
   from (title, mode, Project, provider account, end time), and no digest or
   setting. Entries were redacted before storage, so the export adds nothing
@@ -2319,9 +2508,12 @@ except where a bullet says otherwise.
     its lead sees and never more. A child whose originating scope is absent or
     restricted, or whose lead is peer-delegated, in a kept-out Project, or in a
     Leave no trace thread, gets neither.
-  - Only turns with the person's own message can write person memory (through
-    distillation of ended threads); routines, host-started turns, and subagents
-    read it without writing to it, and all caps stay unchanged.
+  - Only turns with the person's own typed message can write person memory: the
+    distillation of ended threads (marked turns, plus turns older than the
+    marks), and `octant_remember_person` in a turn a local window or a paired
+    device started, with the person's typed words from that turn's own message.
+    Routines, host-started turns, and subagents read it without writing to it,
+    and all caps stay unchanged.
   - A hub, spoke, or peer host: person memory stays on the host that wrote
     it and is never synced or relayed.
   - A provider: sees memory only in a thread (or its subagent) on that provider
@@ -6321,7 +6513,9 @@ flowchart LR
   watermark. A different fingerprint, a
   migration in the same start, a missing, malformed or too-high watermark, or
   any rewrite or delete of a journal row (a trigger clears it in the same
-  transaction, so purge, compaction and host-identity rewrites are covered)
+  transaction, so purge, compaction and host-identity rewrites are covered;
+  nothing deletes at run time except a purge, an erase the person asks for, or
+  an entry's rewrite)
   means a full scan. An incompatible row is quarantined wherever it sits, and a
   diagnostics call with `fresh` always scans everything. Deleting the watermark
   only makes the next start slower.
@@ -6667,7 +6861,14 @@ flowchart LR
   ended pages before it records the journal verification watermark, as it does
   for superseded checkout observations. A whole ended page leaves with both of
   its events, so the rows that stay are the rows the scan decoded, and that
-  start records the watermark again at the head that is left. A thread purge takes a thread's records
+  start records the watermark again at the head that is left. Superseded person
+  memory leaves the same way: each block cut, distilled digest and typed-turn
+  mark is an aggregate of its own, a run erases none of them, and the start
+  removes the cuts and digests a thread has outlived (all but the newest) and
+  the marks beyond its newest 200, whole aggregates with their heads and
+  quarantine rows in one transaction, never a released event, and records the
+  watermark after it. A start that stops between the two only loses the
+  watermark and scans everything the next time. A thread purge takes a thread's records
   and a Project erase takes a Project's, and no export, replica sync, usage or
   activity view, or support bundle carries them beyond the event name in the
   bundle's recent-event list and the kind-name count in Journal growth. The

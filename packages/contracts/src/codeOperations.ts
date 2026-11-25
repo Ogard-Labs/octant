@@ -1103,6 +1103,13 @@ const StartProviderTurn = Schema.Struct({
   ...OperationScope,
   sessionId: ProviderSessionId,
   prompt: CodeEvidenceReference,
+  /**
+   * The person typed (pasted, or dictated) this message into a composer. Only
+   * a composer sets it; a button, template, routine, side task, delivery, or
+   * outside agent does not. The host honours it on the person's own routes
+   * alone and ignores it everywhere else.
+   */
+  typedByPerson: Schema.optional(Schema.Literal(true)),
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   computerUseSelection: Schema.optional(ExtensionSelection),
   /**

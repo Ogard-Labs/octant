@@ -2,10 +2,16 @@ import type { NavigatorAssistantSnapshot } from "@octant/contracts";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { OctantButton } from "../ui/base/OctantButton";
 import { NavigatorPopover } from "./NavigatorPopover";
 import { useNavigatorAssistant } from "./useNavigatorAssistant";
+
+// The popover loads its panel when it opens. Loading it here keeps a cold
+// transform on a busy runner from counting against the wait for the dialog.
+beforeAll(async () => {
+  await import("./NavigatorPanel");
+});
 
 function snapshot(): NavigatorAssistantSnapshot {
   return {
@@ -62,7 +68,10 @@ describe("NavigatorPopover", () => {
       "id",
       "navigator-popover",
     );
-    expect(screen.getByText("Running on model-a")).toBeVisible();
+    expect(await screen.findByText("Running on model-a")).toBeVisible();
+    const dialog = screen.getByRole("dialog", { name: "Navigator" });
+    await waitFor(() => expect(dialog).toContainElement(document.activeElement as HTMLElement));
+    expect(dialog).not.toHaveFocus();
     expect(screen.getByLabelText("Message Navigator")).toBeVisible();
 
     await user.keyboard("{Escape}");

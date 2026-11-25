@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decodeWindowId } from "@octant/contracts";
+import { decodeUtcTimestamp, decodeWindowId } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
 import { Effect, Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserPageSessions } from "../browser/browserPageSessions";
+import { PersonMemoryStore } from "../personMemory/personMemoryStore";
 import { EventRegistry } from "./eventRegistry";
 import { Journal } from "./journal";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
@@ -728,6 +729,77 @@ describe("PersistenceLive", () => {
       ).toEqual([{ aggregate_id: String(page(2).pageId) }]);
       after.close();
       expect(await startupDecodeCount(directory)).toBe(0);
+    });
+
+    it("compacts superseded person memory at the start, verifies only the tail, and keeps the watermark after", async () => {
+      const directory = temporaryDirectory();
+      seedVerifiedJournal(directory).close();
+      await startupDecodeCount(directory);
+      expect(watermarkRow(directory)).toMatchObject({ verified_through: 3 });
+
+      // A run cuts blocks, replaces digests and passes the cap of 200 marks.
+      const run = openSqlite(join(directory, "octant.sqlite3"));
+      const runtime = createPhase1RuntimeRegistries();
+      let tick = 0;
+      const clock = () =>
+        decodeUtcTimestamp(`2026-11-01T10:00:${String(tick++ % 60).padStart(2, "0")}.000Z`);
+      const store = new PersonMemoryStore({
+        connection: run,
+        journal: new Journal({
+          connection: run,
+          registry: runtime.events,
+          projections: runtime.projections,
+          clock,
+        }),
+        uuid: randomUUID,
+        clock,
+        actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      });
+      const thread = { mode: "chat" as const, threadId: "b0000000-0000-4000-8000-0000000010a1" };
+      store.since();
+      for (let index = 0; index < 3; index += 1) store.startBlockCut(thread);
+      for (let index = 0; index < 203; index += 1) {
+        store.markTurnTyped({ ...thread, turnId: `turn-${String(index)}` });
+      }
+      const rows = () =>
+        (
+          run
+            .prepare(
+              `SELECT count(*) AS n FROM event_journal WHERE aggregate_type LIKE 'person-memory-%'`,
+            )
+            .get() as { readonly n: number }
+        ).n;
+      expect(rows()).toBe(1 + 3 + 203);
+      expect(watermarkRow(directory)).toMatchObject({ verified_through: 3 });
+      store.close();
+      run.close();
+
+      // The start decodes only the rows after the watermark, compacts to one
+      // cut and 200 marks, and records the watermark again at the head left.
+      const decoded = await startupDecodeCount(directory);
+      expect(decoded).toBeLessThan(3 + 1 + 3 + 203);
+      const after = openSqlite(join(directory, "octant.sqlite3"));
+      expect(
+        after
+          .prepare(
+            `SELECT event_name, count(*) AS n FROM event_journal
+             WHERE aggregate_type LIKE 'person-memory-%' GROUP BY event_name ORDER BY event_name`,
+          )
+          .all(),
+      ).toEqual([
+        { event_name: "person-memory.block-cut@1", n: 1 },
+        { event_name: "person-memory.settings-changed@1", n: 1 },
+        { event_name: "person-memory.turn-typed@1", n: 200 },
+      ]);
+      const head = (
+        after.prepare("SELECT max(global_sequence) AS n FROM event_journal").get() as {
+          readonly n: number;
+        }
+      ).n;
+      after.close();
+      expect(watermarkRow(directory)).toMatchObject({ verified_through: head });
+      expect(await startupDecodeCount(directory)).toBe(0);
+      expect(watermarkRow(directory)).toMatchObject({ verified_through: head });
     });
 
     it("scans from the start again on the first start of a different build", async () => {

@@ -690,6 +690,12 @@ export interface ChatServiceExecutionContext {
    * it is not the person. Set only by the route; absent, it is not one.
    */
   readonly fromOutsideAgent?: boolean;
+  /**
+   * The person's own route said they typed this message into a composer. Set
+   * only by that route, never read from the command, so a caller inside the
+   * host and a restricted or agent session cannot claim it.
+   */
+  readonly typedByPerson?: true;
   /** One-hop coordination calls cannot expose the coordination tool again. */
   readonly coordinationDepth?: number;
   /**
@@ -876,7 +882,15 @@ export interface ChatServiceOptions {
   readonly personMemoryBlock?: (input: {
     readonly thread: ChatThread;
     readonly windowId: WindowId | undefined;
+    /** The turn starts a provider session that does not resume an earlier one. */
+    readonly startsFreshSession: boolean;
   }) => string | undefined;
+  /** Records that the person typed a turn's message, once the turn is journaled. */
+  readonly markTurnTyped?: (input: {
+    readonly threadId: string;
+    readonly projectId?: string | undefined;
+    readonly turnId: string;
+  }) => void;
   /**
    * The instructions the person wrote for Octant, as standing blocks in their
    * order. Every turn gets them, whoever started it: they grant nothing.
@@ -1287,6 +1301,7 @@ export class ChatService {
   readonly #resolveComputerUseTools?: ChatServiceOptions["resolveComputerUseTools"];
   readonly #resolveHostRunTools?: ChatServiceOptions["resolveHostRunTools"];
   readonly #personMemoryBlock?: ChatServiceOptions["personMemoryBlock"];
+  readonly #markTurnTyped?: ChatServiceOptions["markTurnTyped"];
   readonly #octantInstructionBlocks?: ChatServiceOptions["octantInstructionBlocks"];
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
   readonly #resolveSideChatReturns: SideChatReturnResolver | undefined;
@@ -1381,6 +1396,7 @@ export class ChatService {
       this.#resolveHostRunTools = options.resolveHostRunTools;
     if (options.personMemoryBlock !== undefined)
       this.#personMemoryBlock = options.personMemoryBlock;
+    if (options.markTurnTyped !== undefined) this.#markTurnTyped = options.markTurnTyped;
     if (options.octantInstructionBlocks !== undefined)
       this.#octantInstructionBlocks = options.octantInstructionBlocks;
     if (options.contextMaintenanceTimeoutMs !== undefined) {
@@ -3380,6 +3396,15 @@ export class ChatService {
       } catch (error) {
         releaseDrain();
         throw error;
+      }
+      // After the turn, before its run: a turn with no mark is not the
+      // person's words, so a failed or missing mark is the safe side.
+      if (executionContext?.typedByPerson === true) {
+        this.#markTurnTyped?.({
+          threadId: String(thread.id),
+          projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
+          turnId: String(turn.id),
+        });
       }
       return {
         kind: "accepted" as const,
@@ -5762,10 +5787,13 @@ export class ChatService {
       // request by (the session sends its transcript again with every request),
       // what a requested compaction summarizes from, and what decides whether
       // the conversation still fits. Only the send leaves it out.
-      const personMemoryText = this.#personMemoryBlock?.({
-        thread,
-        windowId: executionContext?.windowId,
-      });
+      const personMemoryFor = (startsFreshSession: boolean) =>
+        this.#personMemoryBlock?.({
+          thread,
+          windowId: executionContext?.windowId,
+          startsFreshSession,
+        });
+      let personMemoryText = personMemoryFor(sessionDecision.kind !== "continue-session");
       const instructionBlocks = this.#octantInstructionBlocks?.({ thread }) ?? [];
       const priorTurnAttachedTexts =
         nativeConversation || excludePriorAttachmentTexts
@@ -5815,12 +5843,15 @@ export class ChatService {
       // session instead and compacts what it drops, as for any host-planned turn.
       if (resumableHost && nativeSession !== undefined && conversationLeftOut(context)) {
         nativeSession = undefined;
-        // The fresh session never saw the sidecar source the continued one held.
-        if (sideChatSource !== undefined && sideChatSourceContext !== sideChatSource) {
-          context = planWith(
-            this.#sideChatSourceForTurn(thread.id, sideChatSource, { reusable: false, previous }),
-          );
-        }
+        // The block was cut for the continuation; the new session is cut anew,
+        // and the plan is built again once with it. The fresh session also
+        // never saw the sidecar source the continued one held.
+        personMemoryText = personMemoryFor(true);
+        context = planWith(
+          sideChatSource !== undefined && sideChatSourceContext !== sideChatSource
+            ? this.#sideChatSourceForTurn(thread.id, sideChatSource, { reusable: false, previous })
+            : sideChatSourceContext,
+        );
       }
       const maintained = nativeConversation
         ? context

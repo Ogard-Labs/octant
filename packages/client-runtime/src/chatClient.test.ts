@@ -118,6 +118,43 @@ describe("chat client", () => {
     });
   });
 
+  it("delivers a typed message to a host that refuses the claim, as an older client would send it", async () => {
+    const turn = {
+      id: "00000000-0000-4000-8000-000000000813",
+      threadId,
+      sequence: 1,
+      userMessageRef: {
+        contentId: "00000000-0000-4000-8000-000000000814",
+        digest: "a".repeat(64),
+        byteLength: 5,
+      },
+      attachmentIds: [],
+      attempts: [],
+      createdAt: now,
+    };
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+      String(init?.body).includes("typedByPerson")
+        ? Response.json(
+            { category: "invalid", message: "Chat command is invalid." },
+            { status: 400 },
+          )
+        : Response.json({ kind: "turn-created", turn }),
+    );
+    const client = createChatClient({ baseUrl, fetch, windowCapability: capability });
+
+    const result = await client.execute({
+      kind: "send-chat-turn",
+      threadId: threadId as never,
+      expectedVersion: 1 as never,
+      prompt: "I prefer short answers.",
+      typedByPerson: true,
+    });
+
+    expect(result.kind).toBe("turn-created");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetch.mock.calls[1]?.[1]?.body))).not.toHaveProperty("typedByPerson");
+  });
+
   it("reads a thread window with its page size and anchor in the query", async () => {
     const turnId = "00000000-0000-4000-8000-000000000805";
     const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>

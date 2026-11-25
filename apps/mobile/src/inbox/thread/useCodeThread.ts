@@ -1,3 +1,4 @@
+import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   loadMobileCodeConversation,
@@ -92,6 +93,7 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
   );
 
   const sendFollowUp = async () => {
+    const typedClaim = typedClaimFor(input.typedScope, prompt);
     if (!enabled || transport === undefined || identity === undefined || threadId === undefined) {
       return;
     }
@@ -108,6 +110,7 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
               transport,
               threadId,
               prompt,
+              ...typedClaim,
               attachmentIds: attachments.pending.map((attachment) => attachment.id),
             }),
           onSent: () => {

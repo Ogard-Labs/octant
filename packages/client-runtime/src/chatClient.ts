@@ -1,3 +1,4 @@
+import { sendWithTypedClaim } from "./typedClaim";
 import {
   decodeChatCommand,
   decodeChatThreadWindowRequest,
@@ -164,15 +165,20 @@ export function createChatClient(options: ChatClientOptions): ChatClient {
       } catch {
         throw invalidCommand();
       }
-      return request(
-        fetch,
-        new URL("/api/chat/commands", options.baseUrl).toString(),
-        {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify(validated),
-        },
-        decodeHostAnswer(ChatCommandResult),
+      return sendWithTypedClaim(
+        validated,
+        (sent) =>
+          request(
+            fetch,
+            new URL("/api/chat/commands", options.baseUrl).toString(),
+            {
+              method: "POST",
+              headers: { ...headers, "content-type": "application/json" },
+              body: JSON.stringify(sent),
+            },
+            decodeHostAnswer(ChatCommandResult),
+          ),
+        (error) => error instanceof ChatClientFailure && error.category === "invalid",
       );
     },
     upload(input) {

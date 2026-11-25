@@ -1,3 +1,4 @@
+import { postWithTypedClaim } from "./typedClaim";
 import {
   type ChatEventFrame,
   type ChatThread,
@@ -729,6 +730,8 @@ export async function changeMobileChatProvider(input: {
  * Chat settings defaults).
  */
 export async function createMobileChatWithFirstTurn(input: {
+  /** The person typed the prompt into the composer; a claim, believed only on their own routes. */
+  readonly typedByPerson?: true;
   readonly transport: MobileRemoteTransport;
   readonly prompt: string;
   readonly providerInstanceId?: string;
@@ -766,12 +769,15 @@ export async function createMobileChatWithFirstTurn(input: {
     threadId: thread.id,
     expectedVersion: thread.version,
     prompt: trimmed,
+    ...(input.typedByPerson === true ? { typedByPerson: true as const } : {}),
   });
   const view = await loadMobileChatThread(input.transport, thread.id);
   return chatRow(input.transport.hostId, view.thread);
 }
 
 export async function sendMobileChatTurn(input: {
+  /** The person typed the prompt into the composer; a claim, believed only on their own routes. */
+  readonly typedByPerson?: true;
   readonly transport: MobileRemoteTransport;
   readonly threadId: string;
   readonly expectedVersion: number;
@@ -795,10 +801,8 @@ export async function sendMobileChatTurn(input: {
     });
     expectedVersion = updated.version;
   }
-  const response = await input.transport.authenticatedFetch({
-    method: "POST",
-    path: "/api/chat/commands",
-    body: JSON.stringify({
+  const response = await postWithTypedClaim(
+    {
       kind: "send-chat-turn",
       threadId: input.threadId,
       expectedVersion,
@@ -806,8 +810,15 @@ export async function sendMobileChatTurn(input: {
       ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
         ? {}
         : { attachmentIds: [...input.attachmentIds] }),
-    }),
-  });
+      ...(input.typedByPerson === true ? { typedByPerson: true as const } : {}),
+    },
+    (body) =>
+      input.transport.authenticatedFetch({
+        method: "POST",
+        path: "/api/chat/commands",
+        body: JSON.stringify(body),
+      }),
+  );
   if (!response.ok) {
     throw new MobileInboxFailure(
       response.status === 403 ? "rejected" : "unavailable",

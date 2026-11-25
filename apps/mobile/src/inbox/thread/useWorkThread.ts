@@ -1,3 +1,4 @@
+import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import { useCallback, useEffect, useState } from "react";
 import {
   loadMobileWorkThread,
@@ -54,6 +55,7 @@ export function useWorkThread(input: ThreadHookInput) {
   );
 
   const sendFollowUp = async () => {
+    const typedClaim = typedClaimFor(input.typedScope, prompt);
     if (!enabled || transport === undefined || identity === undefined || threadId === undefined) {
       return;
     }
@@ -73,6 +75,7 @@ export function useWorkThread(input: ThreadHookInput) {
           transport,
           thread: followUp.thread,
           prompt,
+          ...typedClaim,
           attachmentIds: attachments.pending.map((attachment) => attachment.id),
         }),
       onDone: (turn) => {

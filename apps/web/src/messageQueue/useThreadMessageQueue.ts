@@ -40,6 +40,8 @@ type QueueChange =
       readonly kind: "edit";
       readonly messageId: string;
       readonly prompt: string;
+      /** The person's own typing left this text, as the same claim a send makes. */
+      readonly typedByPerson?: true;
       readonly expectedVersion?: ThreadMessageQueueSnapshot["version"];
     }
   | { readonly kind: "remove"; readonly messageId: string }

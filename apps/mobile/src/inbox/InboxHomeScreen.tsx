@@ -1,3 +1,4 @@
+import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import {
@@ -93,6 +94,9 @@ function modeIcon(
   if (mode === "code") return "code-slash";
   return "chatbubble-outline";
 }
+
+/** The one draft the home composer and its sheet share, which says whose typing a send may claim. */
+const HOME_TYPED_SCOPE = "mobile-home";
 
 export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const { colors } = useTheme();
@@ -192,7 +196,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     placementTransport !== undefined &&
     placementAccessReason === undefined;
   const appendToDraft = useCallback((text: string) => {
-    setPrompt((draft) => appendTranscript(draft, text));
+    setPrompt((draft) => appendTranscript(HOME_TYPED_SCOPE, draft, text));
     setCodeRetry(undefined);
   }, []);
   const voice = useVoiceDictation({
@@ -406,6 +410,8 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   };
 
   const createThread = async (mode: MobileCreateMode) => {
+    // The claim is of the text pressed Start on, read before anything is awaited.
+    const typedClaim = typedClaimFor(HOME_TYPED_SCOPE, prompt);
     // Read before the create awaits: a Start pressed meanwhile is another draft.
     // The link goes out once the host has made the thread, before its first
     // turn, so a turn that fails still leaves a linked thread, and the source is
@@ -445,6 +451,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         const row = await createMobileCodeFromPrompt({
           transport: placementTransport,
           prompt,
+          ...typedClaim,
           project: selectedCodeProject,
           providerInstanceId: selectedModel.providerInstanceId,
           modelId: selectedModel.modelId,
@@ -471,6 +478,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         const row = await createMobileWorkFromPrompt({
           transport: placementTransport,
           prompt,
+          ...typedClaim,
           projectId: selectedWorkProject.projectId,
           providerInstanceId: selectedModel.providerInstanceId,
           modelId: selectedModel.modelId,
@@ -483,7 +491,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         props.onOpenThread(row);
         return;
       }
-      const row = await createChat(prompt, started);
+      const row = await createChat(prompt, started, typedClaim.typedByPerson);
       setPrompt("");
       setComposerSheetOpen(false);
       await refresh();
@@ -988,6 +996,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
             onSubmit={() => void createThread(currentCreateMode)}
             placeholder={modePresentation?.placeholder ?? MOBILE_COPY.composerHome}
             testID="mobile-home-composer"
+            typedScope={HOME_TYPED_SCOPE}
             value={prompt}
             voice={voice}
           />
@@ -1004,6 +1013,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         }
       />
       <HomeComposerSheet
+        typedScope={HOME_TYPED_SCOPE}
         busy={creating}
         editable={composerEditable}
         error={composerError}

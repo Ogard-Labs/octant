@@ -11,6 +11,7 @@ import { applyComposerCaret, type ComposerDraftMode } from "./composerThreadDraf
 import {
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
+  useNewTaskTypedScope,
   type NewTaskCreateFromSelection,
 } from "./useNewTaskPrompt";
 import type { ComposerStashBinding } from "./useComposerStash";
@@ -55,6 +56,9 @@ export function useNewTaskComposerStash(options: {
   readonly todo?: ComposerStashTodoSource | undefined;
 }): ComposerStashBinding {
   const draftScope = useContext(NewTaskDraftScopeContext);
+  // The scope the prompt's composer notes its typing under, so a stash and a
+  // restore of the draft carry that note.
+  const typedScope = useNewTaskTypedScope();
   const windowId = useContext(NewTaskDraftsContext)?.windowId;
   const parts: ComposerStashContext[] = [
     ...(options.source?.current === undefined
@@ -67,6 +71,7 @@ export function useNewTaskComposerStash(options: {
     ...(options.extensions?.current.map((value) => ({ kind: "extension" as const, value })) ?? []),
   ];
   return {
+    typedScope,
     target: {
       location: {
         host: options.host ?? "local",

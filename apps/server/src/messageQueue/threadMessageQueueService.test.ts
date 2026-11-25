@@ -360,6 +360,57 @@ describe("durable ordinary thread queue", () => {
       f.connection.prepare("SELECT message_id FROM thread_message_queue_content").all(),
     ).toEqual([]);
   });
+  it("keeps a queued message's typed claim through a save that changes nothing, and gives it only to an edit the person's own route claims", async () => {
+    const f = fixture();
+    const typedEnqueue = decodeThreadMessageQueueCommand({
+      kind: "enqueue",
+      scope,
+      requestId: randomUUID(),
+      expectedVersion: 0,
+      messageId: randomUUID(),
+      payload: { mode: "chat", prompt: "I prefer tabs", typedByPerson: true },
+    });
+    if (typedEnqueue.kind !== "enqueue") throw new Error("Expected enqueue");
+    const plain = enqueue(1, randomUUID(), "A button wrote this");
+    await f.service.execute(windowId, typedEnqueue);
+    await f.service.execute(windowId, plain);
+    const claimOf = async (messageId: string) =>
+      (await snapshot(f.service)).items.find((item) => String(item.messageId) === messageId)
+        ?.payload?.typedByPerson;
+    let version = 2;
+    const edit = async (messageId: string, prompt: string, typedByPerson?: true) =>
+      f.service.execute(
+        windowId,
+        command("edit", version++, {
+          messageId,
+          prompt,
+          ...(typedByPerson === true ? { typedByPerson } : {}),
+        }),
+      );
+
+    // Saved as it was: the claim stays, and an unclaimed message does not gain one.
+    await edit(String(typedEnqueue.messageId), "I prefer tabs");
+    await edit(String(plain.messageId), "A button wrote this");
+    expect(await claimOf(String(typedEnqueue.messageId))).toBe(true);
+    expect(await claimOf(String(plain.messageId))).toBeUndefined();
+
+    // Changed with the person's own claim, a claimed message keeps it.
+    await edit(String(typedEnqueue.messageId), "I prefer tabs, always", true);
+    expect(await claimOf(String(typedEnqueue.messageId))).toBe(true);
+
+    // Changed by a route that makes no claim: no longer the person's typing.
+    await edit(String(typedEnqueue.messageId), "I prefer spaces");
+    expect(await claimOf(String(typedEnqueue.messageId))).toBeUndefined();
+
+    // A message that never carried the claim does not gain it from an edit.
+    await edit(String(plain.messageId), "I prefer tabs now", true);
+    expect(await claimOf(String(plain.messageId))).toBeUndefined();
+
+    // Once the claim is gone, a later claimed edit does not bring it back.
+    await edit(String(typedEnqueue.messageId), "I prefer tabs again", true);
+    expect(await claimOf(String(typedEnqueue.messageId))).toBeUndefined();
+  });
+
   it("sends only one item at a time and advances only after durable normal completion", async () => {
     const f = fixture();
     const first = enqueue();

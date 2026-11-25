@@ -850,6 +850,8 @@ export interface CodeOperationRuntimeOptions {
   readonly personMemoryBlock?: (input: {
     readonly thread: CodeThread;
     readonly windowId: WindowId;
+    /** The turn starts a provider session that does not resume an earlier one. */
+    readonly startsFreshSession: boolean;
   }) => string | undefined;
   /**
    * The instructions the person wrote for Octant, as standing blocks in their
@@ -987,6 +989,7 @@ export interface CodeOperationRuntimeOptions {
   readonly resolveFileMentionContext?: CodeOperationServiceOptions["resolveFileMentionContext"];
   /** Takes the notes the user pointed at the running product into the next turn. */
   readonly takeProductFeedbackForTurn?: CodeOperationServiceOptions["takeProductFeedbackForTurn"];
+  readonly markTurnTyped?: CodeOperationServiceOptions["markTurnTyped"];
   readonly takeIssueContextFramed?: CodeOperationServiceOptions["takeIssueContextFramed"];
   readonly peekIssueContextFramed?: CodeOperationServiceOptions["peekIssueContextFramed"];
   readonly consumeIssueContextFramed?: CodeOperationServiceOptions["consumeIssueContextFramed"];
@@ -1783,6 +1786,7 @@ export function createCodeOperationRuntime(
     ...(options.takeProductFeedbackForTurn === undefined
       ? {}
       : { takeProductFeedbackForTurn: options.takeProductFeedbackForTurn }),
+    ...(options.markTurnTyped === undefined ? {} : { markTurnTyped: options.markTurnTyped }),
     ...(options.takeIssueContextFramed === undefined
       ? {}
       : { takeIssueContextFramed: options.takeIssueContextFramed }),
@@ -6637,6 +6641,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const personMemoryText = this.#options.personMemoryBlock?.({
       thread: active.thread,
       windowId: active.windowId,
+      // The session is the previous one's id when it is resumed and the turn's
+      // own requested id when a new one starts.
+      startsFreshSession: String(active.sessionId) === String(active.requestedSessionId),
     });
     // Counted with Octant's instructions: a Code window is reported by part,
     // and person memory is standing text Octant sends with them.

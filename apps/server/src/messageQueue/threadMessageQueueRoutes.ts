@@ -7,7 +7,7 @@ import {
   type ThreadMessageQueueScope,
   type WindowId,
 } from "@octant/contracts";
-import { authenticateRouteWindowId } from "../principalRouteContext";
+import { authenticateRouteWindowId, boundPrincipalIsThePerson } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 
@@ -91,12 +91,28 @@ export function createThreadMessageQueueRouteHandler(deps: ThreadMessageQueueRou
     } catch {
       return response({ error: "Queue command is invalid." }, 400, origin);
     }
+    // The claim that the person typed a message is believed only from the
+    // person's own window or paired device; from any other caller it is dropped.
+    if (!boundPrincipalIsThePerson(request)) decoded = withoutTypedClaim(decoded);
     try {
       return response(await deps.service.execute(windowId, decoded), 200, origin);
     } catch {
       return response({ error: "Queue could not be updated." }, 503, origin);
     }
   };
+}
+
+/** The command as it stood with no claim that a person typed the message. */
+export function withoutTypedClaim(command: ThreadMessageQueueCommand): ThreadMessageQueueCommand {
+  if (command.kind === "enqueue") {
+    const { typedByPerson: _typed, ...payload } = command.payload;
+    return { ...command, payload } as ThreadMessageQueueCommand;
+  }
+  if (command.kind === "edit") {
+    const { typedByPerson: _typed, ...rest } = command;
+    return rest as ThreadMessageQueueCommand;
+  }
+  return command;
 }
 
 async function readBoundedBody(

@@ -3,10 +3,10 @@ import { appendTranscript } from "./appendTranscript";
 
 describe("appendTranscript", () => {
   it("adds spoken words to the draft as more of the same message", () => {
-    expect(appendTranscript("", "  Hello there ")).toBe("Hello there");
-    expect(appendTranscript("Please", "fix the tests")).toBe("Please fix the tests");
-    expect(appendTranscript("Please ", "fix the tests")).toBe("Please fix the tests");
-    expect(appendTranscript("Line one\n", "line two")).toBe("Line one\nline two");
-    expect(appendTranscript("Keep me", "   ")).toBe("Keep me");
+    expect(appendTranscript("chat:t", "", "  Hello there ")).toBe("Hello there");
+    expect(appendTranscript("chat:t", "Please", "fix the tests")).toBe("Please fix the tests");
+    expect(appendTranscript("chat:t", "Please ", "fix the tests")).toBe("Please fix the tests");
+    expect(appendTranscript("chat:t", "Line one\n", "line two")).toBe("Line one\nline two");
+    expect(appendTranscript("chat:t", "Keep me", "   ")).toBe("Keep me");
   });
 });

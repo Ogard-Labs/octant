@@ -1,3 +1,4 @@
+import { postWithTypedClaim } from "./typedClaim";
 import {
   decodeCodeDeliveryTarget,
   decodeCodeThread,
@@ -290,6 +291,8 @@ function codeCreationFailure(
  * provider turn. Mobile never inherits remembered Full access implicitly.
  */
 export async function createMobileCodeFromPrompt(input: {
+  /** The person typed the prompt into the composer; a claim, believed only on their own routes. */
+  readonly typedByPerson?: true;
   readonly transport: MobileRemoteTransport;
   readonly prompt: string;
   readonly project: MobileCodeProjectOption;
@@ -533,18 +536,23 @@ export async function createMobileCodeFromPrompt(input: {
       "The Code task was created, but its prompt could not be staged.",
     );
     const started = await requireJson(
-      await input.transport.authenticatedFetch({
-        method: "POST",
-        path: "/api/code/commands",
-        body: JSON.stringify({
+      await postWithTypedClaim(
+        {
           kind: "start-provider-turn",
           operationId,
           threadId: thread.id,
           checkoutId: checkout.id,
           sessionId,
           prompt: evidence,
-        }),
-      }),
+          ...(input.typedByPerson === true ? { typedByPerson: true as const } : {}),
+        },
+        (body) =>
+          input.transport.authenticatedFetch({
+            method: "POST",
+            path: "/api/code/commands",
+            body: JSON.stringify(body),
+          }),
+      ),
       decodeHostAnswer(CodeOperationResult),
       "The Code task was created, but its first turn could not start.",
     );

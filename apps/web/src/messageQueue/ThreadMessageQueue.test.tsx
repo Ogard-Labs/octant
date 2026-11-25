@@ -61,6 +61,12 @@ describe("compact message queue controls", () => {
       "pause",
       "resume",
     ]);
+    // The person typed the new text into the editor, so the edit claims it.
+    expect(host.execute.mock.calls[1]?.[0]).toMatchObject({
+      kind: "edit",
+      prompt: "Changed",
+      typedByPerson: true,
+    });
   });
 
   it("steps back without repeating a lost connection the thread already reported", () => {

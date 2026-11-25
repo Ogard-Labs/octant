@@ -33,6 +33,7 @@ import { Schema } from "effect";
 import {
   authenticateRoutePrincipal,
   boundPrincipalIsHubIntroduced,
+  boundPrincipalIsThePerson,
   retainRouteAdmissionCurrent,
 } from "./principalRouteContext";
 import { hubActRefusal, type HubActScopePort } from "./hub/hubActScope";
@@ -353,6 +354,12 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
         decodeWorkTurnLookupResult(
           await dependencies.service.startFirstTurn(authenticatedWindowId, value, {
             admissionCurrent,
+            // Believed only from the person's own window or paired device.
+            ...(isRecord(value) &&
+            value["typedByPerson"] === true &&
+            boundPrincipalIsThePerson(request)
+              ? { typedByPerson: true as const }
+              : {}),
           }),
         ),
         200,

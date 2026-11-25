@@ -29,6 +29,7 @@ import { eventActorForPrincipal } from "./principalEventActor";
 import {
   authenticateRouteWindowId,
   boundPrincipalIsAgent,
+  boundPrincipalIsThePerson,
   boundPrincipalIsRestricted,
   authenticateRoutePrincipal,
   readPrincipalRouteContext,
@@ -432,6 +433,12 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
             // other device session is refused a secret answer by the service.
             initiator: boundPrincipalIsRestricted(request) ? "agent" : "user",
             ...(boundPrincipalIsAgent(request) ? { fromOutsideAgent: true } : {}),
+            // Believed only from the person's own window or paired device.
+            ...(command.kind === "send-chat-turn" &&
+            command.typedByPerson === true &&
+            boundPrincipalIsThePerson(request)
+              ? { typedByPerson: true as const }
+              : {}),
             // Only a turn may describe images; other commands carry no check.
             ...(command.kind === "send-chat-turn" ||
             command.kind === "retry-chat-turn" ||

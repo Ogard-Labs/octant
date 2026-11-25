@@ -1,6 +1,7 @@
-import type { OctantMode, WindowId } from "@octant/contracts";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import type { OctantMode, ProviderInstanceId, WindowId } from "@octant/contracts";
+import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { createPastThreadsTools } from "./pastThreadsTool";
+import { createRememberPersonTools, type PersonTurnMessage } from "./rememberPersonTool";
 import type { PersonMemoryStore } from "./personMemoryStore";
 
 export interface PersonMemoryTurnScope {
@@ -8,13 +9,43 @@ export interface PersonMemoryTurnScope {
   readonly threadId: string;
   readonly projectId?: string | undefined;
   readonly createdAt: string;
+  /** The thread's provider account, which says whether it keeps sessions of its own. */
+  readonly providerInstanceId?: ProviderInstanceId | undefined;
+  /** This turn starts a session that does not resume an earlier one. */
+  readonly startsFreshSession?: boolean | undefined;
   /** The turn's principal scope; absent when no window or host scope started it. */
   readonly windowId: WindowId | undefined;
 }
 
+/**
+ * A turn's scope with what saving needs: the thread's title and provider to name
+ * it as a source, and a reader for what the person wrote. A turn that cannot say
+ * these is offered search only.
+ */
+export interface PersonMemoryToolScope extends PersonMemoryTurnScope {
+  readonly title?: string | undefined;
+  /**
+   * The messages of the turn this scope was built for (its own prompt, and any
+   * steered into it), each with the id its typed mark is kept under. Read again
+   * on every save; absent, the turn is offered search only.
+   */
+  readonly turnMessages?: (() => ReadonlyArray<PersonTurnMessage>) | undefined;
+}
+
 export interface PersonMemoryAccess {
+  /**
+   * Records that the person typed a turn's message. Called by the host after it
+   * admitted a turn the person's own route said was typed, never from request
+   * data a service could read.
+   */
+  readonly markTurnTyped: (input: {
+    readonly mode: OctantMode;
+    readonly threadId: string;
+    readonly turnId: string;
+    readonly projectId?: string | undefined;
+  }) => void;
   readonly blockFor: (scope: PersonMemoryTurnScope) => string | undefined;
-  readonly toolsFor: (scope: PersonMemoryTurnScope) => AppManagedToolSet | undefined;
+  readonly toolsFor: (scope: PersonMemoryToolScope) => AppManagedToolSet | undefined;
   readonly childBlockFor: (lead: PersonMemoryTurnScope) => string | undefined;
   readonly childToolsFor: (
     lead: PersonMemoryTurnScope,
@@ -24,7 +55,9 @@ export interface PersonMemoryAccess {
 }
 
 /**
- * Person memory as a turn or subagent may read it. A local window, a paired
+ * Person memory as a turn or subagent may read it, and as a turn with the
+ * person's own message may write it (`toolsFor` adds the save tool; a turn the
+ * host started, and every subagent, only reads). A local window, a paired
  * device the host's own person approved, and a turn the host starts as itself
  * (a routine's run, a resumed turn, a delivered child result, or a goal round)
  * each read it; a device known only through a hub's roster, a peer-delegated
@@ -36,7 +69,17 @@ export interface PersonMemoryAccess {
  * no trace).
  */
 export function createPersonMemoryAccess(input: {
-  readonly store: Pick<PersonMemoryStore, "blockFor" | "search" | "searchOffered">;
+  readonly store: Pick<
+    PersonMemoryStore,
+    | "blockFor"
+    | "search"
+    | "searchOffered"
+    | "threadTakesPart"
+    | "saveFromOpenThread"
+    | "isTurnTyped"
+    | "markTurnTyped"
+    | "saveRefusal"
+  >;
   readonly isRestrictedDeviceScope?: (scopeId: WindowId) => boolean;
   /**
    * Threads that must never read host-wide person memory even under a host
@@ -44,6 +87,20 @@ export function createPersonMemoryAccess(input: {
    */
   readonly isThreadWithheld?: (threadId: string) => boolean;
   readonly projectLabel: (projectId: string) => string | undefined;
+  /**
+   * Where a thread's block is cut now (see `createPersonMemoryCutOff`). Absent,
+   * the block is cut at the thread's creation.
+   */
+  readonly cutOff?: (scope: PersonMemoryTurnScope) => string;
+  /**
+   * Saving what the person asks to be remembered. Absent, no turn is offered
+   * the save tool.
+   */
+  readonly save?: {
+    readonly namesProtectedPath: (text: string) => boolean;
+    /** A turn the host started as itself, which carries no words of the person's own. */
+    readonly isHostScope: (scopeId: WindowId) => boolean;
+  };
 }): PersonMemoryAccess {
   const scopeReadsPersonMemory = (windowId: WindowId | undefined, threadId: string): boolean =>
     windowId !== undefined &&
@@ -59,15 +116,65 @@ export function createPersonMemoryAccess(input: {
       thread,
       projectLabel: input.projectLabel,
     });
+  const saveToolsFor = (scope: PersonMemoryToolScope): AppManagedToolSet | undefined => {
+    const { save } = input;
+    if (
+      save === undefined ||
+      scope.windowId === undefined ||
+      save.isHostScope(scope.windowId) ||
+      scope.title === undefined ||
+      scope.providerInstanceId === undefined ||
+      scope.turnMessages === undefined ||
+      !input.store.threadTakesPart(scope)
+    ) {
+      return undefined;
+    }
+    return createRememberPersonTools({
+      store: input.store,
+      thread: {
+        mode: scope.mode,
+        threadId: scope.threadId,
+        projectId: scope.projectId,
+        title: scope.title,
+        providerInstanceId: scope.providerInstanceId,
+      },
+      turnMessages: scope.turnMessages,
+      namesProtectedPath: save.namesProtectedPath,
+    });
+  };
+  const blockOf = (scope: PersonMemoryTurnScope): string | undefined =>
+    input.store.blockFor({
+      mode: scope.mode,
+      threadId: scope.threadId,
+      projectId: scope.projectId,
+      cutOff: input.cutOff?.(scope) ?? scope.createdAt,
+    });
   return {
+    markTurnTyped: (turn) => {
+      // The turn is already accepted when this runs. A journal that cannot
+      // take the mark leaves the turn unmarked, which is never the person's
+      // words, instead of failing a turn the person has already been given.
+      try {
+        input.store.markTurnTyped(turn);
+      } catch {
+        // Unmarked is the safe side.
+      }
+    },
     blockFor: (scope) =>
-      scopeReadsPersonMemory(scope.windowId, scope.threadId)
-        ? input.store.blockFor(scope)
-        : undefined,
-    toolsFor: (scope) =>
-      scopeReadsPersonMemory(scope.windowId, scope.threadId) ? toolsForThread(scope) : undefined,
+      scopeReadsPersonMemory(scope.windowId, scope.threadId) ? blockOf(scope) : undefined,
+    toolsFor: (scope) => {
+      if (!scopeReadsPersonMemory(scope.windowId, scope.threadId)) return undefined;
+      const search = toolsForThread(scope);
+      const remember = saveToolsFor(scope);
+      return search === undefined && remember === undefined
+        ? undefined
+        : combineAppManagedToolSets(search, remember);
+    },
+    // The lead's own cut: a child sees what its lead thread's next turn would.
     childBlockFor: (lead) =>
-      scopeReadsPersonMemory(lead.windowId, lead.threadId) ? input.store.blockFor(lead) : undefined,
+      scopeReadsPersonMemory(lead.windowId, lead.threadId)
+        ? blockOf({ ...lead, startsFreshSession: false })
+        : undefined,
     childToolsFor: (lead, authority, currentWindowId) => {
       if (!authority.tools || !scopeReadsPersonMemory(lead.windowId, lead.threadId)) {
         return undefined;

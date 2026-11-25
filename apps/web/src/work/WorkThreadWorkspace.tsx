@@ -1,3 +1,4 @@
+import { threadDraftScope, typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { settledThreadNotice } from "../composer/settledThreadNotice";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
@@ -1114,6 +1115,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   }
   const textareaRef = useRef<ComposerInputElement>(null);
   const stashSubmission = useRef<ComposerStashSubmission>(undefined);
+  const typedScope = threadDraftScope("work", String(props.threadId));
   const currentThreadKeyRef = useRef(String(props.threadId));
   currentThreadKeyRef.current = String(props.threadId);
   const mentionListId = useId();
@@ -1627,6 +1629,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   });
   const fileMentionOpen = fileMentions.open && !mention.open;
   const stash: ComposerStashBinding = {
+    typedScope,
     submission: stashSubmission,
     target: {
       location: {
@@ -2357,6 +2360,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               ...(sideChatReturns.length === 0 ? {} : { sideChatReturns }),
               fileMentionPaths,
               extensionSelections,
+              ...typedClaimFor(typedScope, promptText),
             },
             () => {
               retireStashRecovery?.();
@@ -2386,6 +2390,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           threadId: props.threadId,
           turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
           prompt: promptText,
+          ...typedClaimFor(typedScope, promptText),
           authority: {
             hostId: props.hostId ?? LOCAL_HOST_ID,
             projectId,
@@ -3621,6 +3626,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           }
           input={
             <ComposerInput
+              typedScope={typedScope}
               inlineChips={mention.inlineChips}
               renderModelChip={atMenu.renderModelChip}
               aria-label="Work prompt"
@@ -3836,7 +3842,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               <ComposerVoiceButton
                 disabled={creating || completionLocked}
                 onTranscript={(transcript) =>
-                  rememberDraft(appendTranscript(prompt, transcript), null)
+                  rememberDraft(appendTranscript(typedScope, prompt, transcript), null)
                 }
               />
             ),

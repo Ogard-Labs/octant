@@ -391,6 +391,71 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledTimes(3);
   });
 
+  it("believes that a Code message was typed only from the person's own window or a device they paired", async () => {
+    const executeOperation = vi.fn(
+      async (_window: unknown, command: { readonly operationId: string }, _options?: unknown) => ({
+        kind: "operation-accepted",
+        operationId: command.operationId,
+      }),
+    );
+    const route = routeFixture({ execute: vi.fn(), executeOperation });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000960";
+    const turn = (typedByPerson: boolean) => ({
+      kind: "start-provider-turn",
+      operationId: crypto.randomUUID(),
+      threadId,
+      checkoutId,
+      sessionId: "00000000-0000-4000-8000-000000000961",
+      prompt: {
+        contentId: "00000000-0000-4000-8000-000000000962",
+        digest: "d".repeat(64),
+        byteLength: 42,
+      },
+      ...(typedByPerson ? { typedByPerson: true } : {}),
+    });
+    const post = (command: Record<string, unknown>) =>
+      request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+    const from = (
+      command: Record<string, unknown>,
+      principal: { readonly origin: string; readonly admittedBy?: "host-person" | "hub-roster" },
+    ) => {
+      const remote = post(command);
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000963" as never,
+          ...principal,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    const sent = async (request: Request) => {
+      expect((await route(request))?.status).toBe(200);
+      return executeOperation.mock.lastCall?.[2] as { readonly typedByPerson?: true } | undefined;
+    };
+    const paired = { origin: "https://octant.invalid", admittedBy: "host-person" } as const;
+
+    expect((await sent(post(turn(true))))?.typedByPerson).toBe(true);
+    expect((await sent(from(turn(true), paired)))?.typedByPerson).toBe(true);
+    for (const outsider of [
+      { origin: "https://octant.invalid", admittedBy: "hub-roster" },
+      { origin: "https://octant.invalid" },
+      { origin: AGENT_ACCESS_ORIGIN, admittedBy: "host-person" },
+    ] as const) {
+      expect((await sent(from(turn(true), outsider)))?.typedByPerson).toBeUndefined();
+    }
+    expect((await sent(post(turn(false))))?.typedByPerson).toBeUndefined();
+  });
+
   it("refuses a hub-introduced device raising a thread to Full access, and lets it lower one", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });

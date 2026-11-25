@@ -190,7 +190,7 @@ export function NavigatorPanel(props: NavigatorPanelProps) {
           <ComposerVoiceButton
             disabled={navigator.busy || state.kind === "unconfigured"}
             onTranscript={(transcript) =>
-              setPrompt((current) => appendTranscript(current, transcript))
+              setPrompt((current) => appendTranscript("navigator", current, transcript))
             }
           />
           <OctantButton

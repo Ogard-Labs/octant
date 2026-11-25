@@ -1,4 +1,8 @@
-import { useMemo } from "react";
+import {
+  composerValueShown,
+  noteTypedComposerText,
+} from "@octant/client-runtime/typed-composer-text";
+import { useEffect, useMemo } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { GlassSurface, radii, space, typography, useTheme } from "../../design-system";
@@ -9,6 +13,8 @@ import { IconButton } from "./IconButton";
 export interface FloatingComposerProps {
   readonly placeholder: string;
   readonly value?: string;
+  /** The draft this composer holds, which says whose typing a send may claim. */
+  readonly typedScope: string;
   readonly onChangeText?: (value: string) => void;
   readonly onSubmit?: () => void;
   /** When set with busy, show Stop instead of Send (interrupt in-flight turn). */
@@ -97,6 +103,11 @@ export function FloatingComposer(props: FloatingComposerProps) {
     [colors],
   );
 
+  // What the person types is theirs; a value a screen writes is not, and
+  // replaces the draft's note unless it is text the person left there.
+  useEffect(() => {
+    if (props.value !== undefined) composerValueShown(props.typedScope, props.value);
+  }, [props.value, props.typedScope]);
   const multiline = props.value !== undefined;
   const editable = props.editable !== false && !props.busy;
   const canSend = editable && (props.value ?? "").trim().length > 0 && props.onSubmit !== undefined;
@@ -108,7 +119,10 @@ export function FloatingComposer(props: FloatingComposerProps) {
           <TextInput
             editable={editable}
             multiline
-            onChangeText={props.onChangeText}
+            onChangeText={(value) => {
+              noteTypedComposerText(props.typedScope, value);
+              props.onChangeText?.(value);
+            }}
             placeholder={props.placeholder}
             placeholderTextColor={colors.textTertiary}
             style={styles.input}

@@ -1,3 +1,4 @@
+import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import { useDroppedFolderMentions } from "../../composer/useDroppedFolderMentions";
 import { attachAllowingFiles } from "../../composer/attachmentMediaType";
 import { MAX_WORK_ATTACHMENT_BYTES, MAX_WORK_TURN_ATTACHMENTS } from "@octant/contracts";
@@ -15,6 +16,7 @@ import {
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
   useNewTaskPrompt,
+  useNewTaskTypedScope,
 } from "../../composer/useNewTaskPrompt";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -277,6 +279,8 @@ export interface CodeComposerSuggestion {
 }
 
 export interface CodeComposerSubmitInput {
+  /** The person typed this prompt into the composer; the host believes it only on their own routes. */
+  readonly typedByPerson?: true;
   readonly workingFolder?: import("@octant/contracts").ThreadWorkingFolderChoice;
   readonly modelOptionValues?: ProviderModelOptionValues;
   readonly computerUseSelection?: ExtensionSelection;
@@ -335,6 +339,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     [props.providerGroups, isServer],
   );
   const [draftPrompt, setPrompt] = useNewTaskPrompt();
+  const typedScope = useNewTaskTypedScope();
   const prompt = props.fixedPrompt ?? draftPrompt;
   const drafts = useContext(NewTaskDraftsContext);
   const draftScope = useContext(NewTaskDraftScopeContext);
@@ -990,6 +995,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
+    const typedClaim = typedClaimFor(typedScope, trimmed);
     // A Code thread belongs to a Project, so the first turn cannot start until
     // one is chosen. Send stays live and says so: a Send greyed out for this
     // alone left people guessing why nothing happened.
@@ -1008,6 +1014,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       .then(async (threadMentionIds) => {
         const created = await props.onCreateThread({
           prompt: trimmed,
+          ...typedClaim,
           modelOptionValues,
           ...(extensionSelections.length === 0 ? {} : { extensionSelections }),
           executionPolicy,
@@ -1408,6 +1415,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             }
             input={
               <ComposerInput
+                typedScope={typedScope}
                 inlineChips={mention.inlineChips}
                 renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"
@@ -1545,7 +1553,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 <ComposerVoiceButton
                   disabled={props.creating === true || props.fixedPrompt !== undefined}
                   onTranscript={(transcript) =>
-                    setPrompt((current) => appendTranscript(current, transcript))
+                    setPrompt((current) => appendTranscript(typedScope, current, transcript))
                   }
                 />
               ),

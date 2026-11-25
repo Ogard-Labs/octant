@@ -323,11 +323,21 @@ export class ThreadMessageQueueService {
           if (content === undefined) return refused("content-unavailable");
           let updated: QueueContent;
           try {
+            // A save that changes nothing keeps the claim the message had and
+            // gives none. A changed message keeps a claim only when it already
+            // had one and the person's own route made it again with the edit;
+            // an edit never gives a message the claim (an agent's text, a
+            // template), and any other edit leaves it as not typed.
+            const { typedByPerson: earlier, ...kept } = content.payload;
+            const typed =
+              earlier === true &&
+              (command.prompt === content.payload.prompt || command.typedByPerson === true);
             updated = {
               ...content,
               payload: decodeThreadMessageQueuePayload({
-                ...content.payload,
+                ...kept,
                 prompt: command.prompt,
+                ...(typed ? { typedByPerson: true } : {}),
               }),
             };
           } catch {

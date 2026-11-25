@@ -1,4 +1,8 @@
-import { useMemo } from "react";
+import {
+  composerValueShown,
+  noteTypedComposerText,
+} from "@octant/client-runtime/typed-composer-text";
+import { useEffect, useMemo } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { radii, space, typography, useTheme } from "../../design-system";
@@ -30,6 +34,8 @@ export function HomeComposerSheet(props: {
   readonly visible: boolean;
   readonly mode: MobileCreateMode;
   readonly prompt: string;
+  /** The draft this sheet holds, which says whose typing a send may claim. */
+  readonly typedScope: string;
   readonly modelLabel: string;
   readonly placementLabel?: string | undefined;
   readonly projectLabel?: string | undefined;
@@ -51,6 +57,9 @@ export function HomeComposerSheet(props: {
   readonly onRemoveSource?: (() => void) | undefined;
 }) {
   const { colors } = useTheme();
+  useEffect(() => {
+    composerValueShown(props.typedScope, props.prompt);
+  }, [props.prompt, props.typedScope]);
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -266,7 +275,10 @@ export function HomeComposerSheet(props: {
         autoFocus
         editable={editable}
         multiline
-        onChangeText={props.onChangePrompt}
+        onChangeText={(value) => {
+          noteTypedComposerText(props.typedScope, value);
+          props.onChangePrompt(value);
+        }}
         placeholder={placeholderFor(props.mode)}
         placeholderTextColor={colors.textTertiary}
         style={[styles.input, !editable ? styles.disabled : null]}

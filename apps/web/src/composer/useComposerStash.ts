@@ -1,3 +1,7 @@
+import {
+  composerTextWasTyped,
+  noteTypedComposerText,
+} from "@octant/client-runtime/typed-composer-text";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   composerStashLocationKey,
@@ -25,6 +29,12 @@ export type PreparedComposerStash =
   | { readonly kind: "refused"; readonly reason: string };
 
 export interface ComposerStashBinding {
+  /**
+   * The draft scope the composer notes the person's typing under. A stash keeps
+   * that note with the draft it moves, and a restore brings it back, so a draft
+   * the person typed is still theirs after it was put aside and taken up again.
+   */
+  readonly typedScope?: string | undefined;
   readonly target: ComposerStashTarget;
   readonly draft: ComposerStashDraft;
   readonly readCaret?: () => number | undefined;
@@ -44,6 +54,19 @@ function canReadDraftStorage(): ComposerStashStore | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** The draft with its note that the person typed it, as its composer holds that now. */
+function withTypedNote(draft: ComposerStashDraft, scope: string | undefined): ComposerStashDraft {
+  const { typed: _earlier, ...rest } = draft;
+  return scope !== undefined && composerTextWasTyped(scope, draft.text)
+    ? { ...rest, typed: true }
+    : rest;
+}
+
+/** A draft about to be shown again is the person's own words again, if it was when it left. */
+function restoreTypedNote(draft: ComposerStashDraft, scope: string | undefined): void {
+  if (scope !== undefined && draft.typed === true) noteTypedComposerText(scope, draft.text);
 }
 
 function sameDraft(left: ComposerStashDraft, right: ComposerStashDraft): boolean {
@@ -164,6 +187,7 @@ export function useComposerStash(
           report("Your current edits are kept. Reopen the composer to recover the saved draft.");
         return;
       }
+      restoreTypedNote(draft, current.typedScope);
       prepared.apply();
       recoveryApplied.current = true;
     };
@@ -266,7 +290,10 @@ export function useComposerStash(
       report(input.unavailable);
       return;
     }
-    const before = { ...input.draft, caret: input.readCaret?.() ?? input.draft.caret };
+    const before = {
+      ...withTypedNote(input.draft, input.typedScope),
+      caret: input.readCaret?.() ?? input.draft.caret,
+    };
     if (entry === undefined && !hasComposerStashContent(before)) return;
     const plan =
       entry === undefined
@@ -315,6 +342,7 @@ export function useComposerStash(
         report("The move was saved. Reopen the composer to recover the draft.");
         return;
       }
+      restoreTypedNote(plan.draft, input.typedScope);
       prepared.apply();
       release = undefined;
       setEntries(undefined);
