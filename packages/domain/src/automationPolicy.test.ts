@@ -852,13 +852,56 @@ describe("what a thread's agent may do with routines", () => {
 });
 
 describe("a routine a thread's agent sets up", () => {
-  const suggestion = { requestedByPerson: false, followUp: false } as const;
+  const suggestion = {
+    requestedByPerson: false,
+    followUp: false,
+    strict: false,
+    readOutsideContent: false,
+  } as const;
 
   it("is created paused with no card at Full access when the person keeps such routines paused, and waits for the person's card below it", () => {
     expect(decideRoutineFromAgent({ ...suggestion, posture: "full-access" })).toBe("create-paused");
     for (const posture of ["approval-gated", "auto-accept-edits", undefined] as const) {
       expect(decideRoutineFromAgent({ ...suggestion, posture })).toBe("ask-on-card");
     }
+  });
+
+  it("is created paused under Strict when the person asked for it, and enabled there only at Full access with the Settings choice on", () => {
+    const asked = { ...suggestion, requestedByPerson: true, strict: true } as const;
+    for (const posture of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+      expect(decideRoutineFromAgent({ ...asked, posture })).toBe("create-paused");
+    }
+    expect(
+      decideRoutineFromAgent({ ...asked, posture: "full-access", startActiveAtFullAccess: true }),
+    ).toBe("create-active");
+    expect(
+      decideRoutineFromAgent({
+        ...asked,
+        posture: "approval-gated",
+        startActiveAtFullAccess: true,
+      }),
+    ).toBe("create-paused");
+    expect(decideRoutineFromAgent({ ...suggestion, strict: true, posture: "full-access" })).toBe(
+      "create-paused",
+    );
+    expect(decideRoutineFromAgent({ ...suggestion, strict: true, posture: "approval-gated" })).toBe(
+      "ask-on-card",
+    );
+  });
+
+  it("does not take the agent's word that the person asked on a thread that read outside content: the card below Full access, the suggestion's rule at it", () => {
+    const claimed = { ...suggestion, requestedByPerson: true, readOutsideContent: true } as const;
+    for (const posture of ["approval-gated", "auto-accept-edits", undefined] as const) {
+      expect(decideRoutineFromAgent({ ...claimed, posture })).toBe("ask-on-card");
+    }
+    expect(
+      decideRoutineFromAgent({
+        ...claimed,
+        posture: "full-access",
+        startActiveAtFullAccess: true,
+      }),
+    ).toBe("create-active");
+    expect(decideRoutineFromAgent({ ...claimed, posture: "full-access" })).toBe("create-paused");
   });
 
   it("is created active at any writing level when the person asked for it, whatever Settings say about suggestions", () => {

@@ -186,6 +186,8 @@ function authorize(input: {
   readonly strict?: boolean;
   /** The level the Work parent's running turn holds, when one is running. */
   readonly runningWorkTurnAccess?: WorkAccess;
+  /** Whether the Work parent's running turn started with the kept sandbox. */
+  readonly runningWorkTurnSandbox?: boolean;
 }) {
   return authorizeAgentRunCreation({
     persistence: {
@@ -222,6 +224,7 @@ function authorize(input: {
       input.liveProvider === undefined ? undefined : decodeProviderInstanceId(input.liveProvider),
     ...(input.strict === undefined ? {} : { strict: () => input.strict === true }),
     runningWorkTurnAccess: () => input.runningWorkTurnAccess,
+    runningWorkTurnSandbox: () => input.runningWorkTurnSandbox,
   });
 }
 
@@ -517,7 +520,11 @@ describe("authorizeAgentRunCreation", () => {
   describe("a Work parent's grant to its helpers", () => {
     const admit = (
       stored: Record<string, unknown>,
-      options: { readonly strict?: boolean; readonly runningWorkTurnAccess?: WorkAccess },
+      options: {
+        readonly strict?: boolean;
+        readonly runningWorkTurnAccess?: WorkAccess;
+        readonly runningWorkTurnSandbox?: boolean;
+      },
     ) => {
       const thread = decodeWorkThread({ ...workThread(), ...stored });
       const workspace = withSurface(
@@ -543,6 +550,7 @@ describe("authorizeAgentRunCreation", () => {
         readWorkThread: () => thread,
         ...(options.strict === undefined ? {} : { strict: () => options.strict === true }),
         runningWorkTurnAccess: () => options.runningWorkTurnAccess,
+        runningWorkTurnSandbox: () => options.runningWorkTurnSandbox,
       });
       const admitted = authorize({
         workspace,
@@ -584,6 +592,44 @@ describe("authorizeAgentRunCreation", () => {
       expect(
         admit({ access: "full-access", fullAccessSandbox: true }, { strict: false }),
       ).toMatchObject({ ...open, executionPolicy: "auto-accept-edits" });
+    });
+
+    it("gives a helper no more than the level the person lowered the thread to while its turn runs", () => {
+      const running = { strict: false, runningWorkTurnAccess: "full-access" } as const;
+      expect(admit({ access: "plan" }, running)).toMatchObject({
+        ...closed,
+        executionPolicy: "plan",
+      });
+      expect(admit({ access: "ask-first" }, running)).toMatchObject({
+        ...open,
+        executionPolicy: "approval-gated",
+      });
+      expect(admit({ access: "auto-accept-edits" }, running)).toMatchObject({
+        ...open,
+        executionPolicy: "auto-accept-edits",
+      });
+    });
+
+    it("keeps a helper inside the sandbox its parent's running turn started with after the person turns it off", () => {
+      expect(
+        admit(
+          { access: "full-access" },
+          { strict: false, runningWorkTurnAccess: "full-access", runningWorkTurnSandbox: true },
+        ),
+      ).toMatchObject({ ...open, executionPolicy: "auto-accept-edits" });
+      // Turned on mid-turn: the thread's own choice already holds the helper.
+      expect(
+        admit(
+          { access: "full-access", fullAccessSandbox: true },
+          { strict: false, runningWorkTurnAccess: "full-access", runningWorkTurnSandbox: false },
+        ),
+      ).toMatchObject({ ...open, executionPolicy: "auto-accept-edits" });
+      expect(
+        admit(
+          { access: "full-access" },
+          { strict: false, runningWorkTurnAccess: "full-access", runningWorkTurnSandbox: false },
+        ),
+      ).toMatchObject({ ...open, executionPolicy: "full-access" });
     });
 
     it("stays approval-gated with no shell or Git under Strict, and when Strict was never resolved", () => {

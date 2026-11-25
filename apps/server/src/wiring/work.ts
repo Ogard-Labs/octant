@@ -632,6 +632,10 @@ export function wireWork(deps: WorkDependencies) {
             (persistence.readShellSettings()?.settings ?? defaultShellSettings())
               .agentRoutinesStartActiveAtFullAccess,
           readPosture: readRoutinePosture,
+          readStrict: () => resolveThreadStrict(String(input.thread.id)),
+          readOutsideContent: () =>
+            readThreadExternalContentTaint(persistence.connection, String(input.thread.id))
+              .externalContentIngested,
         }),
         createRoutineTools({
           ...routineTurn,

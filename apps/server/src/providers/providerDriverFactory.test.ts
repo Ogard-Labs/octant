@@ -888,6 +888,30 @@ describe("Codex's open launch environment", () => {
     OPENAI_API_KEY: "codex-own",
   };
 
+  it.each([
+    ['model_provider = "amazon-bedrock"\n', true],
+    ['model_provider = "openai"\n', false],
+    [undefined, false],
+  ] as const)(
+    "hands the host's Bedrock API key to a Codex account outside Strict only when its config.toml selects Amazon Bedrock (config %j)",
+    (config, crosses) => {
+      const codexHome = mkdtempSync(join(tmpdir(), "octant-codex-home-"));
+      try {
+        if (config !== undefined) writeFileSync(join(codexHome, "config.toml"), config);
+        const environment = openCodexAccountEnvironment({
+          binaryPath: "/opt/homebrew/bin/codex",
+          hostEnvironment: { ...hostEnvironment, AWS_BEARER_TOKEN_BEDROCK: "bedrock-token" },
+          codexHome,
+          inheritHostAuth: true,
+        });
+        expect(environment.AWS_BEARER_TOKEN_BEDROCK).toBe(crosses ? "bedrock-token" : undefined);
+        expect(environment.AWS_ACCESS_KEY_ID).toBe("AKIAEXAMPLE");
+      } finally {
+        rmSync(codexHome, { recursive: true, force: true });
+      }
+    },
+  );
+
   it.each([['model_provider = "amazon-bedrock"\n'], ['model_provider = "openai"\n'], [undefined]])(
     "keeps the person's exported AWS keys outside Strict whichever provider the account's config.toml selects (config %j)",
     (config) => {

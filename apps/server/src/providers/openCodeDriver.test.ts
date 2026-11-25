@@ -1319,10 +1319,10 @@ describe("OpenCode driver", () => {
     ["approval-gated", "bash", "ask"],
     ["approval-gated", "task", "allow"],
     ["auto-accept-edits", "task", "allow"],
-    ["approval-gated", "todowrite", "allow"],
-    ["approval-gated", "todoread", "allow"],
-    ["approval-gated", "lsp", "allow"],
-    ["auto-accept-edits", "codesearch", "allow"],
+    ["approval-gated", "todowrite", "ask"],
+    ["approval-gated", "todoread", "ask"],
+    ["approval-gated", "lsp", "ask"],
+    ["auto-accept-edits", "codesearch", "ask"],
     ["auto-accept-edits", "bash", "ask"],
     ["approval-gated", "external_directory", "ask"],
     ["plan", "read", "allow"],
@@ -1341,7 +1341,7 @@ describe("OpenCode driver", () => {
     ["plan", "webfetch", "deny"],
     ["plan", "websearch", "deny"],
   ] as const)(
-    "maps %s %s through official last-match permission semantics",
+    "maps %s %s through official last-match permission semantics under Strict",
     async (policy, permission, action) => {
       const fixture = driverFixture();
       await Effect.runPromise(
@@ -1359,8 +1359,61 @@ describe("OpenCode driver", () => {
     },
   );
 
-  it("allows at Ask first and Accept edits every tool Plan allows without asking, on both runtimes", () => {
+  it.each([
+    ["approval-gated", "todowrite"],
+    ["approval-gated", "todoread"],
+    ["approval-gated", "lsp"],
+    ["auto-accept-edits", "codesearch"],
+  ] as const)(
+    "starts a %s session outside Strict with %s allowed without asking",
+    async (policy, permission) => {
+      const fixture = driverFixture();
+      await Effect.runPromise(
+        Effect.scoped(
+          fixture.driver
+            .acquire({ instanceId, projectRoot: "/tmp/project" })
+            .pipe(
+              Effect.flatMap((connection) =>
+                connection.start({ sessionId, modelId, executionPolicy: policy, strict: false }),
+              ),
+            ),
+        ),
+      );
+      expect(evaluatePermission(fixture.createdPermissions[0]!, permission)).toBe("allow");
+    },
+  );
+
+  it("keeps asking under Strict at Ask first and Accept edits for the read-only tools Plan allows, on both runtimes", () => {
     const own = { rules: [], toolServers: false, webTools: true };
+    for (const level of ["approval-gated", "auto-accept-edits"] as const) {
+      for (const tool of ["todowrite", "todoread", "codesearch", "lsp", "webfetch", "websearch"]) {
+        expect(
+          evaluatePermission(permissionRules(level, "code", undefined, [], false, own), tool),
+        ).toBe("ask");
+        expect(
+          evaluateV2Permission(
+            [...betaSessionPermissionRules(level, "code", undefined, [], false, own)],
+            tool,
+          ),
+        ).toBe("ask");
+      }
+      // Subagents started unasked at these levels before the read-only tools
+      // joined them, so Strict keeps that.
+      expect(
+        evaluatePermission(permissionRules(level, "code", undefined, [], false, own), "task"),
+      ).toBe("allow");
+      expect(
+        evaluateV2Permission(
+          [...betaSessionPermissionRules(level, "code", undefined, [], false, own)],
+          "subagent",
+        ),
+      ).toBe("allow");
+    }
+  });
+
+  it("allows outside Strict at Ask first and Accept edits every tool Plan allows without asking, on both runtimes", () => {
+    const own = { rules: [], toolServers: false, webTools: true };
+    const outsideStrict = [undefined, undefined, undefined, false] as const;
     const tools = [
       "read",
       "glob",
@@ -1381,7 +1434,10 @@ describe("OpenCode driver", () => {
           "allow"
         ) {
           expect(
-            evaluatePermission(permissionRules(level, "code", undefined, [], false, own), tool),
+            evaluatePermission(
+              permissionRules(level, "code", undefined, [], false, own, ...outsideStrict),
+              tool,
+            ),
           ).toBe("allow");
         }
         if (
@@ -1392,7 +1448,17 @@ describe("OpenCode driver", () => {
         ) {
           expect(
             evaluateV2Permission(
-              [...betaSessionPermissionRules(level, "code", undefined, [], false, own)],
+              [
+                ...betaSessionPermissionRules(
+                  level,
+                  "code",
+                  undefined,
+                  [],
+                  false,
+                  own,
+                  ...outsideStrict,
+                ),
+              ],
               tool,
             ),
           ).toBe("allow");
@@ -1401,7 +1467,17 @@ describe("OpenCode driver", () => {
       // Effects still follow the level.
       expect(
         evaluateV2Permission(
-          [...betaSessionPermissionRules(level, "code", undefined, [], false, own)],
+          [
+            ...betaSessionPermissionRules(
+              level,
+              "code",
+              undefined,
+              [],
+              false,
+              own,
+              ...outsideStrict,
+            ),
+          ],
           "shell",
         ),
       ).toBe("ask");

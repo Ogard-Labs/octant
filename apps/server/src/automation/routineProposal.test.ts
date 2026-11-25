@@ -213,6 +213,11 @@ function harness(options: { readonly mode?: "chat" | "work" | "code" } = {}) {
     isAutomationOrigin = false,
     posture?: ProviderExecutionPolicy,
     startsActiveAtFullAccess = false,
+    // Absent facts are the tool's own defaults: Strict, and a marked thread.
+    facts: { readonly strict?: boolean; readonly readOutsideContent?: boolean } = {
+      strict: false,
+      readOutsideContent: false,
+    },
   ) =>
     createRoutineProposalTools({
       windowId: scope,
@@ -221,6 +226,10 @@ function harness(options: { readonly mode?: "chat" | "work" | "code" } = {}) {
       proposals,
       ...(posture === undefined ? {} : { readPosture: () => posture }),
       startsActiveAtFullAccess: () => startsActiveAtFullAccess,
+      ...(facts.strict === undefined ? {} : { readStrict: () => facts.strict === true }),
+      ...(facts.readOutsideContent === undefined
+        ? {}
+        : { readOutsideContent: () => facts.readOutsideContent === true }),
       now: () => NOW_MS,
     });
   const routines = (
@@ -419,6 +428,52 @@ describe("routine proposals from a thread", () => {
     ).toEqual([]);
     await decide(h.handler, String(proposal.proposalId), "decline");
     expect(await call).toMatchObject({ result: { status: "declined" } });
+  });
+
+  it("creates the routine the person asked for paused under Strict, and when Strict was never resolved", async () => {
+    const requested = JSON.stringify({ ...JSON.parse(weeklyInput), requestedByPerson: true });
+    for (const facts of [{ strict: true, readOutsideContent: false }, {}]) {
+      const h = harness();
+      const outcome = await h
+        .tools(windowId, false, "approval-gated", false, facts)
+        .execute({ name: "octant_propose_routine", inputJson: requested });
+      expect(outcome).toMatchObject({ result: { status: "created", paused: true } });
+      expect(String((outcome.result as { message: string }).message)).toContain(
+        "because the person asked for it",
+      );
+      expect(await listed(h.handler)).toEqual([]);
+      const [item] = h.projection.listSummaries({
+        hostId: "local" as never,
+        mode: "all",
+        limit: 10,
+      }).items;
+      expect(h.projection.getDefinition(item?.id as never)).toMatchObject({ lifecycle: "paused" });
+    }
+  });
+
+  it("waits for the person's card below Full access when a thread that read outside content says the person asked", async () => {
+    const h = harness({ mode: "code" });
+    const requested = JSON.stringify({ ...JSON.parse(weeklyInput), requestedByPerson: true });
+    const call = h
+      .tools(windowId, false, "approval-gated", false, { strict: false, readOutsideContent: true })
+      .execute({ name: "octant_propose_routine", inputJson: requested });
+    const waiting = await cardAppears(h.handler);
+    expect(waiting).toHaveLength(1);
+    expect(
+      h.projection.listSummaries({ hostId: "local" as never, mode: "all", limit: 10 }).items,
+    ).toEqual([]);
+    await decide(h.handler, String(waiting[0]?.proposalId), "decline");
+    expect(await call).toMatchObject({ result: { status: "declined" } });
+
+    // At Full access the mark only records: the routine is created as the
+    // agent's own suggestion is there.
+    const atFullAccess = await h
+      .tools(windowId, false, "full-access", true, { strict: false, readOutsideContent: true })
+      .execute({ name: "octant_propose_routine", inputJson: requested });
+    expect(atFullAccess).toMatchObject({ result: { status: "created", paused: false } });
+    expect(String((atFullAccess.result as { message: string }).message)).toContain(
+      "runs at Full access",
+    );
   });
 
   it("asks on a card, and creates nothing, for a follow-up or a turn in Plan even when the person asked", async () => {

@@ -5440,7 +5440,8 @@ describe("Codex execution authority and approvals", () => {
       { kind: "tool-progress" },
       {
         kind: "tool-success",
-        summary: "File change completed, including files outside the Project.",
+        summary:
+          "File change completed, including files outside the Project: modified /Users/person/notes/todo.md.",
       },
     ]);
     await kept.acquired.close();

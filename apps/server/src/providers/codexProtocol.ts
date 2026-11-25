@@ -689,7 +689,16 @@ export type CodexServerNotification = {
     readonly kind: "notification";
     readonly method: Method;
     readonly params: CodexNotificationParams[Method];
-  };
+  } & (Method extends "turn/completed"
+    ? {
+        /**
+         * The completion named its thread but no turn this build could read
+         * (`readableTurnCompletion`): it ends whichever turn that thread is
+         * running, and `params.turn.id` is empty.
+         */
+        readonly turnUnreadable?: true;
+      }
+    : unknown);
 }[CodexStableNotificationMethod];
 
 const stableNotificationDecoders: Record<
@@ -898,6 +907,63 @@ function decodeRpcResponse(value: Record<string, unknown>): CodexRpcResponse {
   return hasError ? decode(CodexRpcErrorResponse)(value) : decode(CodexRpcSuccessResponse)(value);
 }
 
+/**
+ * A `turn/completed` whose params fail the schema, read by hand. It is the
+ * one notification that ends a turn, so it is never dropped as other
+ * unreadable notifications are: dropped, the turn stayed running until a
+ * stall limit that may be off. With a thread and turn id it ends that turn:
+ * failed when it carries an error of any shape or a status that is not text,
+ * and by its status otherwise. With only the thread it fails that thread's
+ * running turn. With no thread nothing says whose turn ended, so it throws
+ * and the caller fails the stream, as every undecodable notification once did.
+ */
+function readableTurnCompletion(
+  params: unknown,
+): Extract<CodexServerNotification, { readonly method: "turn/completed" }> {
+  if (!isRecord(params) || typeof params.threadId !== "string") {
+    throw new TypeError("Codex turn completion names no thread");
+  }
+  const threadId = params.threadId;
+  const turn = isRecord(params.turn) ? params.turn : undefined;
+  if (turn === undefined || typeof turn.id !== "string") {
+    return {
+      kind: "notification",
+      method: "turn/completed",
+      params: { threadId, turn: { id: "", status: "failed" } },
+      turnUnreadable: true,
+    };
+  }
+  const hasError = turn.error !== undefined && turn.error !== null;
+  if (!hasError) {
+    return {
+      kind: "notification",
+      method: "turn/completed",
+      params: {
+        threadId,
+        turn: { id: turn.id, status: typeof turn.status === "string" ? turn.status : "failed" },
+      },
+    };
+  }
+  const reported = isRecord(turn.error) ? turn.error : {};
+  return {
+    kind: "notification",
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turn.id,
+        status: "failed",
+        error: {
+          message: typeof reported.message === "string" ? reported.message : "",
+          ...(typeof reported.codexErrorInfo === "string"
+            ? { codexErrorInfo: reported.codexErrorInfo }
+            : {}),
+        },
+      },
+    },
+  };
+}
+
 export function decodeCodexServerMessage(value: unknown): CodexServerMessage {
   if (!isRecord(value)) {
     throw new TypeError("Codex server message must be an object");
@@ -933,6 +999,7 @@ export function decodeCodexServerMessage(value: unknown): CodexServerMessage {
     try {
       params = stableNotificationDecoders[stableMethod](value.params);
     } catch {
+      if (stableMethod === "turn/completed") return readableTurnCompletion(value.params);
       // One app-server process carries every thread, so a notification whose
       // shape a newer Codex changed is dropped like one this build does not
       // know. Failing it closed the connection under all of them.

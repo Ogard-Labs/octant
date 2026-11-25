@@ -9,12 +9,17 @@ import { MAX_PROVIDER_PASS_THROUGH } from "@octant/contracts";
  * shell has it (maintainer decision, 2026-11-25): stripping them left `gh`,
  * `npm publish` and `aws` without a sign-in inside an agent's commands. Only
  * Strict keeps a fixed list.
+ *
+ * `AWS_BEARER_TOKEN_BEDROCK` is on the list although it is an AWS variable:
+ * it is a Bedrock API key, which buys model calls and signs no other tool in,
+ * so it reaches only a provider that itself signs in to Amazon Bedrock.
  */
 export const MODEL_PROVIDER_CREDENTIAL_VARIABLES: ReadonlySet<string> = new Set([
   "AIROUTER_API_KEY",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
   "ANTHROPIC_OAUTH_TOKEN",
+  "AWS_BEARER_TOKEN_BEDROCK",
   "AZURE_OPENAI_API_KEY",
   "CEREBRAS_API_KEY",
   "CLAUDE_CODE_OAUTH_TOKEN",

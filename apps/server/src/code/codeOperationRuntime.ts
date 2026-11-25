@@ -551,6 +551,7 @@ export interface CodeOperationRuntimeOptions {
    * a plan starts the work in the provider's own app, and here the person had
    * to send another message first. A rejection is ignored: the level change is
    * journaled and stays, and the person's next message carries the plan out.
+   * Never fires for a Strict thread, or one whose Strict cannot be resolved.
    */
   readonly onPlanApproved?: (threadId: CodeThreadId) => Promise<void>;
   /** Refuses every new Code turn whose current Project policy no longer accepts its provider/model. */
@@ -7148,7 +7149,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           void this.#options
             .onProviderStop?.(active.thread.id, stoppedOnFailure.availability, stopped)
             .catch(() => undefined);
-        } else if (active.planApproved === true) {
+        } else if (active.planApproved === true && !this.#strict(active.thread.id)) {
+          // Under Strict the host starts no turn of its own here: the thread
+          // waits for the person's next message, as before plans continued.
           void this.#options.onPlanApproved?.(active.thread.id).catch(() => undefined);
         }
       });

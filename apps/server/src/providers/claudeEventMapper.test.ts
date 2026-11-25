@@ -3023,6 +3023,69 @@ describe("mapClaudeMessage", () => {
     });
   });
 
+  it("keeps Claude's own turn cost when the result's usage cannot be counted, on the figures the turn already reported", () => {
+    for (const unreadable of [
+      { usage: { ...usage, outputTokens: Number.MAX_SAFE_INTEGER + 1 } },
+      {},
+    ]) {
+      const ctx = context();
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-1",
+        content: [{ kind: "text", text: "Done." }],
+        usage,
+      });
+      const results = eventValues(
+        mapped(ctx, {
+          kind: "result",
+          sessionId: claudeSessionId,
+          outcome: "success",
+          subtype: "success",
+          stopReason: "end_turn",
+          ...unreadable,
+          durationMs: 1200,
+          costUsd: 0.0421,
+          permissionDenials: [],
+        }),
+      );
+      expect(results.map((item) => item.kind)).toEqual(["usage", "completed"]);
+      // The turn's own total as its calls reported it, never a zero.
+      expect(results[0]).toMatchObject({
+        kind: "usage",
+        inputTokens: 17,
+        outputTokens: 7,
+        costUsd: 0.0421,
+        providerExecutionDurationMs: 1200,
+      });
+    }
+  });
+
+  it("reports no usage for a result it cannot count when no cost came with it, or the cost is unreadable", () => {
+    for (const costUsd of [undefined, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const ctx = context();
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-1",
+        content: [{ kind: "text", text: "Done." }],
+        usage,
+      });
+      const results = eventValues(
+        mapped(ctx, {
+          kind: "result",
+          sessionId: claudeSessionId,
+          outcome: "success",
+          subtype: "success",
+          stopReason: "end_turn",
+          ...(costUsd === undefined ? {} : { costUsd }),
+          permissionDenials: [],
+        }),
+      );
+      expect(results.map((item) => item.kind)).toEqual(["completed"]);
+    }
+  });
+
   it("does not expose a cumulative session total when the turn baseline is unknown", () => {
     const results = mapped(context(), {
       kind: "result",

@@ -672,6 +672,8 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
     readonly configuredDriverOptions: () => ConfiguredProviderDriverOptions;
     /** The level a Work thread's running turn holds; wired later, read per call. */
     readonly runningWorkTurnAccess: (threadId: string) => WorkAccess | undefined;
+    /** Whether that turn started with the kept sandbox; wired later, read per call. */
+    readonly runningWorkTurnSandbox: (threadId: string) => boolean | undefined;
   };
 
 export function wireAgentRuns(deps: AgentRunsDependencies) {
@@ -697,6 +699,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     providerRuntimeRegistry,
     selectCodeConversation,
     runningWorkTurnAccess,
+    runningWorkTurnSandbox,
     windowAuthorityStore,
     workThreadProjection,
     workTurnProjection,
@@ -902,6 +905,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
             workThreadProjection,
             run,
           ),
+          strict: resolveThreadStrict(String(run.parentThreadId)),
         });
         return minutes === "none" ? "none" : minutes * 60_000;
       },
@@ -1264,6 +1268,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         liveTurnProvider: (threadId) => liveTurns.connection(threadId)?.providerInstanceId,
         strict: resolveThreadStrict,
         runningWorkTurnAccess,
+        runningWorkTurnSandbox,
       }),
     poolRouting: ({ request }) => {
       if (request.pool === undefined) return undefined;

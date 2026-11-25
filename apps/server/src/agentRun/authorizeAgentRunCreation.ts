@@ -8,6 +8,7 @@ import {
   type AgentRunAuthority,
   type AgentRunParentThreadId,
   type CodeThread,
+  type ProviderExecutionPolicy,
   type ProviderInstanceId,
   type WindowId,
   type WorkAccess,
@@ -16,6 +17,7 @@ import {
   type WorkspaceLayoutNode,
 } from "@octant/contracts";
 import {
+  clampTurnAccessPosture,
   defaultAgentRunAuthorityCeilingForMode,
   resolveAgentRunLiveParentGrant,
   windowAdmitsProject,
@@ -52,11 +54,14 @@ type WorkThreadReader = (
 /**
  * What decides a Work parent's grant beside the thread itself: Strict as the
  * host resolves it for the thread (absent, or unreadable, it is Strict), and
- * the level the thread's running turn holds, which may be below the thread's.
+ * the level and sandbox choice the thread's running turn started with, either
+ * of which may differ from what the thread stores now.
  */
 interface WorkParentGrantReads {
   readonly strict?: (threadId: string) => boolean;
   readonly runningWorkTurnAccess?: (threadId: string) => WorkAccess | undefined;
+  /** Whether the running turn started with the kept sandbox; undefined when none runs. */
+  readonly runningWorkTurnSandbox?: (threadId: string) => boolean | undefined;
 }
 
 /**
@@ -68,10 +73,10 @@ interface WorkParentGrantReads {
  * with no shell, Git or network, or Plan while the parent is in Plan.
  */
 const workParentLiveGrant = (
-  thread: Pick<WorkThread, "access" | "fullAccessSandbox">,
+  level: ProviderExecutionPolicy,
+  keepsSandbox: boolean,
   strict: boolean,
 ): AgentRunAuthority => {
-  const level = workThreadAccessOf(thread.access).executionPolicy;
   const planOnly = level === "plan";
   const open = !strict && !planOnly;
   return resolveAgentRunLiveParentGrant({
@@ -86,28 +91,45 @@ const workParentLiveGrant = (
       ? "plan"
       : strict
         ? "approval-gated"
-        : level === "full-access" && thread.fullAccessSandbox === true
+        : level === "full-access" && keepsSandbox
           ? "auto-accept-edits"
           : level,
     permissionPersistence: "current-session",
   });
 };
 
-/** The Work parent as its running turn holds it, read for one grant. */
+/**
+ * The Work parent's grant, read once: the lower of the level its running turn
+ * holds and the level the thread stores now, and sandboxed when either keeps
+ * the sandbox, as a Code parent is clamped (`threadWithActiveTurnPosture`).
+ * The running turn's level alone would let a helper keep Full access after
+ * the person lowered the thread mid-turn, and the thread's sandbox choice
+ * alone would open a helper of a turn that started inside the sandbox. A
+ * running turn that cannot be read leaves the stored thread under Strict.
+ */
 const workParentGrantFor = (
   reads: WorkParentGrantReads,
   threadId: string,
   thread: Pick<WorkThread, "access" | "fullAccessSandbox">,
 ): AgentRunAuthority => {
+  const stored = workThreadAccessOf(thread.access).executionPolicy;
   let strict = true;
-  let access = thread.access;
+  let level = stored;
+  let keepsSandbox = thread.fullAccessSandbox === true;
   try {
     strict = reads.strict?.(threadId) !== false;
-    access = reads.runningWorkTurnAccess?.(threadId) ?? thread.access;
+    const running = reads.runningWorkTurnAccess?.(threadId);
+    if (running !== undefined) {
+      level = clampTurnAccessPosture({
+        requested: workThreadAccessOf(running).executionPolicy,
+        thread: stored,
+      });
+    }
+    keepsSandbox = keepsSandbox || reads.runningWorkTurnSandbox?.(threadId) === true;
   } catch {
     strict = true;
   }
-  return workParentLiveGrant({ ...thread, access }, strict);
+  return workParentLiveGrant(level, keepsSandbox, strict);
 };
 
 const codeParentLiveGrant = (
@@ -361,6 +383,9 @@ export function boundAgentRunLiveAuthority(
     ...(input.runningWorkTurnAccess === undefined
       ? {}
       : { runningWorkTurnAccess: input.runningWorkTurnAccess }),
+    ...(input.runningWorkTurnSandbox === undefined
+      ? {}
+      : { runningWorkTurnSandbox: input.runningWorkTurnSandbox }),
     ...(input.readWorkThread === undefined ? {} : { readWorkThread: input.readWorkThread }),
     ...(input.activeTurn === undefined ? {} : { activeTurn: input.activeTurn }),
     // Cached bindings do not extend a window's lifetime. The store's read

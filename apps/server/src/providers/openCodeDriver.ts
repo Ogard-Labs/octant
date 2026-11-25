@@ -2653,6 +2653,7 @@ function makeConnection(
         state.protectedPaths,
         readOnlyFolders,
         platform,
+        state.strict,
       );
     /**
      * Holds a subagent session OpenCode just created to the thread's level,
@@ -2926,6 +2927,7 @@ function makeConnection(
                     ),
                     readOnlyFolders,
                     platform,
+                    strict,
                   ),
                   ...(readOnlyFolders.length === 0 ? {} : { readOnlyFolders }),
                   ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
@@ -3450,6 +3452,7 @@ function makeConnection(
                         state.protectedPaths,
                         readOnlyFolders,
                         platform,
+                        state.strict,
                       ),
                       model: splitModelId(input.modelId),
                     }),
@@ -3845,6 +3848,7 @@ function makeConnection(
                                 state.protectedPaths,
                                 readOnlyFolders,
                                 platform,
+                                state.strict,
                               ),
                             }),
                           );
@@ -4292,7 +4296,15 @@ function failClosedBetaEvent(
     return event;
   }
   const edit = betaPermissionEffect(
-    betaAgentPermissionRules(state.executionPolicy, mode, [], [], NO_PROTECTED_PATHS, platform),
+    betaAgentPermissionRules(
+      state.executionPolicy,
+      mode,
+      [],
+      [],
+      NO_PROTECTED_PATHS,
+      platform,
+      state.strict,
+    ),
     "edit",
   );
   // An edit the posture allows, or one the user already approved, may be
@@ -4450,6 +4462,7 @@ function mapAndOffer(
               state.protectedPaths,
               beta.readOnlyFolders,
               beta.platform,
+              state.strict,
             ),
             action,
           ) ?? "ask");
@@ -4723,6 +4736,15 @@ const OPENCODE_SUBAGENT_ALLOWS = ["task", "subagent"] as const;
 const GUARDED_LEVEL_ALLOWS = [...PLAN_READ_TOOLS, ...OPENCODE_SUBAGENT_ALLOWS] as const;
 
 /**
+ * Under Strict a guarded level allows only what it allowed before the
+ * read-only tools joined the list: subagents. The task list, code lookups and
+ * web reads keep asking there, since Strict is where Octant's own asks stay.
+ */
+function guardedLevelAllows(strict: boolean): ReadonlyArray<string> {
+  return strict ? OPENCODE_SUBAGENT_ALLOWS : GUARDED_LEVEL_ALLOWS;
+}
+
+/**
  * OpenCode's own default agent refuses `.env` files but not their examples;
  * its rules come before Octant's, so the read allow above would otherwise
  * take that protection away. These sit with the level's allows, under the
@@ -4771,6 +4793,7 @@ export function permissionRules(
   protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
   readOnlyFolders: ReadonlyArray<string> = [],
   platform: NodeJS.Platform = process.platform,
+  strict = true,
 ): PermissionRuleset {
   if (mode === "chat" && platform === "win32") {
     // On Windows outside Strict, OpenCode runs unconfined in Chat with a
@@ -4797,7 +4820,7 @@ export function permissionRules(
     rules = [
       { permission: "*", pattern: "*", action: "ask" },
       { permission: "edit", pattern: "*", action: "allow" },
-      ...GUARDED_LEVEL_ALLOWS.map((permission) => ({
+      ...guardedLevelAllows(strict).map((permission) => ({
         permission,
         pattern: "*",
         action: "allow" as const,
@@ -4806,7 +4829,7 @@ export function permissionRules(
   } else if (policy === "approval-gated") {
     rules = [
       { permission: "*", pattern: "*", action: "ask" },
-      ...GUARDED_LEVEL_ALLOWS.map((permission) => ({
+      ...guardedLevelAllows(strict).map((permission) => ({
         permission,
         pattern: "*",
         action: "allow" as const,
@@ -4914,6 +4937,7 @@ export function betaAgentPermissionRules(
   ownRules: ReadonlyArray<PermissionV2Rule> = [],
   protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
   platform: NodeJS.Platform = process.platform,
+  strict = true,
 ): PermissionV2Ruleset {
   if (mode === "chat" && platform === "win32") {
     return [{ action: "*", resource: "*", effect: "deny" }];
@@ -4926,7 +4950,7 @@ export function betaAgentPermissionRules(
     rules = [
       { action: "*", resource: "*", effect: "ask" },
       { action: "edit", resource: "*", effect: "allow" },
-      ...GUARDED_LEVEL_ALLOWS.map((action) => ({
+      ...guardedLevelAllows(strict).map((action) => ({
         action,
         resource: "*",
         effect: "allow" as const,
@@ -4935,7 +4959,7 @@ export function betaAgentPermissionRules(
   } else if (policy === "approval-gated") {
     rules = [
       { action: "*", resource: "*", effect: "ask" },
-      ...GUARDED_LEVEL_ALLOWS.map((action) => ({
+      ...guardedLevelAllows(strict).map((action) => ({
         action,
         resource: "*",
         effect: "allow" as const,
@@ -5049,6 +5073,7 @@ export function betaSessionPermissionRules(
   protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
   readOnlyFolders: ReadonlyArray<string> = [],
   platform: NodeJS.Platform = process.platform,
+  strict = true,
 ): PermissionV2Ruleset {
   if (mode === "chat" && platform === "win32") {
     const chatRules: PermissionV2Ruleset = [
@@ -5062,7 +5087,15 @@ export function betaSessionPermissionRules(
     return chatRules;
   }
   const rules: PermissionV2Ruleset = [
-    ...betaAgentPermissionRules(policy, mode, extraFolders, own.rules, protectedPaths, platform),
+    ...betaAgentPermissionRules(
+      policy,
+      mode,
+      extraFolders,
+      own.rules,
+      protectedPaths,
+      platform,
+      strict,
+    ),
     ...(own.toolServers
       ? []
       : [

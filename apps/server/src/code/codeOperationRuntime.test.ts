@@ -7980,6 +7980,8 @@ describe("CodeOperationRuntime", () => {
     readonly inPlace: ProviderInPlaceLevelChange;
     readonly operation: number;
     readonly decision?: "approved" | "denied";
+    /** Strict for the thread; absent leaves it unresolved, which reads as Strict. */
+    readonly strict?: boolean;
   }) {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const order: string[] = [];
@@ -8002,6 +8004,7 @@ describe("CodeOperationRuntime", () => {
       provider: providerDriver(connection),
       changeThreadLevel,
       onPlanApproved,
+      ...(input.strict === undefined ? {} : { resolveStrict: () => input.strict === true }),
     });
     if (input.kind === "exit-plan")
       fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
@@ -8103,6 +8106,7 @@ describe("CodeOperationRuntime", () => {
       kind: "exit-plan",
       inPlace: { status: "applied" },
       operation: 1401,
+      strict: false,
     });
     try {
       expect(approved.answered).toMatchObject({ state: "interrupted" });
@@ -8127,6 +8131,7 @@ describe("CodeOperationRuntime", () => {
       inPlace: { status: "applied" },
       operation: 1403,
       decision: "denied",
+      strict: false,
     });
     try {
       expect(declined.answered).toMatchObject({ state: "running" });
@@ -8147,6 +8152,7 @@ describe("CodeOperationRuntime", () => {
       kind: "enter-plan",
       inPlace: { status: "failed", reason: "Claude did not switch to plan mode." },
       operation: 1405,
+      strict: false,
     });
     try {
       await Effect.runPromise(
@@ -8160,6 +8166,37 @@ describe("CodeOperationRuntime", () => {
       expect(entered.onPlanApproved).not.toHaveBeenCalled();
     } finally {
       entered.fixture.close();
+    }
+  });
+
+  it("starts nothing after an approved plan on a Strict thread, or one whose Strict was never resolved: the thread waits for the person", async () => {
+    for (const [strict, operation] of [
+      [true, 1421],
+      [undefined, 1423],
+    ] as const) {
+      const approved = await answeredLevelChangeWithInPlaceDriver({
+        kind: "exit-plan",
+        inPlace: { status: "applied" },
+        operation,
+        ...(strict === undefined ? {} : { strict }),
+      });
+      try {
+        expect(approved.answered).toMatchObject({ state: "interrupted" });
+        await Effect.runPromise(
+          Queue.offer(approved.queue, providerEvent({ kind: "interrupted", message: "Stopped." })),
+        );
+        await vi.waitFor(async () =>
+          expect(
+            terminalStates(await operationEvents(approved.fixture.runtime, approved.turn)),
+          ).toEqual(["interrupted"]),
+        );
+        await vi.waitFor(() =>
+          expect(approved.fixture.runtime.turnInProgress?.(String(threadId))).toBe(false),
+        );
+        expect(approved.onPlanApproved).not.toHaveBeenCalled();
+      } finally {
+        approved.fixture.close();
+      }
     }
   });
 
@@ -8177,6 +8214,7 @@ describe("CodeOperationRuntime", () => {
     const fixture = runtimeFixture({
       provider: providerDriver(connection),
       changeThreadLevel,
+      resolveStrict: () => false,
       // What the host does with it: an ordinary turn start of its own.
       onPlanApproved: async (approvedThread) => {
         followOn = fixture.runtime.execute(windowId, {
@@ -8267,6 +8305,7 @@ describe("CodeOperationRuntime", () => {
     const fixture = runtimeFixture({
       provider: providerDriver(connection),
       changeThreadLevel: vi.fn(async () => true),
+      resolveStrict: () => false,
       onPlanApproved: async (approvedThread) => {
         busy.push(fixture.runtime.turnInProgress?.(String(approvedThread)));
         await fixture.runtime.execute(windowId, {

@@ -5,6 +5,12 @@ describe("host credential pass-through names", () => {
   it("refuses another model provider's key on a pass-through list, since the launch never lets one through", () => {
     expect(hostCredentialPassThroughRefusal("OPENAI_API_KEY")).toContain("model provider");
     expect(hostCredentialPassThroughRefusal("anthropic_api_key")).toContain("model provider");
+    // A Bedrock API key buys model calls and nothing else, unlike the AWS
+    // access keys the person's other tools sign in with.
+    expect(hostCredentialPassThroughRefusal("AWS_BEARER_TOKEN_BEDROCK")).toContain(
+      "model provider",
+    );
+    expect(hostCredentialPassThroughRefusal("AWS_ACCESS_KEY_ID")).toBeUndefined();
     expect(hostCredentialPassThroughRefusal("STRIPE_API_KEY")).toBeUndefined();
   });
 

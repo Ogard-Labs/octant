@@ -75,7 +75,11 @@ import {
   type CodexRpcClient,
   type CodexRpcStderrCapture,
 } from "./codexRpcClient";
-import { awsProfileReadPaths, providerHostEnvironment } from "./providerHostEnvironment";
+import {
+  awsProfileReadPaths,
+  BEDROCK_MODEL_CREDENTIALS,
+  providerHostEnvironment,
+} from "./providerHostEnvironment";
 import { strictLetThroughNames } from "./providerOwnChannels";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 
@@ -617,7 +621,10 @@ export function sanitizeCodexEnvironment(
 /**
  * The model-provider keys Codex reads as its own. Outside Strict these cross
  * from the host with the rest of its environment, the AWS keys a Bedrock
- * sign-in takes among them; every other provider's key is dropped.
+ * sign-in takes among them; every other provider's key is dropped. The
+ * Bedrock API key is Codex's own only for an account whose `config.toml`
+ * selects Amazon Bedrock (`codexConfiguresBedrock`): an OpenAI-backed account
+ * has no use for it.
  */
 const CODEX_OWN_MODEL_CREDENTIALS: ReadonlySet<string> = new Set([
   "CODEX_ACCESS_TOKEN",
@@ -627,9 +634,15 @@ const CODEX_OWN_MODEL_CREDENTIALS: ReadonlySet<string> = new Set([
 
 function openCodexEnvironment(
   environment: NodeJS.ProcessEnv,
+  signsInToBedrock: boolean,
   platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
-  const open = providerHostEnvironment(environment, CODEX_OWN_MODEL_CREDENTIALS);
+  const open = providerHostEnvironment(
+    environment,
+    signsInToBedrock
+      ? new Set([...CODEX_OWN_MODEL_CREDENTIALS, ...BEDROCK_MODEL_CREDENTIALS])
+      : CODEX_OWN_MODEL_CREDENTIALS,
+  );
   // Windows spells its names in any case (`Path`); upper-cased as the Strict
   // list is, so the launch's own `PATH` below replaces the host's.
   return platform === "win32"
@@ -653,10 +666,11 @@ export function codexProcessEnvironment(
   environment: NodeJS.ProcessEnv,
   strict = true,
   letThrough: ReadonlyArray<string> = [],
+  signsInToBedrock = false,
 ): NodeJS.ProcessEnv {
   const sanitized = strict
     ? sanitizeCodexEnvironment(environment, process.platform, letThrough)
-    : openCodexEnvironment(environment);
+    : openCodexEnvironment(environment, signsInToBedrock);
   const binaryDirectory = dirname(binaryPath);
   const path = sanitized.PATH?.split(delimiter).filter(Boolean) ?? [];
   return {
@@ -696,12 +710,18 @@ export function codexAccountProcessEnvironment(input: {
   readonly strict?: false;
   /** The host variables the person let through to Codex; read only under Strict. */
   readonly credentialPassThrough?: ReadonlyArray<string>;
+  /**
+   * The account's `config.toml` selects Amazon Bedrock, so the host's Bedrock
+   * API key is its own. Read only outside Strict.
+   */
+  readonly signsInToBedrock?: boolean;
 }): NodeJS.ProcessEnv {
   const environment = codexProcessEnvironment(
     input.binaryPath,
     input.hostEnvironment,
     input.strict !== false,
     input.credentialPassThrough,
+    input.signsInToBedrock === true,
   );
   if (input.inheritHostAuth !== true) {
     for (const name of ACCOUNT_AUTH_VARIABLES) {

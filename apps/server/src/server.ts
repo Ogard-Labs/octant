@@ -337,6 +337,7 @@ export function startOctantServer(
       resolveThreadStrict,
       // Deferred: Work's running turns are wired later in this scope.
       runningWorkTurnAccess: (threadId) => runningWorkTurnAccess(threadId),
+      runningWorkTurnSandbox: (threadId) => runningWorkTurnSandbox(threadId),
       options,
       persistence,
     });
@@ -405,6 +406,7 @@ export function startOctantServer(
       configuredDriverOptions: (): ConfiguredProviderDriverOptions => configuredDriverOptions,
       // Deferred: Work's running turns are wired later in this scope.
       runningWorkTurnAccess: (threadId) => runningWorkTurnAccess(threadId),
+      runningWorkTurnSandbox: (threadId) => runningWorkTurnSandbox(threadId),
       isProjectPolicyTargetAllowed,
       liveTurns,
       nativeHarnessSessions,
@@ -1675,6 +1677,7 @@ export function startOctantServer(
       liveTurns,
       persistence,
       projectService,
+      resolveThreadStrict,
       routeCodeService,
       routineProposalService,
       serverConnection,

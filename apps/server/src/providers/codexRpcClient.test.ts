@@ -219,6 +219,34 @@ describe("CodexRpcClient", () => {
     await client.close();
   });
 
+  it("delivers a turn's end it can only partly read, and fails the stream when the end names no thread", async () => {
+    const { client, stdout } = transport();
+    const notifications: unknown[] = [];
+    client.onNotification((message) => notifications.push(message));
+    stdout.write(
+      `${JSON.stringify({
+        method: "turn/completed",
+        params: { threadId: "thread-1", turn: { id: "turn-1", status: "failed", error: {} } },
+      })}\n`,
+    );
+    await tick();
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        method: "turn/completed",
+        params: {
+          threadId: "thread-1",
+          turn: { id: "turn-1", status: "failed", error: { message: "" } },
+        },
+      }),
+    ]);
+    const exited = client.exited;
+    stdout.write(`${JSON.stringify({ method: "turn/completed", params: { turn: {} } })}\n`);
+    expect(await failureOf(exited)).toMatchObject({
+      kind: "protocol",
+      message: "Codex sent invalid JSON-RPC.",
+    });
+  });
+
   it("declines an approval request it cannot read instead of delivering or allowing it", async () => {
     const { client, stdin, stdout } = transport();
     const written = lines(stdin);

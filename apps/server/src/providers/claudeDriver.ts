@@ -1706,6 +1706,12 @@ interface ClaudePendingApprovalState extends ClaudePendingApproval {
   readonly sessionPermissions?: ReadonlyArray<ClaudeSessionPermissionUpdate>;
   /** The pending call for an automatic reviewer; never published. */
   readonly call?: ProviderApprovalCall | undefined;
+  /**
+   * Set when the allow was the person's and not for this one call only. An
+   * automatic reviewer's answer and one given for a helper cover one call
+   * (`ProviderApprovalAnswer.scope`), so they never set it.
+   */
+  keptByPerson?: true;
 }
 
 interface ClaudePendingQuestionState extends ClaudePendingQuestion {
@@ -4554,10 +4560,15 @@ function makeConnection(
             if (refusal !== undefined) return deny(refusal);
           }
           // What an allowed call lets the session into: the worktree it
-          // switches to, and the outside working directory it was asked from.
-          const holdAllowed = () => {
+          // switches to, which is what that call does, and the outside
+          // working directory it was asked from, only when the person kept
+          // the answer. An automatic reviewer's allow of one command from
+          // that directory used to add the whole directory, so no later call
+          // from it reached the outside-path ask again, though nobody had
+          // reviewed those calls.
+          const holdAllowed = (keptByPerson: boolean) => {
             holdWorktree(activeState, request.toolName, request.input, grant.workingDirectory);
-            if (grant.outsideWorkingDirectory === true) {
+            if (keptByPerson && grant.outsideWorkingDirectory === true) {
               activeState.worktrees.add(grant.workingDirectory);
             }
           };
@@ -4582,7 +4593,7 @@ function makeConnection(
                 CLAUDE_SESSION_TOOLS.has(request.toolName) ||
                 isPlanShellCommand(executionPolicy, request.toolName, executionOptions.tools)))
           ) {
-            holdAllowed();
+            holdAllowed(false);
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
           }
@@ -4611,7 +4622,7 @@ function makeConnection(
             grant.outsideWorkingDirectory !== true &&
             activeState.approvalReuse.has(reusableApprovalKey);
           const allowUnderEarlierAnswer = (): ClaudeToolDecision => {
-            holdAllowed();
+            holdAllowed(false);
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
           };
@@ -4781,7 +4792,7 @@ function makeConnection(
               activeState.publishedSnapshots.set(request.toolUseId, snapshot);
             }
           }
-          if (decision.behavior === "allow") holdAllowed();
+          if (decision.behavior === "allow") holdAllowed(pending.keptByPerson === true);
           return decision;
         };
         const gatePreToolUse: ClaudeOpenQueryInput["preToolUse"] = async (request) => {
@@ -4805,7 +4816,8 @@ function makeConnection(
           // 2026-11-25): refusing here left every call after a `cd` out of
           // the Project refused for the rest of the session. Full access
           // allows it as it allows any path; below it the first call asks and
-          // an allow adds the directory to what the session holds. Plan,
+          // an allow the person keeps adds the directory to what the session
+          // holds; one that covers a single call leaves the next asking. Plan,
           // Strict, Chat and a Full access thread that keeps its sandbox
           // still refuse.
           const outsideWorkingDirectory = !sessionHolds(activeState, request.projectRoot);
@@ -6232,6 +6244,7 @@ function makeConnection(
               return;
             }
             if (answer.approved) {
+              if (answer.scope !== "once") pending.keptByPerson = true;
               let persistence: PermissionPersistence = "project-default";
               try {
                 persistence = options.permissionPersistence?.() ?? "current-session";

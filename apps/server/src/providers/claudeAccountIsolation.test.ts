@@ -110,6 +110,34 @@ describe("isolatedClaudeAccountEnvironment", () => {
     );
   });
 
+  it("a Claude launch outside Strict receives the host's Bedrock API key only while the host routes Claude through Bedrock", () => {
+    const launch = (routing: NodeJS.ProcessEnv) =>
+      isolatedClaudeAccountEnvironment({
+        hostEnvironment: {
+          PATH: "/usr/bin",
+          AWS_BEARER_TOKEN_BEDROCK: "bedrock-token-sentinel",
+          AWS_ACCESS_KEY_ID: "aws-key-sentinel",
+          ...routing,
+        },
+        configDirectory: "/Users/provider-user/.claude-accounts/work",
+        authentication: "subscription",
+        strict: false,
+      });
+    expect(launch({ CLAUDE_CODE_USE_BEDROCK: "1" })).toMatchObject({
+      AWS_BEARER_TOKEN_BEDROCK: "bedrock-token-sentinel",
+      AWS_ACCESS_KEY_ID: "aws-key-sentinel",
+    });
+    for (const routing of [
+      {},
+      { CLAUDE_CODE_USE_BEDROCK: "0" },
+      { CLAUDE_CODE_USE_BEDROCK: "false" },
+    ]) {
+      const environment = launch(routing);
+      expect(environment).not.toHaveProperty("AWS_BEARER_TOKEN_BEDROCK");
+      expect(environment).toMatchObject({ AWS_ACCESS_KEY_ID: "aws-key-sentinel" });
+    }
+  });
+
   it("a Claude launch outside Strict receives the person's AWS keys whether or not Bedrock signs it in", () => {
     const environment = isolatedClaudeAccountEnvironment({
       hostEnvironment: { PATH: "/usr/bin", AWS_ACCESS_KEY_ID: "aws-key-sentinel" },

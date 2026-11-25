@@ -34,6 +34,8 @@ const DIFF_MAX_CHARACTERS = 65_536;
 const LABEL_MAX_CHARACTERS = 256;
 const SUMMARY_MAX_CHARACTERS = 1_024;
 const PATH_MAX_CHARACTERS = 4_096;
+/** How many changes outside the Project one finished step names before counting the rest. */
+const OUTSIDE_CHANGES_NAMED = 8;
 const LIVENESS_INTERVAL_MS = 5_000;
 
 export interface CodexEventContext {
@@ -475,6 +477,56 @@ function fileChangePathsAreConfined(
   });
 }
 
+/**
+ * What a finished file change did outside the Project, one entry per change:
+ * the file edited, created or deleted, and both ends of a move when either is
+ * outside. Paths are absolute, as Codex reported them; contents never cross.
+ */
+function outsideChangeEntries(
+  context: CodexEventContext,
+  item: Extract<ToolItem, { readonly type: "fileChange" }>,
+): ReadonlyArray<string> {
+  const shown = (path: string) =>
+    truncate(resolve(context.projectRoot, path), LABEL_MAX_CHARACTERS);
+  return item.changes.flatMap((change) => {
+    const inside = confinedRelativePath(context, change.path) !== undefined;
+    const movePath = change.kind.type === "update" ? change.kind.move_path : null;
+    if (movePath !== null) {
+      return inside && confinedRelativePath(context, movePath) !== undefined
+        ? []
+        : [`moved ${shown(change.path)} to ${shown(movePath)}`];
+    }
+    if (inside) return [];
+    const verb =
+      change.kind.type === "add"
+        ? "created"
+        : change.kind.type === "delete"
+          ? "deleted"
+          : "modified";
+    return [`${verb} ${shown(change.path)}`];
+  });
+}
+
+/**
+ * The finished step's summary for a change that reached outside the Project.
+ * The journal has no file-change record for such a file, so this text is the
+ * only place the thread says which files were written: it names up to
+ * `OUTSIDE_CHANGES_NAMED` of them within the summary bound and counts the rest.
+ */
+function outsideChangeSummary(entries: ReadonlyArray<string>): string {
+  const counted = (rest: number) => `; and ${rest} more outside the Project.`;
+  const room = SUMMARY_MAX_CHARACTERS - counted(entries.length).length;
+  let summary = "File change completed, including files outside the Project";
+  let named = 0;
+  for (const entry of entries.slice(0, OUTSIDE_CHANGES_NAMED)) {
+    const next = `${summary}${named === 0 ? ": " : "; "}${entry}`;
+    if (Array.from(next).length > room) break;
+    summary = next;
+    named += 1;
+  }
+  return named === entries.length ? `${summary}.` : `${summary}${counted(entries.length - named)}`;
+}
+
 function mapFileChangeCompletion(
   context: CodexEventContext,
   item: Extract<ToolItem, { readonly type: "fileChange" }>,
@@ -506,19 +558,19 @@ function mapFileChangeCompletion(
   }));
   // A file-change record names a Project-relative path, which a file outside
   // the Project does not have. Such a file gets no record, as the thread's
-  // views of changed files stay on the Project, and the step says so instead.
+  // views of changed files stay on the Project, and the step names it instead:
+  // "including files outside the Project" alone left the journal unable to say
+  // which files were written, and a move out of the Project left no trace.
   const inside = changes.flatMap(({ path, change }) =>
     path === undefined ? [] : [event(context, { kind: "file-change", path, change })],
   );
+  const outside = outsideChangeEntries(context, item);
   return [
     ...inside,
     event(context, {
       kind: "tool-success",
       toolCallId: id,
-      summary:
-        inside.length === changes.length
-          ? "File change completed."
-          : "File change completed, including files outside the Project.",
+      summary: outside.length === 0 ? "File change completed." : outsideChangeSummary(outside),
     }),
   ];
 }
@@ -1161,7 +1213,13 @@ function mapNotification(
     case "turn/started":
       return [{ kind: "ignored" }];
     case "turn/completed":
-      if (!matchesCorrelation(context, message.params.threadId, message.params.turn.id)) {
+      // A completion whose turn could not be read ends the turn this thread
+      // is running: it names no other, and left alone that turn never ends.
+      if (
+        message.turnUnreadable === true
+          ? message.params.threadId !== context.threadId
+          : !matchesCorrelation(context, message.params.threadId, message.params.turn.id)
+      ) {
         return otherTurnNotification();
       }
       return mapTerminal(context, message.params.turn);

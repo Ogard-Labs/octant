@@ -336,7 +336,9 @@ export function makeCodexRpcClient(options: CodexRpcClientOptions): CodexRpcClie
       // Only a broken envelope reaches here (not an object, an unusable id or
       // method, a response that is neither a result nor an error): the stream
       // itself cannot be trusted. A known message with params this build
-      // cannot read is decoded as unknown above and never closes it.
+      // cannot read is decoded as unknown above and never closes it, except
+      // a turn's end that names no thread: no turn can be ended for it, and
+      // dropping it would leave one running.
       failProtocol("Codex sent invalid JSON-RPC.");
     }
   };

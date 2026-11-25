@@ -1566,6 +1566,17 @@ function mapResult(
   }
   // The result's figures replace the turn's running total, so ones this build
   // cannot count leave that total standing instead of zeroing it.
+  //
+  // Claude's price for the turn is read apart from those figures: a turn whose
+  // cost went unreported was not counted towards the person's spend ceiling.
+  // A usage event cannot state a cost without token counts, so the cost goes
+  // out on the total the turn's own calls already reported, restated. With no
+  // call counted there is no honest figure to put it on and it is left out.
+  const costStands =
+    message.costUsd !== undefined &&
+    Number.isFinite(message.costUsd) &&
+    message.costUsd >= 0 &&
+    context.callUsage.size > 0;
   const results: ClaudeMappedMessage[] =
     message.usage !== undefined && usageIsSafe(message.usage)
       ? [
@@ -1577,7 +1588,16 @@ function mapResult(
             message.contextBreakdown,
           ),
         ]
-      : [];
+      : costStands
+        ? [
+            usageEvent(
+              context,
+              turnUsageSoFar(context.callUsage),
+              message.durationMs,
+              message.costUsd,
+            ),
+          ]
+        : [];
   if (message.outcome === "success") {
     const stop = outputStopReason(message.stopReason);
     results.push(

@@ -1247,6 +1247,13 @@ export function validateAutomationDefinition(input: AutomationDefinition): Autom
  * chose a level where nothing prompts, and starts enabled unless the person
  * turned that off in Settings, which keeps it paused. A turn in Plan changes
  * nothing, so it asks, and a follow-up asks at every level.
+ *
+ * That the person asked is the agent's own word, which the host cannot check.
+ * On a thread that read outside content it is not believed, since a page the
+ * agent read can tell it to claim so: the routine is then decided as the
+ * agent's own suggestion is. Under Strict the word starts nothing either: a
+ * routine the person asked for is created paused, and one at Full access
+ * starts enabled only on the Settings choice, as before that decision.
  */
 export function decideRoutineFromAgent(input: {
   readonly requestedByPerson: boolean;
@@ -1259,11 +1266,22 @@ export function decideRoutineFromAgent(input: {
    * enabled; off or absent, it starts paused.
    */
   readonly startActiveAtFullAccess?: boolean;
+  /** Strict as the host resolves it for the thread; a caller that cannot tell passes true. */
+  readonly strict: boolean;
+  /** The thread is marked as having read outside content; a caller that cannot tell passes true. */
+  readonly readOutsideContent: boolean;
 }): "create-active" | "create-paused" | "ask-on-card" {
   if (input.followUp || input.posture === "plan") return "ask-on-card";
-  if (input.requestedByPerson) return "create-active";
+  const startsActive = input.posture === "full-access" && input.startActiveAtFullAccess === true;
+  if (input.strict) {
+    if (startsActive) return "create-active";
+    return input.requestedByPerson || input.posture === "full-access"
+      ? "create-paused"
+      : "ask-on-card";
+  }
+  if (input.requestedByPerson && !input.readOutsideContent) return "create-active";
   if (input.posture !== "full-access") return "ask-on-card";
-  return input.startActiveAtFullAccess === true ? "create-active" : "create-paused";
+  return startsActive ? "create-active" : "create-paused";
 }
 
 /** Whether this principal is the one that reviewed the held batch. */

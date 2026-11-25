@@ -815,6 +815,71 @@ describe("Codex stable 0.144.4 protocol", () => {
     },
   );
 
+  it("always reads a turn's end for a thread it can name, however the rest of the notification is shaped", () => {
+    const ended = (params: unknown) =>
+      decodeCodexServerMessage({ method: "turn/completed", params });
+    // An error object this build cannot read still says the turn failed.
+    expect(
+      ended({ threadId: "thread-1", turn: { id: "turn-1", status: "failed", error: { code: 7 } } }),
+    ).toEqual({
+      kind: "notification",
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "failed", error: { message: "" } },
+      },
+    });
+    expect(
+      ended({
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed", error: "It stopped." },
+      }),
+    ).toMatchObject({
+      params: { turn: { id: "turn-1", status: "failed", error: { message: "" } } },
+    });
+    // What can still be read of the error is kept.
+    expect(
+      ended({
+        threadId: "thread-1",
+        turn: {
+          id: "turn-1",
+          status: "failed",
+          error: {
+            message: "Out of credits.",
+            codexErrorInfo: "usageLimitExceeded",
+            additionalDetails: 7,
+          },
+        },
+      }),
+    ).toMatchObject({
+      params: {
+        turn: { error: { message: "Out of credits.", codexErrorInfo: "usageLimitExceeded" } },
+      },
+    });
+    // A status that is not text cannot say the turn went well.
+    expect(ended({ threadId: "thread-1", turn: { id: "turn-1", status: 3 } })).toEqual({
+      kind: "notification",
+      method: "turn/completed",
+      params: { threadId: "thread-1", turn: { id: "turn-1", status: "failed" } },
+    });
+    // No turn id: the thread's running turn is the one that ended.
+    for (const params of [
+      { threadId: "thread-1", turn: { status: "completed" } },
+      { threadId: "thread-1", turn: "turn-1" },
+      { threadId: "thread-1" },
+    ]) {
+      expect(ended(params)).toEqual({
+        kind: "notification",
+        method: "turn/completed",
+        params: { threadId: "thread-1", turn: { id: "", status: "failed" } },
+        turnUnreadable: true,
+      });
+    }
+    // No thread either: nothing says whose turn ended, so the stream fails.
+    expect(() => ended({ turn: { id: "turn-1", status: "completed" } })).toThrow();
+    expect(() => ended(null)).toThrow();
+  });
+
   it("drops a notification it cannot read, and declines a request it cannot read, without failing the connection", () => {
     expect(
       decodeCodexServerMessage({
@@ -851,12 +916,6 @@ describe("Codex stable 0.144.4 protocol", () => {
       id: 1,
       method: "item/fileChange/requestApproval",
     });
-    expect(
-      decodeCodexServerMessage({
-        method: "turn/completed",
-        params: { threadId: "thread-1", turn: { status: "completed" } },
-      }),
-    ).toEqual({ kind: "unknown-notification", method: "turn/completed" });
     expect(
       decodeCodexServerMessage({
         method: "thread/tokenUsage/updated",

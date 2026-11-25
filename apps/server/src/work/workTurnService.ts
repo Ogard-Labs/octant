@@ -583,7 +583,8 @@ export interface WorkTurnServiceDependencies {
    * that carries the plan out, at the level the thread returned to: approving
    * a plan starts the work in the provider's own app, and here the person had
    * to send another message first. A rejection is ignored: the level change
-   * has happened and the person's next message carries the plan out.
+   * has happened and the person's next message carries the plan out. Never
+   * fires for a Strict thread, or one whose Strict cannot be resolved.
    */
   readonly onPlanApproved?: (threadId: WorkThreadId) => Promise<void>;
   readonly spendCeiling?: {
@@ -2701,7 +2702,12 @@ export class WorkTurnService {
         this.#liveTasks.delete(String(command.requestId));
         this.#liveToolSteps.delete(String(command.requestId));
         this.#liveReasoningMs.delete(String(command.requestId));
-        if (this.#planApprovedTurns.delete(String(command.requestId))) {
+        // Under Strict the host starts no turn of its own here: the thread
+        // waits for the person's next message, as before plans continued.
+        if (
+          this.#planApprovedTurns.delete(String(command.requestId)) &&
+          (this.#resolveStrict?.(String(command.threadId)) ?? true) === false
+        ) {
           void this.#onPlanApproved?.(command.threadId).catch(() => undefined);
         }
       });

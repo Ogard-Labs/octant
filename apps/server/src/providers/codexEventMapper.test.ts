@@ -980,7 +980,7 @@ describe("mapCodexMessage", () => {
     expect(JSON.stringify(result)).not.toMatch(/Users|private|secret\.txt|raw diff|file-1/);
   });
 
-  it("records a file change outside the Project as a finished step and keeps the turn, outside Strict", () => {
+  it("names each file changed outside the Project on the finished step, outside Strict", () => {
     const ctx = context({ recordsOutsideChanges: true });
     const started = map(
       ctx,
@@ -1029,7 +1029,7 @@ describe("mapCodexMessage", () => {
       { kind: "event", event: { kind: "tool-progress", toolCallId: "tool-1" } },
     ]);
     // The file-change record names a Project-relative path, so only the file
-    // inside the Project gets one; the step itself says the rest was outside.
+    // inside the Project gets one; the step itself names the file outside.
     expect(completed).toMatchObject([
       { kind: "event", event: { kind: "file-change", path: "src/main.ts", change: "created" } },
       {
@@ -1037,12 +1037,98 @@ describe("mapCodexMessage", () => {
         event: {
           kind: "tool-success",
           toolCallId: "tool-1",
-          summary: "File change completed, including files outside the Project.",
+          summary:
+            "File change completed, including files outside the Project: modified /Users/private/outside/notes.txt.",
         },
       },
     ]);
     expect(ctx.terminal).toBe(false);
-    expect(JSON.stringify([started, completed])).not.toMatch(/Users|private|notes\.txt|raw diff/);
+    // The start still names nothing outside, and no contents cross.
+    expect(JSON.stringify(started)).not.toMatch(/Users|private|notes\.txt/);
+    expect(JSON.stringify([started, completed])).not.toMatch(/raw diff|\+secret/);
+  });
+
+  const outsideChangeSummary = (
+    changes: ReadonlyArray<{
+      readonly path: string;
+      readonly kind:
+        | { readonly type: "add" }
+        | { readonly type: "delete" }
+        | { readonly type: "update"; readonly move_path: string | null };
+    }>,
+  ) => {
+    const ctx = context({ recordsOutsideChanges: true });
+    const item = {
+      type: "fileChange" as const,
+      id: "file-outside",
+      changes: changes.map((change) => ({ ...change, diff: "raw diff must-not-cross" })),
+    };
+    map(
+      ctx,
+      notification("item/started", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { ...item, status: "inProgress" },
+        startedAtMs: 10,
+      }),
+    );
+    const completed = map(
+      ctx,
+      notification("item/completed", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { ...item, status: "completed" },
+        completedAtMs: 20,
+      }),
+    );
+    const success = completed.flatMap((mapped) =>
+      mapped.kind === "event" && mapped.event.kind === "tool-success" ? [mapped.event] : [],
+    );
+    expect(success).toHaveLength(1);
+    expect(JSON.stringify(completed)).not.toContain("raw diff");
+    return success[0]?.summary ?? "";
+  };
+
+  it("names a creation, a deletion and both ends of a move outside the Project, outside Strict", () => {
+    expect(
+      outsideChangeSummary([
+        { path: "/etc/created.conf", kind: { type: "add" } },
+        { path: "/etc/removed.conf", kind: { type: "delete" } },
+        { path: "src/main.ts", kind: { type: "update", move_path: "/Users/private/moved.ts" } },
+        { path: "/Users/private/in.ts", kind: { type: "update", move_path: "src/in.ts" } },
+        { path: "src/kept.ts", kind: { type: "update", move_path: "src/renamed.ts" } },
+      ]),
+    ).toBe(
+      "File change completed, including files outside the Project: created /etc/created.conf; deleted /etc/removed.conf; moved /tmp/project/src/main.ts to /Users/private/moved.ts; moved /Users/private/in.ts to /tmp/project/src/in.ts.",
+    );
+    // A change inside the Project alone names no path on the step.
+    expect(
+      outsideChangeSummary([{ path: "src/kept.ts", kind: { type: "update", move_path: null } }]),
+    ).toBe("File change completed.");
+  });
+
+  it("bounds how many outside paths a step names and how long each is, and counts the rest", () => {
+    const many = outsideChangeSummary(
+      Array.from({ length: 40 }, (_, index) => ({
+        path: `/outside/file-${index}.txt`,
+        kind: { type: "delete" as const },
+      })),
+    );
+    expect(many).toContain("deleted /outside/file-0.txt;");
+    expect(many).toContain("deleted /outside/file-7.txt;");
+    expect(many).not.toContain("file-8.txt");
+    expect(many.endsWith("and 32 more outside the Project.")).toBe(true);
+
+    const long = outsideChangeSummary([
+      { path: `/outside/${"a".repeat(5_000)}`, kind: { type: "add" } },
+      { path: `/outside/${"b".repeat(5_000)}`, kind: { type: "add" } },
+      { path: `/outside/${"c".repeat(5_000)}`, kind: { type: "add" } },
+      { path: `/outside/${"d".repeat(5_000)}`, kind: { type: "add" } },
+      { path: `/outside/${"e".repeat(5_000)}`, kind: { type: "add" } },
+    ]);
+    expect(Array.from(long).length).toBeLessThanOrEqual(1_024);
+    expect(long).toContain(`created /outside/${"a".repeat(200)}`);
+    expect(long).toMatch(/and \d more outside the Project\.$/);
   });
 
   it.each([
@@ -2112,6 +2198,40 @@ describe("mapCodexMessage", () => {
         }),
       ),
     ).toMatchObject([{ kind: "event", event: { kind: "completed" } }]);
+    expect(ctx.terminal).toBe(true);
+    expect([...ctx.toolStates.values()]).toMatchObject([{ lifecycle: "terminal" }]);
+  });
+
+  it("fails the thread's running turn on a completion whose turn could not be read, and never another thread's", () => {
+    const unreadable = (threadId: string): CodexServerMessage => ({
+      kind: "notification",
+      method: "turn/completed",
+      params: { threadId, turn: { id: "", status: "failed" } },
+      turnUnreadable: true,
+    });
+    const other = context();
+    expect(map(other, unreadable("thread-2"))).toEqual([{ kind: "ignored" }]);
+    expect(other.terminal).toBe(false);
+
+    const ctx = context();
+    map(
+      ctx,
+      notification("item/started", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: commandItem,
+        startedAtMs: 10,
+      }),
+    );
+    expect(map(ctx, unreadable("thread-1"))).toMatchObject([
+      {
+        kind: "event",
+        event: {
+          kind: "failed",
+          failure: { category: "provider-failed", message: "Provider execution failed." },
+        },
+      },
+    ]);
     expect(ctx.terminal).toBe(true);
     expect([...ctx.toolStates.values()]).toMatchObject([{ lifecycle: "terminal" }]);
   });

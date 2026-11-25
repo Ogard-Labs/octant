@@ -1183,10 +1183,12 @@ describe("WorkTurnService", () => {
     }
   });
 
-  it("hands an approved plan to the host to carry out once the planning turn has ended, and never an approved ask to plan first", async () => {
-    for (const [threadAccess, continues] of [
-      ["plan", true],
-      ["ask-first", false],
+  it("hands an approved plan to the host to carry out once the planning turn has ended, and never an approved ask to plan first, a Strict thread's plan, or one whose Strict was never resolved", async () => {
+    for (const [threadAccess, strict, continues] of [
+      ["plan", false, true],
+      ["ask-first", false, false],
+      ["plan", true, false],
+      ["plan", undefined, false],
     ] as const) {
       const activeWhenHandedOver: boolean[] = [];
       const onPlanApproved = vi.fn(async () => {
@@ -1196,6 +1198,7 @@ describe("WorkTurnService", () => {
       const fixture = serviceFixture({
         threadAccess,
         onPlanApproved,
+        ...(strict === undefined ? {} : { resolveStrict: () => strict }),
         turnRuntime: {
           run: async (input) => {
             running = true;
@@ -1243,6 +1246,7 @@ describe("WorkTurnService", () => {
       const release = deferred<void>();
       const fixture = serviceFixture({
         threadAccess: "plan",
+        resolveStrict: () => false,
         // What the host's wiring does with the hand-over: a thread with a
         // turn starting or running is busy and gets nothing; otherwise the
         // host starts its own turn under its scope, through the ordinary

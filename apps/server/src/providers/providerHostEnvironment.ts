@@ -37,6 +37,14 @@ export function providerHostEnvironment(
   );
 }
 
+/**
+ * The Bedrock API key a provider that signs in to Amazon Bedrock reads from
+ * the host, as its own CLI does: that provider's own, so never stripped for
+ * it. The AWS access keys are not listed: they are the person's general
+ * credentials and cross outside Strict for every provider.
+ */
+export const BEDROCK_MODEL_CREDENTIALS: ReadonlyArray<string> = ["AWS_BEARER_TOKEN_BEDROCK"];
+
 const AWS_PROFILE_FILE_VARIABLES = [
   "AWS_CONFIG_FILE",
   "AWS_SHARED_CREDENTIALS_FILE",

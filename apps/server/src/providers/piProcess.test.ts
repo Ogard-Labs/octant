@@ -169,12 +169,16 @@ describe("Pi process boundary", () => {
       GH_TOKEN: "gh-token",
       NPM_TOKEN: "npm-token",
       AWS_ACCESS_KEY_ID: "aws-key",
+      AWS_BEARER_TOKEN_BEDROCK: "bedrock-token",
       SOME_SERVICE_API_KEY: "service-key",
       ANTHROPIC_API_KEY: "anthropic-key",
       OPENAI_API_KEY: "openai-key",
       OCTANT_PI_TOOL_BRIDGE_TOKEN: "octant-secret",
     };
     const open = sanitizePiEnvironment(host, "/managed", "enabled", "openai", false);
+    // A Bedrock API key is a model provider's key, and this thread's model
+    // does not run on Bedrock.
+    expect(open).not.toHaveProperty("AWS_BEARER_TOKEN_BEDROCK");
     expect(open).toMatchObject({
       PATH: "/usr/bin",
       HOME: "/managed",
