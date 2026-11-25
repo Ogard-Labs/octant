@@ -115,17 +115,30 @@ function imagePart(reference: { readonly bytes: Uint8Array; readonly mediaType: 
   };
 }
 
+/** A count Google states that the usage ledger can hold: a whole number, at least 0. */
+function tokenCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * The usage Google reported, or undefined when any count it gave is not one
+ * the ledger can record: a settlement must not fail on it, and an earlier
+ * report or the estimate stands instead.
+ */
 function usageOf(payload: unknown): VideoAdapterUsage | undefined {
   const usage = jsonField(payload, "usage");
   if (usage === undefined) return undefined;
-  const output = jsonField(usage, "total_output_tokens");
-  const thought = jsonField(usage, "total_thought_tokens");
-  const input = jsonField(usage, "total_input_tokens");
-  const outputTokens =
-    (typeof output === "number" ? output : 0) + (typeof thought === "number" ? thought : 0);
+  const fields = ["total_output_tokens", "total_thought_tokens", "total_input_tokens"] as const;
+  const stated = fields.map((field) => jsonField(usage, field));
+  const counts = stated.map((value) => (typeof value === "number" ? tokenCount(value) : undefined));
+  if (stated.some((value, at) => typeof value === "number" && counts[at] === undefined))
+    return undefined;
+  const [output, thought, input] = counts;
+  const outputTokens = (output ?? 0) + (thought ?? 0);
+  if (!Number.isSafeInteger(outputTokens)) return undefined;
   const reported = {
-    ...(typeof output === "number" || typeof thought === "number" ? { outputTokens } : {}),
-    ...(typeof input === "number" ? { inputTokens: input } : {}),
+    ...(output !== undefined || thought !== undefined ? { outputTokens } : {}),
+    ...(input !== undefined ? { inputTokens: input } : {}),
   };
   return Object.keys(reported).length === 0 ? undefined : reported;
 }
