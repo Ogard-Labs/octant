@@ -3929,9 +3929,11 @@ Status: Built. Since: 2026-10-26. Detail: [Outside provider drivers: provenance 
 An outside package can provide an image or video generation driver, installed, trusted and enabled like any other plugin, and Octant's media tools use it as they use a bundled driver: the same card, price, spend limits, storage and restart rules (maintainer approval, 2026-11-22).
 
 - The package declares its models and published prices as manifest data; the host reads a price only there, at the digest the profile binds, reserves before dispatch and never settles above the reservation, and refuses an unpriced model under a spend limit.
-- The driver runs in the same confined process and reaches its provider only through the brokered call to the configured origin; the host checks the images it returns and fetches an image address only when the provider's own answer named it.
+- The driver runs in the same confined process and reaches its provider only through the brokered call to the configured origin; the host checks the images and clips it returns and fetches an address only when the provider's own answer named it.
 - A driver that is not installed, trusted and enabled at its digest is not offered, and its jobs are refused before anything is reserved.
-- Built for image generation. Video follows once the video seam exists in code.
+- What an outside video clip may have cost is decided from what the host saw leave and come back, never from what the driver says: a start the provider did not refuse outright, and an accepted clip whose end the driver cannot state readably, settle at the estimate. A driver names counts, never amounts, and a clip never settles above its reservation.
+- A brokered `PUT` or `DELETE` may serve only a video driver's own call, and every request of a video driver names the call it serves.
+- Built for image and video generation. Not built yet: the Settings form that changes an outside media profile's address or models.
 
 Status: Partly built. Since: 2026-11-22. Detail: [Outside provider drivers: outside media generation drivers](outside-provider-drivers.md#outside-media-generation-drivers).
 

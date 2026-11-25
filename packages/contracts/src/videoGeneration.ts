@@ -12,11 +12,18 @@ const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
 const OptionLabel = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32));
 
 /**
- * The bundled video drivers. Each is a provider plugin on the video seam in
- * `@octant/provider-sdk/video-generation`, admitted by the same activation
- * ladder as image drivers (maintainer decision, 2026-11-22).
+ * The video drivers. The bundled ones are provider plugins on the video seam
+ * in `@octant/provider-sdk/video-generation`, admitted by the same activation
+ * ladder as image drivers (maintainer decision, 2026-11-22). `outside-video`
+ * is the one family for every driver package that does not ship with Octant;
+ * which driver a profile runs is package data in its configuration.
  */
-export const VIDEO_DRIVER_KINDS = ["gemini-video", "runway-video", "fal-video"] as const;
+export const VIDEO_DRIVER_KINDS = [
+  "gemini-video",
+  "runway-video",
+  "fal-video",
+  "outside-video",
+] as const;
 export const VideoDriverKind = Schema.Literal(...VIDEO_DRIVER_KINDS);
 export type VideoDriverKind = typeof VideoDriverKind.Type;
 
@@ -230,6 +237,13 @@ export const VideoJob = Schema.Struct({
    * retry loop, the safe default.
    */
   providerRemoval: Schema.optional(VideoJobControl.fields.removal),
+  /**
+   * Which driver build, address and key placement an outside job was queued
+   * on, as a digest. Its remote id means nothing to any other, so nothing is
+   * asked about the clip after a restart, or its copy, unless the profile
+   * still matches. Absent on a bundled driver's job.
+   */
+  outsideBinding: Schema.optional(ContentDigest),
   settledCostUsdMicros: Schema.optional(NonNegativeInt),
   version: AggregateVersion,
   createdAt: UtcTimestamp,

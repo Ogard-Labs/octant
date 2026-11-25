@@ -14,6 +14,7 @@ import {
   type ProjectImageGenerationChoice,
   type OutsideImageProviderInstance,
   type OutsideProviderDriverListing,
+  type OutsideVideoProviderInstance,
   type ProviderInstance,
   type ThreadExportAttachment,
 } from "@octant/contracts";
@@ -270,24 +271,43 @@ export function imageGenerationWithoutAsking(input: {
 export function admitsListedOutsideImageDriver(
   listings: ReadonlyArray<OutsideProviderDriverListing> | undefined,
 ): (instance: OutsideImageProviderInstance) => boolean {
-  return (instance) => {
-    const bound = instance.configuration.driver;
-    if (
-      instance.driverQuarantine !== undefined &&
-      String(instance.driverQuarantine.digest) === String(bound.digest)
-    ) {
-      return false;
-    }
-    return (listings ?? []).some(
-      (listing) =>
-        listing.imageGeneration !== undefined &&
-        String(listing.driver.extensionId) === String(bound.extensionId) &&
-        String(listing.driver.packageId) === String(bound.packageId) &&
-        String(listing.driver.componentId) === String(bound.componentId) &&
-        String(listing.driver.version) === String(bound.version) &&
-        String(listing.driver.digest) === String(bound.digest),
+  return (instance) =>
+    listsBoundDriver(
+      instance,
+      (listings ?? []).filter((listing) => listing.imageGeneration !== undefined),
     );
-  };
+}
+
+/** The same reading for an outside video profile. */
+export function admitsListedOutsideVideoDriver(
+  listings: ReadonlyArray<OutsideProviderDriverListing> | undefined,
+): (instance: OutsideVideoProviderInstance) => boolean {
+  return (instance) =>
+    listsBoundDriver(
+      instance,
+      (listings ?? []).filter((listing) => listing.videoGeneration !== undefined),
+    );
+}
+
+function listsBoundDriver(
+  instance: OutsideImageProviderInstance | OutsideVideoProviderInstance,
+  listings: ReadonlyArray<OutsideProviderDriverListing>,
+): boolean {
+  const bound = instance.configuration.driver;
+  if (
+    instance.driverQuarantine !== undefined &&
+    String(instance.driverQuarantine.digest) === String(bound.digest)
+  ) {
+    return false;
+  }
+  return listings.some(
+    (listing) =>
+      String(listing.driver.extensionId) === String(bound.extensionId) &&
+      String(listing.driver.packageId) === String(bound.packageId) &&
+      String(listing.driver.componentId) === String(bound.componentId) &&
+      String(listing.driver.version) === String(bound.version) &&
+      String(listing.driver.digest) === String(bound.digest),
+  );
 }
 
 export function hasEligibleImageProfile(

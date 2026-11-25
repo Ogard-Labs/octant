@@ -591,6 +591,55 @@ describe("ProviderCatalogView outside drivers", () => {
     });
   });
 
+  it("adds a video profile from an outside video driver with only the models the person keeps", async () => {
+    const videoListing = {
+      ...listing,
+      displayName: "Example video",
+      videoGeneration: {
+        models: [
+          { modelId: "example-video-1", displayName: "Example Video", publishesPrice: true },
+          { modelId: "example-video-draft", displayName: "Example Draft", publishesPrice: false },
+        ],
+      },
+    } as unknown as OutsideProviderDriverListing;
+    const onAddOutsideProvider = vi.fn(async () => true);
+    render(
+      <ProviderCatalogView
+        {...props({
+          outsideDrivers: [videoListing],
+          onAddOutsideProvider,
+          credentialManagementAvailable: true,
+        })}
+      />,
+    );
+    const outsideList = screen.getByRole("list", { name: "Outside drivers" });
+    const row = within(outsideList).getByRole("link", {
+      name: "Example video, not added. Open setup",
+    });
+    expect(row.textContent).toContain("Video generation · Outside driver");
+    openSetup(/^Example video, /);
+    const form = screen.getByRole("form", { name: "Add a provider from Example video" });
+    expect(within(form).queryByLabelText("Model IDs")).toBeNull();
+    expect(within(form).getByText("Price shown on each card")).toBeDefined();
+    expect(within(form).getByText("No published price")).toBeDefined();
+    fireEvent.click(within(form).getByRole("checkbox", { name: /Example Draft/ }));
+    fireEvent.change(within(form).getByLabelText("Address"), {
+      target: { value: "https://video.example.test" },
+    });
+    fireEvent.change(within(form).getByLabelText("API key"), { target: { value: "KEY-3" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Add provider" }));
+    await waitFor(() => expect(onAddOutsideProvider).toHaveBeenCalledTimes(1));
+    const [, configuration] = onAddOutsideProvider.mock.calls[0] as unknown as [string, unknown];
+    expect(configuration).toEqual({
+      kind: "outside-video",
+      driver: listing.driver,
+      baseUrl: "https://video.example.test",
+      key: { header: "authorization", scheme: "Bearer" },
+      modelAllowlist: ["example-video-1"],
+      defaultModel: "example-video-1",
+    });
+  });
+
   it("refuses a form with no models before it asks the host", () => {
     const onAddOutsideProvider = vi.fn(async () => true);
     render(<ProviderCatalogView {...props({ outsideDrivers: [listing], onAddOutsideProvider })} />);
