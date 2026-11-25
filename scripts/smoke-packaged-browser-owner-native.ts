@@ -26,6 +26,13 @@ const endpointContinueReady = (snapshot: string): boolean => {
   const rows = snapshot.split("\n").filter((row) => row.startsWith("AXButton | Continue |"));
   return rows.length === 1 && rows[0]?.endsWith(" | readiness:true") === true;
 };
+// Settings lists a Work section of its own and stays in the tree for a moment
+// after Close Settings is pressed. Revealing that row as it was torn down read
+// -25202 (seen 2026-11-24), so the app's entry counts only once Settings is gone.
+export const workModeEntryReady = (snapshot: string): boolean =>
+  snapshot.includes(" | Work |") &&
+  !snapshot.includes("| Close Settings |") &&
+  !snapshot.includes("Back to app");
 const ax = String.raw`on run argv
 tell application "System Events"
 set candidate to first application process whose unix id is (item 1 of argv as integer)
@@ -960,7 +967,7 @@ end run`;
               await native("reveal", "Back to app");
               await native("click", "Back to app");
             }
-            await wait("work-mode-entry", (s) => s.includes(" | Work |"));
+            await wait("work-mode-entry", workModeEntryReady);
             await native("reveal", "Work");
             await native("click", "Work");
             await wait("folder-thread-kind", (s) => s.includes("AXCheckBox | In a folder |"));
@@ -1593,7 +1600,9 @@ end run`;
   }
 }
 
-void main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : "Native Browser owner smoke failed.");
-  process.exitCode = 1;
-});
+if (import.meta.main) {
+  void main().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : "Native Browser owner smoke failed.");
+    process.exitCode = 1;
+  });
+}
