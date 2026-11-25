@@ -1,4 +1,5 @@
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
+import { settledThreadNotice } from "../composer/settledThreadNotice";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import { TurnSubagentRows } from "../agents/threadSubagents";
 import { attachAllowingFiles, attachmentMediaType } from "../composer/attachmentMediaType";
@@ -2553,7 +2554,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   }, [completing, props.threadClient, thread]);
 
   const reopenCompleted = useCallback(async () => {
-    if (thread === undefined || completing || thread.completionConfirmed !== true) return;
+    if (thread === undefined || completing) return;
+    if (thread.completionConfirmed !== true && thread.completedAt === undefined) return;
     setCompleting(true);
     setErrorMessage(undefined);
     setStatus(undefined);
@@ -3916,6 +3918,17 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             ...(handoffNotice === undefined || completionLocked || turnRunning
               ? []
               : [{ key: "handoff", tone: "neutral" as const, text: handoffNotice }]),
+            // A settled thread says when, with the way back; a task marked
+            // Done says so below instead, and its Reopen also un-settles it.
+            ...(completionLocked
+              ? []
+              : [
+                  settledThreadNotice({
+                    settledAt: thread?.completedAt,
+                    busy: completing,
+                    onUnsettle: readOnly ? undefined : () => void reopenCompleted(),
+                  }),
+                ].filter((notice) => notice !== undefined)),
             // A locked task is a fact the person acts on: it stays until
             // they reopen it, which is one click from here.
             ...(completionLocked

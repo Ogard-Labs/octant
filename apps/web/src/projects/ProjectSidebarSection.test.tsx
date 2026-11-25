@@ -1125,7 +1125,6 @@ describe("ProjectSidebarSection activity view", () => {
               projectId: String(chatProjectA.id),
               threadId: "thread-today",
               title: "Update AuroraDocs logos",
-              activity: "working",
               followUp: true,
               woke: true,
               unread: true,
@@ -1135,6 +1134,13 @@ describe("ProjectSidebarSection activity view", () => {
               threadId: "thread-yesterday",
               title: "Estimate app rebrand effort",
               updatedAt: "2026-08-13T18:00:00.000Z",
+            },
+            {
+              projectId: String(chatProjectA.id),
+              threadId: "thread-running",
+              title: "Draft the release notes",
+              activity: "working",
+              updatedAt: "2026-08-14T12:30:00.000Z",
             },
           ]}
         />,
@@ -1173,11 +1179,18 @@ describe("ProjectSidebarSection activity view", () => {
       // and the row's one accessible name carries them all.
       expect(
         within(priority).getByRole("button", {
-          name: "Update AuroraDocs logos, Test, Working, Snooze ended, New activity, Follow-up",
+          name: "Update AuroraDocs logos, Test, Needs attention, Snooze ended, New activity, Follow-up",
         }),
       ).toBeVisible();
-      expect(within(priority).getByText("Working")).toBeVisible();
-      expect(within(priority).getByText("Needs you")).toBeVisible();
+      expect(within(priority).getAllByText("Needs you")).toHaveLength(2);
+      // A running thread is listed once, under Working at the foot of the feed.
+      const foot = screen.getByRole("group", { name: "Working and settled" });
+      expect(
+        within(within(foot).getByRole("region", { name: "Working" })).getByRole("button", {
+          name: /Draft the release notes/,
+        }),
+      ).toBeVisible();
+      expect(screen.getAllByRole("button", { name: /Draft the release notes/ })).toHaveLength(1);
       expect(screen.getByRole("button", { name: /Estimate app rebrand effort/ })).toHaveTextContent(
         "No Project",
       );
@@ -2641,7 +2654,7 @@ describe("snoozed and completed shelves", () => {
     expect(within(projects).queryByRole("button", { name: /Shipped the fix/ })).toBeNull();
 
     const snoozed = screen.getByText("Snoozed").closest("details");
-    const completed = screen.getByText("Put away").closest("details");
+    const completed = screen.getByText("Settled").closest("details");
     expect(screen.queryByText("Completed")).toBeNull();
     expect(snoozed).toHaveAttribute("data-shelf", "snoozed");
     expect(completed).toHaveAttribute("data-shelf", "completed");
@@ -2649,12 +2662,12 @@ describe("snoozed and completed shelves", () => {
     expect(within(snoozed!).getByText("1")).toBeInTheDocument();
     expect(within(completed!).getByText("1")).toBeInTheDocument();
 
-    await user.click(within(completed!).getByText("Put away"));
+    await user.click(within(completed!).getByText("Settled"));
     await user.click(within(completed!).getByRole("button", { name: /Shipped the fix/ }));
     expect(onSelectThread).toHaveBeenCalledWith("thread-c");
   });
 
-  it("opens the Put away shelf, or the Activity feed, when a sidebar tile asks for it", async () => {
+  it("opens the Settled shelf, or the Activity feed, when a sidebar tile asks for it", async () => {
     // The shelf scrolls itself into view a frame after it opens, and this
     // test now waits long enough for that frame; jsdom has no scrollIntoView.
     Element.prototype.scrollIntoView = vi.fn();
@@ -2685,10 +2698,10 @@ describe("snoozed and completed shelves", () => {
       />
     );
     const { rerender } = render(section());
-    expect(screen.getByText("Put away").closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("Settled").closest("details")).not.toHaveAttribute("open");
 
     rerender(section({ view: "completed", sequence: 1 }));
-    expect(screen.getByText("Put away").closest("details")).toHaveAttribute("open");
+    expect(screen.getByText("Settled").closest("details")).toHaveAttribute("open");
     await expectArrangement(userEvent.setup(), "Activity feed", false);
 
     rerender(section({ view: "activity", sequence: 2 }));
@@ -2721,7 +2734,7 @@ describe("snoozed and completed shelves", () => {
         ]}
       />,
     );
-    expect(screen.getByText("Put away").closest("details")).toHaveAttribute("open");
+    expect(screen.getByText("Settled").closest("details")).toHaveAttribute("open");
     expect(screen.getByRole("button", { name: /Shipped the fix/ })).toHaveAttribute(
       "aria-current",
       "page",

@@ -6876,7 +6876,7 @@ describe("completing and snoozing a Code thread", () => {
         expectedVersion: 1,
       }),
     ).rejects.toMatchObject({
-      failure: { category: "invalid", message: /before putting this thread away/ },
+      failure: { category: "invalid", message: /before settling this thread/ },
     });
 
     const waiting = serviceFixture();
@@ -6888,7 +6888,7 @@ describe("completing and snoozing a Code thread", () => {
         expectedVersion: 1,
       }),
     ).rejects.toMatchObject({
-      failure: { category: "invalid", message: /answer it before putting it away/ },
+      failure: { category: "invalid", message: /answer it before settling it/ },
     });
     expect(running.persistence.journal.append).not.toHaveBeenCalled();
     expect(waiting.persistence.journal.append).not.toHaveBeenCalled();
@@ -7004,6 +7004,23 @@ describe("completing and snoozing a Code thread", () => {
     });
     if (!("thread" in markedWithSettingOff)) throw new Error("expected the marked thread");
     expect(markedWithSettingOff.thread).not.toHaveProperty("completedAt");
+  });
+
+  it("settles a thread whose agent finished, as the host, and not while its turn still runs", () => {
+    const fixture = serviceFixture();
+    expect(fixture.service.settleFinishedThread(ids.thread)).toEqual({ status: "settled" });
+    const append = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+      events: Array<{ actor: unknown; payload: { thread: Record<string, unknown> } }>;
+    };
+    expect(append.events[0]?.payload.thread.completedAt).toBe(now);
+    expect(append.events[0]?.payload.thread).not.toHaveProperty("markedDoneAt");
+    expect(append.events[0]?.actor).toMatchObject({ kind: "system" });
+
+    const waiting = serviceFixture({ awaitsHarnessApproval: () => true });
+    expect(waiting.service.settleFinishedThread(ids.thread)).toEqual({
+      status: "skipped",
+      reason: "busy",
+    });
   });
 
   it("puts a thread away once for its merged pull request, as the host, and not again after the person takes it back", async () => {

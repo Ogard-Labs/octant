@@ -277,7 +277,7 @@ export function CoordinatorWorkersPanel(props: {
         rows={sections.done}
       />
       <FoldedSection
-        label="Put away"
+        label="Settled"
         now={now}
         onOpen={props.source.onOpenWorker}
         onSelectPullRequest={props.onSelectPullRequest}

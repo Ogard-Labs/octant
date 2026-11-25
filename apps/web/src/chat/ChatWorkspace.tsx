@@ -1,4 +1,5 @@
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
+import { settledThreadNotice } from "../composer/settledThreadNotice";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   ProjectMemoryProposalPrompt,
@@ -1832,7 +1833,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             stash={stash}
             readOnly={readOnly}
             benchmarkProjectId={view.thread.projectId}
-            notices={sideChatNotice === undefined ? [] : [sideChatNotice]}
+            notices={[
+              settledThreadNotice({
+                settledAt: thread.completedAt,
+                onUnsettle: readOnly
+                  ? undefined
+                  : () => void props.controller.reopenThread(thread.id),
+              }),
+              sideChatNotice,
+            ].filter((notice) => notice !== undefined)}
             key={String(thread.id)}
             info={
               <ThreadInfo

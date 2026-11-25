@@ -21,7 +21,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
     {
       ...octantSettingsNavigation.general,
       keywords:
-        "general enabled modes startup default chat work updates version release threads completed put away archive snooze compact compaction context window profile name email avatar gravatar initials colour color picture identity notifications notify alerts push phone waiting approval failure completion automation routines",
+        "general enabled modes startup default chat work updates version release threads completed settle settled put away archive snooze compact compaction context window profile name email avatar gravatar initials colour color picture identity notifications notify alerts push phone waiting approval failure completion automation routines",
       settings: [
         {
           id: settingId("resource-limits"),
@@ -158,16 +158,16 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("put-away-when-done"),
-          label: "Put away threads when they're done",
+          label: "Settle threads when they're done",
           scope: "host",
           keywords: "finished merged pull request settle automatically mark shelf sidebar hide",
         },
         {
           id: settingId("completed-thread-archive"),
-          label: "Archive put-away threads",
+          label: "Archive settled threads",
           scope: "host",
           keywords:
-            "put away complete completed threads archive automatically days never snooze snoozed shelf sidebar",
+            "settle settled put away complete completed threads archive automatically days never snooze snoozed shelf sidebar",
         },
         {
           id: settingId("auto-compact-octant"),

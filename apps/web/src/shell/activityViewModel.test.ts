@@ -44,6 +44,24 @@ function thread(
 }
 
 describe("buildSidebarActivityView", () => {
+  it("lifts a thread waiting on an approval above the days, even with no unread mark", () => {
+    const view = buildSidebarActivityView({
+      now: new Date("2026-08-14T12:00:00.000Z"),
+      projects: [{ id: projectId, name: "Octant" }],
+      threads: [
+        thread({ threadId: "new", title: "New", updatedAt: "2026-08-14T10:00:00.000Z" }),
+        thread({
+          threadId: "asks",
+          title: "Asks",
+          activity: "attention",
+          awaitingKind: "approval",
+          updatedAt: "2026-07-01T10:00:00.000Z",
+        }),
+      ],
+    });
+    expect(view.groups[0]).toMatchObject({ id: "priority", threads: [{ threadId: "asks" }] });
+  });
+
   it("puts unread and follow-up threads in Priority, then groups the rest by recency", () => {
     const now = new Date("2026-08-14T15:00:00.000Z");
     const view = buildSidebarActivityView({
@@ -359,7 +377,7 @@ describe("activity view preference", () => {
 });
 
 describe("buildSidebarStatusView", () => {
-  it("groups threads by what they need, pinned first, newest first within a group", () => {
+  it("groups threads by what they need, pinned first, and lists running turns at the foot", () => {
     const view = buildSidebarStatusView({
       projects: [{ id: projectId, name: "Octant" }],
       threads: [
@@ -385,11 +403,12 @@ describe("buildSidebarStatusView", () => {
       view.groups.map((group) => [group.label, group.threads.map((row) => row.threadId)]),
     ).toEqual([
       ["Pinned", ["pinned"]],
-      ["Needs input", ["asks"]],
+      ["Needs you", ["asks"]],
       ["Ready for review", ["review"]],
-      ["Working", ["working"]],
       ["Idle", ["idle-new", "idle-old"]],
     ]);
+    // A thread waiting on an approval needs you, so it is not listed as working.
+    expect(view.working.map((row) => row.threadId)).toEqual(["working"]);
   });
 
   it("keeps a coordinator with the pins and its worker under its own heading", () => {
@@ -408,10 +427,7 @@ describe("buildSidebarStatusView", () => {
     });
     expect(
       view.groups.map((group) => [group.label, group.threads.map((row) => row.threadId)]),
-    ).toEqual([
-      ["Pinned", ["coordinator"]],
-      ["Working", ["worker"]],
-    ]);
-    expect(view.groups[1]?.threads[0]?.coordinatorTitle).toBe("Backlog");
+    ).toEqual([["Pinned", ["coordinator"]]]);
+    expect(view.working[0]?.coordinatorTitle).toBe("Backlog");
   });
 });

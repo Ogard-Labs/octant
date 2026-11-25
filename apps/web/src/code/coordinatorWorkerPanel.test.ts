@@ -42,7 +42,7 @@ describe("the Workers panel's rows", () => {
     expect(coordinatorWorkerState(worker({ id: "f", markedDone: true }))).toBe("done");
   });
 
-  it("files a worker the person put away without delivering it as Put away, never Done", () => {
+  it("files a worker the person put away without delivering it as Settled, never Done", () => {
     const putAway = worker({ id: "g", completedAt: "2026-11-15T12:00:00.000Z" as never });
     expect(coordinatorWorkerState(putAway)).toBe("put-away");
     const sections = coordinatorWorkerSections(coordinatorWorkerRows([putAway], "c", () => "m"));
