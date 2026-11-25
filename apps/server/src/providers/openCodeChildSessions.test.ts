@@ -133,6 +133,50 @@ describe("OpenCodeChildSessions", () => {
     });
   });
 
+  it("counts a child's thinking inside its output and its cached tokens inside its input", () => {
+    const children = new OpenCodeChildSessions();
+    children.route(created("child", "root"), "child", isRoot);
+    for (const id of ["m1", "m2"]) {
+      children.route(
+        event("message.updated", {
+          sessionID: "child",
+          info: {
+            id,
+            sessionID: "child",
+            role: "assistant",
+            tokens: { input: 100, output: 20, reasoning: 7, cache: { read: 400, write: 30 } },
+          },
+        }),
+        "child",
+        isRoot,
+      );
+    }
+    expect(
+      children.route(event("session.idle", { sessionID: "child" }), "child", isRoot),
+    ).toMatchObject({ activity: { usage: { inputTokens: 1060, outputTokens: 54 } } });
+  });
+
+  it("leaves a child's usage unknown when OpenCode leaves out part of a count", () => {
+    const children = new OpenCodeChildSessions();
+    children.route(created("child", "root"), "child", isRoot);
+    children.route(
+      event("message.updated", {
+        sessionID: "child",
+        info: {
+          id: "m1",
+          sessionID: "child",
+          role: "assistant",
+          tokens: { input: 100, output: 20 },
+        },
+      }),
+      "child",
+      isRoot,
+    );
+    const route = children.route(event("session.idle", { sessionID: "child" }), "child", isRoot);
+    if (route.kind !== "child") throw new Error("Expected the child's route");
+    expect(route.activity).not.toHaveProperty("usage");
+  });
+
   it("leaves model, closing text and usage unknown when a child reports none", () => {
     const children = new OpenCodeChildSessions();
     children.route(created("child", "root"), "child", isRoot);

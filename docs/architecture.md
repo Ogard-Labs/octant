@@ -10758,7 +10758,10 @@ sum, so no request counts twice. A token ceiling sums input and output:
 reasoning is part of output for every runtime, OpenCode's included, whose
 mapper adds the reasoning it reports apart into output; the rows OpenCode
 wrote before that are kept by id at the upgrade
-(`usage_reasoning_outside_output`) and their reasoning is added. A Code row carries the same reasoning and
+(`usage_reasoning_outside_output`) and their reasoning is added, by the
+ceiling's sum and by every read of the ledger (the Usage dashboard, the usage
+list and the exports), so an output total means the same for old and new rows.
+A Code row carries the same reasoning and
 cache read and write tokens a Chat or Work row does, NULL where the report
 named none; Code rows projected before they were filled stay NULL, since a
 purged thread's operation events are gone and a rebuild would drop its spend.

@@ -41,6 +41,7 @@ import type { AgentRunProjection } from "./agentRun/agentRunProjection";
 import type { Journal } from "./persistence/journal";
 import { readSpendCeiling } from "./persistence/spendCeilingProjection";
 import {
+  REASONING_OUTSIDE_OUTPUT_SQL,
   usageProjectConditionParams,
   usageProjectConditionSql,
 } from "./persistence/usageProjection";
@@ -1013,10 +1014,6 @@ function ledgerWhere(input: {
 const KEPT_BELOW_FULL_ACCESS_SQL =
   "CASE WHEN reconciliation_id IN (SELECT reconciliation_id FROM usage_unreported_guarded_turn) THEN 1 ELSE 0 END";
 
-/** The reasoning a row reported apart from its output, which the sum adds; 0 for every other row. */
-const REASONING_OUTSIDE_OUTPUT_SQL =
-  "CASE WHEN reconciliation_id IN (SELECT reconciliation_id FROM usage_reasoning_outside_output) THEN COALESCE(reasoning_tokens, 0) ELSE 0 END";
-
 function sumUsageTokens(
   connection: SqliteConnection,
   input: {
@@ -1032,8 +1029,7 @@ function sumUsageTokens(
   // provider never reports usage, whose turns the ceiling does not measure.
   // Reasoning is the part of output spent thinking, already in
   // `output_tokens`, so it is not added a second time, except on the rows
-  // OpenCode wrote before its mapper added reasoning into output
-  // (`usage_reasoning_outside_output`, migration 111).
+  // `REASONING_OUTSIDE_OUTPUT_SQL` names.
   const rows = connection
     .prepare(
       `SELECT

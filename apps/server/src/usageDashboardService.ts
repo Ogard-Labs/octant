@@ -13,6 +13,7 @@ import {
 import {
   deriveModeFromSubjectType,
   readImageJobThread,
+  readUsageRows,
   usageModeCondition,
   usageProjectConditionParams,
   usageProjectConditionSql,
@@ -203,11 +204,10 @@ function selectRows(
   }
 
   const where = conditions.length === 0 ? "" : `WHERE ${conditions.join(" AND ")}`;
-  const rows = connection
-    .prepare(
-      `SELECT * FROM usage_record_projection ${where} ORDER BY observed_at DESC LIMIT ?`.trim(),
-    )
-    .all(...params, scanLimit + 1) as ReadonlyArray<UsageRecordProjectionRow>;
+  const rows = readUsageRows(connection, `${where} ORDER BY observed_at DESC LIMIT ?`, [
+    ...params,
+    scanLimit + 1,
+  ]);
 
   return { rows: rows.slice(0, scanLimit), truncated: rows.length > scanLimit };
 }
