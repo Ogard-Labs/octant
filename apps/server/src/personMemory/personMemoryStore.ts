@@ -67,6 +67,11 @@ import {
   reconcileAggregateHeads,
 } from "../persistence/threadPurge";
 
+interface AggregateKey {
+  readonly aggregateType: string;
+  readonly aggregateId: string;
+}
+
 /** The one aggregate the person's memory settings live in. */
 const SETTINGS_AGGREGATE_ID = "00000000-0000-4000-8000-0000000000e1";
 
@@ -255,9 +260,12 @@ export class PersonMemoryStore {
     if (!this.threadTakesPart(thread) || this.#gone.has(threadKey(ref))) return undefined;
     const cutOff = this.#dependencies.clock();
     try {
-      this.#replace(
+      // An aggregate of its own: the newest cut by journal order wins, and the
+      // older ones leave at the next start, never while the host runs.
+      this.#append(
         PERSON_MEMORY_CUT_AGGREGATE_TYPE,
-        personMemoryThreadAggregateId("cut", ref),
+        this.#dependencies.uuid(),
+        0,
         PERSON_MEMORY_BLOCK_CUT,
         { threadId: thread.threadId, mode: thread.mode, cutOff },
       );
@@ -301,33 +309,16 @@ export class PersonMemoryStore {
     return this.isTurnTyped(turn) || turn.began < this.typedSince();
   }
 
+  /**
+   * Keeps a thread's newest marks in memory. A mark past the cap stays in the
+   * journal until the next start removes it, so no run erases history.
+   */
   #rememberTyped(thread: { readonly mode: string; readonly threadId: string }, turnId: string) {
     const key = threadKey(thread);
     const turns = this.#typedTurns.get(key) ?? [];
     turns.push(turnId);
     this.#typedTurns.set(key, turns);
-    while (turns.length > PERSON_MEMORY_MAX_TYPED_TURNS_PER_THREAD) {
-      const oldest = turns.shift();
-      if (oldest === undefined) break;
-      this.#erase([
-        {
-          aggregateType: PERSON_MEMORY_TYPED_AGGREGATE_TYPE,
-          aggregateId: personMemoryThreadAggregateId(`typed:${oldest}`, thread),
-        },
-      ]);
-    }
-  }
-
-  #eraseTyped(thread: { readonly mode: string; readonly threadId: string }): void {
-    const turns = this.#typedTurns.get(threadKey(thread));
-    if (turns === undefined) return;
-    this.#typedTurns.delete(threadKey(thread));
-    this.#erase(
-      turns.map((turnId) => ({
-        aggregateType: PERSON_MEMORY_TYPED_AGGREGATE_TYPE,
-        aggregateId: personMemoryThreadAggregateId(`typed:${turnId}`, thread),
-      })),
-    );
+    while (turns.length > PERSON_MEMORY_MAX_TYPED_TURNS_PER_THREAD) turns.shift();
   }
 
   view(): PersonMemoryView {
@@ -458,15 +449,15 @@ export class PersonMemoryStore {
       summary:
         input.summary.length === 0 && earlier !== undefined ? earlier.summary : input.summary,
     };
-    const aggregateId = personMemoryThreadAggregateId("thread", thread);
     let learnedAt: UtcTimestamp;
     try {
-      // The thread's digest is replaced, not added to: only the newest stays.
-      // The new one is written before the old is erased, so a failure between
-      // the two leaves both (the later one wins at replay) and never none.
-      learnedAt = this.#replace(
+      // An aggregate of its own: the newest digest by journal order wins, and
+      // the older ones leave at the next start. A failed write leaves the
+      // earlier digest in place, as it was.
+      learnedAt = this.#append(
         PERSON_MEMORY_THREAD_AGGREGATE_TYPE,
-        aggregateId,
+        this.#dependencies.uuid(),
+        0,
         PERSON_MEMORY_THREAD_DISTILLED,
         { threadId: input.source.threadId, digest, lastMessage },
       ).occurredAt;
@@ -631,30 +622,12 @@ export class PersonMemoryStore {
     actor?: EventActor,
   ): void {
     const key = threadKey(thread);
-    this.#eraseTyped(thread);
-    if (this.#cuts.delete(key)) {
-      this.#erase([
-        {
-          aggregateType: PERSON_MEMORY_CUT_AGGREGATE_TYPE,
-          aggregateId: personMemoryThreadAggregateId("cut", {
-            mode: thread.mode,
-            threadId: thread.threadId,
-          }),
-        },
-      ]);
-    }
+    // Every cut, digest and mark of the thread, the superseded ones too.
+    if (this.#typedTurns.delete(key))
+      this.#eraseOfThread(PERSON_MEMORY_TYPED_AGGREGATE_TYPE, thread);
+    if (this.#cuts.delete(key)) this.#eraseOfThread(PERSON_MEMORY_CUT_AGGREGATE_TYPE, thread);
     this.#learned.delete(key);
-    if (this.#digests.delete(key)) {
-      this.#erase([
-        {
-          aggregateType: PERSON_MEMORY_THREAD_AGGREGATE_TYPE,
-          aggregateId: personMemoryThreadAggregateId("thread", {
-            mode: thread.mode,
-            threadId: thread.threadId,
-          }),
-        },
-      ]);
-    }
+    if (this.#digests.delete(key)) this.#eraseOfThread(PERSON_MEMORY_THREAD_AGGREGATE_TYPE, thread);
     // Rewriting or erasing an entry only replaces or removes keys already
     // visited, which a Map iteration allows.
     for (const entry of this.#entries.values()) {
@@ -675,35 +648,16 @@ export class PersonMemoryStore {
   }
 
   #forgetEverything(actor: EventActor | undefined): void {
-    const aggregates = [
-      ...[...this.#entries.keys()].map((id) => ({
-        aggregateType: PERSON_MEMORY_ENTRY_AGGREGATE_TYPE,
-        aggregateId: id,
-      })),
-      ...[...this.#digests.values()].map((digest) => ({
-        aggregateType: PERSON_MEMORY_THREAD_AGGREGATE_TYPE,
-        aggregateId: personMemoryThreadAggregateId("thread", digest.source),
-      })),
-    ];
-    const typed = [...this.#typedTurns.entries()].flatMap(([key, turnIds]) => {
-      const separator = key.indexOf(":");
-      const thread = { mode: key.slice(0, separator), threadId: key.slice(separator + 1) };
-      return turnIds.map((turnId) => ({
-        aggregateType: PERSON_MEMORY_TYPED_AGGREGATE_TYPE,
-        aggregateId: personMemoryThreadAggregateId(`typed:${turnId}`, thread),
-      }));
-    });
-    const cuts = [...this.#cuts.keys()].map((key) => {
-      const separator = key.indexOf(":");
-      return {
-        aggregateType: PERSON_MEMORY_CUT_AGGREGATE_TYPE,
-        aggregateId: personMemoryThreadAggregateId("cut", {
-          mode: key.slice(0, separator),
-          threadId: key.slice(separator + 1),
-        }),
-      };
-    });
-    this.#erase([...aggregates, ...typed, ...cuts]);
+    const entries = [...this.#entries.keys()].map((id) => ({
+      aggregateType: PERSON_MEMORY_ENTRY_AGGREGATE_TYPE,
+      aggregateId: id,
+    }));
+    this.#erase([
+      ...entries,
+      ...this.#aggregatesOfType(PERSON_MEMORY_THREAD_AGGREGATE_TYPE),
+      ...this.#aggregatesOfType(PERSON_MEMORY_TYPED_AGGREGATE_TYPE),
+      ...this.#aggregatesOfType(PERSON_MEMORY_CUT_AGGREGATE_TYPE),
+    ]);
     this.#cuts.clear();
     this.#entries.clear();
     this.#digests.clear();
@@ -776,9 +730,7 @@ export class PersonMemoryStore {
     this.#entries.delete(id);
   }
 
-  #erase(
-    aggregates: ReadonlyArray<{ readonly aggregateType: string; readonly aggregateId: string }>,
-  ): void {
+  #erase(aggregates: ReadonlyArray<AggregateKey>): void {
     if (aggregates.length === 0) return;
     const { connection } = this.#dependencies;
     connection.pragma("foreign_keys = OFF");
@@ -795,76 +747,36 @@ export class PersonMemoryStore {
     }
   }
 
-  /**
-   * Writes an aggregate's one current state: the new event goes in at the next
-   * version first, then the older events are erased, so a failure in between
-   * leaves the old and the new (the later one wins at replay), never neither.
-   * The new event stands once it is journaled: an erase that fails is left for
-   * the next replace, which erases everything older than itself.
-   */
-  #replace(
-    aggregateType: string,
-    aggregateId: string,
-    eventName: string,
-    payload: unknown,
-  ): { readonly version: number; readonly occurredAt: UtcTimestamp } {
-    const written = this.#append(
-      aggregateType,
-      aggregateId,
-      readVersion(this.#dependencies.connection, aggregateType, aggregateId),
-      eventName,
-      payload,
-    );
-    if (written.version > 1) {
-      try {
-        this.#eraseBefore(aggregateType, aggregateId, written.version);
-      } catch {
-        // The older events stay; the next replace erases them.
-      }
-    }
-    return written;
+  /** Every aggregate of a type, the superseded ones too. */
+  #aggregatesOfType(aggregateType: string): ReadonlyArray<AggregateKey> {
+    return (
+      this.#dependencies.connection
+        .prepare(`SELECT DISTINCT aggregate_id FROM event_journal WHERE aggregate_type = ?`)
+        .all(aggregateType) as ReadonlyArray<{ readonly aggregate_id: string }>
+    ).map((row) => ({ aggregateType, aggregateId: row.aggregate_id }));
   }
 
   /**
-   * Erases an aggregate's events older than `version` and numbers the one that
-   * remains 1, because the store verifier reads a first version above 1 as a
-   * gap. The newest event keeps its sequence, so the aggregate's head and every
-   * projection checkpoint stay valid and no whole-table reconcile is needed.
+   * Erases every aggregate of a type that names the thread, by the thread id
+   * each payload carries, so the superseded cuts, digests and marks go with the
+   * newest. A purge, Leave no trace and Forget everything erase at once.
    */
-  #eraseBefore(aggregateType: string, aggregateId: string, version: number): void {
-    const { connection } = this.#dependencies;
-    connection.pragma("foreign_keys = OFF");
-    try {
-      connection.transaction(() => {
-        connection
-          .prepare(
-            `DELETE FROM event_quarantine WHERE global_sequence IN (
-               SELECT global_sequence FROM event_journal
-               WHERE aggregate_type = ? AND aggregate_id = ? AND aggregate_version < ?)`,
-          )
-          .run(aggregateType, aggregateId, version);
-        connection
-          .prepare(
-            `DELETE FROM event_journal
-             WHERE aggregate_type = ? AND aggregate_id = ? AND aggregate_version < ?`,
-          )
-          .run(aggregateType, aggregateId, version);
-        connection
-          .prepare(
-            `UPDATE event_journal SET aggregate_version = 1
-             WHERE aggregate_type = ? AND aggregate_id = ? AND aggregate_version = ?`,
-          )
-          .run(aggregateType, aggregateId, version);
-        connection
-          .prepare(
-            `UPDATE aggregate_heads SET aggregate_version = 1
-             WHERE aggregate_type = ? AND aggregate_id = ? AND aggregate_version = ?`,
-          )
-          .run(aggregateType, aggregateId, version);
-      })();
-    } finally {
-      connection.pragma("foreign_keys = ON");
-    }
+  #eraseOfThread(
+    aggregateType: string,
+    thread: { readonly mode: string; readonly threadId: string },
+  ): void {
+    const modePath =
+      aggregateType === PERSON_MEMORY_THREAD_AGGREGATE_TYPE ? "$.digest.source.mode" : "$.mode";
+    const rows = this.#dependencies.connection
+      .prepare(
+        `SELECT DISTINCT aggregate_id FROM event_journal
+         WHERE aggregate_type = ? AND json_extract(payload_json, '$.threadId') = ?
+           AND json_extract(payload_json, '${modePath}') = ?`,
+      )
+      .all(aggregateType, String(thread.threadId), thread.mode) as ReadonlyArray<{
+      readonly aggregate_id: string;
+    }>;
+    this.#erase(rows.map((row) => ({ aggregateType, aggregateId: row.aggregate_id })));
   }
 
   #append(
@@ -983,9 +895,7 @@ export class PersonMemoryStore {
           const typed = decodeTurnTyped(envelope.payload);
           const thread = { mode: typed.mode, threadId: String(typed.threadId) };
           if (!this.isTurnTyped({ ...thread, turnId: typed.turnId })) {
-            const turns = this.#typedTurns.get(threadKey(thread)) ?? [];
-            turns.push(typed.turnId);
-            this.#typedTurns.set(threadKey(thread), turns);
+            this.#rememberTyped(thread, typed.turnId);
           }
           break;
         }

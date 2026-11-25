@@ -66,6 +66,7 @@ import {
 } from "./migrationErrors";
 import { MIGRATIONS } from "./migrations";
 import { compactClosedBrowserPages } from "./browserPageProjection";
+import { compactSupersededPersonMemory } from "./personMemoryCompaction";
 import { compactSupersededCheckoutObservations } from "./journalCompaction";
 import {
   clearJournalWatermark,
@@ -532,17 +533,23 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
     // The pages a Browser pane held and then ended leave here and nowhere else:
     // no deletion at run time may clear the verification watermark.
     const pageCompaction = compactClosedBrowserPages(connection);
-    // A whole ended page leaves with both of its events, so every row that
-    // stays is the row the scan decoded: its deletion clears the watermark
+    // Superseded person memory leaves here too, for the same reason: a run
+    // never erases it, because that would clear the watermark.
+    const memoryCompaction = compactSupersededPersonMemory(connection);
+    // Whole aggregates leave (an ended page with both of its events, a
+    // superseded cut, digest or mark with its only one), so every row that
+    // stays is the row the scan decoded: their deletion clears the watermark
     // (migration 96) and this start records it again at the head that is left.
     // Checkout compaction cuts single events out of aggregates that stay, so it
     // leaves the clearing.
+    const wholeAggregateEventsRemoved =
+      pageCompaction.eventsRemoved + memoryCompaction.eventsRemoved;
     const compaction = { eventsRemoved: checkoutCompaction.eventsRemoved };
-    const recordedHead = pageCompaction.eventsRemoved === 0 ? scannedHead : journal.headSequence();
+    const recordedHead = wholeAggregateEventsRemoved === 0 ? scannedHead : journal.headSequence();
     if (
       compaction.eventsRemoved === 0 &&
       fingerprint !== undefined &&
-      (recordedHead !== verifiedThrough || pageCompaction.eventsRemoved > 0)
+      (recordedHead !== verifiedThrough || wholeAggregateEventsRemoved > 0)
     ) {
       // Only a scan that found the journal compatible and left its rows
       // untouched may move the watermark; a start that rewrote rows leaves the

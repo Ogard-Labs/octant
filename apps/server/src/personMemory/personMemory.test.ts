@@ -25,6 +25,8 @@ import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjectio
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { recordJournalWatermark } from "../persistence/journalWatermark";
+import { compactSupersededPersonMemory } from "../persistence/personMemoryCompaction";
 import { rebuildAll, verifyDatabase } from "../persistence/recovery";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
@@ -1627,15 +1629,28 @@ describe("which turns the person typed", () => {
     expect(began < after).toBe(true);
   });
 
-  it("keeps only a thread's newest marks", () => {
+  it("counts only a thread's newest 200 marks, and the next start removes the rest from the journal", () => {
     const h = harness([]);
     for (let index = 0; index < 205; index += 1) mark(h, `turn-${String(index)}`);
 
+    // The run counts the newest 200 and erases nothing.
+    expect(markEvents(h)).toHaveLength(205);
+    expect(h.store.isTurnTyped({ mode: "chat", threadId: THREAD_1, turnId: "turn-204" })).toBe(
+      true,
+    );
+    expect(h.store.isTurnTyped({ mode: "chat", threadId: THREAD_1, turnId: "turn-4" })).toBe(false);
+    expect(h.store.isTurnTyped({ mode: "chat", threadId: THREAD_1, turnId: "turn-5" })).toBe(true);
+    const restarted = restart(h);
+    expect(restarted.isTurnTyped({ mode: "chat", threadId: THREAD_1, turnId: "turn-4" })).toBe(
+      false,
+    );
+    restarted.close();
+
+    compactSupersededPersonMemory(h.connection);
     const turnIds = markEvents(h).map((event) => event.turnId);
     expect(turnIds).toHaveLength(200);
     expect(turnIds).not.toContain("turn-0");
     expect(turnIds).toContain("turn-204");
-    expect(h.store.isTurnTyped({ mode: "chat", threadId: THREAD_1, turnId: "turn-4" })).toBe(false);
   });
 
   it("learns only from turns the person typed once marks are kept, and still reads older turns as before", () => {
@@ -1824,7 +1839,7 @@ describe("where a thread's block is cut, and how a digest is replaced", () => {
     });
   const thread = { mode: "chat" as const, threadId: THREAD_1 };
 
-  it("journals the newest cut only, replays it after a restart, and erases it with Leave no trace and Forget everything", () => {
+  it("journals every cut while running, replays the newest, and erases all of them with Leave no trace and Forget everything", () => {
     const h = harness([]);
     h.advance("2026-11-01T10:00:00.000Z");
     expect(h.store.startBlockCut(thread)).toBe("2026-11-01T10:00:00.000Z");
@@ -1833,6 +1848,7 @@ describe("where a thread's block is cut, and how a digest is replaced", () => {
     h.store.startBlockCut({ ...thread, threadId: THREAD_2 });
 
     expect(cutEvents(h).map((event) => event.cutOff)).toEqual([
+      "2026-11-01T10:00:00.000Z",
       "2026-11-01T12:00:00.000Z",
       "2026-11-01T12:00:00.000Z",
     ]);
@@ -1848,7 +1864,7 @@ describe("where a thread's block is cut, and how a digest is replaced", () => {
         leavesNoTrace: true,
       }),
     );
-    expect(cutEvents(h).map((event) => event.threadId)).toEqual([THREAD_1]);
+    expect(cutEvents(h).map((event) => event.threadId)).toEqual([THREAD_1, THREAD_1]);
     expect(h.store.startBlockCut({ ...thread, threadId: THREAD_2 })).toBeUndefined();
     h.advance(later);
     h.store.change(decodePersonMemoryCommand({ kind: "forget-person-memory", confirmed: true }));
@@ -1885,25 +1901,6 @@ describe("where a thread's block is cut, and how a digest is replaced", () => {
     h.advance("2026-11-01T14:00:00.000Z");
     expect(h.store.startBlockCut(thread)).toBe("2026-11-01T14:00:00.000Z");
     expect(check().issues).toEqual([]);
-  });
-
-  it("keeps the new event in memory when erasing the older ones fails", () => {
-    const h = harness([]);
-    h.advance("2026-11-01T10:00:00.000Z");
-    h.store.startBlockCut(thread);
-    h.advance("2026-11-01T12:00:00.000Z");
-    const prepare = h.connection.prepare.bind(h.connection);
-    h.connection.prepare = (sql: string) => {
-      if (sql.includes("DELETE FROM event_journal")) throw new Error("SQLITE_BUSY");
-      return prepare(sql);
-    };
-
-    expect(h.store.startBlockCut(thread)).toBe("2026-11-01T12:00:00.000Z");
-    expect(h.store.blockCut(thread)).toBe("2026-11-01T12:00:00.000Z");
-    h.connection.prepare = prepare;
-    h.advance("2026-11-01T13:00:00.000Z");
-    h.store.startBlockCut(thread);
-    expect(cutEvents(h).map((event) => event.cutOff)).toEqual(["2026-11-01T13:00:00.000Z"]);
   });
 
   it("keeps the earlier digest in the journal when the later one cannot be written", async () => {
@@ -1967,6 +1964,10 @@ describe("where a thread's block is cut, and how a digest is replaced", () => {
     h.journal.append = append;
     h.advance("2026-11-02T10:00:00.000Z");
     await h.sweep.pass();
+    // The earlier digest stays until the next start, which removes it.
+    expect(h.journalText()).toContain("Second digest.");
+    expect(h.journalText()).toContain("First digest.");
+    compactSupersededPersonMemory(h.connection);
     expect(h.journalText()).toContain("Second digest.");
     expect(h.journalText()).not.toContain("First digest.");
   });
@@ -2422,5 +2423,274 @@ describe("learning from threads still open", () => {
     expect(again.learnedThrough(ref(THREAD_2))).toMatchObject({ id: "thread-end", at: later });
     restarted.close();
     again.close();
+  });
+});
+
+describe("person memory and the journal verification watermark", () => {
+  const chat = (threadId: string) => ({ mode: "chat" as const, threadId });
+  const watermark = (h: ReturnType<typeof harness>) =>
+    h.connection.prepare("SELECT verified_through FROM journal_verification_watermark").get();
+  const count = (h: ReturnType<typeof harness>, eventName: string, threadId?: string) =>
+    (
+      h.connection
+        .prepare(
+          `SELECT count(*) AS n FROM event_journal WHERE event_name = ?
+           AND (? IS NULL OR json_extract(payload_json, '$.threadId') = ?)`,
+        )
+        .get(eventName, threadId ?? null, threadId ?? null) as { readonly n: number }
+    ).n;
+  const CUT = "person-memory.block-cut@1";
+  const DISTILLED = "person-memory.thread-distilled@1";
+  const TYPED = "person-memory.turn-typed@1";
+  const source = (threadId: string, endedAt: string) => ({
+    mode: "chat" as const,
+    threadId: threadId as never,
+    title: "Invoices",
+    providerInstanceId: PROVIDER,
+    endedAt: decodeUtcTimestamp(endedAt),
+  });
+  const reopen = (h: ReturnType<typeof harness>) =>
+    new PersonMemoryStore({
+      connection: h.connection,
+      journal: h.journal,
+      uuid: () => crypto.randomUUID(),
+      clock: () => decodeUtcTimestamp(later),
+      actor,
+    });
+
+  /** A run that cuts blocks, replaces digests, and passes the 200-mark cap. */
+  function busyRun() {
+    const h = harness([]);
+    h.store.since();
+    h.store.typedSince();
+    recordJournalWatermark(h.connection, "fingerprint", h.journal.headSequence(), START);
+    for (const hour of [10, 11, 12, 13]) {
+      h.advance(`2026-11-01T${String(hour)}:00:00.000Z`);
+      h.store.startBlockCut(chat(THREAD_1));
+      h.store.startBlockCut(chat(THREAD_2));
+    }
+    for (const hour of [14, 15, 16]) {
+      const at = `2026-11-01T${String(hour)}:00:00.000Z`;
+      for (const threadId of [THREAD_1, THREAD_2]) {
+        h.store.remember({
+          source: source(threadId, at),
+          summary: `Invoices at ${String(hour)}`,
+          entries: [],
+          lastMessage: { id: `message-${String(hour)}`, at: decodeUtcTimestamp(at) },
+        });
+      }
+    }
+    for (let index = 0; index < 205; index += 1) {
+      h.store.markTurnTyped({ ...chat(THREAD_1), turnId: `turn-${String(index)}` });
+    }
+    h.store.markTurnTyped({ ...chat(THREAD_2), turnId: "turn-x" });
+    return h;
+  }
+
+  const stateOf = (store: PersonMemoryStore) => ({
+    cuts: [THREAD_1, THREAD_2].map((threadId) => store.blockCut(chat(threadId))),
+    learned: [THREAD_1, THREAD_2].map((threadId) => store.learnedThrough(chat(threadId))),
+    remembered: [THREAD_1, THREAD_2].map((threadId) => store.isRemembered(chat(threadId))),
+    typed: [THREAD_1, THREAD_2].map((threadId) => [...store.typedTurnIds(chat(threadId))].sort()),
+    hits: store.search({ mode: "work", threadId: THREAD_3 }, "invoices"),
+    block: store.blockFor({ ...chat(THREAD_3), cutOff: later }),
+    entries: store.view().entries,
+  });
+
+  const check = (h: ReturnType<typeof harness>) =>
+    verifyDatabase({ connection: h.connection, journal: h.journal, projections: h.projections })
+      .issues;
+
+  it("keeps the watermark through a run that cuts blocks, replaces digests and passes 200 marks", () => {
+    const h = busyRun();
+    expect(watermark(h)).toEqual({ verified_through: expect.any(Number) });
+    // Nothing superseded is erased or renumbered while the host runs.
+    expect(count(h, CUT)).toBe(8);
+    expect(count(h, DISTILLED)).toBe(6);
+    expect(count(h, TYPED)).toBe(206);
+    // Each is an aggregate of its own: no event is renumbered or stacked on another.
+    expect(
+      h.connection
+        .prepare(
+          `SELECT count(*) AS n FROM event_journal WHERE aggregate_version != 1
+           AND aggregate_type IN ('person-memory-cut', 'person-memory-typed', 'person-memory-thread')`,
+        )
+        .get(),
+    ).toEqual({ n: 0 });
+    expect(
+      h.connection
+        .prepare(
+          `SELECT count(DISTINCT aggregate_id) AS n FROM event_journal
+           WHERE event_name IN (?, ?)`,
+        )
+        .get(CUT, DISTILLED),
+    ).toEqual({ n: 14 });
+    // The newest still wins for the host that wrote them.
+    expect(h.store.blockCut(chat(THREAD_1))).toBe("2026-11-01T13:00:00.000Z");
+    expect(h.store.typedTurnIds(chat(THREAD_1)).size).toBe(200);
+    expect(h.store.isTurnTyped({ ...chat(THREAD_1), turnId: "turn-204" })).toBe(true);
+    expect(h.store.isTurnTyped({ ...chat(THREAD_1), turnId: "turn-4" })).toBe(false);
+  });
+
+  it("compacts to one cut and one digest per thread and 200 marks, with the same state before and after", () => {
+    const h = busyRun();
+    const before = reopen(h);
+    const stateBefore = stateOf(before);
+    before.close();
+    expect(check()).toEqual([]);
+    function check() {
+      return verifyDatabase({
+        connection: h.connection,
+        journal: h.journal,
+        projections: h.projections,
+      }).issues;
+    }
+
+    const report = compactSupersededPersonMemory(h.connection);
+
+    expect(report).toEqual({ aggregatesRemoved: 6 + 4 + 5, eventsRemoved: 6 + 4 + 5 });
+    expect(count(h, CUT, THREAD_1)).toBe(1);
+    expect(count(h, CUT, THREAD_2)).toBe(1);
+    expect(count(h, DISTILLED, THREAD_1)).toBe(1);
+    expect(count(h, DISTILLED, THREAD_2)).toBe(1);
+    expect(count(h, TYPED, THREAD_1)).toBe(200);
+    expect(count(h, TYPED, THREAD_2)).toBe(1);
+    const after = reopen(h);
+    expect(stateOf(after)).toEqual(stateBefore);
+    after.close();
+    expect(check()).toEqual([]);
+    rebuildAll({
+      connection: h.connection,
+      journal: h.journal,
+      projections: h.projections,
+      clock: () => later,
+    });
+    expect(check()).toEqual([]);
+    // Every head of a removed aggregate left with it, and no other did.
+    expect(
+      h.connection
+        .prepare(
+          `SELECT count(*) AS n FROM aggregate_heads WHERE aggregate_type LIKE 'person-memory-%'
+           AND NOT EXISTS (SELECT 1 FROM event_journal e
+             WHERE e.aggregate_type = aggregate_heads.aggregate_type
+               AND e.aggregate_id = aggregate_heads.aggregate_id)`,
+        )
+        .get(),
+    ).toEqual({ n: 0 });
+    // A second compaction finds nothing, and the store keeps writing.
+    expect(compactSupersededPersonMemory(h.connection)).toEqual({
+      aggregatesRemoved: 0,
+      eventsRemoved: 0,
+    });
+    h.advance("2026-11-02T10:00:00.000Z");
+    expect(h.store.startBlockCut(chat(THREAD_1))).toBe("2026-11-02T10:00:00.000Z");
+    expect(check()).toEqual([]);
+  });
+
+  it("never takes a released event or an aggregate that holds one, and does nothing without these events", () => {
+    const empty = harness([]);
+    expect(compactSupersededPersonMemory(empty.connection)).toEqual({
+      aggregatesRemoved: 0,
+      eventsRemoved: 0,
+    });
+    const h = busyRun();
+    const aggregateId = personMemoryThreadAggregateId("thread", chat(THREAD_3));
+    // A thread remembered the released way, in the aggregate older builds wrote.
+    h.journal.append({
+      aggregate: { aggregateType: "person-memory-thread", aggregateId },
+      expectedVersion: 0,
+      events: [
+        {
+          eventId: crypto.randomUUID(),
+          eventName: "person-memory.thread-remembered@1",
+          eventVersion: 1,
+          correlationId: crypto.randomUUID(),
+          actor,
+          occurredAt: START,
+          payload: {
+            threadId: THREAD_3,
+            digest: { source: source(THREAD_3, START), summary: "Old digest." },
+          },
+        },
+      ],
+    });
+    compactSupersededPersonMemory(h.connection);
+    expect(count(h, "person-memory.thread-remembered@1")).toBe(1);
+    expect(count(h, DISTILLED, THREAD_1)).toBe(1);
+    expect(count(h, "person-memory.settings-changed@1")).toBeGreaterThan(0);
+  });
+
+  it("is safe when the start stops between the compaction and recording the watermark", () => {
+    const h = busyRun();
+    const before = reopen(h);
+    const stateBefore = stateOf(before);
+    before.close();
+    compactSupersededPersonMemory(h.connection);
+    // The deletion cleared the watermark, as migration 96 does, so the next
+    // start scans everything: slower, never wrong.
+    expect(watermark(h)).toBeUndefined();
+    const after = reopen(h);
+    expect(stateOf(after)).toEqual(stateBefore);
+    after.close();
+    expect(
+      verifyDatabase({ connection: h.connection, journal: h.journal, projections: h.projections })
+        .issues,
+    ).toEqual([]);
+  });
+
+  it("still erases every trace at once for a purged thread, Leave no trace, and Forget everything", () => {
+    const traces = (h: ReturnType<typeof harness>, threadId: string) =>
+      (
+        h.connection
+          .prepare(
+            `SELECT count(*) AS n FROM event_journal
+             WHERE aggregate_type IN ('person-memory-cut', 'person-memory-typed', 'person-memory-thread')
+               AND json_extract(payload_json, '$.threadId') = ?`,
+          )
+          .get(threadId) as { readonly n: number }
+      ).n;
+    const h = busyRun();
+    h.journal.append({
+      aggregate: { aggregateType: "thread-retention", aggregateId: THREAD_1 },
+      expectedVersion: 0,
+      events: [
+        {
+          eventId: crypto.randomUUID(),
+          eventName: THREAD_RETENTION_EVENT_NAMES.threadPurged,
+          eventVersion: 1,
+          correlationId: crypto.randomUUID(),
+          actor,
+          occurredAt: later,
+          payload: { kind: "thread-purged", mode: "chat", threadId: THREAD_1, purgedAt: later },
+        },
+      ],
+    });
+    // The memory of the purged thread goes at once, superseded rows included.
+    expect(traces(h, THREAD_1)).toBe(0);
+    expect(traces(h, THREAD_2)).toBeGreaterThan(0);
+
+    h.store.change(
+      decodePersonMemoryCommand({
+        kind: "set-thread-leaves-no-trace",
+        mode: "chat",
+        threadId: THREAD_2,
+        leavesNoTrace: true,
+      }),
+    );
+    expect(traces(h, THREAD_2)).toBe(0);
+
+    const forget = busyRun();
+    forget.advance(later);
+    forget.store.change(
+      decodePersonMemoryCommand({ kind: "forget-person-memory", confirmed: true }),
+    );
+    expect(
+      forget.connection
+        .prepare(
+          `SELECT count(*) AS n FROM event_journal
+           WHERE aggregate_type IN ('person-memory-cut', 'person-memory-typed', 'person-memory-thread')`,
+        )
+        .get(),
+    ).toEqual({ n: 0 });
   });
 });
