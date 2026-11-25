@@ -189,6 +189,7 @@ import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
+import { SideTaskReportCards } from "../agents/SideTaskReportCards";
 import { SteeredMessages } from "../messageQueue/SteeredMessages";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import {
@@ -2931,13 +2932,21 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               if (row.kind === "message") {
                 if (row.entry.role === "user") {
                   if (row.delivered === true) {
+                    const reportDelivery = row.turn.delivery?.kind === "side-task-report";
                     return withRowHandoff(
                       row.handoff,
-                      <article aria-label="Subagent results" className="turn-child-result">
-                        <ChildResultCards
-                          providerGroups={props.providerGroups}
-                          text={row.entry.text}
-                        />
+                      <article
+                        aria-label={reportDelivery ? "Report from side task" : "Subagent results"}
+                        className="turn-child-result"
+                      >
+                        {reportDelivery ? (
+                          <SideTaskReportCards text={row.entry.text} />
+                        ) : (
+                          <ChildResultCards
+                            providerGroups={props.providerGroups}
+                            text={row.entry.text}
+                          />
+                        )}
                       </article>,
                     );
                   }

@@ -172,7 +172,7 @@ function FinishedResult(props: {
   );
 }
 
-function FoldedText(props: { readonly text: string; readonly markdown?: boolean }) {
+export function FoldedText(props: { readonly text: string; readonly markdown?: boolean }) {
   const long =
     props.text.length > FOLD_AFTER_CHARACTERS || props.text.split("\n").length > FOLD_AFTER_LINES;
   const [open, setOpen] = useState(false);

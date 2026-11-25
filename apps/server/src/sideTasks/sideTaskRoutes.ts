@@ -1,6 +1,7 @@
 import {
   decodeContinueSideTaskHere,
   decodeDismissSideTask,
+  decodeSetSideTaskReporting,
   decodeStartSideTask,
   type OctantMode,
   type SideTaskChildState,
@@ -15,6 +16,7 @@ import {
   startSideTask,
   type SideTaskStartDependencies,
 } from "./sideTaskStart";
+import type { SideTaskReportStore } from "./sideTaskReportStore";
 import type { SideTaskStore } from "./sideTaskStore";
 
 const METHODS = "GET, POST, OPTIONS";
@@ -40,6 +42,12 @@ export interface SideTaskRouteDependencies extends SideTaskStartDependencies {
     readonly threadId: string;
     readonly windowId: string;
   }) => Promise<SideTaskChildState | undefined> | SideTaskChildState | undefined;
+  /**
+   * The report journal a started child's reporting switch writes to. Absent
+   * on a host without report-back, where the action refuses and reads omit
+   * the field.
+   */
+  readonly reports?: Pick<SideTaskReportStore, "setReporting" | "reportingOn">;
   readonly now?: () => number;
 }
 
@@ -103,21 +111,35 @@ export function createSideTaskRouteHandler(dependencies: SideTaskRouteDependenci
     if (request.method === "GET" && action === "") {
       const sideTasks = dependencies.store.read(threadId);
       const childState = dependencies.childState;
-      if (sideTasks === undefined || childState === undefined) {
+      const reports = dependencies.reports;
+      if (sideTasks === undefined || (childState === undefined && reports === undefined)) {
         return json({ sideTasks }, 200, origin);
       }
-      // The child's live state is read-time enrichment: it rides on the task
-      // view but is never journaled, and it is simply absent when the window
-      // cannot read the child.
+      // The child's live state and reporting switch are read-time
+      // enrichment: they ride on the task view but are never journaled, and
+      // each is simply absent when the host cannot answer it.
       const tasks = await Promise.all(
         sideTasks.tasks.map(async (task) => {
           if (task.status !== "started" || task.startedThreadId === undefined) return task;
-          const state = await childState({
-            mode: task.offer.mode,
-            threadId: task.startedThreadId,
-            windowId,
-          });
-          return state === undefined ? task : { ...task, childState: state };
+          const state =
+            childState === undefined
+              ? undefined
+              : await childState({
+                  mode: task.offer.mode,
+                  threadId: task.startedThreadId,
+                  windowId,
+                });
+          const reporting =
+            reports === undefined
+              ? undefined
+              : reports.reportingOn(task.startedThreadId)
+                ? ("on" as const)
+                : ("stopped" as const);
+          return {
+            ...task,
+            ...(state === undefined ? {} : { childState: state }),
+            ...(reporting === undefined ? {} : { reporting }),
+          };
         }),
       );
       return json({ sideTasks: { ...sideTasks, tasks } }, 200, origin);
@@ -166,6 +188,20 @@ export function createSideTaskRouteHandler(dependencies: SideTaskRouteDependenci
       });
       return json(result, statusFor(result), origin);
     }
+    if (action === "reporting") {
+      let command;
+      try {
+        command = decodeSetSideTaskReporting(body);
+      } catch {
+        return json({ error: "Side task reporting change is invalid." }, 400, origin);
+      }
+      const result = setSideTaskReporting(dependencies, {
+        threadId,
+        sideTaskId: String(command.sideTaskId),
+        on: command.on,
+      });
+      return json(result, statusFor(result), origin);
+    }
     if (action === "dismiss") {
       let command;
       try {
@@ -180,5 +216,42 @@ export function createSideTaskRouteHandler(dependencies: SideTaskRouteDependenci
       return json(result, statusFor(result), origin);
     }
     return json({ error: "Unknown side task action." }, 404, origin);
+  };
+}
+
+/**
+ * The person stops or resumes the reports a started child owes this thread.
+ * Only a started task has a child thread to switch; anything else is the
+ * same refusal a dismissal of it would give.
+ */
+function setSideTaskReporting(
+  dependencies: SideTaskRouteDependencies,
+  input: { readonly threadId: string; readonly sideTaskId: string; readonly on: boolean },
+): SideTaskResult {
+  const refused = (
+    reason: "not-found" | "already-settled" | "target-unavailable",
+  ): SideTaskResult => ({
+    kind: "side-task-refused",
+    sideTaskId: input.sideTaskId,
+    reason,
+    message:
+      reason === "not-found"
+        ? "That side task is no longer offered on this thread."
+        : reason === "already-settled"
+          ? "That side task was already started, continued here, or dismissed."
+          : "That side task cannot report back here.",
+  });
+  const reports = dependencies.reports;
+  if (reports === undefined) return refused("target-unavailable");
+  const task = dependencies.store.find(input.threadId, input.sideTaskId);
+  if (task === undefined) return refused("not-found");
+  if (task.status !== "started" || task.startedThreadId === undefined) {
+    return refused("already-settled");
+  }
+  reports.setReporting(task.startedThreadId, input.on);
+  return {
+    kind: "side-task-reporting",
+    sideTaskId: task.offer.id,
+    reporting: input.on ? "on" : "stopped",
   };
 }

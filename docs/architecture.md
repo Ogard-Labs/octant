@@ -11819,6 +11819,27 @@ These are the only places a prompt is sent for the person, and only on their
 click. If a new thread's first message does not go out, the thread stays and
 the prompt waits in its composer.
 
+A thread started from a side task reports back. The `thread-side-task-reports`
+aggregate, keyed by the child thread, records every turn that ends there as a
+`side-task-report-owed` event: detection in the harness's turn hooks owes a
+completion report carrying the reply (bounded and marked truncated when cut)
+and owes a failure or cancellation its outcome alone, and a completed turn is
+never owed twice at its end. `SideTaskReportStore`
+hydrates the aggregate so owed reports survive a restart, and the person's
+Stop/Resume control on the receipt journals `side-task-reporting-stopped` /
+`-resumed` on the same record; a stopped child owes nothing. A
+`SideTaskReportDeliveryService` watches the journal for owed events and armed
+parents, coalesces owed reports per offering thread (bounded per delivery),
+records each batch as outside content before dispatch, and asks the mode's
+port to begin a turn carrying the `side-task-report` delivery mark — Chat
+through `deliver-chat-side-task-report`, Work and Code through their ordinary
+start commands. Delivery admission in each mode service verifies every named
+report is still owed to that thread, so a forged or replayed mark cannot mint
+a delivery; a turn that already carries the mark settles its reports without
+a second dispatch, a deferred parent is retried on a timer, and a parent that
+is gone or refuses for good gets its reports settled as `side-task-report-refused`
+with the reason journaled rather than retried forever.
+
 **Work fork.** `fork-work-thread` creates a Work thread in the source's
 Project on the source's provider and model, with a `forkedFrom` origin naming
 the source thread and a finished Work turn, and copies the source's turns

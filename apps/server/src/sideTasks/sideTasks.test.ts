@@ -153,6 +153,61 @@ describe("side tasks", () => {
     ]);
   });
 
+  it("still names a started child's offer after newer offers push its receipt out of view", async () => {
+    const connection = openConnection();
+    const store = storeOn(connection);
+    const ids = uuidFactory();
+    const child = "00000000-0000-4000-8000-0000000000e1";
+    const tools = toolsFor(store, "chat", ids);
+    await tools.execute({
+      name: "octant_offer_side_task",
+      inputJson: JSON.stringify(offer),
+    });
+    const startedTask = store.read(threadId).tasks[0];
+    const sideTaskId = String(startedTask?.offer.id);
+    await startSideTask(
+      startDependencies(store, {
+        create: async () => ({
+          kind: "created",
+          created: {
+            kind: "new-thread",
+            mode: "chat",
+            title: offer.title,
+            threadId: child,
+          } as never,
+          onSuggestingModel: true,
+        }),
+      }),
+      { threadId, windowId, sideTaskId },
+    );
+
+    // Enough later offers, each dismissed on arrival, to evict the started
+    // receipt from the capped view.
+    for (let index = 0; index < 12; index += 1) {
+      await tools.execute({
+        name: "octant_offer_side_task",
+        inputJson: JSON.stringify({ ...offer, title: `${offer.title} ${index}` }),
+      });
+      const newest = store.read(threadId).tasks.at(-1);
+      dismissSideTask(
+        { store, clock: () => now },
+        { threadId, sideTaskId: String(newest?.offer.id) },
+      );
+    }
+    expect(store.read(threadId).tasks.some((task) => task.startedThreadId === child)).toBe(false);
+
+    expect(store.startedOfferFor(threadId, child)).toMatchObject({
+      title: offer.title,
+      mode: "chat",
+    });
+    // A restart replays the same index rather than rereading the capped view.
+    expect(storeOn(connection).startedOfferFor(threadId, child)).toMatchObject({
+      title: offer.title,
+      mode: "chat",
+    });
+    expect(store.startedOfferFor("00000000-0000-4000-8000-0000000000ff", child)).toBeUndefined();
+  });
+
   it("refuses a worktree outside Code and a model that keeps offering past the open limit", async () => {
     const store = storeOn(openConnection());
     const tools = toolsFor(store, "work");
@@ -948,6 +1003,139 @@ describe("side tasks", () => {
         sideTasks: { tasks: Array<{ childState?: string }> };
       };
       expect(quietBody.sideTasks.tasks[0]?.childState).toBeUndefined();
+    });
+
+    describe("the reporting switch on a started receipt", () => {
+      async function startedTask() {
+        const store = storeOn(openConnection());
+        const sideTaskId = await offeredHere(store);
+        const child = "00000000-0000-4000-8000-000000000093";
+        await startSideTask(
+          startDependencies(store, {
+            create: async () => ({
+              kind: "created",
+              created: {
+                kind: "new-thread",
+                mode: "chat",
+                title: offer.title,
+                threadId: child,
+              } as never,
+              onSuggestingModel: true,
+            }),
+          }),
+          { threadId, windowId, sideTaskId },
+        );
+        return { store, sideTaskId, child };
+      }
+
+      function reportingFake() {
+        const switches = new Map<string, boolean>();
+        return {
+          switches,
+          reports: {
+            setReporting: (id: string, on: boolean) => {
+              switches.set(id, on);
+            },
+            reportingOn: (id: string) => switches.get(id) !== false,
+          },
+        };
+      }
+
+      function routeFor(
+        store: SideTaskStore,
+        reports: ReturnType<typeof reportingFake>["reports"],
+        authorized: () => boolean,
+      ) {
+        const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        const windowAuthorityStore = new WindowAuthorityStore();
+        windowAuthorityStore.register({ windowId: windowId as WindowId, capability, now: 0 });
+        return {
+          capability,
+          route: createSideTaskRouteHandler({
+            ...startDependencies(store),
+            store,
+            windowAuthorityStore,
+            authorizeThread: authorized,
+            reports,
+            now: () => 1,
+          }),
+        };
+      }
+
+      it("refuses a window the offering thread does not authorize before switching anything", async () => {
+        const { store, sideTaskId } = await startedTask();
+        const { reports, switches } = reportingFake();
+        const { capability, route } = routeFor(store, reports, () => false);
+        const response = await route(
+          new Request(`http://127.0.0.1/api/side-tasks/${threadId}/reporting`, {
+            method: "POST",
+            headers: { "x-octant-window-capability": capability },
+            body: JSON.stringify({ sideTaskId, on: false }),
+          }),
+        );
+        expect(response?.status).toBe(403);
+        expect(switches.size).toBe(0);
+      });
+
+      it("stops a started child's reports and reads the switch back on the receipt", async () => {
+        const { store, sideTaskId, child } = await startedTask();
+        const { reports, switches } = reportingFake();
+        const { capability, route } = routeFor(store, reports, () => true);
+        const post = (on: boolean) =>
+          route(
+            new Request(`http://127.0.0.1/api/side-tasks/${threadId}/reporting`, {
+              method: "POST",
+              headers: { "x-octant-window-capability": capability },
+              body: JSON.stringify({ sideTaskId, on }),
+            }),
+          );
+        const read = () =>
+          route(
+            new Request(`http://127.0.0.1/api/side-tasks/${threadId}`, {
+              headers: { "x-octant-window-capability": capability },
+            }),
+          );
+
+        const stopped = await post(false);
+        expect(stopped?.status).toBe(200);
+        expect(await stopped?.json()).toMatchObject({
+          kind: "side-task-reporting",
+          reporting: "stopped",
+        });
+        expect(switches.get(child)).toBe(false);
+
+        const stoppedBody = (await (await read())?.json()) as {
+          sideTasks: { tasks: Array<{ reporting?: string }> };
+        };
+        expect(stoppedBody.sideTasks.tasks[0]?.reporting).toBe("stopped");
+
+        const resumed = await post(true);
+        expect(await resumed?.json()).toMatchObject({
+          kind: "side-task-reporting",
+          reporting: "on",
+        });
+        const resumedBody = (await (await read())?.json()) as {
+          sideTasks: { tasks: Array<{ reporting?: string }> };
+        };
+        expect(resumedBody.sideTasks.tasks[0]?.reporting).toBe("on");
+      });
+
+      it("refuses the switch for a task that never started", async () => {
+        const store = storeOn(openConnection());
+        const sideTaskId = await offeredHere(store);
+        const { reports, switches } = reportingFake();
+        const { capability, route } = routeFor(store, reports, () => true);
+        const response = await route(
+          new Request(`http://127.0.0.1/api/side-tasks/${threadId}/reporting`, {
+            method: "POST",
+            headers: { "x-octant-window-capability": capability },
+            body: JSON.stringify({ sideTaskId, on: false }),
+          }),
+        );
+        expect(response?.status).toBe(409);
+        expect(await response?.json()).toMatchObject({ kind: "side-task-refused" });
+        expect(switches.size).toBe(0);
+      });
     });
   });
 

@@ -52,6 +52,11 @@ function setup(
     start: vi.fn(),
     continueHere: vi.fn(),
     dismiss: vi.fn(),
+    setReporting: vi.fn(async () => ({
+      kind: "side-task-reporting",
+      sideTaskId,
+      reporting: "stopped",
+    })),
     ...client,
   };
   const onStarted = vi.fn();
@@ -298,5 +303,37 @@ describe("SideTaskInline", () => {
       expect.objectContaining({ threadId: started.threadId, mode: "code" }),
       undefined,
     );
+  });
+
+  it("stops a started child's reports from its receipt and offers to resume them", async () => {
+    let reporting: "on" | "stopped" | undefined = "on";
+    const { client } = setup(
+      () => [
+        task({
+          status: "started",
+          startedThreadId: started.threadId,
+          startedWith: "fresh",
+          reporting,
+        }),
+      ],
+      {
+        setReporting: vi.fn(async (_thread: string, _id: string, on: boolean) => {
+          reporting = on ? "on" : "stopped";
+          return { kind: "side-task-reporting", sideTaskId, reporting };
+        }),
+      },
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "Stop reporting" }));
+    await waitFor(() =>
+      expect(client.setReporting).toHaveBeenCalledWith(threadId, sideTaskId, false),
+    );
+    expect(await screen.findByRole("button", { name: "Resume reporting" })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Resume reporting" }));
+    await waitFor(() =>
+      expect(client.setReporting).toHaveBeenCalledWith(threadId, sideTaskId, true),
+    );
+    expect(await screen.findByRole("button", { name: "Stop reporting" })).toBeEnabled();
   });
 });

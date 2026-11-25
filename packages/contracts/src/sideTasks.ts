@@ -106,6 +106,12 @@ export const SideTask = Schema.Struct({
   settledAt: Schema.optional(UtcTimestamp),
   /** The child thread's live state at read time; absent when it cannot be read. */
   childState: Schema.optional(SideTaskChildState),
+  /**
+   * Whether the child still owes this thread reports of its ended turns, as
+   * the report aggregate reads it now. Read-time only, like `childState`:
+   * absent when the host cannot say, and `on` unless the person stopped it.
+   */
+  reporting: Schema.optional(Schema.Literal("on", "stopped")),
 }).annotations(strict);
 export type SideTask = typeof SideTask.Type;
 
@@ -170,6 +176,13 @@ export const DismissSideTask = Schema.Struct({
 }).annotations(strict);
 export type DismissSideTask = typeof DismissSideTask.Type;
 
+/** The person stops or resumes the reports a started child owes this thread. */
+export const SetSideTaskReporting = Schema.Struct({
+  sideTaskId: SideTaskId,
+  on: Schema.Boolean,
+}).annotations(strict);
+export type SetSideTaskReporting = typeof SetSideTaskReporting.Type;
+
 export const SideTaskResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("side-task-started"),
@@ -205,6 +218,11 @@ export const SideTaskResult = Schema.Union(
     reason: Schema.Literal("not-found", "already-settled", "target-unavailable", "turn-running"),
     message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("side-task-reporting"),
+    sideTaskId: SideTaskId,
+    reporting: Schema.Literal("on", "stopped"),
+  }).annotations(strict),
 );
 export type SideTaskResult = typeof SideTaskResult.Type;
 
@@ -223,6 +241,7 @@ export const decodeThreadSideTasks = Schema.decodeUnknownSync(ThreadSideTasks);
 export const decodeStartSideTask = Schema.decodeUnknownSync(StartSideTask);
 export const decodeDismissSideTask = Schema.decodeUnknownSync(DismissSideTask);
 export const decodeContinueSideTaskHere = Schema.decodeUnknownSync(ContinueSideTaskHere);
+export const decodeSetSideTaskReporting = Schema.decodeUnknownSync(SetSideTaskReporting);
 export const decodeSideTaskResult = Schema.decodeUnknownSync(SideTaskResult);
 
 // ── Completion reports back to the offering thread ──────────────────────────
@@ -236,11 +255,17 @@ export const decodeSideTaskResult = Schema.decodeUnknownSync(SideTaskResult);
 
 /** At most this much of a finished turn's reply rides in one report. */
 export const MAX_SIDE_TASK_REPORT_TEXT_LENGTH = 4_096;
+/**
+ * One delivery turn carries at most this many reports; a larger owed set is
+ * split across turns rather than making one turn carry an unbounded batch.
+ */
+export const MAX_SIDE_TASK_REPORT_DELIVERY_BATCH_SIZE = 8;
 
 export const THREAD_SIDE_TASK_REPORTS_AGGREGATE_TYPE = "thread-side-task-reports";
 export const THREAD_SIDE_TASK_REPORT_EVENT_NAMES = {
   owed: "side-task-report-owed@1",
   delivered: "side-task-report-delivered@1",
+  refused: "side-task-report-refused@1",
   reportingStopped: "side-task-reporting-stopped@1",
   reportingResumed: "side-task-reporting-resumed@1",
 } as const;
@@ -284,6 +309,18 @@ export const SideTaskReportDelivered = Schema.Struct({
 }).annotations(strict);
 export type SideTaskReportDelivered = typeof SideTaskReportDelivered.Type;
 
+/**
+ * The reports these ids name can never reach their parent: the parent is gone
+ * or refuses the delivery for good. Settled honestly rather than retried
+ * forever and never silently dropped — the refusal is journaled with why.
+ */
+export const SideTaskReportRefused = Schema.Struct({
+  reportIds: Schema.Array(Schema.UUID).pipe(Schema.minItems(1)),
+  detail: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  refusedAt: UtcTimestamp,
+}).annotations(strict);
+export type SideTaskReportRefused = typeof SideTaskReportRefused.Type;
+
 /** The person asked the child to stop reporting; new turns in it owe nothing. */
 export const SideTaskReportingStopped = Schema.Struct({
   stoppedAt: UtcTimestamp,
@@ -294,6 +331,12 @@ export const SideTaskReportingResumed = Schema.Struct({
   resumedAt: UtcTimestamp,
 }).annotations(strict);
 export type SideTaskReportingResumed = typeof SideTaskReportingResumed.Type;
+
+export const decodeSideTaskReportOwed = Schema.decodeUnknownSync(SideTaskReportOwed);
+export const decodeSideTaskReportDelivered = Schema.decodeUnknownSync(SideTaskReportDelivered);
+export const decodeSideTaskReportRefused = Schema.decodeUnknownSync(SideTaskReportRefused);
+export const decodeSideTaskReportingStopped = Schema.decodeUnknownSync(SideTaskReportingStopped);
+export const decodeSideTaskReportingResumed = Schema.decodeUnknownSync(SideTaskReportingResumed);
 
 /**
  * The idempotency mark a delivery turn carries when it entered the parent:

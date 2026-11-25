@@ -112,8 +112,8 @@ import { serverCodeThreadProviderGroups } from "./composer/serverCodeComposer";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
+import { SideTaskReportCards } from "../agents/SideTaskReportCards";
 import { SteeredMessages } from "../messageQueue/SteeredMessages";
-import { isChildResultDelivery } from "../agents/childResultDelivery";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
 import { InlineThreadPlan } from "../plan/InlineThreadPlan";
@@ -2113,12 +2113,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       />
                     </>
                   );
-                // Code's conversation turns do not carry the delivery mark, so the
-                // host's own delivery wording is what says this is a subagent's
-                // result and not something the person typed.
-                const delivered = message.role === "user" && isChildResultDelivery(message.text);
+                // The journaled delivery mark — not the prompt's wording — says
+                // this turn is the host's own delivery and not something the
+                // person typed.
+                const delivered =
+                  message.role === "user" && message.delivery?.kind === "agent-result";
+                const reportDelivery =
+                  message.role === "user" && message.delivery?.kind === "side-task-report";
+                const hostDelivered = delivered || reportDelivery;
                 const sentBy =
-                  message.role !== "user" || delivered || message.operationId === undefined
+                  message.role !== "user" || hostDelivered || message.operationId === undefined
                     ? undefined
                     : agentTurnSender(
                         String(message.sourceThreadId ?? props.threadId),
@@ -2192,15 +2196,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       aria-label={
                         delivered
                           ? "Subagent results"
-                          : followUpPrompt !== undefined
-                            ? "Scheduled follow-up"
-                            : message.role === "user"
-                              ? sentBy === undefined
-                                ? "Your message"
-                                : `Message from ${sentBy}`
-                              : "Assistant message"
+                          : reportDelivery
+                            ? "Report from side task"
+                            : followUpPrompt !== undefined
+                              ? "Scheduled follow-up"
+                              : message.role === "user"
+                                ? sentBy === undefined
+                                  ? "Your message"
+                                  : `Message from ${sentBy}`
+                                : "Assistant message"
                       }
-                      className={`code-thread-workspace__message ${delivered ? "turn-child-result" : message.role === "user" ? "turn-user" : "turn-agent"}`}
+                      className={`code-thread-workspace__message ${hostDelivered ? "turn-child-result" : message.role === "user" ? "turn-user" : "turn-agent"}`}
                     >
                       <TurnActionMenu
                         actions={
@@ -2274,6 +2280,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       >
                         {delivered ? (
                           <ChildResultCards providerGroups={providerGroups} text={message.text} />
+                        ) : reportDelivery ? (
+                          <SideTaskReportCards text={message.text} />
                         ) : message.role === "user" ? (
                           <>
                             {/* What the user typed stays exactly as they typed it,

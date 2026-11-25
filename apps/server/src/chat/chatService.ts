@@ -233,6 +233,8 @@ import {
   coveredAgentResultDeliveryMembers,
   validateAgentResultDelivery,
 } from "../agentRun/agentResultDeliveryBatch";
+import { sideTaskReportDeliveryPrompt } from "../sideTasks/sideTaskReportDeliveryPrompt";
+import type { SideTaskReportEntry, SideTaskReportStore } from "../sideTasks/sideTaskReportStore";
 import { Schema } from "effect";
 import { Effect } from "effect";
 import {
@@ -996,6 +998,13 @@ export interface ChatServiceOptions {
     readonly getById: (runId: AgentRunId) => AgentRun | undefined;
     readonly resultText: (runId: AgentRunId) => string | undefined;
   };
+  /**
+   * Read access to journaled side-task reports. A `deliver-chat-side-task-report`
+   * command resolves the named reports here, so the turn it begins is provably
+   * the report of a side task that owes this thread — never text a caller
+   * supplied. Absent means this host delivers no side-task reports into Chat.
+   */
+  readonly sideTaskReports?: Pick<SideTaskReportStore, "reportsForParent">;
 }
 
 /**
@@ -1298,6 +1307,7 @@ export class ChatService {
   readonly #linearIssueContext?: LinearIssueContextPort;
   readonly #reviewedModelManifest?: ReviewedModelManifest;
   readonly #agentRuns?: ChatServiceOptions["agentRuns"];
+  readonly #sideTaskReports?: ChatServiceOptions["sideTaskReports"];
   readonly #activeAttempts = new Map<string, AbortController>();
   readonly #activeThreadExecutions = new Set<string>();
   readonly #threadAdmissions = new Map<string, Promise<void>>();
@@ -1348,6 +1358,9 @@ export class ChatService {
     }
     if (options.agentRuns !== undefined) {
       this.#agentRuns = options.agentRuns;
+    }
+    if (options.sideTaskReports !== undefined) {
+      this.#sideTaskReports = options.sideTaskReports;
     }
     if (options.resolveAppManagedTools !== undefined) {
       this.#resolveAppManagedTools = options.resolveAppManagedTools;
@@ -1875,7 +1888,8 @@ export class ChatService {
         command.kind === "send-chat-turn" ||
         command.kind === "retry-chat-turn" ||
         command.kind === "resume-chat-turn" ||
-        command.kind === "deliver-chat-agent-result"
+        command.kind === "deliver-chat-agent-result" ||
+        command.kind === "deliver-chat-side-task-report"
       )
         this.#refuseUnattendedTurn(command.threadId, executionContext);
       switch (command.kind) {
@@ -1910,6 +1924,8 @@ export class ChatService {
           return await this.#sendTurn(command, executionContext);
         case "deliver-chat-agent-result":
           return await this.#deliverAgentResult(command, executionContext);
+        case "deliver-chat-side-task-report":
+          return await this.#deliverSideTaskReport(command, executionContext);
         case "rewind-chat-thread":
           return await this.#withThreadAdmission(command.threadId, () =>
             this.#rewindThread(command),
@@ -3398,14 +3414,14 @@ export class ChatService {
       const view = this.#persistence.readChatThreadView(thread.id);
       const existing = view?.turns.find(
         (turn) =>
-          turn.delivery !== undefined &&
+          turn.delivery?.kind === "agent-result" &&
           coveredAgentResultDeliveryMembers(requested, [turn.delivery]).length > 0,
       );
       const covered = new Set(
         coveredAgentResultDeliveryMembers(
           requested,
           (view?.turns ?? []).flatMap((turn) =>
-            turn.delivery === undefined ? [] : [turn.delivery],
+            turn.delivery?.kind === "agent-result" ? [turn.delivery] : [],
           ),
         ).map((member) => String(member.runId)),
       );
@@ -3549,14 +3565,9 @@ export class ChatService {
           },
         },
       );
-      return {
-        kind: "accepted" as const,
-        thread: updatedThread,
-        turn,
-        attempt: turn.attempts[0]!,
-        prepared,
-        prompt,
-      };
+      const attempt = turn.attempts[0];
+      if (attempt === undefined) throw new Error("A Chat delivery turn must have an attempt.");
+      return { kind: "accepted" as const, thread: updatedThread, turn, attempt, prepared, prompt };
     });
     if (accepted.kind === "existing") return { kind: "turn-created", turn: accepted.turn };
     await this.#runAttempt({
@@ -3568,6 +3579,224 @@ export class ChatService {
       ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "turn-created", turn: accepted.turn };
+  }
+
+  /**
+   * Begin the turn that carries owed side-task reports into this thread. The
+   * command names the reports; the journaled report entries — not caller text
+   * — compose the prompt, and each must still be owed to this thread, so a
+   * forged or replayed mark cannot mint a delivery the child never owed.
+   */
+  async #deliverSideTaskReport(
+    command: Extract<
+      ReturnType<typeof decodeChatCommand>,
+      { kind: "deliver-chat-side-task-report" }
+    >,
+    executionContext?: ChatServiceExecutionContext,
+  ): Promise<ChatCommandResult> {
+    if (executionContext?.windowId !== undefined) {
+      throw new ChatServiceError({
+        category: "unauthorized",
+        message: "Only the host can deliver a side-task report.",
+      });
+    }
+    const accepted = await this.#withTurnAdmission(command.threadId, async () => {
+      const thread = this.#requireActiveThread(command.threadId);
+      if (this.#sideTaskReports === undefined) {
+        throw new ChatServiceError(
+          decodeChatFailure({
+            category: "unsupported",
+            message: "This host does not deliver side-task reports into Chat.",
+          }),
+        );
+      }
+      const view = this.#persistence.readChatThreadView(thread.id);
+      const existing = view?.turns.find(
+        (turn) =>
+          turn.delivery?.kind === "side-task-report" &&
+          command.reportIds.every(
+            (reportId) =>
+              turn.delivery?.kind === "side-task-report" &&
+              turn.delivery.reportIds.some((id) => String(id) === String(reportId)),
+          ),
+      );
+      if (existing !== undefined) return { kind: "existing" as const, turn: existing };
+      const entries = this.#owedReportsFor(command.threadId, command.reportIds);
+      this.#admitHarnessTurn(thread);
+      this.#assertExpectedThreadVersion(thread, command.expectedVersion);
+      const timestamp = decodeTimestamp(this.#clock());
+      const prompt = sideTaskReportDeliveryPrompt(entries.map((entry) => entry.report));
+      const userMessage = this.#prepareContent(thread.id, "user", prompt);
+      const userMessageRef = userMessage.reference;
+      this.#assertNoActiveTurn(view, thread.id);
+      this.#assertNotCompacting(thread.id);
+      const sequence = (view?.turns.length ?? 0) + 1;
+      const turnId = this.#uuid() as ChatTurn["id"];
+      const routing = await this.#computeTurnRouting(thread, turnId);
+      if (routing !== undefined && routing.decision.decision.kind === "waiting") {
+        await this.#multiModelRoute.persistTurnRoute(routing.decision);
+        throw new ChatServiceError(
+          decodeChatFailure({
+            category: "waiting",
+            message: routing.decision.decision.message,
+          }),
+        );
+      }
+      const executionThread = routing?.executionThread ?? thread;
+      const prepared = await this.#prepareTurnExecution(
+        executionThread,
+        prompt,
+        userMessageRef,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "send",
+        { ...executionContext, turnId },
+        undefined,
+      );
+      this.#owedReportsFor(command.threadId, command.reportIds);
+      const turn = beginChatTurn(prepared.executionThread, {
+        turnId,
+        attemptId: this.#uuid() as ChatAttempt["id"],
+        providerSessionId:
+          prepared.nativeSession?.providerSessionId ?? decodeProviderSessionId(this.#uuid()),
+        ...(prepared.nativeSession?.resumeCursor === undefined
+          ? {}
+          : { resumeCursor: prepared.nativeSession.resumeCursor }),
+        ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
+        ...(prepared.inputReceipt === undefined ? {} : { inputReceipt: prepared.inputReceipt }),
+        ...(prepared.describedImages === undefined
+          ? {}
+          : { describedImages: prepared.describedImages }),
+        contextManifestId: prepared.context.snapshot.next.manifest.id,
+        ...(prepared.sideChatSourceReceipt === undefined
+          ? {}
+          : { sideChatSourceReceipt: prepared.sideChatSourceReceipt }),
+        userMessageRef,
+        delivery: {
+          kind: "side-task-report",
+          reportIds: command.reportIds,
+        },
+        sequence,
+        expectedVersion: command.expectedVersion,
+        createdAt: timestamp,
+      });
+      const updatedThread = {
+        ...withoutThreadRest(thread),
+        version: (command.expectedVersion + 1) as AggregateVersion,
+        updatedAt: timestamp,
+      };
+      this.#persistence.journal.append(
+        {
+          aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+          expectedVersion: command.expectedVersion,
+          events: [
+            this.#pending(
+              "chat.thread-updated@1",
+              {
+                kind: "thread-updated",
+                thread: updatedThread,
+              },
+              { actorKind: "system" },
+            ),
+            this.#pending(
+              "chat.turn-created@1",
+              { kind: "turn-created", turn },
+              { actorKind: "system" },
+            ),
+            ...(routing !== undefined && routing.decision.decision.kind === "selected"
+              ? [
+                  this.#pending(
+                    "chat.turn-route-decided@1",
+                    {
+                      kind: "turn-route-decided",
+                      decision: routing.decision,
+                    },
+                    { actorKind: "system" },
+                  ),
+                ]
+              : []),
+          ],
+        },
+        {
+          beforeEvents: (connection) => {
+            this.#writePreparedContent(connection, userMessage);
+            for (const content of prepared.describedContents ?? [])
+              this.#writePreparedContent(connection, content);
+          },
+        },
+      );
+      const attempt = turn.attempts[0];
+      if (attempt === undefined) throw new Error("A Chat delivery turn must have an attempt.");
+      return { kind: "accepted" as const, thread: updatedThread, turn, attempt, prepared, prompt };
+    });
+    if (accepted.kind === "existing") return { kind: "turn-created", turn: accepted.turn };
+    await this.#runAttempt({
+      thread: threadAsRoutedFor(accepted.thread, accepted.attempt),
+      turn: accepted.turn,
+      attempt: accepted.attempt,
+      prompt: accepted.prompt,
+      prepared: accepted.prepared,
+      ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+    });
+    return { kind: "turn-created", turn: accepted.turn };
+  }
+
+  /**
+   * The journaled reports a delivery may name: each must be owed to this
+   * thread and still unsettled. Called again after preparation so a report
+   * that settled while the turn was being built refuses the stale claim.
+   */
+  #owedReportsFor(
+    threadId: ChatThreadId,
+    reportIds: ReadonlyArray<string>,
+  ): ReadonlyArray<SideTaskReportEntry> {
+    if (this.#sideTaskReports === undefined) {
+      throw new ChatServiceError(
+        decodeChatFailure({
+          category: "unsupported",
+          message: "This host does not deliver side-task reports into Chat.",
+        }),
+      );
+    }
+    const byId = new Map(
+      this.#sideTaskReports
+        .reportsForParent(String(threadId))
+        .map((entry) => [String(entry.report.reportId), entry]),
+    );
+    const seen = new Set<string>();
+    return reportIds.map((reportId) => {
+      const key = String(reportId);
+      if (seen.has(key)) {
+        throw new ChatServiceError(
+          decodeChatFailure({
+            category: "invalid",
+            message: "A side-task report was named twice.",
+          }),
+        );
+      }
+      seen.add(key);
+      const entry = byId.get(key);
+      if (entry === undefined || entry.report.parentMode !== "chat") {
+        throw new ChatServiceError(
+          decodeChatFailure({
+            category: "invalid",
+            message: "A named side-task report is not owed to this thread.",
+          }),
+        );
+      }
+      if (entry.state !== "owed") {
+        throw new ChatServiceError(
+          decodeChatFailure({
+            category: "invalid",
+            message: "A named side-task report has already settled and cannot be delivered again.",
+          }),
+        );
+      }
+      return entry;
+    });
   }
 
   /**

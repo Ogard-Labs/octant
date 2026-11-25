@@ -37,6 +37,7 @@ import {
   type CodeReviewCorrectionPrepared,
   type CodeTurnReviewPreview,
   type CodeTurnReviewCapture,
+  type ThreadDeliveryMark,
   personalSignInRefusals,
   type ProviderSignInFacts,
 } from "@octant/contracts";
@@ -46,6 +47,7 @@ import {
   coveredAgentResultDeliveryMembers,
   validateAgentResultDelivery,
 } from "../agentRun/agentResultDeliveryBatch";
+import type { SideTaskReportStore } from "../sideTasks/sideTaskReportStore";
 import type { SelectedExtensionResolver } from "../extensions/selectedExtensions";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
@@ -1671,6 +1673,14 @@ export interface CodeOperationServiceOptions {
   readonly agentRuns?: {
     readonly getById: (runId: AgentRunId) => AgentRun | undefined;
   };
+  /**
+   * Read access to journaled side-task reports. A turn that claims to carry
+   * owed reports is verified here — each must still be owed to this thread —
+   * before its start event can journal, so a caller cannot mark a turn as a
+   * delivery the journal does not record. Absent means report claims are
+   * refused.
+   */
+  readonly sideTaskReports?: Pick<SideTaskReportStore, "reportsForParent">;
 }
 
 /**
@@ -1950,7 +1960,8 @@ export class CodeOperationService {
       }
     }
     if (command.kind === "start-provider-turn" && command.delivery !== undefined) {
-      const delivery = this.#agentResultDelivery(command);
+      const delivery =
+        this.#agentResultDelivery(command) ?? this.#sideTaskReportDelivery(command, windowId);
       if (delivery !== undefined) return delivery;
     }
     const replay = this.#replay(command.threadId, command.operationId, 0, 256);
@@ -2191,7 +2202,8 @@ export class CodeOperationService {
               if (restoring !== undefined) await restoring;
               let turnRefusal =
                 command.kind === "start-provider-turn"
-                  ? this.#refuseInvalidAgentRunDelivery(command)
+                  ? (this.#refuseInvalidAgentRunDelivery(command) ??
+                    this.#refuseInvalidSideTaskReportDelivery(command, windowId))
                   : undefined;
               const admissionRefusal = () =>
                 this.#failed(
@@ -2314,7 +2326,9 @@ export class CodeOperationService {
                     : await this.#checkpoint(turnThread, scope.checkout.id, root.checkoutRoot);
                 // Check again after the asynchronous checkpoint so a changed generation or
                 // an intervening parent admission cannot acquire a stale delivery mark.
-                const afterCheckpoint = this.#agentResultDelivery(command);
+                const afterCheckpoint =
+                  this.#agentResultDelivery(command) ??
+                  this.#sideTaskReportDelivery(command, windowId);
                 if (afterCheckpoint !== undefined) {
                   // The delivery's own result stands, unless a Stop already
                   // journaled this start; then a Stop has nothing more to journal.
@@ -7725,7 +7739,7 @@ export class CodeOperationService {
   #refuseInvalidAgentRunDelivery(
     command: Extract<CodeOperationCommand, { readonly kind: "start-provider-turn" }>,
   ): CodeOperationResult | undefined {
-    if (command.delivery === undefined) return undefined;
+    if (command.delivery?.kind !== "agent-result") return undefined;
     const validation = validateAgentResultDelivery({
       delivery: command.delivery,
       threadId: String(command.threadId),
@@ -7743,11 +7757,58 @@ export class CodeOperationService {
     return undefined;
   }
 
+  /**
+   * The side-task report mark a start-provider-turn claims, checked against
+   * the journaled reports before anything journals: each named report must
+   * still be owed to this thread — otherwise the mark is a caller's story the
+   * journal does not back.
+   */
+  #refuseInvalidSideTaskReportDelivery(
+    command: Extract<CodeOperationCommand, { readonly kind: "start-provider-turn" }>,
+    windowId: WindowId,
+  ): CodeOperationResult | undefined {
+    const mark = command.delivery;
+    if (mark?.kind !== "side-task-report") return undefined;
+    // The host's delivery service is the only caller allowed to claim report
+    // marks; a window's command naming owed ids would mint an unscheduled
+    // delivery, so it is refused before the journal is even read.
+    if (!isRoutineHostScope(windowId)) {
+      return this.#failed(
+        command.operationId,
+        "unauthorized",
+        "Only the host may deliver side-task reports into a Code thread.",
+      );
+    }
+    const reports = this.#options.sideTaskReports;
+    if (reports === undefined)
+      return this.#failed(
+        command.operationId,
+        "unavailable",
+        "Side-task reports are unavailable on this host.",
+      );
+    const byId = new Map(
+      reports
+        .reportsForParent(String(command.threadId))
+        .map((entry) => [String(entry.report.reportId), entry]),
+    );
+    for (const reportId of new Set(mark.reportIds.map(String))) {
+      const entry = byId.get(reportId);
+      if (entry === undefined || entry.report.parentMode !== "code" || entry.state !== "owed") {
+        return this.#failed(
+          command.operationId,
+          "invalid",
+          "A named side-task report is not owed to this thread.",
+        );
+      }
+    }
+    return undefined;
+  }
+
   #agentResultDelivery(
     command: Extract<CodeOperationCommand, { readonly kind: "start-provider-turn" }>,
   ): CodeOperationResult | undefined {
     const mark = command.delivery;
-    if (mark === undefined) return undefined;
+    if (mark?.kind !== "agent-result") return undefined;
     const validation = validateAgentResultDelivery({
       delivery: mark,
       threadId: String(command.threadId),
@@ -7764,7 +7825,8 @@ export class CodeOperationService {
         "Code result delivery history must be rebuilt before another delivery can start.",
       );
     const starts = history.frames.flatMap((frame) =>
-      frame.event.kind === "conversation-turn-started" && frame.event.delivery !== undefined
+      frame.event.kind === "conversation-turn-started" &&
+      frame.event.delivery?.kind === "agent-result"
         ? [{ operationId: frame.operationId, delivery: frame.event.delivery }]
         : [],
     );
@@ -7799,6 +7861,133 @@ export class CodeOperationService {
           command.operationId,
           "invalid",
           "Provider turn identity does not match the requested child results.",
+        );
+      const active = new Set<string>();
+      for (const frame of history.frames) {
+        if (frame.event.kind === "conversation-turn-started") active.add(String(frame.operationId));
+        else if (
+          isTerminalSettlement(frame.event) ||
+          (frame.event.kind === "operation-result" &&
+            frame.event.result.kind === "operation-failed")
+        )
+          active.delete(String(frame.operationId));
+      }
+      if (active.size > 0)
+        return this.#failed(
+          command.operationId,
+          "waiting",
+          "The Code parent already has an active turn.",
+        );
+      return undefined;
+    }
+    // Retrying the original operation must retain Code's launch/settlement
+    // recovery. A newly composed batch only needs the prior admission receipt.
+    if (
+      String(existing.operationId) === String(command.operationId) &&
+      JSON.stringify(existing.delivery) === JSON.stringify(mark)
+    )
+      return undefined;
+    const recordedResult = history.frames.findLast(
+      (frame) =>
+        String(frame.operationId) === String(existing.operationId) &&
+        frame.event.kind === "operation-result",
+    );
+    const state =
+      recordedResult?.event.kind === "operation-result" &&
+      recordedResult.event.result.kind === "provider-turn-state"
+        ? recordedResult.event.result.state
+        : "waiting";
+    return decodeCodeOperationResult({
+      kind: "provider-turn-state",
+      operationId: existing.operationId,
+      state,
+      delivery: existing.delivery,
+    });
+  }
+
+  /**
+   * The side-task report delivery a start-provider-turn claims, checked
+   * against the journaled reports and the thread's own conversation turns: a
+   * turn already carrying the mark answers a retried operation, an active
+   * turn holds the parent busy, and a mark the journal cannot back is
+   * refused before anything journals.
+   */
+  #sideTaskReportDelivery(
+    command: Extract<CodeOperationCommand, { readonly kind: "start-provider-turn" }>,
+    windowId: WindowId,
+  ): CodeOperationResult | undefined {
+    const mark = command.delivery;
+    if (mark?.kind !== "side-task-report") return undefined;
+    // Only the host's own delivery service may claim report marks: a window's
+    // turn command naming owed report ids would mint a delivery the journal
+    // never scheduled, so the claim is refused before anything is read.
+    if (!isRoutineHostScope(windowId)) {
+      return this.#failed(
+        command.operationId,
+        "unauthorized",
+        "Only the host may deliver side-task reports into a Code thread.",
+      );
+    }
+    const reports = this.#options.sideTaskReports;
+    if (reports === undefined)
+      return this.#failed(
+        command.operationId,
+        "unavailable",
+        "Side-task reports are unavailable on this host.",
+      );
+    const history = this.#options.events.historyForThread(command.threadId);
+    if (history.status !== "ok")
+      return this.#failed(
+        command.operationId,
+        "unavailable",
+        "Code side-task report delivery history must be rebuilt before another delivery can start.",
+      );
+    const starts = history.frames.flatMap((frame) =>
+      frame.event.kind === "conversation-turn-started" &&
+      frame.event.delivery?.kind === "side-task-report"
+        ? [{ operationId: frame.operationId, delivery: frame.event.delivery }]
+        : [],
+    );
+    const markCovers = (
+      delivery: Extract<ThreadDeliveryMark, { readonly kind: "side-task-report" }>,
+      reportId: string,
+    ) => delivery.reportIds.some((id) => String(id) === reportId);
+    const existing = starts.find((start) =>
+      mark.reportIds.every((reportId) => markCovers(start.delivery, String(reportId))),
+    );
+    if (existing === undefined) {
+      // No earlier turn covers this batch, so every named report must still
+      // be owed: a mark the journal cannot back is a caller's story.
+      const byId = new Map(
+        reports
+          .reportsForParent(String(command.threadId))
+          .map((entry) => [String(entry.report.reportId), entry]),
+      );
+      const requested = new Set<string>();
+      for (const reportId of mark.reportIds) {
+        const key = String(reportId);
+        if (requested.has(key)) continue;
+        requested.add(key);
+        const entry = byId.get(key);
+        if (entry === undefined || entry.report.parentMode !== "code" || entry.state !== "owed") {
+          return this.#failed(
+            command.operationId,
+            "invalid",
+            "A named side-task report is not owed to this thread.",
+          );
+        }
+      }
+      if (
+        history.frames.some(
+          (frame) =>
+            String(frame.operationId) === String(command.operationId) &&
+            frame.event.kind === "conversation-turn-started",
+        )
+      )
+        return this.#failed(
+          command.operationId,
+          "invalid",
+          "Provider turn identity does not match the requested side-task reports.",
         );
       const active = new Set<string>();
       for (const frame of history.frames) {

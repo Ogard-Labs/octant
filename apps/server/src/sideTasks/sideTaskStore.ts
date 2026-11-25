@@ -68,6 +68,16 @@ export class SideTaskStore {
   readonly #actor: typeof EventActor.Type;
   readonly #clock: () => string;
   readonly #records = new Map<string, ThreadRecord>();
+  /**
+   * The offer behind every started child, keyed by the child's thread id.
+   * The view keeps only a recent tail, so a long-lived child's offer can fall
+   * off it while the child still owes its parent reports; this index is what
+   * report detection reads instead of the capped list.
+   */
+  readonly #startedOffers = new Map<
+    string,
+    { readonly parentThreadId: string; readonly offer: SideTaskOffer }
+  >();
 
   constructor(options: {
     readonly journal: JournalPort;
@@ -93,6 +103,18 @@ export class SideTaskStore {
     return this.#records
       .get(threadId)
       ?.tasks.find((task) => String(task.offer.id) === String(sideTaskId));
+  }
+
+  /**
+   * The offer a started child came from, even after newer offers pushed it
+   * out of the parent's view. Answers only for the child this parent
+   * started, so a stray child id cannot borrow another thread's offer.
+   */
+  startedOfferFor(parentThreadId: string, childThreadId: string): SideTaskOffer | undefined {
+    const entry = this.#startedOffers.get(childThreadId);
+    return entry !== undefined && String(entry.parentThreadId) === parentThreadId
+      ? entry.offer
+      : undefined;
   }
 
   /**
@@ -168,6 +190,12 @@ export class SideTaskStore {
     );
     const task = record.tasks[index];
     if (task === undefined) return;
+    if (settlement.kind === "started") {
+      this.#startedOffers.set(String(settlement.payload.startedThreadId), {
+        parentThreadId: String(task.offer.threadId),
+        offer: task.offer,
+      });
+    }
     record.tasks[index] = settledTask(task, settlement);
   }
 

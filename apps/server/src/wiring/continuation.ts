@@ -65,6 +65,13 @@ import {
   createCodeAgentResultDeliveryPort,
   createWorkAgentResultDeliveryPort,
 } from "../agentRun/agentResultDeliveryPorts";
+import { SideTaskReportDeliveryService } from "../sideTasks/sideTaskReportDeliveryService";
+import {
+  createChatSideTaskReportDeliveryPort,
+  createCodeSideTaskReportDeliveryPort,
+  createWorkSideTaskReportDeliveryPort,
+} from "../sideTasks/sideTaskReportDeliveryPorts";
+import { recordSideTaskReportIngestion } from "../sideTasks/sideTaskReports";
 import { defaultShellSettings, enabledModes } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -86,7 +93,10 @@ export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
   > &
   Pick<
     AgentRunsWiring,
-    "agentRunOrchestration" | "capacityScheduler" | "externalContentIngestionStore"
+    | "agentRunOrchestration"
+    | "capacityScheduler"
+    | "externalContentIngestionStore"
+    | "sideTaskReports"
   > &
   Pick<WorkspaceWiring, "contextHarness"> &
   Pick<
@@ -345,6 +355,77 @@ export function wireContinuation(deps: ContinuationDependencies) {
       }),
     );
     agentResultDeliveryService.start();
+    // A turn that ends in a side-task child owes its offering thread a
+    // journaled turn carrying the report. The service watches committed
+    // appends and dispatches through each mode's ordinary turn admission —
+    // the mark on that turn is what keeps a replayed delivery from minting a
+    // second one, and a parent that can never take the reports settles them
+    // as refused rather than retrying forever.
+    const sideTaskReportDeliveryService = new SideTaskReportDeliveryService({
+      journal: persistence.journal,
+      reports: deps.sideTaskReports,
+      clock: () => new Date(),
+      recordIngestion: (parentThreadId, reports) =>
+        recordSideTaskReportIngestion(
+          (input) => externalContentIngestionStore.record(input),
+          parentThreadId,
+          reports,
+          randomUUID,
+        ),
+      ports: {
+        chat: createChatSideTaskReportDeliveryPort({
+          readThread: (threadId) => persistence.readChatThread(threadId),
+          readThreadView: (threadId) => persistence.readChatThreadView(threadId),
+          chat: chatService,
+        }),
+        work: createWorkSideTaskReportDeliveryPort({
+          uuid: randomUUID,
+          isEnabled: () =>
+            enabledModes(
+              persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+            ).includes("work"),
+          readThread: (threadId) => workThreadProjection.read(threadId),
+          listTurns: (threadId) => workTurnProjection.listForThread(threadId),
+          startFirstTurn: (windowId, input) => workTurnService.startFirstTurn(windowId, input),
+        }),
+        code: createCodeSideTaskReportDeliveryPort({
+          uuid: randomUUID,
+          readThread: (threadId) => persistence.readCodeThread(threadId),
+          busy: (threadId) =>
+            deps.codeOperationRuntime?.turnInProgress?.(String(threadId)) === true,
+          compacting: (threadId) =>
+            contextHarness.compactionRunning(
+              decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
+            ),
+          turnDeliveryMarks: (threadId) => {
+            const history = deps.codeBoardEventStore.historyForThread(decodeCodeThreadId(threadId));
+            if (history.status !== "ok") throw new Error("Code delivery history is unavailable.");
+            return history.frames.flatMap(({ event }) =>
+              event.kind === "conversation-turn-started" && event.delivery !== undefined
+                ? [event.delivery]
+                : [],
+            );
+          },
+          ...(routeCodeService.stageEvidence === undefined
+            ? {}
+            : { stageEvidence: routeCodeService.stageEvidence }),
+          ...(routeCodeService.executeOperation === undefined
+            ? {}
+            : { executeOperation: routeCodeService.executeOperation }),
+        }),
+      },
+      onError: (message, error) => console.error(`[side-task-report] ${message}`, error),
+    });
+    const unsubscribeSideTaskReportDelivery = persistence.journal.subscribeCommitted((append) =>
+      sideTaskReportDeliveryService.onCommittedAppend(append),
+    );
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        unsubscribeSideTaskReportDelivery();
+        sideTaskReportDeliveryService.stop();
+      }),
+    );
+    sideTaskReportDeliveryService.start();
     const agentRunDependencyScheduler = new AgentRunDependencyScheduler({
       agentRuns: agentRunPersistence,
       orchestration: agentRunOrchestration,

@@ -61,7 +61,7 @@ export interface FollowUpSuggestionChipsProps {
 export interface ComposerOffers extends FollowUpSuggestionChipsProps {
   readonly sideTaskClient?: Pick<
     SideTaskClient,
-    "sideTasks" | "start" | "continueHere" | "dismiss"
+    "sideTasks" | "start" | "continueHere" | "dismiss" | "setReporting"
   >;
   readonly finishedReceiptClient?: Pick<FinishedReceiptClient, "receipts">;
 }

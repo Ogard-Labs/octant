@@ -36,6 +36,7 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "pull-request-review": "A second-model pull request review",
   "sibling-thread": "Other threads in this Project",
   "side-chat": "The thread this side chat is about",
+  "side-task-report": "A side task's report",
   "simulator-screen": "A simulator screen sent as feedback",
   "subagent-result": "A subagent's result",
   "thread-mention": "A thread mentioned in a message",

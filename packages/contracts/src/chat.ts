@@ -20,10 +20,10 @@ import { DescribedImageName, ImageDescribedBy } from "./imageDescription";
 import {
   AgentResultsSteeredIntoTurn,
   AgentRunId,
-  AgentRunResultDeliveryMark,
   AgentRunResultDeliveryRunIds,
   AgentRunResultDeliveryGenerations,
 } from "./agentRun";
+import { MAX_SIDE_TASK_REPORT_DELIVERY_BATCH_SIZE, ThreadDeliveryMark } from "./sideTasks";
 import { ContextCompactionSettledRecord, ContextManifestId } from "./context";
 import {
   ContextHandoffMessages,
@@ -485,11 +485,12 @@ export const ChatTurn = Schema.Struct({
    */
   rewound: Schema.optional(ChatTurnRewound),
   /**
-   * Set only on a turn the host itself started to carry a finished subagent
-   * run's result into this thread. The marker is what makes the delivery
-   * idempotent: the server refuses to begin a second turn for the same run.
+   * Set only on a turn the host itself started to carry owed reports into
+   * this thread — a finished subagent run's result or a side task's report.
+   * The marker is what makes the delivery idempotent: the server refuses to
+   * begin a second turn for the same reports.
    */
-  delivery: Schema.optional(AgentRunResultDeliveryMark),
+  delivery: Schema.optional(ThreadDeliveryMark),
   /**
    * Finished children's results the host steered into this turn while it
    * ran, in arrival order. The journaled `agent-run.result-steered` record is
@@ -950,6 +951,22 @@ export const DeliverChatAgentResultCommand = Schema.Struct({
     }),
   );
 
+/**
+ * Host-owned: wakes the thread with a turn that carries owed side-task
+ * reports into the conversation. The server composes the turn's input from
+ * the journaled reports — the command names them, never the text — and marks
+ * the turn so a delivery replayed after a crash cannot mint a second one for
+ * the same reports.
+ */
+export const DeliverChatSideTaskReportCommand = Schema.Struct({
+  kind: Schema.Literal("deliver-chat-side-task-report"),
+  ...ChatThreadCommandFields,
+  reportIds: Schema.Array(Schema.UUID).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(MAX_SIDE_TASK_REPORT_DELIVERY_BATCH_SIZE),
+  ),
+}).annotations(strict);
+
 export const UpdateChatSettingsCommand = Schema.Struct({
   kind: Schema.Literal("update-chat-settings"),
   expectedVersion: AggregateVersion,
@@ -1084,6 +1101,7 @@ export const ChatCommand = Schema.Union(
   CancelChatUsageResumeCommand,
   AnswerChatTurnQuestionCommand,
   DeliverChatAgentResultCommand,
+  DeliverChatSideTaskReportCommand,
   DeleteChatThreadCommand,
   UpdateChatSettingsCommand,
   ThreadWorkCommand,

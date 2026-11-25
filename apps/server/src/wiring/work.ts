@@ -208,6 +208,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "managedWorktreeReceipts"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
+    | "sideTaskReports"
     | "finishedReceipts"
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
@@ -387,6 +388,7 @@ export function wireWork(deps: WorkDependencies) {
     sideTaskHost,
     routineProposalService,
     sideTasks,
+    sideTaskReports,
     finishedReceipts,
     gitObservationPort,
     nativeHarnessApprovals,
@@ -697,6 +699,7 @@ export function wireWork(deps: WorkDependencies) {
       forgeChanges: runtimeForgeChanges,
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,
+      sideTaskReports,
       contextHarness,
       resolveSelectedExtensions,
       pinnedExtensionIds,

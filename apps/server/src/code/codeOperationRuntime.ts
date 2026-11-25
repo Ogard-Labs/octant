@@ -117,6 +117,7 @@ import type {
   ProviderWakeupSchedule,
 } from "@octant/provider-sdk/driver";
 import type { Journal } from "../persistence/journal";
+import type { SideTaskReportStore } from "../sideTasks/sideTaskReportStore";
 import type { OutlivingSessions } from "../providers/outlivingSessions";
 import { createGhPullRequestPort } from "./ghPullRequestActionPort";
 import type { PullRequestLinkReader, PullRequestLinkRecorder } from "./pullRequestLinkService";
@@ -547,6 +548,11 @@ export interface CodeOperationRuntimeOptions {
   readonly agentRuns?: {
     readonly getById: (runId: AgentRunId) => AgentRun | undefined;
   };
+  /**
+   * Read access to journaled side-task reports, for verifying the report mark
+   * a `start-provider-turn` claims. Absent means report claims are refused.
+   */
+  readonly sideTaskReports?: Pick<SideTaskReportStore, "reportsForParent">;
   readonly probeProvider?: (
     instanceId: CodeThread["providerInstanceId"],
   ) => Promise<Pick<ProviderProbeResult, "readiness" | "models">>;
@@ -1614,6 +1620,7 @@ export function createCodeOperationRuntime(
       ? {}
       : { isProviderModelAllowed: options.isProviderModelAllowed }),
     ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
+    ...(options.sideTaskReports === undefined ? {} : { sideTaskReports: options.sideTaskReports }),
     onScopedOperation: ({ command, executeOptions }) => {
       // The service invokes this only after its authoritative scope check and
       // replay lookup, but before approval or the operation side effect. That

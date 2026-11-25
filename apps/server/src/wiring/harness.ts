@@ -85,11 +85,7 @@ import {
 } from "../sideTasks/sideTaskRoutes";
 import { createFinishedReceiptRouteHandler } from "../finishedReceipts/finishedReceiptRoutes";
 import type { SideTaskStartDependencies } from "../sideTasks/sideTaskStart";
-import {
-  sideTaskCompletionReport,
-  sideTaskFailureReport,
-  sideTaskReportOutcomeForStop,
-} from "../sideTasks/sideTaskReports";
+import { createSideTaskReportDetection } from "../sideTasks/sideTaskReports";
 import {
   createNativeHarnessSessionRouteHandler,
   type NativeHarnessSessionRouteDependencies,
@@ -722,6 +718,7 @@ export function wireHarness(deps: HarnessDependencies) {
     noteStarted: ({ parentThreadId, childThreadId }) =>
       threadFollowUpSuggestions.noteSideTaskStarted(parentThreadId, childThreadId),
     childState: (input) => sideTaskHost.current?.childState?.(input),
+    reports: sideTaskReports,
     clock: () => new Date().toISOString(),
   });
   const finishedReceiptRoutes = createFinishedReceiptRouteHandler({
@@ -903,20 +900,17 @@ export function wireHarness(deps: HarnessDependencies) {
     (scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0], turn: TurnEndSummary) => void
   >();
   // A turn in a thread started from a side task owes its offering thread a
-  // report of how it ended. The completion hook below owes the reply; a turn
-  // that ended without completing owes its failure or cancellation. The set
-  // remembers completions per thread so the end hook never reports the same
-  // turn twice.
-  const sideTaskCompletionsPending = new Set<string>();
-  const sideTaskOfferFor = (
-    childThreadId: string,
-    parentThreadId: string,
-  ): { readonly title: string; readonly mode: "chat" | "work" | "code" } | undefined => {
-    const offer = sideTasks
-      .read(parentThreadId)
-      .tasks.find((task) => String(task.startedThreadId) === childThreadId)?.offer;
-    return offer === undefined ? undefined : { title: offer.title, mode: offer.mode };
-  };
+  // report of how it ended; the detection keeps the completion a turn's reply
+  // already reported from being reported again when the turn ends.
+  const sideTaskReportDetection = createSideTaskReportDetection({
+    parentOf: (childThreadId) => threadFollowUpSuggestions.sideTaskParentOf(childThreadId),
+    offerFor: (childThreadId, parentThreadId) => {
+      const offer = sideTasks.startedOfferFor(parentThreadId, childThreadId);
+      return offer === undefined ? undefined : { title: offer.title, mode: offer.mode };
+    },
+    reports: sideTaskReports,
+    now: () => new Date().toISOString(),
+  });
   const observeTurnEnded = (
     observer: (
       scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0],
@@ -1025,6 +1019,7 @@ export function wireHarness(deps: HarnessDependencies) {
     acceptTurn: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) =>
       hostDrain.accept(scope),
     turnStarted: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) => {
+      sideTaskReportDetection.turnStarted(scope.threadId);
       hostDrain.turnStarted(scope);
       nativeHarnessObserver.turnStarted(scope);
       nativeHarnessLeadFallback.turnStarted(scope);
@@ -1054,30 +1049,10 @@ export function wireHarness(deps: HarnessDependencies) {
       nativeHarnessLeadFallback.turnEnded(scope);
       if (turn === undefined) return;
       try {
-        const completed = sideTaskCompletionsPending.delete(String(scope.threadId));
-        if (!completed) {
-          const outcome = sideTaskReportOutcomeForStop(turn.stopReason);
-          const parentThreadId =
-            outcome === undefined
-              ? undefined
-              : threadFollowUpSuggestions.sideTaskParentOf(scope.threadId);
-          const offer =
-            parentThreadId === undefined
-              ? undefined
-              : sideTaskOfferFor(String(scope.threadId), parentThreadId);
-          if (outcome !== undefined && parentThreadId !== undefined && offer !== undefined) {
-            sideTaskReports.owe(
-              String(scope.threadId),
-              sideTaskFailureReport({
-                parentThreadId,
-                parentMode: offer.mode,
-                title: offer.title,
-                outcome,
-                endedAt: turn.endedAt,
-              }),
-            );
-          }
-        }
+        sideTaskReportDetection.turnEnded(String(scope.threadId), {
+          stopReason: turn.stopReason,
+          endedAt: turn.endedAt,
+        });
       } catch {
         // A report the journal refused still leaves the turn ended.
       }
@@ -1115,23 +1090,7 @@ export function wireHarness(deps: HarnessDependencies) {
         // A set the journal refused leaves the reply itself untouched.
       }
       try {
-        const parentThreadId = threadFollowUpSuggestions.sideTaskParentOf(input.threadId);
-        if (parentThreadId !== undefined) {
-          sideTaskCompletionsPending.add(String(input.threadId));
-          const offer = sideTaskOfferFor(String(input.threadId), parentThreadId);
-          if (offer !== undefined) {
-            sideTaskReports.owe(
-              String(input.threadId),
-              sideTaskCompletionReport({
-                parentThreadId,
-                parentMode: offer.mode,
-                title: offer.title,
-                text: input.text,
-                endedAt: new Date().toISOString(),
-              }),
-            );
-          }
-        }
+        sideTaskReportDetection.turnCompleted({ threadId: input.threadId, text: input.text });
       } catch {
         // A report the journal refused leaves the reply itself untouched.
       }

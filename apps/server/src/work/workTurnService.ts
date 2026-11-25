@@ -19,6 +19,7 @@ import {
   coveredAgentResultDeliveryMembers,
   validateAgentResultDelivery,
 } from "../agentRun/agentResultDeliveryBatch";
+import type { SideTaskReportStore } from "../sideTasks/sideTaskReportStore";
 import {
   contextSourceKey,
   reusableContextSummaryIds,
@@ -715,6 +716,13 @@ export interface WorkTurnServiceDependencies {
     readonly getById: (runId: AgentRunId) => AgentRun | undefined;
   };
   /**
+   * Read access to journaled side-task reports. A turn that claims to carry
+   * owed reports is verified here — they must belong to this thread and not
+   * already be settled — so a caller cannot mark a turn as a delivery the
+   * journal does not record. Absent means report claims are refused.
+   */
+  readonly sideTaskReports?: Pick<SideTaskReportStore, "reportsForParent">;
+  /**
    * Where the service records the access each running turn holds. The host
    * passes one it built before the native harness, which reads it; absent,
    * the service keeps its own.
@@ -810,6 +818,7 @@ export class WorkTurnService {
   readonly #toolCallRecorders: ThreadToolCallRecorders | undefined;
   readonly #toolStepSettings: NonNullable<WorkTurnServiceDependencies["toolStepSettings"]>;
   readonly #agentRuns: WorkTurnServiceDependencies["agentRuns"];
+  readonly #sideTaskReports: WorkTurnServiceDependencies["sideTaskReports"];
   readonly #controllers = new Map<string, AbortController>();
   readonly #inflight = new Map<string, Promise<void>>();
   readonly #liveResponses = new Map<string, string>();
@@ -895,6 +904,7 @@ export class WorkTurnService {
         fullAccessToolStepsPerTurn: 0,
       }));
     this.#agentRuns = dependencies.agentRuns;
+    this.#sideTaskReports = dependencies.sideTaskReports;
   }
 
   /**
@@ -1054,7 +1064,7 @@ export class WorkTurnService {
   }
 
   #agentResultDelivery(command: StartWorkThreadTurnCommand): WorkTurnLookupResult | undefined {
-    if (command.delivery === undefined) return undefined;
+    if (command.delivery?.kind !== "agent-result") return undefined;
     const requested = command.delivery;
     const validation = validateAgentResultDelivery({
       delivery: requested,
@@ -1069,7 +1079,7 @@ export class WorkTurnService {
     const covered = new Set(
       coveredAgentResultDeliveryMembers(
         requested,
-        turns.flatMap((turn) => (turn.delivery === undefined ? [] : [turn.delivery])),
+        turns.flatMap((turn) => (turn.delivery?.kind === "agent-result" ? [turn.delivery] : [])),
       ).map((member) => String(member.runId)),
     );
     if (
@@ -1080,11 +1090,74 @@ export class WorkTurnService {
       throw this.#failure("invalid", "A named subagent run's result delivery already settled.");
     const delivered = turns.find(
       (turn) =>
-        turn.delivery !== undefined &&
+        turn.delivery?.kind === "agent-result" &&
         coveredAgentResultDeliveryMembers(requested, [turn.delivery]).length > 0,
     );
     if (delivered !== undefined)
       return decodeWorkTurnLookupResult({ kind: "accepted", turn: delivered });
+    if (
+      turns.some(
+        (turn) =>
+          turn.status === "accepted" || turn.status === "running" || turn.status === "waiting",
+      )
+    )
+      throw this.#failure("stale", "The Work parent already has an active turn.");
+    return undefined;
+  }
+
+  /**
+   * A turn that claims to carry owed side-task reports is admitted only when
+   * the report journal records each named report as still owed to this
+   * thread. The journal — not the caller — is what says a report exists and
+   * is unsettled, so a forged mark cannot mint a delivery the child never
+   * owed. A turn already carrying the mark answers a retried command.
+   */
+  #sideTaskReportDelivery(
+    command: StartWorkThreadTurnCommand,
+    authenticatedWindowId: WindowId,
+  ): WorkTurnLookupResult | undefined {
+    const requested = command.delivery;
+    if (requested?.kind !== "side-task-report") return undefined;
+    // Only the host's own delivery service may claim report marks: a window's
+    // turn command naming owed report ids would mint a delivery the journal
+    // never scheduled, so the claim is refused before anything is read.
+    if (!isRoutineHostScope(authenticatedWindowId)) {
+      throw this.#failure(
+        "unauthorized",
+        "Only the host may deliver side-task reports into a Work thread.",
+      );
+    }
+    const reports = this.#sideTaskReports?.reportsForParent(String(command.threadId));
+    if (reports === undefined) {
+      throw this.#failure("invalid", "Side-task reports are unavailable on this host.");
+    }
+    const turns = this.#projection.listForThread(command.threadId);
+    const delivered = turns.find(
+      (turn) =>
+        turn.delivery?.kind === "side-task-report" &&
+        requested.reportIds.every(
+          (reportId) =>
+            turn.delivery?.kind === "side-task-report" &&
+            turn.delivery.reportIds.some((id) => String(id) === String(reportId)),
+        ),
+    );
+    if (delivered !== undefined)
+      return decodeWorkTurnLookupResult({ kind: "accepted", turn: delivered });
+    const byId = new Map(reports.map((entry) => [String(entry.report.reportId), entry]));
+    for (const reportId of requested.reportIds) {
+      const entry = byId.get(String(reportId));
+      if (entry === undefined || String(entry.report.parentThreadId) !== String(command.threadId)) {
+        throw this.#failure("invalid", "A named side-task report is not owed to this thread.");
+      }
+      if (entry.state !== "owed") {
+        throw this.#failure(
+          "invalid",
+          "A named side-task report has already settled and cannot be delivered again.",
+        );
+      }
+    }
+    const existing = this.#projection.lookup(command.requestId);
+    if (existing !== undefined) return this.#lookupMatching(command, existing);
     if (
       turns.some(
         (turn) =>
@@ -1706,6 +1779,8 @@ export class WorkTurnService {
 
     const delivered = this.#agentResultDelivery(command);
     if (delivered !== undefined) return delivered;
+    const reportDelivered = this.#sideTaskReportDelivery(command, authenticatedWindowId);
+    if (reportDelivered !== undefined) return reportDelivered;
 
     let projectRoot: string;
     if (server !== undefined) {
@@ -2408,6 +2483,8 @@ export class WorkTurnService {
       // Preparation awaits filesystem and provider context; recheck the journal before admission.
       const afterPreparation = this.#agentResultDelivery(command);
       if (afterPreparation !== undefined) return afterPreparation;
+      const afterPreparationReport = this.#sideTaskReportDelivery(command, authenticatedWindowId);
+      if (afterPreparationReport !== undefined) return afterPreparationReport;
 
       // A move may have frozen the thread while its context was prepared; the
       // turn is refused here, before anything is accepted, so no message

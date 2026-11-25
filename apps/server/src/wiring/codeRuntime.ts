@@ -403,6 +403,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "nativeHarnessRoutingStore"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
+    | "sideTaskReports"
     | "finishedReceipts"
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
@@ -615,6 +616,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     serverProjectStore,
     shieldServerStore,
     sideTasks,
+    sideTaskReports,
     finishedReceipts,
     gitObservationPort,
     goalService,
@@ -1242,6 +1244,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         onPendingRequestWithdrawn: () => machineChangeFeed.publish(["code-navigation"]),
         gitMutationPort,
         agentRuns: agentRunPersistence,
+        sideTaskReports,
         resolveSelectedExtensions,
         pinnedExtensionIds,
         threadDesktopDestination,

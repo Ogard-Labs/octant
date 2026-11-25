@@ -171,6 +171,10 @@ import { ResearchRouter } from "./research/researchRouter";
 import { ThreadWorkService } from "./threadWorkService";
 import { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import { createChatAgentResultDeliveryPort } from "./chatAgentResultDeliveryPort";
+import { createChatSideTaskReportDeliveryPort } from "../sideTasks/sideTaskReportDeliveryPorts";
+import { SideTaskReportDeliveryService } from "../sideTasks/sideTaskReportDeliveryService";
+import { SideTaskReportStore } from "../sideTasks/sideTaskReportStore";
+import { createSideTaskReportDetection } from "../sideTasks/sideTaskReports";
 import { ChatService, ChatServiceError, type ChatServiceOptions } from "./chatService";
 import { createCheckpointChatPort } from "../checkpoint/threadCheckpointPorts";
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
@@ -434,6 +438,11 @@ function openFixture(options?: {
       runId: import("@octant/contracts").AgentRunId,
     ) => import("@octant/contracts").AgentRun | undefined;
     readonly resultText: (runId: import("@octant/contracts").AgentRunId) => string | undefined;
+  };
+  readonly sideTaskReports?: {
+    readonly reportsForParent: (
+      parentThreadId: string,
+    ) => ReadonlyArray<import("../sideTasks/sideTaskReportStore").SideTaskReportEntry>;
   };
   readonly gatherMultiModelRuntimeFacts?: (input: {
     readonly pool: import("@octant/contracts/multi-model-pool").MultiModelPool;
@@ -890,6 +899,7 @@ function openFixture(options?: {
       ? {}
       : { gatherMultiModelRuntimeFacts: options.gatherMultiModelRuntimeFacts }),
     ...(options?.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
+    ...(options?.sideTaskReports === undefined ? {} : { sideTaskReports: options.sideTaskReports }),
     ...(options?.issueContext === undefined ? {} : { issueContext: options.issueContext }),
     ...(options?.linearIssueContext === undefined
       ? {}
@@ -12634,6 +12644,111 @@ describe("agent result delivery", () => {
       runIds: [run.id],
     });
     expect(fixture.service.read(created.thread.id).turns).toHaveLength(2);
+  });
+
+  it("delivers a side-task child's completed Chat reply to its parent's provider exactly once", async () => {
+    let reports: SideTaskReportStore;
+    let detection: ReturnType<typeof createSideTaskReportDetection>;
+    const fixture = openFixture({
+      sideTaskReports: { reportsForParent: (id) => reports.reportsForParent(id) },
+      nativeHarness: {
+        contextFor: () => [],
+        turnStarted: () => undefined,
+        turnCompleted: async (input) => detection.turnCompleted(input),
+        turnEnded: (scope, turn) => {
+          if (turn !== undefined) detection.turnEnded(scope.threadId, turn);
+        },
+      },
+    });
+    const create = async (title: string) => {
+      const result = await fixture.service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title,
+      });
+      if (result.kind !== "thread-created") throw new Error("Expected a Chat thread.");
+      return result.thread;
+    };
+    const parent = await create("Parent");
+    const child = await create("Child");
+    reports = new SideTaskReportStore({
+      journal: fixture.persistence.journal,
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+      actor: decodeEventActor({ kind: "local-user", actorId: ids.actor }),
+    });
+    detection = createSideTaskReportDetection({
+      parentOf: (id) => (id === child.id ? parent.id : undefined),
+      offerFor: () => ({ title: "Fix stale install docs", mode: "chat" }),
+      reports,
+      now: () => now,
+    });
+    const chat = createChatSideTaskReportDeliveryPort({
+      readThread: (id) => fixture.service.read(id).thread,
+      readThreadView: (id) => fixture.service.read(id),
+      chat: fixture.service,
+    });
+    const service = new SideTaskReportDeliveryService({
+      reports,
+      journal: fixture.persistence.journal,
+      ports: { chat, work: chat, code: chat },
+      clock: () => new Date(now),
+      recordIngestion: () => true,
+    });
+    const unsubscribe = fixture.persistence.journal.subscribeCommitted((append) =>
+      service.onCommittedAppend(append),
+    );
+    try {
+      service.start();
+      await fixture.service.execute({
+        kind: "send-chat-turn",
+        threadId: child.id,
+        expectedVersion: child.version,
+        prompt: "Check the docs.",
+      });
+      await until(() => reports.reportsForParent(parent.id)[0]?.state === "delivered");
+      const reportId = reports.reportsForParent(parent.id)[0]?.report.reportId;
+      const delivery = fixture.service.read(parent.id).turns[0];
+      expect(delivery?.delivery).toEqual({ kind: "side-task-report", reportIds: [reportId] });
+      expect(fixture.fakeDriver.sentTurns[1]?.prompt).toContain('"text":"Fixture response"');
+      const replay = {
+        kind: "deliver-chat-side-task-report",
+        threadId: parent.id,
+        expectedVersion: parent.version,
+        reportIds: [reportId],
+      };
+      await expect(fixture.service.execute(replay)).resolves.toMatchObject({
+        kind: "turn-created",
+        turn: { id: delivery?.id },
+      });
+      await expect(
+        fixture.service.execute(replay, { windowId: decodeWindowId(ids.actor) }),
+      ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+      expect(fixture.service.read(parent.id).turns).toHaveLength(1);
+    } finally {
+      unsubscribe();
+      service.stop();
+    }
+  });
+
+  it("refuses a side-task report delivery the journaled entries do not owe", async () => {
+    const fixture = openFixture({
+      sideTaskReports: { reportsForParent: () => [] },
+    });
+    const created = await fixture.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Parent",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    await expect(
+      fixture.service.execute({
+        kind: "deliver-chat-side-task-report",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        reportIds: ["00000000-0000-4000-8000-0000000000d1"],
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
   });
 
   it("refuses a delivery that names a run the thread never owned or an unfinished run", async () => {

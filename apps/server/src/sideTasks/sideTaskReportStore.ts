@@ -7,6 +7,7 @@ import {
   EventId,
   SideTaskReportDelivered,
   SideTaskReportOwed,
+  SideTaskReportRefused,
   SideTaskReportingResumed,
   SideTaskReportingStopped,
   THREAD_SIDE_TASK_REPORTS_AGGREGATE_TYPE,
@@ -30,6 +31,7 @@ export function registerSideTaskReportEvents(registry: EventRegistry): EventRegi
   return registry
     .register(THREAD_SIDE_TASK_REPORT_EVENT_NAMES.owed, 1, SideTaskReportOwed)
     .register(THREAD_SIDE_TASK_REPORT_EVENT_NAMES.delivered, 1, SideTaskReportDelivered)
+    .register(THREAD_SIDE_TASK_REPORT_EVENT_NAMES.refused, 1, SideTaskReportRefused)
     .register(THREAD_SIDE_TASK_REPORT_EVENT_NAMES.reportingStopped, 1, SideTaskReportingStopped)
     .register(THREAD_SIDE_TASK_REPORT_EVENT_NAMES.reportingResumed, 1, SideTaskReportingResumed);
 }
@@ -38,8 +40,19 @@ interface ChildRecord {
   /** Every report owed, in the order the child's turns ended. */
   readonly reports: SideTaskReportOwed[];
   readonly delivered: Set<string>;
+  /** Reports the parent can never take; settled, never retried, never dropped silently. */
+  readonly refused: Set<string>;
   stopped: boolean;
   version: number;
+}
+
+/** How one report a parent was owed stands now, for delivery admission to check. */
+export type SideTaskReportState = "owed" | "delivered" | "refused";
+
+export interface SideTaskReportEntry {
+  readonly childThreadId: string;
+  readonly report: SideTaskReportOwed;
+  readonly state: SideTaskReportState;
 }
 
 /**
@@ -95,6 +108,32 @@ export class SideTaskReportStore {
     return "owed";
   }
 
+  /**
+   * Every report this parent was ever owed, with how it stands. Delivery
+   * admission reads this to verify a claimed mark against the journal: a
+   * report still `owed` may enter a turn, `delivered` only through the turn
+   * that already carries it, and `refused` never again.
+   */
+  reportsForParent(parentThreadId: string): ReadonlyArray<SideTaskReportEntry> {
+    const entries: SideTaskReportEntry[] = [];
+    for (const [childThreadId, record] of this.#records) {
+      for (const report of record.reports) {
+        if (String(report.parentThreadId) !== parentThreadId) continue;
+        const id = String(report.reportId);
+        entries.push({
+          childThreadId,
+          report,
+          state: record.delivered.has(id)
+            ? "delivered"
+            : record.refused.has(id)
+              ? "refused"
+              : "owed",
+        });
+      }
+    }
+    return entries;
+  }
+
   /** The reports this parent has not yet heard about, across every child. */
   undeliveredForParent(parentThreadId: string): ReadonlyArray<{
     readonly childThreadId: string;
@@ -103,9 +142,11 @@ export class SideTaskReportStore {
     const owed: { childThreadId: string; report: SideTaskReportOwed }[] = [];
     for (const [childThreadId, record] of this.#records) {
       for (const report of record.reports) {
+        const id = String(report.reportId);
         if (
           String(report.parentThreadId) === parentThreadId &&
-          !record.delivered.has(String(report.reportId))
+          !record.delivered.has(id) &&
+          !record.refused.has(id)
         ) {
           owed.push({ childThreadId, report });
         }
@@ -122,7 +163,8 @@ export class SideTaskReportStore {
     const owed: { childThreadId: string; report: SideTaskReportOwed }[] = [];
     for (const [childThreadId, record] of this.#records) {
       for (const report of record.reports) {
-        if (!record.delivered.has(String(report.reportId))) {
+        const id = String(report.reportId);
+        if (!record.delivered.has(id) && !record.refused.has(id)) {
           owed.push({ childThreadId, report });
         }
       }
@@ -138,12 +180,36 @@ export class SideTaskReportStore {
   markDelivered(childThreadId: string, reportIds: ReadonlyArray<string>): void {
     const record = this.#records.get(childThreadId);
     if (record === undefined || reportIds.length === 0) return;
+    // A report already delivered or refused is settled; naming it again must
+    // not mint a second journal event for the same fact.
+    const fresh = reportIds.filter((id) => !record.delivered.has(id) && !record.refused.has(id));
+    if (fresh.length === 0) return;
     const payload: SideTaskReportDelivered = {
-      reportIds: reportIds.map((id) => id as SideTaskReportDelivered["reportIds"][number]),
+      reportIds: fresh.map((id) => id as SideTaskReportDelivered["reportIds"][number]),
       deliveredAt: decodeUtcTimestamp(this.#clock()),
     };
     this.#append(childThreadId, record, THREAD_SIDE_TASK_REPORT_EVENT_NAMES.delivered, payload);
-    for (const id of reportIds) record.delivered.add(id);
+    for (const id of fresh) record.delivered.add(id);
+  }
+
+  /**
+   * Journals that the named reports can never reach their parent — the parent
+   * is gone or refuses them for good. They leave the owed set for good, so a
+   * restart neither retries them nor loses that they were settled.
+   */
+  markRefused(childThreadId: string, reportIds: ReadonlyArray<string>, detail: string): void {
+    const record = this.#records.get(childThreadId);
+    if (record === undefined || reportIds.length === 0) return;
+    const fresh = reportIds.filter((id) => !record.delivered.has(id) && !record.refused.has(id));
+    if (fresh.length === 0) return;
+    const trimmed = detail.trim().slice(0, 512).trim();
+    const payload: SideTaskReportRefused = {
+      reportIds: fresh.map((id) => id as SideTaskReportRefused["reportIds"][number]),
+      detail: trimmed.length === 0 ? "The parent refused the delivery." : trimmed,
+      refusedAt: decodeUtcTimestamp(this.#clock()),
+    };
+    this.#append(childThreadId, record, THREAD_SIDE_TASK_REPORT_EVENT_NAMES.refused, payload);
+    for (const id of fresh) record.refused.add(id);
   }
 
   setReporting(childThreadId: string, on: boolean): void {
@@ -162,7 +228,13 @@ export class SideTaskReportStore {
   #record(childThreadId: string): ChildRecord {
     const existing = this.#records.get(childThreadId);
     if (existing !== undefined) return existing;
-    const created: ChildRecord = { reports: [], delivered: new Set(), stopped: false, version: 0 };
+    const created: ChildRecord = {
+      reports: [],
+      delivered: new Set(),
+      refused: new Set(),
+      stopped: false,
+      version: 0,
+    };
     this.#records.set(childThreadId, created);
     return created;
   }
@@ -201,6 +273,10 @@ export class SideTaskReportStore {
       } else if (envelope.eventName === THREAD_SIDE_TASK_REPORT_EVENT_NAMES.delivered) {
         for (const id of (envelope.payload as SideTaskReportDelivered).reportIds) {
           record.delivered.add(String(id));
+        }
+      } else if (envelope.eventName === THREAD_SIDE_TASK_REPORT_EVENT_NAMES.refused) {
+        for (const id of (envelope.payload as SideTaskReportRefused).reportIds) {
+          record.refused.add(String(id));
         }
       } else if (envelope.eventName === THREAD_SIDE_TASK_REPORT_EVENT_NAMES.reportingStopped) {
         record.stopped = true;

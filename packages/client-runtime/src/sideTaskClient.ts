@@ -24,6 +24,13 @@ export interface SideTaskClient {
   /** "Do it here": the offering thread takes the work on as its next turn. */
   continueHere(threadId: string, sideTaskId: string, signal?: AbortSignal): Promise<SideTaskResult>;
   dismiss(threadId: string, sideTaskId: string, signal?: AbortSignal): Promise<SideTaskResult>;
+  /** Stops or resumes the reports a started child owes this thread. */
+  setReporting(
+    threadId: string,
+    sideTaskId: string,
+    on: boolean,
+    signal?: AbortSignal,
+  ): Promise<SideTaskResult>;
 }
 
 export class SideTaskClientFailure extends Error {
@@ -76,6 +83,8 @@ export function createSideTaskClient(options: SideTaskClientOptions): SideTaskCl
     continueHere: (threadId, sideTaskId, signal) =>
       post(threadId, "continue", { sideTaskId, confirmed: true }, signal),
     dismiss: (threadId, sideTaskId, signal) => post(threadId, "dismiss", { sideTaskId }, signal),
+    setReporting: (threadId, sideTaskId, on, signal) =>
+      post(threadId, "reporting", { sideTaskId, on }, signal),
   };
 }
 

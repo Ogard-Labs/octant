@@ -3485,6 +3485,17 @@ describe("CodeOperationService", () => {
     expect(started.prompt).toBe("does this still hold?");
   });
 
+  it("refuses a window claiming a side-task report as its Code prompt", async () => {
+    const fixture = providerTurnFixture();
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        delivery: { kind: "side-task-report", reportIds: [crypto.randomUUID()] },
+      }),
+    ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+  });
+
   it("refuses a Code turn that claims to deliver a subagent result the journal does not back", async () => {
     const fixture = providerTurnFixture();
     await expect(

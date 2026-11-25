@@ -2102,6 +2102,7 @@ function startTurn(
     ...(frame.event.executionPolicy === undefined
       ? {}
       : { executionPolicy: frame.event.executionPolicy }),
+    ...(frame.event.delivery === undefined ? {} : { delivery: frame.event.delivery }),
     // Who described each image is shown; the words stay in the content store.
     ...(frame.event.describedImages === undefined
       ? {}
@@ -2265,6 +2266,7 @@ type CodeConversationBuilder = {
   failure?: CodeConversationTurn["failure"];
   changedFiles?: CodeConversationTurn["changedFiles"];
   reviewPreview?: CodeConversationTurn["reviewPreview"];
+  delivery?: CodeConversationTurn["delivery"];
   startedAt: CodeConversationTurn["startedAt"];
   updatedAt: CodeConversationTurn["updatedAt"];
 };

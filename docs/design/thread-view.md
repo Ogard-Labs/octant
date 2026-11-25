@@ -499,7 +499,12 @@ failed keeps the full card and gives the host's recorded reason in place of a
 reply. Run ID, generation and provider ID sit behind a Details disclosure in
 the opened card. The card is one component in Chat, Work and
 Code; a delivery the card cannot read is shown as its text under a plain
-"Subagent result" head.
+"Subagent result" head. A turn the host composed to carry a side-task
+child's report back renders the same way but honestly attributed: a
+left-aligned "Report from side task" card naming the task and its outcome
+(finished, failed, or cancelled), the reply as Markdown when one was kept,
+and a note that it was cut short when the host truncated it — never the
+person's own right-aligned message.
 
 Subagents the provider runtime started itself are rows in the same card,
 counted and previewed by the same rules as managed runs, finished ones
@@ -557,7 +562,11 @@ receipt names where the work went and, beside its Open link, the child
 thread's live state in the sidebar rows' own vocabulary — **Working**,
 **Needs you**, or **Finished** — read from the same navigation facts those
 rows use, so receipt and row never disagree. A child the window cannot read
-shows no state rather than a guessed one.
+shows no state rather than a guessed one. Beside the state the receipt
+carries a link-variant **Stop reporting** / **Resume reporting** control
+that switches whether the child's ended turns are owed back to this thread;
+the switch is journaled on the child's report record and reads back on the
+next list.
 
 ## Turn figures and plan usage
 

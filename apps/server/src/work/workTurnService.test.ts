@@ -6331,6 +6331,16 @@ describe("WorkTurnService", () => {
     }
   });
 
+  it("refuses a window claiming a side-task report as its Work prompt", async () => {
+    const { service } = serviceFixture();
+    await expect(
+      service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        delivery: { kind: "side-task-report", reportIds: [crypto.randomUUID()] },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+  });
+
   it("refuses a turn that claims to deliver a subagent result the journal does not back", async () => {
     const delivery = { kind: "agent-result", runId: "d4a1b000-0000-4000-8000-000000000099" };
     // No agentRuns dependency: an unbacked mark is refused.
