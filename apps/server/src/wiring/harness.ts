@@ -1216,7 +1216,10 @@ export function wireHarness(deps: HarnessDependencies) {
           decodeCodeThreadId(threadId),
           limit * 4,
         ),
-        steered: codeBoardEventStore.steeredPersonMessagesForThread(decodeCodeThreadId(threadId)),
+        steered: codeBoardEventStore.steeredPersonMessagesForThread(
+          decodeCodeThreadId(threadId),
+          limit,
+        ),
         readPrompt: (prompt) => codeEvidence.read(prompt),
         limit,
         counts: ({ turnId, began }) =>
@@ -1226,7 +1229,7 @@ export function wireHarness(deps: HarnessDependencies) {
     codeLastMessageAt: (threadId) =>
       codeLastMessageAt(
         codeBoardEventStore.personPromptTurnsForThread(decodeCodeThreadId(threadId), 1),
-        codeBoardEventStore.steeredPersonMessagesForThread(decodeCodeThreadId(threadId)),
+        codeBoardEventStore.steeredPersonMessagesForThread(decodeCodeThreadId(threadId), 1),
       ),
     turnRunning: (threadId) => deps.liveTurns.read(threadId) !== undefined,
     resolveDriver: resolveConfiguredDriver,

@@ -2365,7 +2365,8 @@ except where a bullet says otherwise.
   message steered into a running Work or Code turn is read with the prompts, in
   the order it was said, on its own mark as a prompt is, and it counts as the
   newest thing the person wrote when the sweep decides whether a thread has
-  anything new.
+  anything new. A thread's newest steered messages are read (as many as the
+  distiller keeps), and the check for anything new reads only the newest one.
   Rationale: an agent's answer can carry outside content (a web page, a tool
   result the Watcher marked) or the contents of a file it read, and a memory
   entry must never be made on outside content's say-so or from a protected

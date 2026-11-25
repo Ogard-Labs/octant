@@ -43,6 +43,7 @@ import {
   readAgentResultsSteered,
 } from "../agentRun/agentResultSteeredRecord";
 import {
+  readNewestThreadMessagesSteered,
   readThreadMessagesSteered,
   threadMessagesSteeredInto,
 } from "../messageQueue/threadMessageSteeredRecord";
@@ -96,6 +97,7 @@ type JournalPort = Pick<
   | "append"
   | "replayAggregate"
   | "replayAggregateTypeForThread"
+  | "latestAggregateTypeForThread"
   | "aggregateTypeThreadHead"
   | "replayThreadAnchoredRows"
   | "latestThreadEvents"
@@ -1069,15 +1071,16 @@ export class CodeOperationEventStore {
   }
 
   /**
-   * The messages the person steered into this thread's running turns, oldest
-   * first, each under the id its typed mark uses. Empty when the journal cannot
+   * The newest `limit` messages the person steered into this thread's running
+   * turns, oldest first among them, each under the id its typed mark uses. Empty when the journal cannot
    * be read.
    */
   steeredPersonMessagesForThread(
     threadId: CodeThreadId,
+    limit: number,
   ): ReadonlyArray<{ readonly messageId: string; readonly at: string; readonly body: string }> {
     try {
-      return readThreadMessagesSteered(this.#journal, String(threadId))
+      return readNewestThreadMessagesSteered(this.#journal, String(threadId), limit)
         .filter((record) => record.mode === "code")
         .map((record) => ({
           messageId: String(record.messageId),

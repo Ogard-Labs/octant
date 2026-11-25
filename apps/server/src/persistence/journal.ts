@@ -140,6 +140,7 @@ export class Journal {
   readonly #replayNarrowedAggregateTypeRows: SqliteStatement;
   readonly #aggregateVersionRows: SqliteStatement;
   readonly #replayAggregateTypeThreadRows: SqliteStatement;
+  readonly #latestAggregateTypeThreadRows: SqliteStatement;
   readonly #aggregateTypeThreadHead: SqliteStatement;
   readonly #replayThreadAnchoredRows: SqliteStatement;
   readonly #replayAggregateRows: SqliteStatement;
@@ -355,6 +356,17 @@ export class Journal {
         AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
         AND global_sequence > ?
       ORDER BY global_sequence ASC
+      LIMIT ?
+    `);
+    this.#latestAggregateTypeThreadRows = options.connection.prepare(`
+      SELECT
+        global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
+        event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
+        actor_id, ${actorJsonSelect}, occurred_at, payload_json
+      FROM event_journal
+      WHERE aggregate_type = ?
+        AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+      ORDER BY global_sequence DESC
       LIMIT ?
     `);
     // The size and newest row of the same thread slice, counted on the index
@@ -901,6 +913,34 @@ export class Journal {
         cursor.threadId,
         cursor.afterSequence,
         cursor.limit,
+      ) as Array<JournalRow>
+    ).map((row) => this.#decodeRow(row));
+  }
+
+  /**
+   * The newest `limit` events of one aggregate type that name a thread, newest
+   * first: the other end of `replayAggregateTypeForThread`, for a reader that
+   * needs the recent part of a long history.
+   */
+  latestAggregateTypeForThread(slice: {
+    readonly aggregateType: string;
+    readonly threadId: string;
+    readonly limit: number;
+  }): ReadonlyArray<EventEnvelope> {
+    if (
+      slice.aggregateType.trim().length === 0 ||
+      slice.threadId.trim().length === 0 ||
+      !Number.isSafeInteger(slice.limit) ||
+      slice.limit < 1 ||
+      slice.limit > 1_000
+    ) {
+      throw new JournalInputInvalid({ operation: "replay" });
+    }
+    return (
+      this.#latestAggregateTypeThreadRows.all(
+        slice.aggregateType,
+        slice.threadId,
+        slice.limit,
       ) as Array<JournalRow>
     ).map((row) => this.#decodeRow(row));
   }
