@@ -19,6 +19,7 @@ import {
   defaultAgentRunAuthorityCeilingForMode,
   resolveAgentRunLiveParentGrant,
   windowAdmitsProject,
+  workThreadAccessOf,
 } from "@octant/domain";
 import type { CodeSessionAuthorityStore } from "../code/codeSessionAuthorityStore";
 import type { PersistenceService } from "../persistence/persistenceService";
@@ -44,25 +45,70 @@ const chatParentLiveGrant = (): AgentRunAuthority =>
     permissionPersistence: "current-session",
   });
 
-type WorkThreadReader = (threadId: WorkThreadId) => Pick<WorkThread, "access"> | undefined;
+type WorkThreadReader = (
+  threadId: WorkThreadId,
+) => Pick<WorkThread, "access" | "fullAccessSandbox"> | undefined;
 
 /**
- * A Work parent's grant to its helpers: approval-gated, or Plan while the
- * parent is in Plan, so a helper of a read-only thread is read-only too, as
- * a Code parent's is.
+ * What decides a Work parent's grant beside the thread itself: Strict as the
+ * host resolves it for the thread (absent, or unreadable, it is Strict), and
+ * the level the thread's running turn holds, which may be below the thread's.
  */
-const workParentLiveGrant = (access: WorkAccess): AgentRunAuthority =>
-  resolveAgentRunLiveParentGrant({
+interface WorkParentGrantReads {
+  readonly strict?: (threadId: string) => boolean;
+  readonly runningWorkTurnAccess?: (threadId: string) => WorkAccess | undefined;
+}
+
+/**
+ * A Work parent's grant to its helpers. Work and Code share one capability
+ * set, so outside Strict the grant follows the thread's own level as a Code
+ * parent's does: shell, Git and network outside Plan, read-only in Plan, and
+ * Accept edits for a sandboxed Full access thread, whose helper carries a
+ * posture and not the sandbox choice. Under Strict it stays approval-gated
+ * with no shell, Git or network, or Plan while the parent is in Plan.
+ */
+const workParentLiveGrant = (
+  thread: Pick<WorkThread, "access" | "fullAccessSandbox">,
+  strict: boolean,
+): AgentRunAuthority => {
+  const level = workThreadAccessOf(thread.access).executionPolicy;
+  const planOnly = level === "plan";
+  const open = !strict && !planOnly;
+  return resolveAgentRunLiveParentGrant({
     mode: "work",
     filesystem: true,
-    shell: false,
-    git: false,
-    network: false,
+    shell: open,
+    git: open,
+    network: open,
     tools: true,
     subagents: true,
-    executionPolicy: access === "plan" ? "plan" : "approval-gated",
+    executionPolicy: planOnly
+      ? "plan"
+      : strict
+        ? "approval-gated"
+        : level === "full-access" && thread.fullAccessSandbox === true
+          ? "auto-accept-edits"
+          : level,
     permissionPersistence: "current-session",
   });
+};
+
+/** The Work parent as its running turn holds it, read for one grant. */
+const workParentGrantFor = (
+  reads: WorkParentGrantReads,
+  threadId: string,
+  thread: Pick<WorkThread, "access" | "fullAccessSandbox">,
+): AgentRunAuthority => {
+  let strict = true;
+  let access = thread.access;
+  try {
+    strict = reads.strict?.(threadId) !== false;
+    access = reads.runningWorkTurnAccess?.(threadId) ?? thread.access;
+  } catch {
+    strict = true;
+  }
+  return workParentLiveGrant({ ...thread, access }, strict);
+};
 
 const codeParentLiveGrant = (
   executionPolicy: CodeThread["executionPolicy"],
@@ -104,8 +150,9 @@ export type CodeParentActiveTurn = (thread: CodeThread) => CodeThread;
  * Whether a parent thread runs at Full access: the level its running turn
  * holds, which a routine or a narrowed turn may hold below the thread's own,
  * or with no turn running the thread's own as it stands now. This is not the
- * authority a child is given: a Work parent's children are always capped at
- * approval-gated, so that cap cannot say whether the parent is at Full access.
+ * authority a child is given: under Strict a Work parent's children are capped
+ * at approval-gated, so that cap cannot say whether the parent is at Full
+ * access.
  */
 export function parentRunsAtFullAccess(
   input: {
@@ -141,7 +188,7 @@ type AgentRunCreationInput = {
    * (a turn waiting on a question still holds it); undefined with none.
    */
   readonly liveTurnProvider?: (threadId: string) => ProviderInstanceId | undefined;
-};
+} & WorkParentGrantReads;
 
 export function authorizeAgentRunCreation(
   input: AgentRunCreationInput,
@@ -224,7 +271,7 @@ function authorizeParentThread(
     const revision = project.bindingHistory.at(-1);
     if (revision === undefined) return undefined;
     const parentAuthority = defaultAgentRunAuthorityCeilingForMode("work");
-    const liveAuthority = workParentLiveGrant(workThread.access);
+    const liveAuthority = workParentGrantFor(input, String(workThread.id), workThread);
     return {
       parentMode: "work",
       parentAuthority,
@@ -290,24 +337,30 @@ function authorizeParentThread(
   return undefined;
 }
 
-export function boundAgentRunLiveAuthority(input: {
-  readonly persistence: Pick<PersistenceService, "readCodeThread">;
-  readonly run: Pick<AgentRun, "requestId" | "parentThreadId"> & {
-    readonly routingReceipt: Pick<AgentRun["routingReceipt"], "mode">;
-  };
-  readonly executionWindows: ReadonlyMap<
-    AgentRun["requestId"],
-    { readonly windowId: WindowId; readonly parentThreadId: AgentRun["parentThreadId"] }
-  >;
-  readonly codeSessionAuthority: CodeSessionAuthorityStore;
-  readonly windowAuthorityStore: Pick<WindowAuthorityStore, "listWindowIds">;
-  readonly activeTurn?: CodeParentActiveTurn;
-  readonly readWorkThread?: WorkThreadReader;
-}): AgentRunAuthority | undefined {
+export function boundAgentRunLiveAuthority(
+  input: {
+    readonly persistence: Pick<PersistenceService, "readCodeThread">;
+    readonly run: Pick<AgentRun, "requestId" | "parentThreadId"> & {
+      readonly routingReceipt: Pick<AgentRun["routingReceipt"], "mode">;
+    };
+    readonly executionWindows: ReadonlyMap<
+      AgentRun["requestId"],
+      { readonly windowId: WindowId; readonly parentThreadId: AgentRun["parentThreadId"] }
+    >;
+    readonly codeSessionAuthority: CodeSessionAuthorityStore;
+    readonly windowAuthorityStore: Pick<WindowAuthorityStore, "listWindowIds">;
+    readonly activeTurn?: CodeParentActiveTurn;
+    readonly readWorkThread?: WorkThreadReader;
+  } & WorkParentGrantReads,
+): AgentRunAuthority | undefined {
   const binding = input.executionWindows.get(input.run.requestId);
   return scheduledAgentRunLiveAuthority({
     persistence: input.persistence,
     run: input.run,
+    ...(input.strict === undefined ? {} : { strict: input.strict }),
+    ...(input.runningWorkTurnAccess === undefined
+      ? {}
+      : { runningWorkTurnAccess: input.runningWorkTurnAccess }),
     ...(input.readWorkThread === undefined ? {} : { readWorkThread: input.readWorkThread }),
     ...(input.activeTurn === undefined ? {} : { activeTurn: input.activeTurn }),
     // Cached bindings do not extend a window's lifetime. The store's read
@@ -336,32 +389,35 @@ export function boundAgentRunLiveAuthority(input: {
  * Returns `undefined` when the parent thread the grant derives from can no
  * longer be read; the dispatch then reports a refusal instead of guessing.
  */
-export function scheduledAgentRunLiveAuthority(input: {
-  readonly persistence: Pick<PersistenceService, "readCodeThread">;
-  readonly run: Pick<AgentRun, "parentThreadId"> & {
-    readonly routingReceipt: Pick<AgentRun["routingReceipt"], "mode">;
-  };
-  readonly executionWindow?: {
-    readonly windowId: WindowId;
-    readonly codeSessionAuthority: CodeSessionAuthorityStore;
-  };
-  readonly activeTurn?: CodeParentActiveTurn;
-  /** A Work parent as it is stored now; absent, or unreadable, it reads as outside Plan. */
-  readonly readWorkThread?: WorkThreadReader;
-}): AgentRunAuthority | undefined {
+export function scheduledAgentRunLiveAuthority(
+  input: {
+    readonly persistence: Pick<PersistenceService, "readCodeThread">;
+    readonly run: Pick<AgentRun, "parentThreadId"> & {
+      readonly routingReceipt: Pick<AgentRun["routingReceipt"], "mode">;
+    };
+    readonly executionWindow?: {
+      readonly windowId: WindowId;
+      readonly codeSessionAuthority: CodeSessionAuthorityStore;
+    };
+    readonly activeTurn?: CodeParentActiveTurn;
+    /** A Work parent as it is stored now; absent, or unreadable, it reads as outside Plan. */
+    readonly readWorkThread?: WorkThreadReader;
+  } & WorkParentGrantReads,
+): AgentRunAuthority | undefined {
   switch (input.run.routingReceipt.mode) {
     case "chat":
       return chatParentLiveGrant();
     case "work": {
-      let access: WorkAccess = DEFAULT_WORK_ACCESS;
+      let thread: Pick<WorkThread, "access" | "fullAccessSandbox"> = {
+        access: DEFAULT_WORK_ACCESS,
+      };
       try {
-        access =
-          input.readWorkThread?.(decodeWorkThreadId(String(input.run.parentThreadId)))?.access ??
-          DEFAULT_WORK_ACCESS;
+        thread =
+          input.readWorkThread?.(decodeWorkThreadId(String(input.run.parentThreadId))) ?? thread;
       } catch {
-        access = DEFAULT_WORK_ACCESS;
+        thread = { access: DEFAULT_WORK_ACCESS };
       }
-      return workParentLiveGrant(access);
+      return workParentGrantFor(input, String(input.run.parentThreadId), thread);
     }
     case "code": {
       let codeThread;

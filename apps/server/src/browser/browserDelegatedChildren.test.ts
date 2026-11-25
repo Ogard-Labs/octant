@@ -53,7 +53,7 @@ it.each([
     });
     if (command.kind !== "review") throw Error("Expected review");
     const windowId = decodeWindowId("10000000-0000-4000-8000-000000000001");
-    const authority = defaultAgentRunAuthorityCeilingForMode("work");
+    const authority = { ...defaultAgentRunAuthorityCeilingForMode("work"), network: false };
     const workRun = decodeAgentRun({
       id: "20000000-0000-4000-8000-000000000001",
       requestId: "22222222-2222-4222-8222-222222222222",

@@ -70,7 +70,6 @@ import {
   type AgentRunSessionPort,
 } from "./agentRunSessionPort";
 
-const DEFAULT_MAX_EVENTS = 256;
 /**
  * The default time one managed child turn may work, from acquiring the provider to
  * its terminal event.
@@ -246,14 +245,18 @@ function dependencyResultBlocks(
 }
 
 export interface AgentRunSessionInteractions {
-  /** The host checks current child authority and asks the person; this port never grants it. */
+  /**
+   * The host checks current child authority and asks the person; this port
+   * never grants it. `approved-by-reviewer` is an automatic reviewer's allow,
+   * which holds for that one call whatever the person's persistence setting.
+   */
   readonly approve?: (input: {
     readonly run: AgentRun;
     readonly event: Extract<ProviderRuntimeEvent, { readonly kind: "approval-request" }>;
     /** The pending call, from the child's connection, for an automatic reviewer. */
     readonly call?: ProviderApprovalCall | undefined;
     readonly signal: AbortSignal;
-  }) => Promise<boolean>;
+  }) => Promise<boolean | "approved-by-reviewer">;
   readonly askUser?: (input: {
     readonly run: AgentRun;
     readonly event: Extract<ProviderRuntimeEvent, { readonly kind: "user-input-request" }>;
@@ -263,11 +266,18 @@ export interface AgentRunSessionInteractions {
 
 export interface AgentRunSessionRuntimeOptions {
   /**
+   * Strict for the child's session, resolved from its parent thread: a helper
+   * of a thread outside Strict runs as that thread's own provider does, and a
+   * helper of a Strict thread keeps every Strict protection. Absent, or
+   * unreadable, the session is Strict.
+   */
+  readonly strict?: (run: AgentRun) => boolean;
+  /**
    * Whether the child's provider may ask it a question that wants a secret:
    * only when its parent thread is outside Strict, read the way every other
    * child policy reads its parent's Strict. Its answer reaches the child in
-   * memory and is kept nowhere. The child's session still runs Strict in
-   * every other respect. Absent, or unreadable, such a question is refused.
+   * memory and is kept nowhere. Absent, or unreadable, such a question is
+   * refused.
    */
   readonly asksSecretQuestions?: (run: AgentRun) => boolean;
   readonly reviewCapture?: AgentRunReviewCapture;
@@ -352,7 +362,6 @@ export interface AgentRunSessionRuntimeOptions {
     readonly modelId: ProviderModelId;
   }) => ProviderServiceLimits | undefined;
   readonly capacityEnforcement?: SchedulerCapacityEnforcement;
-  readonly maxEvents?: number;
   readonly timeoutMs?: number;
   /**
    * Person-owned settings, read for each new attempt; agents cannot supply
@@ -482,7 +491,6 @@ export function createAgentRunSessionRuntime(
   options: AgentRunSessionRuntimeOptions,
 ): AgentRunSessionPort {
   const sessions = new Map<AgentRunId, LiveSession>();
-  const maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
   const timeoutMs = options.timeoutMs ?? MANAGED_AGENT_RUN_TURN_DEADLINE_MS;
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
 
@@ -1184,8 +1192,8 @@ export function createAgentRunSessionRuntime(
             recordCursor,
             recordContinuation,
             requireResumeCursor: options.supportsResume?.(target.providerInstanceId) === true,
-            maxEvents,
             timeoutMs: workingTimeLimitMs,
+            strict: safeStrict(options, run),
             shutdownTimeoutMs,
             shutdown,
             onTextDelta: options.onTextDelta,
@@ -1392,6 +1400,14 @@ export function createAgentRunSessionRuntime(
   };
 }
 
+function safeStrict(options: AgentRunSessionRuntimeOptions, run: AgentRun): boolean {
+  try {
+    return options.strict?.(run) !== false;
+  } catch {
+    return true;
+  }
+}
+
 function safeAsksSecretQuestions(options: AgentRunSessionRuntimeOptions, run: AgentRun): boolean {
   try {
     return options.asksSecretQuestions?.(run) === true;
@@ -1554,7 +1570,6 @@ interface ManagedSessionInput {
   readonly recordCursor: (cursor: ProviderResumeCursor | undefined) => boolean;
   readonly recordContinuation: (state: "delivery-unknown" | "delivered") => boolean;
   readonly requireResumeCursor: boolean;
-  readonly maxEvents: number;
   /** `none` runs the turn with no working-time limit. */
   readonly timeoutMs: number | "none";
   readonly shutdownTimeoutMs: number;
@@ -1564,6 +1579,8 @@ interface ManagedSessionInput {
   readonly outsideContentMarks: RuntimeOutsideContentMarking;
   readonly onUserMessage?: AgentRunSessionRuntimeOptions["onUserMessage"];
   readonly interactions: AgentRunSessionRuntimeOptions["interactions"];
+  /** See {@link AgentRunSessionRuntimeOptions.strict}. */
+  readonly strict: boolean;
   /** See {@link AgentRunSessionRuntimeOptions.asksSecretQuestions}. */
   readonly asksSecretQuestions: boolean;
   readonly onConnectionReady: (
@@ -1586,7 +1603,6 @@ interface ManagedSessionState {
   usage: TurnUsage | undefined;
   /** Whether the prompt went to the provider, so the turn may have been charged. */
   promptSent: boolean;
-  handledEvents: number;
   /** Whether a provider connection was acquired at all. */
   acquired: boolean;
   /** Whether the runtime deadline, rather than the provider, ended the turn. */
@@ -1696,7 +1712,6 @@ function runManagedSession(
         toolsTruncated: false,
         usage: undefined,
         promptSent: false,
-        handledEvents: 0,
         acquired: false,
         timedOut: false,
         awaitPerson: deadline.awaitPerson,
@@ -1963,8 +1978,11 @@ function runSessionTurn(
             // The clamped run authority is what reaches the provider. Nothing here
             // may widen it, and no parent-thread policy is consulted.
             executionPolicy: input.authority.executionPolicy,
-            // Every approval a helper gets holds for that one call.
-            answersOncePerCall: true,
+            strict: input.strict,
+            // Under Strict every approval a helper gets holds for that one
+            // call. Outside it the person's answer is kept as their
+            // persistence setting says, as on the parent thread.
+            ...(input.strict ? { answersOncePerCall: true } : {}),
             ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
             ...(input.asksSecretQuestions ? { asksSecretQuestions: true } : {}),
             tools: input.appManagedTools?.definitions ?? [],
@@ -1977,7 +1995,8 @@ function runSessionTurn(
               ? {}
               : { modelOptionValues: input.modelOptionValues }),
             executionPolicy: input.authority.executionPolicy,
-            answersOncePerCall: true,
+            strict: input.strict,
+            ...(input.strict ? { answersOncePerCall: true } : {}),
             ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
             ...(input.asksSecretQuestions ? { asksSecretQuestions: true } : {}),
             tools: input.appManagedTools?.definitions ?? [],
@@ -2153,7 +2172,6 @@ function collectSessionEvents(
         );
       const collection = events.pipe(
         Stream.filter((event) => event.sessionId === input.sessionId),
-        Stream.take(input.maxEvents + 1),
         Stream.takeUntil(
           (event) =>
             event.kind === "waiting" ||
@@ -2165,10 +2183,7 @@ function collectSessionEvents(
           Effect.gen(function* () {
             // For a Chat or Work thread's tool-call record; a helper keeps none.
             if (event.kind === "tool-call-content") return;
-            state.handledEvents += 1;
             input.toolEffects?.observe(event, input.appManagedTools);
-            // Marked before the budget is looked at: what the runtime read
-            // reached its model either way.
             if (event.kind === "outside-content-result") {
               const watched = input.outsideContentMarks.watch(String(input.run.id), event);
               if (watched.status === "refused") {
@@ -2187,15 +2202,8 @@ function collectSessionEvents(
                   message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
                 } satisfies ProviderFailure);
               }
-            }
-            if (state.handledEvents > input.maxEvents) {
-              state.outcome = {
-                kind: "interrupted",
-                reason: "Managed AgentRun turn exceeded its bounded event budget.",
-              };
               return;
             }
-            if (event.kind === "outside-content-read") return;
             if (event.kind === "file-change" && event.instanceId === input.providerInstanceId) {
               const path = isAbsolute(event.path)
                 ? relative(input.projectRoot, event.path)
@@ -2263,7 +2271,7 @@ function collectSessionEvents(
               yield* forkInteraction(
                 Effect.gen(function* () {
                   let interactionSignal: AbortSignal | undefined;
-                  const approved = yield* Effect.tryPromise({
+                  const answer = yield* Effect.tryPromise({
                     try: async (signal) => {
                       interactionSignal = AbortSignal.any([signal, toolAbort.signal]);
                       const resumeDeadline = state.awaitPerson();
@@ -2292,10 +2300,15 @@ function collectSessionEvents(
                   yield* connection.answerApproval({
                     sessionId: input.sessionId,
                     requestId: event.requestId,
-                    approved,
-                    // A child's request is answered for that one call, by the
-                    // person or by its parent's reviewer; nothing is remembered.
-                    scope: "once",
+                    approved: answer !== false,
+                    // Under Strict a child's request is answered for that one
+                    // call and nothing is remembered. Outside it the person's
+                    // own answer is kept as their persistence setting says;
+                    // an automatic reviewer's answer never is, since no one
+                    // reviewed the next call.
+                    ...(input.strict || answer === "approved-by-reviewer"
+                      ? { scope: "once" as const }
+                      : {}),
                   });
                 }),
               );

@@ -143,6 +143,19 @@ describe("a child under a parent Octant Shield reviews", () => {
     expect(shown).toHaveBeenCalledOnce();
   });
 
+  it("says when the reviewer, not the person, allowed a child's provider prompt", async () => {
+    const reviewed = interactionsWith("allow");
+    const signal = new AbortController().signal;
+    expect(await reviewed.interactions.approve({ run, event, signal })).toBe(
+      "approved-by-reviewer",
+    );
+    expect(reviewed.ask).not.toHaveBeenCalled();
+
+    const asked = interactionsWith("ask");
+    expect(await asked.interactions.approve({ run, event, signal })).toBe(true);
+    expect(asked.ask).toHaveBeenCalledOnce();
+  });
+
   it("refuses a child's provider prompt Shield denies, without asking the person", async () => {
     const { interactions, ask } = interactionsWith("deny");
     expect(await interactions.approve({ run, event, signal: new AbortController().signal })).toBe(

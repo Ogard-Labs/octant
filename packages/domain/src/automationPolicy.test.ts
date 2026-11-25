@@ -854,22 +854,29 @@ describe("what a thread's agent may do with routines", () => {
 describe("a routine a thread's agent sets up", () => {
   const suggestion = { requestedByPerson: false, followUp: false } as const;
 
-  it("is created paused with no card at Full access, and waits for the person's card below it", () => {
+  it("is created paused with no card at Full access when the person keeps such routines paused, and waits for the person's card below it", () => {
     expect(decideRoutineFromAgent({ ...suggestion, posture: "full-access" })).toBe("create-paused");
     for (const posture of ["approval-gated", "auto-accept-edits", undefined] as const) {
       expect(decideRoutineFromAgent({ ...suggestion, posture })).toBe("ask-on-card");
     }
   });
 
-  it("is created paused at any writing level when the person asked for it", () => {
+  it("is created active at any writing level when the person asked for it, whatever Settings say about suggestions", () => {
     for (const posture of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
-      expect(decideRoutineFromAgent({ ...suggestion, requestedByPerson: true, posture })).toBe(
-        "create-paused",
-      );
+      for (const startActiveAtFullAccess of [true, false, undefined]) {
+        expect(
+          decideRoutineFromAgent({
+            ...suggestion,
+            requestedByPerson: true,
+            posture,
+            ...(startActiveAtFullAccess === undefined ? {} : { startActiveAtFullAccess }),
+          }),
+        ).toBe("create-active");
+      }
     }
   });
 
-  it("starts enabled at Full access only when the person turned that on in Settings", () => {
+  it("starts an agent's suggestion enabled only at Full access with the Settings choice on", () => {
     expect(
       decideRoutineFromAgent({
         ...suggestion,
@@ -880,11 +887,10 @@ describe("a routine a thread's agent sets up", () => {
     expect(
       decideRoutineFromAgent({
         ...suggestion,
-        requestedByPerson: true,
         posture: "auto-accept-edits",
         startActiveAtFullAccess: true,
       }),
-    ).toBe("create-paused");
+    ).toBe("ask-on-card");
     expect(
       decideRoutineFromAgent({
         ...suggestion,

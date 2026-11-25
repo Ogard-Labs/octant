@@ -40,20 +40,30 @@ describe("AgentRunPolicySettings", () => {
 describe("a helper's working-time limit", () => {
   const stored: { readonly workingTimeLimitMinutes?: number } = {};
 
-  it("is 120 minutes until a person chooses another", () => {
+  it("is 120 minutes below Full access until a person chooses another", () => {
     expect(agentRunWorkingTimeLimitMinutes(stored, { threadAtFullAccess: false })).toBe(120);
     expect(
       agentRunWorkingTimeLimitMinutes(
         { ...stored, workingTimeLimitMinutes: 45 },
-        { threadAtFullAccess: true },
+        { threadAtFullAccess: false },
       ),
     ).toBe(45);
   });
 
-  it("is none only when the person chose that and the thread has Full access", () => {
-    const lifted = { ...stored, noWorkingTimeLimitAtFullAccess: true };
-    expect(agentRunWorkingTimeLimitMinutes(lifted, { threadAtFullAccess: true })).toBe("none");
-    expect(agentRunWorkingTimeLimitMinutes(lifted, { threadAtFullAccess: false })).toBe(120);
+  it("is none at Full access by default, and never below it", () => {
+    for (const settings of [stored, { ...stored, noWorkingTimeLimitAtFullAccess: true }]) {
+      expect(agentRunWorkingTimeLimitMinutes(settings, { threadAtFullAccess: true })).toBe("none");
+      expect(agentRunWorkingTimeLimitMinutes(settings, { threadAtFullAccess: false })).toBe(120);
+    }
+  });
+
+  it("keeps the person's limit at Full access once they turn the lift off", () => {
+    expect(
+      agentRunWorkingTimeLimitMinutes(
+        { workingTimeLimitMinutes: 45, noWorkingTimeLimitAtFullAccess: false },
+        { threadAtFullAccess: true },
+      ),
+    ).toBe(45);
   });
 });
 

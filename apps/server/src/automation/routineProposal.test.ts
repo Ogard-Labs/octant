@@ -313,17 +313,17 @@ describe("routine proposals from a thread", () => {
     expect(await listed(h.handler)).toEqual([]);
   });
 
-  it("creates a paused routine at once, with no card, when the person asked for it", async () => {
+  it("creates an enabled routine at once, with no card, when the person asked for it", async () => {
     const h = harness();
     const outcome = await h.tools().execute({
       name: "octant_propose_routine",
       inputJson: JSON.stringify({ ...JSON.parse(weeklyInput), requestedByPerson: true }),
     });
-    expect(outcome).toMatchObject({ result: { status: "created", paused: true } });
+    expect(outcome).toMatchObject({ result: { status: "created", paused: false } });
     // The tool row carries what was created, so the transcript can show a receipt.
     expect(outcome.routine).toMatchObject({
       name: "Monday report",
-      paused: true,
+      paused: false,
       trigger: { kind: "weekly-local" },
     });
     expect(await listed(h.handler)).toEqual([]);
@@ -335,7 +335,7 @@ describe("routine proposals from a thread", () => {
     expect(items).toHaveLength(1);
     const routine = h.projection.getDefinition(items[0]?.id as never);
     expect(routine).toMatchObject({
-      lifecycle: "paused",
+      lifecycle: "enabled",
       originThreadId: THREAD,
       createdBy: { kind: "local-window", windowId: String(windowId), capabilityGeneration: 0 },
     });
@@ -347,7 +347,7 @@ describe("routine proposals from a thread", () => {
     });
   });
 
-  it("creates a paused routine with no card, and a receipt for the thread, when the agent suggests one at Full access", async () => {
+  it("creates a paused routine with no card, and a receipt for the thread, when the agent suggests one at Full access and the person's Settings keep such routines paused", async () => {
     const h = harness({ mode: "code" });
     const outcome = await h
       .tools(windowId, false, "full-access")

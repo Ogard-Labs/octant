@@ -147,7 +147,10 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
     readonly commandHosts?: ReadonlyArray<NativeHarnessCommandHost>;
     readonly shieldCall?: (boundRoot: string) => ShieldCall;
     readonly signal?: AbortSignal;
-  }): Promise<NativeHarnessCommandApprovalOutcome | { readonly outcome: "shield-denied" }> => {
+  }): Promise<
+    | (NativeHarnessCommandApprovalOutcome & { readonly byReviewer?: true })
+    | { readonly outcome: "shield-denied" }
+  > => {
     if (!current(input.run, input.signal)) return { outcome: "cancelled" };
     // A provider's opaque prompt cannot widen Plan or the child's admitted
     // authority. Native tool prompts have already passed the tool policy.
@@ -187,7 +190,9 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
         });
         if (decision.verdict === "allow" || decision.verdict === "deny") {
           options.approvals.recordReviewed?.(ask, { ...decision, verdict: decision.verdict });
-          return { outcome: decision.verdict === "allow" ? "approved" : "shield-denied" };
+          return decision.verdict === "allow"
+            ? { outcome: "approved", byReviewer: true }
+            : { outcome: "shield-denied" };
         }
         ask = { ...ask, shield: decision };
       }
@@ -236,8 +241,8 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
       /** The pending call, from the child's connection, for Shield. */
       readonly call?: ProviderApprovalCall | undefined;
       readonly signal: AbortSignal;
-    }): Promise<boolean> =>
-      (await approve({
+    }): Promise<boolean | "approved-by-reviewer"> => {
+      const answered = await approveListing({
         ...input,
         toolName: "provider-action",
         summary: `${input.event.action}: ${input.event.description}`,
@@ -250,7 +255,12 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
             description: input.event.description,
             boundRoot,
           }),
-      })) === "approved",
+      });
+      if (answered.outcome !== "approved") return false;
+      return "byReviewer" in answered && answered.byReviewer === true
+        ? "approved-by-reviewer"
+        : true;
+    },
     askUser: async (input: {
       readonly run: AgentRun;
       readonly event: Extract<ProviderRuntimeEvent, { readonly kind: "user-input-request" }>;

@@ -83,6 +83,12 @@ export interface CoordinatorServicePorts {
   readonly isDesignatedPlanner: (threadId: string) => boolean;
   /** Whether a thread is marked as having read outside content, as its mark reads now. */
   readonly isMarked: (threadId: string) => boolean;
+  /**
+   * Strict as the host resolves it for a thread now. Under it a marked
+   * coordinator's workers never start at Full access; absent, every thread
+   * reads as Strict.
+   */
+  readonly isStrict?: (threadId: string) => boolean;
   /** A thread's state in the closed set the threads tool reports, or `undefined`. */
   readonly threadState: (threadId: string) => "working" | "waiting-for-person" | "idle" | undefined;
   /** The id of the thread's latest provider turn, if it has one. */
@@ -365,6 +371,7 @@ export class CoordinatorService {
               lifecycle: caller.lifecycle,
               level: caller.executionPolicy,
               marked: this.#ports.isMarked(String(caller.id)),
+              strict: this.#ports.isStrict?.(String(caller.id)) !== false,
               // A worker never coordinates, even one designated as planner
               // before that rule; it stays refused as unauthorized.
               designatedPlanner:

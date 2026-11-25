@@ -751,11 +751,13 @@ export class CodeTurnRunner {
                       .pipe(Effect.catchAll(() => Effect.void));
                     return yield* fail("failed", RUNTIME_OUTSIDE_CONTENT_REFUSAL);
                   }
-                  // The runtime's own reviewer was chosen for this session
-                  // while the thread was unmarked and would keep answering
-                  // approvals for the rest of it; the next turn starts
-                  // without it.
-                  if (input.harnessAutoReviewEnabled === true) {
+                  // Under Strict the runtime's own reviewer, chosen for this
+                  // session while the thread was unmarked, would keep
+                  // answering approvals for the rest of it; the next turn
+                  // starts without it. Outside Strict the read only marks the
+                  // thread and the reviewer keeps answering, as it does in
+                  // the provider's own app.
+                  if (strict && input.harnessAutoReviewEnabled === true) {
                     yield* connection
                       .interrupt(input.sessionId)
                       .pipe(Effect.catchAll(() => Effect.void));
@@ -770,7 +772,10 @@ export class CodeTurnRunner {
                     fullAccess: input.thread.executionPolicy === "full-access",
                   });
                 }
-                if (handledEvents > maxEvents) {
+                // The event budget is one of Octant's own limits, so it
+                // stops a turn only under Strict; outside it a long turn
+                // keeps running, as the tool-step limit it follows says.
+                if (strict && handledEvents > maxEvents) {
                   yield* connection
                     .interrupt(input.sessionId)
                     .pipe(Effect.catchAll(() => Effect.void));

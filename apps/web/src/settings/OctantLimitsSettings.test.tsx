@@ -22,7 +22,7 @@ describe("Octant's own limits in Settings", () => {
       screen.getByRole("switch", { name: "Start agent-created routines active at Full access" }),
     );
     expect(onSettingsChange).toHaveBeenLastCalledWith({
-      agentRoutinesStartActiveAtFullAccess: true,
+      agentRoutinesStartActiveAtFullAccess: false,
     });
     expect(
       screen.getByText(/Default 8\. A recurring wake-up may fire as often as every minute/),

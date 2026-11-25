@@ -334,6 +334,9 @@ export function startOctantServer(
     } = wireAuthority({
       workThreadProjection,
       browserAuthority,
+      resolveThreadStrict,
+      // Deferred: Work's running turns are wired later in this scope.
+      runningWorkTurnAccess: (threadId) => runningWorkTurnAccess(threadId),
       options,
       persistence,
     });
