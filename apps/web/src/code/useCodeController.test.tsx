@@ -3577,6 +3577,46 @@ describe("useCodeController", () => {
       unmount();
     });
 
+    it("opens no second stream for a turn this window sent when the thread list says the thread is working", async () => {
+      const { client, host, say } = runningThread();
+      host.threads[String(ids.thread)]?.turns.splice(0, 1);
+      const sent = fakeClient({
+        ...client,
+        executeOperation: vi.fn(async (command: CodeOperationCommand) => ({
+          kind: "provider-turn-state",
+          operationId: command.operationId,
+          state: "running",
+        })) as never,
+      });
+      const working = (sequence: number): CodeBootstrap => ({
+        ...bootstrap(1, sequence),
+        runtime: [{ threadId: ids.thread, executing: true }] as never,
+      });
+      const { result, rerender, unmount } = renderHook(
+        ({ navigationBootstrap }) =>
+          useCodeController({
+            activeThreadId: ids.thread,
+            client: sent,
+            navigation: { bootstrap: navigationBootstrap },
+            navigationRefreshMs: 0,
+            reconnectDelayMs: 60_000,
+          }),
+        { initialProps: { navigationBootstrap: bootstrap() } },
+      );
+      await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+      void result.current.sendFollowUp("Add the index");
+      // The list hears of the turn before the host has answered the send.
+      rerender({ navigationBootstrap: working(4) });
+      await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      rerender({ navigationBootstrap: working(6) });
+      act(() => say(1, "part-1"));
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({ text: "First half" }),
+      );
+      expect(client.subscribeOperation).toHaveBeenCalledOnce();
+      unmount();
+    });
+
     it("reads nothing more for a thread with no running turn", async () => {
       const host = windowedHost({
         [String(ids.thread)]: {

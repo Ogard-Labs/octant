@@ -386,6 +386,88 @@ describe("CodeThreadControllerSlots", () => {
     expect(readsOf(threadB)).toBe(idleReads);
   });
 
+  it("follows a turn another window started in a thread this window opened idle, with what the person sent into it", async () => {
+    const registry = createCodeThreadControllers();
+    const steeredMessages = [{ messageId: "m1", body: "Skip the backfill.", steeredAt: now }];
+    const turn = {
+      operationId: "70000000-0000-4000-8000-000000000002",
+      providerInstanceId: "50000000-0000-4000-8000-000000000001",
+      modelId: "model-a",
+      prompt: { contentId: "p", digest: "a".repeat(64), byteLength: 1 },
+      assistant: [],
+      status: "incomplete",
+      steeredMessages,
+      startedAt: now,
+      updatedAt: now,
+    };
+    let turnsOfA: ReadonlyArray<object> = [];
+    const conversationWindow = vi.fn(async (threadId: unknown) => ({
+      version: 1,
+      threadId,
+      turns: String(threadId) === String(threadA) ? turnsOfA : [],
+      hasEarlier: false,
+      hasLater: false,
+    }));
+    const subscribeOperation = vi.fn((_t: unknown, _o: unknown, _c: unknown, signal: AbortSignal) =>
+      idleStream(signal),
+    );
+    const api = {
+      ...client(),
+      conversationWindow,
+      operationContent: vi.fn(async () => new TextEncoder().encode("Add the index")),
+      subscribeOperation,
+    } as unknown as CodeClient;
+    const readCursorStore = createCodeReadCursorStore();
+    const idle = bootstrap();
+    const tree = (navigationBootstrap: CodeBootstrap) => (
+      <CodeThreadControllerSlots
+        client={api}
+        navigationBootstrap={navigationBootstrap}
+        readCursorStore={readCursorStore}
+        registry={registry}
+        threadIds={[threadA, threadB]}
+      />
+    );
+    const view = render(tree(idle));
+    await waitFor(() => {
+      expect(registry.get(threadA)?.conversationHistory).toBe("loaded");
+      expect(registry.get(threadB)?.conversationHistory).toBe("loaded");
+    });
+    expect(registry.get(threadA)?.turnStatus).toBe("idle");
+    const readsOf = (threadId: CodeThreadId) =>
+      conversationWindow.mock.calls.filter(([id]) => String(id) === String(threadId)).length;
+    const idleReadsOfB = readsOf(threadB);
+    const idleReadsOfA = readsOf(threadA);
+
+    // Another window started a turn and the runtime took a message into it.
+    // The window's thread list is all this one hears of it.
+    turnsOfA = [turn];
+    const working = (sequence: number): CodeBootstrap => ({
+      ...idle,
+      activity: [{ threadId: threadA, lastSequence: sequence }] as never,
+      runtime: [{ threadId: threadA, executing: true }] as never,
+    });
+    view.rerender(tree(working(5)));
+
+    await waitFor(() => {
+      expect(registry.get(threadA)?.turnStatus).toBe("running");
+      expect(registry.get(threadA)?.conversation.at(-1)).toMatchObject({
+        role: "assistant",
+        steeredMessages,
+      });
+    });
+    await waitFor(() => expect(subscribeOperation).toHaveBeenCalledOnce());
+    const followedReads = readsOf(threadA);
+    expect(followedReads).toBeGreaterThan(idleReadsOfA);
+
+    // More activity on a turn already followed reads nothing again and opens
+    // no second stream.
+    view.rerender(tree(working(9)));
+    await act(async () => undefined);
+    expect(subscribeOperation).toHaveBeenCalledOnce();
+    expect(readsOf(threadB)).toBe(idleReadsOfB);
+  });
+
   it("gives every open Code thread its own view instead of one shared with the front tab", async () => {
     const registry = createCodeThreadControllers();
     render(
