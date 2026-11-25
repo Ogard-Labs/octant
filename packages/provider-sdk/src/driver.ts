@@ -2,6 +2,7 @@ import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import type {
   ProviderApprovalCall,
   ContextCompactionRefusalReason,
+  PermissionPersistence,
   ProviderDriverKind,
   ProviderExecutionPolicy,
   ProviderFailure,
@@ -115,6 +116,14 @@ export interface ProviderAcquireInput {
    */
   readonly serverPlacement?: ProviderServerPlacement;
   readonly mode?: "chat" | "work" | "code";
+  /**
+   * How long an approval holds on this thread. A driver whose runtime process
+   * remembers session approvals and is kept between turns never gives a thread
+   * that keeps none a process that may still hold one. What an answer
+   * remembers follows {@link ProviderApprovalAnswer.persistence}. Absent, the
+   * thread follows the host's default.
+   */
+  readonly permissionPersistence?: PermissionPersistence;
   /** Context used by the server-owned Work request projection subscriber. */
   readonly workRequest?: {
     readonly projectId: ProjectId;
@@ -490,9 +499,21 @@ export interface ProviderApprovalAnswer {
    * persistence setting says. Every automatic reviewer's answer (Octant
    * Shield) and every answer on a child run's behalf carries it, so one
    * automatic allow never authorizes a later call that nobody reviewed.
-   * Absent, the driver applies the person's persistence setting as before.
+   * Absent, the driver applies `persistence`, or the host's default where the
+   * answer names none.
    */
   readonly scope?: "once";
+  /**
+   * How long the person's answer holds on the thread it was given in, in place
+   * of the host's default persistence the driver was built with. With
+   * `current-session` a driver remembers the answer for this session where it
+   * would under that default, so the runtime is not asked again for the same
+   * action; with `project-default` it remembers nothing. It never widens an answer: `scope: "once"` wins over it, a denial
+   * remembers nothing, and a driver that cannot remember for a session, or
+   * could only remember more than was approved, keeps asking. Absent, the
+   * driver reads the host's default.
+   */
+  readonly persistence?: PermissionPersistence;
 }
 
 export interface ProviderUserInputAnswer {
