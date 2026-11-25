@@ -3716,8 +3716,10 @@ stops being one of its linked threads (for babysitting and line notes too)
 until the thread touches it again, whatever the branch or an earlier
 operation said, and across a repository rename. The thread keeps its newest 50
 unlinks; an older one lapses. The page says when the unlink is done or why it
-was refused. Only a person may unlink; a routine is refused (maintainer
-decision, 2026-11-24). A "…" menu beside the row (More for pull request
+was refused. Only a person may unlink (maintainer decision,
+2026-11-24), at a window on this computer or on a device they paired at Full; a
+routine, an agent grant, a device paired at a narrower level and a device only
+the hub introduced are refused (maintainer decision, 2026-11-25). A "…" menu beside the row (More for pull request
 #N), shown on hover and keyboard focus and always on touch, offers Open on
 GitHub and Copy link. The list is the host's cached reading: opening the strip
 reaches no forge, and the link is built from the repository and number, never
