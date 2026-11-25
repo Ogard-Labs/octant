@@ -206,9 +206,10 @@ try:
          "-destination", "id=" + device, "-derivedDataPath", str(derived_data),
          "CODE_SIGNING_ALLOWED=NO"], timeout=1800)
     if os.environ.get("OCTANT_KEEP_SIMULATOR_APP") == "1":
-        # Before the scenarios, so a failing one can be looked into by hand.
+        # The app and its test runner, before the scenarios, so a failing one
+        # can be looked into by hand.
         run(["ditto", "-c", "-k", "--keepParent",
-             str(derived_data / "Build/Products/Release-iphonesimulator/Octant.app"),
+             str(derived_data / "Build/Products"),
              str(artifacts / "Octant-simulator.zip")], timeout=300)
     for label, size, appearance, method in (
         ("standard", "large", "light", "testColdDemoReplyForegroundAndReset"),

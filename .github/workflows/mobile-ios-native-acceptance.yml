@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       keep_app:
-        description: Keep the built Simulator app with the evidence, to look at it on another Mac
+        description: Keep the built Simulator app and test runner with the evidence, to look at it on another Mac
         type: boolean
         default: false
 

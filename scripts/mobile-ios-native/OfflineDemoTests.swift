@@ -232,4 +232,40 @@ final class OfflineDemoTests: XCTestCase {
         XCTAssertTrue(element("mobile-entry-demo").waitForExistence(timeout: 15))
         app.terminate()
     }
+
+    /// Drives the app through steps a person writes, for looking at a screen by
+    /// hand on another Mac. The acceptance run gives none, and skips it.
+    @MainActor
+    func testDriveByHand() throws {
+        let steps = ProcessInfo.processInfo.environment["OCTANT_DRIVE_STEPS"] ?? ""
+        try XCTSkipIf(steps.isEmpty, "No steps were given.")
+        app.launch()
+        for step in steps.components(separatedBy: ";") {
+            let parts = step.split(separator: ":", maxSplits: 1).map(String.init)
+            let target = parts.count > 1 ? parts[1] : ""
+            // By identifier, else by the words VoiceOver says.
+            let named = element(target)
+            let control = named.exists ? named : app.descendants(matching: .any).matching(
+                NSPredicate(format: "label BEGINSWITH %@", target)
+            ).firstMatch
+            switch parts.first ?? "" {
+            case "demo": enterDemo()
+            case "tap": _ = control.waitForExistence(timeout: 10); control.tap()
+            case "tab": tap(app.tabBars.buttons[target])
+            case "press": _ = control.waitForExistence(timeout: 10); control.press(forDuration: 1.2)
+            case "left": control.swipeLeft()
+            case "right": control.swipeRight()
+            case "up": app.swipeUp()
+            case "down": app.swipeDown()
+            case "type": app.typeText(target)
+            case "wait": Thread.sleep(forTimeInterval: Double(target) ?? 1)
+            case "shot":
+                let picture = XCTAttachment(screenshot: app.screenshot())
+                picture.name = target
+                picture.lifetime = .keepAlways
+                add(picture)
+            default: XCTFail("Unknown step \(step)")
+            }
+        }
+    }
 }
