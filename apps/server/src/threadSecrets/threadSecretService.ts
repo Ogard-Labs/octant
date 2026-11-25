@@ -1142,9 +1142,13 @@ export class ThreadSecretService {
           return "unavailable";
         }
         // "Shown as typed" is the agent's word. It spares an email address the
-        // person typed and saw; it never spares an account's own password, or
-        // a stored value nobody looked at.
-        const plain = !shown.secret && value.source === "pasted" && input.kind === "token";
+        // person typed and saw; it never spares an account's own password, a
+        // stored value nobody looked at, or several lines, which no card shows.
+        const plain =
+          !shown.secret &&
+          value.source === "pasted" &&
+          input.kind === "token" &&
+          !/[\r\n]/u.test(value.value);
         // Nothing of an item read at each use is kept, so nothing is there to print.
         const release = plain || value.eachUse ? undefined : this.#options.hold(value.value);
         const secret: ActiveSecret = {

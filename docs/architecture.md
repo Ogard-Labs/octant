@@ -19804,9 +19804,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     alignment, and its URL and JSON forms are replaced in runtime events, the
     service log, exports and tool-call records, at any depth, and in a key unless
     it reads as a field name. An agent cannot switch this off: a field it calls
-    not secret is spared only when the person typed it for a token. Matches are
-    found in the original text and overlapping ones replaced as one. An ended
-    value stays redacted, and is kept for nothing else, until the host stops
+    not secret is spared only when the person typed it for a token, on one line.
+    Matches are found in the original text and overlapping ones replaced as one.
+    An ended value stays redacted, and is kept for nothing else, until the host stops
     (maintainer decision, 2026-11-24): the token usually still works and may
     still be in the agent's context. At most 128 ended values are kept, the
     longest ended leaving first.

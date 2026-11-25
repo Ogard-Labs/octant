@@ -11,7 +11,7 @@ import {
   type ThreadSecretLifetime,
 } from "@octant/contracts/thread-secrets";
 import { Schema } from "effect";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { Journal } from "../persistence/journal";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -249,6 +249,18 @@ describe("a secret a thread's commands may read", () => {
     expect(readFileSync(join(root, THREAD, "SERVICE_EMAIL"), "utf8")).toBe("person@example.com");
     // A field shown as typed is not a secret to hide.
     expect(redactHostSecrets("person@example.com")).toBe("person@example.com");
+  });
+
+  it("hides a value of several lines, which no card shows, even in a field the agent calls not secret", async () => {
+    const context = host();
+    const key = "first-line-of-the-key-0001\nsecond-line-of-the-key-0002\n";
+    await grant(
+      context,
+      request({ name: "SERVICE", fields: [{ name: "NOTE", label: "Note", secret: false }] }),
+      { fields: [{ name: "NOTE", source: "pasted", value: key }] },
+    );
+    expect(redactHostSecrets(`got ${key}`)).not.toContain("line-of-the-key");
+    expect(redactHostSecrets("second-line-of-the-key-0002")).not.toContain("0002");
   });
 
   it("refuses an answer that leaves a field out or names another", async () => {
@@ -1243,6 +1255,44 @@ describe("a secret the person asked Octant to remember", () => {
     expect([...stored.values()]).toEqual(["second-Value-1"]);
     expect(open().list()).toHaveLength(1);
   });
+
+  it.each(["first", "second"] as const)(
+    "offers one value after two threads save one name at once and the %s is stored last",
+    async (last) => {
+      const writes = [Promise.withResolvers<void>(), Promise.withResolvers<void>()] as const;
+      let write = 0;
+      const { open, stored } = memory({
+        setWaits: () => (write++ === 0 ? writes[0].promise : writes[1].promise),
+      });
+      const context = host({ remembered: open() });
+      const asked = [THREAD, OTHER_THREAD].map((threadId) =>
+        context.service.request({ ...context.caller, threadId }, request()),
+      );
+      const saved = [THREAD, OTHER_THREAD].map((threadId, index) =>
+        context.service.answer(
+          WINDOW,
+          threadId,
+          {
+            id: card(context.service, threadId).id,
+            action: "save",
+            lifetime: "remember",
+            fields: [{ name: "DEPLOY_TOKEN", source: "pasted", value: `value-number-${index}-x` }],
+          },
+          { paired: false },
+        ),
+      );
+      const [early, late] = last === "first" ? [writes[1], writes[0]] : [writes[0], writes[1]];
+      early.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      late.resolve();
+      expect(await Promise.all(saved)).toEqual([{ status: "accepted" }, { status: "accepted" }]);
+      await Promise.all(asked);
+      await vi.waitFor(() => expect([...stored.values()]).toEqual(["value-number-1-x"]));
+      context.service.withdrawThread(THREAD);
+      void context.service.request(context.caller, request());
+      expect(card(context.service).remembered).toHaveLength(1);
+    },
+  );
 
   it("keeps the newest when two threads remember one name at once", async () => {
     const { open, stored } = memory();
