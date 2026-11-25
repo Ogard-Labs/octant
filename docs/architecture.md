@@ -6364,11 +6364,16 @@ flowchart LR
   Maintenance › Save diagnostics and `octant diagnostics export --out <folder
 or .zip>` write the same files, built by one host command
   (`/api/diagnostics/bundle`, with a plain-list read at
-  `/api/diagnostics/bundle/preview`). Both routes sit on the loopback
-  administration chain beside host control. A paired device takes a bundle as
-  a local window does (maintainer decision, 2026-11-12); not built yet: today
-  both routes reject a paired device and are not in the remote forward list,
-  so only a window or CLI session on this machine reaches them. The person sees the list of sections, with how many
+  `/api/diagnostics/bundle/preview`). A local window, the CLI on this machine,
+  and a device the host's own person paired at Full take a bundle alike
+  (maintainer decision, 2026-11-12): both routes are in the remote forward
+  list, the bundle's hand-over journal record names the device that asked, and
+  a restricted or hub-introduced device, a device below Full and an agent grant
+  are refused by the route itself, with no action in the product catalogue. The
+  diagnostics export (`/api/diagnostics/export`) and the journal growth read
+  are admitted the same way, and the export's receipt names the device. The
+  desktop's save to a chosen path stays on the loopback administration chain
+  beside host control and is never forwarded. The person sees the list of sections, with how many
   entries each holds now, and what the file never holds, before anything is
   written; the CLI prints it first and `--list` stops there. The files are a
   readme plus one JSON file per section: versions (Octant, wire, runtime),
@@ -18742,7 +18747,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     secret a window on the host holds and whose native controls (a folder
     picker, an external editor) exist only there; a window's own shell (its bootstrap, workspace commands and local sessions); linking a secret store and
     pointing a key at it, which are acts at the machine; pointing a runtime at an executable, which goes through the host's native file picker; choosing a new skill folder or a local plugin folder, which goes through the host's native folder picker; the replica store and its membership; and the whole host's
-    export, bulk data with no bound for a remote caller. Importing cookies from the host's Keychain into a Browser profile and a server Project's port forward, which listens on the host's own loopback, stay with a window too. Not built yet: the list of ports a server serves, which a preview picks from (`/api/server-project-listeners`); diagnostics (`/api/diagnostics/export`, `/api/diagnostics/journal-growth` and the support bundle under `/api/diagnostics/bundle`, which `authorizeDiagnosticsExportActor` grants only a local window); and granting a site login permission in the Browser (`/api/browser/credential-use`) are not open to a person-paired device either. Removing a provider together with its key is not offered to a device, which removes the provider and then the key.
+    export, bulk data with no bound for a remote caller. Importing cookies from the host's Keychain into a Browser profile and a server Project's port forward, which listens on the host's own loopback, stay with a window too. Not built yet: the list of ports a server serves, which a preview picks from (`/api/server-project-listeners`); and granting a site login permission in the Browser (`/api/browser/credential-use`) are not open to a person-paired device either. Removing a provider together with its key is not offered to a device, which removes the provider and then the key.
   - **The journal names the device.** A person-paired device's change is
     journaled with the device as its actor (`remote-device`, its id), resolved
     once from the authenticated principal and never from the request; a local

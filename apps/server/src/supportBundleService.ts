@@ -6,6 +6,7 @@ import {
   type CodeSettings,
   type CorrelationId,
   type DiagnosticHostHealth,
+  type EventActor,
   type ProviderInstance,
   type ProviderObservedState,
   type SupportBundleExportRequest,
@@ -293,6 +294,8 @@ export async function exportSupportBundle(
   request: SupportBundleExportRequest,
   sources: SupportBundleSources,
   stage?: StageSupportBundleDelivery,
+  /** Who asked: the local person or the paired device; absent, the local person. */
+  actor?: EventActor,
 ): Promise<SupportBundleOutcome> {
   const bundleId = (sources.idGenerator ?? randomUUID)();
   const facts = await gatherSupportBundleFacts(sources, bundleId);
@@ -331,7 +334,7 @@ export async function exportSupportBundle(
           eventName: SUPPORT_BUNDLE_EXPORTED_EVENT,
           eventVersion: 1,
           correlationId: randomUUID() as CorrelationId,
-          actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+          actor: actor ?? { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
           occurredAt: facts.generatedAt,
           payload,
         },

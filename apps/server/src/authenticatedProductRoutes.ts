@@ -319,9 +319,10 @@ export function classifyProductAction(request: Request): string | undefined {
     if (method === "POST" && path === "/api/speech/synthesis") return "speech.synthesize";
     return undefined;
   }
-  if (path === "/api/diagnostics/export") {
-    return method === "POST" ? "diagnostics.export" : undefined;
-  }
+  // The diagnostics export, its journal-growth read and the support bundle have
+  // no action here: a device the host's own person paired takes them as a
+  // local window does, and every other device session stays denied.
+  if (path.startsWith("/api/diagnostics/")) return undefined;
   if (path === "/api/threads/export") {
     // A thread export is a read of a thread the caller can already Open.
     // The service re-checks that Open and clamps to that one thread, so a

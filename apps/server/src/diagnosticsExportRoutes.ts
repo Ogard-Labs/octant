@@ -3,10 +3,12 @@ import {
   type DiagnosticHostHealth,
   type DiagnosticsExportOutcome,
 } from "@octant/contracts";
-import { authorizeDiagnosticsExportActor } from "@octant/domain";
+import { authorizeDiagnosticsExportActor, type DiagnosticsExportActorKind } from "@octant/domain";
 import { resolveReportedHostVersion } from "@octant/host-runtime";
 import { isLoopbackHostname } from "./shellRoutes";
-import { authenticateRoutePrincipal } from "./principalRouteContext";
+import { principalActsAsHostPerson } from "./clientPrincipal";
+import { eventActorForPrincipal } from "./principalEventActor";
+import { authenticateRoutePrincipal, type PrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import { exportDiagnosticsEvidence } from "./diagnosticsExportService";
 import { readEventLoopLagCounters } from "./eventLoopLag";
@@ -17,13 +19,36 @@ import type { SqliteConnection } from "./persistence/sqlitePort";
 
 /**
  * The one browser-first HTTP entry point for the authenticated
- * diagnostics export command. Mirrors `./usageRoutes.ts` exactly — loopback
- * only, allow-listed renderer origin, and `authenticateRouteWindowId` as the
- * local-authenticated-user gate — so a remote device, a provider process, an
- * automation/agent run, or an extension all fail closed before
- * `exportDiagnosticsEvidence` (and therefore the redaction/sealing
- * policy) is ever reached.
+ * diagnostics export command. Mirrors `./usageRoutes.ts` — loopback
+ * only after the remote gateway hands the request over, an allow-listed
+ * renderer origin, and the bound principal as the gate. A local window and a
+ * device the host's own person paired act as that person (maintainer
+ * decision, 2026-11-12); a restricted or hub-introduced device, an agent
+ * grant, a provider process, an automation/agent run, or an extension all
+ * fail closed before `exportDiagnosticsEvidence` (and therefore the
+ * redaction/sealing policy) is ever reached.
  */
+
+/**
+ * Who a diagnostics request comes from, judged from the principal the server
+ * bound to it, and the actor its journal record names: the local person, or
+ * the paired device by its own id.
+ */
+export function diagnosticsExportCaller(context: PrincipalRouteContext): {
+  readonly actorKind: DiagnosticsExportActorKind;
+  readonly actor: ReturnType<typeof eventActorForPrincipal>;
+} {
+  const { principal } = context;
+  return {
+    actorKind:
+      principal.kind === "local-window"
+        ? "local-window"
+        : principalActsAsHostPerson(principal)
+          ? "person-paired-device"
+          : "remote-device",
+    actor: eventActorForPrincipal(principal),
+  };
+}
 
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -98,14 +123,15 @@ export function createDiagnosticsExportRouteHandler(
       );
     }
 
-    let actorKind: "local-window" | "remote-device";
+    let caller: ReturnType<typeof diagnosticsExportCaller>;
     try {
-      const context = authenticateRoutePrincipal({
-        request,
-        store: dependencies.windowAuthorityStore,
-        now: now(),
-      });
-      actorKind = context.principal.kind;
+      caller = diagnosticsExportCaller(
+        authenticateRoutePrincipal({
+          request,
+          store: dependencies.windowAuthorityStore,
+          now: now(),
+        }),
+      );
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failureResponse("Diagnostics export is unauthorized.", 401, origin);
@@ -116,7 +142,7 @@ export function createDiagnosticsExportRouteHandler(
     // The bound principal is the only actor this route may name. Hardcoding
     // local-window here would export host-wide evidence for a remote device
     // that reached the loopback handler through product dispatch.
-    const authorization = authorizeDiagnosticsExportActor(actorKind);
+    const authorization = authorizeDiagnosticsExportActor(caller.actorKind);
     if (authorization.kind === "denied") {
       return failureResponse("Diagnostics export is unauthorized.", 403, origin);
     }
@@ -155,6 +181,7 @@ export function createDiagnosticsExportRouteHandler(
       octantVersion: dependencies.octantVersion ?? resolveReportedHostVersion(process.env),
       hostHealth: readHostHealth,
       clock,
+      actor: caller.actor,
     });
 
     return jsonResponse(outcome, outcome.kind === "exported" ? 200 : 422, origin);
