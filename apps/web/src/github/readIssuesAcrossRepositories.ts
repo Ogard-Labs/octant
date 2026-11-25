@@ -1,5 +1,6 @@
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type {
+  GithubIssueClosedReasonFilter,
   GithubIssueRow,
   GithubIssueStateFilter,
   GithubRepositoryRow,
@@ -62,6 +63,8 @@ export async function readIssuesAcrossRepositories(
     readonly concurrency?: number;
     /** Narrows every repository read to issues nobody has been assigned. */
     readonly assignee?: "none";
+    /** Narrows every repository read to one closed reason; only with `state: "closed"`. */
+    readonly closedReason?: GithubIssueClosedReasonFilter;
   },
 ): Promise<IssuesAcrossRepositories> {
   const rows: RepositoryIssueRow[] = [];
@@ -86,6 +89,7 @@ export async function readIssuesAcrossRepositories(
             ? {}
             : { search: options.search }),
           ...(options.assignee === undefined ? {} : { assignee: options.assignee }),
+          ...(options.closedReason === undefined ? {} : { closedReason: options.closedReason }),
         });
         if (response.kind === "unavailable") {
           refused.push({

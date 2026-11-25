@@ -4006,9 +4006,24 @@ The Issues surface is laid out as the Pull requests page is: a 384px list
 column with the title and count, the Repository control in the same place and
 at the same fixed width (All repositories, or one repository, from the picker),
 Sort, a search field at the column's width, and Open, Closed and All as the
-same chips; rows are the shared row (state glyph, title, one meta line). The
-reading pane shares the pull request pane's columns: the text column (720px) and
-a 260px facts column, centred together with a 32px gap, and the action (Start a
+same chips; rows are the shared row (state glyph, title, one meta line).
+
+A closed issue says why it was closed, as GitHub reports it: the state pill and
+the row glyph's name read Closed as completed, Closed as not planned or Closed
+as duplicate, and a not-planned or duplicate issue takes a struck-circle glyph
+instead of the check, so the difference is not carried by colour. An issue
+GitHub gives no reason for, or a reason this host does not know, reads plain
+Closed with the check. While Closed is chosen a second row of the same chips
+offers All closed, Completed and Not planned; it applies to one repository and
+to All repositories alike, and leaving Closed forgets the choice. GitHub's
+repository issue list cannot filter by reason, so Completed and Not planned read
+through GitHub's issue search, with its rate limit and its cap of 1,000 results.
+GitHub Project status is not shown, because reading it needs access the sign-in
+does not ask for. Pull requests keep their own states.
+
+The reading
+pane shares the pull request pane's columns: the text column (720px) and a
+260px facts column, centred together with a 32px gap, and the action (Start a
 Code thread) at the facts column's right edge. The title, state pill and meta
 line sit above the description, which is rendered as markdown by the same
 renderer as a pull request's description, with its task list as read-only

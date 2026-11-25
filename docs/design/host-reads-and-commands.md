@@ -303,7 +303,11 @@ under Terminal output paths.
 
 The issue browser's catalogue reads stay on the existing `githubCatalogue`
 union over `/api/github/catalogue/reads`: `kind: "issues"` includes optional
-server-composed search, and `kind: "issue"` returns a bounded detail.
+server-composed search, and `kind: "issue"` returns a bounded detail. A closed
+issue's row and detail carry GitHub's closed reason when it gives a known one.
+An `issues` read of closed issues may name `closedReason` (`completed` or
+`not-planned`), which the host refuses with any other state
+([Workspace](workspace.md#pull-requests-and-issues) owns what a person sees).
 
 Create from an issue frames redacted issue text through
 `apps/server/src/context/externalContentFraming.ts` and appends
