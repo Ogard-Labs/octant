@@ -132,7 +132,7 @@ const APPLE_BOOT_TIMEOUT_MS = 120_000;
 const APPLE_SIMULATOR_TIMEOUT_MS = 30_000;
 const MAX_APPLE_RESULT_DIAGNOSTICS = 16;
 
-const pullRequestDefinition = {
+export const pullRequestDefinition = {
   name: CODE_PULL_REQUEST_TOOL_NAME,
   description:
     "Open or change the pull request for this thread's own branch, only when the person asks for it. create opens it with a title and body, as a draft when draft is true, and stacked on another open branch when base names a branch that has an open pull request of its own; without base it targets the thread's delivery base. update changes the open pull request's title, body, or draft state (draft false marks it ready for review), adds or removes labels the repository already has, or closes it (state closed) or reopens it (state open). comment posts a comment, or a reply in one review thread when reviewThreadId is given, and merge merges it with the method and the head commit the person saw; comment acts under the person's name: at Full access it posts without asking, and below it it asks the person first unless this Project lets agents comment; merge asks unless a stored choice allows it. watch lets Octant start a new turn in this thread when the pull request's checks finish, a review or comment arrives, or a merge conflict appears, instead of polling, and never asks; unwatch stops that. Push the branch first. An approval-gated thread asks the person before GitHub is touched, and refuses a title and body too long to show whole in that approval (about 1.5 KB together); Plan mode refuses everything but unwatch and help. This tool cannot create labels, approve or request changes, delete a branch, or change or watch any other branch's pull request. Call operation help for full usage.",
@@ -158,7 +158,7 @@ const pullRequestDefinition = {
   },
 } as const;
 
-const terminalDefinition = {
+export const terminalDefinition = {
   name: CODE_TERMINAL_TOOL_NAME,
   description:
     "Use Octant's terminal for this Code task: run starts a command, write sends input, read checks output, and stop terminates it. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. Ordinary terminal permissions still apply. Call operation help for full usage.",
@@ -172,7 +172,7 @@ const terminalDefinition = {
   },
 } as const;
 
-const appleDefinition = {
+export const appleDefinition = {
   name: CODE_APPLE_TOOL_NAME,
   description:
     "Build, test, run, and drive Apple apps through Octant's in-app iOS Simulator pane and Apple workbench. Begin with discover or status and reuse the returned identifiers. Show a Simulator only in that pane: never launch Simulator.app, run open -a Simulator, or start serve-sim. discover, status, screenshot, logs, and open of a running Simulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
@@ -226,7 +226,7 @@ const appleDefinition = {
   },
 } as const;
 
-const androidDefinition = {
+export const androidDefinition = {
   name: CODE_ANDROID_TOOL_NAME,
   description:
     "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and reuse the returned AVD names; never start an external emulator window as the place to look. discover, status, screenshot, describe-ui, logs, and open of a running emulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",

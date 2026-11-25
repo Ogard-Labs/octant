@@ -37,7 +37,7 @@ const BOARD_PROMPT_LENGTH = Math.min(
   MAX_CODE_PLANNER_PROPOSAL_INTENT_LENGTH,
 );
 
-function definition(worktree: boolean, board: boolean): ProviderToolDefinition {
+export function sideTaskDefinition(worktree: boolean, board: boolean): ProviderToolDefinition {
   const targets = [
     ...(worktree ? ["new-worktree", "new-thread"] : []),
     ...(board ? ["board"] : []),
@@ -136,7 +136,7 @@ export function createSideTaskTools(input: {
   const board =
     plannerThread() && isToolAllowedByAllowlist(allowlist, SIDE_TASK_BOARD_ALLOWLIST_ENTRY);
   return {
-    definitions: [definition(worktree, board)],
+    definitions: [sideTaskDefinition(worktree, board)],
     execute: async ({ inputJson, signal }) => {
       if (signal?.aborted) return refused("The turn was cancelled.");
       let raw: unknown;

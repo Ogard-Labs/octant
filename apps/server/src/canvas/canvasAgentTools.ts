@@ -113,7 +113,7 @@ function memberKind(member: (typeof CanvasBlock.members)[number]): string {
 // member per layout, so the catalogue is deduped to keep the enum unique.
 const blockKinds = [...new Set(CanvasBlock.members.map(memberKind))];
 
-const canvasDefinitionSchema = {
+export const canvasDefinitionSchema = {
   type: "object",
   properties: {
     operation: {
@@ -742,7 +742,7 @@ function describedGuidance(
   return guidance;
 }
 
-function toolDescription(
+export function canvasToolDescription(
   mode: "chat" | "work" | "code",
   scope: "thread" | "run" = "thread",
   chatOwner: ChatCanvasOwner = "project",
@@ -1323,7 +1323,7 @@ function canvasToolSet(options: {
     definitions: [
       {
         name: CANVAS_TOOL_NAME,
-        description: toolDescription(options.mode, options.scope, options.chatOwner),
+        description: canvasToolDescription(options.mode, options.scope, options.chatOwner),
         inputSchema: canvasDefinitionSchema,
       },
     ],

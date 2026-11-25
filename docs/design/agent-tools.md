@@ -45,6 +45,16 @@ tools from plugins or MCP servers the person added are not listed.
   [Architecture: Security and authority](../architecture.md#security-and-authority)
   and [Tool calls in Chat and Work](../architecture.md#tool-calls-in-chat-and-work).
 
+- **Size.** What Octant itself gives each runtime, its instructions and tool
+  definitions in the first prompt and what it sends again on each later turn, is
+  measured by `bun run prompt-size:check` for the widest lead and child-run turn
+  of each mode, from the real definitions and each adapter's own encoding, with
+  no server. `scripts/agent-prompt-size-budget.json` holds the exact sizes with
+  no headroom, and CI fails when one grows past it, so a tool offered somewhere
+  new raises the budget visibly, by what it needs. The person's own skills,
+  memory, files, plugins and MCP servers, and a runtime's own prompt, are not
+  counted.
+
 "Code + tools" below means a Code thread on a provider that carries
 app-managed tools, subject to the thread profile's tool constraints.
 

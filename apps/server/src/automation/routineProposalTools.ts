@@ -21,7 +21,7 @@ import type { RoutineProposalService } from "./routineProposalService";
 
 const MINUTE_MS = 60_000;
 
-const definition: ProviderToolDefinition = {
+export const routineProposalDefinition: ProviderToolDefinition = {
   name: ROUTINE_PROPOSAL_TOOL_NAME,
   description: [
     "Set up a routine that starts a new thread in this Project on a schedule, with a fixed prompt.",
@@ -68,7 +68,7 @@ const definition: ProviderToolDefinition = {
  * folder to give a routine that starts new threads, and a follow-up always
  * waits on the person's card, so there is no requested or missed-run choice.
  */
-const chatDefinition: ProviderToolDefinition = {
+export const chatRoutineProposalDefinition: ProviderToolDefinition = {
   name: ROUTINE_PROPOSAL_TOOL_NAME,
   description: [
     'Propose a follow-up: once, at `at` (an ISO time with Z or an offset), the prompt is sent as a new turn in this same Chat thread, so you will have this conversation then (for example "check whether the reply arrived and summarise").',
@@ -132,7 +132,7 @@ export function createRoutineProposalTools(input: {
 }): AppManagedToolSet {
   const mode = input.thread.mode;
   return {
-    definitions: [mode === "chat" ? chatDefinition : definition],
+    definitions: [mode === "chat" ? chatRoutineProposalDefinition : routineProposalDefinition],
     execute: async ({ inputJson, signal }) => {
       if (signal?.aborted) return refused("tool-interrupted", "The turn was cancelled.");
       if (input.isAutomationOrigin) {
