@@ -1026,6 +1026,24 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          // When the host removes worktree folders from this computer's disk
+          // is the person's choice, at a window on it or on a device they
+          // paired; no agent-gated or hub-introduced caller may set it.
+          if (
+            command?.kind === "update-code-settings" &&
+            command.worktrees !== undefined &&
+            (callerAuthority !== "local-window" || agentGrantSession)
+          ) {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message:
+                  "Only you, from a window or a device you paired, can change worktree naming and cleanup.",
+              },
+              403,
+              origin,
+            );
+          }
           // Which account a thread runs on, now or when its account hits its
           // usage limit, is the person's own choice; a device that acts on
           // this host without the person's powers may not make it.

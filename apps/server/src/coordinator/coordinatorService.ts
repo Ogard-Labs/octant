@@ -52,7 +52,7 @@ import {
   type WorkerModelChoice,
   type WorkerRoles,
 } from "@octant/domain";
-import { defaultDeliveryBranchIntent } from "@octant/domain/code-worktree-source-policy";
+import { deriveDeliveryBranch } from "@octant/domain/code-worktree-naming";
 import type { EventEnvelope } from "@octant/contracts";
 import type { InheritedExternalContentMark } from "../context/inheritedExternalContentMark";
 import type { CoordinatorCounts } from "./coordinatorCountStore";
@@ -1153,10 +1153,11 @@ export class CoordinatorService {
           : {}),
         deliveryTarget: {
           ...deliveryTarget,
-          branchIntent: defaultDeliveryBranchIntent(
-            deliveryTarget.proposedBaseBranch,
-            threadId.replace(/-/g, "").slice(0, 12),
-          ),
+          branchIntent: deriveDeliveryBranch({
+            baseBranch: deliveryTarget.proposedBaseBranch,
+            shortId: threadId.replace(/-/g, "").slice(0, 12),
+            prefix: this.#ports.readSettings()?.worktrees?.branchPrefix,
+          }),
           confirmedAt: new Date(this.#ports.now()).toISOString(),
         },
         sourceBranch: deliveryTarget.proposedBaseBranch,

@@ -50,8 +50,8 @@ import {
   type CreateHostViewScope,
   type PickerGroup,
 } from "@octant/domain";
+import { deriveDeliveryBranch } from "@octant/domain/code-worktree-naming";
 import {
-  defaultDeliveryBranchIntent,
   defaultStartFromOrigin,
   selectWorktreeRemote,
   type WorktreeRemoteFacts,
@@ -119,13 +119,20 @@ import type {
   MentionableThreadId,
   TerminalSessionImportRequest,
 } from "@octant/contracts";
-import type { CodeCommand, CodeCommandResult, CodeWorktreeRef } from "@octant/contracts/code";
+import type {
+  CodeCommand,
+  CodeCommandResult,
+  CodeWorktreeRef,
+  CodeWorktreeSettings,
+} from "@octant/contracts/code";
 import type { OctantHostBridge } from "../../shell/hostBridge";
 import { boundsInsideViewport } from "../../browser/useNativeBrowserSurface";
 import { observeComposerPlacement } from "../codeWorkspaceApprovals";
 import { ComposerInput, type ComposerInputElement } from "../../composer/ComposerInput";
 
 export interface CodeComposerAdapterProps {
+  /** Settings › Code › Worktrees: the prefix and naming a new worktree's branch follows. */
+  readonly worktreeSettings?: CodeWorktreeSettings;
   readonly stashSource?: ComposerStashSource;
   readonly stashTodo?: ComposerStashTodoSource;
   readonly projectId?: ProjectId;
@@ -780,6 +787,30 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     [setBaseBranch, setWorktreeRemote, setStartFromOriginOverride],
   );
 
+  // The name shown before Send is the name sent: one derivation serves both,
+  // from the branches the host listed, so a taken name is already numbered.
+  const worktreeBranch = useMemo(
+    () =>
+      deriveDeliveryBranch({
+        baseBranch: submittedBaseBranch,
+        shortId,
+        prefix: props.worktreeSettings?.branchPrefix,
+        naming: props.worktreeSettings?.branchNaming,
+        prompt: trimmed,
+        existingBranches: (worktreeRefs ?? []).flatMap((ref) =>
+          ref.kind === "local" ? [ref.name] : [],
+        ),
+      }),
+    [
+      props.worktreeSettings?.branchPrefix,
+      props.worktreeSettings?.branchNaming,
+      shortId,
+      submittedBaseBranch,
+      trimmed,
+      worktreeRefs,
+    ],
+  );
+
   const submit = useCallback(() => {
     if (!canSubmit) return;
     // A Code thread belongs to a Project, so the first turn cannot start until
@@ -807,7 +838,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           permissionPersistence: isServer ? "current-session" : permissionPersistence,
           ...(autoApprove ? { autoApprove: true } : {}),
           deliveryTarget: {
-            branchIntent: defaultDeliveryBranchIntent(submittedBaseBranch, shortId),
+            branchIntent: worktreeBranch,
             remoteName: resolvedWorktreeRemote,
             proposedBaseRepository: baseRepository,
             proposedBaseBranch: submittedBaseBranch,
@@ -841,7 +872,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     workspace,
     baseRepository,
     baseBranch,
-    shortId,
+    worktreeBranch,
     outcomeKind,
     startFromOrigin,
     resolvedWorktreeRemote,
@@ -969,7 +1000,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         sourceControl={sourceControl}
         branch={resolvedBaseBranch ?? "Default branch"}
         onWorkspaceChange={setWorkspaceOverride}
-        worktreeBranch={defaultDeliveryBranchIntent(resolvedBaseBranch ?? "", shortId)}
+        worktreeBranch={worktreeBranch}
         workspace={workspace}
         {...(props.creating === true ? { disabled: true } : {})}
         {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}

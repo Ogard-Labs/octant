@@ -36,6 +36,7 @@ import type {
   CodeThread,
   CodeThreadId,
   CodeThreadView,
+  CodeWorktreeSettings,
 } from "@octant/contracts/code";
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import {
@@ -2968,6 +2969,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
       readonly restartContinuation?: boolean;
       readonly windowsTerminalShell?: WindowsTerminalShell;
+      readonly worktrees?: CodeWorktreeSettings;
     }): Promise<boolean> => {
       if (bootstrap === undefined) return false;
       const result = await execute({

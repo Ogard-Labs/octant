@@ -112,6 +112,7 @@ import {
   type CodeRelativePath,
   type CodeRepositoryTestListing,
   type CodeSettings,
+  type CodeWorktreeSettings,
   type CodeThread,
   type CodeThreadActivity,
   type CodeThreadForkOrigin,
@@ -152,7 +153,7 @@ import {
   type ProfileThreadContextSnapshot,
 } from "@octant/domain/agent-profile-policy";
 import { ACCESS_POSTURE_RANK, authorizeCodeOperation } from "@octant/domain/code-policy";
-import { defaultDeliveryBranchIntent } from "@octant/domain/code-worktree-source-policy";
+import { deriveDeliveryBranch } from "@octant/domain/code-worktree-naming";
 import { evaluateCodeDeliveryOutcomeProposal } from "@octant/domain/delivery-target-policy";
 import {
   completedThreadArchiveDue,
@@ -283,6 +284,13 @@ const MANAGED_CREATION_REFUSAL_MESSAGES: Record<string, string> = {
   "plan-on-server":
     "Plan changes nothing on a server, so it cannot start a thread in a new worktree there. Choose another level or Current checkout.",
 };
+
+/** An empty choice is the defaults, so it is stored as none. */
+function worktreeSettingsField(worktrees: CodeWorktreeSettings | undefined): {
+  readonly worktrees?: CodeWorktreeSettings;
+} {
+  return worktrees === undefined || Object.keys(worktrees).length === 0 ? {} : { worktrees };
+}
 
 /** Absent reads as Windows PowerShell, so only another choice is stored. */
 function windowsTerminalShellSetting(shell: WindowsTerminalShell | undefined): {
@@ -2319,6 +2327,7 @@ export class CodeService {
           ...windowsTerminalShellSetting(
             command.windowsTerminalShell ?? current.windowsTerminalShell,
           ),
+          ...worktreeSettingsField(command.worktrees ?? current.worktrees),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -5667,10 +5676,11 @@ export class CodeService {
         permissionPersistence: "current-session",
         deliveryTarget: {
           ...deliveryTarget,
-          branchIntent: defaultDeliveryBranchIntent(
-            deliveryTarget.branchIntent,
-            String(command.threadId).replace(/-/g, "").slice(0, 12),
-          ),
+          branchIntent: deriveDeliveryBranch({
+            baseBranch: deliveryTarget.branchIntent,
+            shortId: String(command.threadId).replace(/-/g, "").slice(0, 12),
+            prefix: this.#persistence.readCodeSettings()?.settings.worktrees?.branchPrefix,
+          }),
         },
         sourceBranch: deliveryTarget.branchIntent,
         startFromOrigin: false,
