@@ -533,10 +533,10 @@ export interface ProjectThreadRowsProps {
    */
   readonly hideCheckoutFact?: boolean;
   /**
-   * Threads whose rows take one more step in. A worker's row already sits one
-   * step in, so a thread it started takes another.
+   * Whether a thread's row takes one more step in. A worker's row already sits
+   * one step in, so a thread it started takes another.
    */
-  readonly indentedThreadIds?: ReadonlySet<string>;
+  readonly indents?: ((thread: ChatThreadNavigationItem) => boolean) | undefined;
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
   /**
    * Rows shown before the list folds behind Show more. Absent shows every
@@ -862,7 +862,7 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
   }, [threads.length, virtualized]);
 
   const row = (thread: ChatThreadNavigationItem) => {
-    if (props.indentedThreadIds?.has(thread.threadId) !== true) return threadRow(thread);
+    if (props.indents?.(thread) !== true) return threadRow(thread);
     // Set here, not in the sidebar's stylesheet: that loads before first paint
     // and has no room under its budget.
     return (
@@ -1149,12 +1149,12 @@ function CoordinatorThreadSection(props: {
   }
   const rows = (
     threads: ReadonlyArray<ChatThreadNavigationItem>,
-    indentedThreadIds?: ReadonlySet<string>,
+    indents?: (thread: ChatThreadNavigationItem) => boolean,
   ) => (
     <ProjectThreadRows
       {...(props.actions === undefined ? {} : { actions: props.actions })}
       {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
-      {...(indentedThreadIds === undefined ? {} : { indentedThreadIds })}
+      indents={indents}
       {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
       {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
       {...(props.projectNameForThread === undefined
@@ -1221,17 +1221,8 @@ function CoordinatorThreadSection(props: {
             </div>
             {open && hasRows ? (
               <div className="project-coordinator__workers" id={listId}>
-                {childRows.length === 0 ? null : rows(childRows)}
-                {workerRows.length === 0
-                  ? null
-                  : rows(
-                      workerRows,
-                      new Set(
-                        workerRows
-                          .filter((thread) => !group.workers.includes(thread))
-                          .map((thread) => thread.threadId),
-                      ),
-                    )}
+                {rows(childRows)}
+                {rows(workerRows, (thread) => !group.workers.includes(thread))}
               </div>
             ) : null}
           </div>

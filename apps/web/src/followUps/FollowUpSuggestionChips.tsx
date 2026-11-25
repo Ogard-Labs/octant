@@ -107,9 +107,7 @@ export function PaneSideTasks(props: {
     <SideTaskProvider
       client={context?.sideTaskClient}
       threadId={context?.threadId}
-      {...(props.sideTaskNavigationRevision === undefined
-        ? {}
-        : { navigationRevision: props.sideTaskNavigationRevision })}
+      navigationRevision={props.sideTaskNavigationRevision}
       onStarted={(started, unsentPrompt) =>
         context?.onCreated({
           mode: started.mode,

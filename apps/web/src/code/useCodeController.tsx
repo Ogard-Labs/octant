@@ -2121,7 +2121,6 @@ export function useCodeController(options: CodeControllerOptions) {
       string,
       {
         readonly executing: boolean;
-        readonly awaitingInput?: boolean;
         readonly awaitingKind?: "approval" | "user-input";
         readonly checkoutChip?: {
           readonly checkoutKind: "existing-worktree" | "managed-worktree";
@@ -2138,9 +2137,7 @@ export function useCodeController(options: CodeControllerOptions) {
       const pullRequestSummaries = entry.threadPullRequests ?? entry.pullRequestSummaries;
       byThread.set(String(entry.threadId), {
         executing: entry.executing,
-        ...(entry.awaitingInput === true
-          ? { awaitingInput: true, awaitingKind: entry.awaitingKind ?? "approval" }
-          : {}),
+        ...(entry.awaitingInput === true ? { awaitingKind: entry.awaitingKind ?? "approval" } : {}),
         ...(entry.turnStartedAt === undefined ? {} : { turnStartedAt: entry.turnStartedAt }),
         ...(entry.liveStep === undefined ? {} : { liveStep: entry.liveStep }),
         ...(entry.checkoutChip === undefined ? {} : { checkoutChip: entry.checkoutChip }),
@@ -2187,9 +2184,9 @@ export function useCodeController(options: CodeControllerOptions) {
               (activityByThread.get(String(thread.id)) ?? 0) >
                 (readCursors.get(String(thread.id)) ?? 0),
             ...(runtime?.executing === true ? { executing: true } : {}),
-            ...(runtime?.awaitingInput === true
-              ? { awaitingInput: true, awaitingKind: runtime.awaitingKind ?? "approval" }
-              : {}),
+            ...(runtime?.awaitingKind === undefined
+              ? {}
+              : { awaitingInput: true, awaitingKind: runtime.awaitingKind }),
             ...(runtime?.turnStartedAt === undefined
               ? {}
               : { turnStartedAt: runtime.turnStartedAt }),

@@ -832,15 +832,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                     onWorkThreadUpdated={workNavigation.applyThread}
                     workTurnClient={workTurnClient}
                     workChangeRevision={machineChanges.workNavigation}
-                    sideTaskNavigationRevision={
-                      activeMode === "chat"
-                        ? machineChanges.chatNavigation
-                        : activeMode === "work"
-                          ? machineChanges.workNavigation
-                          : activeMode === "code"
-                            ? machineChanges.codeNavigation
-                            : undefined
-                    }
+                    sideTaskNavigationRevision={machineChanges[`${activeMode}Navigation`]}
                     workRequestClient={workRequestClient}
                     workOverviewClient={workOverviewClient}
                     workResearchClient={workResearchClient}
