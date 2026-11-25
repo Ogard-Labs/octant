@@ -2249,9 +2249,11 @@ except where a bullet says otherwise.
   bypassed by learning in the background. What was learned is recorded as
   `person-memory.thread-distilled@1` (the thread, its digest, and the last
   message learned from); an old `person-memory.thread-remembered@1` replays as
-  learned to the thread's end. A later pass replaces the thread's digest (the
-  new one is written before the old is erased, so a failure leaves the earlier
-  digest), and its entries merge as before. Threads completed before memory existed are never
+  learned to the thread's end. A later pass replaces the thread's digest: each is an
+  aggregate of its own and the newest by journal order wins, so a failed write
+  leaves the earlier digest. The superseded digests stay in the journal until
+  the next start removes them ([Startup check](#persistence)). Its entries merge
+  as before. Threads completed before memory existed are never
   back-filled, and nothing said before memory began is read from an open
   thread, so turning it on never starts a burst of model calls. Forgetting
   everything, switching memory back on, letting a Project back in, or allowing a
@@ -2318,7 +2320,9 @@ except where a bullet says otherwise.
   claim on the queue entry and a person's edit keeps it; any other edit clears
   it. A message steered into a running turn is marked on its own. The marks are
   erased with their thread, with Leave no trace, and by Forget everything, and
-  a thread keeps only its newest 200. A client that sends nothing (an older
+  a thread counts only its newest 200. A mark beyond the 200 stays in the
+  journal until the next start removes it, so a turn whose mark was compacted
+  counts as not typed for new learning, as a turn with no mark does. A client that sends nothing (an older
   one) leaves its turns unmarked, so nothing from them is quotable and nothing
   new is learned from them; a client whose host predates the field sends the
   message again without it when the host refuses the unknown field. The sweep
@@ -2368,10 +2372,10 @@ except where a bullet says otherwise.
   session that does not resume an earlier one (also a Chat retry that starts one
   on its newest attempt). A turn that starts a session cuts its block at the
   moment the block is built and journals that moment as
-  `person-memory.block-cut@1` (the thread, its mode, and the instant; only the
-  newest is kept: it is written first and the older ones are erased in the same
-  step as the newest is numbered 1, never touching other aggregates, and an erase
-  that fails leaves them for the next write, since the new event stands), so that turn and every turn after it keep the entries up to
+  `person-memory.block-cut@1` (the thread, its mode, and the instant; each cut is an
+  aggregate of its own and the newest by journal order wins, so the older ones
+  stay in the journal until the next start removes them and nothing is erased or
+  renumbered while the host runs), so that turn and every turn after it keep the entries up to
   the same instant, also after a restart, which no journaled turn time could
   promise because a turn is journaled after its block is built. The block is
   cut at the later of the thread's creation, its newest compaction, the
@@ -2427,7 +2431,12 @@ except where a bullet says otherwise.
   rebuilt from the journal at start, so they are local, owner-only, and in no
   diagnostics or telemetry. A thread's digest names the thread as `threadId`,
   so a thread purge takes it with the thread, and so do its typed-turn marks
-  and its block cut. Export my data carries person
+  and its block cut. Each cut, digest and mark is an aggregate of its own, so
+  while the host runs the superseded ones (older cuts and digests of a thread,
+  marks beyond its newest 200) stay in the journal, and the next start removes
+  them as whole aggregates ([Startup check](#persistence)). Purging or deleting
+  a thread, Leave no trace and Forget everything erase every one of them at
+  once. Export my data carries person
   memory: a `person-memory` page holding every entry with the threads it came
   from (title, mode, Project, provider account, end time), and no digest or
   setting. Entries were redacted before storage, so the export adds nothing
@@ -6247,7 +6256,9 @@ flowchart LR
   watermark. A different fingerprint, a
   migration in the same start, a missing, malformed or too-high watermark, or
   any rewrite or delete of a journal row (a trigger clears it in the same
-  transaction, so purge, compaction and host-identity rewrites are covered)
+  transaction, so purge, compaction and host-identity rewrites are covered;
+  nothing deletes at run time except a purge, an erase the person asks for, or
+  an entry's rewrite)
   means a full scan. An incompatible row is quarantined wherever it sits, and a
   diagnostics call with `fresh` always scans everything. Deleting the watermark
   only makes the next start slower.
@@ -6593,7 +6604,14 @@ flowchart LR
   ended pages before it records the journal verification watermark, as it does
   for superseded checkout observations. A whole ended page leaves with both of
   its events, so the rows that stay are the rows the scan decoded, and that
-  start records the watermark again at the head that is left. A thread purge takes a thread's records
+  start records the watermark again at the head that is left. Superseded person
+  memory leaves the same way: each block cut, distilled digest and typed-turn
+  mark is an aggregate of its own, a run erases none of them, and the start
+  removes the cuts and digests a thread has outlived (all but the newest) and
+  the marks beyond its newest 200, whole aggregates with their heads and
+  quarantine rows in one transaction, never a released event, and records the
+  watermark after it. A start that stops between the two only loses the
+  watermark and scans everything the next time. A thread purge takes a thread's records
   and a Project erase takes a Project's, and no export, replica sync, usage or
   activity view, or support bundle carries them beyond the event name in the
   bundle's recent-event list and the kind-name count in Journal growth. The
