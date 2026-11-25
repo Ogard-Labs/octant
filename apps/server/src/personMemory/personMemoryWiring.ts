@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  type ChatThread,
   type ChatThreadView,
   type ChatTurn,
   decodeChatThreadId,
@@ -23,6 +24,17 @@ import {
   type PersonMemoryThreadSource,
   type PersonMessage,
 } from "./personMemorySweep";
+
+interface WorkThreadFacts {
+  readonly id: string;
+  readonly title: string;
+  readonly projectId: string;
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly modelId: ProviderModelId;
+  readonly completedAt?: string | undefined;
+}
+
+type CodeThread = ReturnType<PersistenceService["readCodeThreads"]>[number];
 
 /** The newest person messages a thread is distilled from; older ones are past the input cap anyway. */
 const PERSON_MESSAGE_LIMIT = 60;
@@ -70,6 +82,46 @@ export function chatPersonMessages(
 }
 
 /**
+ * When a thread's stream last recorded anything, which is when its last turn
+ * ended as well as when it began. Chat reads its own stream; Code reads the
+ * thread's operations through the index that starts at the thread. Newest
+ * first and one row, so the cost does not grow with the thread's length.
+ */
+export function latestEventAt(
+  connection: PersistenceService["connection"],
+  key:
+    | { readonly aggregateType: string; readonly aggregateId: string; readonly eventName?: string }
+    | { readonly aggregateType: string; readonly threadId: string },
+): string | undefined {
+  const row =
+    "threadId" in key
+      ? connection
+          .prepare(
+            `SELECT occurred_at AS at FROM event_journal
+             WHERE aggregate_type = ?
+               AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+             ORDER BY global_sequence DESC LIMIT 1`,
+          )
+          .get(key.aggregateType, key.threadId)
+      : key.eventName === undefined
+        ? connection
+            .prepare(
+              `SELECT occurred_at AS at FROM event_journal
+               WHERE aggregate_type = ? AND aggregate_id = ?
+               ORDER BY global_sequence DESC LIMIT 1`,
+            )
+            .get(key.aggregateType, key.aggregateId)
+        : connection
+            .prepare(
+              `SELECT occurred_at AS at FROM event_journal
+               WHERE aggregate_type = ? AND aggregate_id = ? AND event_name = ?
+               ORDER BY global_sequence DESC LIMIT 1`,
+            )
+            .get(key.aggregateType, key.aggregateId, key.eventName);
+  return (row as { readonly at: string } | undefined)?.at;
+}
+
+/**
  * The sweep over Chat, Work, and Code with the host's own reads: each mode's
  * threads, and only the messages the person wrote in one. The model call is
  * a tool-less one-shot in a scratch folder outside every Project, on the
@@ -88,20 +140,15 @@ export function createPersonMemorySweep(input: {
   >;
   readonly store: PersonMemoryStore;
   readonly workThreads: {
-    readonly list: () => ReadonlyArray<{
-      readonly id: string;
-      readonly title: string;
-      readonly projectId: string;
-      readonly providerInstanceId: ProviderInstanceId;
-      readonly modelId: ProviderModelId;
-      readonly completedAt?: string | undefined;
-    }>;
+    readonly list: () => ReadonlyArray<WorkThreadFacts>;
   };
   /** The newest messages the person wrote in a Work or Code thread that count as theirs. */
   readonly workPersonMessages: (threadId: string, limit: number) => ReadonlyArray<PersonMessage>;
   readonly codePersonMessages: (threadId: string, limit: number) => ReadonlyArray<PersonMessage>;
   /** When the person last wrote to a Work or Code thread, whether it counts or not. */
   readonly workLastMessageAt: (threadId: string) => string | undefined;
+  /** When a Work thread's newest turn last changed, which is when it ended. */
+  readonly workLastActivityAt: (threadId: string) => string | undefined;
   readonly codeLastMessageAt: (threadId: string) => string | undefined;
   /** A turn is running or waiting in the thread. */
   readonly turnRunning: (threadId: string) => boolean;
@@ -112,16 +159,36 @@ export function createPersonMemorySweep(input: {
   readonly protectedSecretPath: (path: string) => boolean;
 }): PersonMemorySweep {
   const { persistence } = input;
+  // Each pass lists a mode's threads once; reading one thread uses that list
+  // instead of scanning it again for every thread.
+  const listedChat = new Map<string, ChatThread>();
+  const listedCode = new Map<string, CodeThread>();
   const chat: PersonMemoryThreadSource = {
     mode: "chat",
     // A Chat being deleted is on its way out; learning from it now would
     // spend a call on a thread whose memory the delete then erases.
-    threads: () =>
-      persistence.readChatThreads().filter((thread) => thread.lifecycle !== "deleting"),
+    threads: () => {
+      const threads = persistence.readChatThreads().filter((thread) => thread.lifecycle !== "deleting");
+      listedChat.clear();
+      for (const thread of threads) listedChat.set(String(thread.id), thread);
+      return threads;
+    },
+    peek: (threadId) => ({
+      lastMessageAt: latestEventAt(persistence.connection, {
+        aggregateType: "chat-thread",
+        aggregateId: threadId,
+        eventName: "chat.turn-created@1",
+      }),
+      lastActivityAt: latestEventAt(persistence.connection, {
+        aggregateType: "chat-thread",
+        aggregateId: threadId,
+      }),
+      running: input.turnRunning(threadId),
+    }),
     read: (threadId) => {
-      const thread = persistence
-        .readChatThreads()
-        .find((candidate) => String(candidate.id) === threadId);
+      const thread =
+        listedChat.get(threadId) ??
+        persistence.readChatThreads().find((candidate) => String(candidate.id) === threadId);
       const view = persistence.readChatThreadView(decodeChatThreadId(threadId));
       if (thread === undefined || view === undefined) return undefined;
       return {
@@ -135,18 +202,27 @@ export function createPersonMemorySweep(input: {
           (turn) => input.store.countsAsPersonWords({ mode: "chat", threadId, ...turn }),
           (turnId) => input.store.isTurnTyped({ mode: "chat", threadId, turnId }),
         ),
-        lastMessageAt: activeChatTurns(view.turns)
-          .filter((turn) => turn.delivery === undefined)
-          .at(-1)?.createdAt,
-        running: input.turnRunning(threadId),
       };
     },
   };
+  const listedWork = new Map<string, WorkThreadFacts>();
   const work: PersonMemoryThreadSource = {
     mode: "work",
-    threads: () => input.workThreads.list(),
+    threads: () => {
+      const threads = input.workThreads.list();
+      listedWork.clear();
+      for (const thread of threads) listedWork.set(thread.id, thread);
+      return threads;
+    },
+    peek: (threadId) => ({
+      lastMessageAt: input.workLastMessageAt(threadId),
+      lastActivityAt: input.workLastActivityAt(threadId),
+      running: input.turnRunning(threadId),
+    }),
     read: (threadId) => {
-      const thread = input.workThreads.list().find((candidate) => candidate.id === threadId);
+      const thread =
+        listedWork.get(threadId) ??
+        input.workThreads.list().find((candidate) => candidate.id === threadId);
       if (thread === undefined) return undefined;
       return {
         title: thread.title,
@@ -154,18 +230,30 @@ export function createPersonMemorySweep(input: {
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
         personMessages: input.workPersonMessages(threadId, PERSON_MESSAGE_LIMIT),
-        lastMessageAt: input.workLastMessageAt(threadId),
-        running: input.turnRunning(threadId),
       };
     },
   };
   const code: PersonMemoryThreadSource = {
     mode: "code",
-    threads: () => persistence.readCodeThreads(),
+    threads: () => {
+      const threads = persistence.readCodeThreads();
+      listedCode.clear();
+      for (const thread of threads) listedCode.set(String(thread.id), thread);
+      return threads;
+    },
+    peek: (threadId) => ({
+      lastMessageAt: input.codeLastMessageAt(threadId),
+      lastActivityAt: latestEventAt(persistence.connection, {
+        aggregateType: "code-operation",
+        threadId,
+      }),
+      running: input.turnRunning(threadId),
+    }),
     read: (threadId) => {
-      const thread = persistence
-        .readCodeThreads()
-        .find((candidate) => String(candidate.id) === String(decodeCodeThreadId(threadId)));
+      const decoded = String(decodeCodeThreadId(threadId));
+      const thread =
+        listedCode.get(decoded) ??
+        persistence.readCodeThreads().find((candidate) => String(candidate.id) === decoded);
       if (thread === undefined) return undefined;
       return {
         title: thread.title,
@@ -173,8 +261,6 @@ export function createPersonMemorySweep(input: {
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
         personMessages: input.codePersonMessages(threadId, PERSON_MESSAGE_LIMIT),
-        lastMessageAt: input.codeLastMessageAt(threadId),
-        running: input.turnRunning(threadId),
       };
     },
   };

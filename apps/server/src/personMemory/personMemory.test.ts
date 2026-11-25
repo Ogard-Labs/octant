@@ -74,6 +74,8 @@ interface FakeThread {
   /** The host marked the messages typed (an open thread learns from nothing else). */
   typed?: boolean;
   running?: boolean;
+  /** When the thread last did anything (a turn ended); absent, its last message. */
+  lastActivityAt?: string;
 }
 
 /** A fake thread's messages as the sweep reads them. */
@@ -110,6 +112,8 @@ function harness(threads: FakeThread[]) {
   });
   const prompts: string[] = [];
   const usage: string[] = [];
+  /** The threads the sweep read in full. */
+  const reads: string[] = [];
   let reply: PersonMemoryModelAnswer = {
     status: "answered",
     text: JSON.stringify({
@@ -129,7 +133,29 @@ function harness(threads: FakeThread[]) {
         // A thread put away gains a completion time and keeps its lifecycle.
         completedAt: thread.completedAt,
       })),
+    peek: (threadId) => {
+      const thread = threads.find((candidate) => candidate.id === threadId);
+      // What the host's marks say, as the route would have recorded them.
+      if (thread?.typed === true) {
+        thread.personMessages.forEach((_, index) =>
+          store.markTurnTyped({
+            mode: "chat",
+            threadId,
+            turnId: `message-${String(index)}`,
+            projectId: thread.projectId,
+          }),
+        );
+      }
+      return thread === undefined
+        ? undefined
+        : {
+            lastMessageAt: thread.messageTimes?.at(-1) ?? START,
+            lastActivityAt: thread.lastActivityAt,
+            running: thread.running === true,
+          };
+    },
     read: (threadId) => {
+      reads.push(threadId);
       const thread = threads.find((candidate) => candidate.id === threadId);
       return thread === undefined
         ? undefined
@@ -139,8 +165,6 @@ function harness(threads: FakeThread[]) {
             providerInstanceId: PROVIDER,
             modelId: "big-model" as ProviderModelId,
             personMessages: personMessagesOf(thread),
-            lastMessageAt: thread.messageTimes?.at(-1) ?? START,
-            running: thread.running === true,
           };
     },
   };
@@ -202,6 +226,7 @@ function harness(threads: FakeThread[]) {
     sweepWith,
     prompts,
     usage,
+    reads,
     journalText,
     reply: () => reply,
     setThreads: (next: FakeThread[]) => {
@@ -516,12 +541,12 @@ function sourceOf(): PersonMemoryThreadSource {
   return {
     mode: "chat",
     threads: () => [],
+    peek: () => ({ running: false }),
     read: (threadId: string) => ({
       title: threadId === THREAD_1 ? "Keys" : "Web",
       providerInstanceId: PROVIDER,
       modelId: SMALL,
       personMessages: [{ id: "message-0", at: START, text: "text", typed: false }],
-      running: false,
     }),
   };
 }
@@ -981,12 +1006,12 @@ describe("person memory under timing and volume", () => {
         {
           mode: "chat",
           threads: () => [{ id: THREAD_1, completedAt: later }],
+          peek: () => ({ running: false }),
           read: () => ({
             title: "Invoices",
             providerInstanceId: PROVIDER,
             modelId: SMALL,
             personMessages: [{ id: "message-0", at: START, text: "CSV", typed: false }],
-            running: false,
           }),
         },
       ],
@@ -1914,6 +1939,73 @@ describe("learning from threads still open", () => {
     h.setThreads([open({ personMessages: ["Newer"], messageTimes: ["2026-11-02T10:00:00.000Z"] })]);
     expect(await unavailable.pass()).toEqual([
       { mode: "chat", threadId: THREAD_1, outcome: "unavailable" },
+    ]);
+  });
+
+  it("does not let threads whose account makes no call use up the ten calls of a pass", async () => {
+    const opened: FakeThread[] = Array.from({ length: 13 }, (_, index) => ({
+      ...open(),
+      id: `aaaaaaaa-0000-4000-8000-0000000003${String(index).padStart(2, "0")}`,
+      title: `Open ${String(index)}`,
+      personMessages: [`Open message ${String(index)}`],
+    }));
+    const h = begin(opened);
+    h.advance(QUIET);
+    let resolved = 0;
+    // The first twelve threads sit on an account that is off; the last is fine.
+    const sweep = h.sweepWith({
+      resolve: ({ thread }) => {
+        resolved += 1;
+        return resolved <= 12
+          ? undefined
+          : {
+              model: { providerInstanceId: thread.providerInstanceId, modelId: SMALL },
+              driverKind: "fake",
+            };
+      },
+    });
+
+    const results = await sweep.pass();
+
+    expect(results.filter((result) => result.outcome === "remembered")).toHaveLength(1);
+    expect(h.prompts).toHaveLength(1);
+  });
+
+  it("reads an open thread in full only when it has something to learn, and not again until it changes", async () => {
+    const unmarked = open({ id: THREAD_2, typed: false });
+    const thread = open();
+    const h = begin([unmarked, thread]);
+    h.advance(QUIET);
+    // Habits of a host that records marks: this thread was typed in, the other not.
+    expect(await h.sweep.pass()).toHaveLength(1);
+    expect(h.reads).toEqual([THREAD_1]);
+
+    // Nothing changed in six hours' time: no thread is read again.
+    h.advance("2026-11-02T10:00:00.000Z");
+    await h.sweep.pass();
+    await h.sweep.pass();
+    expect(h.reads).toEqual([THREAD_1]);
+
+    // A thread whose newest message is older than what was learned is not read
+    // either, and one that did change is.
+    thread.personMessages = [...thread.personMessages, "More."];
+    thread.messageTimes = [MSG_AT, "2026-11-02T09:00:00.000Z"];
+    await h.sweep.pass();
+    expect(h.reads).toEqual([THREAD_1, THREAD_1]);
+  });
+
+  it("waits for the thread to be quiet from the end of its last turn, not from when the last message began", async () => {
+    const thread = open({ lastActivityAt: "2026-11-01T11:00:00.000Z" });
+    const h = begin([thread]);
+
+    // The message began at 10:30 but the turn it started ended at 11:00.
+    h.advance("2026-11-01T11:10:00.000Z");
+    expect(await h.sweep.pass()).toEqual([]);
+    expect(h.prompts).toHaveLength(0);
+
+    h.advance("2026-11-01T11:31:00.000Z");
+    expect(await h.sweep.pass()).toEqual([
+      { mode: "chat", threadId: THREAD_1, outcome: "remembered" },
     ]);
   });
 

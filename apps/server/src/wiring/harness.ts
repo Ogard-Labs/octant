@@ -1197,6 +1197,8 @@ export function wireHarness(deps: HarnessDependencies) {
         .listForThread(decodeWorkThreadId(threadId))
         .filter((turn) => turn.delivery === undefined)
         .at(-1)?.acceptedAt,
+    workLastActivityAt: (threadId) =>
+      workTurnProjection.listForThread(decodeWorkThreadId(threadId)).at(-1)?.updatedAt,
     codePersonMessages: (threadId, limit) =>
       codeBoardEventStore
         .personPromptTurnsForThread(decodeCodeThreadId(threadId), limit * 4)
