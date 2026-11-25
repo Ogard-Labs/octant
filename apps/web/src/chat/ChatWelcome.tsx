@@ -1,4 +1,4 @@
-import { armTypedClaim } from "@octant/client-runtime/typed-composer-text";
+import { withTypedSend } from "@octant/client-runtime/typed-composer-text";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import {
   ComposerSlashTypeahead,
@@ -169,14 +169,14 @@ export function ChatWelcome(props: ChatWelcomeProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    armTypedClaim(typedScope, trimmed);
+    const onCreateChat = withTypedSend(props.onCreateChat, typedScope, trimmed);
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
     const options = Object.keys(modelOptionValues).length === 0 ? undefined : modelOptionValues;
     if (stagedFiles.length > 0) {
       const submitted = stagedFiles;
-      const created = props.onCreateChat(
+      const created = onCreateChat(
         trimmed,
         options,
         extensionSelections.length > 0 ? extensionSelections : undefined,
@@ -194,10 +194,10 @@ export function ChatWelcome(props: ChatWelcomeProps) {
         });
       if (extensionSelections.length > 0) extensionDraft.clear();
     } else if (extensionSelections.length > 0) {
-      props.onCreateChat(trimmed, options, extensionSelections);
+      onCreateChat(trimmed, options, extensionSelections);
       extensionDraft.clear();
-    } else if (options === undefined) props.onCreateChat(trimmed);
-    else props.onCreateChat(trimmed, options);
+    } else if (options === undefined) onCreateChat(trimmed);
+    else onCreateChat(trimmed, options);
   }, [canSubmit, extensionDraft, props, trimmed, modelOptionValues, stagedFiles, typedScope]);
 
   function handleKeyDown(event: KeyboardEvent<ComposerInputElement>) {

@@ -1,7 +1,7 @@
 import {
-  armTypedClaim,
   composerTextWasTyped,
   noteTypedComposerText,
+  sendingTyped,
 } from "@octant/client-runtime/typed-composer-text";
 import "../styles/chat-project-overview.css";
 import {
@@ -175,15 +175,15 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
     setSubmitting(true);
     // The claim is taken before the draft is cleared, and the draft that a
     // refused create puts back keeps it.
-    armTypedClaim(typedScope, normalized);
     const typedBefore = composerTextWasTyped(typedScope, normalized);
     const retireStashRecovery = stashSubmission.current?.();
     if (retireStashRecovery === undefined) setDraft("");
     try {
-      const created =
+      const created = await sendingTyped(typedBefore, normalized, () =>
         Object.keys(modelOptionValues).length === 0
-          ? await props.onCreateThread(normalized)
-          : await props.onCreateThread(normalized, modelOptionValues);
+          ? props.onCreateThread?.(normalized)
+          : props.onCreateThread?.(normalized, modelOptionValues),
+      );
       const current =
         drafts === undefined || draftScope === undefined ? undefined : drafts.read(draftScope);
       if (created && retireStashRecovery !== undefined) {

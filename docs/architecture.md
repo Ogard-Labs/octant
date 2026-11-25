@@ -2322,7 +2322,13 @@ except where a bullet says otherwise.
   text the note holds), and a stash carries it with the draft it saves and
   restores; a restore joined to text already in the composer counts only when
   both parts were typed. A send that fails and leaves the draft in place keeps
-  its claim. Undo or redo that lands on text counts only if that text was left
+  its claim, and a first message put back in the composer of the thread that was
+  created for it carries its claim to that thread's draft. The claim reaches the
+  handler that builds the command with the call that hands the text over (a
+  phone's send carries it as a field), never through state that outlives the
+  call, so a submit that fails leaves nothing behind and another submit cannot
+  take it; a relay that waits before the handler reads it loses the claim and
+  never gains one. Undo or redo that lands on text counts only if that text was left
   by the person's input when it was current, so undoing back to what a button
   wrote does not count; deleting back to it by hand does, because that is the
   person's own input. A person's own edit in a queued message's editor claims

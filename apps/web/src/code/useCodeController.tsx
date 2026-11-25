@@ -1,5 +1,5 @@
 import {
-  armedTypedClaimFor,
+  noteTypedComposerText,
   threadDraftScope,
   typedClaimFor,
 } from "@octant/client-runtime/typed-composer-text";
@@ -2458,6 +2458,8 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly fileMentionPaths?: ReadonlyArray<string>;
       readonly computerUseSelection?: ExtensionSelection;
       readonly extensionSelections?: ReadonlyArray<ExtensionSelection>;
+      /** The person typed the prompt where it was written; it keeps the claim if it is put back. */
+      readonly typedByPerson?: true;
     }): Promise<boolean> => {
       const prompt = input.prompt.trim();
       if (prompt.length === 0) return false;
@@ -2478,6 +2480,9 @@ export function useCodeController(options: CodeControllerOptions) {
         // fail on a thread that is already open — the New Code composer opens
         // the thread before starting — so put it back now or the composer stays
         // empty in front of the error.
+        if (input.typedByPerson === true) {
+          noteTypedComposerText(threadDraftScope("code", String(input.threadId)), prompt);
+        }
         if (String(activeThreadId.current) === String(input.threadId)) {
           setPendingDraft(prompt);
           firstTurnFailures.current.delete(String(input.threadId));
@@ -2487,7 +2492,6 @@ export function useCodeController(options: CodeControllerOptions) {
         const { operationId, started } = await beginProviderTurn({
           ...input,
           prompt,
-          ...armedTypedClaimFor(prompt),
         });
         if (started.kind === "operation-failed") {
           failFirstTurn(started.failure.message);

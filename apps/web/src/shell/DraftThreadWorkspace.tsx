@@ -1,4 +1,4 @@
-import { armTypedClaim } from "@octant/client-runtime/typed-composer-text";
+import { withTypedSend } from "@octant/client-runtime/typed-composer-text";
 import { matchProjectForLinearIssue } from "@octant/domain";
 import {
   decodeThreadWorkingDirectory,
@@ -1361,7 +1361,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    armTypedClaim(typedScope, trimmed);
+    const claimedCreate = withTypedSend(createThread, typedScope, trimmed);
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
@@ -1373,7 +1373,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     };
     if (Object.keys(modelOptionValues).length > 0) {
       afterCreate(
-        createThread(
+        claimedCreate(
           trimmed,
           undefined,
           undefined,
@@ -1392,7 +1392,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     }
     if (extensionSelections.length > 0) {
       afterCreate(
-        createThread(
+        claimedCreate(
           trimmed,
           undefined,
           undefined,
@@ -1407,10 +1407,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       return;
     }
     if (issueContext === undefined && linearIssueContext === undefined) {
-      void createThread(trimmed);
+      void claimedCreate(trimmed);
       return;
     }
-    void createThread(
+    void claimedCreate(
       trimmed,
       undefined,
       undefined,

@@ -1,3 +1,4 @@
+import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import {
@@ -409,6 +410,8 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   };
 
   const createThread = async (mode: MobileCreateMode) => {
+    // The claim is of the text pressed Start on, read before anything is awaited.
+    const typedClaim = typedClaimFor(HOME_TYPED_SCOPE, prompt);
     // Read before the create awaits: a Start pressed meanwhile is another draft.
     // The link goes out once the host has made the thread, before its first
     // turn, so a turn that fails still leaves a linked thread, and the source is
@@ -448,6 +451,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         const row = await createMobileCodeFromPrompt({
           transport: placementTransport,
           prompt,
+          ...typedClaim,
           project: selectedCodeProject,
           providerInstanceId: selectedModel.providerInstanceId,
           modelId: selectedModel.modelId,
@@ -474,6 +478,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         const row = await createMobileWorkFromPrompt({
           transport: placementTransport,
           prompt,
+          ...typedClaim,
           projectId: selectedWorkProject.projectId,
           providerInstanceId: selectedModel.providerInstanceId,
           modelId: selectedModel.modelId,
@@ -486,7 +491,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         props.onOpenThread(row);
         return;
       }
-      const row = await createChat(prompt, started);
+      const row = await createChat(prompt, started, typedClaim.typedByPerson);
       setPrompt("");
       setComposerSheetOpen(false);
       await refresh();

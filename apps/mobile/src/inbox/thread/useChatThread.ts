@@ -1,3 +1,4 @@
+import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   cancelMobileChatWorkItem,
@@ -22,7 +23,7 @@ import { useThreadAttachments } from "./useThreadAttachments";
 export function useChatThread(
   input: ThreadHookInput & { readonly modelOptions: ReadonlyArray<MobileModelOption> },
 ) {
-  const { transport, target, guard, ui, gate, prompt, setPrompt, modelOptions } = input;
+  const { transport, target, guard, ui, gate, prompt, setPrompt, modelOptions, typedScope } = input;
   const identity = target?.identity;
   const threadId = target?.threadId;
   const enabled = target?.mode === "chat";
@@ -123,6 +124,8 @@ export function useChatThread(
   };
 
   const send = async () => {
+    // Read now, before anything is awaited: the claim is of the text being sent.
+    const typedClaim = typedClaimFor(typedScope, prompt);
     if (!enabled || transport === undefined || view === undefined || identity === undefined) return;
     const decoded =
       modelOptionId === undefined ? undefined : decodeMobileModelOptionId(modelOptionId);
@@ -144,6 +147,7 @@ export function useChatThread(
               threadId: view.thread.id,
               expectedVersion: view.thread.version,
               prompt,
+              ...typedClaim,
               ...(pendingAttachments.length > 0
                 ? { attachmentIds: pendingAttachments.map((item) => item.id) }
                 : {}),

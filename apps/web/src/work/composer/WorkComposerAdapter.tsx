@@ -1,4 +1,4 @@
-import { armTypedClaim } from "@octant/client-runtime/typed-composer-text";
+import { withTypedSend } from "@octant/client-runtime/typed-composer-text";
 import { useDroppedFolderMentions } from "../../composer/useDroppedFolderMentions";
 import { MAX_WORK_ATTACHMENT_BYTES, MAX_WORK_TURN_ATTACHMENTS } from "@octant/contracts";
 import {
@@ -277,7 +277,6 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    armTypedClaim(typedScope, trimmed);
     // A Work thread belongs to a Project, so the first turn
     // cannot start until one is chosen. Refusing here, with a visible reason,
     // is what makes the Project control a requirement rather than a suggestion.
@@ -303,7 +302,12 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
         if (extensionSelections.length > 0 || Object.keys(modelOptionValues).length > 0)
           options[1] = extensionSelections.length === 0 ? undefined : extensionSelections;
         if (Object.keys(modelOptionValues).length > 0) options[2] = modelOptionValues;
-        const created = await props.onCreateThread(trimmed, staged, threadMentionIds, ...options);
+        const created = await withTypedSend(props.onCreateThread, typedScope, trimmed)(
+          trimmed,
+          staged,
+          threadMentionIds,
+          ...options,
+        );
         if (created !== false) images.clearAfterAccepted();
         return created;
       })

@@ -1,9 +1,8 @@
 import {
-  armTypedClaim,
-  composerTextReplaced,
+  composerValueShown,
   noteTypedComposerText,
 } from "@octant/client-runtime/typed-composer-text";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { GlassSurface, radii, space, typography, useTheme } from "../../design-system";
@@ -105,17 +104,10 @@ export function FloatingComposer(props: FloatingComposerProps) {
   );
 
   // What the person types is theirs; a value a screen writes is not, and
-  // replaces the draft's note unless it is the text the person left.
-  const lastTyped = useRef<string | undefined>(undefined);
+  // replaces the draft's note unless it is text the person left there.
   useEffect(() => {
-    if (props.value !== undefined && props.value !== lastTyped.current) {
-      composerTextReplaced(props.typedScope, props.value);
-    }
+    if (props.value !== undefined) composerValueShown(props.typedScope, props.value);
   }, [props.value, props.typedScope]);
-  const submit = () => {
-    armTypedClaim(props.typedScope, props.value ?? "");
-    props.onSubmit?.();
-  };
   const multiline = props.value !== undefined;
   const editable = props.editable !== false && !props.busy;
   const canSend = editable && (props.value ?? "").trim().length > 0 && props.onSubmit !== undefined;
@@ -128,7 +120,6 @@ export function FloatingComposer(props: FloatingComposerProps) {
             editable={editable}
             multiline
             onChangeText={(value) => {
-              lastTyped.current = value;
               noteTypedComposerText(props.typedScope, value);
               props.onChangeText?.(value);
             }}
@@ -191,7 +182,7 @@ export function FloatingComposer(props: FloatingComposerProps) {
               accessibilityLabel="Send"
               disabled={!canSend}
               name="arrow-up"
-              onPress={submit}
+              onPress={props.onSubmit}
               size={34}
               testID="mobile-composer-send"
               variant="send"

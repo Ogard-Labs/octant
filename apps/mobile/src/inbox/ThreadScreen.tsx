@@ -154,6 +154,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
     identity === undefined || hostId === undefined || threadId === undefined || mode !== wanted
       ? undefined
       : { identity, hostId, threadId, mode };
+  const typedScope = `thread:${identity ?? "none"}`;
   const shared = (target: ThreadTarget | undefined): ThreadHookInput => ({
     transport,
     target,
@@ -161,6 +162,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
     ui,
     gate: staleGate,
     prompt,
+    typedScope,
     setPrompt,
   });
 
@@ -392,7 +394,6 @@ export function ThreadScreen(props: ThreadScreenProps) {
         !workTurnLive &&
         !codeTurnLive &&
         (mode === "code" || work.thread !== undefined));
-  const typedScope = `thread:${identity ?? "none"}`;
   const appendToDraft = useCallback(
     (text: string) => setPrompt((draft) => appendTranscript(typedScope, draft, text)),
     [typedScope],

@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { postWithTypedClaim, sendWithTypedClaim, withoutTypedClaim } from "./typedClaim";
 import {
-  armedTypedClaimFor,
-  armTypedClaim,
   composerTextReplaced,
   composerTextWasTyped,
+  composerValueShown,
   forgetTypedComposerText,
   noteTypedComposerText,
   typedClaimFor,
+  typedSendClaim,
+  withTypedSend,
 } from "./typedComposerText";
 
 describe("a send that claims the person typed it", () => {
@@ -110,19 +111,40 @@ describe("what the person typed", () => {
     expect(composerTextWasTyped("chat:a", "Second draft")).toBe(false);
   });
 
-  it("answers a new-task send with the claim its own composer armed, once, for exactly that text", () => {
+  it("keeps a note when a native field shows the person's earlier text late, and when two views share the draft, but not for a real replacement", () => {
+    forgetTypedComposerText();
+    noteTypedComposerText("mobile-home", "I prefer");
+    noteTypedComposerText("mobile-home", "I prefer tabs");
+
+    // The field reports the first keystroke's value after the second was typed;
+    // the hidden sheet and the inline composer both see the new value.
+    composerValueShown("mobile-home", "I prefer");
+    composerValueShown("mobile-home", "I prefer tabs");
+    composerValueShown("mobile-home", "I prefer tabs");
+    expect(composerTextWasTyped("mobile-home", "I prefer tabs")).toBe(true);
+
+    composerValueShown("mobile-home", "Prefilled by a button");
+    expect(composerTextWasTyped("mobile-home", "I prefer tabs")).toBe(false);
+  });
+
+  it("hands a claim to the handler only for the length of the call that hands the text over", async () => {
     forgetTypedComposerText();
     noteTypedComposerText("new-task:a", "I prefer tabs");
+    const seen: Array<{ typedByPerson?: true }> = [];
+    const handler = async (text: string) => {
+      seen.push(typedSendClaim(text));
+      await Promise.resolve();
+      // After its first await the claim is gone, and so is every other composer's.
+      seen.push(typedSendClaim(text));
+    };
 
-    armTypedClaim("new-task:a", "I prefer tabs");
-    expect(armedTypedClaimFor("something else")).toEqual({});
-    armTypedClaim("new-task:a", "I prefer tabs");
-    expect(armedTypedClaimFor("I prefer tabs")).toEqual({ typedByPerson: true });
-    expect(armedTypedClaimFor("I prefer tabs")).toEqual({});
+    await withTypedSend(handler, "new-task:a", "I prefer tabs")("I prefer tabs");
+    // Another composer sending the same words, which nobody typed there.
+    await withTypedSend(handler, "new-task:b", "I prefer tabs")("I prefer tabs");
+    // A handler given other text than the composer's claims nothing.
+    await withTypedSend(handler, "new-task:a", "I prefer tabs")("something else");
 
-    // Another composer's submit of the same words, which nobody typed, leaves nothing to find.
-    armTypedClaim("new-task:a", "I prefer tabs");
-    armTypedClaim("new-task:b", "I prefer tabs");
-    expect(armedTypedClaimFor("I prefer tabs")).toEqual({});
+    expect(seen).toEqual([{ typedByPerson: true }, {}, {}, {}, {}, {}]);
+    expect(typedSendClaim("I prefer tabs")).toEqual({});
   });
 });

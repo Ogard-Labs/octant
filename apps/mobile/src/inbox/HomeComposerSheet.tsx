@@ -1,9 +1,8 @@
 import {
-  armTypedClaim,
-  composerTextReplaced,
+  composerValueShown,
   noteTypedComposerText,
 } from "@octant/client-runtime/typed-composer-text";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { radii, space, typography, useTheme } from "../../design-system";
@@ -58,14 +57,9 @@ export function HomeComposerSheet(props: {
   readonly onRemoveSource?: (() => void) | undefined;
 }) {
   const { colors } = useTheme();
-  const lastTyped = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (props.prompt !== lastTyped.current) composerTextReplaced(props.typedScope, props.prompt);
+    composerValueShown(props.typedScope, props.prompt);
   }, [props.prompt, props.typedScope]);
-  const submit = () => {
-    armTypedClaim(props.typedScope, props.prompt);
-    props.onSubmit();
-  };
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -190,7 +184,7 @@ export function HomeComposerSheet(props: {
             disabled={!canSubmit}
             iconSize={18}
             name={props.busy === true ? "hourglass-outline" : "arrow-up"}
-            onPress={submit}
+            onPress={props.onSubmit}
             size={32}
             testID="mobile-home-composer-submit"
             variant="send"
@@ -282,7 +276,6 @@ export function HomeComposerSheet(props: {
         editable={editable}
         multiline
         onChangeText={(value) => {
-          lastTyped.current = value;
           noteTypedComposerText(props.typedScope, value);
           props.onChangePrompt(value);
         }}

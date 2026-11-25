@@ -15,6 +15,9 @@
  */
 const SCOPE_LIMIT = 256;
 const typed = new Map<string, string>();
+/** The last few texts each scope's person typed, for a field that shows its value late. */
+const echoes = new Map<string, string[]>();
+const ECHO_LIMIT = 8;
 
 /** The draft scope of an open thread's composer. */
 export function threadDraftScope(mode: "chat" | "work" | "code", threadId: string): string {
@@ -27,11 +30,16 @@ export function noteTypedComposerText(scope: string, text: string): void {
   typed.delete(scope);
   if (trimmed.length === 0) return;
   typed.set(scope, trimmed);
+  echoes.set(
+    scope,
+    [...(echoes.get(scope) ?? []).filter((text) => text !== trimmed), trimmed].slice(-ECHO_LIMIT),
+  );
   // A scope forgotten only costs a claim, never grants one.
   while (typed.size > SCOPE_LIMIT) {
     const oldest = typed.keys().next();
     if (oldest.done === true) break;
     typed.delete(oldest.value);
+    echoes.delete(oldest.value);
   }
 }
 
@@ -42,6 +50,16 @@ export function noteTypedComposerText(scope: string, text: string): void {
  */
 export function composerTextReplaced(scope: string, text: string): void {
   if (typed.get(scope) !== text.trim()) typed.delete(scope);
+}
+
+/**
+ * A native field showed `text` after the person typed it, perhaps a keystroke
+ * late: the person's own earlier text is not a replacement, anything else is.
+ */
+export function composerValueShown(scope: string, text: string): void {
+  const trimmed = text.trim();
+  if (typed.get(scope) === trimmed || (echoes.get(scope) ?? []).includes(trimmed)) return;
+  typed.delete(scope);
 }
 
 /** Whether the person's own input last left exactly this text in the scope's draft. */
@@ -57,28 +75,54 @@ export function typedClaimFor(scope: string, text: string): { readonly typedByPe
 
 /**
  * A new-task composer cannot hand its scope to the handler that builds the
- * command, so its submit leaves the answer here for that command. Every
- * composer's submit replaces it, so a send that never reached the host leaves
- * nothing for another composer's identical text to find.
+ * command, so the claim travels for the length of the one synchronous call that
+ * hands the prompt over: `sendingTyped` sets it around that call and puts back
+ * what it found, and the handler reads it with `typedSendClaim` before its
+ * first await. Nothing outlives the call, so a submit that never reached a
+ * handler leaves nothing, and a second submit cannot take the first one's claim.
+ * A relay that waits before calling the handler loses the claim, never gains one.
  */
-let armed: string | undefined;
+let sending: { readonly text: string } | undefined;
 
-/** A composer's submit: whether `text` is what the person typed in `scope`. */
-export function armTypedClaim(scope: string, text: string): void {
-  armed = composerTextWasTyped(scope, text) ? text.trim() : undefined;
+/** Runs `send`, a composer handing `text` to the handler that starts the thread, with its claim. */
+export function sendingTyped<Result>(
+  typedByPerson: boolean,
+  text: string,
+  send: () => Result,
+): Result {
+  const outer = sending;
+  sending = typedByPerson ? { text: text.trim() } : undefined;
+  try {
+    return send();
+  } finally {
+    sending = outer;
+  }
 }
 
-/** The claim a composer's submit armed for exactly this text; it is spent by being read. */
-export function armedTypedClaimFor(text: string): { readonly typedByPerson?: true } {
-  const claim = armed !== undefined && armed === text.trim();
-  armed = undefined;
-  return claim ? { typedByPerson: true } : {};
+/** The claim of the send now being handed over, for exactly this text; read before the first await. */
+export function typedSendClaim(text: string): { readonly typedByPerson?: true } {
+  return sending !== undefined && sending.text === text.trim() ? { typedByPerson: true } : {};
+}
+
+/**
+ * `fn`, called with the claim of `text` in `scope` as the draft holds it when
+ * the call is made.
+ */
+export function withTypedSend<Args extends ReadonlyArray<unknown>, Result>(
+  fn: (...args: Args) => Result,
+  scope: string,
+  text: string,
+): (...args: Args) => Result {
+  return (...args) => sendingTyped(composerTextWasTyped(scope, text), text, () => fn(...args));
 }
 
 /** Forgets one scope's note, or every note, for a test or a closed draft. */
 export function forgetTypedComposerText(scope?: string): void {
   if (scope === undefined) {
     typed.clear();
-    armed = undefined;
-  } else typed.delete(scope);
+    echoes.clear();
+  } else {
+    typed.delete(scope);
+    echoes.delete(scope);
+  }
 }
