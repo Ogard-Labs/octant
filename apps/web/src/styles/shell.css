@@ -1000,6 +1000,12 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   content: "";
 }
 
+/* A hidden sidebar with no rail has no trailing edge: centred on nothing, the
+   handle would sit half outside the window. */
+.shell--sidebar-collapsed.shell-frame:not(.shell--sidebar-rail) > .shell-frame__sidebar-resize {
+  left: 0;
+}
+
 /* A handle's hairline is the border at rest, the strong border under the
    pointer, and the meta ink, doubled in width, while it is grabbed; no accent
    comes with a press (the accent line stayed lit on a handle that had only

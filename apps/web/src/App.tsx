@@ -105,6 +105,8 @@ import { SurfaceLoading } from "./surface/SurfaceLoading";
 import { DockModuleBoundary } from "./shell/DockModuleBoundary";
 import type { ShellActions, ThreadMoveRequest } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
+import { threadRestRowActions } from "./app/threadRestRowActions";
+import { TerminalShellContext, type TerminalShellFacts } from "./shell/terminalSlot";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
 import { useStableActions } from "./app/useStableActions";
 import { PaneDockToolsContext, type PaneDockTools } from "./shell/PaneDockTools";
@@ -4147,6 +4149,9 @@ function LaunchedShell(
     renderedBottomPanelState,
     retainedBottomPanelState,
   } = dockPresentation;
+  // What the terminal cycle chords walk. A terminal reads it when a chord is
+  // pressed, so it holds whatever the newest render saw.
+  const terminalShell = useRef<TerminalShellFacts>(undefined);
   // The pull requests the active Code thread is already about, offered where a
   // reader adds a tab. Read from the same catalogue the Environment panel uses,
   // so the two never disagree.
@@ -8932,6 +8937,39 @@ function LaunchedShell(
         ? undefined
         : { id: serverActionsProject.projectId, name: serverActionsProject.name }
       : { id: actionsProject.id, name: actionsProject.name };
+  // The palette acts on the thread in front through that thread's own sidebar
+  // row: the same state decides what is offered, and the same actions run. A
+  // window with no row for it (still loading, or the thread lives elsewhere)
+  // offers nothing.
+  const frontThreadRow =
+    replyDetailThread === undefined
+      ? undefined
+      : (replyDetailThread.mode === "code"
+          ? navigationModel.codeSidebarThreads
+          : replyDetailThread.mode === "work"
+            ? navigationModel.workProjectThreads
+            : chatController.status === "ready"
+              ? navigationModel.markedChatNavigation
+              : []
+        ).find((row) => row.threadId === replyDetailThread.threadId);
+  terminalShell.current = {
+    layout: controller.presentedLayout,
+    narrow: isNarrow,
+    dock: {
+      threadId: dockThread?.mode === "code" ? dockThread.threadId : undefined,
+      open: dockPresentedOpen,
+      tabs: displayedDockState.tabs,
+      minimised: dockShelfDrawn ? minimisedUtilityTabIds(displayedDockState) : [],
+    },
+    bottom: {
+      open: bottomPanelPresentedOpen,
+      tabs: renderedBottomPanelState.tabs,
+      shown: activeBottomSurface?.id,
+    },
+    activatePane: controller.activatePane,
+    selectDockTab,
+    openBottomTool,
+  };
   const octantCommands = buildOctantCommands({
     activeMode,
     modes: enabledModes(controller.settings),
@@ -8993,6 +9031,14 @@ function LaunchedShell(
                     onSet: setCurrentThreadReplyDetail,
                   },
                 }),
+          },
+        }),
+    ...(replyDetailThread === undefined || frontThreadRow === undefined
+      ? {}
+      : {
+          frontThread: {
+            thread: frontThreadRow,
+            actions: threadRestRowActions(actions)[replyDetailThread.mode],
           },
         }),
     onOpenReview: openReview,
@@ -9244,6 +9290,14 @@ function LaunchedShell(
             void controller.updateSettings({ sidebarWidth: width });
           }}
           onPreviewSidebarWidth={setPreviewSidebarWidth}
+          // The phone drawer opens and shuts on its own terms, so it offers no
+          // edge to drag. A drag leaves focus where it was.
+          {...(sidebarIsDrawer
+            ? {}
+            : {
+                onSidebarCollapsedChange: (collapsed: boolean) =>
+                  setSidebarCollapsedPersistent(collapsed, { keepFocus: true }),
+              })}
           sidebarCollapsed={presentedSidebarCollapsed}
           sidebarRail={sidebarRail}
           sidebarRailBeside={sidebarRailBeside}
@@ -10362,7 +10416,11 @@ function LaunchedShell(
                                                                             projectController.allProjects,
                                                                         }}
                                                                       >
-                                                                        {shell}
+                                                                        <TerminalShellContext.Provider
+                                                                          value={terminalShell}
+                                                                        >
+                                                                          {shell}
+                                                                        </TerminalShellContext.Provider>
                                                                       </BenchmarkAdviceContext.Provider>
                                                                     </PaneDockToolsContext.Provider>
                                                                   </QuestionnaireDraftsProvider>

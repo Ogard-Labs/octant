@@ -33,8 +33,25 @@ export type OctantKeybindingActionId =
   | "review-send-back"
   | "review-snooze"
   | "review-mark-seen"
+  | OctantTerminalActionId;
+
+/** The actions a terminal itself answers, so its handler can cover every one. */
+export type OctantTerminalActionId =
   | "terminal-focus-next"
-  | "terminal-focus-previous";
+  | "terminal-focus-previous"
+  | "terminal-cycle-next"
+  | "terminal-cycle-previous";
+
+const TERMINAL_ACTION_IDS: Readonly<Record<OctantTerminalActionId, true>> = {
+  "terminal-focus-next": true,
+  "terminal-focus-previous": true,
+  "terminal-cycle-next": true,
+  "terminal-cycle-previous": true,
+};
+
+function isTerminalAction(id: OctantKeybindingActionId): id is OctantTerminalActionId {
+  return Object.hasOwn(TERMINAL_ACTION_IDS, id);
+}
 
 export interface OctantKeybindingAction {
   readonly id: OctantKeybindingActionId;
@@ -211,6 +228,24 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     // Keep existing custom chords ahead of the newly introduced default.
     defaultChord: "Mod+S",
   },
+  // Listed last, so a chord a person saved on an earlier action stays with it.
+  // Shells read the arrows alone, with Alt or with Control, and none binds them
+  // with both Mod and Shift; no browser, desktop menu or system chord holds
+  // Mod+Shift with Up or Down.
+  {
+    id: "terminal-cycle-next",
+    label: "Focus the next open terminal of this thread",
+    area: "Terminal",
+    defaultChord: "Mod+Shift+ArrowDown",
+    scope: "terminal",
+  },
+  {
+    id: "terminal-cycle-previous",
+    label: "Focus the previous open terminal of this thread",
+    area: "Terminal",
+    defaultChord: "Mod+Shift+ArrowUp",
+    scope: "terminal",
+  },
 ];
 
 export interface OctantChord {
@@ -335,7 +370,17 @@ export function chordRulesFor(action: OctantKeybindingAction): {
   return { page: action.page !== undefined, terminal: action.scope === "terminal" };
 }
 
+/** Chords are matched in lower case; these keys are written back as they are read. */
+const NAMED_KEYS: Readonly<Record<string, string>> = {
+  arrowup: "ArrowUp",
+  arrowdown: "ArrowDown",
+  arrowleft: "ArrowLeft",
+  arrowright: "ArrowRight",
+};
+
 function part(key: string): string {
+  const named = NAMED_KEYS[key];
+  if (named !== undefined) return named;
   return key.length === 1 ? key.toUpperCase() : `${key[0]?.toUpperCase() ?? ""}${key.slice(1)}`;
 }
 
@@ -523,11 +568,11 @@ export function matchTerminalKeybinding(
   keybindings: OctantKeybindings,
   event: Parameters<typeof chordFromEvent>[0],
   apple: boolean,
-): OctantKeybindingActionId | undefined {
+): OctantTerminalActionId | undefined {
   const chord = chordFromEvent(event, apple);
   if (!chord.mod && !chord.alt) return undefined;
   for (const action of OCTANT_KEYBINDING_ACTIONS) {
-    if (action.scope !== "terminal") continue;
+    if (action.scope !== "terminal" || !isTerminalAction(action.id)) continue;
     const bound = keybindings.bindings.get(action.id);
     if (bound === undefined || !sameChord(bound, chord)) continue;
     if (!isShadowedKeybinding(keybindings, action.id)) return action.id;

@@ -5,12 +5,19 @@ import {
   type CodeCheckoutId,
   type CodeThreadId,
 } from "@octant/contracts/code";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
 import { waitForReconnect } from "../lib/waitForReconnect";
 import { waitUntilDocumentVisible } from "../polling/documentVisibility";
-import { XtermTerminalAdapter, type XtermAdapterRuntime } from "../code/XtermTerminalAdapter";
+import type { XtermAdapterRuntime } from "../code/XtermTerminalAdapter";
 import { useTypographyProjection } from "../theme/TypographyProvider";
 import { DockMiniCard, type DockCardPages } from "./DockShelf";
+
+// The terminal engine's view loads with the first preview, not with the window.
+const XtermTerminalAdapter = lazy(() =>
+  import("../code/XtermTerminalAdapter").then((module) => ({
+    default: module.XtermTerminalAdapter,
+  })),
+);
 
 /** The smallest size Settings allows for terminal text, so a card holds as many columns as it can. */
 const MINI_TERMINAL_FONT_SIZE = 8;
@@ -259,15 +266,17 @@ export function DockTerminalCard(props: {
         <p className="dock-mini-card__note">Preview unavailable</p>
       ) : (
         <div className="dock-mini-card__terminal">
-          <XtermTerminalAdapter
-            ariaLabel="Terminal preview"
-            interactive={false}
-            {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
-            onData={ignore}
-            onResize={ignore}
-            output={tail.output}
-            typography={{ ...typography, fontSize: MINI_TERMINAL_FONT_SIZE }}
-          />
+          <Suspense fallback={null}>
+            <XtermTerminalAdapter
+              ariaLabel="Terminal preview"
+              interactive={false}
+              {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
+              onData={ignore}
+              onResize={ignore}
+              output={tail.output}
+              typography={{ ...typography, fontSize: MINI_TERMINAL_FONT_SIZE }}
+            />
+          </Suspense>
         </div>
       )}
     </DockMiniCard>

@@ -3,12 +3,19 @@ import {
   isShadowedKeybinding,
   matchTerminalKeybinding,
   type OctantKeybindings,
+  type OctantTerminalActionId,
 } from "@octant/domain";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { TerminalColorProjection } from "@octant/theme/terminal-colors";
 import type { TerminalTypographyProjection } from "@octant/theme/typography";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import { isApplePlatform } from "../platform";
+import { terminalCycleFor, type TerminalCycle } from "../shell/terminalCycle";
+import {
+  TERMINAL_SURFACE_ATTRIBUTE,
+  TerminalShellContext,
+  TerminalSlotContext,
+} from "../shell/terminalSlot";
 import { useTerminalColorProjection } from "../theme/ThemeSettingsProvider";
 import { useTypographyProjection } from "../theme/TypographyProvider";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -79,6 +86,11 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
   const element = useRef<HTMLDivElement>(null);
   const hintId = useId();
   const [focused, setFocused] = useState(false);
+  const shell = useContext(TerminalShellContext);
+  const slot = useContext(TerminalSlotContext);
+  const latestCycle = useRef<{ readonly cycle: TerminalCycle; readonly slot: string }>(undefined);
+  // Counts sessions, so each new one says how to take the caret.
+  const [sessionNumber, setSessionNumber] = useState(0);
   const { keybindings } = useKeybindings();
   const latestKeybindings = useRef(keybindings);
   const latestProps = useRef(props);
@@ -154,6 +166,18 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
     latestKeybindings.current = keybindings;
   }, [keybindings]);
 
+  // Only a mounted terminal with a place among the thread's own takes part.
+  useEffect(() => {
+    if (sessionNumber === 0 || shell === undefined || slot === undefined) return;
+    const cycle = terminalCycleFor(shell);
+    latestCycle.current = { cycle, slot };
+    const forget = cycle.register(slot, () => session.current?.focus(), props.interactive);
+    return () => {
+      latestCycle.current = undefined;
+      forget();
+    };
+  }, [shell, slot, sessionNumber, props.interactive]);
+
   useEffect(() => {
     let disposed = false;
     setRuntimeUnavailable(false);
@@ -175,7 +199,7 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
             // claimed too so the shell never sees half of the chord.
             if (event.type === "keydown" && element.current !== null) {
               event.preventDefault();
-              moveFocusOut(element.current, action === "terminal-focus-next" ? "next" : "previous");
+              runTerminalAction(action, element.current, latestCycle.current);
             }
             return true;
           },
@@ -189,6 +213,7 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
           return;
         }
         session.current = mounted;
+        setSessionNumber((current) => current + 1);
         legacyOutput.current = latestProps.current.output;
         const queued = pendingWrites.current;
         pendingWrites.current = [];
@@ -205,6 +230,8 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
       disposed = true;
       session.current?.dispose();
       session.current = undefined;
+      // A disposed session has no caret to give, so its place is forgotten.
+      setSessionNumber(0);
       latestProps.current.onSelectionReader?.(undefined);
     };
     // Callers passing a custom loadRuntime must keep its identity stable:
@@ -226,6 +253,7 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
         aria-describedby={hintId}
         aria-label={props.ariaLabel}
         data-read-only={!props.interactive}
+        {...{ [TERMINAL_SURFACE_ATTRIBUTE]: "" }}
         onBlur={() => setFocused(false)}
         onFocus={() => {
           setFocused(true);
@@ -276,6 +304,28 @@ function leaveHint(keybindings: OctantKeybindings): string {
     ...(previous === undefined ? [] : [`${previous} goes back`]),
   ];
   return parts.join(" · ");
+}
+
+function runTerminalAction(
+  action: OctantTerminalActionId,
+  terminal: HTMLElement,
+  place: { readonly cycle: TerminalCycle; readonly slot: string } | undefined,
+): void {
+  switch (action) {
+    case "terminal-focus-next":
+      moveFocusOut(terminal, "next");
+      return;
+    case "terminal-focus-previous":
+      moveFocusOut(terminal, "previous");
+      return;
+    case "terminal-cycle-next":
+    case "terminal-cycle-previous":
+      // A terminal with no place among the thread's own stays where it is.
+      place?.cycle.cycle(place.slot, action === "terminal-cycle-next" ? "next" : "previous");
+      return;
+    default:
+      action satisfies never;
+  }
 }
 
 const TABBABLE =

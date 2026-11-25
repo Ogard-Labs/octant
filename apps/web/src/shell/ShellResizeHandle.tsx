@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { createPortal } from "react-dom";
 
 /**
@@ -14,9 +20,26 @@ export function ResizeDragShield(props: { readonly axis: "column" | "row" }) {
   );
 }
 
+/**
+ * How far past the minimum a drag must go before a collapsible panel hides,
+ * and how far a hidden panel's edge must be pulled before it shows again. A
+ * drag that only overshoots the minimum keeps the panel at its minimum.
+ */
+export const RESIZE_COLLAPSE_DISTANCE = 64;
+
 export interface ShellResizeHandleProps {
   readonly accessibleName: string;
   readonly className?: string;
+  /** Lets a drag hide the panel and pull it back out. A handle without it only resizes. */
+  readonly collapse?: {
+    readonly collapsed: boolean;
+    readonly onCollapsedChange: (collapsed: boolean) => void;
+    /**
+     * The width the panel is drawn at, when the window squeezes it below its
+     * value. A drag starts there, so it hides where the edge is seen to be.
+     */
+    readonly drawnValue?: () => number | undefined;
+  };
   readonly edge: "leading" | "trailing" | "top" | "bottom";
   readonly maximum: number;
   readonly minimum: number;
@@ -30,17 +53,9 @@ export interface ShellResizeHandleProps {
 export function ShellResizeHandle(props: ShellResizeHandleProps) {
   const latestProps = useRef(props);
   latestProps.current = props;
-  const activePointer = useRef<
-    | {
-        readonly pointerId: number;
-        readonly startValue: number;
-        readonly startPoint: number;
-        lastValue: number;
-        moved: boolean;
-      }
-    | undefined
-  >(undefined);
+  const activePointer = useRef<ActivePointer | undefined>(undefined);
   const [resizing, setResizing] = useState(false);
+  const collapsed = props.collapse?.collapsed === true;
 
   useEffect(() => {
     function handleWindowKeyDown(event: KeyboardEvent): void {
@@ -62,20 +77,49 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
     };
   }, []);
 
-  function pointerValue(event: ReactPointerEvent<HTMLElement>): number | undefined {
+  // The toggle can hide or show the panel while its edge is held. The toggle
+  // wins: the drag ends there, so its release saves no width and Escape undoes
+  // nothing. A flip the drag made itself is already in the pointer's record.
+  useLayoutEffect(() => {
     const pointer = activePointer.current;
-    if (pointer === undefined || pointer.pointerId !== event.pointerId) return undefined;
+    if (pointer === undefined || pointer.collapsed === collapsed) return;
+    activePointer.current = undefined;
+    setResizing(false);
+    if (!pointer.moved) return;
+    latestProps.current.onPreview(pointer.startValue);
+    latestProps.current.onCancel?.();
+  }, [collapsed]);
+
+  function movePointer(event: ReactPointerEvent<HTMLElement>): void {
+    const pointer = activePointer.current;
+    if (pointer === undefined || pointer.pointerId !== event.pointerId) return;
     const currentPoint = verticalResize(props.edge) ? event.clientY : event.clientX;
     const growsWithPointer = props.edge === "trailing" || props.edge === "bottom";
     const delta = growsWithPointer
       ? currentPoint - pointer.startPoint
       : pointer.startPoint - currentPoint;
-    if (delta === 0 && !pointer.moved) return undefined;
-    const value = clamp(pointer.startValue + delta, props.minimum, props.maximum);
+    if (delta === 0 && !pointer.moved) return;
+    // Where the dragged edge asks to be, before the bounds apply. A hidden
+    // panel's edge starts from nothing.
+    const requested = (pointer.startCollapsed ? 0 : pointer.startEdge) + delta;
+    const hidden =
+      props.collapse !== undefined &&
+      requested <
+        (pointer.startCollapsed
+          ? RESIZE_COLLAPSE_DISTANCE
+          : props.minimum - RESIZE_COLLAPSE_DISTANCE);
+    const changed = hidden !== pointer.collapsed;
+    // A short pull on a hidden panel's edge has changed nothing yet.
+    if (hidden && !changed && !pointer.moved) return;
     pointer.moved = true;
-    pointer.lastValue = value;
-    props.onPreview(value);
-    return value;
+    pointer.collapsed = hidden;
+    // A hidden panel keeps the width the drag started with, so showing it
+    // another way brings that width back.
+    pointer.lastValue = hidden
+      ? pointer.startValue
+      : clamp(requested, props.minimum, props.maximum);
+    if (!hidden || changed) props.onPreview(pointer.lastValue);
+    if (changed) props.collapse?.onCollapsedChange(hidden);
   }
 
   function cancelPointerResize(): void {
@@ -86,17 +130,37 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
   function finishPointerResize(event: ReactPointerEvent<HTMLDivElement>): void {
     const pointer = activePointer.current;
     if (pointer === undefined || pointer.pointerId !== event.pointerId) return;
-    const value = pointerValue(event) ?? pointer.lastValue;
+    movePointer(event);
     activePointer.current = undefined;
     setResizing(false);
     if (!pointer.moved) return;
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    props.onCommit(value);
+    if (!pointer.collapsed) props.onCommit(pointer.lastValue);
+  }
+
+  // The arrow that widens a panel shows a hidden one at the width it had;
+  // Home and End show it at the bound they name.
+  function handleCollapsedKeyDown(event: React.KeyboardEvent<HTMLDivElement>): void {
+    const bound =
+      event.key === "Home" ? props.minimum : event.key === "End" ? props.maximum : undefined;
+    const direction = keyboardDirection(event.key, props.edge);
+    if (bound === undefined && direction === undefined) return;
+    event.preventDefault();
+    if (bound === undefined && direction !== 1) return;
+    if (bound !== undefined && bound !== props.value) {
+      props.onPreview(bound);
+      props.onCommit(bound);
+    }
+    props.collapse?.onCollapsedChange(false);
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>): void {
+    if (collapsed) {
+      handleCollapsedKeyDown(event);
+      return;
+    }
     if (event.key === "Home" || event.key === "End") {
       event.preventDefault();
       const value = event.key === "Home" ? props.minimum : props.maximum;
@@ -121,9 +185,9 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
         aria-label={props.accessibleName}
         aria-orientation={verticalResize(props.edge) ? "horizontal" : "vertical"}
         aria-valuemax={props.maximum}
-        aria-valuemin={props.minimum}
-        aria-valuenow={props.value}
-        aria-valuetext={`${props.value} px`}
+        aria-valuemin={collapsed ? 0 : props.minimum}
+        aria-valuenow={collapsed ? 0 : props.value}
+        aria-valuetext={collapsed ? "Hidden" : `${props.value} px`}
         className={props.className}
         data-edge={props.edge}
         onKeyDown={handleKeyDown}
@@ -135,14 +199,17 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
           activePointer.current = {
             pointerId: event.pointerId,
             startValue: props.value,
+            startEdge: Math.min(props.value, props.collapse?.drawnValue?.() ?? props.value),
             startPoint: verticalResize(props.edge) ? event.clientY : event.clientX,
+            startCollapsed: collapsed,
+            collapsed,
             lastValue: props.value,
             moved: false,
           };
           event.currentTarget.setPointerCapture(event.pointerId);
           setResizing(true);
         }}
-        onPointerMove={pointerValue}
+        onPointerMove={movePointer}
         onPointerUp={finishPointerResize}
         role="separator"
         tabIndex={0}
@@ -152,21 +219,29 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
   );
 }
 
+interface ActivePointer {
+  readonly pointerId: number;
+  readonly startValue: number;
+  readonly startEdge: number;
+  readonly startPoint: number;
+  readonly startCollapsed: boolean;
+  collapsed: boolean;
+  lastValue: number;
+  moved: boolean;
+}
+
 function cancelActivePointer(
-  activePointer: React.RefObject<
-    | {
-        readonly startValue: number;
-        readonly moved: boolean;
-      }
-    | undefined
-  >,
-  handlers: Pick<ShellResizeHandleProps, "onCancel" | "onPreview">,
+  activePointer: React.RefObject<ActivePointer | undefined>,
+  handlers: Pick<ShellResizeHandleProps, "collapse" | "onCancel" | "onPreview">,
 ): void {
   const pointer = activePointer.current;
   if (pointer === undefined) return;
   activePointer.current = undefined;
   if (!pointer.moved) return;
   handlers.onPreview(pointer.startValue);
+  if (pointer.collapsed !== pointer.startCollapsed) {
+    handlers.collapse?.onCollapsedChange(pointer.startCollapsed);
+  }
   handlers.onCancel?.();
 }
 

@@ -207,7 +207,16 @@ the focused pane's named bar controls — every button, menu row and view
 option the bar offers, folded or not — and each palette command runs the
 exact callback the bar's own control invokes; state lines and tool-drawn
 controls are not commands, and a disabled control is absent there as it is
-on the bar. In the Activity feed the
+on the bar. For the thread in front it also lists that thread's sidebar row
+choices under the row menu's own words and conditions: **Pin** or **Unpin**
+(Code only), **Settle**, or **Un-settle** or **Reopen** once the thread is
+closed, and **Wake** on a snoozed thread or else one **Snooze · <time>**
+command for each wake time the row menu offers, since the palette has no
+submenu. They run the row menu's own actions, so a refusal reads where the
+row's does, and a wake time is worked out when its command runs. A draft, a
+page or Settings covering the workspace, and a thread this window has no row
+for leave no thread in front, so none are listed. **Mark done** stays on the
+row menu. In the Activity feed the
 newest group is open, so a feed whose only group is Earlier is never a blank
 column. Group headings in the sidebar are 12px in the meta ink with a 14px
 chevron and the count as a right-aligned number.
@@ -1761,7 +1770,7 @@ the terminal's start in the journal records `program: "provider"`.
 Not built yet: the other ACP agents (offered once a CLI's interactive mode is
 confirmed), an added ACP agent, and the other providers with a command-line
 program.
-A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). A focused Browser page does not trap the window's shortcuts either: at their default chords the command palette (`Mod+K`), sidebar (`Mod+\`), dock (`Mod+Shift+J`) and focus composer (`Ctrl+Escape`) are held back from the page and handed to the window, and Settings (`Mod+,`) stays a menu accelerator; Zen's `Mod+Shift+E` stays with the page, as the renderer leaves it to a focused text field. **Minimised tools.** A thread's Browser and Terminal can be minimised into small
+A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything (moving between a thread's terminals is a separate pair, under [Cycling between terminals](#cycling-between-terminals)), the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). A focused Browser page does not trap the window's shortcuts either: at their default chords the command palette (`Mod+K`), sidebar (`Mod+\`), dock (`Mod+Shift+J`) and focus composer (`Ctrl+Escape`) are held back from the page and handed to the window, and Settings (`Mod+,`) stays a menu accelerator; Zen's `Mod+Shift+E` stays with the page, as the renderer leaves it to a focused text field. **Minimised tools.** A thread's Browser and Terminal can be minimised into small
 live cards on a shelf at the foot of the dock, so a page or a shell can be
 watched, and seen to answer, while another tool or only the dock's overview is
 in front. A floating preview of the Browser, drawn over the thread, covered the
@@ -2851,6 +2860,21 @@ left corners and clip follow without a notch (they leave at the start of an
 opening and arrive after the slide has landed when it shuts). The title band's
 drag strip and the traffic-light reserve do not move. The slide is for opening and shutting only: dragging the sidebar's edge or resizing the window follows the pointer exactly. The sidebar keeps its full width through the slide and its column clips it, so its contents travel with the edge. There is no motion under
 the system's reduced-motion setting or the app's own.
+Dragging the sidebar's edge also hides and shows it, with the same one hidden
+state as **Hide sidebar** and **Show sidebar**, in whichever collapsed form the
+Icon rail setting names, and with the same slide. A drag past the minimum width stops at the minimum;
+64px further it hides the sidebar while the pointer is still down. Hiding this
+way keeps the width from before the drag. While the sidebar is hidden, its edge
+(the window's left edge, or the icon rail's right edge) stays grabbable: pulling
+it 64px out shows the sidebar, no narrower than the minimum, and the width on
+release is saved; a click or a shorter pull does nothing. Escape, losing the
+window's focus, or a cancelled pointer puts back the state and width the drag
+started with. Hiding or showing the sidebar another way while its edge is held
+ends the drag there, with no width saved. The edge stays one separator in both states. While hidden it
+reports 0 and "Hidden"; the arrow that widens it shows the sidebar at its saved
+width, and Home and End show it at the minimum and maximum. No key hides it from
+the separator. At 960px and narrower, the phone drawer included, there is no
+edge to drag.
 The directory provides search and All, Chat, Work, and Code filters. Project
 detail is thread-first, with memory, provider access, and canvases in compact
 expandable rows below the primary work; its layout is in
@@ -4376,6 +4400,35 @@ output only while it holds the keyboard (the row keeps its height, so
 focusing never moves the output) and always lists it in the terminal's
 accessible description. Tab, Shift+Tab, a bare Escape and function keys still
 reach the shell.
+
+### Cycling between terminals
+
+With several terminals open for one thread, `Mod+Shift+ArrowDown`
+(`terminal-cycle-next`) and `Mod+Shift+ArrowUp` (`terminal-cycle-previous`),
+pressed in a terminal, put the caret in the next or previous one, wrapping at
+the ends. Both are remappable under Settings › Keyboard shortcuts, send nothing
+to the shell, and never move focus out of the terminals; with one terminal they
+do nothing. The order is the panes as laid out, then the bottom panel's
+Terminal, then the dock's Terminal sessions in tab order. Provider program
+terminals take part like shells. Choosing a session behind another brings it to
+the front of its own region and focuses it once it has attached; if the person
+clicks or moves focus elsewhere first, or it has not attached within 15 seconds,
+the caret stays where it is. Left out: other threads' terminals, anything a focused pane, narrow window, covering content
+view, or closed dock or panel hides, a dock Terminal
+minimised to its card, a pane whose shell is not running, the card's read-only
+preview, Zen's cards and Project terminals, which belong to no thread view.
+Only Code threads have thread terminals. The commands are keyboard only: the
+command palette lists no terminal focus command.
+
+The defaults were chosen because shells read the arrows alone, with Alt or with
+Control, and bind none with both Mod and Shift, and no browser, desktop menu or
+system chord holds Mod+Shift with Up or Down. Rejected: Mod+Alt with arrows or
+brackets (desktop workspace switching, browser tab switching, AltGr, the focus
+space chords, and Option rewriting the printed key on Apple hardware),
+Mod+Shift with brackets, Page Up or Down (browser tab switching, and keys Apple
+laptops lack), Mod+Shift with Left or Right (word selection in a Windows
+shell), and Mod+Shift with a letter (the control code the shell would read, or a
+browser's own command).
 
 ### Quitting
 
