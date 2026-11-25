@@ -668,6 +668,22 @@ export class AgentRunOrchestrationService {
   }
 
   /** Whether this child waits for a provider slot, by the host's record and not its reason text. */
+  /**
+   * Whether the host will start this waiting run with no one doing anything:
+   * it waits for room under the subagent limit, for a free request slot, or
+   * for siblings, and nothing holds it. A paused parent, a hold since restart,
+   * or a pool that named no eligible model needs a person (a resume, or a new
+   * request), as does every other wait.
+   */
+  startsWithoutPerson(run: AgentRun): boolean {
+    if (run.lifecycleStatus !== "waiting") return false;
+    if (this.#parentSessions?.isHeld(run.parentThreadId) === true) return false;
+    if (run.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON) return true;
+    if (run.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON)
+      return !this.#heldSinceRestart.has(run.id);
+    return this.waitsForProviderSlot(run);
+  }
+
   waitsForProviderSlot(run: Pick<AgentRun, "id" | "lifecycleStatus">): boolean {
     return run.lifecycleStatus === "waiting" && this.#providerSlotRefusals.has(run.id);
   }

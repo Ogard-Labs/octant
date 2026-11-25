@@ -2241,9 +2241,7 @@ working as they do.
   asking window or device already lists there
   ([Architecture: Active work read](../architecture.md#security-and-authority)). A
   subagent's task shows only where the Agents page's own rule lets the window
-  read that run; elsewhere the row reads "Subagent" under its thread. A
-  subagent the host holds back on its own (for sibling runs, room under the subagent limit, a free request slot, or a model in its pool) is In progress, like a queued one; any other
-  wait is Waiting.
+  read that run; elsewhere the row reads "Subagent" under its thread. A subagent the host will start by itself (once siblings finish, the subagent limit has room, or a request slot frees) is In progress, like a queued one. One that needs a person is Waiting: under a paused parent, held since a restart until it is resumed, with a pool that named no eligible model (it must be requested again), or any other wait.
 - **Opening** a row makes the choice the sidebar makes. A Code thread on a
   paired computer opens in that computer's Code start screen, as under "On your
   other computers"; a Work or Chat thread there cannot be shown by that screen,

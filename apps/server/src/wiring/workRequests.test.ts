@@ -442,6 +442,7 @@ describe("wireWorkRequests active work", () => {
             windowAuthorityStore,
             providerDataDirectory: dataDirectory,
             agentRunPersistence: { listCenterCandidates: emptyList },
+            agentRunOrchestration: { startsWithoutPerson: () => false },
             decisionReviewModelPort: {},
             workRequestService: { listForThread: emptyList },
             goalService: {

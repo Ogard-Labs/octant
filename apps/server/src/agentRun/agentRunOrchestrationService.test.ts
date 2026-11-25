@@ -885,6 +885,8 @@ describe("AgentRunOrchestrationService", () => {
     const persisted = persistence.getById(admitted.run.id);
     expect(persisted?.lifecycleStatus).toBe("waiting");
     expect(persisted?.routingReceipt.poolRoute?.decision.kind).toBe("waiting");
+    // It starts only when it is requested again.
+    if (persisted !== undefined) expect(orchestration.startsWithoutPerson(persisted)).toBe(false);
   });
 
   it("reserves capacity on the explicit pool fallback target, not the unavailable primary", () => {
@@ -1369,6 +1371,7 @@ describe("AgentRun dependency graphs", () => {
       lifecycleStatus: "waiting",
       recoveryReason: AGENT_RUN_DEPENDENCY_WAITING_REASON,
     });
+    expect(orchestration.startsWithoutPerson(joined)).toBe(true);
 
     orchestration.onSessionSettled({
       runId: first,
@@ -1461,6 +1464,7 @@ describe("AgentRun dependency graphs", () => {
 
     const parked = persistence.getById(dependent.id);
     if (parked === undefined) throw new Error("The dependent is gone.");
+    expect(orchestration.startsWithoutPerson(parked)).toBe(false);
     await orchestration.resume(dependent.id, parked.version, authority);
     expect(persistence.getById(dependent.id)?.lifecycleStatus).toBe("starting");
     expect(starts).toContain(String(dependent.id));
@@ -1471,6 +1475,7 @@ describe("AgentRun dependency graphs", () => {
     const first = run(requestIds[0]);
     const dependent = admit(requestIds[1], [String(first)]);
     sessions.pause(String(ids.thread), "paused-by-user", "Checking the plan.");
+    expect(orchestration.startsWithoutPerson(dependent)).toBe(false);
 
     orchestration.onSessionSettled({
       runId: first,
@@ -1737,6 +1742,7 @@ describe("managed child waiting for a provider slot", () => {
       lifecycleStatus: "waiting",
       recoveryReason: AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
     });
+    expect(provider.orchestration.startsWithoutPerson(helper)).toBe(true);
     expect(provider.acquire).not.toHaveBeenCalled();
     expect(provider.supervisor.activeRunIds()).toEqual([]);
     // Asking again while the provider is still full journals nothing: each
@@ -2572,6 +2578,7 @@ describe("managed child waiting for a provider slot", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(provider.acquire).not.toHaveBeenCalled();
     expect(provider.status(helper.id)).toBe("waiting");
+    expect(provider.orchestration.startsWithoutPerson(helper)).toBe(false);
 
     held = false;
     provider.slots.retryNow();

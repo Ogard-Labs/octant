@@ -1758,6 +1758,7 @@ export function startOctantServer(
       isProjectPolicyTargetAllowed,
       observeWorkThreadRuntime,
       workRequestService,
+      agentRunOrchestration,
       agentRunPersistence,
       baseRouteCodeService,
       chatService,

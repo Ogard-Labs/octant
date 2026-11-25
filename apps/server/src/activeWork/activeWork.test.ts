@@ -101,7 +101,7 @@ function subagent(
   overrides: {
     readonly mode?: "chat" | "code";
     readonly readable?: boolean;
-    readonly recoveryReason?: string;
+    readonly startsWithoutPerson?: boolean;
   } = {},
 ) {
   return {
@@ -112,7 +112,7 @@ function subagent(
     lifecycleStatus,
     updatedAt: at,
     readableBy: () => overrides.readable ?? true,
-    ...(overrides.recoveryReason === undefined ? {} : { recoveryReason: overrides.recoveryReason }),
+    startsWithoutPerson: overrides.startsWithoutPerson ?? false,
   };
 }
 
@@ -315,26 +315,17 @@ describe("a host's active work", () => {
     expect(JSON.stringify(onDevice)).not.toContain("release notes");
   });
 
-  it("files a subagent the host holds back on its own as In progress, and only a wait on the person as Waiting", async () => {
+  it("files a subagent the host will start by itself as In progress, and one that needs a person as Waiting", async () => {
     const listed = { code: async () => [facts({ threadId: id("21") })] };
-    const boardOf = async (recoveryReason?: string) =>
+    const boardOf = async (startsWithoutPerson: boolean) =>
       (
         await service({
           ...listed,
-          subagents: () => [
-            subagent("waiting", recoveryReason === undefined ? {} : { recoveryReason }),
-          ],
+          subagents: () => [subagent("waiting", { startsWithoutPerson })],
         }).list(windowId, local)
       ).rows.find((row) => row.kind === "subagent")?.board;
-    for (const automatic of [
-      "waiting-on-dependencies",
-      "provider-capacity-saturated",
-      "Waiting for a free request slot",
-      "multi-model-pool-no-eligible-candidate",
-    ]) {
-      expect(await boardOf(automatic)).toEqual({ status: "in-progress", reason: "executing" });
-    }
-    expect(await boardOf()).toEqual({ status: "waiting", reason: "awaiting-input" });
+    expect(await boardOf(true)).toEqual({ status: "in-progress", reason: "executing" });
+    expect(await boardOf(false)).toEqual({ status: "waiting", reason: "awaiting-input" });
   });
 
   it("keeps a Chat thread's subagents from a reader that may not read them", async () => {

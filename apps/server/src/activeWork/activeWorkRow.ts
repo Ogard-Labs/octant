@@ -12,12 +12,6 @@ import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectSummary } from "@octant/contracts/projects";
 import type { ThreadBoardDerivation } from "@octant/contracts/thread-board";
 import { deriveThreadBoardStatus } from "@octant/domain/thread-board-policy";
-import {
-  AGENT_RUN_CAPACITY_WAITING_REASON,
-  AGENT_RUN_DEPENDENCY_WAITING_REASON,
-  AGENT_RUN_POOL_WAITING_REASON,
-  AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
-} from "@octant/domain";
 
 /** The Project facts a row names: its title, and the one GitHub repository its checkout names. */
 export interface ActiveWorkProject {
@@ -194,31 +188,16 @@ export function chatActiveWork(
 }
 
 /**
- * Waits the host clears by itself: siblings to finish, room under the subagent
- * limit, a free request slot, or an eligible model in the pool. Such a run is
- * held like a queued one.
- */
-const AUTOMATIC_SUBAGENT_WAITS: ReadonlySet<string> = new Set([
-  AGENT_RUN_CAPACITY_WAITING_REASON,
-  AGENT_RUN_DEPENDENCY_WAITING_REASON,
-  AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
-  AGENT_RUN_POOL_WAITING_REASON,
-]);
-
-/**
- * A subagent's own state: queued, starting, running, and held by the host are
- * In progress, and any other wait is a wait on the person. (The Work board
- * counts a waiting child toward its parent's activity; a row of its own says
- * what it waits on.)
+ * A subagent's own state: queued, starting, running, and a wait the host will
+ * end by itself are In progress; any wait that needs a person (a resume, a new
+ * request, an answer) is Waiting. (The Work board counts a waiting child toward
+ * its parent's activity; a row of its own says what it waits on.)
  */
 export function subagentBoard(
   status: AgentRunLifecycleStatus,
-  recoveryReason?: string,
+  startsWithoutPerson: boolean,
 ): ThreadBoardDerivation {
-  const held =
-    status === "waiting" &&
-    recoveryReason !== undefined &&
-    AUTOMATIC_SUBAGENT_WAITS.has(recoveryReason);
+  const held = status === "waiting" && startsWithoutPerson;
   return deriveThreadBoardStatus({
     deliverySatisfaction: "pending",
     executing: status === "queued" || status === "starting" || status === "running" || held,

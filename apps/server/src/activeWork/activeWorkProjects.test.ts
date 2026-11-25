@@ -44,6 +44,36 @@ it("names Projects from what is stored, and asks for repositories at most once a
   expect(bootstrap).toHaveBeenCalledTimes(2);
 });
 
+it("does not give a relinked Project the repository of the folder it left", async () => {
+  let folder = "/repos/parser";
+  const bound = () => ({ ...parser, binding: { canonicalRoot: folder } });
+  const bootstrap = vi.fn(async () => ({
+    active: [
+      {
+        ...bound(),
+        connectedRepository: {
+          host: "github.com",
+          owner: "acme",
+          repository: folder === "/repos/parser" ? "parser" : "parser-next",
+        },
+      } as unknown as ProjectSummary,
+    ],
+  }));
+  const projects = createActiveWorkProjects({
+    readProjects: () => [bound()],
+    bootstrap,
+    now: () => 0,
+  });
+  expect((await projects()).get(p2)).toMatchObject({
+    connectedRepository: { repository: "parser" },
+  });
+  folder = "/repos/parser-next";
+  expect((await projects()).get(p2)).toMatchObject({
+    connectedRepository: { repository: "parser-next" },
+  });
+  expect(bootstrap).toHaveBeenCalledTimes(2);
+});
+
 it("still names Projects when reading repositories fails", async () => {
   const projects = createActiveWorkProjects({
     readProjects: () => [parser],

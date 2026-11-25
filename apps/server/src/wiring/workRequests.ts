@@ -150,13 +150,14 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
   > &
   Pick<WorkFilesWiring, "workResearchProjection"> &
   Pick<ContextWiring, "windowCanOpenThread"> &
-  Pick<AgentRunsWiring, "finishedReceipts"> &
+  Pick<AgentRunsWiring, "agentRunOrchestration" | "finishedReceipts"> &
   Pick<FoundationsWiring, "workArtifactProjection" | "workThreadProjection" | "workTurnProjection">;
 
 export function wireWorkRequests(deps: WorkRequestsDependencies) {
   const {
     hubActScopeSlot,
     agentRunInteractions,
+    agentRunOrchestration,
     agentRunPersistence,
     decisionReviewModelPort,
     isProjectPolicyTargetAllowed,
@@ -664,7 +665,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
             mode: run.routingReceipt.mode,
             task: run.task,
             lifecycleStatus: run.lifecycleStatus,
-            ...(run.recoveryReason === undefined ? {} : { recoveryReason: run.recoveryReason }),
+            startsWithoutPerson: agentRunOrchestration.startsWithoutPerson(run),
             updatedAt: run.updatedAt,
             readableBy: (windowId) =>
               authorizeAgentRunCancellation({ persistence, workThreadProjection, run, windowId }) &&

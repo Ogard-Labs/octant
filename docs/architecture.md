@@ -17383,11 +17383,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   have, with the checkout, pull-request and issue facts its sidebar row already
   carries. Projects are named as stored; their GitHub repository comes from a
   Projects read at most once a minute, because that read observes every
-  Project's folder and remotes. Linked pull requests and issues are identities only, because a title
+  Project's folder and remotes, and again at once when a Project is bound to
+  another folder, whose repository it never borrows from the old one. Linked pull requests and issues are identities only, because a title
   on a forge is text an outsider may have written. A coordinator is derived
   without delivery evidence; a Chat thread is a row only while it runs or waits;
-  a subagent is a row only under a thread already listed, In progress while
-  queued, starting, running or held by the host (on sibling runs, room under the subagent limit, a free request slot, or an eligible pool model) and Waiting on any other wait, and
+  a subagent is a row only under a thread already listed, In progress while queued, starting, running, or waiting on what the host ends by itself (siblings, room under the subagent limit, a free request slot) with nothing holding it, as the orchestration service decides; Waiting under a paused parent, after a restart hold, for a pool with no eligible model, and on any other wait, and
   its task is named only to a local window the
   AgentRun authorization admits, the same one the Agents center applies. A Chat
   thread's subagents are listed to such a window alone. The read takes a local
