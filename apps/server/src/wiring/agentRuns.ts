@@ -115,6 +115,7 @@ import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore";
 import { ThreadFollowUpSuggestionStore } from "../followUps/threadFollowUpSuggestionStore";
 import { SideTaskStore } from "../sideTasks/sideTaskStore";
+import { SideTaskReportStore } from "../sideTasks/sideTaskReportStore";
 import { ThreadFinishedReceiptStore } from "../finishedReceipts/finishedReceiptStore";
 import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
@@ -727,6 +728,14 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     clock: () => new Date().toISOString(),
   });
   const sideTasks = new SideTaskStore({
+    journal: persistence.journal,
+    uuid: randomUUID,
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    clock: () => new Date().toISOString(),
+  });
+  // What every side-task child owes its offering thread, rebuilt from the
+  // journal so a restart loses no report.
+  const sideTaskReports = new SideTaskReportStore({
     journal: persistence.journal,
     uuid: randomUUID,
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
@@ -1775,6 +1784,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     remoteDelegationHolder,
     runtimeOutsideContentMarks,
     sideTasks,
+    sideTaskReports,
     finishedReceipts,
     spendCeiling,
     spendCeilingHolder,
