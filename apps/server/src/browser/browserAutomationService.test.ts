@@ -181,7 +181,14 @@ function harness(
       };
     },
   };
-  const runtime = options.wrapRuntime?.(baseRuntime) ?? baseRuntime;
+  const hostRunRuntime: BrowserRuntimePort =
+    options.hostRun === true
+      ? {
+          ...baseRuntime,
+          persistentOwner: { createContext: vi.fn(async () => ({ status: "created" })) } as never,
+        }
+      : baseRuntime;
+  const runtime = options.wrapRuntime?.(hostRunRuntime) ?? hostRunRuntime;
   const ids = [contextOne, "30000000-0000-4000-8000-000000000002"];
   const service = new BrowserAutomationService({
     runtime,
@@ -213,6 +220,15 @@ function harness(
     ...(options.strict === undefined ? {} : { strict: options.strict }),
     ...(options.downloads === undefined ? {} : { downloads: options.downloads }),
     ...(options.pageSessions === undefined ? {} : { pageSessions: options.pageSessions }),
+    ...(options.hostRun === true
+      ? {
+          executionOwner: {
+            kind: "execution" as const,
+            binding: {} as never,
+            isCurrent: () => true,
+          },
+        }
+      : {}),
     ...(options.unattended === true ? { isUnattendedScope: () => true } : {}),
     ...(options.delegatedProfileIsCurrent === undefined
       ? {}
@@ -4379,6 +4395,15 @@ describe("Browser session recording", () => {
     expect(pageSessions.opened).toHaveBeenCalledWith(
       expect.objectContaining({ profileKind: "personal" }),
     );
+    await f.service.close();
+  });
+
+  it("records no page the host runs for its own owner", async () => {
+    const pageSessions = recorder();
+    const f = harness({ hostRun: true, pageSessions });
+    const opened = await open(f);
+    expect(opened.context?.state).toBe("active");
+    expect(pageSessions.opened).not.toHaveBeenCalled();
     await f.service.close();
   });
 

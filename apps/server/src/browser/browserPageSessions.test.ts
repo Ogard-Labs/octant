@@ -19,6 +19,7 @@ import { rebuildProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { erasePurgedProjectData, erasePurgedThread } from "../persistence/threadPurge";
+import { readJournalGrowth } from "../persistence/journalGrowth";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { BrowserPageOffers } from "./browserPageOffers";
 import { BrowserPageSessions } from "./browserPageSessions";
@@ -229,6 +230,18 @@ describe("Browser session records", () => {
     ).toEqual([id(2), id(3)].sort());
     // Settled pages left no history once swept.
     expect(events().every((row) => [id(2), id(3)].includes(row.aggregate_id))).toBe(true);
+  });
+});
+
+describe("Browser session diagnostics", () => {
+  it("counts the records by kind name and never names a page, a thread, or a Project", () => {
+    const { sessions, connection } = open();
+    sessions.opened(page(id(1), thread(1)));
+    const growth = JSON.stringify(readJournalGrowth(connection, new Date(now)));
+    expect(growth).toContain("browser-page");
+    for (const secret of [id(1), thread(1), projectId, String(windowId)]) {
+      expect(growth).not.toContain(secret);
+    }
   });
 });
 

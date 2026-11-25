@@ -6315,6 +6315,39 @@ flowchart LR
   built yet, a paired device that can open the thread,
   added to a pull request body only when the person chooses, and never in
   telemetry. Detail is in [Browser captures](design/browser-captures.md).
+- **Browser sessions.** A Browser session is the person's open page in a
+  thread's Browser pane in a Work or Code thread (maintainer decision,
+  2026-11-25). The host journals its start as `browser.page-opened@1` and its
+  end as `browser.page-closed@1`, one aggregate per page, so a start with no end
+  when the host next starts is what a restart or crash took. A record names the
+  page id, the thread, the window, the mode, the profile kind (Private,
+  Project, Personal, or a named account with its id) and the thread's Project,
+  and never an address, a title, or page content. Every ordinary ending writes
+  the end: the person closing the page, the agent stopping its Browser, the
+  thread's authority ending (archived, deleted, its Project archived), a cleared
+  or removed profile, the page expiring, and the Browser runtime being lost. A
+  window revoked, which a Quit also does, and the host shutting down write none,
+  because a page a Quit or a restart ended must be offered back; the next start
+  settles what is left, ending a page whose thread can no longer open a Browser
+  and keeping only the newest page of each thread. A routine, a subagent's
+  delivered result, a terminal grant, a page the host runs for its own owner,
+  and a page opened for one Open of its own are never recorded, and Chat has no
+  Browser. The projection holds only the pages open now, ended pages' events are
+  swept from the journal (so a page opened and closed a thousand times leaves a
+  bounded handful), a thread purge takes a thread's records and a Project erase
+  takes a Project's, and no export, replica sync, or diagnostics bundle carries
+  them beyond the kind-name count in Journal growth. The thread's Browser read
+  carries the offer for the host's person only: a local window, or a device the
+  person paired at Full; a device paired below Full, a restricted device, and a
+  hub-introduced device see no offer and cannot claim or dismiss one, checked on
+  the host before any record is read. One claim wins: it is the page's end
+  appended at the version its start left, so two windows cannot both reopen. A
+  claim, a dismissal, an archive, a delete and a purge end the offer, and the
+  next start does not offer it again. Reopening never restores the page: it
+  names the profile, the start page preselects it, and the person's address goes
+  through the ordinary open with its site approval. A profile that no longer
+  exists is said so instead of offered. Detail is in
+  [Browser profiles: Reopening a page a restart took](design/browser-profiles.md#reopening-a-page-a-restart-took).
 - **Browser flows.** An agent's Browser run can be saved as a named flow in the
   thread's Work or Code Project and replayed by name with no model turn between
   steps, each step admitted like a call of its own. The host keeps up to 50 flows
@@ -21871,10 +21904,12 @@ documents its authority, privacy, and release boundaries):
   ([process topology](#process-topology)), the desktop keeps local crash
   records (an unwatched host keeps its own at its next start), the next
   start's notice names them, and the recovery screen saves a support bundle.
-  Not built yet: one-click reopening of a Browser session a restart ended.
-  Code thread and Project terminals, debug sessions and saved Project action
-  runs a restart ended are offered back through their ordinary start
-  ([Decisions and requirements](design/decisions.md#recovering-after-a-crash-without-the-terminal)).
+  Code thread and Project terminals, debug sessions, saved Project action runs
+  and the person's Browser page a restart ended are offered back: the first four
+  through their ordinary start, the page through a **Reopen page** control that
+  opens a blank page in the same profile
+  ([Browser sessions](#browser-sessions);
+  [Decisions and requirements](design/decisions.md#recovering-after-a-crash-without-the-terminal)).
 - Public Canvas links, under
   [Canvas public links](design/canvas-public-links.md), served by the
   self-hostable reference app at `apps/share` in this repository. Ogard Labs
