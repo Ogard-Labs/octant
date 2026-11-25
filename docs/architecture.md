@@ -6340,17 +6340,26 @@ flowchart LR
   pages in the same context without saying so, so none is recorded, nor is a
   page opened for one Open of its own, and Chat has no Browser. Every ordinary
   ending writes the end, with the actor of the request that caused it (the
-  device at any access level, the local person for a window): the person closing
-  the page, the agent stopping its Browser, the window closing, a remote
-  device's session ending, the thread's authority ending, a cleared or removed
-  profile, the page expiring, and the Browser runtime being lost. Only a Quit and
-  the host's own shutdown keep the record open. The desktop reports a person's
-  Quit to the host (the same report restart recovery uses) after the quit is
-  accepted and before it revokes its windows, and the host holds its pages'
-  records from that report on. A quit the system asked for (a restart, a
-  shutdown, a signal) sends no report, so the windows it revokes write the end
-  and that page is not offered back, which loses one offer rather than offering
-  a page the person had closed; a crash or a power loss revokes nothing and
+  device at any access level, the local person for a window, the agent whose
+  Browser stop it was): the person closing the page, the agent stopping its
+  Browser, the window closing, a remote device's session ending, the thread's
+  authority ending, a cleared or removed profile, a profile switch (which
+  records the replacement page and ends the old record as superseded), the page
+  expiring, and the Browser runtime being lost; the last two are the host's own
+  doing and carry the host's actor. Only a Quit and the host's own shutdown
+  keep the record open. The desktop says on the window-revoke request itself
+  that its app is quitting (`desktopQuitAccepted`, set once the quit was
+  accepted, whether the person, the system, a signal or an update asked for it,
+  and for a Quit that closes the windows and leaves a host running for other
+  clients); the host reads it per request, holds that window's pages' records,
+  and offers them again at once from the running host as well as at the next
+  start. Only the desktop's bridge secret reaches that route, so no paired
+  device can use the field, and a desktop or host that predates it keeps
+  working (the desktop asks again without the field when a host refuses it).
+  After a quit is accepted the desktop stops reporting pages gone to the host,
+  so its windows closing is not recorded as a lost Browser runtime. A person
+  closing a window while the app keeps running writes the end. A crash or a power
+  loss revokes nothing and
   offers the page. The start settles what is left: a page whose thread is
   archived or deleted is ended, a page whose thread is live but cannot open a
   Browser now (its mode switched off, its Project archived) is held and not
@@ -6358,8 +6367,9 @@ flowchart LR
   than 25 pages stay in all. The projection holds only the pages open now. A run
   deletes nothing from the journal: the persistence start removes the events of
   ended pages before it records the journal verification watermark, as it does
-  for superseded checkout observations, and counts the removal so that start
-  leaves the watermark to the next one. A thread purge takes a thread's records
+  for superseded checkout observations. A whole ended page leaves with both of
+  its events, so the rows that stay are the rows the scan decoded, and that
+  start records the watermark again at the head that is left. A thread purge takes a thread's records
   and a Project erase takes a Project's, and no export, replica sync, usage or
   activity view, or support bundle carries them beyond the event name in the
   bundle's recent-event list and the kind-name count in Journal growth. The
@@ -6369,7 +6379,7 @@ flowchart LR
   release or dismiss one, checked on the host before any record is read. A claim
   is a short exclusive reservation in memory for one window or device: of two
   windows only one holds the page, and it is given back when the open it was for
-  fails or is declined, when the window goes away, or after two minutes. The
+  fails or is declined, when the window goes away, or after two minutes (a remote device's session ending leaves its reservation to lapse that way). The
   offer ends only when the reserved open succeeds, which ends the old record as
   reopened, or on dismiss, archive, delete or purge, and the next start does not
   offer it again. Reopening never restores the page: it names the profile, the
