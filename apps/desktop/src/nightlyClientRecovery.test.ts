@@ -134,3 +134,90 @@ it("cancels a pending fresh acquisition and closes its late result without retry
   expect(exhausted).not.toHaveBeenCalled();
   expect(attempts).toBe(2);
 });
+
+it("keeps asking for its first window while Octant answers too slowly or is still starting", async () => {
+  vi.useFakeTimers();
+  const reasons = ["deadline-exceeded", "unavailable"];
+  const open = vi.fn(async () => {
+    const reason = reasons.shift();
+    return reason === undefined
+      ? { kind: "opened" as const, close: async () => ({ kind: "closed" as const }) }
+      : { kind: "refused" as const, reason, retryable: true as const };
+  });
+  const exhausted = vi.fn();
+  const client = createNightlyClientRecovery({ open, exhausted });
+  const started = client.start();
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect((await started).kind).toBe("opened");
+  expect(open).toHaveBeenCalledTimes(3);
+  expect(exhausted).not.toHaveBeenCalled();
+  expect(await client.stop()).toEqual({ kind: "closed" });
+});
+
+it("stops asking for its first window after a bounded time and reports the last refusal", async () => {
+  vi.useFakeTimers();
+  const open = vi.fn(async () => ({
+    kind: "refused" as const,
+    reason: "deadline-exceeded",
+    retryable: true as const,
+  }));
+  const client = createNightlyClientRecovery({ open, exhausted: vi.fn() });
+  const started = client.start();
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(await started).toMatchObject({ kind: "refused", reason: "deadline-exceeded" });
+  const attempts = open.mock.calls.length;
+  expect(attempts).toBeGreaterThan(2);
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(open).toHaveBeenCalledTimes(attempts);
+});
+
+it.each([
+  // No answer a later attempt could change, or a window that already existed.
+  { reason: "invalid-peer" },
+  { reason: "deadline-exceeded" },
+])("asks once when its first window is refused for good: $reason", async (refusal) => {
+  vi.useFakeTimers();
+  const open = vi.fn(async () => ({ kind: "refused" as const, ...refusal }));
+  const client = createNightlyClientRecovery({ open, exhausted: vi.fn() });
+  const started = client.start();
+  await vi.advanceTimersByTimeAsync(20_000);
+  expect((await started).kind).toBe("refused");
+  expect(open).toHaveBeenCalledOnce();
+});
+
+it("stops asking for its first window when the person quits", async () => {
+  vi.useFakeTimers();
+  const open = vi.fn(async () => ({
+    kind: "refused" as const,
+    reason: "unavailable",
+    retryable: true as const,
+  }));
+  const client = createNightlyClientRecovery({ open, exhausted: vi.fn() });
+  const started = client.start();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(await client.stop()).toEqual({ kind: "closed" });
+  expect((await started).kind).toBe("refused");
+  await vi.advanceTimersByTimeAsync(20_000);
+  expect(open).toHaveBeenCalledOnce();
+});
+
+it("starts no attempt when its wait for the first window ends after the deadline", async () => {
+  vi.useFakeTimers();
+  const open = vi.fn(async () => ({
+    kind: "refused" as const,
+    reason: "unavailable",
+    retryable: true as const,
+  }));
+  const client = createNightlyClientRecovery({ open, exhausted: vi.fn() });
+  const started = client.start();
+  await vi.advanceTimersByTimeAsync(0);
+  // A busy main process can run the backoff timer after the deadline has passed.
+  const late = vi.spyOn(performance, "now").mockReturnValue(Number.MAX_SAFE_INTEGER);
+  try {
+    await vi.advanceTimersByTimeAsync(250);
+    expect((await started).kind).toBe("refused");
+    expect(open).toHaveBeenCalledOnce();
+  } finally {
+    late.mockRestore();
+  }
+});

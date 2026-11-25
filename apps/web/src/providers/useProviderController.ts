@@ -24,6 +24,7 @@ import {
   type OhMyPiProviderConfiguration,
   type OutsideHarnessEndpointProviderConfiguration,
   type OutsideImageProviderConfiguration,
+  type OutsideVideoProviderConfiguration,
   type PiProviderConfiguration,
   type PermissionPersistence,
   type ProviderDefaults,
@@ -642,7 +643,8 @@ export function useProviderController(options: ProviderControllerOptions) {
       displayName: string,
       configuration:
         | OutsideHarnessEndpointProviderConfiguration
-        | OutsideImageProviderConfiguration,
+        | OutsideImageProviderConfiguration
+        | OutsideVideoProviderConfiguration,
       credential: TransientProviderCredential,
     ) => {
       const instanceId = decodeProviderInstanceId(crypto.randomUUID());
@@ -665,7 +667,13 @@ export function useProviderController(options: ProviderControllerOptions) {
               await client.execute(
                 configuration.kind === "outside-image"
                   ? { kind: "create-outside-image-provider", ...common, configuration }
-                  : { kind: "create-outside-harness-endpoint-provider", ...common, configuration },
+                  : configuration.kind === "outside-video"
+                    ? { kind: "create-outside-video-provider", ...common, configuration }
+                    : {
+                        kind: "create-outside-harness-endpoint-provider",
+                        ...common,
+                        configuration,
+                      },
               ),
               current,
               install,

@@ -8,8 +8,12 @@ import {
   outsideDriverHostLaunch,
   listOutsideImageDriverChoices,
   resolveOutsideDriverActivation,
+  outsideImageDriverModels,
+  outsideVideoDriverModels,
   resolveOutsideDriverRebind,
+  resolveOutsideHarnessEndpointActivation,
   resolveOutsideImageDriverActivation,
+  resolveOutsideVideoDriverActivation,
 } from "./activation";
 
 const effective: ExtensionActivationState = {
@@ -514,5 +518,116 @@ describe("outside image drivers as choices in the image tools", () => {
         driver: { ...driver, digest: `sha256:${"0".repeat(64)}` },
       }),
     ).toEqual({ kind: "blocked", reason: "superseded" });
+  });
+});
+
+describe("outside video drivers as choices in the video tools", () => {
+  const driver = {
+    extensionId: "00000000-0000-4000-8000-000000000931",
+    packageId: "00000000-0000-4000-8000-000000000932",
+    componentId: "video",
+    version: "1.2.0",
+    digest: `sha256:${"e".repeat(64)}`,
+  } as const;
+  const videoModel = {
+    modelId: "example-video-1",
+    displayName: "Example Video",
+    durations: { kind: "range", min: 2, max: 10 },
+    resolutions: ["720p"],
+    aspectRatios: [{ ratio: "16:9" }],
+    audio: "none",
+    inputs: { firstFrame: false, lastFrame: false, maxReferenceImages: 0 },
+    price: { kind: "per-second", rates: [{ resolution: "720p", usdMicrosPerSecond: 50_000 }] },
+    job: { cancel: "running", removal: { kind: "delete" }, resumeWindowHours: 24 },
+  } as const;
+  const fixturePackage = (
+    mediaGeneration: Record<string, unknown> | undefined,
+    activation: Partial<ExtensionActivationState> = {},
+  ) =>
+    Schema.decodeUnknownSync(ExtensionPackageState)({
+      extensionId: driver.extensionId,
+      packageId: driver.packageId,
+      slug: "example-video",
+      displayName: "Example video",
+      stateVersion: 3,
+      version: driver.version,
+      digest: driver.digest,
+      source: { kind: "local-folder", sourceRef: "folder-video" },
+      compatibility: {
+        platforms: ["macos"],
+        modes: ["chat", "work", "code"],
+        providerFamilies: [],
+      },
+      activation: { ...effective, ...activation },
+      components: [
+        {
+          component: {
+            id: "video",
+            kind: "provider-driver",
+            displayName: "Example video",
+            declaredCapabilities: [],
+            entryPoint: "dist/video.mjs",
+            ...(mediaGeneration === undefined ? {} : { mediaGeneration }),
+          },
+          activation: { ...effective, ...activation },
+          effectiveState: { kind: "effective" },
+        },
+      ],
+      diagnostics: [],
+    });
+  const video = { media: "video", models: [videoModel] };
+  const image = { media: "image", models: [{ modelId: "example-image-1" }] };
+  const ladder = (
+    packageState: ExtensionPackageState,
+    target: Omit<typeof driver, "digest"> & { readonly digest: string } = driver,
+  ) => ({
+    platform: "darwin",
+    packageState,
+    compatible: true,
+    driver: target,
+  });
+
+  it("admits an installed, trusted and enabled video driver with exactly the models it declares", () => {
+    const input = ladder(fixturePackage(video));
+    expect(resolveOutsideVideoDriverActivation(input)).toEqual({ kind: "effective" });
+    expect(outsideVideoDriverModels(input)).toEqual([videoModel]);
+    expect(outsideImageDriverModels(input)).toBeUndefined();
+  });
+
+  it.each([
+    ["untrusted", { trusted: false }],
+    ["plugin-disabled", { pluginDesired: false }],
+    ["component-disabled", { componentDesired: false }],
+    ["quarantined", { quarantined: true }],
+  ] as const)("does not admit a driver that is %s", (reason, activation) => {
+    expect(resolveOutsideVideoDriverActivation(ladder(fixturePackage(video, activation)))).toEqual({
+      kind: "blocked",
+      reason,
+    });
+  });
+
+  it("lets no family run another family's package", () => {
+    const blocked = { kind: "blocked", reason: "incompatible" };
+    expect(resolveOutsideVideoDriverActivation(ladder(fixturePackage(image)))).toEqual(blocked);
+    expect(resolveOutsideVideoDriverActivation(ladder(fixturePackage(undefined)))).toEqual(blocked);
+    expect(resolveOutsideImageDriverActivation(ladder(fixturePackage(video)))).toEqual(blocked);
+    for (const media of [video, image]) {
+      expect(resolveOutsideHarnessEndpointActivation(ladder(fixturePackage(media)))).toEqual(
+        blocked,
+      );
+    }
+    expect(resolveOutsideHarnessEndpointActivation(ladder(fixturePackage(undefined)))).toEqual({
+      kind: "effective",
+    });
+  });
+
+  it("declares nothing at any digest but the one a profile binds", () => {
+    const moved = { ...driver, digest: `sha256:${"0".repeat(64)}` };
+    const input = ladder(fixturePackage(video), moved);
+    expect(outsideVideoDriverModels(input)).toBeUndefined();
+    expect(resolveOutsideVideoDriverActivation(input)).toEqual({
+      kind: "blocked",
+      reason: "superseded",
+    });
   });
 });

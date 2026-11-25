@@ -58,6 +58,7 @@ export function providerToolTransport(
     case "ideogram-image":
     case "gemini-video":
     case "outside-image":
+    case "outside-video":
       return undefined;
   }
 }

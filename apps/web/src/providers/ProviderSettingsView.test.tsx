@@ -4534,42 +4534,48 @@ describe("ProviderSettingsView", () => {
     );
   });
 
-  it("classifies an outside image profile as a media profile without Check connection", () => {
-    const outsideImage: ProviderInstance = {
-      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000098"),
-      displayName: "Example Outside Studio",
-      enabled: true,
-      environmentPolicy: "inherit-host",
-      version: 1 as ProviderInstance["version"],
-      createdAt: "2026-07-26T20:00:00.000Z" as ProviderInstance["createdAt"],
-      updatedAt: "2026-07-26T20:00:00.000Z" as ProviderInstance["updatedAt"],
-      driverKind: "outside-image",
-      configuration: {
-        kind: "outside-image",
-        driver: {
-          extensionId: "80000000-0000-4000-8000-000000000099" as never,
-          packageId: "example.outside-image" as never,
-          componentId: "images" as never,
-          version: "1.0.0" as never,
-          digest: `sha256:${"a".repeat(64)}` as never,
+  it.each([
+    ["outside-image", "Outside image driver Image"],
+    ["outside-video", "Outside video driver Video"],
+  ] as const)(
+    "classifies an %s profile as a media profile without Check connection",
+    (driverKind, label) => {
+      const outsideMedia = {
+        id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000098"),
+        displayName: "Example Outside Studio",
+        enabled: true,
+        environmentPolicy: "inherit-host",
+        version: 1 as ProviderInstance["version"],
+        createdAt: "2026-07-26T20:00:00.000Z" as ProviderInstance["createdAt"],
+        updatedAt: "2026-07-26T20:00:00.000Z" as ProviderInstance["updatedAt"],
+        driverKind,
+        configuration: {
+          kind: driverKind,
+          driver: {
+            extensionId: "80000000-0000-4000-8000-000000000099" as never,
+            packageId: "example.outside-media" as never,
+            componentId: "images" as never,
+            version: "1.0.0" as never,
+            digest: `sha256:${"a".repeat(64)}` as never,
+          },
+          baseUrl: "https://images.example.test",
+          modelAllowlist: ["example-media-1" as never],
+          defaultModel: "example-media-1" as never,
         },
-        baseUrl: "https://images.example.test",
-        modelAllowlist: ["example-image-1" as never],
-        defaultModel: "example-image-1" as never,
-      },
-    };
-    const onProviderCredentialStatus = vi.fn(async () => "missing" as const);
-    renderProviderListExpanded({
-      ...fixture({ instance: outsideImage }),
-      onProviderCredentialStatus,
-    });
-    const row = screen.getByRole("article", { name: "Example Outside Studio" });
-    expect(
-      within(row).queryByRole("button", { name: "Check connection for Example Outside Studio" }),
-    ).toBeNull();
-    expect(within(row).getByText("Outside image driver Image")).toBeVisible();
-    expect(onProviderCredentialStatus).not.toHaveBeenCalled();
-  });
+      } as ProviderInstance;
+      const onProviderCredentialStatus = vi.fn(async () => "missing" as const);
+      renderProviderListExpanded({
+        ...fixture({ instance: outsideMedia }),
+        onProviderCredentialStatus,
+      });
+      const row = screen.getByRole("article", { name: "Example Outside Studio" });
+      expect(
+        within(row).queryByRole("button", { name: "Check connection for Example Outside Studio" }),
+      ).toBeNull();
+      expect(within(row).getByText(label)).toBeVisible();
+      expect(onProviderCredentialStatus).not.toHaveBeenCalled();
+    },
+  );
 
   it("opens only the first provider that needs attention, and none when every provider is fine", () => {
     const second = {

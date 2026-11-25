@@ -400,9 +400,9 @@ focused, **Remove protection**), because every agent can then read those
 files; the host journals the confirmed removal. Paths the person added follow
 as rows with Remove (no confirmation), then one "Protect another path" row with
 a text field and an **Add** button; a refused path is said in the section's
-feedback line. A paired device edits the section as a local window does
-(maintainer decision, 2026-11-12; not built yet: today a paired device sees the
-section as set on the host machine).
+feedback line. A device the host's own person paired edits the section as a
+local window does (maintainer decision, 2026-11-12), from Permissions in the
+paired browser's Host settings; any other paired device sees none of it.
 **Blocked tools** follows Protected files in Settings › Permissions: one row
 per blocked tool, its name with the provider and "Blocked" as meta and an
 **Unblock** button, then a "Block a tool" row with a provider select (Claude
@@ -470,9 +470,9 @@ focused, **Remove worktree**), saying the folder and its ignored files go and
 the branch and its commits stay. A refusal (uncommitted changes, or a turn
 still running in the thread) is said in the
 section's feedback line and the row stays. With none kept it says so in one
-line; a paired device uses the section as a local window does (maintainer
-decision, 2026-11-12; server policy admits a person-paired device and refuses
-hub-introduced devices; paired UI follow-up remains)
+line; a device the host's own person paired uses the section as a local window
+does, from Permissions in the paired browser's Host settings (maintainer
+decision, 2026-11-12; the server refuses hub-introduced devices)
 ([rules](../architecture.md#modes-chat-work-and-code)).
 The same section starts with the choices for new worktrees: **Branch prefix** (a
 text field, `octant/` unless changed, checked as a branch prefix when it loses
@@ -601,7 +601,7 @@ program in the terminal asked, not the thread's agent
 ## Secret stores
 
 Settings › Secret stores sits with Permissions under Safety and is
-host-scoped. It has two cards. **Linked secret stores** is a plain row per
+host-scoped. Its first two cards concern the store. **Linked secret stores** is a plain row per
 tool: the tool's name, one line saying whether it is linked and whether the
 store is ready, locked, not installed, or unreachable, and one button, Link or
 Unlink. Unlink waits for a confirmation that says which providers stop getting
@@ -610,6 +610,15 @@ a missing tool) appears in the card's feedback slot, in the host's own words.
 **Check an item** takes an item reference and answers Found, locked, missing, or
 unreachable; it never shows what an item holds. On a host with no credential
 broker the card says so and offers no button.
+
+**Active secrets** lists every thread's
+[active secrets](../architecture.md#thread-secrets), a row each: its title, then
+its time left, its source, its thread and its name, and **Revoke**, which ends it
+at once. **Remembered secrets** lists what Octant remembers by name, with whether
+the value is in this computer's credential store or is a 1Password item's address,
+and **Forget**, which waits for a confirmation that says what is deleted and that
+a thread that has it keeps it. Neither list shows a value. An action that did not
+happen keeps the row and says so.
 
 A provider's key from a store lives on the provider's own card, under **Key from
 a secret store**, beside the API keys. It appears only when a store is linked or

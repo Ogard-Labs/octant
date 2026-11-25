@@ -62,6 +62,7 @@ export function providerLimitsReporting(kind: ProviderDriverKind): ProviderLimit
     // Octant reads no quota headers on an outside driver's brokered calls.
     case "outside-harness-endpoint":
     case "outside-image":
+    case "outside-video":
     // ACP has no limits channel, and an added agent has no account endpoint.
     case "acp-agent":
       return "runtime-does-not-report";

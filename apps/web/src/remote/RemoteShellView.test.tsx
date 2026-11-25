@@ -191,6 +191,9 @@ function answerProduct(
         return Response.json({ kind: "thread-created", thread: command.thread });
       }
     }
+    if (method === "POST" && path === "/api/extensions/snapshot") {
+      return Response.json({ sequence: 1, snapshotAt: now, packages: [], collisions: [] });
+    }
     if (withToolPrompt && method === "POST" && path === "/api/extensions/tool-approvals") {
       if ((body as { readonly kind?: string }).kind === "decide") {
         toolPromptAnswered = true;
@@ -660,6 +663,36 @@ describe("RemoteShellView", () => {
     }
   });
 
+  it("reads a thread's Browser prompts and captures for a browser the host's own person paired, and for no other", async () => {
+    const user = userEvent.setup();
+    const browserReads = async (person: boolean) => {
+      const seen: ProductRequest[] = [];
+      const { bridge } = await readyBridge(
+        seen,
+        false,
+        person,
+        true,
+        true,
+        person ? undefined : "approve-and-steer",
+      );
+      try {
+        const view = render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+        const list = await screen.findByRole("navigation", { name: "Chat thread list" });
+        await user.click(await within(list).findByRole("button", { name: chatThread.title }));
+        await screen.findByRole("region", { name: "Conversation" });
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        view.unmount();
+        return seen
+          .map((request) => request.path)
+          .filter((path) => path.startsWith("/api/browser/"));
+      } finally {
+        bridge.disconnect();
+      }
+    };
+    expect(await browserReads(true)).toContain("/api/browser/approvals");
+    expect(await browserReads(false)).toEqual([]);
+  });
+
   it("updates an open browser when the host changes its device access level", async () => {
     const user = userEvent.setup();
     let level: "read-only" | "full" = "read-only";
@@ -982,6 +1015,57 @@ describe("RemoteShellView", () => {
     await waitFor(() => expect(seen.map((request) => request.path)).toContain("/api/agent-grants"));
     for (const request of seen) {
       expect(request.headers.get("x-octant-window-capability")).toBeNull();
+    }
+  });
+
+  it("offers a browser the host's own person paired the Claude and Codex tool setup in Extensions", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const { bridge } = await readyBridge(seen, false, true);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    const settings = await screen.findByRole("region", { name: "Host settings" });
+    await user.click(await within(settings).findByRole("button", { name: "Extensions" }));
+    await user.click(await within(settings).findByRole("button", { name: "Claude and Codex" }));
+    // The panel is the one a window shows, not the page that sends a person to the computer.
+    await waitFor(() => expect(settings.textContent).toMatch(/MCP servers and plugins/), {
+      timeout: 4000,
+    });
+    expect(screen.queryByText(/Open Octant on this computer/)).toBeNull();
+  });
+
+  it("offers a browser the host's own person paired the host's permission lists, over the session", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const { bridge } = await readyBridge(seen, false, true);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    const settings = await screen.findByRole("region", { name: "Host settings" });
+    await user.click(await within(settings).findByRole("button", { name: "Permissions" }));
+    await waitFor(
+      () => {
+        const paths = seen.map((request) => request.path);
+        expect(paths).toContain("/api/protected-files");
+        expect(paths).toContain("/api/access/safe-networks");
+        expect(paths).toContain("/api/shield/servers");
+        expect(paths).toContain("/api/code/archived-worktrees");
+      },
+      { timeout: 4000 },
+    );
+    for (const request of seen) {
+      expect(request.headers.get("x-octant-window-capability")).toBeNull();
+    }
+  });
+
+  it("offers a device that is not the host's person, at any level, no Permissions section and asks the host for none of its lists", async () => {
+    for (const accessLevel of ["read-only", "approve-and-steer"] as const) {
+      const seen: ProductRequest[] = [];
+      const { bridge } = await readyBridge(seen, false, false, false, false, accessLevel);
+      const view = render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+      await screen.findByRole("note", { name: "Local host only surfaces" });
+      expect(screen.queryByRole("button", { name: "Permissions" })).toBeNull();
+      expect(seen.map((request) => request.path)).not.toContain("/api/protected-files");
+      view.unmount();
     }
   });
 

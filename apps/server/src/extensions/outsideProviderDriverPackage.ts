@@ -3,6 +3,7 @@ import type { ExtensionNpmSource, ExtensionSource } from "@octant/contracts/exte
 import {
   HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS,
   HOST_IMAGE_GENERATION_PROTOCOL_VERSIONS,
+  HOST_VIDEO_GENERATION_PROTOCOL_VERSIONS,
 } from "@octant/contracts/outside-driver-protocol";
 import {
   OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH,
@@ -124,7 +125,8 @@ export function readOutsideProviderDriverPackage(
     !reading.entry.protocolVersions.some(
       (version) =>
         HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS.includes(version) ||
-        HOST_IMAGE_GENERATION_PROTOCOL_VERSIONS.includes(version),
+        HOST_IMAGE_GENERATION_PROTOCOL_VERSIONS.includes(version) ||
+        HOST_VIDEO_GENERATION_PROTOCOL_VERSIONS.includes(version),
     )
   ) {
     return refused("protocol-incompatible");
@@ -220,7 +222,7 @@ export function outsideProviderDriverRefusalMessage(
     case "signature-invalid":
       return "This provider driver's signature does not match its files, name, or version, or does not verify.";
     case "media-declaration-mismatch":
-      return "This provider driver's kind, protocol versions, and image models do not agree.";
+      return "This provider driver's kind, protocol versions, and media models do not agree.";
   }
 }
 

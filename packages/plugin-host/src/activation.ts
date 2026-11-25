@@ -3,8 +3,10 @@ import type {
   ExtensionComponent,
   ExtensionEffectiveState,
   ExtensionImageGenerationModel,
+  ExtensionMediaGenerationDeclaration,
   ExtensionPackageState,
   ExtensionSource,
+  ExtensionVideoGenerationModel,
 } from "@octant/contracts/extensions";
 import type { OctantMode } from "@octant/contracts/modes";
 
@@ -240,15 +242,15 @@ export function resolveOutsideDriverActivation(input: {
 }
 
 /**
- * The image models and prices an outside image driver declares, read from the
- * package at exactly the version and digest a profile binds. Anything else
- * (another digest, a harness endpoint, a missing component) declares none, so
- * a price never comes from code the person did not add the profile from.
+ * What an outside media driver declares, read from the package at exactly the
+ * version and digest a profile binds. Anything else (another digest, a harness
+ * endpoint, a missing component) declares nothing, so a price never comes from
+ * code the person did not add the profile from.
  */
-export function outsideImageDriverModels(input: {
+function outsideMediaDeclaration(input: {
   readonly packageState: ExtensionPackageState | undefined;
   readonly driver: OutsideDriverActivationTarget;
-}): ReadonlyArray<ExtensionImageGenerationModel> | undefined {
+}): ExtensionMediaGenerationDeclaration | undefined {
   const { packageState, driver } = input;
   if (
     packageState === undefined ||
@@ -262,10 +264,23 @@ export function outsideImageDriverModels(input: {
   const component = packageState.components.find(
     (candidate) => String(candidate.component.id) === driver.componentId,
   )?.component;
-  if (component?.kind !== "provider-driver") return undefined;
-  return component.mediaGeneration?.media === "image"
-    ? component.mediaGeneration.models
-    : undefined;
+  return component?.kind === "provider-driver" ? component.mediaGeneration : undefined;
+}
+
+/** The image models and prices an outside image driver declares, or nothing. */
+export function outsideImageDriverModels(
+  input: Parameters<typeof outsideMediaDeclaration>[0],
+): ReadonlyArray<ExtensionImageGenerationModel> | undefined {
+  const declaration = outsideMediaDeclaration(input);
+  return declaration?.media === "image" ? declaration.models : undefined;
+}
+
+/** The video models, prices and job facts an outside video driver declares, or nothing. */
+export function outsideVideoDriverModels(
+  input: Parameters<typeof outsideMediaDeclaration>[0],
+): ReadonlyArray<ExtensionVideoGenerationModel> | undefined {
+  const declaration = outsideMediaDeclaration(input);
+  return declaration?.media === "video" ? declaration.models : undefined;
 }
 
 /**
@@ -280,6 +295,30 @@ export function resolveOutsideImageDriverActivation(
   const state = resolveOutsideDriverActivation(input);
   if (state.kind !== "effective") return state;
   return outsideImageDriverModels(input) === undefined
+    ? { kind: "blocked", reason: "incompatible" }
+    : state;
+}
+
+/** The same for a video profile: its bound component must still declare video generation. */
+export function resolveOutsideVideoDriverActivation(
+  input: Parameters<typeof resolveOutsideDriverActivation>[0],
+): ExtensionEffectiveState {
+  const state = resolveOutsideDriverActivation(input);
+  if (state.kind !== "effective") return state;
+  return outsideVideoDriverModels(input) === undefined
+    ? { kind: "blocked", reason: "incompatible" }
+    : state;
+}
+
+/**
+ * The same for a harness endpoint: a package that generates media speaks no
+ * harness endpoint protocol, so it can never run as one.
+ */
+export function resolveOutsideHarnessEndpointActivation(
+  input: Parameters<typeof resolveOutsideDriverActivation>[0],
+): ExtensionEffectiveState {
+  const state = resolveOutsideDriverActivation(input);
+  return state.kind === "effective" && outsideMediaDeclaration(input) !== undefined
     ? { kind: "blocked", reason: "incompatible" }
     : state;
 }

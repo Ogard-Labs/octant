@@ -708,7 +708,12 @@ export function startOctantServer(
             url: options.credentialBrokerUrl,
             token: options.credentialBrokerToken,
           });
-    const { threadSecrets, threadSecretRoutes } = wireThreadSecrets({
+    const {
+      threadSecrets,
+      threadSecretRoutes,
+      pairedThreadSecretRoutes,
+      threadSecretScopeCurrent,
+    } = wireThreadSecrets({
       options,
       persistence,
       machineChangeFeed,
@@ -718,6 +723,10 @@ export function startOctantServer(
       processAuthorityTime,
       windowAuthorityStore,
       workThreadProjection,
+      browserAuthority,
+      isPairedDeviceScope,
+      isPairedDeviceSessionCurrent,
+      isRestrictedDeviceScope,
       readReference: commandBroker?.requestCardRead,
       browse: commandBroker?.browse,
     });
@@ -1343,8 +1352,7 @@ export function startOctantServer(
       resolveStrict: resolveThreadStrict,
       keepsSandbox: threadKeepsSandbox,
       isHarnessProvider,
-      windowCurrent: (windowId) =>
-        windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
+      windowCurrent: threadSecretScopeCurrent,
     };
     const {
       fileMentionRoutes,
@@ -1719,6 +1727,7 @@ export function startOctantServer(
       threadSearchRoutes,
       workThreadRoutes,
     } = wireWorkRequests({
+      threadSecrets,
       hubActScopeSlot,
       agentRunInteractions,
       browserToolApprovalService,
@@ -2067,6 +2076,7 @@ export function startOctantServer(
       providerCloudSessionRoutes: cloudSessions.routes,
       credentialRequestRoutes,
       threadSecretRoutes,
+      pairedThreadSecretRoutes,
       agentMessageRoutes,
       agentProfileRoutes,
       archivedWorktreeRoutes,

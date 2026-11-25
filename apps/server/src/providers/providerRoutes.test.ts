@@ -90,8 +90,7 @@ describe("ProviderRoutes", () => {
       kind: "change-outside-harness-endpoint-configuration",
       expectedVersion: 1,
     } as never);
-    const imageConfiguration = {
-      kind: "outside-image",
+    const mediaConfiguration = {
       driver: (create.configuration as { readonly driver: unknown }).driver,
       baseUrl: "https://images.example.test/",
       key: { header: "authorization", scheme: "Bearer" },
@@ -104,13 +103,26 @@ describe("ProviderRoutes", () => {
         instanceId,
         expectedVersion: 0,
         displayName: "Example images",
-        configuration: imageConfiguration,
+        configuration: { kind: "outside-image", ...mediaConfiguration },
       } as never,
       {
         kind: "change-outside-image-configuration",
         instanceId,
         expectedVersion: 1,
-        configuration: imageConfiguration,
+        configuration: { kind: "outside-image", ...mediaConfiguration },
+      } as never,
+      {
+        kind: "create-outside-video-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Example video",
+        configuration: { kind: "outside-video", ...mediaConfiguration },
+      } as never,
+      {
+        kind: "change-outside-video-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: { kind: "outside-video", ...mediaConfiguration },
       } as never,
     );
     for (const body of commands) {

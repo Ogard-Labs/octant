@@ -34,6 +34,31 @@ export type CodeProjectPullRequestMergeAction = (
   actor?: EventActor,
 ) => Promise<CodeProjectPullRequestMergeOutcome>;
 
+/** Reads a layer gets to land, or to have its mergeability worked out. */
+const STACK_LANDED_READS = 4;
+const STACK_MERGEABILITY_READS = 10;
+const STACK_READ_INTERVAL_MS = 1_500;
+/**
+ * Waits for mergeability one stack merge gets in all (a minute). The person's
+ * request stays open meanwhile, and the host closes one that has been quiet for
+ * 255 seconds. Seeing a layer land has its own waits: spending those on a slow
+ * layer below would call a landed one queued.
+ */
+const STACK_MERGEABILITY_WAITS = 40;
+
+function waitFor(milliseconds: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, milliseconds);
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
+
 export interface CodeProjectPullRequestActionForge {
   editLabels(
     request: GhPullRequestIdentityRequest & {
@@ -141,17 +166,20 @@ export class CodeProjectPullRequestActionService {
   readonly #forge: CodeProjectPullRequestActionForge;
   readonly #merge: CodeProjectPullRequestMergeAction;
   readonly #record: (record: CodeProjectPullRequestActionRecorded, actor?: EventActor) => void;
+  readonly #wait: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 
   constructor(options: {
     readonly authority: CodeProjectPullRequestActionAuthority;
     readonly forge: CodeProjectPullRequestActionForge;
     readonly merge: CodeProjectPullRequestMergeAction;
     readonly record: (record: CodeProjectPullRequestActionRecorded, actor?: EventActor) => void;
+    readonly wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   }) {
     this.#authority = options.authority;
     this.#forge = options.forge;
     this.#merge = options.merge;
     this.#record = options.record;
+    this.#wait = options.wait ?? waitFor;
   }
 
   async act(
@@ -281,6 +309,9 @@ export class CodeProjectPullRequestActionService {
       if (summary.status !== "read" || summary.state !== "open") {
         return { status: "refused", reason: "unreadable" };
       }
+      // Read before the first merge, so a layer that moved above does not
+      // leave the ones below it landed.
+      if (summary.headSha !== item.headSha) return { status: "refused", reason: "stale" };
       summaries.push({
         number: item.number,
         headBranch: summary.headBranch,
@@ -293,16 +324,25 @@ export class CodeProjectPullRequestActionService {
     // when the forge keeps the merged branch, so each child is pointed at the
     // branch the whole stack lands on before it merges.
     const destination = summaries[0]?.baseBranch ?? "";
+    if (command.baseBranch !== undefined && command.baseBranch !== destination) {
+      return { status: "refused", reason: "base-changed" };
+    }
     const merged: number[] = [];
+    let waits = STACK_MERGEABILITY_WAITS;
+    const waitForMergeability = async (): Promise<boolean> => {
+      if (waits === 0) return false;
+      waits -= 1;
+      return this.#waited(signal);
+    };
     for (const [index, item] of command.items.entries()) {
+      const identity = {
+        owner: command.repositoryOwner,
+        name: command.repositoryName,
+        number: item.number,
+      };
       if (index > 0) {
         const retargeted = await this.#forge.retarget(
-          {
-            owner: command.repositoryOwner,
-            name: command.repositoryName,
-            number: item.number,
-            baseBranch: destination,
-          },
+          { ...identity, baseBranch: destination },
           signal,
         );
         if (retargeted.status !== "done") {
@@ -313,7 +353,13 @@ export class CodeProjectPullRequestActionService {
             outcome: { status: "unavailable", reason: "unavailable" },
           };
         }
+        await this.#mergeabilityKnown(identity, destination, waitForMergeability, signal);
       }
+      const stopped = {
+        status: "stopped" as const,
+        stoppedAt: item.number,
+        ...(index === 0 ? {} : { retargetedTo: destination }),
+      };
       const outcome = await this.#merge(
         windowId,
         {
@@ -324,28 +370,70 @@ export class CodeProjectPullRequestActionService {
           method: command.method,
           headSha: item.headSha,
           confirmed: true,
+          ...(command.baseBranch === undefined ? {} : { baseBranch: destination }),
         },
         signal,
         caller,
         actor,
       );
       if (outcome.status === "merged") {
+        // GitHub also takes a merge it only queues. Pointing the next layer at
+        // a branch its parent has not reached would merge the parent's work
+        // through the child.
+        if (!(await this.#landed(identity, signal))) {
+          return { ...stopped, merged, outcome: { status: "not-landed" } };
+        }
         merged.push(item.number);
         continue;
       }
       // The owner unlock is checked once for the whole stack, on its route,
       // before this runs; a single merge here never asks for it.
       if (outcome.status === "owner-unlock-required") {
-        return {
-          status: "stopped",
-          merged,
-          stoppedAt: item.number,
-          outcome: { status: "refused", reason: "not-authorized" },
-        };
+        return { ...stopped, merged, outcome: { status: "refused", reason: "not-authorized" } };
       }
-      return { status: "stopped", merged, stoppedAt: item.number, outcome };
+      return { ...stopped, merged, outcome };
     }
     return { status: "merged", merged };
+  }
+
+  async #waited(signal: AbortSignal): Promise<boolean> {
+    if (!signal.aborted) await this.#wait(STACK_READ_INTERVAL_MS, signal);
+    return !signal.aborted;
+  }
+
+  /** Whether the forge shows the pull request merged, read a few times before saying no. */
+  async #landed(identity: GhPullRequestIdentityRequest, signal: AbortSignal): Promise<boolean> {
+    for (let read = 0; read < STACK_LANDED_READS; read += 1) {
+      if (read > 0 && !(await this.#waited(signal))) return false;
+      const summary = await this.#forge.summary(identity, signal);
+      if (summary.status === "read" && summary.state === "merged") return true;
+    }
+    return false;
+  }
+
+  /**
+   * Waits, within a bound, until GitHub has worked out whether a layer merges
+   * into its new base. It says "unknown" at first, which the merge refuses, so
+   * without this a stack stopped at its second layer. The merge reads it again
+   * and decides; this only gives GitHub the time.
+   */
+  async #mergeabilityKnown(
+    identity: GhPullRequestIdentityRequest,
+    baseBranch: string,
+    wait: () => Promise<boolean>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    for (let read = 0; read < STACK_MERGEABILITY_READS; read += 1) {
+      if (read > 0 && !(await wait())) return;
+      const summary = await this.#forge.summary(identity, signal);
+      if (
+        summary.status === "read" &&
+        summary.baseBranch === baseBranch &&
+        summary.mergeability !== "unknown"
+      ) {
+        return;
+      }
+    }
   }
 
   /**
