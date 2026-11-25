@@ -1,5 +1,9 @@
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
-import { decodeProviderInstance, decodeProviderUsageLimitsSnapshot } from "@octant/contracts";
+import {
+  decodeProviderInstance,
+  decodeProviderUsageLimitsSnapshot,
+  type ProviderInstanceId,
+} from "@octant/contracts";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -203,6 +207,25 @@ describe("RailUsage", () => {
 
     await user.click(screen.getByRole("button", { name: "Account menu, Ada" }));
     expect(await screen.findByRole("menuitem", { name: "Lab, 5h 90% left" })).toBeVisible();
+  });
+
+  it("moves the rings when the person reorders providers, before the registry is read again", async () => {
+    const usage = planUsage(four.slice(0, 2));
+    const rail = (order?: ReadonlyArray<ProviderInstanceId>) => (
+      <PlanUsageProvider {...usage} order={order}>
+        <RailUsage onOpenUsage={vi.fn()} />
+      </PlanUsageProvider>
+    );
+    const names = () =>
+      within(screen.getByRole("group", { name: "Plan usage" }))
+        .getAllByRole("button")
+        .map((ring) => ring.getAttribute("aria-label")?.split(" plan usage")[0]);
+    const { rerender } = render(rail());
+    await screen.findByRole("group", { name: "Plan usage" });
+    expect(names()).toEqual(["Personal", "Team"]);
+
+    rerender(rail(usage.instances.map(({ id }) => id).reverse()));
+    expect(names()).toEqual(["Team", "Personal"]);
   });
 
   it("leaves plan usage out of the rail's account menu while the rings show every account", async () => {
