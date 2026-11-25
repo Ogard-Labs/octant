@@ -302,7 +302,11 @@ in-process host, so it loses no capability by comparison: the 3.0.3 source
 sends ACP usage updates with context size and cost, a `/compact` command,
 `review/*` extension methods, and questions as elicitation. Usage and context
 updates are consumed from the verified 3.0.3 release on (a later release
-unverified), as specified below.
+unverified), as specified below. Remaining Vibe Code allowance is not in
+that ACP usage update: when the instance uses API-key authentication,
+Octant reads the monthly window from Mistral's billing endpoint with the
+key Settings already holds, under the
+[account usage endpoint](../architecture.md#security-and-authority) rule.
 Native review remains unimplemented. Supplementary file-review
 reads have a candidate integration behind an empty verified-version allowlist:
 no production profile declares the read capability until signed-in 3.0.3

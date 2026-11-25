@@ -2837,11 +2837,12 @@ Status: Partly built. Since: 2026-11-24. Detail: [Architecture: Thread secrets](
 
 ### Account usage reads
 
-Plan limits for providers that report them only from an account endpoint are read with the sign-in the provider's own CLI saved.
+Plan limits for providers that report them only from an account endpoint are read with a credential already on the host for that instance: Devin and OpenCode Go from the sign-in their own CLI saved; Mistral Vibe from the Mistral API key Settings already holds (maintainer decision, 2026-11-25).
 
 - The host reads the saved key only for an enabled instance of that provider, sends it nowhere else, follows no redirect, and never writes, copies or stores it.
 - Only a refresh the person asks for waits on the endpoint; every other caller gets the last reading and at most one background read starts per five minutes.
 - Failures carry a fixed message, a changed response shape keeps the last reading, and the key stays out of logs, journal, snapshots and errors.
+- Vibe remaining quota never reads Vibe's Keychain item or `~/.vibe/.env`, and never scrapes `admin.mistral.ai`. A missing allowance or a key without usage permission is unavailable or plan limits not applying, never 0% used.
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Account usage endpoints](../architecture.md#security-and-authority).
 
