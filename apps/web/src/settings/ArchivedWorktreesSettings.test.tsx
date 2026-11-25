@@ -26,7 +26,9 @@ function client(answer: RemoveArchivedWorktreeResult) {
     .mockResolvedValueOnce([worktree])
     .mockResolvedValue(answer.kind === "archived-worktree-removed" ? [] : [worktree]);
   const remove = vi.fn(async () => answer);
-  return { list, remove, fake: { list, remove } };
+  const listCleanedUp = vi.fn(async () => []);
+  const restore = vi.fn();
+  return { list, remove, fake: { list, remove, listCleanedUp, restore } };
 }
 
 describe("ArchivedWorktreesSettings", () => {

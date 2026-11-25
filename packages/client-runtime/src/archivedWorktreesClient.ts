@@ -4,6 +4,11 @@ import {
   RemoveArchivedWorktreeResult,
   type ArchivedWorktree,
 } from "@octant/contracts/archived-worktrees";
+import {
+  CleanedUpWorktreeList,
+  RestoreCleanedUpWorktreeResult,
+  type CleanedUpWorktree,
+} from "@octant/contracts/cleaned-up-worktrees";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ArchivedWorktreesClientOptions {
@@ -28,6 +33,12 @@ export interface ArchivedWorktreesClient {
     threadId: ArchivedWorktree["threadId"],
     signal?: AbortSignal,
   ): Promise<RemoveArchivedWorktreeResult>;
+  /** Threads whose worktree the host cleaned up and can restore. */
+  listCleanedUp(signal?: AbortSignal): Promise<ReadonlyArray<CleanedUpWorktree>>;
+  restore(
+    threadId: CleanedUpWorktree["threadId"],
+    signal?: AbortSignal,
+  ): Promise<RestoreCleanedUpWorktreeResult>;
 }
 
 export function createArchivedWorktreesClient(
@@ -65,6 +76,36 @@ export function createArchivedWorktreesClient(
       );
       return decodeHostAnswer(RemoveArchivedWorktreeResult)(body);
     },
+    async listCleanedUp(signal) {
+      const body = await send(
+        fetch,
+        new URL("/api/code/cleaned-up-worktrees", options.baseUrl).toString(),
+        {
+          method: "GET",
+          headers: { "x-octant-window-capability": options.windowCapability },
+          ...(signal === undefined ? {} : { signal }),
+        },
+        "Cleaned-up worktrees could not be read from this host.",
+      );
+      return decodeHostAnswer(CleanedUpWorktreeList)(body).worktrees;
+    },
+    async restore(threadId, signal) {
+      const body = await send(
+        fetch,
+        new URL("/api/code/cleaned-up-worktrees/restore", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: {
+            "x-octant-window-capability": options.windowCapability,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ threadId, confirmed: true }),
+          ...(signal === undefined ? {} : { signal }),
+        },
+        "The worktree could not be restored.",
+      );
+      return decodeHostAnswer(RestoreCleanedUpWorktreeResult)(body);
+    },
   };
 }
 
@@ -74,7 +115,7 @@ function isRefusal(body: unknown): boolean {
     typeof body === "object" &&
     body !== null &&
     "kind" in body &&
-    body.kind === "archived-worktree-refused"
+    (body.kind === "archived-worktree-refused" || body.kind === "cleaned-up-worktree-refused")
   );
 }
 

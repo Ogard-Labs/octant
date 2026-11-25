@@ -892,6 +892,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "worktrees managed worktree archived threads disk space storage clean up cleanup remove delete reclaim build output",
         },
         {
+          id: settingId("cleaned-up-worktrees"),
+          label: "Cleaned-up worktrees",
+          scope: "host",
+          keywords:
+            "worktrees cleaned up cleanup restore worktree thread inactive folder removed brought back",
+        },
+        {
           id: settingId("host-worktrees"),
           label: "Worktrees on this computer",
           scope: "host",

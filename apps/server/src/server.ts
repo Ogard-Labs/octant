@@ -629,6 +629,7 @@ export function startOctantServer(
       pinnedExtensionIds,
       reviewedModelManifest,
       managedWorktreeService,
+      managedWorktreeReclaim,
       skillDiscoveryService,
       providerAvailabilityMarks,
     } = yield* wireProviders({
@@ -800,6 +801,7 @@ export function startOctantServer(
     const {
       agentProfileRoutes,
       archivedWorktreeRoutes,
+      worktreeReclaimSweep,
       buildCodeService,
       diskCleanupRoutes,
       canAccessCodeProject,
@@ -840,6 +842,7 @@ export function startOctantServer(
       managedCodeThreadCreation,
       managedWorktreeRefsList,
       managedWorktreeService,
+      managedWorktreeReclaim,
       managedWorktreeSourcePreview,
       probeProviderForThreads,
       providerFolderDiscoveryPorts,
@@ -2449,6 +2452,7 @@ export function startOctantServer(
           // and the stop below is registered before the first pass runs.
           completedThreadArchiveSweep.start();
           mergedThreadPutAway?.start();
+          worktreeReclaimSweep.start();
           idleCompactions.start();
           stopBenchmarkRunner = benchmarkRunner.start();
           personMemorySweep.start();
@@ -2556,6 +2560,7 @@ export function startOctantServer(
           }
           completedThreadArchiveSweep.stop();
           mergedThreadPutAway?.stop();
+          worktreeReclaimSweep.stop();
           idleCompactions.stop();
           personMemorySweep.stop();
           personMemory.close();

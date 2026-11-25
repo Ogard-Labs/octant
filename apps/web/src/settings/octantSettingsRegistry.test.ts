@@ -405,6 +405,7 @@ describe("octantSettingsRegistry", () => {
       "code-editor-executable",
       "code-editor-arguments",
       "archived-worktrees",
+      "cleaned-up-worktrees",
       "host-worktrees",
       "xcode-build-data",
       "open-in-applications",

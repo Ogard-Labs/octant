@@ -5,6 +5,8 @@ import { removeHostWorktree } from "../code/hostWorktreeRemoval";
 import { createDiskCleanupRouteHandler } from "../diskCleanupRoutes";
 import { createArchivedWorktreeRouteHandler } from "../archivedWorktreeRoutes";
 import { createArchivedWorktrees } from "../code/archivedWorktrees";
+import { createCleanedUpWorktrees } from "../code/cleanedUpWorktrees";
+import { WorktreeReclaimSweep } from "../code/worktreeReclaimSweep";
 import {
   decodeThreadWorkingDirectory,
   type CodeThreadUnlinkedPullRequest,
@@ -660,6 +662,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "managedCodeThreadCreation"
     | "managedWorktreeService"
     | "managedWorktreeRefsList"
+    | "managedWorktreeReclaim"
     | "managedWorktreeSourcePreview"
     | "probeProviderForThreads"
     | "providerFolderDiscoveryPorts"
@@ -695,6 +698,7 @@ export function wireCode(deps: CodeDependencies) {
     managedCodeThreadCreation,
     managedWorktreeReceipts,
     managedWorktreeRefsList,
+    managedWorktreeReclaim,
     managedWorktreeService,
     managedWorktreeSourcePreview,
     onGithubPullRequestsUnreadable,
@@ -728,8 +732,54 @@ export function wireCode(deps: CodeDependencies) {
       cleanupOnArchive: () =>
         persistence.readCodeSettings()?.settings.worktrees?.cleanup?.onArchive !== false,
     });
+    const cleanedUpWorktrees = createCleanedUpWorktrees({
+      readCodeThreads: () => persistence.readCodeThreads(),
+      readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+      readCodeCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
+      loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
+      restore: (receiptId, signal) => managedWorktreeReclaim.restore({ receiptId }, signal),
+      abandon: (receiptId, signal) => managedWorktreeReclaim.abandon({ receiptId }, signal),
+    });
+    // The host's own timer for the cleanup a person opted into. With no choice
+    // on it removes nothing, and it only settles a cleanup a restart cut short.
+    const journalTimeOfSequence = persistence.connection.prepare(
+      "SELECT occurred_at FROM event_journal WHERE global_sequence = ?",
+    );
+    let activityRead:
+      | { readonly at: number; readonly sequences: ReadonlyMap<string, number> }
+      | undefined;
+    const worktreeReclaimSweep = new WorktreeReclaimSweep({
+      cleanup: () => persistence.readCodeSettings()?.settings.worktrees?.cleanup,
+      threads: () => persistence.readCodeThreads(),
+      readCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
+      loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
+      lastActivityAt: (threadId) => {
+        // One read of the table serves a whole pass, not one per thread.
+        if (activityRead === undefined || Date.now() - activityRead.at > 10_000) {
+          activityRead = {
+            at: Date.now(),
+            sequences: new Map(
+              persistence
+                .readCodeThreadActivity()
+                .map((entry) => [String(entry.threadId), entry.lastSequence] as const),
+            ),
+          };
+        }
+        const sequence = activityRead.sequences.get(String(threadId));
+        if (sequence === undefined) return undefined;
+        const row = journalTimeOfSequence.get(sequence) as
+          | { readonly occurred_at?: unknown }
+          | undefined;
+        return typeof row?.occurred_at === "string" ? Date.parse(row.occurred_at) : undefined;
+      },
+      turnInProgress: (threadId) =>
+        archivedWorktreeTurns?.turnInProgress?.(String(threadId)) === true,
+      reclaim: (input, signal) => managedWorktreeReclaim.reclaim(input, signal),
+      abandon: (receiptId, signal) => managedWorktreeReclaim.abandon({ receiptId }, signal),
+    });
     const archivedWorktreeRoutes = createArchivedWorktreeRouteHandler({
       worktrees: archivedWorktrees,
+      cleanedUp: cleanedUpWorktrees,
       windowAuthorityStore,
     });
     // Worktrees Octant made and still owns are cleaned up through their
@@ -1389,6 +1439,7 @@ export function wireCode(deps: CodeDependencies) {
     return {
       agentProfileRoutes,
       archivedWorktreeRoutes,
+      worktreeReclaimSweep,
       buildCodeService,
       diskCleanupRoutes,
       canAccessCodeProject,

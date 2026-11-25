@@ -138,7 +138,7 @@ export function CodeWorktreeSettingsSection(props: {
           />
         </SettingRow>
         <SettingRow
-          description="Also remove the worktree folder of a thread that is still open once its branch is merged. Open the thread and choose Restore worktree to bring the folder back."
+          description="Also remove the worktree folder of a thread that is still open, a day after its last activity, once everything is committed and pushed or merged. The branch stays, and Cleaned-up worktrees below brings the folder back."
           label="Clean up merged worktrees"
           scope="app"
           settingId="code-worktree-cleanup-merged"
@@ -150,7 +150,7 @@ export function CodeWorktreeSettingsSection(props: {
           />
         </SettingRow>
         <SettingRow
-          description="Remove the worktree folder of a thread nobody has used for a while, open or archived. Only a folder with no uncommitted, untracked or ignored files goes. The branch, the thread and its checkpoints stay, and the thread asks you to restore the folder before its next turn."
+          description="Remove the worktree folder of a thread nobody has used for a while, open or archived. Only a folder with no uncommitted, untracked or ignored files goes. The branch, the thread and its checkpoints stay, and the thread takes no new turn until you restore the folder under Cleaned-up worktrees."
           label="Clean up after inactivity"
           scope="app"
           settingId="code-worktree-cleanup-inactivity"
