@@ -16,8 +16,8 @@ export function MobileDeepLinkCapture(props: {
   ) => ReactNode;
 }) {
   const [state, setState] = useState<MobileDeepLinkCaptureState>({});
-  const openUrl = useCallback((url: string | null) => {
-    if (url === null) return;
+  const openUrl = useCallback((url: string | null | undefined) => {
+    if (url === null || url === undefined) return;
     setState((current) => captureMobileDeepLink(current, url));
   }, []);
 

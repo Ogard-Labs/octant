@@ -5,6 +5,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  type ScrollViewInstance,
   StyleSheet,
   Text,
   View,
@@ -120,7 +121,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const [modelOpen, setModelOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [panesOpen, setPanesOpen] = useState(false);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   const [surface, setSurface] = useState<RemoteThreadSurfaceKind>("chat");
   // The surfaces on offer come from the shared remote matrix, so a host that
   // would refuse one never has it shown here.
@@ -204,7 +205,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
 
   useEffect(() => {
     if (identity === undefined) return;
-    let previous = AppState.currentState;
+    let previous = AppState.currentState ?? null;
     const subscription = AppState.addEventListener("change", (next) => {
       const returnedToForeground = enteredMobileForeground(previous, next);
       previous = next;
