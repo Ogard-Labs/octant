@@ -76,6 +76,9 @@ export interface BoundedGitResult {
   readonly timedOut: boolean;
 }
 
+/** `killed` says the group has been sent SIGKILL. */
+type GroupProbe = (pid: number, killed: boolean) => boolean | Promise<boolean>;
+
 export interface BoundedGitOptions {
   readonly executable: string;
   readonly args: ReadonlyArray<string>;
@@ -86,7 +89,7 @@ export interface BoundedGitOptions {
   /** How long after SIGKILL the group may stay before it is reported as surviving. */
   readonly confirmMs?: number;
   /** Whether any process of the group led by this pid still runs; tests replace it. */
-  readonly probeGroup?: (pid: number) => boolean | Promise<boolean>;
+  readonly probeGroup?: GroupProbe;
   readonly maxBuffer?: number;
 }
 
@@ -105,19 +108,24 @@ function groupExists(pid: number): boolean {
   }
 }
 
-/** The state and process group of one process, as `/proc/<pid>/stat` states them. */
-function memberFromStat(stat: string): GroupMember | undefined {
+interface GroupMember {
+  readonly group: number;
+  readonly running: boolean;
+}
+
+/** Whether one process runs, and in which group, as `/proc/<pid>/stat` states them. */
+export function memberFromStat(stat: string): GroupMember | undefined {
   // The command name is in parentheses and may hold any character.
-  const [state, , group] = stat
+  const fields = stat
     .slice(stat.lastIndexOf(")") + 1)
     .trim()
     .split(/\s+/);
-  return state === undefined || group === undefined ? undefined : { state, group: Number(group) };
-}
-
-interface GroupMember {
-  readonly state: string;
-  readonly group: number;
+  const [state, , group] = fields;
+  if (state === undefined || group === undefined) return undefined;
+  // A process whose first thread has exited reads as a zombie while its other
+  // threads, which may still write, are counted here.
+  const threads = Number(fields[17]);
+  return { group: Number(group), running: !/^[ZX]/i.test(state) || threads > 1 };
 }
 
 async function readProcesses(): Promise<ReadonlyArray<GroupMember>> {
@@ -136,26 +144,41 @@ async function readProcesses(): Promise<ReadonlyArray<GroupMember>> {
   });
   return listed.split("\n").flatMap((line) => {
     const [group, state] = line.trim().split(/\s+/);
-    return group === undefined || state === undefined ? [] : { state, group: Number(group) };
+    return group === undefined || state === undefined
+      ? []
+      : { group: Number(group), running: !state.startsWith("Z") };
   });
+}
+
+async function hasRunningMember(pid: number): Promise<boolean> {
+  const members = (await readProcesses()).filter((member) => member.group === pid);
+  // A group the list does not name at all left between the two looks, or is
+  // hidden from this process: the next look decides.
+  return members.length === 0 || members.some((member) => member.running);
 }
 
 /**
  * Whether any process of the group still runs. A signal also reaches one that
  * has exited and that its parent has not reaped yet; such a process writes
- * nothing more and cannot be killed, so a group of only those is gone. A
- * process list that cannot be read answers that one is still there.
+ * nothing more and cannot be killed, so a group of only those is gone. That is
+ * only asked once the group has been sent SIGKILL: before it, a member can
+ * start another while the list is being read, and the list would miss it. The
+ * second SIGKILL and list are for one that was being started as the first
+ * landed. A process list that cannot be read answers that one is still there.
  */
-async function groupRuns(pid: number): Promise<boolean> {
+async function groupRuns(pid: number, killed: boolean): Promise<boolean> {
   if (!groupExists(pid)) return false;
-  if (process.platform === "win32") return true;
+  if (!killed || process.platform === "win32") return true;
   try {
-    const members = (await readProcesses()).filter((member) => member.group === pid);
-    // A group the list does not name at all left between the two looks, or is
-    // hidden from this process: the next look decides.
-    return members.length === 0 || members.some((member) => !/^[ZX]/i.test(member.state));
+    if (await hasRunningMember(pid)) return true;
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // Gone meanwhile, or macOS, which refuses to signal only exited processes.
+    }
+    return await hasRunningMember(pid);
   } catch {
-    return true;
+    return groupExists(pid);
   }
 }
 
@@ -194,6 +217,7 @@ export function runBoundedGit(options: BoundedGitOptions): Promise<BoundedGitRes
     let settled = false;
     let closed = false;
     let groupGone = false;
+    let killed = false;
     let code: number | null = null;
     const timers: Array<ReturnType<typeof setTimeout>> = [];
 
@@ -221,7 +245,7 @@ export function runBoundedGit(options: BoundedGitOptions): Promise<BoundedGitRes
     };
     const watchGroup = (pid: number, killedAt: number) => {
       const look = async (): Promise<void> => {
-        const present = await probe(pid);
+        const present = await probe(pid, killed);
         if (settled) return;
         if (!present) {
           groupGone = true;
@@ -248,7 +272,12 @@ export function runBoundedGit(options: BoundedGitOptions): Promise<BoundedGitRes
       const killedAt = Date.now() + grace;
       // The escalation is never cancelled by the direct child leaving: only the
       // group being gone ends it.
-      timers.push(setTimeout(() => signalTree(child, "SIGKILL"), grace));
+      timers.push(
+        setTimeout(() => {
+          signalTree(child, "SIGKILL");
+          killed = true;
+        }, grace),
+      );
       if (child.pid === undefined) {
         groupGone = true;
         return;
@@ -292,14 +321,10 @@ export function runBoundedGit(options: BoundedGitOptions): Promise<BoundedGitRes
 }
 
 /** Looks at a group that survived SIGKILL until it is gone, killing it again each time. */
-async function outlive(
-  pid: number,
-  probe: (pid: number) => boolean | Promise<boolean>,
-  child: ChildProcess,
-): Promise<void> {
+async function outlive(pid: number, probe: GroupProbe, child: ChildProcess): Promise<void> {
   for (;;) {
     await new Promise<void>((resolve) => setTimeout(resolve, SURVIVOR_POLL_MS));
-    if (!(await probe(pid))) return;
+    if (!(await probe(pid, true))) return;
     signalTree(child, "SIGKILL");
   }
 }

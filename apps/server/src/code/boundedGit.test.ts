@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { forReceipt, runBoundedGit, waitForSurvivingGit } from "./boundedGit";
+import { forReceipt, memberFromStat, runBoundedGit, waitForSurvivingGit } from "./boundedGit";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -180,26 +180,48 @@ describe("runBoundedGit", () => {
           confirmMs: 4_000,
         }),
       );
-      const written = (name: string) =>
-        readFile(join(directory, name), "utf8").then(
-          (text) => (name === "ready" ? true : text.length > 0),
-          () => false,
+      const ended = running.then(
+        () => "finished",
+        (error: unknown) => String(error),
+      );
+      const keeper = () =>
+        readFile(join(directory, "keeper"), "utf8").then(
+          (text) => Number(text),
+          () => 0,
         );
-      await expect.poll(() => written("ready")).toBe(true);
-      await expect.poll(() => written("keeper")).toBe(true);
-      const keeper = Number(await readFile(join(directory, "keeper"), "utf8"));
       try {
+        await expect.poll(keeper).toBeGreaterThan(0);
+        await expect
+          .poll(() =>
+            readFile(join(directory, "ready"), "utf8").then(
+              () => true,
+              () => false,
+            ),
+          )
+          .toBe(true);
         const began = Date.now();
         stop.abort(new Error("stopped"));
-        await expect(running).rejects.toThrow("stopped");
+        await expect(ended).resolves.toContain("stopped");
         expect(Date.now() - began).toBeLessThan(3_000);
-        expect(alive(keeper)).toBe(true);
+        expect(alive(await keeper())).toBe(true);
         await waitForSurvivingGit("zombies");
       } finally {
-        process.kill(keeper, "SIGKILL");
+        stop.abort(new Error("stopped"));
+        const pid = await keeper();
+        if (pid > 0) process.kill(pid, "SIGKILL");
+        await ended;
       }
     },
   );
+
+  it("counts a process whose first thread exited as running while others do", () => {
+    const stat = (state: string, threads: number) =>
+      `41 (git) (x) ${state} 1 40 40 0 -1 4194304 0 0 0 0 0 0 0 0 20 0 ${threads} 0 100`;
+    expect(memberFromStat(stat("Z", 3))).toEqual({ group: 40, running: true });
+    expect(memberFromStat(stat("Z", 1))).toEqual({ group: 40, running: false });
+    expect(memberFromStat(stat("S", 1))).toEqual({ group: 40, running: true });
+    expect(memberFromStat("")).toBeUndefined();
+  });
 
   it("refuses to start under a signal that has already stopped", async () => {
     await expect(

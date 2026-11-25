@@ -2673,9 +2673,9 @@ at and killed again every quarter second, under the receipt whose operation
 started that Git. That receipt's lock neither starts nor releases an operation
 while the registry holds one of its groups: a restore that has to wait is told
 a cleanup still holds the receipt, and nothing writes in the folder while that
-helper might. Other receipts are not held up by it. A group counts as gone when
-it has no running process: one that has exited and that its parent never reaps
-(a container without an init) writes nothing and cannot be killed. A process
+helper might. Other receipts are not held up by it. Once killed, a group counts as
+gone when it has no running process: one that has exited and that its parent
+never reaps (a container without an init) writes nothing and cannot be killed. A process
 list that cannot be read counts the group as still there. Windows has no process groups: the tree is
 ended with `taskkill /T /F` at the stop, while the root still names it, and
 only the root is confirmed gone. Reads stop at two
