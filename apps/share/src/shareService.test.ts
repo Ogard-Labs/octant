@@ -1246,6 +1246,31 @@ describe("carried images in the store", () => {
     }
   });
 
+  test("reads nothing past a compact share's head for a reader it refuses or an image it need not send", async () => {
+    start();
+    const first = picture("image-1", 1, 64);
+    const second = picture("image-2", 2, 64);
+    const created = await createPictures([first, second]);
+    const locked = await createPictures([first, second], { password: "correct horse" });
+    const headBytes = (id: string) =>
+      Number(/^\{"headBytes":"(\d{8})"/.exec(readFileSync(sharePath(id), "utf8"))?.[1]);
+    const revalidated = await shareBytesRead(async () => {
+      const response = await fetch(viewerImage(created.shareId, second.sha256), {
+        headers: { "if-none-match": `"${second.sha256}"` },
+      });
+      expect(response.status).toBe(304);
+    });
+    expect(revalidated).toBe(headBytes(created.shareId));
+    const refused = await shareBytesRead(async () => {
+      expect((await fetch(viewerImage(locked.shareId, second.sha256))).status).toBe(404);
+    });
+    expect(refused).toBe(headBytes(locked.shareId));
+    const sent = await shareBytesRead(async () => {
+      expect((await fetch(viewerImage(created.shareId, second.sha256))).status).toBe(200);
+    });
+    expect(sent).toBe(headBytes(created.shareId) + JSON.stringify(second.entry.data).length);
+  });
+
   test("closes the share file after every answer", async () => {
     start();
     const image = picture("image-1", 1);

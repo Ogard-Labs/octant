@@ -21,8 +21,8 @@ import {
 // from its share.
 
 const HEAD_START = /^\{"headBytes":"(\d{8})",/;
-/** Enough for a share with a few images, so its head takes one read. */
-const FIRST_READ_BYTES = 2048;
+/** The head's own length, so nothing past the head is read to learn where it ends. */
+const HEAD_LENGTH_BYTES = `{"headBytes":"00000000",`.length;
 const QUOTE = 0x22;
 
 interface ImageRange {
@@ -220,7 +220,7 @@ export function withShareHead<T>(
 function readHead(fd: number): ShareHead | undefined {
   try {
     const { size } = fstatSync(fd);
-    const first = readBytes(fd, 0, Math.min(size, FIRST_READ_BYTES));
+    const first = readBytes(fd, 0, Math.min(size, HEAD_LENGTH_BYTES));
     const headBytes = Number(HEAD_START.exec(first?.toString("latin1") ?? "")?.[1] ?? "0");
     if (first === undefined || headBytes === 0 || headBytes > size) return undefined;
     const rest =
