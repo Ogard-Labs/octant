@@ -9,7 +9,7 @@ import {
 import type { HostFederationTransports } from "@octant/client-runtime/host-federation-transports";
 import { pairedComputerReadItems } from "@octant/client-runtime/paired-computer-reads";
 import { createPendingRequestClient } from "@octant/client-runtime/pending-request-client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 
 /** Often enough that a thread started elsewhere shows up while the person looks, rarely enough for a paired session. */
@@ -30,14 +30,22 @@ export function usePairedComputerReads(input: {
   readonly transports: HostFederationTransports | undefined;
   readonly cache: HostReadModelCache | undefined;
   readonly onChange?: () => void;
+  /**
+   * Called as each refresh starts, before any computer answers, so a reader
+   * that asks each computer on its own does not wait for the slowest one.
+   */
+  readonly onRefreshStarted?: () => void;
 }): ReadonlyArray<FederatedReadItem> {
   const { transports, cache, onChange } = input;
+  const onRefreshStarted = useRef(input.onRefreshStarted);
+  onRefreshStarted.current = input.onRefreshStarted;
   const [items, setItems] = useState<ReadonlyArray<FederatedReadItem>>([]);
   useEffect(() => {
     if (transports === undefined || cache === undefined) return;
     let running = false;
     let stopped = false;
     const refresh = async () => {
+      onRefreshStarted.current?.();
       if (running) return;
       running = true;
       try {
@@ -81,4 +89,27 @@ export function usePairedComputerReads(input: {
     };
   }, [transports, cache, onChange]);
   return items;
+}
+
+/** A count of refreshes started, read where it is needed rather than rendered from the shell. */
+export interface RefreshTicks {
+  readonly tick: () => void;
+  readonly read: () => number;
+  readonly subscribe: (listener: () => void) => () => void;
+}
+
+export function createRefreshTicks(): RefreshTicks {
+  let count = 0;
+  const listeners = new Set<() => void>();
+  return {
+    tick: () => {
+      count += 1;
+      for (const listener of listeners) listener();
+    },
+    read: () => count,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
 }

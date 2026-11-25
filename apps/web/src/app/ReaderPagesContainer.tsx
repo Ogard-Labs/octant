@@ -4,7 +4,8 @@ import { decodeChatThreadId } from "@octant/contracts/chat";
 import { decodeCodeThreadId, type CodeThread } from "@octant/contracts/code";
 import { decodeUtcTimestamp, decodeWorkThreadId, type WorkThread } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
-import { memo, useMemo } from "react";
+import { memo, useMemo, useSyncExternalStore } from "react";
+import type { RefreshTicks } from "../host/usePairedComputerReads";
 import type { HostFederationTransports } from "@octant/client-runtime/host-federation-transports";
 import type { ActiveWorkViewProps } from "../activeWork/ActiveWorkView";
 import { canOpenActiveWork, openActiveWork } from "../activeWork/openActiveWork";
@@ -138,7 +139,8 @@ export interface ReaderPagesContainerProps {
   /** The computers this window is paired with, for the Agents page's active work. */
   readonly computerSnapshots: ActiveWorkHostsInput["snapshots"];
   readonly hostFederationTransports?: HostFederationTransports;
-  readonly pairedComputerReads: unknown;
+  /** Each start of the window's existing refresh of its paired computers. */
+  readonly pairedRefreshTicks: RefreshTicks;
   readonly onOpenPairedComputerThread: (hostId: string, threadId: string) => void;
   readonly linearClient: WorkspaceRailLayersProps["linearClient"];
   readonly linearIssuesOpen: boolean;
@@ -263,13 +265,17 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     [codeNavigationRows],
   );
   const { onOpenPairedComputerThread } = props;
+  const pairedRevision = useSyncExternalStore(
+    props.pairedRefreshTicks.subscribe,
+    props.pairedRefreshTicks.read,
+  );
   const activeWorkHosts = useActiveWorkHosts({
     localName: environmentNames.get(String(LOCAL_HOST_ID)) ?? "This computer",
     local: props.clients.accessActivityPort,
     localRevision: navigationRevision,
     snapshots: props.computerSnapshots,
     transports: props.hostFederationTransports,
-    pairedRevision: props.pairedComputerReads,
+    pairedRevision,
   });
   const activeWork = useMemo<ActiveWorkViewProps>(
     () => ({

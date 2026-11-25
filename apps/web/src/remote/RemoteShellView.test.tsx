@@ -714,6 +714,40 @@ describe("RemoteShellView", () => {
     );
   });
 
+  it("keeps the open thread's workspace mounted when active work opens it again", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const { bridge } = await readyBridge(seen, false, true);
+    render(<RemoteShellView bridge={bridge} onReset={() => undefined} />);
+    const openFromActiveWork = async () => {
+      await user.click(await screen.findByRole("button", { name: "Active work" }));
+      const waiting = await screen.findByRole(
+        "region",
+        { name: "Waiting (1)" },
+        { timeout: 10_000 },
+      );
+      await user.click(within(waiting).getByRole("button", { name: /Remote Work/ }));
+    };
+    await openFromActiveWork();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Remote Work" })).toHaveAttribute(
+        "aria-current",
+        "true",
+      ),
+    );
+    // A workspace mounted afresh reads its mode's threads again.
+    const bootstraps = () =>
+      seen.filter((request) => request.path === "/api/work/threads/bootstrap").length;
+    const before = bootstraps();
+    await openFromActiveWork();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(bootstraps()).toBe(before);
+    expect(screen.getByRole("button", { name: "Remote Work" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+  });
+
   it("lets a read-only browser watch Chat without offering sends, approval, or thread creation", async () => {
     const user = userEvent.setup();
     const { bridge } = await readyBridge([], false, false, true, true, "read-only");

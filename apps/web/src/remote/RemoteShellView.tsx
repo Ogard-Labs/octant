@@ -75,8 +75,9 @@ export function RemoteShellView(props: RemoteShellViewProps) {
     () => readContinuationLink(globalThis.location?.href ?? "")?.mode ?? "chat",
   );
   const [activeWorkOpen, setActiveWorkOpen] = useState(false);
-  // A thread opened from active work; its count keys the workspace, so opening
-  // the same thread again after moving away opens it again.
+  // A thread opened from active work. Its count asks the mounted workspace to
+  // open it, so opening it again after moving away opens it again, and opening
+  // the one already open keeps its composer and staged attachments.
   const [openedThread, setOpenedThread] = useState<{
     readonly thread: { readonly mode: OctantMode; readonly threadId: string };
     readonly count: number;
@@ -303,8 +304,9 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           clients={clients}
           connected={connected}
           extensionClient={extensionClient}
-          key={openedThread?.count ?? 0}
-          {...(openedThread === undefined ? {} : { initialThread: openedThread.thread })}
+          {...(openedThread === undefined
+            ? {}
+            : { initialThread: openedThread.thread, initialThreadRequest: openedThread.count })}
           mode={activeMode}
           {...(personPort === undefined ? {} : { worktreePort: personPort })}
           readOnly={standing.accessLevel === "read-only"}
