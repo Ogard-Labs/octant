@@ -60,7 +60,10 @@ export function looksForTurnStartedElsewhere(shown: MobileCodeConversation | und
  */
 export function refreshesForNewestTurn(
   shown: MobileCodeConversation,
-  newest: Pick<MobileCodeConversation["turns"][number], "operationId" | "status"> | null | undefined,
+  newest:
+    | Pick<MobileCodeConversation["turns"][number], "operationId" | "status">
+    | null
+    | undefined,
 ): boolean {
   if (newest === undefined || newest === null) return false;
   return (

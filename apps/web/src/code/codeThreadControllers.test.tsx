@@ -598,7 +598,11 @@ describe("CodeThreadControllerSlots", () => {
       const before = wholeReads();
       rerender(settled(11));
       await waitFor(() =>
-        expect(conversationWindow).toHaveBeenLastCalledWith(threadA, { limit: 1 }, expect.anything()),
+        expect(conversationWindow).toHaveBeenLastCalledWith(
+          threadA,
+          { limit: 1 },
+          expect.anything(),
+        ),
       );
       expect(wholeReads()).toBe(before);
     });

@@ -1993,7 +1993,8 @@ export function useCodeController(options: CodeControllerOptions) {
         const followTurn = async () => {
           const hydrated = await hydrateConversation(threadId, request, controller.signal);
           if (hydrated === undefined) return false;
-          if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) return true;
+          if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
+            return true;
           conversationCursor = hydrated.nextCursor ?? conversationCursor;
           if (hydrated.incomplete) startConversationPoll();
           if (hydrated.activeOperationId !== undefined) {
@@ -2005,7 +2006,8 @@ export function useCodeController(options: CodeControllerOptions) {
           if (!readsConversationWindow(client)) return true;
           const latest = await client.conversationWindow(threadId, { limit: 1 }, controller.signal);
           const newest = latest.turns.at(-1);
-          if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) return true;
+          if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
+            return true;
           if (
             newest === undefined ||
             (newest.status !== "incomplete" &&
