@@ -625,6 +625,15 @@ interface text, and model choices stay in a bounded scrollable popup.
 Sent messages do not repeat an access caption; the underlying history remains
 authoritative.
 
+In desktop and web composers, staged file chips show a 12px file-type glyph
+beside the filename in Chat, Work, and Code. Use the document, code,
+spreadsheet, archive, or image glyph for known filename extensions and the
+plain file glyph otherwise. Composers recognize the Code file explorer's
+code, document, and image extensions. The generic glyph fills the same space
+while the file-type glyph loads. An available image thumbnail takes the glyph's
+place. Long filenames truncate within the chip so its remove control stays
+reachable.
+
 ## Image preview
 
 An image attached in a composer, and an image on a sent message, is a button
@@ -633,7 +642,8 @@ frame 32px inside the window for every image, the image fitted inside it, its
 filename and size beneath, with "n of m" when the message has several. Arrow
 keys step between the images of that message or composer; Escape or a press
 outside closes it and returns focus to the thumbnail. Stepping never resizes
-the frame.
+the frame. The lightbox loads when a thumbnail is available. If it fails to
+load, opening the thumbnail shows a message with how to try again.
 
 ## Model picker
 
