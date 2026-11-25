@@ -901,7 +901,8 @@ describe("an outside image driver's later fixes", () => {
       [`data:${named}\n\n`, "completed"],
       [`event:done\rdata:${named}\r\r`, "completed"],
       [`: Rendering a 12" preview\ndata: {"url":"${named}"}\n\n`, "completed"],
-      [`data: {"blob":"${"A".repeat(200_000)}","url":"${named}"}\n\n`, "completed"],
+      [`data: [View image](${named})\n\n`, "completed"],
+      [`data: {"blob":"${"A".repeat(200_000)}","url":"${named}","more":`, "completed"],
       [`data:${named}`, "failed"],
     ] as const) {
       let resolveChunkSeen: (() => void) | undefined;
@@ -940,7 +941,7 @@ describe("an outside image driver's later fixes", () => {
         expect(job.failure?.category).toBe("unauthorized");
       }
     }
-    expect(imageFetch).toHaveBeenCalledTimes(4);
+    expect(imageFetch).toHaveBeenCalledTimes(5);
   });
 
   it("refuses a URL prefix that has not yet been delimited in an open stream", async () => {

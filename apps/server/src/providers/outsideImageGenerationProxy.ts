@@ -463,7 +463,13 @@ function extractPayloadAddresses(
 ): void {
   const trimmed = payload.trim();
   if (trimmed.length === 0) return;
-  const jsonShaped = trimmed.startsWith("{") || trimmed.startsWith("[");
+  // Distinguish JSON objects/arrays from bracket-led Markdown links like
+  // `[View image](https://...)` so Markdown destinations are still extracted
+  // while malformed/partial JSON stays on the JSON-string-only scanner.
+  const jsonShaped =
+    trimmed.startsWith("{") ||
+    (/^\[[\s\r\n]*(?:["{\[\]-]|true\b|false\b|null\b|[0-9])/.test(trimmed) &&
+      !/^\[[^"\[\]]*\]\(/.test(trimmed));
   if (payloadComplete && jsonShaped) {
     try {
       collectJsonAddresses(JSON.parse(trimmed), add);
