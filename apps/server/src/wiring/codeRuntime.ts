@@ -174,7 +174,7 @@ import type { CanvasWiring } from "./canvas";
 import { sessionNativeSetup } from "../providers/providerNativeSetup";
 import {
   launchCredentialsKey,
-  providerCredentialPassThrough,
+  providerOwnChannelsFromSettings,
 } from "../providers/providerOwnChannels";
 import { resolveProviderTerminal } from "../providers/providerTerminal";
 import { homedir } from "node:os";
@@ -1238,19 +1238,23 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         liveTurns,
         activeTurns: codeActiveTurns,
         terminalBrowserGrants: grants,
-        providerTerminal: ({ thread, shell, strict }) =>
+        providerTerminal: ({ thread, shell, strict, sandboxPolicySelected }) =>
           resolveProviderTerminal({
             instance: persistence.readProviderInstance(thread.providerInstanceId),
             hostEnvironment: process.env,
             homeDirectory: homedir(),
-            credentialPassThrough: (driverKind) =>
-              providerCredentialPassThrough(persistence.readShellSettings()?.settings, driverKind),
+            ownChannels: (driverKind) =>
+              providerOwnChannelsFromSettings(
+                persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+                driverKind,
+              ),
             platform: process.platform,
             shell,
             strict,
             mode: "code",
             executionPolicy: thread.executionPolicy,
             fullAccessSandbox: thread.fullAccessSandbox,
+            sandboxPolicySelected,
             ...(configuredDriverOptions.acpHome === undefined
               ? {}
               : { acpHome: configuredDriverOptions.acpHome }),

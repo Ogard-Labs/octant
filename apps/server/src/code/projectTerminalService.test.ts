@@ -40,6 +40,8 @@ import { rebuildProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { ProjectTerminalService } from "./projectTerminalService";
+import { configureSandboxRestrictionsAuthority } from "../process/sandboxRuntimePolicy";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import type { ProviderTerminalLaunch } from "../providers/providerTerminal";
 import { TerminalService } from "./terminalService";
 import { TerminalProcessPort } from "./terminalProcessPort";
@@ -229,6 +231,7 @@ function harness(
     readonly providerTerminal?: ConstructorParameters<
       typeof ProjectTerminalService
     >[0]["providerTerminal"];
+    readonly network?: ConstructorParameters<typeof ProjectTerminalService>[0]["network"];
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-project-terminal-"));
@@ -291,6 +294,7 @@ function harness(
     ...(options.providerTerminal === undefined
       ? {}
       : { providerTerminal: options.providerTerminal }),
+    ...(options.network === undefined ? {} : { network: options.network }),
   });
   const events = () =>
     journal
@@ -2223,21 +2227,31 @@ describe("Work task provider terminal", () => {
       readonly strict?: boolean;
       readonly executionPolicy?: "approval-gated" | "full-access" | "plan";
       readonly fullAccessSandbox?: boolean;
+      readonly network?: ConstructorParameters<typeof ProjectTerminalService>[0]["network"];
     } = {},
   ) {
     const providerTerminal = vi.fn(
-      (_input: {
+      (input: {
         readonly workThreadId: string;
         readonly shell: string;
         readonly strict: boolean;
+        readonly sandboxPolicySelected: boolean;
       }): ProviderTerminalLaunch => ({
         status: "resolved",
         name: "Google Antigravity",
         command: "exec '/opt/tools/agy'",
-        environment: { GEMINI_HOME: "/Users/person/.gemini" },
+        environment: {
+          GEMINI_HOME: "/Users/person/.gemini",
+          ...(input.sandboxPolicySelected ? { AGY_CLI_DISABLE_AUTO_UPDATE: "1" } : {}),
+        },
       }),
     );
     const f = harness({
+      // Under a sandbox policy the service reads every folder from disk, so
+      // that run's Project root is the task's own folder.
+      ...(options.network === undefined
+        ? {}
+        : { network: options.network, resolveRoot: async () => "/approved/notes" }),
       projects: new Map([[ids.project, project({ type: "work" })]]),
       access: () => true,
       shell: "/bin/zsh",
@@ -2270,6 +2284,7 @@ describe("Work task provider terminal", () => {
         workThreadId,
         shell: "/bin/zsh",
         strict: true,
+        sandboxPolicySelected: false,
       });
       expect(f.terminals.launches[0]).toMatchObject({
         command: "exec '/opt/tools/agy'",
@@ -2332,6 +2347,40 @@ describe("Work task provider terminal", () => {
     } finally {
       outside.connection.close();
       kept.connection.close();
+    }
+  });
+
+  it("gives the Work provider program the guarded environment when it starts under a chosen sandbox policy", async () => {
+    const selection = {
+      context: { root: "/approved/notes", sessionId: "provider-terminal-policy" },
+      policy: { filesystem: { readWriteRoots: [] } },
+    } as unknown as SandboxPolicySelection;
+    configureSandboxRestrictionsAuthority({
+      validateSelection: () => true,
+      registerCleanup: () => () => undefined,
+      storageDirectory: () => undefined,
+      beginTurn: () => ({
+        status: "admitted",
+        turn: { selection, summary: "", current: () => true, end: () => undefined },
+      }),
+      active: () => undefined,
+      deny: () => undefined,
+    });
+    const f = providerHarness({
+      strict: false,
+      network: { start: async () => ({ status: "unrouted" }) } as unknown as NonNullable<
+        ConstructorParameters<typeof ProjectTerminalService>[0]["network"]
+      >,
+    });
+    try {
+      await f.service.execute(windowId, "local-window", providerStart());
+      expect(f.terminals.launches[0]?.environment).toMatchObject({
+        AGY_CLI_DISABLE_AUTO_UPDATE: "1",
+      });
+      expect(f.terminals.launches[0]).not.toHaveProperty("strict", false);
+    } finally {
+      configureSandboxRestrictionsAuthority(undefined);
+      f.connection.close();
     }
   });
 

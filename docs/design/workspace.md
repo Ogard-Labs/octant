@@ -1746,8 +1746,10 @@ run there) and for a thread that kept its sandbox. A Work task's runs by the
 same rule at the task's own level.
 An ACP agent's program keeps every guard its turns set except the ones that
 only keep the piped ACP stream clean (`NO_COLOR`), since the terminal is a TTY:
-its self-update, telemetry and configuration guards hold, and a person's own
-`NO_COLOR` stays. A Work task's Zen card records that it runs the provider
+its self-update, telemetry and configuration guards hold (the first two lifted
+outside Strict by the person's provider switches, as for a turn; Google
+Antigravity's `--disable-telemetry` is a launch argument, which the bare program
+does not take), and a person's own `NO_COLOR` stays. A Work task's Zen card records that it runs the provider
 program, as the host says when the card is pinned, so restarting the card
 after the program ends or the host restarts asks for the program again (still
 decided by the host at that start, for the window's current Work task), and

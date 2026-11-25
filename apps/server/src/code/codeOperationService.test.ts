@@ -5854,6 +5854,7 @@ describe("CodeOperationService provider terminal", () => {
       thread: expect.objectContaining({ id: ids.thread }),
       shell: "/bin/zsh",
       strict: true,
+      sandboxPolicySelected: false,
     });
     expect(terminals.launch).toHaveBeenCalledWith({
       terminalId: ids.terminal,
