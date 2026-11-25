@@ -24,17 +24,18 @@ function branchNamingOf(worktrees: CodeWorktreeSettings | undefined) {
 /**
  * Settings › Code › Worktrees › Naming and Cleanup. Every control saves as it
  * is changed, whole: the host replaces the worktree choices with what is sent.
- * A host that has these choices always answers with them, empty for the
- * defaults. One that does not never does, and rejects an update that names
- * them, so its window shows no controls rather than ones that cannot save.
+ * The naming controls show on every host. A host that has cleanup always
+ * answers with a `cleanup` object, empty for the defaults, whatever naming
+ * choices are stored; one that does not never does, and rejects an update that
+ * names it, so its window shows no cleanup controls rather than ones that
+ * cannot save.
  */
 export function CodeWorktreeSettingsSection(props: {
   readonly focusedSetting?: SettingsSettingId | undefined;
   readonly settings: CodeSettings;
   readonly onUpdate: (input: CodeSettingsUpdate) => Promise<boolean>;
 }) {
-  if (props.settings.worktrees === undefined) return null;
-  return <WorktreeSettingsControls {...props} worktrees={props.settings.worktrees} />;
+  return <WorktreeSettingsControls {...props} worktrees={props.settings.worktrees ?? {}} />;
 }
 
 function WorktreeSettingsControls(props: {
@@ -51,6 +52,7 @@ function WorktreeSettingsControls(props: {
   const [message, setMessage] = useState<string>();
   const cleanup = worktrees?.cleanup;
   const inactivityOn = cleanup?.inactivityDays !== undefined;
+  const hostHasCleanup = cleanup !== undefined;
 
   async function save(next: CodeWorktreeSettings): Promise<boolean> {
     let saved = false;
@@ -140,6 +142,8 @@ function WorktreeSettingsControls(props: {
             value={branchNamingOf(worktrees)}
           />
         </SettingRow>
+        {hostHasCleanup ? (
+          <>
         <SettingRow
           description="When you archive a thread, remove its worktree folder if everything is committed and pushed or merged. The branch stays."
           label="Clean up when a thread is archived"
@@ -205,6 +209,8 @@ function WorktreeSettingsControls(props: {
               value={days}
             />
           </SettingRow>
+        ) : null}
+          </>
         ) : null}
       </div>
       <div className="settings-feedback-slot" aria-live="polite">

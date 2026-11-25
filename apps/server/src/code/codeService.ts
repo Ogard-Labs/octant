@@ -289,19 +289,27 @@ const MANAGED_CREATION_REFUSAL_MESSAGES: Record<string, string> = {
 };
 
 /**
- * What the host answers with: the worktree choices are always present, empty
- * for the defaults, so a window can tell a host that has them from an earlier
- * one that never answers with them. Storage keeps an empty choice as none.
+ * What the host answers with: a `cleanup` object is always present, empty for
+ * the defaults, whatever naming choices are stored, so a window can tell a host
+ * that has cleanup from an earlier one that never answers with it. Storage
+ * keeps an empty choice as none.
  */
 function answeredSettings(settings: CodeSettings): CodeSettings {
-  return { ...settings, worktrees: settings.worktrees ?? {} };
+  return {
+    ...settings,
+    worktrees: { ...settings.worktrees, cleanup: settings.worktrees?.cleanup ?? {} },
+  };
 }
 
 /** An empty choice is the defaults, so it is stored as none. */
 function worktreeSettingsField(worktrees: CodeWorktreeSettings | undefined): {
   readonly worktrees?: CodeWorktreeSettings;
 } {
-  return worktrees === undefined || Object.keys(worktrees).length === 0 ? {} : { worktrees };
+  if (worktrees === undefined) return {};
+  const { cleanup, ...naming } = worktrees;
+  const kept: CodeWorktreeSettings =
+    cleanup === undefined || Object.keys(cleanup).length === 0 ? naming : { ...naming, cleanup };
+  return Object.keys(kept).length === 0 ? {} : { worktrees: kept };
 }
 
 /** Absent reads as Windows PowerShell, so only another choice is stored. */

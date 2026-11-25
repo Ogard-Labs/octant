@@ -8,8 +8,8 @@ import { CodeSettingsView, type CodeSettingsUpdate } from "./CodeSettingsView";
 const settings = {
   defaultExecutionPolicy: "approval-gated",
   defaultPermissionPersistence: "current-session",
-  // A host that has the worktree choices always answers with them.
-  worktrees: {},
+  // A host that has the cleanup choices always answers with them, empty for the defaults.
+  worktrees: { cleanup: {} },
   version: 1,
   updatedAt: "2026-07-21T12:00:00.000Z",
 } as const;
@@ -83,7 +83,7 @@ describe("CodeSettingsView", () => {
     await user.type(prefix, "henrik/");
     await user.tab();
     expect(update).toHaveBeenLastCalledWith(
-      expect.objectContaining({ worktrees: { branchPrefix: "henrik/" } }),
+      expect.objectContaining({ worktrees: { branchPrefix: "henrik/", cleanup: {} } }),
     );
 
     await user.click(screen.getByRole("switch", { name: "Clean up after inactivity" }));
@@ -92,11 +92,19 @@ describe("CodeSettingsView", () => {
     );
   });
 
-  it("shows no worktree controls for a host whose settings do not carry them, since it would reject the update", () => {
-    const { worktrees: _worktrees, ...earlierHost } = settings;
-    render(<CodeSettingsView onUpdate={vi.fn(async () => true)} settings={earlierHost as never} />);
-    expect(screen.queryByRole("textbox", { name: "Branch prefix" })).toBeNull();
-    expect(screen.queryByRole("switch", { name: "Clean up when a thread is archived" })).toBeNull();
+  it("shows the naming controls on any host and the cleanup controls only on one that has cleanup", () => {
+    const { worktrees: _worktrees, ...noChoices } = settings;
+    for (const host of [noChoices, { ...settings, worktrees: { branchPrefix: "team/" } }]) {
+      const { unmount } = render(
+        <CodeSettingsView onUpdate={vi.fn(async () => true)} settings={host as never} />,
+      );
+      expect(screen.getByRole("textbox", { name: "Branch prefix" })).toBeInTheDocument();
+      expect(
+        screen.queryByRole("switch", { name: "Clean up when a thread is archived" }),
+      ).toBeNull();
+      expect(screen.queryByRole("switch", { name: "Clean up after inactivity" })).toBeNull();
+      unmount();
+    }
   });
 
   it("goes to the worktree naming choice a settings search picked", () => {

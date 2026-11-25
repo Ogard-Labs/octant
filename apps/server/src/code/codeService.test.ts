@@ -280,7 +280,7 @@ describe("CodeService reads", () => {
         requireGitRepository: true,
         defaultDiffLayout: "unified",
         // Always answered, so a window can tell this host from one that predates it.
-        worktrees: {},
+        worktrees: { cleanup: {} },
         version: 0,
         updatedAt: now,
       },
@@ -1408,7 +1408,7 @@ describe("CodeService commands", () => {
     });
     if (back.kind !== "settings-updated") throw new Error("settings were not updated");
     // The answer carries the empty choice; the journal keeps none.
-    expect(back.settings.worktrees).toEqual({});
+    expect(back.settings.worktrees).toEqual({ cleanup: {} });
     const journaled = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as
       | {
           readonly events: ReadonlyArray<{
@@ -1417,6 +1417,25 @@ describe("CodeService commands", () => {
         }
       | undefined;
     expect(journaled?.events[0]?.payload.settings.worktrees).toBeUndefined();
+
+    // A naming choice alone still answers with a cleanup object, so it does not
+    // read as a host without cleanup, and stores no empty one.
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: back.settings } as never);
+    const named = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 3,
+      worktrees: { branchPrefix: "team/", cleanup: {} },
+    });
+    if (named.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(named.settings.worktrees).toEqual({ branchPrefix: "team/", cleanup: {} });
+    const stored = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as
+      | {
+          readonly events: ReadonlyArray<{
+            readonly payload: { readonly settings: { readonly worktrees?: unknown } };
+          }>;
+        }
+      | undefined;
+    expect(stored?.events[0]?.payload.settings.worktrees).toEqual({ branchPrefix: "team/" });
   });
 
   it("keeps Android snapshot boot off until a person turns it on, then across later default changes", async () => {
