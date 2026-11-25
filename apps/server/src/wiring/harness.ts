@@ -1181,6 +1181,19 @@ export function wireHarness(deps: HarnessDependencies) {
           modelId: thread.modelId,
           completedAt: thread.completedAt,
         })),
+      get: (threadId) => {
+        const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+        return thread === undefined
+          ? undefined
+          : {
+              id: String(thread.id),
+              title: thread.title,
+              projectId: String(thread.projectId),
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+              completedAt: thread.completedAt,
+            };
+      },
     },
     // What the person wrote: each turn's prompt that the host marked typed (or
     // that began before marks were kept), leaving out the turns the host

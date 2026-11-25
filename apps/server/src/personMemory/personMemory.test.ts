@@ -1086,6 +1086,73 @@ describe("person memory under timing and volume", () => {
     expect(h.prompts[0]).not.toContain("Said before Leave no trace");
   });
 
+  it("stores what a long call learned under the thread as it is when the answer arrives", async () => {
+    const h = harness([]);
+    let answer: (value: PersonMemoryModelAnswer) => void = () => undefined;
+    const pending = new Promise<PersonMemoryModelAnswer>((resolve) => {
+      answer = resolve;
+    });
+    let now: { projectId: string | undefined } | undefined = { projectId: undefined };
+    const sweep = new PersonMemorySweep({
+      store: h.store,
+      sources: [
+        {
+          mode: "chat",
+          threads: () => [{ id: THREAD_1, completedAt: later }],
+          peek: () => ({ running: false }),
+          read: () => ({
+            title: "Invoices",
+            providerInstanceId: PROVIDER,
+            modelId: SMALL,
+            personMessages: [{ id: "message-0", at: later, text: "CSV", typed: false }],
+          }),
+          current: () =>
+            now === undefined
+              ? undefined
+              : { title: "Invoices", projectId: now.projectId, providerInstanceId: PROVIDER },
+        },
+      ],
+      model: {
+        resolve: ({ thread }) => ({
+          model: { providerInstanceId: thread.providerInstanceId, modelId: SMALL },
+          driverKind: "fake",
+        }),
+        complete: () => pending,
+        recordUsage: () => undefined,
+      },
+      namesProtectedPath: () => false,
+    });
+    h.advance(later);
+    h.store.change(
+      decodePersonMemoryCommand({
+        kind: "change-person-memory-settings",
+        expectedVersion: h.store.view().version,
+        settings: { ...h.store.settings(), excludedProjectIds: [PROJECT_A] },
+      }),
+    );
+    const running = sweep.pass();
+    await Promise.resolve();
+    // While the call runs the thread is moved into the Project kept out.
+    now = { projectId: PROJECT_A };
+    answer({
+      status: "answered",
+      text: JSON.stringify({
+        summary: "Invoices.",
+        entries: [{ kind: "preference", content: "Prefers CSV." }],
+      }),
+    });
+    await running;
+
+    expect(h.store.view().entries).toEqual([]);
+    expect(h.store.view().rememberedThreads).toBe(0);
+
+    // A thread deleted meanwhile stores nothing either.
+    now = undefined;
+    expect(await sweep.pass()).not.toContainEqual(
+      expect.objectContaining({ outcome: "remembered" }),
+    );
+  });
+
   it("lets a thread mark, save and cut again once Allow memory lifts Leave no trace", () => {
     const h = harness([{ id: THREAD_1, title: "Diary", personMessages: [] }]);
     const mark = (leavesNoTrace: boolean) =>

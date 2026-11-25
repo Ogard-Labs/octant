@@ -376,6 +376,8 @@ export function createPersonMemorySweep(input: {
     | "readChatThreads"
     | "readChatThreadView"
     | "readCodeThreads"
+    | "readChatThread"
+    | "readCodeThread"
     | "readProviderInstance"
     | "readProviderCatalog"
     | "readProject"
@@ -383,6 +385,8 @@ export function createPersonMemorySweep(input: {
   readonly store: PersonMemoryStore;
   readonly workThreads: {
     readonly list: () => ReadonlyArray<WorkThreadFacts>;
+    /** One thread as it is now, without listing the others. */
+    readonly get: (threadId: string) => WorkThreadFacts | undefined;
   };
   /** The newest messages the person wrote in a Work or Code thread that count as theirs. */
   readonly workPersonMessages: (threadId: string, limit: number) => ReadonlyArray<PersonMessage>;
@@ -418,6 +422,16 @@ export function createPersonMemorySweep(input: {
       listedChat.clear();
       for (const thread of threads) listedChat.set(String(thread.id), thread);
       return threads;
+    },
+    current: (threadId) => {
+      const thread = persistence.readChatThread(decodeChatThreadId(threadId));
+      return thread === undefined || thread.lifecycle === "deleting"
+        ? undefined
+        : {
+            title: thread.title,
+            projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
+            providerInstanceId: thread.providerInstanceId,
+          };
     },
     peek: (threadId) => ({
       lastMessageAt: latestEventAt(persistence.connection, {
@@ -460,6 +474,16 @@ export function createPersonMemorySweep(input: {
       for (const thread of threads) listedWork.set(thread.id, thread);
       return threads;
     },
+    current: (threadId) => {
+      const thread = input.workThreads.get(threadId);
+      return thread === undefined
+        ? undefined
+        : {
+            title: thread.title,
+            projectId: thread.projectId,
+            providerInstanceId: thread.providerInstanceId,
+          };
+    },
     peek: (threadId) => ({
       lastMessageAt: input.workLastMessageAt(threadId),
       lastActivityAt: input.workLastActivityAt(threadId),
@@ -486,6 +510,16 @@ export function createPersonMemorySweep(input: {
       listedCode.clear();
       for (const thread of threads) listedCode.set(String(thread.id), thread);
       return threads;
+    },
+    current: (threadId) => {
+      const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+      return thread === undefined
+        ? undefined
+        : {
+            title: thread.title,
+            projectId: String(thread.projectId),
+            providerInstanceId: thread.providerInstanceId,
+          };
     },
     peek: (threadId) => ({
       lastMessageAt: input.codeLastMessageAt(threadId),

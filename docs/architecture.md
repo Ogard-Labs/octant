@@ -2383,7 +2383,7 @@ except where a bullet says otherwise.
   model calls picks another account. Its usage
   is recorded against the thread as a `person-memory` usage row, so the person
   sees it in the usage dashboard. A reply that read outside content is thrown
-  away. The call sits behind one seam (`personMemoryDistillationAllowed`) that
+  away. Right before it is stored, the thread's facts are read again (that one thread, not the list): a thread moved into a Project kept out, set to leave no trace, or deleted while a long pass ran stores nothing, and one that moved is stored under its Project as it is. The call sits behind one seam (`personMemoryDistillationAllowed`) that
   answers per provider kind, so background use can later be limited for one
   provider without touching the rest; today it allows every kind. Open risk:
   whether a provider's terms allow background calls on a subscription sign-in

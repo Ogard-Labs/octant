@@ -73,6 +73,18 @@ export interface PersonMemoryThreadSource {
    * thread with nothing to learn is never read. `undefined` when it is gone.
    */
   readonly peek: (threadId: string) => PersonMemoryThreadActivity | undefined;
+  /**
+   * The one thread's facts as they are now, without listing the mode again;
+   * `undefined` when it is gone. Read right before a distillation is stored,
+   * since a pass can run long after it listed the threads.
+   */
+  readonly current?: (threadId: string) =>
+    | {
+        readonly title: string;
+        readonly projectId?: string | undefined;
+        readonly providerInstanceId: ProviderInstanceId;
+      }
+    | undefined;
   /** The thread's facts and what the person wrote in it, oldest first; `undefined` when gone. */
   readonly read: (threadId: string) =>
     | {
@@ -534,6 +546,16 @@ export class PersonMemorySweep {
       spend.settle(answer.status === "unavailable" ? undefined : answer.usage);
     }
     if (answer.status !== "answered") return { outcome: "unavailable", settle: "no" };
+    // The thread may have moved into a Project kept out, been set to leave no
+    // trace, or been deleted while the call ran; what it learned is stored
+    // under the thread as it is now, or not at all.
+    const now = source.current?.(threadId);
+    if (source.current !== undefined && now === undefined)
+      return { outcome: "skipped", settle: "no" };
+    const storing = now === undefined ? facts : { ...facts, ...now };
+    if (!store.threadTakesPart({ mode: source.mode, threadId, projectId: storing.projectId })) {
+      return { outcome: "skipped", settle: "no" };
+    }
     const distilled = parsePersonMemoryDistillation(answer.text);
     // An unreadable reply still spent its one call; the messages are marked
     // learned with no entries rather than asked about again on every pass.
@@ -559,7 +581,7 @@ export class PersonMemorySweep {
     return {
       outcome:
         store.remember({
-          source: memorySource,
+          source: memorySourceOf(source.mode, threadId, storing, endedAt ?? last.at, this.#options),
           summary,
           entries,
           lastMessage: { id: last.id, at: decodeUtcTimestamp(last.at) },
