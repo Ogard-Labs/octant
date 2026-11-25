@@ -7,6 +7,7 @@ import { createArchivedWorktreeRouteHandler } from "../archivedWorktreeRoutes";
 import { createArchivedWorktrees } from "../code/archivedWorktrees";
 import { cleanedUpWorktreeOf, createCleanedUpWorktrees } from "../code/cleanedUpWorktrees";
 import { WorktreeReclaimSweep } from "../code/worktreeReclaimSweep";
+import type { ThreadCleanupWorkOptions } from "../code/threadCleanupWork";
 import {
   decodeThreadWorkingDirectory,
   type CodeThreadUnlinkedPullRequest,
@@ -726,8 +727,11 @@ export function wireCode(deps: CodeDependencies) {
     let archivedWorktreeTurns: CodeOperationRuntime | undefined;
     // Everything the host tracks that may be working in a thread's folder is
     // wired after this, so until it is the answer is that work is going on.
-    let threadWorkCheck: ((threadId: CodeThreadId) => boolean) | undefined;
-    const threadHasWork = (threadId: CodeThreadId): boolean => threadWorkCheck?.(threadId) ?? true;
+    let threadWorkCheck:
+      | ((threadId: CodeThreadId, options?: ThreadCleanupWorkOptions) => boolean)
+      | undefined;
+    const threadHasWork = (threadId: CodeThreadId, options?: ThreadCleanupWorkOptions): boolean =>
+      threadWorkCheck?.(threadId, options) ?? true;
     const archivedWorktrees = createArchivedWorktrees({
       readCodeThreads: () => persistence.readCodeThreads(),
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
@@ -735,6 +739,7 @@ export function wireCode(deps: CodeDependencies) {
       loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
       turnInProgress: (threadId) =>
         archivedWorktreeTurns?.turnInProgress?.(String(threadId)) === true,
+      workGoing: (threadId) => threadHasWork(threadId, { ignoreProjectTerminals: true }),
       // One receipt changes one step at a time: a restore waits for this.
       cleanup: (input, signal) =>
         managedWorktreeReclaim.exclusive(input.receiptId, () =>
@@ -1459,7 +1464,9 @@ export function wireCode(deps: CodeDependencies) {
       agentProfileRoutes,
       archivedWorktreeRoutes,
       worktreeReclaimSweep,
-      setThreadWorkCheck: (check: (threadId: CodeThreadId) => boolean) => {
+      setThreadWorkCheck: (
+        check: (threadId: CodeThreadId, options?: ThreadCleanupWorkOptions) => boolean,
+      ) => {
         threadWorkCheck = check;
       },
       buildCodeService,

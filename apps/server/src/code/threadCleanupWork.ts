@@ -15,7 +15,11 @@ export interface ThreadCleanupWorkPorts {
   readonly childWorkGoing: (threadId: CodeThreadId) => boolean;
   /** A debug session the host started for the thread. */
   readonly debugSession: (threadId: CodeThreadId) => boolean;
-  /** A shell or dev server the host runs for the project. */
+  /**
+   * A shell or dev server the host runs for the project. A terminal records
+   * its Project and where it started, and it can move between the Project's
+   * folders, so the host cannot say which worktree it is in.
+   */
   readonly projectTerminalRunning: (projectId: ProjectId) => boolean;
   /** A message waits in the thread's queue. */
   readonly queuedMessage: (threadId: CodeThreadId) => boolean;
@@ -23,12 +27,26 @@ export interface ThreadCleanupWorkPorts {
   readonly pendingWakeups: (threadId: CodeThreadId) => number | undefined;
 }
 
+export interface ThreadCleanupWorkOptions {
+  /**
+   * Do not count a shell somewhere in the Project. Removal on archive has
+   * never waited for one, and the host cannot tell whether it is in this
+   * worktree, so it keeps doing without; the timer's cleanup of an open
+   * thread counts it, since its folder is the one a person may be working in.
+   */
+  readonly ignoreProjectTerminals?: true;
+}
+
 /**
  * Whether anything the host knows of may still be working in the thread's
  * folder or about to start. Any read that cannot answer counts as working, so
  * a worktree is removed only when the host can say the thread is quiet.
  */
-export function threadHasWork(ports: ThreadCleanupWorkPorts, threadId: CodeThreadId): boolean {
+export function threadHasWork(
+  ports: ThreadCleanupWorkPorts,
+  threadId: CodeThreadId,
+  options: ThreadCleanupWorkOptions = {},
+): boolean {
   try {
     const projectId = ports.projectOf(threadId);
     if (projectId === undefined) return true;
@@ -38,7 +56,7 @@ export function threadHasWork(ports: ThreadCleanupWorkPorts, threadId: CodeThrea
       ports.liveTurn(threadId) ||
       ports.childWorkGoing(threadId) ||
       ports.debugSession(threadId) ||
-      ports.projectTerminalRunning(projectId) ||
+      (options.ignoreProjectTerminals !== true && ports.projectTerminalRunning(projectId)) ||
       ports.queuedMessage(threadId) ||
       wakeups === undefined ||
       wakeups > 0
