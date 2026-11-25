@@ -153,6 +153,7 @@
     "./local-usage-pricing": "./src/localUsagePricing.ts",
     "./image-generation-pricing": "./src/imageGenerationPricing.ts",
     "./command-credential-policy": "./src/commandCredentialPolicy.ts",
+    "./thread-secret-policy": "./src/threadSecretPolicy.ts",
     "./thread-wakeup-policy": "./src/threadWakeupPolicy.ts",
     "./strict-policy": "./src/strictPolicy.ts",
     "./pull-request-review-policy": "./src/pullRequestReviewPolicy.ts",

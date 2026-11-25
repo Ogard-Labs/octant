@@ -39,6 +39,11 @@ import {
 import type { NarrationForTurn } from "./speech/narrationTool";
 import type { TranscriptionForTurn } from "./speech/transcriptionTool";
 import { CredentialRequests } from "./credentials/credentialRequests";
+import { holdSecretValue } from "./process/secretRedaction";
+import { createThreadSecretFiles } from "./threadSecrets/threadSecretFiles";
+import { createThreadSecretRoutes } from "./threadSecrets/threadSecretRoutes";
+import { threadSecretsJournal } from "./threadSecrets/threadSecretsJournal";
+import { ThreadSecretService } from "./threadSecrets/threadSecretService";
 import { createCredentialRequestRoutes } from "./credentials/credentialRequestRoutes";
 import { registeredCredentialOperations } from "./credentials/credentialRequestTools";
 import { createCredentialTool } from "./credentials/credentialTool";
@@ -1801,6 +1806,28 @@ export function startOctantServer(
         : { resolveLinked: commandBroker.requestCardRead },
     );
     yield* Effect.addFinalizer(() => Effect.sync(() => credentialRequests.close()));
+    const readLinkedSecret = commandBroker?.requestCardRead;
+    const threadSecrets = new ThreadSecretService({
+      uuid: randomUUID,
+      now: processAuthorityTime,
+      journal: threadSecretsJournal({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        now: () => new Date().toISOString(),
+      }),
+      ...(options.threadSecretsDirectory === undefined
+        ? {}
+        : { files: createThreadSecretFiles({ root: options.threadSecretsDirectory }) }),
+      hold: holdSecretValue,
+      ...(readLinkedSecret === undefined ? {} : { readReference: readLinkedSecret }),
+      onAsked: onWaitingAsk,
+      onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
+    });
+    onThreadArchived((threadId) => threadSecrets.withdrawThread(threadId));
+    onWindowRevoked((window) => threadSecrets.revokeWindow(String(window)));
+    yield* Effect.addFinalizer(() => Effect.sync(() => threadSecrets.close()));
+    const threadSecretRoutes = createThreadSecretRoutes(threadSecrets, windowAuthorityStore);
     yield* Effect.addFinalizer(() => Effect.sync(() => projectMemoryAccess.proposals.close()));
     // Plan reads Project memory and refuses every write to it.
     contributeCodeTools(({ windowId, thread, readThread }) =>
@@ -2022,6 +2049,7 @@ export function startOctantServer(
       conversationInputRoutes,
       providerCloudSessionRoutes: cloudSessions.routes,
       credentialRequestRoutes,
+      threadSecretRoutes,
       agentMessageRoutes,
       agentProfileRoutes,
       archivedWorktreeRoutes,

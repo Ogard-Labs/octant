@@ -1,4 +1,4 @@
-import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
+import { OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS } from "@octant/contracts/credential-request";
 import type {
   CodeToolContribution,
   CodeToolHostPort,
@@ -37,13 +37,13 @@ export function createCredentialCodeTool(input: {
       ? []
       : [
           {
-            ...OCTANT_CREDENTIAL_TOOL,
+            ...OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS,
             name,
             description: input.description,
             inputSchema: {
-              ...OCTANT_CREDENTIAL_TOOL.inputSchema,
+              ...OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS.inputSchema,
               properties: {
-                ...OCTANT_CREDENTIAL_TOOL.inputSchema.properties,
+                ...OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS.inputSchema.properties,
                 operation: { type: "string", enum: actions },
               },
             },

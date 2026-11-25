@@ -15484,7 +15484,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     credentials, the Provider sign-ins group (each provider's stored sign-in
     and Octant's managed account homes), with the same plain message, as the
     account's sign-in stays out of the instruction files Octant reads for
-    Claude at every level. Below Full access they refuse every protected path.
+    Claude at every level, and the folder of the
+    [secrets a person gave a thread](#thread-secrets) (maintainer decision,
+    2026-11-24). Below Full access they refuse every protected path.
     OpenCode's own file tools are held to the same narrowing: at Full access
     its read and list refusals, on 1.x and 2.x, name only the Provider
     sign-ins group ([detail](design/provider-runtimes.md#key-providers)).
@@ -15856,8 +15858,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     files Octant protects (`~/.aws`, kube, docker, npm and `gh`
     configuration, `.netrc`) at every level, as on its own, so `aws`,
     `kubectl`, `docker push`, private registries and `gh` work. Octant's own
-    file tools keep refusing them below Full access, and provider sign-ins
-    at Full access. Strict refuses them for every tool. Built for Claude
+    file tools keep refusing them below Full access, and at Full access the
+    provider sign-ins and the folder of thread secrets. Strict refuses them for every tool. Built for Claude
     Code's own file tools (its gate refuses only another provider's sign-in
     outside Strict) and for the confinement of Pi and the ACP agents
     (`protectedFiles: "provider-sign-ins"`), read at each launch. Built for
@@ -19659,8 +19661,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     text describes this specific consumer, not a general guarantee about every
     tool. A future credential-bearing command needs a separate consumer and
     its ordinary execution approval; it cannot reuse this card's grant.
-    Administrator passwords and arbitrary command/file delivery are not
-    supported. The person may instead submit a field reference from an already
+    This card takes no administrator password and delivers to no command or
+    file; [thread secrets](#thread-secrets) have their own rules for both. The
+    person may instead submit a field reference from an already
     linked 1Password store. The authenticated broker reads that exact reference
     once, checks its link revision before and after lookup, and returns transient
     material only to the host's already claimed card operation. The host rechecks
@@ -19669,6 +19672,81 @@ approval-gated` command that undoes it. The terminal shows no one-time
     bounded actionable cause; a new card requires new consent. There is no
     automatic linking, unlocking, fallback or retry. Item references resolve at
     use, including rotated values, under the existing linked-store rules.
+
+<a id="thread-secrets"></a>
+
+- **Thread secrets.** An agent in a Code or Work thread may ask the person for a
+  secret its work needs: an API key, a token, or an account password for `sudo`
+  (maintainer decision, 2026-11-24). The host half is built; the tool operation,
+  the card, Remember, Fresh each use, a secret already pasted in chat and
+  `run-with-secret` are not built yet, so no agent is offered any of it.
+  - **Request.** The agent names the secret, a label, a kind (`token` or
+    `account-password`), a reason, an optional setup page, up to eight fields and
+    a delivery. Labels, reasons and placeholders are one line of visible text: no
+    control, reordering or zero-width character, so the card cannot imitate
+    Octant's own words. A setup page is an http or https address with no sign-in
+    in it, shown as the browser will open it. Chat is refused. A thread has at
+    most two cards waiting, so its cards cannot keep another thread's from
+    opening. A card never expires: it ends with its answer, its turn, its
+    thread's archive, its window, its authority or the host.
+  - **Lifetime.** The person chooses on every card: this command, this turn, one
+    hour, 24 hours, until the thread is archived, or Remember. It starts on their
+    last choice for that name and kind, else 24 hours, else this turn under
+    Strict. Strict offers neither 24 hours nor Remember, and an account password
+    never offers Remember. "Until archived" stays under Strict because its thread
+    bounds it and nothing under Strict writes a file. Time is the authority clock,
+    which counts a suspended host's time.
+  - **Delivery.** A `handle` is redeemed once, by a registered host or plugin
+    consumer, for its own thread, and never by a command. The thread's authority,
+    Strict, the turn, the consumer's registration and the cancellation signal are
+    read before the value is read and again after it. A 1Password item is read
+    again at every redemption. The value stays redacted until the consumer says
+    it is done or the turn ends. A `file` request also writes an owner-only file
+    where the thread's own commands run outside an Octant sandbox; under Strict,
+    in a sandbox, or for one command, nothing is written. Asking again for an
+    active secret returns a new handle per field with no card, never a wider
+    delivery, and never another turn's secret when it was given for one turn. The
+    same retry key returns the same answer while it is still true.
+  - **Files.** `<runtime>/thread-secrets/<host>/<thread>/<NAME>` on macOS and
+    Linux, folder 0700 and file 0600, where `<host>` names the data directory:
+    every host of one user shares the runtime folder, and each clears its own as
+    it starts and stops. Windows has no owner-only mode, so there the folder is in
+    the host profile's data directory, whose protected, inheritable access list
+    admits its owner and the system alone. No file is written until what an
+    earlier host left is gone. Every launch Octant confines is denied the folder,
+    apart from the protected list: the person cannot remove that rule, and it
+    holds for launches that carry only the sign-in rules. Octant's own file tools
+    refuse it at every level, Full access included (maintainer decision,
+    2026-11-24); an agent's own shell there can still read it.
+  - **Record first.** Values are redacted, written under a name nothing knows,
+    recorded, and only then put in place. A refused journal append leaves nothing
+    behind, and a file that cannot be put in place leaves an earlier secret of the
+    name as it was. `thread-secret.recorded@1` on one aggregate per thread holds
+    metadata alone, with no free text; a thread's purge erases it, and the next
+    start ends what a crashed host left open.
+  - **Redaction.** While a secret is active its value, its base64 at each
+    alignment, and its URL and JSON forms are replaced in runtime events, the
+    service log, exports and tool-call records, at any depth, and in a key unless
+    it reads as a field name. An agent cannot switch this off: a field it calls
+    not secret is spared only when the person typed it for a token. Matches are
+    found in the original text and overlapping ones replaced as one. An ended
+    value stays redacted, and is kept for nothing else, until the host stops
+    (maintainer decision, 2026-11-24): the token usually still works and may
+    still be in the agent's context. At most 128 ended values are kept, the
+    longest ended leaving first.
+  - **What it does not cover.** A command that runs without a sandbox (Full
+    access, and most providers below it outside Strict) can read any thread's
+    file, print it, encode it or send it, and may keep a hard link. Redaction
+    misses other encodings (hex, letter case, HTML, shell quoting, wrapped
+    base64), a value split across streamed chunks, short lines of a multi-line
+    value, values under six characters and plain ones under eight, and tool or
+    approval requests; a value the host no longer keeps; and it is host-wide, so a value
+    that is an ordinary word is hidden everywhere. Anything a runtime shows its
+    model directly is outside it. Consent is to the thread, the name and the
+    lifetime, so a repeat request may state another reason. A handle names no
+    consumer. The kind is the agent's claim. A window's end closes its cards and
+    not its secrets, and any local window may list and end a thread's secrets. A
+    crash leaves files until the next start.
 
 <a id="linked-secret-stores"></a>
 
@@ -20622,8 +20700,10 @@ cards; general Azure CLI credentials remain unavailable by design.
     decision, 2026-11-13). Stores without a fixed path (a KeePassXC database
     the person places) are left to the person's own protected paths.
   - **Octant's own secrets:** the bridge secret, the data directory's
-    `remote` and `integrations` folders, and the runtime directory's
-    `*.secret` files.
+    `remote` and `integrations` folders, the runtime directory's `*.secret`
+    files, and the `thread-secrets` folder in either. Every confined launch
+    denies that last folder, and Octant's own file tools refuse it at every
+    level, whatever this list keeps ([thread secrets](#thread-secrets)).
   - **Provider sign-ins:** each provider's stored sign-in file in the home
     folder, and Octant's managed account homes (`providers/` in the data
     directory). A runtime may read its own sign-in and no other tool's: a

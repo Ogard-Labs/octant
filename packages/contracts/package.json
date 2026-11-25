@@ -193,6 +193,7 @@
     "./managed-tooling": "./src/managedTooling.ts",
     "./browser-credential-use": "./src/browserCredentialUse.ts",
     "./credential-request": "./src/credentialRequest.ts",
+    "./thread-secrets": "./src/threadSecrets.ts",
     "./command-credentials": "./src/commandCredentials.ts",
     "./browser-page-script": "./src/browserPageScript.ts",
     "./paired-browser-control": "./src/pairedBrowserControl.ts",

@@ -51,7 +51,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 18        | 10      | 7            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 10        | 6       | 4            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 14        | 6       | 8            | 0                   |
-| [Credentials and sign-in](#credentials-and-sign-in)                                   | 7         | 4       | 3            | 0                   |
+| [Credentials and sign-in](#credentials-and-sign-in)                                   | 8         | 4       | 4            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 20        | 15      | 5            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **300**   | **181** | **115**      | **4**               |
+| **All areas**                                                                         | **301**   | **181** | **116**      | **4**               |
 
 ## Principles and hard lines
 
@@ -204,7 +204,7 @@ Below Full access, secret files stay out of every agent's reach by an operating-
 
 - One operating-system deny list covers SSH private keys, cloud and tool credentials, keychain and password-manager files, browser login stores, Octant's own secrets, and other runtimes' sign-ins; it names desktop chat apps' stored session tokens (Slack and Discord Local Storage) but never a whole Application Support or `~/.config` folder, so ordinary app settings stay readable (maintainer decision, 2026-11-13); SSH config, known_hosts, public keys and the login keychain stay readable, and a runtime keeps its own sign-in.
 - Below Full access (Ask first, Accept edits, Auto, Plan) the list joins every confined launch after its grants. At Full access no launch is wrapped for any runtime, so Swift packages and headless Chrome work without flags.
-- At Full access the secret-path refusals do not apply, and secret values are still never journaled: Claude Code's own file tools are Claude's, and its gate allows protected paths there, as Claude Code does on its own (maintainer decision, 2026-11-14); Octant's own file tools (the Octant Harness's and the ACP client's) follow the same rule and refuse only the protected provider-account credentials, the Provider sign-ins group, with the same plain message, as the account's sign-in stays out of the instruction files Octant reads for Claude (maintainer decision, 2026-11-15). OpenCode's own file tools follow it too: at Full access its read and list refusals shrink to the same Provider sign-ins group, on 1.x and 2.x, and below Full access the whole list stays. A server Project's file tools follow it as well: the list they match in a shell script on the server, and again on this host, shrinks at Full access to the same group. Built for the Octant Harness's file tools, on this host and in a server Project, the ACP client's file read and write, and OpenCode's permission rules. Plan stays read-only, Octant Shield's Watcher flags a call that names a protected path and the Octant Harness's secret-then-network commands are tagged, both journaled and never blocking, and redaction stays on.
+- At Full access the secret-path refusals do not apply, and secret values are still never journaled: Claude Code's own file tools are Claude's, and its gate allows protected paths there, as Claude Code does on its own (maintainer decision, 2026-11-14); Octant's own file tools (the Octant Harness's and the ACP client's) follow the same rule and refuse only the folder of [thread secrets](#thread-secrets) (maintainer decision, 2026-11-24) and the protected provider-account credentials, the Provider sign-ins group, with the same plain message, as the account's sign-in stays out of the instruction files Octant reads for Claude (maintainer decision, 2026-11-15). OpenCode's own file tools follow it too: at Full access its read and list refusals shrink to the same Provider sign-ins group, on 1.x and 2.x, and below Full access the whole list stays. A server Project's file tools follow it as well: the list they match in a shell script on the server, and again on this host, shrinks at Full access to the same group. Built for the Octant Harness's file tools, on this host and in a server Project, the ACP client's file read and write, and OpenCode's permission rules. Plan stays read-only, Octant Shield's Watcher flags a call that names a protected path and the Octant Harness's secret-then-network commands are tagged, both journaled and never blocking, and redaction stays on.
 - SSH works through the person's SSH agent, Git over HTTPS through the system credential helper, and keys through the credential broker, so agents use credentials without reading them.
 - The person adds paths in Settings › Permissions › Protected files; removing a built-in group needs an explicit confirm and is journaled.
 - Built: on a Windows host the list names the Windows locations (Credential Manager, DPAPI and Vault folders, password-manager vaults and browser profile stores under `AppData`, `_netrc`, and the Windows forge and Copilot sign-ins), and Octant's own file tools judge a drive-absolute path whatever its letter case, slash direction, trailing dots and spaces or `:stream` suffix; a share, device, drive-relative or driveless rooted path is refused rather than judged, and a search rooted at or above any protected location, or inside a pattern entry's folder such as a browser profile, is refused (maintainer decision, 2026-11-14). On every platform a search rooted inside a pattern entry's folder is checked from its root, and a check that cannot finish refuses. Windows has no confined launch yet, so the list is not an operating-system rule there.
@@ -2817,6 +2817,21 @@ A local person can enter a token or select a linked 1Password field reference in
 - Command approval IDs are one-use and never restored. Preparation replay is memory-scoped; a newly prepared request always needs fresh approval and cannot establish that an earlier process stopped. Below Full access the recipient's OS and per-command network rules remain enforced; vendor output concealment is not protection from disclosure to allowed destinations. See the owning linked-store rules for custody, invalidation and cancellation limits.
 
 Status: Partly built. Since: 2026-11-03. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
+
+### Thread secrets
+
+An agent in a Code or Work thread can ask the person for a secret its work needs, in a private card, kept as long as the person chooses (maintainer decisions, 2026-11-24).
+
+- Built: the host service, its contracts, policy, routes and records. Not built yet: the tool operation, the card and the active list, Remember, Fresh each use, `run-with-secret`, a secret already pasted in chat, the 1Password picker, phones and Needs you. No agent is offered it until those exist.
+- Code and Work only; Chat is refused. The card never expires and follows the Unattended work rule.
+- The person chooses the lifetime: this command, this turn, one hour, 24 hours, until archived, or Remember. Strict offers neither 24 hours nor Remember; an account password never offers Remember.
+- A handle is used once by a registered consumer and never by a command; authority is read before and after the value is. A file is written only where the thread's own commands run outside an Octant sandbox, on macOS, Linux and Windows, and every confined launch is denied the folder by a rule the person cannot remove. Octant's own file tools refuse the folder at every level, the one exception to their Full access reach beside the sign-ins (maintainer decision, 2026-11-24).
+- Nothing is usable before its journal record, which holds no value and no free text. Expiry, revocation, the turn, archive, the host's stop and the next start each remove the file and end every use of the value.
+- Active values are redacted with their common encodings, and ended ones until the host stops (maintainer decision, 2026-11-24). The specification lists what redaction and isolation do not cover.
+- The card will have a compact anatomy: title and reason, an optional setup-page button, one row with the source, the input and the primary action, then a privacy line, the lifetime and Decline; several fields stack (maintainer decision, 2026-11-24). Not built yet.
+- Computer use filling a password prompt from a handle is a separate, later decision.
+
+Status: Partly built. Since: 2026-11-24. Detail: [Architecture: Thread secrets](../architecture.md#thread-secrets).
 
 ### Account usage reads
 

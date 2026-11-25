@@ -1,6 +1,8 @@
+import { THREAD_SECRETS_FOLDER } from "./threadSecrets/threadSecretFiles";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { lstatSync } from "node:fs";
+import { win32 } from "node:path";
 import { Cause, Effect, Exit, Option } from "effect";
 import {
   acquireWindowsHostProfileOwner,
@@ -201,6 +203,9 @@ export async function runWindowsForeground(
             usageCacheFile: files.usageCache,
             credentialBrokerUrl: ownedBroker.url,
             credentialBrokerToken: ownedBroker.token,
+            // Inside the profile's data folder, whose protected, inheritable
+            // access list admits its owner and the system alone.
+            threadSecretsDirectory: win32.join(paths.dataDirectory, THREAD_SECRETS_FOLDER),
             hostControl: {
               // Settings reads the same logon entry `octant server` writes,
               // never a separate record that could disagree with it.
