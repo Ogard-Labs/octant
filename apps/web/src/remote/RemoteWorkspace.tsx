@@ -80,13 +80,17 @@ export interface RemoteWorkspaceProps {
 export function RemoteWorkspace(rawProps: RemoteWorkspaceProps) {
   // The host's own person's Canvas controls ride on the Canvas client only for
   // a session that acts as that person; every surface below reads this one.
-  const clients = useMemo(
-    () => ({
-      ...rawProps.clients,
-      canvas: canvasClientFor(rawProps.clients, rawProps.actsAsHostPerson === true),
-    }),
-    [rawProps.clients, rawProps.actsAsHostPerson],
-  );
+  const clients = useMemo(() => {
+    const { browserAutomation, ...rest } = rawProps.clients;
+    const person = rawProps.actsAsHostPerson === true;
+    return {
+      ...rest,
+      canvas: canvasClientFor(rawProps.clients, person),
+      // Captures and Browser prompts are the host's own person's to read and
+      // answer; the host refuses the routes to anyone else.
+      ...(person && browserAutomation !== undefined ? { browserAutomation } : {}),
+    };
+  }, [rawProps.clients, rawProps.actsAsHostPerson]);
   const props = useMemo(() => ({ ...rawProps, clients }), [rawProps, clients]);
   const replyDetail = useRemoteReplyDetail(
     props.clients.replyDetail,
@@ -425,6 +429,9 @@ function RemoteChatSurface(
             {...(props.extensionClient === undefined
               ? {}
               : { extensionClient: props.extensionClient })}
+            {...(props.clients.browserAutomation === undefined
+              ? {}
+              : { browserAutomationClient: props.clients.browserAutomation })}
             narrow
             readOnly={props.readOnly === true}
             onOpenCanvas={props.onOpenCanvas}
@@ -506,6 +513,9 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
             threadId={activeThread.id}
             initialThread={activeThread}
             canvasClient={props.clients.canvas}
+            {...(props.clients.browserAutomation === undefined
+              ? {}
+              : { browserAutomationClient: props.clients.browserAutomation })}
             onOpenCanvas={props.onOpenCanvas}
             onOpenCanvasInSidebar={props.onOpenCanvas}
             canvasOpenLabel="Open Canvas"
@@ -533,6 +543,7 @@ export interface RemoteCodeSurfaceProps extends Omit<RemoteSurfaceProps, "client
     readonly serviceOffers?: RemoteProductClients["serviceOffers"];
     readonly imageResults?: RemoteProductClients["imageResults"];
     readonly folderBrowse?: RemoteProductClients["folderBrowse"];
+    readonly browserAutomation?: RemoteProductClients["browserAutomation"];
   };
   /**
    * False in a desktop window showing a paired computer's threads: the page's
@@ -666,6 +677,9 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
           <CodeThreadWorkspace
             actsAsHostPerson={props.actsAsHostPerson}
             {...(props.clients.canvas === undefined ? {} : { canvasClient: props.clients.canvas })}
+            {...(props.clients.browserAutomation === undefined
+              ? {}
+              : { browserAutomationClient: props.clients.browserAutomation })}
             {...serviceOfferProps(props)}
             onOpenCanvas={props.onOpenCanvas}
             onOpenCanvasInSidebar={props.onOpenCanvas}

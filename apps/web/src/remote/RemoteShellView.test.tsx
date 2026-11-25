@@ -663,6 +663,36 @@ describe("RemoteShellView", () => {
     }
   });
 
+  it("reads a thread's Browser prompts and captures for a browser the host's own person paired, and for no other", async () => {
+    const user = userEvent.setup();
+    const browserReads = async (person: boolean) => {
+      const seen: ProductRequest[] = [];
+      const { bridge } = await readyBridge(
+        seen,
+        false,
+        person,
+        true,
+        true,
+        person ? undefined : "approve-and-steer",
+      );
+      try {
+        const view = render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+        const list = await screen.findByRole("navigation", { name: "Chat thread list" });
+        await user.click(await within(list).findByRole("button", { name: chatThread.title }));
+        await screen.findByRole("region", { name: "Conversation" });
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        view.unmount();
+        return seen
+          .map((request) => request.path)
+          .filter((path) => path.startsWith("/api/browser/"));
+      } finally {
+        bridge.disconnect();
+      }
+    };
+    expect(await browserReads(true)).toContain("/api/browser/approvals");
+    expect(await browserReads(false)).toEqual([]);
+  });
+
   it("updates an open browser when the host changes its device access level", async () => {
     const user = userEvent.setup();
     let level: "read-only" | "full" = "read-only";

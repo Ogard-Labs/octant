@@ -52,6 +52,10 @@ import {
   createSpendCeilingClient,
   type SpendCeilingClient,
 } from "@octant/client-runtime/spend-ceiling-client";
+import {
+  createBrowserAutomationClient,
+  type BrowserAutomationClient,
+} from "@octant/client-runtime/browser-automation-client";
 import { createChatClient, type ChatClient } from "@octant/client-runtime/chat-client";
 import {
   createThreadImageResults,
@@ -201,6 +205,12 @@ export interface RemoteProductClients {
    * shell offers it to no other session, and the host refuses it to them.
    */
   readonly canvasHostPerson: PersonPairedCanvasControls;
+  /**
+   * Browser captures and the Browser prompts a thread waits on, for a thread's
+   * surfaces. The shell hands it only to a session that acts as the host's
+   * person; there is no live Browser pane over the session.
+   */
+  readonly browserAutomation?: BrowserAutomationClient;
   /** The device's own shell in a local or server Project; the host refuses any other session. */
   readonly projectTerminal: ProjectTerminalClient;
   /** The device's own Private page for a Project; a profile page stays at a window. */
@@ -411,6 +421,7 @@ export function createRemoteProductClients(
     canvasImportHtml: (request) =>
       canvas.importHtml?.(request) ?? Promise.reject(new Error("Import is unavailable.")),
     canvasHostPerson: pickPersonCanvasControls(canvas),
+    browserAutomation: createBrowserAutomationClient(port),
     projectTerminal: createProjectTerminalClient(port),
     projectBrowser: createProjectBrowserClient(port),
     // Listing what a server serves is a window-on-this-computer read the remote
