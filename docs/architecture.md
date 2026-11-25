@@ -7881,8 +7881,19 @@ ls-remote` against the thread's remote and the GitHub reads they already
   frame kind it does not know. An open desktop Code transcript has no such
   frame and its operation stream carries no steered message either, so it
   takes the message in when the window hears the `thread-message-queue` change
-  the message leaves the queue with: the open thread, if its turn runs, reads
-  its two newest turns and takes only their `steeredMessages` from that read.
+  the message leaves the queue with: an open thread whose running turn this
+  view follows reads its two newest turns and takes only their
+  `steeredMessages` from that read. A view that loaded the thread settled does
+  not follow a turn started in another window, a Zen card, a split pane or by
+  an agent, because a provider turn is journaled on the operation and the
+  thread's own stream never hears of it. It learns of one from the thread
+  list, which the window re-reads on the `code-navigation` notice a turn start
+  raises (a paired browser on its list refresh): when the list says the open
+  thread is working at an activity sequence the view has not looked at, the
+  view reads the conversation once and follows the turn through the same poll
+  and operation stream a read at open starts. It does not look while it
+  follows a turn, is sending one itself, or is still on its first read, so it
+  never opens a second stream or reopens a turn it settled.
   Those are held apart from the transcript and only ever grow, so the read
   cannot roll back the reply, tool steps or tasks the stream is writing, and
   a slower read of the conversation cannot take a shown message away. Reading
@@ -7891,8 +7902,16 @@ ls-remote` against the thread's remote and the GitHub reads they already
   because an older client cannot decode it. A paired browser's Code surface
   subscribes to no change feed, so it takes the messages in on the running
   turn's own poll (within about two seconds) and on its five-second list
-  refresh. The phone holds no stream of a Code turn, so it re-reads the
-  thread on a short cadence while its newest turn runs or a turn waits. When the running turn is
+  refresh. Each such read costs the host the two turns' fold, the thread's
+  steered-message records and, on a thread with earlier turns, one usage row
+  per earlier turn, so one queue change costs a window one read per open Code
+  thread whose running turn it follows; a turn found through a read is polled
+  at the same price every two seconds anyway. The phone holds no stream of a
+  Code turn, so it re-reads the thread on a short cadence while its newest
+  turn runs or a turn waits. While it shows the newest turns settled, it looks
+  at the newest turn alone, without its text, every ten seconds while in
+  front, and refreshes once when one is underway; an anchored search page
+  does not look. When the running turn is
   one the queue admitted itself, that message stays at the head as
   `accepted` until its turn settles, and the message behind it is offered to
   that turn under the same checks, one at a time, in order. A message

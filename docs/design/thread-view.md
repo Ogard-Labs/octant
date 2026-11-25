@@ -965,8 +965,12 @@ running turn" and cannot be edited, removed or
 moved; the rest of the queue stays usable. A transcript read afresh shows it
 at once, and so does an open desktop transcript, without losing the reply
 streamed so far: a Work transcript reads the running turn again, and a Code
-transcript takes in the message alone when it leaves the queue. A paired
-browser and the phone show it on their next read of the running turn. A message the runtime does not take stays in the queue for
+transcript takes in the message alone when it leaves the queue. An open Code
+view that loaded the thread settled picks up a turn started elsewhere once the
+thread list says the thread is working, and then shows the turn and its
+messages the same way. A paired browser shows it on its next read of the
+running turn; the phone on its next read too, and a phone showing the thread
+settled looks for a newly started turn every ten seconds. A message the runtime does not take stays in the queue for
 the next turn.
 
 ## Scheduled wake-ups
