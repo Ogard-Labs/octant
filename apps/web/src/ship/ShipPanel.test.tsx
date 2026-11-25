@@ -43,7 +43,7 @@ function client(overrides: Partial<ShipClient> = {}): ShipClient {
 }
 
 describe("delivering to somewhere you own", () => {
-  it("states on an info tooltip that Octant runs no target of its own and routes nothing through itself", async () => {
+  it("states on an info tooltip that Octant runs no destination of its own and routes nothing through itself", async () => {
     render(<ShipPanel client={client()} threadId={threadId} />);
 
     // The statement lives on the pane bar's info tooltip, not in a paragraph.
