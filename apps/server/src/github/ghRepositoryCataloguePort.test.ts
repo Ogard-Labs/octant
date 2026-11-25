@@ -314,6 +314,37 @@ describe("why an issue was closed", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  it("ends the list at search's thousandth result instead of asking past it", async () => {
+    const full = Array.from({ length: 100 }, (_, index) =>
+      issueItem(index + 1, { state: "closed", state_reason: "completed" }),
+    );
+    const run = vi.fn(async (arguments_: readonly string[]) =>
+      Number(/&page=(\d+)/.exec(arguments_[1] ?? "")?.[1]) > 10
+        ? { exitCode: 1, stdout: "", stderr: "HTTP 422: Only the first 1000 search results" }
+        : { exitCode: 0, stdout: JSON.stringify({ items: full }) },
+    );
+    const port = new GhRepositoryCataloguePort({ command: { run } });
+    let cursor: string | undefined;
+    let seen = 0;
+    do {
+      const page = await port.listIssues(
+        {
+          owner: "octant",
+          name: "octant",
+          pageSize: 30,
+          state: "closed",
+          closedReason: "completed",
+          ...(cursor === undefined ? {} : { cursor }),
+        },
+        new AbortController().signal,
+      );
+      if (page.kind !== "ok") throw new Error(`${page.kind} after ${String(seen)} rows`);
+      seen += page.value.rows.length;
+      cursor = page.value.endCursor;
+    } while (cursor !== undefined && seen <= 1000);
+    expect(seen).toBe(1000);
+  });
+
   it("refuses to continue a page cursor under a different closed reason", async () => {
     const { port } = portReturning([
       [1, 2, 3].map((n) => issueItem(n, { state: "closed", state_reason: "completed" })),

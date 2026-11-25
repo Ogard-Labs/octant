@@ -4017,7 +4017,8 @@ Closed with the check. While Closed is chosen a second row of the same chips
 offers All closed, Completed and Not planned; it applies to one repository and
 to All repositories alike, and leaving Closed forgets the choice. GitHub's
 repository issue list cannot filter by reason, so Completed and Not planned read
-through GitHub's issue search, with its rate limit and its cap of 1,000 results.
+through GitHub's issue search, which has its own tighter rate limit; the list
+ends at search's first 1,000 results.
 GitHub Project status is not shown, because reading it needs access the sign-in
 does not ask for. Pull requests keep their own states.
 

@@ -1,5 +1,6 @@
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type {
+  GithubCatalogueUnavailable,
   GithubIssueClosedReasonFilter,
   GithubIssueRow,
   GithubIssueStateFilter,
@@ -92,13 +93,7 @@ export async function readIssuesAcrossRepositories(
           ...(options.closedReason === undefined ? {} : { closedReason: options.closedReason }),
         });
         if (response.kind === "unavailable") {
-          refused.push({
-            ...repository,
-            message:
-              response.remediation === undefined
-                ? "GitHub refused the read."
-                : describeGithubRemediation(response.remediation),
-          });
+          refused.push({ ...repository, message: refusalMessage(response) });
           continue;
         }
         if (response.kind !== "issues") {
@@ -130,6 +125,18 @@ export async function readIssuesAcrossRepositories(
   );
   await Promise.all(workers);
   return { rows, refused, truncated, stale };
+}
+
+function refusalMessage(response: GithubCatalogueUnavailable): string {
+  const base =
+    response.remediation !== undefined
+      ? describeGithubRemediation(response.remediation)
+      : response.reason === "rate-limited"
+        ? "GitHub reported a rate limit. Try again later."
+        : "GitHub refused the read.";
+  return response.retryAfterSeconds === undefined
+    ? base
+    : `${base} Retry after ${String(response.retryAfterSeconds)} seconds.`;
 }
 
 export function sortIssueRows<Row extends RepositoryIssueRow>(

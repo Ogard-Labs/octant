@@ -81,6 +81,26 @@ describe("readIssuesAcrossRepositories", () => {
   });
 });
 
+describe("a rate-limited read across repositories", () => {
+  it("says a repository was rate limited and how long to wait", async () => {
+    const result = await readIssuesAcrossRepositories(
+      {
+        readCatalogue: async () => ({
+          kind: "unavailable",
+          capability: "issues-read",
+          reason: "rate-limited",
+          retryAfterSeconds: 45,
+        }),
+      },
+      [{ owner: "octant", name: "app" }],
+      { state: "closed", closedReason: "completed", pageSize: 20 },
+    );
+    expect(result.refused.map((refusal) => refusal.message)).toEqual([
+      "GitHub reported a rate limit. Try again later. Retry after 45 seconds.",
+    ]);
+  });
+});
+
 describe("sortIssueRows", () => {
   const rows = [
     { ...issueRow(3, "2026-08-03"), owner: "octant", name: "zeta" },

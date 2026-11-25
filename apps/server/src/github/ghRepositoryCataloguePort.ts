@@ -9,6 +9,8 @@ const READ_TIMEOUT_MS = 20_000;
 /** Upstream REST fetches allowed while assembling one bounded page. */
 const MAX_UPSTREAM_FETCHES = 10;
 const UPSTREAM_PAGE_SIZE = 100;
+/** GitHub search serves its first 1,000 results and answers 422 past them. */
+const SEARCH_LAST_PAGE = 1000 / UPSTREAM_PAGE_SIZE;
 const ISSUE_BODY_MAX_BYTES = 8 * 1024;
 const COMMENT_BODY_MAX_BYTES = 2 * 1024;
 const MAX_ISSUE_COMMENTS = 10;
@@ -271,6 +273,7 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
         decodeItem: decodeIssueItem,
         matches: () => true,
         extractItems: extractSearchIssueItems,
+        lastPage: SEARCH_LAST_PAGE,
         signal,
       });
     }
@@ -331,6 +334,7 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
       decodeItem: decodeSearchItem,
       matches: () => true,
       extractItems: extractSearchIssueItems,
+      lastPage: SEARCH_LAST_PAGE,
       signal,
     });
   }
@@ -566,6 +570,8 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
     readonly decodeItem: (item: unknown) => Row | "skip" | undefined;
     readonly matches: (row: Row) => boolean;
     readonly extractItems?: (stdout: string) => readonly unknown[] | undefined;
+    /** The last upstream page GitHub will serve, where it has one. */
+    readonly lastPage?: number;
     readonly signal: AbortSignal;
   }): Promise<GhCatalogueResult<GhCataloguePageObservation<Row>>> {
     let page = 1;
@@ -613,7 +619,7 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
       const taking = matched.slice(offset, offset + options.pageSize - rows.length);
       rows.push(...taking);
       const consumedInPage = offset + taking.length;
-      const upstreamExhausted = items.length < UPSTREAM_PAGE_SIZE;
+      const upstreamExhausted = items.length < UPSTREAM_PAGE_SIZE || page === options.lastPage;
       if (rows.length >= options.pageSize) {
         if (consumedInPage < matched.length) {
           return ok(rows, true, cursorAt(page, consumedInPage));
