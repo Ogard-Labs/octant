@@ -25,6 +25,10 @@ import {
   type ExtensionClient,
 } from "@octant/client-runtime/extension-client";
 import {
+  createDiagnosticsExportClient,
+  type DiagnosticsExportClient,
+} from "@octant/client-runtime/diagnostics-export-client";
+import {
   createBrowserAutomationClient,
   type BrowserAutomationClient,
 } from "@octant/client-runtime/browser-automation-client";
@@ -259,6 +263,20 @@ export function createRemotePairedDeviceAdministrationClient(
  */
 export function createRemoteAgentGrantClient(bridge: RemoteSessionBridge): AgentGrantClient {
   return createAgentGrantClient({
+    baseUrl: REMOTE_CLIENT_BASE_URL,
+    fetch: createRemoteProductFetch({ bridge }),
+    windowCapability: NO_WINDOW_CAPABILITY,
+  });
+}
+
+/**
+ * The diagnostics bundle, failure report and journal growth over the session.
+ * The host takes them only from a device its own person paired at Full.
+ */
+export function createRemoteDiagnosticsExportClient(
+  bridge: RemoteSessionBridge,
+): DiagnosticsExportClient {
+  return createDiagnosticsExportClient({
     baseUrl: REMOTE_CLIENT_BASE_URL,
     fetch: createRemoteProductFetch({ bridge }),
     windowCapability: NO_WINDOW_CAPABILITY,

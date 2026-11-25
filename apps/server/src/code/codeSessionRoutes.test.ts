@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { decodeCodeNativeSessionId, decodeCodeThreadId, decodeWindowId } from "@octant/contracts";
+import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createCodeSessionRouteHandler } from "./codeSessionRoutes";
 
@@ -103,6 +104,34 @@ describe("Code live task routes", () => {
     const { handle, adopt } = setup();
     const answered = await handle(adoption(authorized));
     expect(await answered?.json()).toMatchObject({ kind: "code-native-session-adopted" });
-    expect(adopt).toHaveBeenCalledWith(windowId, threadId, "outside-session-1");
+    expect(adopt).toHaveBeenCalledWith(
+      windowId,
+      threadId,
+      "outside-session-1",
+      expect.objectContaining({ kind: "local-user" }),
+    );
+  });
+
+  it("names the paired device that asked, never the local person, when it starts a thread from a session", async () => {
+    const { handle, adopt } = setup();
+    const request = adoption({});
+    bindPrincipalRouteContext(request, {
+      principal: {
+        kind: "remote-device",
+        deviceId: "22222222-2222-4222-8222-222222222222",
+      } as never,
+      scopeId: windowId,
+    });
+    const answered = await handle(request);
+    expect(await answered?.json()).toMatchObject({ kind: "code-native-session-adopted" });
+    expect(adopt).toHaveBeenCalledWith(
+      windowId,
+      threadId,
+      "outside-session-1",
+      expect.objectContaining({
+        kind: "remote-device",
+        deviceId: "22222222-2222-4222-8222-222222222222",
+      }),
+    );
   });
 });

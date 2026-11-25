@@ -43,6 +43,7 @@ import { useTheme } from "../../design-system";
 import { useMobileHardwareBack } from "./useMobileHardwareBack";
 import { mobileThreadReturnRouteForDeepLink } from "./navigationState";
 import { deepLinkRefusal, computersLinkOpening } from "./deepLinkNavigation";
+import { AccessActivityPanel } from "../hosts/AccessActivityPanel";
 import { NewDevicesPanel } from "../hosts/NewDevicesPanel";
 import type { MobileComputersDeepLinkTarget } from "../notifications/deepLinks";
 
@@ -346,6 +347,7 @@ function HostsBody(props: {
                           {environment.kind === "live" && status?.kind === "ready" ? (
                             <>
                               <ConnectorSignInPanel transport={transportForHost(host.hostId)} />
+                              <AccessActivityPanel transport={transportForHost(host.hostId)} />
                               <PushNotificationsPanel
                                 hostKeyFingerprint={host.hostKeyFingerprint}
                                 permission={notificationPermission}

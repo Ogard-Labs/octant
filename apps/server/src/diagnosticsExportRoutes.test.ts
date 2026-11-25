@@ -132,6 +132,74 @@ describe("diagnostics export routes", () => {
     expect(exportSpy).not.toHaveBeenCalled();
   });
 
+  const devicePrincipal = (
+    extra: Partial<Parameters<typeof createRemoteDevicePrincipal>[0]> = {},
+  ) =>
+    createRemoteDevicePrincipal({
+      hostId: "11111111-1111-4111-8111-111111111111" as never,
+      deviceId: "22222222-2222-4222-8222-222222222222" as never,
+      credentialGeneration: 1,
+      origin: "https://octant.example",
+      protocolVersion: 1,
+      capabilityDigest: "b".repeat(64),
+      sessionId: "33333333-3333-4333-8333-333333333333" as never,
+      ...extra,
+    });
+  const asDevice = (request: Request, principal: ReturnType<typeof devicePrincipal>) => {
+    bindPrincipalRouteContext(request, { principal, scopeId: windowId as never });
+    return request;
+  };
+
+  it("exports for a device the host's own person paired, journaling the receipt as that device, and reads journal growth", async () => {
+    const { handler, connection } = setup();
+    const person = devicePrincipal({ admittedBy: "host-person" });
+    const exported = await handler(
+      asDevice(
+        makeRequest("/api/diagnostics/export", {
+          body: {
+            correlationId: failureCorrelationId,
+            domain: "provider",
+            summary: "Provider request timed out after two retries.",
+          },
+        }),
+        person,
+      ),
+    );
+    expect(exported?.status).toBe(200);
+    const row = connection
+      .prepare("SELECT actor_json AS actor FROM event_journal WHERE event_name LIKE ?")
+      .get("diagnostics.export-receipt%") as { actor: string } | undefined;
+    expect(JSON.parse(row?.actor ?? "{}")).toMatchObject({
+      kind: "remote-device",
+      deviceId: "22222222-2222-4222-8222-222222222222",
+    });
+    const growth = await handler(
+      asDevice(makeRequest("/api/diagnostics/journal-growth", { method: "GET" }), person),
+    );
+    expect(growth?.status).toBe(200);
+  });
+
+  it("refuses a restricted, hub-introduced or below-Full device and an agent grant", async () => {
+    const { handler } = setup();
+    const exportSpy = vi.spyOn(diagnosticsExportService, "exportDiagnosticsEvidence");
+    for (const principal of [
+      devicePrincipal(),
+      devicePrincipal({ admittedBy: "hub-roster" }),
+      devicePrincipal({ admittedBy: "host-person", accessLevel: "read-only" }),
+      devicePrincipal({ origin: "octant-agent-access" }),
+    ]) {
+      for (const request of [
+        makeRequest("/api/diagnostics/export", {
+          body: { correlationId: failureCorrelationId, domain: "provider", summary: "x" },
+        }),
+        makeRequest("/api/diagnostics/journal-growth", { method: "GET" }),
+      ]) {
+        expect((await handler(asDevice(request, principal)))?.status).toBe(403);
+      }
+    }
+    expect(exportSpy).not.toHaveBeenCalled();
+  });
+
   it("fails closed for a request that is not loopback (remote)", async () => {
     const { handler } = setup();
     const request = makeRequest("/api/diagnostics/export", {

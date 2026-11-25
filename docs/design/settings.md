@@ -150,6 +150,8 @@ secret, and the revoke through this computer's own device and grant
 controls. A window's notice stack
 shows the newest notice with **Review**, which opens this section, and a
 browser paired at Full shows the notices beside its new-device alerts. The
+phone shows the same list and notices in each paired computer's Settings
+panel, to a session the host says acts as its own person alone. The
 rule is in [Architecture: Security and authority](../architecture.md#security-and-authority).
 
 Selecting a page replaces its controls as well as its heading. Plugin pages
@@ -628,8 +630,9 @@ entries it holds now or "Not available", and one sentence on what it holds),
 then "It never includes" and its plain lines. Only **Save file** asks the host
 to build the bundle; **Cancel** closes the list. In the desktop app Save file
 opens the native save dialog, offering `octant-diagnostics-<date>.zip` in
-Downloads; dismissing it returns to the list with nothing written. A browser or
-paired client downloads the zip instead. The saved line names the file and says
+Downloads; dismissing it returns to the list with nothing written. A browser
+paired at Full (Host settings › Diagnostics) downloads the zip instead; the
+phone has no diagnostics screen. The saved line names the file and says
 nothing was sent. A host that cannot list or
 build the bundle shows one error sentence and keeps the button. The list is
 text and tabular counts on the page ground, with a hairline between rows and no

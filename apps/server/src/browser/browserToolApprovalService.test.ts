@@ -691,6 +691,7 @@ describe("BrowserToolApprovalService for a phone-started turn", () => {
   const threadId = "50000000-0000-4000-8000-000000000001";
   const phone = "60000000-0000-4000-8000-0000000000aa" as never;
   const personal = { kind: "personal" } as const;
+  const personPhone = "60000000-0000-4000-8000-0000000000bb" as never;
 
   function service(rememberTransfer?: (transfer: unknown, windowId: unknown) => void) {
     return new BrowserToolApprovalService({
@@ -732,7 +733,7 @@ describe("BrowserToolApprovalService for a phone-started turn", () => {
     ["upload", { upload: [{ name: "notes.txt", sizeBytes: 5 }] }],
     ["download", { download: { name: "report.pdf", sizeBytes: 4, mediaType: "application/pdf" } }],
   ] as const)(
-    "remembers an Always allow answer to an %s for that site and workspace when a local window gives it, and never when a paired device does",
+    "remembers an Always allow answer to an %s for that site and workspace when a local window gives it, and never when a restricted paired device does",
     async (direction, ask) => {
       const rememberTransfer = vi.fn();
       const rememberOrigin = vi.fn();
@@ -744,6 +745,9 @@ describe("BrowserToolApprovalService for a phone-started turn", () => {
         rememberOrigin,
         isHostScope: isRoutineHostScope,
         isLocalWindow: (scope) => String(scope) === String(windowId),
+        // The phone is restricted or hub-introduced; the person's phone is
+        // not, so it acts as the person.
+        isRestrictedDevice: (scope) => String(scope) !== String(windowId) && scope !== personPhone,
       });
       const decision = {
         approvalId: "40000000-0000-4000-8000-000000000009" as never,
@@ -764,6 +768,17 @@ describe("BrowserToolApprovalService for a phone-started turn", () => {
       expect(approvals.decide(phone, decision)).toBe(true);
       await expect(fromPhone).resolves.toBe("approved");
       expect(rememberTransfer).not.toHaveBeenCalled();
+
+      // A device the host's own person paired is remembered as a window is,
+      // and the answer names that device.
+      const fromPersonPhone = request(personPhone);
+      expect(approvals.decide(personPhone, decision)).toBe(true);
+      await expect(fromPersonPhone).resolves.toBe("approved");
+      expect(rememberTransfer).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ direction, origin: "https://example.com", privatePage: true }),
+        personPhone,
+      );
+      rememberTransfer.mockClear();
 
       const once = request(windowId);
       expect(approvals.decide(windowId, { ...decision, remember: false })).toBe(true);

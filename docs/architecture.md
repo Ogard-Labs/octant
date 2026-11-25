@@ -2299,11 +2299,11 @@ except where a bullet says otherwise.
   setting. Entries were redacted before storage, so the export adds nothing
   beyond what Settings › Memory shows.
 - **Who may read it.**
-  - A local window or a paired device the host's own person approved: read and
+  - A local window or a device the host's own person paired at Full: read and
     change everything in Settings › Memory, and a turn either sends gets the
     block and `octant_past_threads` under the thread's own participation rules
     (memory on, Project not kept out, thread not Leave no trace). A device known
-    only through a hub's roster (and any subagent it spawns), a peer-delegated
+    only through a hub's roster or paired below Full (and any subagent it spawns), a peer-delegated
     Work turn (and any subagent it spawns), and a turn with no scope (such as a
     benchmark runner's Chat turn) get neither.
   - A routine's run or another turn the host starts as itself (a delivered child
@@ -6385,11 +6385,16 @@ flowchart LR
   Maintenance › Save diagnostics and `octant diagnostics export --out <folder
 or .zip>` write the same files, built by one host command
   (`/api/diagnostics/bundle`, with a plain-list read at
-  `/api/diagnostics/bundle/preview`). Both routes sit on the loopback
-  administration chain beside host control. A paired device takes a bundle as
-  a local window does (maintainer decision, 2026-11-12); not built yet: today
-  both routes reject a paired device and are not in the remote forward list,
-  so only a window or CLI session on this machine reaches them. The person sees the list of sections, with how many
+  `/api/diagnostics/bundle/preview`). A local window, the CLI on this machine,
+  and a device the host's own person paired at Full take a bundle alike
+  (maintainer decision, 2026-11-12): both routes are in the remote forward
+  list, the bundle's hand-over journal record names the device that asked, and
+  a restricted or hub-introduced device, a device below Full and an agent grant
+  are refused by the route itself, with no action in the product catalogue. The
+  diagnostics export (`/api/diagnostics/export`) and the journal growth read
+  are admitted the same way, and the export's receipt names the device. The
+  desktop's save to a chosen path stays on the loopback administration chain
+  beside host control and is never forwarded. The person sees the list of sections, with how many
   entries each holds now, and what the file never holds, before anything is
   written; the CLI prints it first and `--list` stops there. The files are a
   readme plus one JSON file per section: versions (Octant, wire, runtime),
@@ -7262,10 +7267,10 @@ ls-remote` against the thread's remote and the GitHub reads they already
   authenticated windows share the queue, and a paired device may queue
   (maintainer request, 2026-11-12). Built: a paired device reads a thread's
   queue, queues a message, and edits or removes a message it queued. A device
-  the host's own person paired also pauses, resumes and reorders the queue and
-  edits or removes another's message, as a local window does (maintainer
-  decision, 2026-11-13); a hub-introduced or restricted device is refused
-  those. A device's queue change is journaled with the device as its actor. The message
+  the host's own person paired at Full also pauses, resumes and reorders the
+  queue and edits or removes another's message, as a local window does
+  (maintainer decision, 2026-11-13); a hub-introduced, below-Full or otherwise
+  restricted device is refused those. A device's queue change is journaled with the device as its actor. The message
   waits under the device's own scope, so its turn keeps every limit a turn
   the device sends directly has. Each mutation and each dispatch asks again
   that the device is still paired, its current access level allows the mode's
@@ -18724,7 +18729,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
     Full uses the notice routes on its own session. The change feed's
     `access-activity` and `change-notices` topics refresh both without a
     reload. Notices stay in the app: none is sent to a phone's push path or
-    by email.
+    by email. The phone app reads both over its own device session while it
+    is in front of the person and shows them in each paired computer's
+    Settings panel to a session the host says acts as its own person, with
+    Undo, Revoke or End access, and Dismiss as the host offers them (a revoke
+    asks first and is confirmed on the phone), and shows nothing to any other
+    session.
   - **What a person-paired device does.** As a local window does, with no
     owner unlock: sets a thread, a Project, or the default to Full access and
     starts a Work or Code thread there; changes a Project's access, actions,
@@ -18766,7 +18776,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     secret a window on the host holds and whose native controls (a folder
     picker, an external editor) exist only there; a window's own shell (its bootstrap, workspace commands and local sessions); linking a secret store and
     pointing a key at it, which are acts at the machine; pointing a runtime at an executable, which goes through the host's native file picker; choosing a new skill folder or a local plugin folder, which goes through the host's native folder picker; the replica store and its membership; and the whole host's
-    export, bulk data with no bound for a remote caller. Importing cookies from the host's Keychain into a Browser profile and a server Project's port forward, which listens on the host's own loopback, stay with a window too. Not built yet: the list of ports a server serves, which a preview picks from (`/api/server-project-listeners`); diagnostics (`/api/diagnostics/export`, `/api/diagnostics/journal-growth` and the support bundle under `/api/diagnostics/bundle`, which `authorizeDiagnosticsExportActor` grants only a local window); and granting a site login permission in the Browser (`/api/browser/credential-use`) are not open to a person-paired device either. Removing a provider together with its key is not offered to a device, which removes the provider and then the key.
+    export, bulk data with no bound for a remote caller. Importing cookies from the host's Keychain into a Browser profile and a server Project's port forward, which listens on the host's own loopback, stay with a window too. Not built yet: the list of ports a server serves, which a preview picks from (`/api/server-project-listeners`); and granting a site login permission in the Browser (`/api/browser/credential-use`) are not open to a person-paired device either. Removing a provider together with its key is not offered to a device, which removes the provider and then the key.
   - **The journal names the device.** A person-paired device's change is
     journaled with the device as its actor (`remote-device`, its id), resolved
     once from the authenticated principal and never from the request; a local
@@ -18795,8 +18805,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     settles by itself after a restart (a turn the restart cut off) are the
     system's. Cancelling a connector sign-in that is still waiting, by
     signing out or by removing the server, names whoever cancelled it, never
-    whoever began the attempt. Not built yet: adopting a session started
-    outside Octant journals its records as the system.
+    whoever began the attempt. Adopting a session started outside Octant
+    journals the adoption, the imported earlier conversation and (in Code)
+    the thread's session-ready record as whoever adopted it, the local person
+    or the paired device that asked; the payloads are unchanged.
 
   A hub acting on its spoke, or a spoke
   delegating to another spoke, is such a remote principal on the receiving
