@@ -7069,6 +7069,44 @@ describe("completing and snoozing a Code thread", () => {
     expect(running.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("journals a person's unlink of a pull request on the thread, and refuses one from a routine", async () => {
+    const fixture = serviceFixture();
+    const unlink = {
+      kind: "unlink-code-thread-pull-request" as const,
+      threadId: ids.thread,
+      expectedVersion: 1,
+      owner: "octant",
+      repository: "octant",
+      number: 12,
+    };
+
+    await expect(fixture.service.execute(ROUTINE_HOST_SCOPE_ID, unlink)).rejects.toMatchObject({
+      failure: {
+        category: "unauthorized",
+        message: "Only a person can unlink a pull request from a thread.",
+      },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+
+    const unlinked = await fixture.service.execute(ids.window, unlink);
+    expect(unlinked).toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        version: 2,
+        unlinkedPullRequests: [
+          { owner: "octant", repository: "octant", number: 12, unlinkedAt: now },
+        ],
+      },
+    });
+    const append = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+      events: Array<{ eventName: string; payload: { thread: Record<string, unknown> } }>;
+    };
+    expect(append.events[0]?.eventName).toBe("code.thread-updated@1");
+    expect(append.events[0]?.payload.thread.unlinkedPullRequests).toEqual([
+      { owner: "octant", repository: "octant", number: 12, unlinkedAt: now },
+    ]);
+  });
+
   it("refuses a routine or anything else acting as the host when it tries to mark a Code thread Done", async () => {
     const fixture = serviceFixture();
 

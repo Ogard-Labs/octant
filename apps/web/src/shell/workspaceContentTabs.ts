@@ -13,9 +13,20 @@ function panes(layout: WorkspaceLayoutNode): ReadonlyArray<WorkspacePane> {
   return layout.kind === "pane" ? [layout] : [...panes(layout.first), ...panes(layout.second)];
 }
 
+/**
+ * A pull request opened from a thread's Environment names its pull request
+ * and is a tab beside the conversation, like a file. The thread's own delivery
+ * pull request surface names none and replaces the pane as before.
+ */
+export function isThreadPullRequestTab(surface: WorkspaceTab): boolean {
+  return surface.kind === "code-pr" && surface.pullRequest !== undefined;
+}
+
 function isContent(surface: WorkspaceTab): boolean {
-  return ["chat-thread", "work-thread", "code-overview", "code-file", "preview", "canvas"].includes(
-    surface.kind,
+  return (
+    ["chat-thread", "work-thread", "code-overview", "code-file", "preview", "canvas"].includes(
+      surface.kind,
+    ) || isThreadPullRequestTab(surface)
   );
 }
 

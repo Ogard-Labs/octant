@@ -6,7 +6,7 @@ import {
   type WorkspaceLayoutNode,
   type WindowId,
 } from "@octant/contracts";
-import type { WorkspaceContentTabs } from "./workspaceContentTabs";
+import { isThreadPullRequestTab, type WorkspaceContentTabs } from "./workspaceContentTabs";
 
 const modes = ["chat", "work", "code"] as const;
 const SavedContent = Schema.Struct({
@@ -26,8 +26,10 @@ function paneIds(layout: WorkspaceLayoutNode): ReadonlyArray<PaneId> {
     : [...paneIds(layout.first), ...paneIds(layout.second)];
 }
 function isContent(tab: WorkspaceTab): boolean {
-  return ["chat-thread", "work-thread", "code-overview", "code-file", "preview", "canvas"].includes(
-    tab.kind,
+  return (
+    ["chat-thread", "work-thread", "code-overview", "code-file", "preview", "canvas"].includes(
+      tab.kind,
+    ) || isThreadPullRequestTab(tab)
   );
 }
 export function workspaceContentStorageKey(
@@ -59,7 +61,10 @@ export function encodeWorkspaceContent(
           .filter(
             (tab) =>
               isContent(tab) &&
-              !("threadId" in tab && tab.threadId !== null && preview.has(String(tab.threadId))),
+              // A pull request the person opened beside a previewed thread is
+              // no preview itself.
+              (isThreadPullRequestTab(tab) ||
+                !("threadId" in tab && tab.threadId !== null && preview.has(String(tab.threadId)))),
           )
           .slice(-128),
       })),

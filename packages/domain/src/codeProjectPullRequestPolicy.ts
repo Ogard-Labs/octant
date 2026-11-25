@@ -22,6 +22,49 @@ export interface CodeProjectLinkedThreadFact {
     readonly observedAt: string;
     readonly repository?: CodeProjectPullRequestRepositoryIdentity;
   }>;
+  /** Pull requests a person unlinked from the thread, each with when. */
+  readonly unlinkedPullRequests?: ReadonlyArray<{
+    readonly owner: string;
+    readonly repository: string;
+    readonly number: number;
+    readonly unlinkedAt: string;
+  }>;
+}
+
+/** Whether two repository names are one repository. */
+export type SameCodeProjectRepository = (
+  left: CodeProjectPullRequestRepositoryIdentity,
+  right: CodeProjectPullRequestRepositoryIdentity,
+) => boolean;
+
+/**
+ * Whether a person's unlink still holds for this pull request: it does until
+ * the thread touches the pull request again after it (a later record of it,
+ * in the repository it was recorded for). An unlink and a touch each name the
+ * repository as it was called then, so a host that knows renames passes its
+ * own comparison.
+ */
+export function threadUnlinkedPullRequest(
+  thread: CodeProjectLinkedThreadFact,
+  pullRequest: {
+    readonly repository: CodeProjectPullRequestRepositoryIdentity;
+    readonly number: number;
+  },
+  same: SameCodeProjectRepository = sameRepository,
+): boolean {
+  const unlinks = thread.unlinkedPullRequests?.filter(
+    (entry) =>
+      entry.number === pullRequest.number &&
+      same({ owner: entry.owner, name: entry.repository }, pullRequest.repository),
+  );
+  if (unlinks === undefined || unlinks.length === 0) return false;
+  const touches = (thread.pullRequestNumbers ?? []).filter(
+    (entry) =>
+      entry.number === pullRequest.number &&
+      same(entry.repository ?? thread.repository, pullRequest.repository),
+  );
+  // Unlinked under two names of one repository, the newest unlink decides.
+  return unlinks.some((unlink) => !touches.some((entry) => entry.observedAt > unlink.unlinkedAt));
 }
 
 export interface CodeProjectPullRequestMatchTarget {
@@ -40,17 +83,20 @@ export interface CodeProjectLinkedThreadEvidence {
 /**
  * Exact linked-thread evidence only: the delivery branch in the thread's own
  * repository, or a recorded pull-request number in the repository it was
- * recorded for (the thread's own, or the one a tool call named). Title text
- * and loose branch fragments never match.
+ * recorded for (the thread's own, or the one a tool call named). A person's
+ * unlink wins over both until the thread touches the pull request again.
+ * Title text and loose branch fragments never match.
  */
 export function matchLinkedThreadsToPullRequest(input: {
   readonly pullRequest: CodeProjectPullRequestMatchTarget;
   readonly threads: ReadonlyArray<CodeProjectLinkedThreadFact>;
+  readonly sameRepository?: SameCodeProjectRepository;
 }): ReadonlyArray<CodeProjectLinkedThreadEvidence> {
+  const same = input.sameRepository ?? sameRepository;
   const matches: CodeProjectLinkedThreadEvidence[] = [];
   for (const thread of input.threads) {
     if (thread.projectId !== input.pullRequest.projectId) continue;
-    const ownRepository = sameRepository(thread.repository, input.pullRequest.repository);
+    const ownRepository = same(thread.repository, input.pullRequest.repository);
     const byBranch =
       ownRepository &&
       thread.deliveryBranch !== undefined &&
@@ -61,9 +107,10 @@ export function matchLinkedThreadsToPullRequest(input: {
           entry.number === input.pullRequest.number &&
           (entry.repository === undefined
             ? ownRepository
-            : sameRepository(entry.repository, input.pullRequest.repository)),
+            : same(entry.repository, input.pullRequest.repository)),
       ) === true;
     if (!byBranch && !byIdentity) continue;
+    if (threadUnlinkedPullRequest(thread, input.pullRequest, same)) continue;
     matches.push({ threadId: thread.threadId, title: thread.title });
   }
   return matches;

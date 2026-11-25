@@ -290,9 +290,11 @@
   list-style: none;
 }
 
+/* A row is at least the old fixed height and grows for a title on two lines,
+   so a long title is read rather than cut at one line's width. */
 .environment-thread-pr {
   display: flex;
-  height: var(--environment-thread-pr-h);
+  min-height: var(--environment-thread-pr-h);
   min-width: 0;
   align-items: center;
 }
@@ -302,10 +304,11 @@
   flex: 1 1 auto;
   width: auto;
   min-width: 0;
-  height: 100%;
+  height: auto;
+  min-height: var(--environment-thread-pr-h);
   align-items: center;
   gap: var(--oct-space-2);
-  padding: 0 var(--oct-space-1) 0 var(--environment-row-inset);
+  padding: var(--oct-space-1) var(--oct-space-1) var(--oct-space-1) var(--environment-row-inset);
   text-align: left;
 }
 
@@ -369,9 +372,37 @@
 }
 
 .environment-thread-pr__title {
+  display: -webkit-box;
   color: var(--oct-fg);
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-medium);
+  line-height: 1.35;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* The next step a pull request waits on sits at the end of the row's second
+   line, so the title keeps the row's width: beside the title it crushed both
+   lines to a few letters. It stays a sibling of the row's button, laid over
+   the meta line, which leaves it the room. */
+.environment-thread-pr {
+  position: relative;
+}
+
+.environment-thread-pr[data-step] .environment-thread-pr__meta {
+  padding-inline-end: 76px;
+}
+
+.environment-thread-pr__step {
+  position: absolute;
+  inset-inline-end: calc(var(--oct-space-1) + 28px);
+  bottom: var(--oct-space-1);
+  gap: 2px;
+  height: 20px;
+  min-height: 20px;
+  padding: 0 var(--oct-space-2);
+  font-size: var(--oct-text-xs);
 }
 
 .environment-thread-pr__meta {

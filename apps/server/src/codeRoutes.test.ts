@@ -504,6 +504,69 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  it("lets only a local window or a device its person paired at Full unlink a pull request from a thread", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated" }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
+    const unlink = (
+      device?: Pick<
+        Parameters<typeof createRemoteDevicePrincipal>[0],
+        "admittedBy" | "accessLevel"
+      > & { readonly origin?: string },
+    ) => {
+      const sent = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "unlink-code-thread-pull-request",
+          threadId,
+          expectedVersion: 1,
+          owner: "acme",
+          repository: "app",
+          number: 917,
+        }),
+      });
+      if (device === undefined) return sent;
+      bindPrincipalRouteContext(sent, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000942" as never,
+          ...device,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return sent;
+    };
+
+    for (const device of [
+      {},
+      { admittedBy: "hub-roster" as const },
+      { admittedBy: "host-person" as const, accessLevel: "approve-and-steer" as const },
+      { admittedBy: "host-person" as const, accessLevel: "read-only" as const },
+      { admittedBy: "host-person" as const, origin: AGENT_ACCESS_ORIGIN },
+    ]) {
+      const refused = await route(unlink(device));
+      expect(refused?.status).toBe(403);
+      expect(await refused?.json()).toMatchObject({
+        category: "unauthorized",
+        message:
+          "Only you, from a window or a device you paired, can unlink a pull request from a thread.",
+      });
+    }
+    expect(execute).not.toHaveBeenCalled();
+
+    expect((await route(unlink()))?.status).toBe(200);
+    expect((await route(unlink({ admittedBy: "host-person" })))?.status).toBe(200);
+    expect(JSON.stringify(execute.mock.lastCall)).toContain(
+      JSON.stringify({ kind: "remote-device", actorId: remoteDeviceId, deviceId: remoteDeviceId }),
+    );
+  });
+
   it("refuses setting or clearing a coordinator done-when condition from a non-person principal", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });

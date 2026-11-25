@@ -85,6 +85,35 @@ describe("Code Project pull-request policy", () => {
     ).toEqual([]);
   });
 
+  it("keeps a pull request a person unlinked off the thread until the thread touches it again", () => {
+    const pullRequest = {
+      projectId: "project-a",
+      repository: octantRepo,
+      number: 12,
+      headBranch: "feature/manual-refresh",
+      title: "List active pull requests",
+    };
+    const thread = (observedAt: string) => ({
+      threadId: "thread-a",
+      projectId: "project-a",
+      title: "Manual refresh",
+      repository: octantRepo,
+      deliveryBranch: "feature/manual-refresh",
+      pullRequestNumbers: [{ number: 12, observedAt }],
+      unlinkedPullRequests: [
+        { owner: "octant", repository: "octant", number: 12, unlinkedAt: "2026-11-24T10:00:00Z" },
+      ],
+    });
+    // Unlinked after its last touch: neither the branch nor the identity links it.
+    expect(
+      matchLinkedThreadsToPullRequest({ pullRequest, threads: [thread("2026-11-24T09:00:00Z")] }),
+    ).toEqual([]);
+    // Touched again after the unlink: linked again.
+    expect(
+      matchLinkedThreadsToPullRequest({ pullRequest, threads: [thread("2026-11-24T11:00:00Z")] }),
+    ).toEqual([{ threadId: "thread-a", title: "Manual refresh" }]);
+  });
+
   it("never matches a linked thread by title or loose branch text", () => {
     expect(
       matchLinkedThreadsToPullRequest({

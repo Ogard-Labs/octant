@@ -75,6 +75,29 @@ export function markCodeThreadDone(thread: CodeThread): CodeCommand {
   };
 }
 
+/**
+ * The person's unlink of one pull request from the thread: the thread stops
+ * listing it and stops being one of its linked threads until it touches the
+ * pull request again.
+ */
+export function unlinkCodeThreadPullRequest(
+  thread: CodeThread,
+  pullRequest: {
+    readonly repositoryOwner: string;
+    readonly repositoryName: string;
+    readonly number: number;
+  },
+): CodeCommand {
+  return {
+    kind: "unlink-code-thread-pull-request",
+    threadId: thread.id,
+    expectedVersion: thread.version,
+    owner: pullRequest.repositoryOwner,
+    repository: pullRequest.repositoryName,
+    number: pullRequest.number,
+  };
+}
+
 export function snoozeCodeThread(thread: CodeThread, until: UtcTimestamp): CodeCommand {
   return {
     kind: "snooze-code-thread",

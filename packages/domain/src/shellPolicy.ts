@@ -1876,6 +1876,19 @@ function requirePane(layout: WorkspaceLayoutNode, paneId: PaneId): WorkspacePane
  * rather than content, so two of them are never "the same" — a split may hold
  * several.
  */
+function samePullRequestIdentity(
+  a: Extract<WorkspaceTab, { readonly kind: "code-pr" }>["pullRequest"],
+  b: Extract<WorkspaceTab, { readonly kind: "code-pr" }>["pullRequest"],
+): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return (
+    String(a.projectId) === String(b.projectId) &&
+    a.repositoryOwner.toLowerCase() === b.repositoryOwner.toLowerCase() &&
+    a.repositoryName.toLowerCase() === b.repositoryName.toLowerCase() &&
+    a.number === b.number
+  );
+}
+
 export function sameWorkspaceSurface(a: WorkspaceTab, b: WorkspaceTab): boolean {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
@@ -1901,9 +1914,15 @@ export function sameWorkspaceSurface(a: WorkspaceTab, b: WorkspaceTab): boolean 
       );
     case "code-overview":
     case "code-git":
-    case "code-pr":
     case "code-local-review":
       return "threadId" in b && String(a.threadId) === String(b.threadId);
+    case "code-pr":
+      // One tab per pull request: the thread's own, and each it worked on.
+      return (
+        b.kind === "code-pr" &&
+        String(a.threadId) === String(b.threadId) &&
+        samePullRequestIdentity(a.pullRequest, b.pullRequest)
+      );
     case "code-file":
       return (
         b.kind === "code-file" &&

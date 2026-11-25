@@ -15,6 +15,7 @@ import {
   Link2,
   MessageSquare,
   MoreHorizontal,
+  Unplug,
   RefreshCw,
   TriangleAlert,
 } from "../ui/icons";
@@ -150,7 +151,7 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
   const [allChecks, setAllChecks] = useState(false);
   const [copied, setCopied] = useState(false);
   const [closing, setClosing] = useState(false);
-  const [closeNotice, setCloseNotice] = useState<{
+  const [notice, setNotice] = useState<{
     readonly tone: "done" | "refused";
     readonly text: string;
   }>();
@@ -184,26 +185,37 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
   async function closeOrReopen(): Promise<void> {
     if (act === undefined) return;
     setClosing(true);
-    setCloseNotice(undefined);
+    setNotice(undefined);
     try {
       const outcome = await act(closed ? { kind: "reopen" } : { kind: "close" });
       if (outcome.status === "done") {
-        setCloseNotice({
+        setNotice({
           tone: "done",
           text: closed ? "Reopened the pull request." : "Closed the pull request.",
         });
         props.onRefresh?.();
       } else {
-        setCloseNotice({ tone: "refused", text: actionRefusalCopy(outcome) });
+        setNotice({ tone: "refused", text: actionRefusalCopy(outcome) });
       }
     } catch (error) {
-      setCloseNotice({
+      setNotice({
         tone: "refused",
         text: isUnauthorized(error) ? DESKTOP_ONLY : "That did not go through. Try again.",
       });
     } finally {
       setClosing(false);
     }
+  }
+
+  async function unlinkFromThread(): Promise<void> {
+    if (props.onUnlinkFromThread === undefined) return;
+    setNotice(undefined);
+    const outcome = await props.onUnlinkFromThread();
+    setNotice(
+      outcome.status === "ok"
+        ? { tone: "done", text: "Unlinked from this thread." }
+        : { tone: "refused", text: outcome.message },
+    );
   }
 
   return (
@@ -331,7 +343,7 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                 </OctantMenuRoot>
               </div>
             )}
-            {act === undefined || merged ? null : (
+            {(act === undefined || merged) && props.onUnlinkFromThread === undefined ? null : (
               <OctantMenuRoot>
                 <OctantTooltip label="More">
                   <OctantMenuTrigger
@@ -344,9 +356,17 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                 <OctantMenuPortal>
                   <OctantMenuPositioner align="end">
                     <OctantMenuPopup aria-label="More actions" className="min-w-[13rem]">
-                      <OctantMenuItem disabled={closing} onClick={() => void closeOrReopen()}>
-                        {closed ? "Reopen pull request" : "Close pull request"}
-                      </OctantMenuItem>
+                      {props.onUnlinkFromThread === undefined ? null : (
+                        <OctantMenuItem onClick={() => void unlinkFromThread()}>
+                          <Unplug aria-hidden="true" size={14} />
+                          Unlink from this thread
+                        </OctantMenuItem>
+                      )}
+                      {act === undefined || merged ? null : (
+                        <OctantMenuItem disabled={closing} onClick={() => void closeOrReopen()}>
+                          {closed ? "Reopen pull request" : "Close pull request"}
+                        </OctantMenuItem>
+                      )}
                     </OctantMenuPopup>
                   </OctantMenuPositioner>
                 </OctantMenuPortal>
@@ -414,13 +434,13 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
             {mergeOutcomeCopy(merge.outcome)}
           </p>
         )}
-        {closeNotice === undefined ? null : (
+        {notice === undefined ? null : (
           /* ui-boundary-exception: compact-status */
           <p
-            className={`code-pr-review__merge-result code-pr-review__merge-result--${closeNotice.tone === "done" ? "merged" : "refused"} pr-detail__notice`}
-            role={closeNotice.tone === "done" ? "status" : "alert"}
+            className={`code-pr-review__merge-result code-pr-review__merge-result--${notice.tone === "done" ? "merged" : "refused"} pr-detail__notice`}
+            role={notice.tone === "done" ? "status" : "alert"}
           >
-            {closeNotice.text}
+            {notice.text}
           </p>
         )}
 

@@ -6,7 +6,7 @@ import type {
 } from "@octant/contracts";
 import { pullRequestStateMark } from "../code/pullRequestState";
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
-import { GitMerge, MoreHorizontal } from "../ui/icons";
+import { ArrowUpRight, GitMerge, MoreHorizontal } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantMenu } from "../ui/base/OctantMenu";
 
@@ -22,7 +22,43 @@ export interface EnvironmentThreadPullRequestsProps {
   readonly onOpen?: ((identity: ThreadBoardPullRequestIdentity) => void) | undefined;
   /** Opens the pull request's page on GitHub. Absent hides the menu entry. */
   readonly onOpenOnGithub?: ((identity: ThreadBoardPullRequestIdentity) => void) | undefined;
+  /**
+   * Opens an address outside Octant: a pull request's checks or conflicts on
+   * GitHub, for the row's Fix and Resolve. Absent, those rows offer no step.
+   */
+  readonly onOpenExternal?: ((url: string) => void) | undefined;
 }
+
+/**
+ * The one next step a row offers, by what blocks the pull request first:
+ * conflicts must be resolved before checks can be fixed, and only a pull
+ * request with neither, approved and freshly observed, is ready to merge.
+ * Fix and Resolve open the place on GitHub where that work is seen; Merge
+ * opens the pull request, whose Merge asks for the method before it acts.
+ */
+export type ThreadPullRequestNextStep =
+  | { readonly kind: "resolve"; readonly url: string }
+  | { readonly kind: "fix"; readonly url: string }
+  | { readonly kind: "merge" };
+
+export function threadPullRequestNextStep(summary: Summary): ThreadPullRequestNextStep | undefined {
+  if (summary.state !== "open" && summary.state !== "draft") return undefined;
+  const url = githubPullRequestUrl(summary.identity);
+  if (summary.mergeability === "conflicting" && url !== undefined) {
+    return { kind: "resolve", url: `${url}/conflicts` };
+  }
+  if (summary.checks === "failing" && url !== undefined)
+    return { kind: "fix", url: `${url}/checks` };
+  // One already in the merge queue or set to merge itself needs no Merge.
+  if (summary.readyToMerge && summary.merging === undefined) return { kind: "merge" };
+  return undefined;
+}
+
+const NEXT_STEP_LABEL: Readonly<Record<ThreadPullRequestNextStep["kind"], string>> = {
+  resolve: "Resolve",
+  fix: "Fix",
+  merge: "Merge",
+};
 
 /** How many pull requests the thread has had, shown or not. */
 export function threadPullRequestCount(
@@ -186,6 +222,7 @@ export function EnvironmentThreadPullRequests(props: EnvironmentThreadPullReques
           <ThreadPullRequestRow
             key={`${String(summary.identity.projectId)}:${summary.identity.repositoryOwner}/${summary.identity.repositoryName}#${String(summary.identity.number)}`}
             onOpen={props.onOpen}
+            onOpenExternal={props.onOpenExternal}
             onOpenOnGithub={props.onOpenOnGithub}
             summary={summary}
           />
@@ -219,6 +256,7 @@ function ThreadPullRequestRow(props: {
   readonly summary: Summary;
   readonly onOpen: EnvironmentThreadPullRequestsProps["onOpen"];
   readonly onOpenOnGithub: EnvironmentThreadPullRequestsProps["onOpenOnGithub"];
+  readonly onOpenExternal: EnvironmentThreadPullRequestsProps["onOpenExternal"];
 }) {
   const summary = props.summary;
   const number = String(summary.identity.number);
@@ -228,6 +266,7 @@ function ThreadPullRequestRow(props: {
   const url = githubPullRequestUrl(summary.identity);
   const openOnGithub = props.onOpenOnGithub;
   const onOpen = props.onOpen;
+  const step = threadPullRequestNextStep(summary);
   const menu = [
     ...(openOnGithub === undefined || url === undefined
       ? []
@@ -270,7 +309,16 @@ function ThreadPullRequestRow(props: {
     </>
   );
   return (
-    <li className="environment-thread-pr">
+    <li
+      className="environment-thread-pr"
+      data-step={
+        step === undefined ||
+        (step.kind !== "merge" && props.onOpenExternal === undefined) ||
+        (step.kind === "merge" && onOpen === undefined)
+          ? undefined
+          : step.kind
+      }
+    >
       {onOpen === undefined ? (
         <div aria-label={rowName(summary)} className="environment-thread-pr__open" role="group">
           {content}
@@ -285,6 +333,32 @@ function ThreadPullRequestRow(props: {
           variant="bare"
         >
           {content}
+        </OctantButton>
+      )}
+      {step === undefined ||
+      (step.kind !== "merge" && props.onOpenExternal === undefined) ||
+      (step.kind === "merge" && onOpen === undefined) ? null : (
+        <OctantButton
+          aria-label={`${NEXT_STEP_LABEL[step.kind]} pull request #${number}${step.kind === "merge" ? "" : " on GitHub"}`}
+          className="environment-thread-pr__step window-no-drag"
+          data-step={step.kind}
+          onClick={() => {
+            if (step.kind === "merge") onOpen?.(summary.identity);
+            else props.onOpenExternal?.(step.url);
+          }}
+          size="sm"
+          title={
+            step.kind === "resolve"
+              ? "Resolve the conflicts on GitHub"
+              : step.kind === "fix"
+                ? "See the failing checks on GitHub"
+                : "Open the pull request to merge it"
+          }
+          type="button"
+          variant="ghost"
+        >
+          {NEXT_STEP_LABEL[step.kind]}
+          {step.kind === "merge" ? null : <ArrowUpRight aria-hidden="true" size={12} />}
         </OctantButton>
       )}
       {/* A sibling of the row, never inside it: a control inside a button is

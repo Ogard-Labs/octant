@@ -67,6 +67,7 @@ import {
   type ProviderExecutionPolicy,
   type ProviderUsageLimit,
   ThreadBoardPullRequestSummaries,
+  type ThreadBoardPullRequestIdentity,
   ThreadTouchedIssues,
   type ThreadLiveStep,
 } from "@octant/contracts";
@@ -131,6 +132,7 @@ import {
   pinCodeThread,
   renameCodeThread,
   markCodeThreadDone,
+  unlinkCodeThreadPullRequest,
   reopenCodeThread,
   setCodeThreadCoordinator,
   setCodeThreadCoordinatorBounds,
@@ -2672,6 +2674,16 @@ export function useCodeController(options: CodeControllerOptions) {
     (threadId: CodeThreadId) => restCommand(threadId, markCodeThreadDone),
     [restCommand],
   );
+  const unlinkPullRequest = useCallback(
+    (
+      threadId: CodeThreadId,
+      pullRequest: Pick<
+        ThreadBoardPullRequestIdentity,
+        "repositoryOwner" | "repositoryName" | "number"
+      >,
+    ) => restCommand(threadId, (thread) => unlinkCodeThreadPullRequest(thread, pullRequest)),
+    [restCommand],
+  );
   const snoozeThread = useCallback(
     (threadId: CodeThreadId, until: string) =>
       restCommand(threadId, (thread) => snoozeCodeThread(thread, decodeUtcTimestamp(until))),
@@ -3684,6 +3696,7 @@ export function useCodeController(options: CodeControllerOptions) {
     completeThread,
     reopenThread,
     markThreadDone,
+    unlinkPullRequest,
     snoozeThread,
     wakeThread,
     moveThread,

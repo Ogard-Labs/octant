@@ -2802,7 +2802,8 @@ without the spinner. See
 [Workspace](workspace.md).
 
 Main-pane content opens in a closable tab beside its conversation. Files, previews,
-and canvases retain navigation references, and selecting one uses the ordinary
+canvases and a Code thread's pull requests (one tab per pull request, opened from
+the Environment's list) retain navigation references, and selecting one uses the ordinary
 host-authorized open command. Image creation is a pane-owned view that retains
 its draft while the user switches back to the conversation. The strip occupies
 the existing pane title row rather than adding a second header.
@@ -3684,7 +3685,7 @@ first, under a small "Pull requests" caption. Past ten, the rest fold behind
 one quiet "Show more (n)" row that becomes "Show less", as the sidebar folds a
 long thread list. Each pull request is one row of fixed height with the
 state's mark in its colour (open, draft, merged, closed, or a neutral mark when
-the state is not known), the title on one line, then the repository, the
+the state is not known), the title on up to two lines, then the repository, the
 number and the state in the meta ink, with "Ready to merge" and a stale or
 unavailable reading said in words, then the pull request's added and removed
 lines as "+A −D" in the two inks of the changes row. An open pull request that
@@ -3706,13 +3707,32 @@ pull request known only from a thread, and a failed queue read send nothing for
 it, and an absent fact draws nothing (never a zero, never "0/0"). A merged or
 closed pull request keeps its line counts and has no checks or merging state.
 Pressing a row
-opens that pull request in the app; a "…" menu beside it (More for pull request
+opens that pull request as a tab of the thread's pane, named by its number
+(#917), drawn with the Pull requests page's reading view (Summary, Changes and
+Timeline, the status column, Merge with its method and confirmation); its More
+actions menu starts with **Unlink from this thread**, which journals the
+person's unlink on the thread: the thread stops listing the pull request and
+stops being one of its linked threads (for babysitting and line notes too)
+until the thread touches it again, whatever the branch or an earlier
+operation said, and across a repository rename. The thread keeps its newest 50
+unlinks; an older one lapses. The page says when the unlink is done or why it
+was refused. Only a person may unlink (maintainer decision,
+2026-11-24), at a window on this computer or on a device they paired at Full; a
+routine, an agent grant, a device paired at a narrower level and a device only
+the hub introduced are refused (maintainer decision, 2026-11-25). A "…" menu beside the row (More for pull request
 #N), shown on hover and keyboard focus and always on touch, offers Open on
 GitHub and Copy link. The list is the host's cached reading: opening the strip
 reaches no forge, and the link is built from the repository and number, never
 taken as text. The host sends at most 50 and a count of the rest, which the
 list says as "N more not shown". A thread with no pull request shows no caption
 and no row, and the folded Changes summary adds the count ("Clean · 1 PR").
+An open or draft pull request ends with the one next step it waits on, by
+what blocks it first: **Resolve ↗** while it has conflicts, which opens its
+conflicts on GitHub; **Fix ↗** while its checks fail, which opens its checks on
+GitHub; and **Merge** once it is ready to merge, which opens the pull request,
+whose Merge asks for the method before it acts. A pull request already in the
+merge queue or set to merge on its own offers no Merge, and a merged or closed
+one offers no step (maintainer decision, 2026-11-24).
 The Project's own open pull requests stay under Delivery (maintainer request,
 2026-11-16).
 **The thread's issues.** Under its pull requests, a small "Issues" caption lists

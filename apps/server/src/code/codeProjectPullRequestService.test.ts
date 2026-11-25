@@ -944,6 +944,42 @@ describe("CodeProjectPullRequestService", () => {
     });
   });
 
+  it("leaves a thread off a pull request a person unlinked, even on rows cached before the unlink", async () => {
+    const unlinkedPullRequests: Array<{
+      owner: string;
+      repository: string;
+      number: number;
+      unlinkedAt: string;
+    }> = [];
+    const { service } = serviceFixture({
+      threads: [
+        {
+          threadId: String(threadId),
+          projectId: String(projectA),
+          title: "Manual refresh",
+          repository: { owner: "octant", name: "octant" },
+          deliveryBranch: "feature/manual-refresh",
+          pullRequestNumbers: [],
+          unlinkedPullRequests,
+        },
+      ],
+    });
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const before = await service.boardSnapshot(windowId);
+    expect(before.rows.find((row) => row.number === 12)?.linkedThreads).toEqual([
+      { threadId, title: "Manual refresh" },
+    ]);
+
+    unlinkedPullRequests.push({
+      owner: "octant",
+      repository: "octant",
+      number: 12,
+      unlinkedAt: "2999-01-01T00:00:00Z",
+    });
+    const after = await service.boardSnapshot(windowId);
+    expect(after.rows.find((row) => row.number === 12)?.linkedThreads ?? []).toEqual([]);
+  });
+
   it("links a thread to the pull request a tool call wrote to, and never to one outside the Project", async () => {
     const { service } = serviceFixture({
       knownPullRequests: [

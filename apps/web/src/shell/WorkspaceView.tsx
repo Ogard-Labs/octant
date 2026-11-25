@@ -124,7 +124,7 @@ import type { ChatThread, ChatThreadId, ChatTurnId } from "@octant/contracts/cha
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useChatController } from "../chat/useChatController";
 import type { ChatController, ChatReadCursorStore } from "../chat/useChatController";
-import type { CodeController } from "../code/useCodeController";
+import type { CodeController, CodeThreadRestOutcome } from "../code/useCodeController";
 import { useCodeThreadController, type CodeThreadControllers } from "../code/codeThreadControllers";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
@@ -455,6 +455,24 @@ export interface WorkspaceViewProps {
    */
   /** Pins a Code thread's terminal to the focus zone. */
   readonly onPinTerminal?: CodeWorkspaceProps["onPinTerminal"];
+  /**
+   * Opens one pull request a Code thread worked on as a tab in that thread's
+   * pane. Absent, the Environment opens it in the Review dock as before.
+   */
+  readonly onOpenThreadPullRequestTab?: (
+    threadId: CodeThreadId,
+    pullRequest: ThreadBoardPullRequestIdentity,
+    title: string,
+  ) => void;
+  /**
+   * Draws such a tab: the Pull requests page's reading view for the pull
+   * request, with Unlink from this thread in its More actions.
+   */
+  readonly renderThreadPullRequest?: (input: {
+    readonly threadId: CodeThreadId;
+    readonly pullRequest: ThreadBoardPullRequestIdentity;
+    readonly onUnlink: () => Promise<CodeThreadRestOutcome>;
+  }) => React.ReactNode;
   readonly onPinCanvasInFocusZone?: (request: {
     readonly canvasId: CanvasId;
     readonly title: string;
@@ -1654,6 +1672,18 @@ function renderCodeTab(
   paneId: PaneId,
   codeController: CodeController,
 ): React.ReactNode {
+  if (
+    tab.kind === "code-pr" &&
+    tab.pullRequest !== undefined &&
+    props.renderThreadPullRequest !== undefined
+  ) {
+    const pullRequest = tab.pullRequest;
+    return props.renderThreadPullRequest({
+      threadId: tab.threadId,
+      pullRequest,
+      onUnlink: () => codeController.unlinkPullRequest(tab.threadId, pullRequest),
+    });
+  }
   const project = resolveCodeTabProject(tab, props);
   const browserAutomationClient = props.browserAutomationClient;
   const onOpenSurface = props.onOpenSurface;
@@ -3433,17 +3463,22 @@ function threadPullRequestProps(
   readonly onOpenThreadPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly onOpenThreadPullRequestOnGithub?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly threadIssues?: ThreadTouchedIssues;
-  readonly onOpenThreadIssue: (url: string) => void;
+  readonly onOpenThreadPage: (url: string) => void;
 } {
   const entry = codeController.navigation?.find((item) => String(item.threadId) === threadId);
   const summaries = entry?.pullRequestSummaries;
   const issues = entry?.touchedIssues;
-  const open = props.onSelectPullRequest;
+  const openTab = props.onOpenThreadPullRequestTab;
+  const open =
+    openTab === undefined
+      ? props.onSelectPullRequest
+      : (identity: ThreadBoardPullRequestIdentity) =>
+          openTab(decodeCodeThreadId(threadId), identity, `#${String(identity.number)}`);
   const hostBridge = props.hostBridge;
   return {
     ...(summaries === undefined ? {} : { threadPullRequests: summaries }),
     ...(issues === undefined ? {} : { threadIssues: issues }),
-    onOpenThreadIssue: (url: string) => openExternalUrl(hostBridge, url),
+    onOpenThreadPage: (url: string) => openExternalUrl(hostBridge, url),
     ...(open === undefined ? {} : { onOpenThreadPullRequest: open }),
     onOpenThreadPullRequestOnGithub: (identity: ThreadBoardPullRequestIdentity) => {
       const url = githubPullRequestUrl(identity);

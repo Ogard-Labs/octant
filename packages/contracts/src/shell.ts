@@ -67,6 +67,7 @@ import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { ProjectId } from "./projects";
+import { ThreadBoardPullRequestIdentity } from "./threadBoardPullRequests";
 import { CanvasId } from "./canvas";
 import {
   AutoCompactIdleMinutes,
@@ -1519,7 +1520,18 @@ const CodeTestWorkspaceTab = Schema.Struct({
   testRunId: Schema.optional(CodeTestRunId),
 }).annotations(strict);
 const CodeGitWorkspaceTab = codeThreadSurface("code-git");
-const CodePrWorkspaceTab = codeThreadSurface("code-pr");
+/**
+ * A Code thread's pull request tab. Without `pullRequest` it is the thread's
+ * own delivery pull request, observed from its checkout. With it, it is one
+ * pull request the thread worked on, drawn with the Pull requests page's
+ * reading view; the identity only names it, and every read of it still goes
+ * through the host's window-authorized pull-request routes.
+ */
+const CodePrWorkspaceTab = Schema.Struct({
+  kind: Schema.Literal("code-pr"),
+  ...CodeWorkspaceTabFields,
+  pullRequest: Schema.optional(ThreadBoardPullRequestIdentity),
+}).annotations(strict);
 const CodeLocalReviewWorkspaceTab = codeThreadSurface("code-local-review");
 const AppleWorkbenchWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("apple-workbench"),
