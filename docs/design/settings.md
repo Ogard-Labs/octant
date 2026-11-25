@@ -474,7 +474,9 @@ line; a paired device uses the section as a local window does (maintainer
 decision, 2026-11-12; server policy admits a person-paired device and refuses
 hub-introduced devices; paired UI follow-up remains)
 ([rules](../architecture.md#modes-chat-work-and-code)).
-The same section starts with the choices for new and kept worktrees: **Branch
+The same section starts with the choices for new and kept worktrees (shown only
+for a host whose settings answer carries them; an earlier host would reject the
+update): **Branch
 prefix** (a text field, `octant/` unless changed, checked as a branch prefix when
 it loses focus; a segment Windows reserves is refused), **Branch name** (a select:
 prefix and short id, or prefix and words from the prompt, which leave out secrets
