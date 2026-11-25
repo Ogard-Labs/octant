@@ -47,6 +47,8 @@ export interface NewThread {
   readonly openNewThread: () => void;
   /** Why this computer takes no new thread from the phone; New is off while it stands. */
   readonly accessReason: string | undefined;
+  /** What a new thread waits on besides access: a computer gone stale. */
+  readonly staleReason: string | undefined;
 }
 
 const Context = createContext<NewThread | undefined>(undefined);
@@ -373,8 +375,15 @@ export function NewThreadProvider(props: {
     setOpen(true);
   }, []);
   const value = useMemo<NewThread>(
-    () => ({ openNewThread, accessReason: placementAccessReason }),
-    [openNewThread, placementAccessReason],
+    () => ({
+      openNewThread,
+      accessReason: placementAccessReason,
+      staleReason:
+        placementTransport === undefined || staleGate.allowProductMutations
+          ? undefined
+          : staleGate.message,
+    }),
+    [openNewThread, placementAccessReason, placementTransport, staleGate],
   );
 
   return (

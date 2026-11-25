@@ -8,13 +8,14 @@ import {
 } from "@octant/client-runtime";
 import { MOBILE_COPY, MOBILE_SCREEN_TITLES } from "../copy";
 import { radii, space, typography, useTheme } from "../../design-system";
+import { NEW_BUTTON_CLEARANCE } from "../navigation/places";
 import { ScreenHeader } from "../navigation/ScreenHeader";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { ListRow, ListSection, SegmentedControl } from "../ui/NativeChrome";
 import { searchHitsBesideList } from "./agentsListPresentation";
 import { useMobileThreads } from "./MobileThreadsContext";
-import { ThreadReadFailures } from "./ThreadReadFailures";
+import { ThreadListNotices } from "./ThreadListNotices";
 import { ThreadRow } from "./ThreadRow";
 import { filterThreads, type MobileThreadFilter } from "./threadFilters";
 import {
@@ -80,7 +81,7 @@ export function ThreadsScreen(props: {
     };
   }, [query, transports]);
 
-  // A Project leaves the filter with the computer that holds it.
+  // Home can also narrow Threads to one computer.
   const heldProject =
     project !== "all" && inboxHostFilter !== "all" && project.hostId !== inboxHostFilter
       ? "all"
@@ -106,7 +107,7 @@ export function ThreadsScreen(props: {
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        content: { paddingBottom: space.xl, flexGrow: 1 },
+        content: { paddingBottom: NEW_BUTTON_CLEARANCE, flexGrow: 1 },
         control: { paddingHorizontal: space.md, paddingBottom: space.sm },
         chips: { gap: space.sm, paddingHorizontal: space.md },
         chipRow: { flexGrow: 0, marginBottom: space.sm },
@@ -165,7 +166,7 @@ export function ThreadsScreen(props: {
         contentInsetAdjustmentBehavior="automatic"
         keyboardDismissMode="on-drag"
       >
-        <ThreadReadFailures />
+        <ThreadListNotices />
         <View style={styles.control}>
           <SegmentedControl
             onSelect={props.onSelectMode}
@@ -187,9 +188,13 @@ export function ThreadsScreen(props: {
                 setInboxHostFilter("all"),
               )}
               {hosts.map((host) =>
-                chip(`host-${host.hostId}`, host.label, inboxHostFilter === host.hostId, () =>
-                  setInboxHostFilter(host.hostId),
-                ),
+                chip(`host-${host.hostId}`, host.label, inboxHostFilter === host.hostId, () => {
+                  setInboxHostFilter(host.hostId);
+                  // A Project leaves the filter with the computer that holds it.
+                  setProject((held) =>
+                    held !== "all" && held.hostId !== host.hostId ? "all" : held,
+                  );
+                }),
               )}
             </ScrollView>
             {offeredProjects.length === 0 ? null : (

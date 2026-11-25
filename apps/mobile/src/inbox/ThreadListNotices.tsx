@@ -2,11 +2,14 @@ import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { space, typography, useTheme } from "../../design-system";
 import { useMobileThreads } from "./MobileThreadsContext";
+import { useNewThread } from "./NewThreadContext";
 
-/** What could not be read, and a Retry, above whichever list a place shows. */
-export function ThreadReadFailures() {
+/** Why New is off and what could not be read, with a Retry, above a place's list. */
+export function ThreadListNotices() {
   const { colors } = useTheme();
   const { error, failures, hostLabel, refresh } = useMobileThreads();
+  const { accessReason, staleReason } = useNewThread();
+  const reason = accessReason ?? staleReason;
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -17,6 +20,13 @@ export function ThreadReadFailures() {
           lineHeight: 18,
           paddingHorizontal: space.md,
           marginBottom: space.sm,
+        },
+        reason: {
+          color: colors.textSecondary,
+          fontSize: typography.detail.fontSize,
+          lineHeight: 18,
+          paddingHorizontal: space.md,
+          marginBottom: space.md,
         },
         retry: {
           color: colors.accent,
@@ -29,6 +39,15 @@ export function ThreadReadFailures() {
   );
   return (
     <>
+      {reason === undefined ? null : (
+        <Text
+          accessibilityLiveRegion="polite"
+          style={styles.reason}
+          testID="mobile-new-thread-reason"
+        >
+          {reason}
+        </Text>
+      )}
       {error === undefined ? null : (
         <Text style={styles.message} testID="mobile-inbox-error">
           {error}

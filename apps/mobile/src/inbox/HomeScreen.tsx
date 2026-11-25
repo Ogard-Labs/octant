@@ -6,6 +6,7 @@ import { MOBILE_COPY, mobileHostHealthLabel, MOBILE_SCREEN_TITLES } from "../cop
 import { radii, space, typography, useTheme } from "../../design-system";
 import { hostHealthTone } from "../hosts/hostHealthTone";
 import type { CountedThreads } from "../navigation/routes";
+import { NEW_BUTTON_CLEARANCE } from "../navigation/places";
 import { ScreenHeader } from "../navigation/ScreenHeader";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { CountTile } from "../ui/CountTile";
@@ -13,8 +14,7 @@ import { ListRow, ListSection } from "../ui/NativeChrome";
 import { inboxEmptyState } from "./inboxEmptyState";
 import { inboxPriorityRows, inboxStatusCounts } from "./inboxWorkPresentation";
 import { useMobileThreads } from "./MobileThreadsContext";
-import { useNewThread } from "./NewThreadContext";
-import { ThreadReadFailures } from "./ThreadReadFailures";
+import { ThreadListNotices } from "./ThreadListNotices";
 import { ThreadRow } from "./ThreadRow";
 
 export interface HomeScreenProps {
@@ -36,7 +36,6 @@ export function HomeScreen(props: HomeScreenProps) {
   const { colors } = useTheme();
   const { transports, hosts, hostsLoaded, health } = useMobileSession();
   const { rows, loading, refresh } = useMobileThreads();
-  const { accessReason } = useNewThread();
   const emptyState = inboxEmptyState({ hosts, hostsLoaded });
   useFocusEffect(
     useCallback(() => {
@@ -57,14 +56,7 @@ export function HomeScreen(props: HomeScreenProps) {
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        content: { paddingBottom: space.xl, flexGrow: 1 },
-        subhero: {
-          color: colors.textSecondary,
-          fontSize: typography.detail.fontSize,
-          lineHeight: 18,
-          paddingHorizontal: space.md,
-          marginBottom: space.md,
-        },
+        content: { paddingBottom: NEW_BUTTON_CLEARANCE, flexGrow: 1 },
         tiles: {
           flexDirection: "row",
           gap: 10,
@@ -133,12 +125,7 @@ export function HomeScreen(props: HomeScreenProps) {
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
       >
-        {accessReason === undefined ? null : (
-          <Text accessibilityLiveRegion="polite" style={styles.subhero}>
-            {accessReason}
-          </Text>
-        )}
-        <ThreadReadFailures />
+        <ThreadListNotices />
         {emptyState !== undefined ? (
           <View style={styles.firstRun} testID="mobile-home-first-run">
             <Text style={styles.firstRunTitle}>{emptyState.title}</Text>

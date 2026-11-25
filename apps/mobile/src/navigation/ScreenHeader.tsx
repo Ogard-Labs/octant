@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type {
@@ -50,8 +50,22 @@ export function ScreenHeader(props: {
     [colors],
   );
 
-  // No dependency list: actions close over the screen's current state, and
-  // setOptions compares nothing itself.
+  // The header keeps its options until what it shows changes. Handing the
+  // native search field new ones on each keystroke is needless work, so the
+  // handlers are read when they run.
+  const handlers = useRef({ actions, search });
+  handlers.current = { actions, search };
+  const shown = JSON.stringify({
+    title,
+    subtitle,
+    placeholder: search?.placeholder,
+    actions: actions?.map(({ label, icon, disabled, testID }) => ({
+      label,
+      icon,
+      disabled,
+      testID,
+    })),
+  });
   useLayoutEffect(() => {
     const options: NativeStackNavigationOptions = {
       title,
@@ -89,12 +103,14 @@ export function ScreenHeader(props: {
         : {
             headerSearchBarOptions: {
               placeholder: search.placeholder,
-              onChangeText: (event) => search.onChangeText(event.nativeEvent.text),
-              onCancelButtonPress: () => search.onChangeText(""),
+              onChangeText: (event) =>
+                handlers.current.search?.onChangeText(event.nativeEvent.text),
+              onCancelButtonPress: () => handlers.current.search?.onChangeText(""),
             },
           }),
     };
     navigation.setOptions(options);
-  });
+    // `shown` stands for every value the options draw.
+  }, [navigation, shown, styles]);
   return null;
 }

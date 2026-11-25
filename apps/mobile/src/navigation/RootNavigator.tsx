@@ -465,7 +465,9 @@ export function RootNavigator(props: RootNavigatorProps) {
   return (
     <View style={styles.fill} testID="octant-mobile-shell">
       {linkNotice === undefined ? null : (
-        <LinkNotice onDismiss={() => setLinkNotice(undefined)} text={linkNotice} />
+        <SafeAreaView edges={environment.kind === "mock" ? [] : ["top"]}>
+          <LinkNotice onDismiss={() => setLinkNotice(undefined)} text={linkNotice} />
+        </SafeAreaView>
       )}
       <ShellContext.Provider value={shell}>
         <MobileThreadsProvider>

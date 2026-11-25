@@ -78,3 +78,6 @@ export function placeFor(id: string): MobilePlaceId {
 export function screenHidesBar(screen: string): boolean {
   return screen === "thread";
 }
+
+/** Room under a place's list for New, which floats over it where the bar has no place for it. */
+export const NEW_BUTTON_CLEARANCE = 96;

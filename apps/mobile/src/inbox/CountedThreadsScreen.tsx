@@ -9,7 +9,7 @@ import { ScreenHeader } from "../navigation/ScreenHeader";
 import { ListSection } from "../ui/NativeChrome";
 import { inboxCountedRows } from "./inboxWorkPresentation";
 import { useMobileThreads } from "./MobileThreadsContext";
-import { ThreadReadFailures } from "./ThreadReadFailures";
+import { ThreadListNotices } from "./ThreadListNotices";
 import { ThreadRow } from "./ThreadRow";
 
 const COUNTED: Readonly<
@@ -50,7 +50,7 @@ export function CountedThreadsScreen(props: {
     <View style={{ flex: 1 }} testID="mobile-counted-threads">
       <ScreenHeader title={COUNTED[props.view].title} />
       <ScrollView contentContainerStyle={styles.content} contentInsetAdjustmentBehavior="automatic">
-        <ThreadReadFailures />
+        <ThreadListNotices />
         {counted.length > 0 ? (
           <ListSection>
             {counted.map((row, index) => (
