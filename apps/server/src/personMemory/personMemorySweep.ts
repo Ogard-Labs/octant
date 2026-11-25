@@ -204,13 +204,24 @@ export function redactForPersonMemory(text: string): string {
 }
 
 /**
- * A credential given after its label (`password:`, `token =`, `the passphrase is`,
- * `secret - `): the whole value goes, up to its closing quote when it is quoted
- * and else to the end of the line, so a value of several words is not left in
- * part (a value on the next line counts). The shared secret shapes name only some labels and take one word.
+ * A credential given after its label (`password:`, `"token": …`, `DB_PASSWORD=`,
+ * `the passphrase is`, `secret - `): the whole value goes, up to its closing
+ * quote when it is quoted and else to the end of the line, so a value of several
+ * words is not left in part (a value on the next line counts). The label may end
+ * a longer name and be marked up or quoted. The shared secret shapes name only
+ * some labels and take one word.
  */
-const LABELLED_CREDENTIAL =
-  /\b(?:password|passwd|passphrase|pwd|secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|token)\b(?:[ \t]*[:=]|[ \t]+(?:is|are)\b|[ \t]+[-\u2013\u2014](?=[ \t]))[ \t]*(?:\n[ \t]*)?(?:"[^"\n]*(?:"|$)|'[^'\n]*(?:'|$)|`[^`\n]*(?:`|$)|[^\n]*)/gim;
+const LABELLED_CREDENTIAL = new RegExp(
+  [
+    /(?:password|passwd|passphrase|pwd|secret|credential|api[_ -]?key|token)s?/,
+    /["'`*_]{0,3}(?:[ \t]*[:=\uff1a][*_]{0,2}|[ \t]+(?:is|are)\b|[ \t]+[-\u2013\u2014](?=[ \t]))/,
+    /[ \t]*(?:\n[ \t]*)?/,
+    /(?:"(?:\\.|[^"\\\n])*(?:"|$)|'(?:\\.|[^'\\\n])*(?:'|$)|`(?:\\.|[^`\\\n])*(?:`|$)|[^\n]*)/,
+  ]
+    .map((part) => part.source)
+    .join(""),
+  "gim",
+);
 
 /**
  * Learns from threads in two ways. A thread the person put away is learned
