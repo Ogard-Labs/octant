@@ -16,10 +16,13 @@ import {
   type CanvasPublicShareReportReason,
   decodeCanvasPublicShareDocument,
 } from "./shareKit.ts";
+import { type CarriedImage, documentImages, encodeShareFile, withShareHead } from "./shareFile.ts";
 
 const DAY_MS = 86_400_000;
 const SWEEP_INTERVAL_MS = 3_600_000;
 const SHARE_ID_PATTERN = /^[A-Za-z0-9_-]{22}$/;
+/** A share write that stopped before its rename. */
+const UNFINISHED_SHARE_PATTERN = /^[A-Za-z0-9_-]{22}\.json\.[0-9a-f]{12}\.tmp$/;
 
 export type RandomBytes = (size: number) => Uint8Array;
 export type Clock = () => number;
@@ -52,6 +55,13 @@ export type ShareLookup =
   | { readonly status: "active"; readonly share: StoredShare }
   | { readonly status: "gone"; readonly tombstone: Tombstone }
   | { readonly status: "missing" };
+
+/** What an image request needs of a live share: the terms that admit it, and its images. */
+export interface ShareImages {
+  readonly passwordHash: string | null;
+  readonly revision: number;
+  readonly images: ReadonlyArray<CarriedImage>;
+}
 
 export type CreateOutcome =
   | { readonly status: "created" }
@@ -88,49 +98,55 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** A stored share's terms: all of it but the document. */
+function readShareTerms(parsed: unknown): Omit<StoredShare, "document"> | undefined {
+  if (!isRecord(parsed)) return undefined;
+  const { createdAt, updatedAt, expiresAt, byteLength, passwordHash, ownerSecretHash } = parsed;
+  const { revision, viewCount } = parsed;
+  if (
+    typeof createdAt !== "string" ||
+    typeof updatedAt !== "string" ||
+    (expiresAt !== null && typeof expiresAt !== "string") ||
+    typeof byteLength !== "number" ||
+    (passwordHash !== null && typeof passwordHash !== "string") ||
+    typeof ownerSecretHash !== "string" ||
+    typeof revision !== "number" ||
+    typeof viewCount !== "number"
+  ) {
+    return undefined;
+  }
+  const creation = parsed.creation;
+  if (
+    creation !== undefined &&
+    (!isRecord(creation) ||
+      typeof creation.requestDigest !== "string" ||
+      !/^[0-9a-f]{64}$/.test(creation.requestDigest) ||
+      (creation.expiresAt !== null && typeof creation.expiresAt !== "string"))
+  )
+    return undefined;
+  return {
+    ...(isRecord(creation) &&
+    typeof creation.requestDigest === "string" &&
+    (creation.expiresAt === null || typeof creation.expiresAt === "string")
+      ? { creation: { requestDigest: creation.requestDigest, expiresAt: creation.expiresAt } }
+      : {}),
+    createdAt,
+    updatedAt,
+    expiresAt,
+    byteLength,
+    passwordHash,
+    ownerSecretHash,
+    revision,
+    viewCount,
+  };
+}
+
 function readStoredShare(text: string): StoredShare | undefined {
   try {
     const parsed: unknown = JSON.parse(text);
-    if (!isRecord(parsed)) return undefined;
-    const { createdAt, updatedAt, expiresAt, byteLength, passwordHash, ownerSecretHash } = parsed;
-    const { revision, viewCount } = parsed;
-    if (
-      typeof createdAt !== "string" ||
-      typeof updatedAt !== "string" ||
-      (expiresAt !== null && typeof expiresAt !== "string") ||
-      typeof byteLength !== "number" ||
-      (passwordHash !== null && typeof passwordHash !== "string") ||
-      typeof ownerSecretHash !== "string" ||
-      typeof revision !== "number" ||
-      typeof viewCount !== "number"
-    ) {
-      return undefined;
-    }
-    const creation = parsed.creation;
-    if (
-      creation !== undefined &&
-      (!isRecord(creation) ||
-        typeof creation.requestDigest !== "string" ||
-        !/^[0-9a-f]{64}$/.test(creation.requestDigest) ||
-        (creation.expiresAt !== null && typeof creation.expiresAt !== "string"))
-    )
-      return undefined;
-    return {
-      ...(isRecord(creation) &&
-      typeof creation.requestDigest === "string" &&
-      (creation.expiresAt === null || typeof creation.expiresAt === "string")
-        ? { creation: { requestDigest: creation.requestDigest, expiresAt: creation.expiresAt } }
-        : {}),
-      document: decodeCanvasPublicShareDocument(parsed["document"]),
-      createdAt,
-      updatedAt,
-      expiresAt,
-      byteLength,
-      passwordHash,
-      ownerSecretHash,
-      revision,
-      viewCount,
-    };
+    const terms = readShareTerms(parsed);
+    if (terms === undefined || !isRecord(parsed)) return undefined;
+    return { ...terms, document: decodeCanvasPublicShareDocument(parsed["document"]) };
   } catch {
     return undefined;
   }
@@ -182,6 +198,12 @@ export class ShareStore {
     mkdirSync(this.#directory("reports"), { recursive: true, mode: 0o700 });
     mkdirSync(this.#directory("views"), { recursive: true, mode: 0o700 });
     for (const name of readdirSync(this.#directory("shares"))) {
+      // The serving process is the one writer, so a temporary file found at
+      // start is a write a stop cut short, holding a document no link shows.
+      if (UNFINISHED_SHARE_PATTERN.test(name)) {
+        rmSync(join(this.#directory("shares"), name), { force: true });
+        continue;
+      }
       if (!name.endsWith(".json")) continue;
       const id = name.slice(0, -".json".length);
       // Reconcile a crash that left a payload beside its tombstone.
@@ -234,13 +256,36 @@ export class ShareStore {
     }
     const share = this.#readShare(id);
     if (share !== undefined) {
-      if (share.expiresAt !== null && Date.parse(share.expiresAt) <= this.#clock()) {
+      if (this.#hasExpired(share)) {
         this.#remove(id, share, "expired");
         return this.#lookupTombstone(id);
       }
       return { status: "active", share };
     }
     return this.#lookupTombstone(id);
+  }
+
+  /**
+   * Answers for a live share's images, reading only its terms, its image
+   * index and the images `answer` reads. A share with no such index is read
+   * whole. Undefined when no live share has this id. Images are readable only
+   * inside `answer`.
+   */
+  withImages<T>(id: string, answer: (share: ShareImages) => T): T | undefined {
+    if (isShareId(id) && !this.#hasTombstone(id)) {
+      const head = withShareHead(this.#sharePath(id), ({ terms: stored, images }) => {
+        const terms = readShareTerms(stored);
+        // An expired or unreadable share is left to the whole lookup below.
+        if (terms === undefined || this.#hasExpired(terms)) return undefined;
+        const { passwordHash, revision } = terms;
+        return { answer: answer({ passwordHash, revision, images }) };
+      });
+      if (head.status === "read" && head.value !== undefined) return head.value.answer;
+    }
+    const lookup = this.lookup(id);
+    if (lookup.status !== "active") return undefined;
+    const { document, passwordHash, revision } = lookup.share;
+    return answer({ passwordHash, revision, images: documentImages(document) });
   }
 
   create(id: string, share: StoredShare): CreateOutcome {
@@ -358,6 +403,10 @@ export class ShareStore {
     }
   }
 
+  #hasExpired(terms: Pick<StoredShare, "expiresAt">): boolean {
+    return terms.expiresAt !== null && Date.parse(terms.expiresAt) <= this.#clock();
+  }
+
   #directory(name: string): string {
     return join(this.#root, name);
   }
@@ -434,7 +483,7 @@ export class ShareStore {
   }
 
   #writeShare(id: string, share: StoredShare): void {
-    this.#writeAtomic(this.#sharePath(id), JSON.stringify(share));
+    this.#writeAtomic(this.#sharePath(id), encodeShareFile(share));
   }
 
   #writeAtomic(path: string, content: string): void {

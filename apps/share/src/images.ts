@@ -1,4 +1,4 @@
-import type { CanvasShareImage } from "./shareKit.ts";
+import type { CarriedImage } from "./shareFile.ts";
 
 /**
  * One carried image's response, once its route has checked the reader may
@@ -6,13 +6,13 @@ import type { CanvasShareImage } from "./shareKit.ts";
  * `no-cache` makes the browser ask again before each reuse, so a revoked or
  * expired link, a lapsed password grant or an expired token stops serving a
  * copy the browser kept. A page that shows one image many times still loads
- * it once.
+ * it once. Undefined when the share's file does not hold the bytes.
  */
 export function carriedImageResponse(
   request: Request,
-  image: CanvasShareImage,
+  image: CarriedImage,
   headers: Readonly<Record<string, string>>,
-): Response {
+): Response | undefined {
   const tag = `"${image.sha256}"`;
   // The route's own content type is for its refusals; a 304 carries none, so
   // a cache keeps the raster's type.
@@ -21,7 +21,9 @@ export function carriedImageResponse(
   if (request.headers.get("if-none-match") === tag) {
     return new Response(null, { status: 304, headers: common });
   }
-  return new Response(Buffer.from(image.data ?? "", "base64"), {
+  const bytes = image.read();
+  if (bytes === undefined) return undefined;
+  return new Response(bytes, {
     status: 200,
     headers: { ...common, "content-type": image.mediaType },
   });
