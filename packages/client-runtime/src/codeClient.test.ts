@@ -363,6 +363,35 @@ describe("code client", () => {
     );
   });
 
+  it("asks for a thread's cleaned-up worktree standing and reads it, and a standing it does not know leaves the view readable", async () => {
+    const checkout = {
+      id: ids.checkout,
+      repositoryId,
+      kind: "plain-folder",
+      availability: "available",
+      head: { kind: "none" },
+      observedAt: now,
+    };
+    const view = { thread, checkout, lastSequence: 3 };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ ...view, worktreeCleanup: "cleaned-up" }))
+      .mockResolvedValueOnce(Response.json({ ...view, worktreeCleanup: "somewhere-new" }))
+      .mockResolvedValueOnce(Response.json(view));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.thread(ids.thread as never)).resolves.toMatchObject({
+      worktreeCleanup: "cleaned-up",
+    });
+    // The query is how the host knows this build reads the field; an older
+    // build never sends it, and its strict decoder is never shown the key.
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      `${baseUrl}/api/code/threads/${ids.thread}?reads=worktree-cleanup`,
+    );
+    expect(await client.thread(ids.thread as never)).not.toHaveProperty("worktreeCleanup");
+    expect(await client.thread(ids.thread as never)).not.toHaveProperty("worktreeCleanup");
+  });
+
   it("queries the Code Thread Board and decodes the resolved view", async () => {
     const view = {
       version: 1,

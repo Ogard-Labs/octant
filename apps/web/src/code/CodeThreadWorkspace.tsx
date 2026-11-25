@@ -468,21 +468,42 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const [restoreProblem, setRestoreProblem] = useState<string>();
   // The host said the worktree is back. The notice goes with that answer, not
   // with the view read that follows, which may fail and is read again by the
-  // next refresh; the flag clears once the view itself no longer names it.
-  const [worktreeRestored, setWorktreeRestored] = useState(false);
+  // next refresh. The answer belongs to the thread and to the cleanup it
+  // answered: another thread never inherits it, a later cleanup of this one
+  // shows its notice again, and it clears once the view no longer names one.
+  const [restoredAnswer, setRestoredAnswer] = useState<{
+    readonly threadId: string;
+    readonly standing: typeof hostWorktreeCleanup;
+  }>();
+  const currentThreadId = useRef(String(props.threadId));
+  currentThreadId.current = String(props.threadId);
   useEffect(() => {
-    if (hostWorktreeCleanup === undefined) setWorktreeRestored(false);
+    setRestoredAnswer((answer) =>
+      answer?.threadId === String(props.threadId) ? answer : undefined,
+    );
+    setRestoreProblem(undefined);
+  }, [props.threadId]);
+  useEffect(() => {
+    if (hostWorktreeCleanup === undefined) setRestoredAnswer(undefined);
   }, [hostWorktreeCleanup]);
+  const worktreeRestored =
+    restoredAnswer?.threadId === String(props.threadId) &&
+    restoredAnswer.standing === hostWorktreeCleanup;
   const worktreeCleanup = worktreeRestored ? undefined : hostWorktreeCleanup;
   async function restoreWorktree(): Promise<void> {
     if (worktreeClient === undefined || restoringWorktree) return;
+    const askedThread = String(props.threadId);
+    const askedStanding = hostWorktreeCleanup;
     setRestoringWorktree(true);
     setRestoreProblem(undefined);
     try {
       const result = await worktreeClient.restore(props.threadId);
       // Another window may have restored it first: it is back all the same.
       if (result.kind === "cleaned-up-worktree-restored" || result.reason === "not-cleaned-up") {
-        setWorktreeRestored(true);
+        // Not if the person has moved to another thread meanwhile.
+        if (currentThreadId.current === askedThread) {
+          setRestoredAnswer({ threadId: askedThread, standing: askedStanding });
+        }
       } else {
         setRestoreProblem(result.message);
       }

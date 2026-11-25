@@ -826,6 +826,57 @@ describe("CodeThreadWorkspace", () => {
       expect(screen.queryByRole("button", { name: "Restore worktree" })).not.toBeInTheDocument();
     });
 
+    it("keeps another thread's notice when the person moves on during a restore, and shows a later cleanup of the same thread again", async () => {
+      const user = userEvent.setup();
+      let answer: (value: unknown) => void = () => undefined;
+      const worktreeClient = restoreClient(() => new Promise((resolve) => (answer = resolve)));
+      const workspace = (controllerFor: CodeController, id: unknown) => (
+        <CodeThreadWorkspace
+          actsAsHostPerson
+          controller={controllerFor}
+          pairedDevice
+          providerGroups={[providerGroup()]}
+          threadId={id as never}
+          worktreeClient={worktreeClient}
+        />
+      );
+      const reloadThreadView = vi.fn(async () => undefined);
+      const withReload = () => withCleanup({ reloadThreadView });
+      const first = withReload();
+      const view = render(workspace(first, threadId));
+      await user.click(screen.getByRole("button", { name: "Restore worktree" }));
+      // Another thread, with its own cleaned-up worktree, is open when the answer comes.
+      const otherId = "00000000-0000-4000-8000-0000000000f1" as never;
+      const otherBase = withReload();
+      const otherView = controller({
+        ...otherBase,
+        activeView: {
+          ...otherBase.activeView!,
+          thread: { ...otherBase.activeView!.thread, id: otherId },
+          worktreeCleanup: "cleaned-up",
+        },
+      });
+      view.rerender(workspace(otherView, otherId));
+      await act(async () => {
+        answer({ kind: "cleaned-up-worktree-restored", threadId });
+      });
+      expect(screen.getByText(cleanedUpWorktreeSentence("cleaned-up"))).toBeVisible();
+
+      // The first thread, restored, then cleaned up again: its notice comes back.
+      view.rerender(workspace(withReload(), threadId));
+      const again = screen.getByRole("button", { name: "Restore worktree" });
+      await user.click(again);
+      await act(async () => {
+        answer({ kind: "cleaned-up-worktree-restored", threadId });
+      });
+      await waitFor(() =>
+        expect(screen.queryByText(cleanedUpWorktreeSentence("cleaned-up"))).not.toBeInTheDocument(),
+      );
+      view.rerender(workspace(controller(), threadId));
+      view.rerender(workspace(withReload(), threadId));
+      expect(screen.getByText(cleanedUpWorktreeSentence("cleaned-up"))).toBeVisible();
+    });
+
     it("gives a device the hub introduced no button even when a session client exists", () => {
       render(
         <CodeThreadWorkspace

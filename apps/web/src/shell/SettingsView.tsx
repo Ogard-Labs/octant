@@ -487,6 +487,8 @@ export function SettingsView(props: SettingsViewProps) {
   const capabilities: SettingsNativeCapabilities = {
     nativeBoundsAvailable: props.nativeBoundsAvailable,
     sidebarVibrancySupported: props.sidebarVibrancySupported,
+    worktreeListsAvailable: props.archivedWorktreesClient !== undefined,
+    diskCleanupAvailable: props.diskCleanupClient !== undefined,
   };
   const hostEffectivePlugins = useFirstPartyPluginsEffective();
   const effectivePlugins = props.effectivePlugins ?? hostEffectivePlugins;

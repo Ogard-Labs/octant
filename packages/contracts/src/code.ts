@@ -1777,6 +1777,9 @@ export const CodeCommandResult = Schema.Union(
 );
 export type CodeCommandResult = typeof CodeCommandResult.Type;
 
+/** Where the cleanup of a thread's managed worktree stands; see `CodeThreadView`. */
+export const CodeThreadViewCleanup = Schema.Literal("cleaned-up", "cleaning-up", "restoring");
+
 export const CodeThreadView = Schema.Struct({
   thread: CodeThread,
   checkout: CodeCheckoutIdentity,
@@ -1784,11 +1787,13 @@ export const CodeThreadView = Schema.Struct({
   /**
    * Present while the host has removed the thread's managed worktree folder
    * (or is part way through removing or restoring it). The thread keeps its
-   * branch but takes no turn, and the thread view offers a restore. Optional
-   * so an earlier client, which drops a field it does not know, sees the
-   * unavailable checkout it always saw.
+   * branch but takes no turn, and the thread view offers a restore. An earlier
+   * client's strict view decoder refuses a key it does not know, so the host
+   * sends this only to a client that asks for it (`?reads=worktree-cleanup`
+   * on the thread read); an earlier client sees the unavailable checkout it
+   * always saw.
    */
-  worktreeCleanup: Schema.optional(Schema.Literal("cleaned-up", "cleaning-up", "restoring")),
+  worktreeCleanup: Schema.optional(CodeThreadViewCleanup),
 }).annotations(strict);
 export type CodeThreadView = typeof CodeThreadView.Type;
 

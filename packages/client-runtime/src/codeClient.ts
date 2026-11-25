@@ -89,6 +89,7 @@ import {
   CodeRepositoryTestStatus,
   type CodeThreadId,
   type CodeThreadView,
+  CodeThreadViewCleanup,
   MAX_CODE_OPERATION_EVIDENCE_BYTES,
   MAX_CODE_ATTACHMENT_BYTES,
   MAX_CODE_OPERATION_TEXT_BYTES,
@@ -500,7 +501,12 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
     thread(threadId, signal) {
       return request(
         fetch,
-        new URL(`/api/code/threads/${encodeURIComponent(threadId)}`, options.baseUrl).toString(),
+        // Says this client reads the cleaned-up worktree field, which an older
+        // client's strict view decoder would refuse.
+        new URL(
+          `/api/code/threads/${encodeURIComponent(threadId)}?reads=worktree-cleanup`,
+          options.baseUrl,
+        ).toString(),
         { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
         decodeThreadView,
       );
@@ -1896,7 +1902,13 @@ function decodeBootstrap(value: unknown): CodeBootstrap {
 }
 
 function decodeThreadView(value: unknown): CodeThreadView {
-  if (!isRecord(value) || !exactKeys(value, ["thread", "checkout", "lastSequence"])) {
+  if (
+    !isRecord(value) ||
+    !(
+      exactKeys(value, ["thread", "checkout", "lastSequence"]) ||
+      exactKeys(value, ["thread", "checkout", "lastSequence", "worktreeCleanup"])
+    )
+  ) {
     throw new Error("invalid");
   }
   if (
@@ -1910,7 +1922,21 @@ function decodeThreadView(value: unknown): CodeThreadView {
     thread: decodeHostAnswer(CodeThread)(value.thread),
     checkout: decodeHostAnswer(CodeCheckoutIdentity)(value.checkout),
     lastSequence: value.lastSequence as CodeThreadView["lastSequence"],
+    ...cleanupOf(value.worktreeCleanup),
   };
+}
+
+/** A standing this build does not know is left out: the thread still reads, as it did before. */
+function cleanupOf(value: unknown): {
+  readonly worktreeCleanup?: CodeThreadView["worktreeCleanup"];
+} {
+  try {
+    return value === undefined
+      ? {}
+      : { worktreeCleanup: decodeHostAnswer(CodeThreadViewCleanup)(value) };
+  } catch {
+    return {};
+  }
 }
 
 function invalidCommand(): CodeClientFailure {

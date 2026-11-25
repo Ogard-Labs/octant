@@ -969,15 +969,19 @@ describe("CodeService reads", () => {
 
   it("names a cleaned-up worktree in the thread view, and says nothing when the folder is in use", async () => {
     const cleaned = serviceFixture({ worktreeCleanup: async () => "cleaned-up" });
-    await expect(cleaned.service.read(ids.window, ids.thread)).resolves.toMatchObject({
-      worktreeCleanup: "cleaned-up",
-    });
+    await expect(
+      cleaned.service.read(ids.window, ids.thread, { worktreeCleanup: true }),
+    ).resolves.toMatchObject({ worktreeCleanup: "cleaned-up" });
+    // A client built before the field refuses a view with a key it does not know.
+    expect(await cleaned.service.read(ids.window, ids.thread)).not.toHaveProperty(
+      "worktreeCleanup",
+    );
     const unreadable = serviceFixture({
       worktreeCleanup: async () => {
         throw new Error("receipt unreadable");
       },
     });
-    const view = await unreadable.service.read(ids.window, ids.thread);
+    const view = await unreadable.service.read(ids.window, ids.thread, { worktreeCleanup: true });
     expect(view).not.toHaveProperty("worktreeCleanup");
     const plain = await serviceFixture().service.read(ids.window, ids.thread);
     expect(plain).not.toHaveProperty("worktreeCleanup");

@@ -1694,13 +1694,20 @@ export class CodeService {
     }
   }
 
-  async read(authenticatedWindowId: WindowId, threadId: CodeThreadId): Promise<CodeThreadView> {
+  async read(
+    authenticatedWindowId: WindowId,
+    threadId: CodeThreadId,
+    reads: Readonly<{ worktreeCleanup?: boolean }> = {},
+  ): Promise<CodeThreadView> {
     const thread = this.#persistence.readCodeThread(threadId);
     if (thread === undefined) throw this.#failure("invalid", "Code thread was not found.");
     await this.#authorizeThread(authenticatedWindowId, thread);
     const view = this.#persistence.readCodeThreadView(threadId);
     if (view === undefined) throw this.#failure("unavailable", "Code thread is unavailable.");
-    const worktreeCleanup = await this.#worktreeCleanup?.(view.checkout).catch(() => undefined);
+    const worktreeCleanup =
+      reads.worktreeCleanup === true
+        ? await this.#worktreeCleanup?.(view.checkout).catch(() => undefined)
+        : undefined;
     return {
       ...view,
       thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, view.thread),

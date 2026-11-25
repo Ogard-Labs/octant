@@ -888,6 +888,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("archived-worktrees"),
           label: "Worktrees",
           scope: "host",
+          nativeRequired: "worktreeListsAvailable",
           keywords:
             "worktrees managed worktree archived threads disk space storage clean up cleanup remove delete reclaim build output",
         },
@@ -895,6 +896,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("cleaned-up-worktrees"),
           label: "Cleaned-up worktrees",
           scope: "host",
+          nativeRequired: "worktreeListsAvailable",
           keywords:
             "worktrees cleaned up cleanup restore worktree thread inactive folder removed brought back",
         },
@@ -902,6 +904,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("host-worktrees"),
           label: "Worktrees on this computer",
           scope: "host",
+          nativeRequired: "diskCleanupAvailable",
           keywords:
             "worktrees agents stale scan computer home folder other tools git worktree remove prune disk space",
         },
@@ -909,6 +912,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("xcode-build-data"),
           label: "Xcode builds",
           scope: "host",
+          nativeRequired: "diskCleanupAvailable",
           keywords:
             "xcode derived data deriveddata build folders cache stale orphaned disk space remove",
         },

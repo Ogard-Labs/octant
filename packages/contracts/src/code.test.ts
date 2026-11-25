@@ -249,6 +249,31 @@ describe("Code aggregate contracts", () => {
     });
   });
 
+  it("is accepted by a lenient reader built before the thread view named a cleaned-up worktree", () => {
+    const olderView = codeContracts.CodeThreadView.omit("worktreeCleanup").annotations({
+      parseOptions: { onExcessProperty: "error" },
+    });
+    const view = {
+      thread,
+      checkout: {
+        id: ids.checkout,
+        repositoryId,
+        kind: "plain-folder",
+        availability: "available",
+        head: { kind: "none" },
+        observedAt: now,
+      },
+      lastSequence: 3,
+      worktreeCleanup: "cleaned-up",
+    };
+    // The phone and the command line read host answers this way.
+    expect(decodeHostAnswer(olderView)(view)).not.toHaveProperty("worktreeCleanup");
+    expect(() => Schema.decodeUnknownSync(olderView)(view)).toThrow();
+    expect(Schema.decodeUnknownSync(codeContracts.CodeThreadView)(view)).toMatchObject({
+      worktreeCleanup: "cleaned-up",
+    });
+  });
+
   it("decodes shell-free Code settings and rejects raw checkout/file paths", () => {
     const settings = {
       defaultExecutionPolicy: "approval-gated",

@@ -424,6 +424,34 @@ describe("octantSettingsRegistry", () => {
     ]);
   });
 
+  it("does not offer the worktree lists in search where the window has no such section", () => {
+    const search = (caps: Parameters<typeof searchSettings>[1]) =>
+      searchSettings(
+        listAvailableSections(octantSettingsRegistry, caps),
+        caps,
+        "cleaned-up worktrees",
+      )
+        .map((result) => (result.kind === "setting" ? String(result.settingId) : ""))
+        .filter((id) => id.endsWith("worktrees"));
+    // A window with neither list client draws neither section.
+    expect(search(capabilities)).toEqual([]);
+    expect(search({ ...capabilities, worktreeListsAvailable: true })).toContain(
+      "cleaned-up-worktrees",
+    );
+    expect(search({ ...capabilities, worktreeListsAvailable: true })).not.toContain(
+      "host-worktrees",
+    );
+    const disk = searchSettings(
+      listAvailableSections(octantSettingsRegistry, {
+        ...capabilities,
+        diskCleanupAvailable: true,
+      }),
+      { ...capabilities, diskCleanupAvailable: true },
+      "worktrees on this computer",
+    ).map((result) => (result.kind === "setting" ? String(result.settingId) : ""));
+    expect(disk).toContain("host-worktrees");
+  });
+
   it("keeps the helper-agent posture with the Octant Harness it governs", () => {
     const ids = octantSettingsRegistry.sections.map((section) => String(section.id));
     expect(ids).not.toContain("agents");

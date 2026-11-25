@@ -2050,7 +2050,10 @@ describe("Code routes", () => {
     const route = routeFixture({ read });
 
     expect((await route(request(`/api/code/threads/${threadId}`)))?.status).toBe(200);
-    expect(read).toHaveBeenCalledWith(windowId, threadId);
+    expect(read).toHaveBeenCalledWith(windowId, threadId, { worktreeCleanup: false });
+    // Only a client that says it reads the cleaned-up worktree field is sent it.
+    await route(request(`/api/code/threads/${threadId}?reads=worktree-cleanup`));
+    expect(read).toHaveBeenLastCalledWith(windowId, threadId, { worktreeCleanup: true });
     expect(
       (
         await route(

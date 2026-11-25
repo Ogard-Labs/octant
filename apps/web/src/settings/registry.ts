@@ -15,6 +15,14 @@ export type SettingsScope = "app" | "host" | "mode" | "project" | "thread";
 export interface SettingsNativeCapabilities {
   readonly nativeBoundsAvailable: boolean;
   readonly sidebarVibrancySupported: boolean;
+  /**
+   * The Worktrees lists in Settings › Code (kept after archiving, cleaned up)
+   * are drawn only where the host lists them; a window without that has no
+   * such section, so search does not offer it. Absent counts as not available.
+   */
+  readonly worktreeListsAvailable?: boolean;
+  /** The disk-cleanup lists ("Worktrees on this computer", Xcode builds). */
+  readonly diskCleanupAvailable?: boolean;
 }
 
 export type SettingsNativeCapabilityKey = keyof SettingsNativeCapabilities;
