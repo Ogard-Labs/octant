@@ -1650,8 +1650,9 @@ document as a future version. Frames follow the
   by what the frame holds, and the Run control there says so. This tier has
   shipped. A design or prototype also has a per-Canvas "Allow network" switch
   that only the person sets, off by default and journaled (maintainer
-  decision, 2026-11-12; not built yet: a paired device is not offered the
-  switch, and today only a local window sets it). While it is on, a running page of that Canvas may ask
+  decision, 2026-11-12; a browser the host's own person paired is offered the
+  switch as a local window is, and a hub-introduced or restricted device is
+  not). While it is on, a running page of that Canvas may ask
   the host to fetch for it through token-bound proxy paths its page policy
   names: a script's `GET`, a script's `POST` of a JSON body of at most
   256 KiB, an image, and a font, and no WebSocket, media, or other method
@@ -1719,8 +1720,8 @@ document as a future version. Frames follow the
   Markdown export writes the title. A public link is an export too: off until
   the person turns on Settings › Permissions › Public links, published only from
   the approval card in a local window or on a paired device (maintainer
-  decision, 2026-11-12; not built yet: today a local window only) and never by
-  an agent, it carries the
+  decision, 2026-11-12; a browser the host's own person paired shows the card
+  too) and never by an agent, it carries the
   share filter's blocks without host, Project, thread, or source identity to
   the public Canvas share service, which can read it, draws design frames only
   from a separate user-content origin, and deletes it on revoke or expiry (see
@@ -2549,9 +2550,10 @@ keep, largest first, with the Project, branch, folder, and a bounded size
 cleanup as a confirmed local-user request: it refuses uncommitted changes, an
 active thread, and a thread whose turn is still in progress, and keeps the
 branch. Listing and removing are the person's, at a local window or a paired
-device (maintainer decision, 2026-11-12; not built yet: today a paired device is
-refused both, because the list names folders on this computer and removal
-deletes from its disk). The receipt's
+device (maintainer decision, 2026-11-12; a browser the host's own person paired
+lists and removes them, and a hub-introduced or restricted device is refused
+both, because the list names folders on this
+computer and removal deletes from its disk). The receipt's
 `cleanup-pending` and `removed` states record each removal, as they do for the
 other cleanup callers.
 
@@ -2602,7 +2604,8 @@ workspace is gone (orphaned) or that Xcode has not opened for 30 days
 (unused); a workspace on an unmounted volume is neither. Removing one reads
 it again and keeps a folder Xcode has opened since. Both lists and every
 removal are the person's, at a local window or a paired device (maintainer
-decision, 2026-11-12; not built yet: today a local window's only); nothing is journaled, because none of
+decision, 2026-11-12; a browser the host's own person paired does both as a
+window does, and a hub-introduced or restricted device is refused); nothing is journaled, because none of
 these folders is Octant's.
 
 A Code fork (`fork-code-thread`) is a managed-worktree creation the host
@@ -13736,8 +13739,9 @@ ten minutes by default, up to a day; maintainer decision, 2026-11-21), in the
 window that asked, and refuses when the account or
 its folder changed since (`changed-plan`), comparing the command written out as text when its turn comes, not a hash. **The person only**: every step
 needs a local window's capability or a paired device's session (maintainer
-decision, 2026-11-12; not built yet: today a request forwarded from a paired
-device is refused, `not-a-local-window`), and no agent tool or route reaches
+decision, 2026-11-12; a request forwarded from a device the host's own person
+paired is taken, and one from any other device is refused,
+`not-a-local-window`), and no agent tool or route reaches
 it, since an agent holds neither. **No shell**: the program is started with
 an argument list, every value is validated first (names are
 `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, a web address must parse as http or https
@@ -18450,7 +18454,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   everywhere until reconfirmed, and the desktop app loads them into the profile's
   Electron session, with `chrome.tabs` for the profile's own pages and
   `chrome.action.onClicked` answered by the app. A signed-in page's approval from a phone-started turn is answered on that phone or at any window or paired device that may drive the thread
-  (maintainer decision, 2026-11-12; not built yet: today it waits for a local window), and a kept screenshot's record names the profile. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
+  (maintainer decision, 2026-11-12; a browser the host's own person paired reads and answers it; a hub-introduced or restricted device never sees it), and a kept screenshot's record names the profile. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,
@@ -21223,7 +21227,7 @@ whole, journal first, as `shield-servers.server-set@1` or
 Project's list is journaled whole as `shield-servers.project-servers-set@1`
 under the Project's id, and `shield-servers.project-override-cleared@1`
 returns the Project to the account list. Startup replays them; only a person,
-at a local window or a paired device (not built yet for the device), changes them (`GET`/`POST /api/shield/servers`, with
+at a local window or on a device the host's own person paired, changes them (`GET`/`POST /api/shield/servers`, with
 `?projectId=` for a Project's list). An account server's row also offers
 **Make this an Octant computer** (`POST /api/shield/servers/member-install`,
 for a window or a device the host's own person paired): the signed headless
@@ -21422,8 +21426,8 @@ this; it would need each runtime's profile to open the relays.
 **The credential broker for SSH.** For a server registered to sign in with
 a key Octant keeps, the credential broker makes an Ed25519 key the first time
 the person asks for it (**Show key** in Settings, `show-server-key` on
-`POST /api/shield/servers`, from a local window or, not built yet, a paired
-device, for a server whose sign-in
+`POST /api/shield/servers`, from a local window or a device the host's own
+person paired, for a server whose sign-in
 is `octant-key`) and keeps it in a credential namespace of its own (the
 `app.octant.ssh-keys.v1` Keychain service, the `octant.ssh-keys.v1` Secret
 Service attribute), keyed by the server's id. Its routes (`/v1/ssh-keys/ensure`,

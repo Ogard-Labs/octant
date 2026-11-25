@@ -29,6 +29,8 @@ function isCalendarPeriod(value: string): value is CalendarPeriod {
 export function ProjectSpendCeilingSection(props: {
   readonly client: SpendCeilingClient;
   readonly projectId: string;
+  /** Inside a settings section, which already carries the heading. */
+  readonly inSettings?: boolean;
 }) {
   const [snapshot, setSnapshot] = useState<SpendCeilingSnapshot | undefined>(undefined);
   const [budget, setBudget] = useState("");
@@ -105,8 +107,15 @@ export function ProjectSpendCeilingSection(props: {
   }
 
   return (
-    <section aria-label="Project spend ceiling" className="project-overview__ceiling">
-      <h3>Spend ceiling</h3>
+    <section
+      aria-label="Project spend ceiling"
+      className={
+        props.inSettings === true
+          ? "grid gap-2 text-xs text-muted-foreground"
+          : "project-overview__ceiling"
+      }
+    >
+      {props.inSettings === true ? null : <h3>Spend ceiling</h3>}
       {remaining === undefined ? (
         <p role="note">
           No spend ceiling on this Project. A turn must still stay under any thread ceiling. Setting
@@ -120,6 +129,7 @@ export function ProjectSpendCeilingSection(props: {
       {refusal === undefined ? null : <OctantAlert tone="warning">{refusal.message}</OctantAlert>}
       {hasMoneyCeiling([snapshot?.project]) ? <p role="note">{MONEY_CEILING_NOTE}</p> : null}
       <form
+        {...(props.inSettings === true ? { className: "grid gap-2" } : {})}
         noValidate
         onSubmit={(event) => {
           event.preventDefault();

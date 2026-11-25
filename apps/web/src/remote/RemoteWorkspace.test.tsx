@@ -80,6 +80,7 @@ function workClients(
     workMutation: unused<WorkMutationClient>("workMutation"),
     workRequest: unused<WorkRequestClient>("workRequest"),
     replyDetail: { read: replyDetailRead, setThreadLevel: async () => undefined },
+    canvasHostPerson: {},
     canvasImportHtml: async () => {
       throw new Error("canvasImportHtml is unused");
     },

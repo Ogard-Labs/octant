@@ -255,6 +255,12 @@ import "../styles/settings-specialty.css";
 import "../styles/extensions-settings.css";
 import "../styles/extension-library.css";
 
+// The paired browser's sections are loaded from here too: they are made of this
+// view's own parts, and a second lazy entry over the same parts splits them
+// into more chunks and grows the first load.
+export { RemoteHostPermissions } from "../remote/RemoteHostPermissions";
+export { RemoteProviderTooling } from "../remote/RemoteProviderTooling";
+
 export interface SettingsViewProps {
   readonly pickSkillFolder?: () => Promise<string | undefined>;
   readonly chatController?: ChatController;

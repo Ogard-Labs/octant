@@ -2,7 +2,7 @@ import { createDefaultDeviceKeyStore, createRemoteSessionBridge } from "@octant/
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import { describe, expect, it, vi } from "vitest";
 import { ORIGIN, readyPairedBridge } from "../host/pairedComputerTestBridge.test-support";
-import { createRemoteProductClients } from "./remoteProductClients";
+import { canvasClientFor, createRemoteProductClients } from "./remoteProductClients";
 
 describe("remote product clients", () => {
   it("lets a paired browser read a person's saved decision answers and never write them", () => {
@@ -43,5 +43,47 @@ describe("remote product clients", () => {
     expect(serverProjects?.previewCommand).toBeTypeOf("function");
     expect(serverProjects).not.toHaveProperty("forwardCommand");
     expect(serverProjects).not.toHaveProperty("forwardRead");
+  });
+
+  describe("the Canvas controls only the host's own person has", () => {
+    const personControls = [
+      "networkAccess",
+      "setNetworkAccess",
+      "renewNetworkPage",
+      "exportOffers",
+      "prepareExport",
+      "decideExport",
+      "dismissExportNotice",
+      "revokePublicShare",
+      "publicLinkSettings",
+      "setPublicLinkSettings",
+      "comments",
+      "comment",
+      "listDesignSystems",
+      "applyDesignSystem",
+    ] as const;
+    const clients = () =>
+      createRemoteProductClients(
+        createRemoteSessionBridge({
+          fetch: vi.fn(),
+          deviceKeyStore: createDefaultDeviceKeyStore(),
+        }),
+      );
+
+    it("gives a person-paired browser the network switch, public links, export approval, comments and design-system switch", () => {
+      const canvas = canvasClientFor(clients(), true);
+      for (const control of personControls) expect(canvas[control]).toBeTypeOf("function");
+    });
+
+    it("never gives a person-paired browser the host's native folder picker", () => {
+      const canvas = canvasClientFor(clients(), true);
+      expect(canvas).not.toHaveProperty("chooseExportFolder");
+      expect(canvas).not.toHaveProperty("exportFolder");
+    });
+
+    it("offers a hub-introduced, restricted or read-only browser none of them", () => {
+      const canvas = canvasClientFor(clients(), false);
+      for (const control of personControls) expect(canvas).not.toHaveProperty(control);
+    });
   });
 });
