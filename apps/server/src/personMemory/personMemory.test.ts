@@ -1781,6 +1781,120 @@ describe("which turns the person typed", () => {
   });
 });
 
+describe("where a thread's block is cut, and how a digest is replaced", () => {
+  const cutEvents = (h: ReturnType<typeof harness>) =>
+    (
+      h.connection
+        .prepare(
+          "SELECT payload_json FROM event_journal WHERE event_name = 'person-memory.block-cut@1'",
+        )
+        .all() as ReadonlyArray<{ readonly payload_json: string }>
+    ).map((row) => JSON.parse(row.payload_json) as Record<string, unknown>);
+  const reopen = (h: ReturnType<typeof harness>) =>
+    new PersonMemoryStore({
+      connection: h.connection,
+      journal: h.journal,
+      uuid: () => crypto.randomUUID(),
+      clock: () => decodeUtcTimestamp(later),
+      actor,
+    });
+  const thread = { mode: "chat" as const, threadId: THREAD_1 };
+
+  it("journals the newest cut only, replays it after a restart, and erases it with Leave no trace and Forget everything", () => {
+    const h = harness([]);
+    h.advance("2026-11-01T10:00:00.000Z");
+    expect(h.store.startBlockCut(thread)).toBe("2026-11-01T10:00:00.000Z");
+    h.advance("2026-11-01T12:00:00.000Z");
+    expect(h.store.startBlockCut(thread)).toBe("2026-11-01T12:00:00.000Z");
+    h.store.startBlockCut({ ...thread, threadId: THREAD_2 });
+
+    expect(cutEvents(h).map((event) => event.cutOff)).toEqual([
+      "2026-11-01T12:00:00.000Z",
+      "2026-11-01T12:00:00.000Z",
+    ]);
+    const restarted = reopen(h);
+    expect(restarted.blockCut(thread)).toBe("2026-11-01T12:00:00.000Z");
+    restarted.close();
+
+    h.store.change(
+      decodePersonMemoryCommand({
+        kind: "set-thread-leaves-no-trace",
+        mode: "chat",
+        threadId: THREAD_2,
+        leavesNoTrace: true,
+      }),
+    );
+    expect(cutEvents(h).map((event) => event.threadId)).toEqual([THREAD_1]);
+    expect(h.store.startBlockCut({ ...thread, threadId: THREAD_2 })).toBeUndefined();
+    h.advance(later);
+    h.store.change(decodePersonMemoryCommand({ kind: "forget-person-memory", confirmed: true }));
+    expect(cutEvents(h)).toEqual([]);
+    expect(h.store.blockCut(thread)).toBeUndefined();
+  });
+
+  it("keeps the earlier digest in the journal when the later one cannot be written", async () => {
+    const h = harness([
+      {
+        id: THREAD_1,
+        title: "Invoices",
+        personMessages: ["Export invoices as CSV.", "Add totals."],
+        messageTimes: ["2026-11-01T10:30:00.000Z", "2026-11-01T11:20:00.000Z"],
+        typed: true,
+      },
+    ]);
+    h.store.since();
+    h.advance("2026-11-01T11:10:00.000Z");
+    // The first pass learns from the first message only.
+    h.setThreads([
+      {
+        id: THREAD_1,
+        title: "Invoices",
+        personMessages: ["Export invoices as CSV."],
+        messageTimes: ["2026-11-01T10:30:00.000Z"],
+        typed: true,
+      },
+    ]);
+    h.setReply({
+      status: "answered",
+      text: JSON.stringify({ summary: "First digest.", entries: [] }),
+    });
+    await h.sweep.pass();
+    expect(h.journalText()).toContain("First digest.");
+
+    h.setThreads([
+      {
+        id: THREAD_1,
+        title: "Invoices",
+        personMessages: ["Export invoices as CSV.", "Add totals."],
+        messageTimes: ["2026-11-01T10:30:00.000Z", "2026-11-01T11:20:00.000Z"],
+        typed: true,
+      },
+    ]);
+    h.setReply({
+      status: "answered",
+      text: JSON.stringify({ summary: "Second digest.", entries: [] }),
+    });
+    h.advance("2026-11-01T18:00:00.000Z");
+    const append = h.journal.append.bind(h.journal);
+    h.journal.append = (request, options) => {
+      if (request.events.some((event) => event.eventName.includes("thread-distilled"))) {
+        throw new Error("SQLITE_FULL");
+      }
+      return append(request, options);
+    };
+    await h.sweep.pass();
+
+    // The write failed: the person's earlier digest is still there, not erased first.
+    expect(h.journalText()).toContain("First digest.");
+    expect(h.journalText()).not.toContain("Second digest.");
+    h.journal.append = append;
+    h.advance("2026-11-02T10:00:00.000Z");
+    await h.sweep.pass();
+    expect(h.journalText()).toContain("Second digest.");
+    expect(h.journalText()).not.toContain("First digest.");
+  });
+});
+
 describe("learning from threads still open", () => {
   const MSG_AT = "2026-11-01T10:30:00.000Z";
   const QUIET = "2026-11-01T11:10:00.000Z";

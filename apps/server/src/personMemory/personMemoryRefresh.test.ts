@@ -58,7 +58,7 @@ function fixture() {
   });
   const ownership = (providerInstanceId: string): ConversationOwnership =>
     providerInstanceId === HOST_PROVIDER ? "host" : "provider";
-  const cutOff = createPersonMemoryCutOff({ connection, ownership, clock: () => now });
+  const cutOff = createPersonMemoryCutOff({ connection, ownership, store });
   const access = createPersonMemoryAccess({
     store,
     cutOff,
@@ -163,12 +163,15 @@ describe("when a long-lived thread sees newer entries", () => {
     expect(resumed).toBe(first);
     expect(resumed).not.toContain("short answers");
 
-    // The next turn starts a new session that does not resume the earlier one.
-    f.chatTurn("2026-11-01T12:00:00.000Z", "session-b", false);
-    const fresh = f.access.blockFor(f.scope());
+    // The next turn starts a new session that does not resume the earlier one:
+    // its block is built, then the turn is journaled.
+    f.setNow("2026-11-01T12:00:00.000Z");
+    const fresh = f.access.blockFor(f.scope({ startsFreshSession: true }));
+    f.chatTurn("2026-11-01T12:00:01.000Z", "session-b", false);
     expect(fresh).toContain("I prefer short answers.");
     expect(fresh).toContain("I prefer tabs.");
     // And stays the same for the resumed turns that follow.
+    expect(f.access.blockFor(f.scope())).toBe(fresh);
     f.chatTurn("2026-11-01T12:05:00.000Z", "session-b", true);
     expect(f.access.blockFor(f.scope())).toBe(fresh);
   });
@@ -251,7 +254,7 @@ describe("when a long-lived thread sees newer entries", () => {
     expect(f.access.blockFor(f.scope(hostOwned))).toContain("short answers");
   });
 
-  it("reads a Work thread's accepted turns and a Code thread's session starts", () => {
+  it("refreshes a Work and a Code thread at a new session, and at the harness compacting the newest session only", () => {
     const f = fixture();
     f.learn("2026-11-01T11:00:00.000Z", "I prefer short answers.");
     const workTurn = (at: string, session: string) =>
@@ -265,18 +268,150 @@ describe("when a long-lived thread sees newer entries", () => {
         threadId: THREAD,
         event: { kind: "provider-session-ready", sessionId: session },
       });
+    const harnessCompacted = (session: string, at: string) =>
+      f.insert(
+        "native-harness-transcript",
+        session,
+        "native-harness-transcript-compacted@1",
+        at,
+        {},
+      );
 
     workTurn("2026-11-01T10:00:01.000Z", "work-a");
     workTurn("2026-11-01T10:30:00.000Z", "work-a");
     expect(f.access.blockFor(f.scope({ mode: "work" }))).toBeUndefined();
-    workTurn("2026-11-01T12:00:00.000Z", "work-b");
-    expect(f.access.blockFor(f.scope({ mode: "work" }))).toContain("short answers");
+    f.setNow("2026-11-01T12:00:00.000Z");
+    const fresh = f.access.blockFor(f.scope({ mode: "work", startsFreshSession: true }));
+    workTurn("2026-11-01T12:00:01.000Z", "work-b");
+    expect(fresh).toContain("short answers");
+    expect(f.access.blockFor(f.scope({ mode: "work" }))).toBe(fresh);
 
     codeReady("2026-11-01T10:00:01.000Z", "code-a");
     codeReady("2026-11-01T10:30:00.000Z", "code-a");
     expect(f.access.blockFor(f.scope({ mode: "code" }))).toBeUndefined();
-    codeReady("2026-11-01T12:00:00.000Z", "code-b");
+    codeReady("2026-11-01T12:00:01.000Z", "code-b");
+    // Only the session the thread's newest turn runs on can refresh it.
+    harnessCompacted("code-a", "2026-11-01T12:10:00.000Z");
+    expect(f.access.blockFor(f.scope({ mode: "code" }))).toBeUndefined();
+    harnessCompacted("code-b", "2026-11-01T12:20:00.000Z");
     expect(f.access.blockFor(f.scope({ mode: "code" }))).toContain("short answers");
+  });
+
+  it("keeps a new session's block the same on the turn after it, though an entry was saved while the turn was being journaled", () => {
+    const f = fixture();
+    f.chatTurn("2026-11-01T10:00:01.000Z", "session-a", false);
+    f.learn("2026-11-01T11:00:00.000Z", "I prefer short answers.");
+    // The block is built at 12:00:00, the turn is journaled a little later, and
+    // in between another thread saves an entry.
+    f.setNow("2026-11-01T12:00:00.000Z");
+    const first = f.access.blockFor(f.scope({ startsFreshSession: true }));
+    f.learn("2026-11-01T12:00:00.500Z", "I prefer dark themes.");
+    f.chatTurn("2026-11-01T12:00:01.000Z", "session-b", false);
+
+    expect(first).toContain("short answers");
+    expect(first).not.toContain("dark themes");
+    expect(f.access.blockFor(f.scope())).toBe(first);
+    // Still the same for a host-started turn and after a restart.
+    expect(f.access.blockFor(f.scope({ windowId: HOST_WINDOW }))).toBe(first);
+    const restarted = new PersonMemoryStore({
+      connection: f.connection,
+      journal: f.journal,
+      uuid: () => crypto.randomUUID(),
+      clock: () => decodeUtcTimestamp("2026-11-02T00:00:00.000Z"),
+      actor,
+    });
+    const after = createPersonMemoryAccess({
+      store: restarted,
+      cutOff: createPersonMemoryCutOff({
+        connection: f.connection,
+        ownership: () => "provider",
+        store: restarted,
+      }),
+      projectLabel: () => undefined,
+    }).blockFor(f.scope());
+    expect(after).toBe(first);
+    restarted.close();
+  });
+
+  it("treats a Chat retry that starts a session of its own as a refresh point, so the next turn keeps its block", () => {
+    const f = fixture();
+    f.chatTurn("2026-11-01T10:00:01.000Z", "session-a", false);
+    f.learn("2026-11-01T11:00:00.000Z", "I prefer short answers.");
+    // The retry adds an attempt on a new session to the turn the thread has.
+    f.setNow("2026-11-01T12:00:00.000Z");
+    const retried = f.access.blockFor(f.scope({ startsFreshSession: true }));
+    f.insert("chat-thread", THREAD, "chat.attempt-updated@1", "2026-11-01T12:00:01.000Z", {
+      kind: "attempt-updated",
+      attempt: { providerSessionId: "session-b" },
+    });
+
+    expect(retried).toContain("short answers");
+    // The next turn builds its block before it is journaled; a subagent of the
+    // retried turn reads through its lead.
+    expect(f.access.blockFor(f.scope())).toBe(retried);
+    expect(f.access.childBlockFor(f.scope())).toBe(retried);
+    f.chatTurn("2026-11-01T12:05:00.000Z", "session-b", true);
+    expect(f.access.blockFor(f.scope())).toBe(retried);
+  });
+
+  it("reads the cut with keyed lookups of one row each, however long the thread", () => {
+    const readCut = (turns: number) => {
+      const f = fixture();
+      for (let turn = 0; turn < turns; turn += 1) {
+        const at = new Date(Date.parse(T0) + (turn + 1) * 60_000).toISOString();
+        f.chatTurn(at, "session-a", turn > 0);
+      }
+      const statements: string[] = [];
+      const plans: string[] = [];
+      const watched = new Proxy(f.connection, {
+        get(target, property) {
+          const value = Reflect.get(target, property) as unknown;
+          if (property !== "prepare") return typeof value === "function" ? value.bind(target) : value;
+          return (sql: string) => {
+            const statement = target.prepare(sql);
+            return new Proxy(statement, {
+              get(statementTarget, statementProperty) {
+                const member = Reflect.get(statementTarget, statementProperty) as unknown;
+                if (statementProperty !== "get" && statementProperty !== "all") {
+                  return typeof member === "function" ? member.bind(statementTarget) : member;
+                }
+                return (...params: ReadonlyArray<unknown>) => {
+                  statements.push(sql);
+                  for (const row of target
+                    .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+                    .all(...params) as ReadonlyArray<{ readonly detail: string }>) {
+                    plans.push(row.detail);
+                  }
+                  return (member as (...args: ReadonlyArray<unknown>) => unknown).apply(
+                    statementTarget,
+                    params,
+                  );
+                };
+              },
+            });
+          };
+        },
+      });
+      for (const mode of ["chat", "work", "code"] as const) {
+        createPersonMemoryCutOff({
+          connection: watched,
+          ownership: () => "provider",
+          store: f.store,
+        })(f.scope({ mode }));
+      }
+      return { statements, plans };
+    };
+
+    const short = readCut(3);
+    const long = readCut(300);
+
+    // The same statements however many turns the thread has, none paging its history.
+    expect(long.statements).toEqual(short.statements);
+    expect(long.statements.filter((sql) => /OFFSET/i.test(sql))).toEqual([]);
+    // Every step searches an index; none scans the table or sorts the thread's rows.
+    expect(long.plans.length).toBeGreaterThan(5);
+    expect(long.plans.every((detail) => detail.startsWith("SEARCH") && detail.includes("USING INDEX"))).toBe(true);
+    expect(long.plans.filter((detail) => /SCAN|TEMP B-TREE/.test(detail))).toEqual([]);
   });
 
   it("gives a turn the host starts and a subagent through its lead the same block", () => {
@@ -284,7 +419,9 @@ describe("when a long-lived thread sees newer entries", () => {
     f.learn("2026-11-01T09:00:00.000Z", "I prefer tabs.");
     f.chatTurn("2026-11-01T10:00:01.000Z", "session-a", false);
     f.learn("2026-11-01T11:00:00.000Z", "I prefer short answers.");
-    f.chatTurn("2026-11-01T12:00:00.000Z", "session-b", false);
+    f.setNow("2026-11-01T12:00:00.000Z");
+    f.access.blockFor(f.scope({ startsFreshSession: true }));
+    f.chatTurn("2026-11-01T12:00:01.000Z", "session-b", false);
 
     const person = f.access.blockFor(f.scope());
     const hostStarted = f.access.blockFor(f.scope({ windowId: HOST_WINDOW }));
@@ -300,7 +437,9 @@ describe("when a long-lived thread sees newer entries", () => {
     f.learn("2026-11-01T09:00:00.000Z", "I prefer tabs.");
     f.chatTurn("2026-11-01T10:00:01.000Z", "session-a", false);
     f.learn("2026-11-01T11:00:00.000Z", "I prefer short answers.");
-    f.chatTurn("2026-11-01T12:00:00.000Z", "session-b", false);
+    f.setNow("2026-11-01T12:00:00.000Z");
+    f.access.blockFor(f.scope({ startsFreshSession: true }));
+    f.chatTurn("2026-11-01T12:00:01.000Z", "session-b", false);
     const before = f.access.blockFor(f.scope());
 
     const restarted = new PersonMemoryStore({
@@ -315,7 +454,7 @@ describe("when a long-lived thread sees newer entries", () => {
       cutOff: createPersonMemoryCutOff({
         connection: f.connection,
         ownership: () => "provider",
-        clock: () => "2026-11-02T00:00:00.000Z",
+        store: restarted,
       }),
       projectLabel: () => undefined,
     }).blockFor(f.scope());
@@ -344,9 +483,9 @@ describe("when a long-lived thread sees newer entries", () => {
       const fresh = turn === 0 || turn === 10;
       if (fresh) session = `session-${String(turn)}`;
       f.setNow(at);
-      f.chatTurn(at, session, !fresh);
       if (turn === 15) f.insert("context-ledger", THREAD, "context.compaction-completed@1", at, {});
       blocks.push(f.access.blockFor(f.scope({ startsFreshSession: fresh })));
+      f.chatTurn(at, session, !fresh);
       // What cutting at the turn itself would send: every new entry changes it.
       cutAtEveryTurn.push(f.access.blockFor(f.scope({ createdAt: at })));
     }

@@ -327,7 +327,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
   const personMemoryCutOff = createPersonMemoryCutOff({
     connection: persistence.connection,
     ownership: (providerInstanceId) => conversationOwnershipSlot.current?.(providerInstanceId),
-    clock: () => new Date().toISOString(),
+    store: personMemory,
   });
   const personMemoryAccess = createPersonMemoryAccess({
     store: personMemory,

@@ -10,6 +10,8 @@ import {
 } from "@octant/contracts";
 import {
   DEFAULT_PERSON_MEMORY_SETTINGS,
+  PERSON_MEMORY_BLOCK_CUT,
+  PERSON_MEMORY_CUT_AGGREGATE_TYPE,
   PERSON_MEMORY_ENTRY_AGGREGATE_TYPE,
   PERSON_MEMORY_ENTRY_RECORDED,
   PERSON_MEMORY_ENTRY_SAVED,
@@ -23,6 +25,7 @@ import {
   PERSON_MEMORY_TYPED_AGGREGATE_TYPE,
   PERSON_MEMORY_MAX_TYPED_TURNS_PER_THREAD,
   PERSON_MEMORY_UNTRACED_AGGREGATE_TYPE,
+  PersonMemoryBlockCut,
   PersonMemoryEntryRecorded,
   PersonMemoryEntrySaved,
   PersonMemorySettingsChanged,
@@ -74,6 +77,7 @@ const decodeThreadRemembered = Schema.decodeUnknownSync(PersonMemoryThreadRememb
 const decodeThreadDistilled = Schema.decodeUnknownSync(PersonMemoryThreadDistilled);
 const decodeThreadUntraced = Schema.decodeUnknownSync(PersonMemoryThreadUntraced);
 const decodeTurnTyped = Schema.decodeUnknownSync(PersonMemoryTurnTyped);
+const decodeBlockCut = Schema.decodeUnknownSync(PersonMemoryBlockCut);
 
 export function registerPersonMemoryEvents(registry: EventRegistry): EventRegistry {
   return registry
@@ -83,7 +87,8 @@ export function registerPersonMemoryEvents(registry: EventRegistry): EventRegist
     .register(PERSON_MEMORY_THREAD_REMEMBERED, 1, PersonMemoryThreadRemembered)
     .register(PERSON_MEMORY_THREAD_DISTILLED, 1, PersonMemoryThreadDistilled)
     .register(PERSON_MEMORY_THREAD_UNTRACED, 1, PersonMemoryThreadUntraced)
-    .register(PERSON_MEMORY_TURN_TYPED, 1, PersonMemoryTurnTyped);
+    .register(PERSON_MEMORY_TURN_TYPED, 1, PersonMemoryTurnTyped)
+    .register(PERSON_MEMORY_BLOCK_CUT, 1, PersonMemoryBlockCut);
 }
 
 /** A stable aggregate id for one thread's digest or mark, from its mode and id. */
@@ -147,6 +152,8 @@ export class PersonMemoryStore {
   readonly #savedEntryIds = new Set<string>();
   /** Per thread, the ids of the turns the person typed, oldest first. */
   readonly #typedTurns = new Map<string, string[]>();
+  /** Per thread, where its block was last cut at a turn that started a session of its own. */
+  readonly #cuts = new Map<string, UtcTimestamp>();
   /**
    * Threads purged, deleted, or marked to leave no trace while this host ran.
    * A distillation already waiting on its model call for one of them must
@@ -222,6 +229,44 @@ export class PersonMemoryStore {
       throw error;
     }
     this.#rememberTyped(thread, input.turnId);
+  }
+
+  /**
+   * Where a thread's block was last cut at a turn that started a session of its
+   * own, or `undefined` when no turn has.
+   */
+  blockCut(thread: { readonly mode: OctantMode; readonly threadId: string }): string | undefined {
+    return this.#cuts.get(threadKey(thread));
+  }
+
+  /**
+   * Cuts a thread's block now, for a turn that starts a session that does not
+   * resume an earlier one, and journals the instant so every later turn keeps
+   * the same entries: the block is the same on the turn that starts the session
+   * and on each turn after it, also after a restart. A thread that takes no
+   * part in memory is cut nowhere.
+   */
+  startBlockCut(thread: {
+    readonly mode: OctantMode;
+    readonly threadId: string;
+    readonly projectId?: string | undefined;
+  }): string | undefined {
+    const ref = { mode: thread.mode, threadId: thread.threadId };
+    if (!this.threadTakesPart(thread) || this.#gone.has(threadKey(ref))) return undefined;
+    const cutOff = this.#dependencies.clock();
+    try {
+      this.#replace(
+        PERSON_MEMORY_CUT_AGGREGATE_TYPE,
+        personMemoryThreadAggregateId("cut", ref),
+        PERSON_MEMORY_BLOCK_CUT,
+        { threadId: thread.threadId, mode: thread.mode, cutOff },
+      );
+    } catch (error) {
+      if (error instanceof ConcurrencyConflict) return undefined;
+      throw error;
+    }
+    this.#cuts.set(threadKey(ref), cutOff);
+    return cutOff;
   }
 
   isTurnTyped(input: {
@@ -414,16 +459,14 @@ export class PersonMemoryStore {
         input.summary.length === 0 && earlier !== undefined ? earlier.summary : input.summary,
     };
     const aggregateId = personMemoryThreadAggregateId("thread", thread);
-    // The thread's digest is replaced, not added to: only the newest stays.
-    if (earlier !== undefined) {
-      this.#erase([{ aggregateType: PERSON_MEMORY_THREAD_AGGREGATE_TYPE, aggregateId }]);
-    }
     let learnedAt: UtcTimestamp;
     try {
-      learnedAt = this.#append(
+      // The thread's digest is replaced, not added to: only the newest stays.
+      // The new one is written before the old is erased, so a failure between
+      // the two leaves both (the later one wins at replay) and never none.
+      learnedAt = this.#replace(
         PERSON_MEMORY_THREAD_AGGREGATE_TYPE,
         aggregateId,
-        0,
         PERSON_MEMORY_THREAD_DISTILLED,
         { threadId: input.source.threadId, digest, lastMessage },
       ).occurredAt;
@@ -589,6 +632,17 @@ export class PersonMemoryStore {
   ): void {
     const key = threadKey(thread);
     this.#eraseTyped(thread);
+    if (this.#cuts.delete(key)) {
+      this.#erase([
+        {
+          aggregateType: PERSON_MEMORY_CUT_AGGREGATE_TYPE,
+          aggregateId: personMemoryThreadAggregateId("cut", {
+            mode: thread.mode,
+            threadId: thread.threadId,
+          }),
+        },
+      ]);
+    }
     this.#learned.delete(key);
     if (this.#digests.delete(key)) {
       this.#erase([
@@ -639,7 +693,18 @@ export class PersonMemoryStore {
         aggregateId: personMemoryThreadAggregateId(`typed:${turnId}`, thread),
       }));
     });
-    this.#erase([...aggregates, ...typed]);
+    const cuts = [...this.#cuts.keys()].map((key) => {
+      const separator = key.indexOf(":");
+      return {
+        aggregateType: PERSON_MEMORY_CUT_AGGREGATE_TYPE,
+        aggregateId: personMemoryThreadAggregateId("cut", {
+          mode: key.slice(0, separator),
+          threadId: key.slice(separator + 1),
+        }),
+      };
+    });
+    this.#erase([...aggregates, ...typed, ...cuts]);
+    this.#cuts.clear();
     this.#entries.clear();
     this.#digests.clear();
     this.#learned.clear();
@@ -730,6 +795,54 @@ export class PersonMemoryStore {
     }
   }
 
+  /**
+   * Writes an aggregate's one current state: the new event goes in at the next
+   * version first, then the older events are erased, so a failure in between
+   * leaves the old and the new (the later one wins at replay), never neither.
+   */
+  #replace(
+    aggregateType: string,
+    aggregateId: string,
+    eventName: string,
+    payload: unknown,
+  ): { readonly version: number; readonly occurredAt: UtcTimestamp } {
+    const written = this.#append(
+      aggregateType,
+      aggregateId,
+      readVersion(this.#dependencies.connection, aggregateType, aggregateId),
+      eventName,
+      payload,
+    );
+    if (written.version > 1) this.#eraseBefore(aggregateType, aggregateId, written.version);
+    return written;
+  }
+
+  #eraseBefore(aggregateType: string, aggregateId: string, version: number): void {
+    const { connection } = this.#dependencies;
+    connection.pragma("foreign_keys = OFF");
+    try {
+      connection.transaction(() => {
+        connection
+          .prepare(
+            `DELETE FROM event_quarantine WHERE global_sequence IN (
+               SELECT global_sequence FROM event_journal
+               WHERE aggregate_type = ? AND aggregate_id = ? AND aggregate_version < ?)`,
+          )
+          .run(aggregateType, aggregateId, version);
+        connection
+          .prepare(
+            `DELETE FROM event_journal
+             WHERE aggregate_type = ? AND aggregate_id = ? AND aggregate_version < ?`,
+          )
+          .run(aggregateType, aggregateId, version);
+        reconcileAggregateHeads(connection);
+        clampCheckpointsToJournalHead(connection);
+      })();
+    } finally {
+      connection.pragma("foreign_keys = ON");
+    }
+  }
+
   #append(
     aggregateType: string,
     aggregateId: string,
@@ -800,6 +913,7 @@ export class PersonMemoryStore {
       PERSON_MEMORY_THREAD_AGGREGATE_TYPE,
       PERSON_MEMORY_UNTRACED_AGGREGATE_TYPE,
       PERSON_MEMORY_TYPED_AGGREGATE_TYPE,
+      PERSON_MEMORY_CUT_AGGREGATE_TYPE,
     ])) {
       switch (envelope.eventName) {
         case PERSON_MEMORY_SETTINGS_CHANGED: {
@@ -849,6 +963,11 @@ export class PersonMemoryStore {
             turns.push(typed.turnId);
             this.#typedTurns.set(threadKey(thread), turns);
           }
+          break;
+        }
+        case PERSON_MEMORY_BLOCK_CUT: {
+          const cut = decodeBlockCut(envelope.payload);
+          this.#cuts.set(threadKey({ mode: cut.mode, threadId: String(cut.threadId) }), cut.cutOff);
           break;
         }
         case PERSON_MEMORY_THREAD_UNTRACED: {

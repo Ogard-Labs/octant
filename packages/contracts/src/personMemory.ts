@@ -177,6 +177,7 @@ export const PERSON_MEMORY_ENTRY_AGGREGATE_TYPE = "person-memory-entry";
 export const PERSON_MEMORY_THREAD_AGGREGATE_TYPE = "person-memory-thread";
 export const PERSON_MEMORY_UNTRACED_AGGREGATE_TYPE = "person-memory-untraced";
 export const PERSON_MEMORY_TYPED_AGGREGATE_TYPE = "person-memory-typed";
+export const PERSON_MEMORY_CUT_AGGREGATE_TYPE = "person-memory-cut";
 
 export const PERSON_MEMORY_SETTINGS_CHANGED = "person-memory.settings-changed@1";
 export const PERSON_MEMORY_ENTRY_RECORDED = "person-memory.entry-recorded@1";
@@ -185,6 +186,7 @@ export const PERSON_MEMORY_THREAD_REMEMBERED = "person-memory.thread-remembered@
 export const PERSON_MEMORY_THREAD_UNTRACED = "person-memory.thread-untraced@1";
 export const PERSON_MEMORY_THREAD_DISTILLED = "person-memory.thread-distilled@1";
 export const PERSON_MEMORY_TURN_TYPED = "person-memory.turn-typed@1";
+export const PERSON_MEMORY_BLOCK_CUT = "person-memory.block-cut@1";
 /** Marks one thread keeps: the newest turns, so a long thread cannot grow the journal without bound. */
 export const PERSON_MEMORY_MAX_TYPED_TURNS_PER_THREAD = 200;
 
@@ -274,6 +276,20 @@ export const PersonMemoryTurnTyped = Schema.Struct({
   turnId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
 }).annotations(strict);
 export type PersonMemoryTurnTyped = typeof PersonMemoryTurnTyped.Type;
+
+/**
+ * The instant a thread's person-memory block was last cut at a turn that
+ * started a session of its own. Journaled as the block is built, so the turn
+ * that starts the session and every later turn, also after a restart, keep the
+ * entries up to the same moment. Only the newest is kept. `threadId` sits at the
+ * top so a thread purge takes it with the thread.
+ */
+export const PersonMemoryBlockCut = Schema.Struct({
+  threadId: MentionableThreadId,
+  mode: OctantMode,
+  cutOff: UtcTimestamp,
+}).annotations(strict);
+export type PersonMemoryBlockCut = typeof PersonMemoryBlockCut.Type;
 
 export const PAST_THREADS_TOOL_NAME = "octant_past_threads";
 export const PAST_THREADS_QUERY_MAX_CHARACTERS = 200;
