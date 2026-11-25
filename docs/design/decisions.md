@@ -4118,6 +4118,7 @@ Status: Partly built. Since: 2026-11-19. Detail: [Hub and spokes: the hub coordi
 Octant Nightly is a second desktop app that installs beside Octant, follows the preview ring (scheduled builds of `main`), and works on the same data. Octant's host alone owns the data folder. Octant itself is one binary whose in-app channel switch is Stable | Preview | Nightly (maintainer decision, 2026-11-05): Nightly keeps Octant on the candidate ring and adds the install row, and Octant never follows preview.
 
 - By default Nightly connects to Octant's running host as a client and never runs a host on Octant's data; it needs Octant installed.
+- Nightly asks for its first window again, starting no attempt after 15 seconds, while Octant is slow or still starting, and never after a refused identity. Each app validates its own signed identity once per process and its peer's on every exchange. Detail: [reconnecting](nightly-app.md#reconnecting-after-host-loss).
 - For development and testing, a person can opt Nightly into its own host on separate test data, with its own port and Keychain service names; it never touches Octant's data or host.
 - Nightly has its own bundle id, link scheme, command-line tool and window storage, and holds no thread or Project data.
 - Both macOS desktop mains use sealed fixed entry roles. The same-version worker runtime keeps host/tool/extension Node execution under a distinct identity that native peer admission must refuse. Detail: [fixed entry](nightly-app.md#fixed-packaged-entry).

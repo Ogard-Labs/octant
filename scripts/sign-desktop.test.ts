@@ -18,10 +18,16 @@ import {
   parseNotarizationSubmission,
   requireSigned,
   resolveSigningCredentials,
+  SANDBOX_SCOPE_SIGNING_PATH,
   signAndNotarizeDesktop,
   SIGNING_ORDER,
 } from "./sign-desktop";
-import { PACKAGED_EXECUTABLE_FILES, signPackagedDesktop } from "./package-desktop";
+import {
+  PACKAGED_ARM64_FILES,
+  PACKAGED_EXECUTABLE_FILES,
+  REQUIRED_DARWIN_HELPER_FILES,
+  signPackagedDesktop,
+} from "./package-desktop";
 
 const credentials = {
   OCTANT_SIGNING_IDENTITY: "Developer ID Application: Example (TEAMID1234)",
@@ -216,6 +222,45 @@ describe("signAndNotarizeDesktop", () => {
     ]) {
       expect(signed).toContain(`/repo/out/Octant.app/${payload}`);
     }
+  });
+
+  it("signs every native file the app ships except the one its publisher signs", async () => {
+    // Apple refused eight Nightly builds in a row because a new helper was
+    // packaged and never added to the signing list.
+    const argv = await record();
+    const signed = argv
+      .filter((command) => command[0] === "/usr/bin/codesign" && command.includes("--sign"))
+      .map((command) => command[command.length - 1]);
+    const publisherSigned = "native/cua-driver";
+
+    const shipped = new Set<string>([
+      ...PACKAGED_ARM64_FILES,
+      ...REQUIRED_DARWIN_HELPER_FILES.map((file) =>
+        file.slice("Octant.app/Contents/Resources/".length),
+      ),
+    ]);
+    for (const file of shipped) {
+      if (file === publisherSigned) continue;
+      expect(signed).toContain(
+        `/repo/out/Octant.app/${packagedNativePath(`Contents/Resources/${file}`)}`,
+      );
+    }
+  });
+
+  it("signs the sandbox helper without Octant's entitlements before sealing the app", async () => {
+    const argv = await record();
+    const signed = argv.filter(
+      (command) => command[0] === "/usr/bin/codesign" && command.includes("--sign"),
+    );
+    const targets = signed.map((command) => command[command.length - 1]);
+    const index = targets.indexOf(`/repo/out/Octant.app/${SANDBOX_SCOPE_SIGNING_PATH}`);
+
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(index).toBeLessThan(targets.indexOf("/repo/out/Octant.app"));
+    expect(signed[index]).toEqual(
+      expect.arrayContaining(["--sign", "Developer ID", "--options", "runtime", "--timestamp"]),
+    );
+    expect(signed[index]).not.toContain("--entitlements");
   });
 
   it("signs the bundled language server with the hardened runtime and no entitlements before sealing the app", async () => {
