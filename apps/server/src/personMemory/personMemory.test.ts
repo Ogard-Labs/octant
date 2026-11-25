@@ -1254,6 +1254,26 @@ describe("saving what the person asks to be remembered, at once", () => {
     ).toHaveLength(1);
   });
 
+  it("does not give the thread its own saved words back at a refresh point, nor to its subagents, but gives another thread", async () => {
+    const { h, scope, latestMessages, remember } = saving([
+      { id: THREAD_1, title: "Short answers", personMessages: [] },
+    ]);
+    latestMessages.push("I prefer short answers");
+    await remember({ text: "I prefer short answers" });
+    // A refresh point long after the entry was saved.
+    const refreshed = createPersonMemoryAccess({
+      store: h.store,
+      projectLabel: () => "Shop",
+      cutOff: () => "2026-12-01T00:00:00.000Z",
+    });
+
+    expect(refreshed.blockFor(scope)).toBeUndefined();
+    expect(refreshed.childBlockFor(scope)).toBeUndefined();
+    expect(refreshed.blockFor({ ...scope, threadId: THREAD_2 })).toContain(
+      "I prefer short answers",
+    );
+  });
+
   it("offers the tool to a Chat thread with no Project, and a Work or Code thread in one", async () => {
     const { access, scope } = saving();
     for (const thread of [

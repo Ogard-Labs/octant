@@ -391,6 +391,7 @@ export class PersonMemoryStore {
       entries: [...this.#entries.values()],
       cutOff: scope.cutOff,
       withheld: this.#withheld(),
+      receiver: scope,
     });
   }
 

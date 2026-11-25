@@ -2375,8 +2375,12 @@ except where a bullet says otherwise.
   gets one `person-memory` context block through Octant's own context
   assembly, placed after Octant's instructions and before Project memory and
   the conversation. It holds the entries that existed at the thread's cut-off,
-  newest first, capped at 2,000 characters. The cut-off is the thread's
-  creation until its context is rebuilt, so the block is the same text on every
+  newest first, capped at 2,000 characters. An entry whose only eligible source
+  is the receiving thread (for a subagent, its lead thread) is never in it,
+  however late the cut falls, so a thread is not handed its own words back as
+  earlier threads' memory; a source that had not ended by the cut was not in
+  the entry then, so it does not change the block between refresh points. The
+  cut-off is the thread's creation until its context is rebuilt, so the block is the same text on every
   turn between and a provider's prompt cache keeps its prefix; an entry the
   person edits or deletes changes it, which re-sends the standing context once.
   A refresh point moves the cut-off to its time, so a long-lived thread sees

@@ -57,6 +57,8 @@ function entry(
 }
 
 const NONE = { excludedProjectIds: [], untraced: [] };
+/** A thread that none of these entries came from. */
+const AWAY = { mode: "chat", threadId: "away" };
 
 describe("person memory distillation", () => {
   it("reads entries and a summary from a fenced JSON reply", () => {
@@ -135,6 +137,7 @@ describe("the person-memory block", () => {
       entries: [old, later],
       cutOff: "2026-11-01T10:00:00.000Z",
       withheld: NONE,
+      receiver: AWAY,
     });
     expect(text).toBe(`${PERSON_MEMORY_BLOCK_PREAMBLE}\n- Preference: Prefers metric units.`);
   });
@@ -149,9 +152,37 @@ describe("the person-memory block", () => {
       entries: [hidden, shared],
       cutOff: "2026-11-02T00:00:00.000Z",
       withheld: { excludedProjectIds: [PROJECT_A], untraced: [] },
+      receiver: AWAY,
     });
     expect(text).toContain("Likes short answers.");
     expect(text).not.toContain("payroll");
+  });
+
+  it("never hands a thread back what only it said, however late the block is cut", () => {
+    const own = entry("I prefer tabs.", [source("t1")], "2026-11-01T09:00:00.000Z");
+    const shared = entry(
+      "Writes in Norwegian.",
+      [source("t1"), { ...source("t2"), endedAt: "2026-11-01T11:00:00.000Z" as PersonMemorySource["endedAt"] }],
+      "2026-11-01T09:00:00.000Z",
+    );
+    const receiver = { mode: "chat", threadId: "t1" };
+
+    const later = personMemoryBlockText({
+      entries: [own, shared],
+      cutOff: "2026-11-03T00:00:00.000Z",
+      withheld: NONE,
+      receiver,
+    });
+    // Another thread's source that had not ended at the cut was not in the entry then.
+    const earlier = personMemoryBlockText({
+      entries: [own, shared],
+      cutOff: "2026-11-01T10:30:00.000Z",
+      withheld: NONE,
+      receiver,
+    });
+
+    expect(later).toBe(`${PERSON_MEMORY_BLOCK_PREAMBLE}\n- Preference: Writes in Norwegian.`);
+    expect(earlier).toBeUndefined();
   });
 
   it("stays within its size cap", () => {
@@ -162,6 +193,7 @@ describe("the person-memory block", () => {
       entries: many,
       cutOff: "2026-11-02T00:00:00.000Z",
       withheld: NONE,
+      receiver: AWAY,
     });
     expect(text?.length).toBeLessThanOrEqual(PERSON_MEMORY_BLOCK_MAX_CHARACTERS);
   });

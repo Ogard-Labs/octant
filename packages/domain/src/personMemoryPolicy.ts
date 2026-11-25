@@ -287,19 +287,30 @@ export const PERSON_MEMORY_BLOCK_PREAMBLE =
  * existed then and are not withheld, newest first, within the size cap. The cut
  * is the thread's creation until its context is rebuilt (a compaction, or a new
  * provider session), so the block is the same text on every turn between and a
- * provider's cached prefix survives new entries. `undefined` when nothing is
- * left to say.
+ * provider's cached prefix survives new entries. An entry the receiving thread
+ * is the only eligible source of is left out, since its own words are not
+ * "earlier threads" however late the cut falls; a source that had not ended by
+ * the cut was not in the entry then, so it does not change the block between
+ * refresh points. `undefined` when nothing is left to say.
  */
 export function personMemoryBlockText(input: {
   readonly entries: ReadonlyArray<PersonMemoryEntry>;
   readonly cutOff: string;
   readonly withheld: PersonMemoryWithheld;
+  readonly receiver: { readonly mode: string; readonly threadId: string };
 }): string | undefined {
   const lines: string[] = [];
   let used = PERSON_MEMORY_BLOCK_PREAMBLE.length;
   const candidates = input.entries
     .filter((entry) => entry.createdAt <= input.cutOff)
-    .filter((entry) => personMemoryEntryShown(entry, input.withheld))
+    .filter((entry) =>
+      entry.sources.some(
+        (source) =>
+          source.endedAt <= input.cutOff &&
+          !sameThread(source, input.receiver) &&
+          !sourceWithheld(source, input.withheld),
+      ),
+    )
     .sort(
       (left, right) =>
         right.createdAt.localeCompare(left.createdAt) ||
