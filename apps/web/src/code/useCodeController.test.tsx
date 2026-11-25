@@ -3360,6 +3360,8 @@ describe("useCodeController", () => {
           const next = queue.shift();
           if (next !== undefined) {
             yield next as never;
+            // The host ends an operation's stream with the operation.
+            if (JSON.stringify(next).includes('"kind":"operation-state"')) return;
             continue;
           }
           await new Promise<void>((resolve) => {
@@ -3494,6 +3496,57 @@ describe("useCodeController", () => {
           steeredMessages: [{ body: "Skip the backfill." }],
         }),
       );
+      unmount();
+    });
+
+    it("shows once a turn this window sent ends, when the read its queue change asked for failed, and reads no more after", async () => {
+      const { client, emit, hold, host, say } = runningThread();
+      host.threads[String(ids.thread)]?.turns.splice(0, 1);
+      const sent = fakeClient({
+        ...client,
+        executeOperation: vi.fn(async (command: CodeOperationCommand) => ({
+          kind: "provider-turn-state",
+          operationId: command.operationId,
+          state: "running",
+        })) as never,
+      });
+      const { result, rerender, unmount } = renderHook(
+        ({ revision }) =>
+          useCodeController({
+            activeThreadId: ids.thread,
+            client: sent,
+            messageQueueRevision: revision,
+            navigationRefreshMs: 0,
+            reconnectDelayMs: 60_000,
+          }),
+        { initialProps: { revision: 1 } },
+      );
+      await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+      void result.current.sendFollowUp("Add the index");
+      await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      act(() => say(1, "part-1"));
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({ text: "First half" }),
+      );
+      const row: { readonly operationId: string } = reply(result.current.conversation);
+      hold([steered(1, "Skip the backfill.")], row.operationId);
+      vi.mocked(host.client.conversationWindow).mockRejectedValueOnce(new Error("offline"));
+      rerender({ revision: 2 });
+      await act(async () => undefined);
+      expect(reply(result.current.conversation)).not.toHaveProperty("steeredMessages");
+
+      act(() => emit(2, { kind: "operation-state", state: "completed" }));
+      await waitFor(() =>
+        expect(reply(result.current.conversation)).toMatchObject({
+          text: "First half",
+          status: "completed",
+          steeredMessages: [{ body: "Skip the backfill." }],
+        }),
+      );
+      const reads = vi.mocked(host.client.conversationWindow).mock.calls.length;
+      rerender({ revision: 3 });
+      await act(async () => undefined);
+      expect(host.client.conversationWindow).toHaveBeenCalledTimes(reads);
       unmount();
     });
 

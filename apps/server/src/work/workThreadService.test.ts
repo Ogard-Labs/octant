@@ -3941,6 +3941,34 @@ describe("searching Work message text", () => {
     expect(String(result.hits[0]?.turnId)).toBe("72000000-0000-4000-8000-000000000301");
   });
 
+  it("finds what the person sent into a running turn, after its prompt and before its reply", async () => {
+    const fixture = serviceFixture({
+      turns: [
+        {
+          ...searchTurn({
+            threadId: ids.thread,
+            index: 1,
+            prompt: "Draft the brief",
+            response: "Left the appendix out.",
+          }),
+          steeredMessages: [
+            {
+              messageId: "72000000-0000-4000-8000-000000000391",
+              body: "Skip the appendix",
+              steeredAt: now,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(
+      (await fixture.service.searchTranscript(ids.window, "appendix")).hits.map(
+        (hit) => hit.snippet,
+      ),
+    ).toEqual(["Skip the appendix"]);
+  });
+
   it("searches no thread whose Project is not an active Work Project", async () => {
     const fixture = serviceFixture({
       project: { ...workProject(), lifecycle: "archived" } as Project,

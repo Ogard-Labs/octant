@@ -3344,11 +3344,24 @@ export function useCodeController(options: CodeControllerOptions) {
           }
         });
         let terminal = false;
+        // No conversation read follows a turn this window sent, so its end
+        // reads what the person sent into it, for a read that failed while it
+        // ran. A waiting turn may go on, so it stays the running one.
+        const endSentTurn = (status: "waiting" | "interrupted" | "failed" | "completed") => {
+          void readSteeredMessages();
+          const key = String(view.thread.id);
+          if (
+            status !== "waiting" &&
+            activeTurnOperations.current.get(key)?.operationId === operationId
+          )
+            activeTurnOperations.current.delete(key);
+        };
         const settleActiveTurn = (
           status: "waiting" | "interrupted" | "failed",
           message: string,
           category?: CodeOperationFailure["category"],
         ) => {
+          endSentTurn(status);
           // The turn ended: what the beat still holds belongs in the row the
           // person is looking at, not one flush away.
           replyBeat.flush();
@@ -3522,6 +3535,7 @@ export function useCodeController(options: CodeControllerOptions) {
         setProviderRequests([]);
         replyBeat.flush();
         if (controller.signal.aborted) return false;
+        endSentTurn("completed");
         setConversation((current) =>
           current.map((message) =>
             message.id === assistantId
@@ -3550,7 +3564,15 @@ export function useCodeController(options: CodeControllerOptions) {
         return false;
       }
     },
-    [activeView, beginProviderTurn, clearFailure, client, failCommand, turnStatus],
+    [
+      activeView,
+      beginProviderTurn,
+      clearFailure,
+      client,
+      failCommand,
+      readSteeredMessages,
+      turnStatus,
+    ],
   );
 
   /**

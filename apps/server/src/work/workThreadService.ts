@@ -750,9 +750,11 @@ export class WorkThreadService {
       for (const thread of threads) {
         const lifecycle = thread.lifecycle === "archived" ? "archived" : "active";
         for (const turn of this.#turnProjection.listForThread(thread.id)) {
-          const body = [turn.prompt, turn.response ?? ""].find((text) =>
-            text.toLowerCase().includes(needle),
-          );
+          const body = [
+            turn.prompt,
+            ...(turn.steeredMessages ?? []).map((message) => message.body),
+            turn.response ?? "",
+          ].find((text) => text.toLowerCase().includes(needle));
           if (body === undefined) continue;
           if (hits.length === MAX_CHAT_TRANSCRIPT_SEARCH_HITS) {
             return { query: trimmed, hits, truncated: true };

@@ -36,8 +36,9 @@ export async function loadCodeConversationPage(
  * Whether the phone keeps re-reading the thread: its newest turn runs, or a
  * turn waits. The phone holds no stream of a Code turn, so without this a
  * running reply, and a message sent into it, shows only at the next refresh.
+ * It decides reading alone; the composer stays open while a turn runs.
  */
-export function codeTurnIsLive(
+export function rereadsCodeThread(
   turns: ReadonlyArray<Pick<MobileCodeConversation["turns"][number], "status">>,
 ): boolean {
   return turns.at(-1)?.status === "incomplete" || turns.some((turn) => turn.status === "waiting");

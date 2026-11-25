@@ -4,7 +4,7 @@ import {
   type MobileCodeConversation,
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
-import { codeTurnIsLive, loadCodeConversationPage } from "./codeConversationPage";
+import { rereadsCodeThread, loadCodeConversationPage } from "./codeConversationPage";
 
 vi.mock("@octant/client-runtime", async () => {
   const actual =
@@ -72,13 +72,13 @@ describe("the Code page the phone shows", () => {
 
 describe("whether the phone keeps re-reading a Code thread", () => {
   it("re-reads while a turn runs or waits, so a message sent into it shows, and stops once it settles", () => {
-    expect(codeTurnIsLive([{ status: "completed" }, { status: "incomplete" }])).toBe(true);
-    expect(codeTurnIsLive([{ status: "waiting" }])).toBe(true);
-    expect(codeTurnIsLive([{ status: "completed" }, { status: "failed" }])).toBe(false);
-    expect(codeTurnIsLive([])).toBe(false);
+    expect(rereadsCodeThread([{ status: "completed" }, { status: "incomplete" }])).toBe(true);
+    expect(rereadsCodeThread([{ status: "waiting" }])).toBe(true);
+    expect(rereadsCodeThread([{ status: "completed" }, { status: "failed" }])).toBe(false);
+    expect(rereadsCodeThread([])).toBe(false);
   });
 
   it("does not take an earlier turn left incomplete for one that runs", () => {
-    expect(codeTurnIsLive([{ status: "incomplete" }, { status: "completed" }])).toBe(false);
+    expect(rereadsCodeThread([{ status: "incomplete" }, { status: "completed" }])).toBe(false);
   });
 });

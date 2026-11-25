@@ -225,13 +225,14 @@ export function ThreadScreen(props: ThreadScreenProps) {
   // place, and the polling stops the moment the turn settles.
   const workTurnLive = work.live;
   const codeTurnLive = code.live;
+  const codeRereads = code.rereads;
   useEffect(() => {
-    if (mode === "chat" || (!workTurnLive && !codeTurnLive)) return;
+    if (mode === "chat" || (!workTurnLive && !codeRereads)) return;
     const timer = setInterval(() => {
       if (AppState.currentState === "active") void refresh({ quiet: true });
     }, MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS);
     return () => clearInterval(timer);
-  }, [codeTurnLive, mode, refresh, workTurnLive]);
+  }, [codeRereads, mode, refresh, workTurnLive]);
 
   const turnActions = useThreadTurnActions({
     transport,
