@@ -425,7 +425,7 @@ describe("code client", () => {
   it("shows a real 400 on a thread read instead of hiding it behind the older-host retry", async () => {
     const refusal = () =>
       Response.json({ category: "invalid", message: "Code request is invalid." }, { status: 400 });
-    const fetch = vi.fn(async () => refusal());
+    const fetch = vi.fn(async (_url: string) => refusal());
     const client = createCodeClient({
       baseUrl,
       fetch: fetch as never,
