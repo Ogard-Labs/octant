@@ -500,6 +500,31 @@ describe("probeOpenCodeBinary", () => {
     });
   });
 
+  it("holds the person's tool servers off on their own configuration with a policy after any the environment already carries", () => {
+    const posture = [{ action: "*", resource: "*", effect: "ask" }] as const;
+    const profile = createOwnOpenCodeProfile(
+      {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          policies: [{ action: "mcp.use", resource: "docs", effect: "allow" }],
+        }),
+      },
+      posture,
+      "darwin",
+      false,
+      false,
+      false,
+      true,
+    );
+    expect(JSON.parse(profile?.environment.OPENCODE_CONFIG_CONTENT ?? "")).toEqual({
+      policies: [
+        { action: "mcp.use", resource: "docs", effect: "allow" },
+        { action: "mcp.use", resource: "*", effect: "deny" },
+        { action: "mcp.use", resource: "octant-*", effect: "allow" },
+      ],
+      permissions: posture,
+    });
+  });
+
   it("keeps the private configuration when Octant's rules do not fit an environment variable", () => {
     const posture = Array.from({ length: 400 }, (_, index) => ({
       action: "read",
@@ -2263,6 +2288,7 @@ exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
       readonly strict?: false;
       readonly runsAsItself?: true;
       readonly ownToolServers?: Record<string, never>;
+      readonly ownToolServersOff?: true;
       readonly ownChannels?: { readonly telemetry: boolean; readonly selfUpdate: boolean };
       readonly executionPolicy?: "plan";
       /** The release the launch reports; the one read for own configuration by default. */
@@ -2326,6 +2352,23 @@ exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
       expect(JSON.parse(recorded.content ?? "")).toEqual({ permissions: posture });
     });
 
+    it("reads the person's own configuration with their tool servers switched off by policy when those are off", async () => {
+      const { server, recorded } = await launch({
+        strict: false,
+        runsAsItself: true,
+        ownToolServersOff: true,
+      });
+      expect(server.ownConfiguration).toBe(true);
+      expect(recorded.config).toBe("<unset>");
+      expect(JSON.parse(recorded.content ?? "")).toEqual({
+        permissions: posture,
+        policies: [
+          { action: "mcp.use", resource: "*", effect: "deny" },
+          { action: "mcp.use", resource: "octant-*", effect: "allow" },
+        ],
+      });
+    });
+
     it("lets OpenCode update itself there once the person's self-update switch is on", async () => {
       const { recorded } = await launch({
         strict: false,
@@ -2340,8 +2383,12 @@ exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
       ["under Strict", { ...ownSetup }],
       ["outside Strict when the session's own setup is off", { strict: false }],
       [
-        "outside Strict when the person's tool servers are off",
+        "outside Strict when the person's tool servers are off and cannot be held off there",
         { strict: false, runsAsItself: true },
+      ],
+      [
+        "under Strict when the person's tool servers are off",
+        { runsAsItself: true, ownToolServersOff: true },
       ],
       ["in Plan", { strict: false, ...ownSetup, executionPolicy: "plan" }],
       [

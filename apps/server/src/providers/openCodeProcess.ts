@@ -197,6 +197,13 @@ export interface OpenCodeProcessStartInput {
    */
   readonly ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /**
+   * The person let OpenCode run as itself with its tool servers off, and
+   * nothing in their own configuration outranks the policy that holds those
+   * servers off (`createOwnOpenCodeProfile`), so the launch may still read
+   * that configuration. Never set with `ownToolServers`.
+   */
+  readonly ownToolServersOff?: true;
+  /**
    * The person let OpenCode run as itself: a 1.x launch, and a 2.x launch
    * outside Strict, also finds their global `AGENTS.md` where OpenCode looks
    * for it, as it does on its own (see `openCodeGlobalAgentsInstructionFile`).
@@ -354,9 +361,10 @@ function launchIsStrict(input: OpenCodeProcessStartInput): boolean {
  * agents, commands, plugins, instructions, formatters and language servers
  * never loaded. Everything else keeps the private configuration: Strict,
  * Chat, Plan, a kept or chosen sandbox (whose wall opens only the private
- * folders), the readiness check, a session whose setup is off or whose tool
- * servers are off (the person's servers would start from their own file),
- * OpenCode 1.x, and a 2.x release older than the one read for how it orders
+ * folders), the readiness check, a session whose setup is off, one whose tool
+ * servers are off where they cannot be held off in the person's own file
+ * (`ownToolServersOff`), OpenCode 1.x, and a 2.x release older than the one
+ * read for how it orders
  * the inline configuration Octant's rules ride on
  * (`openCodeServesOwnConfiguration`).
  */
@@ -367,7 +375,7 @@ export function openCodeRunsOnOwnConfiguration(
   return (
     openCodeServesOwnConfiguration(version) &&
     input.runsAsItself === true &&
-    input.ownToolServers !== undefined &&
+    (input.ownToolServers !== undefined || input.ownToolServersOff === true) &&
     input.purpose !== "probe" &&
     !launchIsStrict(input) &&
     (input.mode === "work" || input.mode === "code") &&
@@ -1113,6 +1121,15 @@ export function createPrivateOpenCodeProfile(
 }
 
 /**
+ * The policies that hold every MCP server off but Octant's own bridge, in the
+ * order OpenCode reads one document's policies: the last match decides.
+ */
+const OWN_TOOL_SERVERS_OFF_POLICIES = [
+  { action: "mcp.use", resource: "*", effect: "deny" },
+  { action: "mcp.use", resource: "octant-*", effect: "allow" },
+] as const;
+
+/**
  * The longest inline configuration a launch carries in one environment
  * variable: Linux caps a single variable at 128 KiB and Windows the whole
  * block at 32,767 characters. A longer one keeps the private configuration.
@@ -1137,6 +1154,16 @@ function inlineConfigLimit(platform: NodeJS.Platform): number {
  * Octant's tool bridge go through the server's routes, not configuration.
  * An inline document the person's own environment already carries is kept,
  * with Octant's rules after its own.
+ *
+ * With the person's tool servers off (`toolServersOff`), the inline document
+ * also carries a policy that denies every MCP server and allows Octant's own
+ * bridge, which the driver registers by a name that starts `octant-`. Run
+ * against opencode v2.4.1 with a scratch home (2026-11-25): servers named in
+ * the global file, in either shape, were neither listed nor started under
+ * that policy, and a server registered at runtime under the allowed name
+ * still was. A policy in a document OpenCode ranks above the inline one wins
+ * over it (`mcp.use` allow in the global file started that server in the same
+ * run), so the driver asks for this only when the person's file has none.
  */
 export function createOwnOpenCodeProfile(
   hostEnvironment: NodeJS.ProcessEnv,
@@ -1145,6 +1172,7 @@ export function createOwnOpenCodeProfile(
   ownSkills = false,
   projectConfig = false,
   selfUpdate = false,
+  toolServersOff = false,
 ): PrivateOpenCodeProfile | undefined {
   const environment = childProcessEnvironment(hostEnvironment);
   let inline: JsonRecord = {};
@@ -1158,6 +1186,14 @@ export function createOwnOpenCodeProfile(
   }
   const content = JSON.stringify({
     ...inline,
+    ...(toolServersOff
+      ? {
+          policies: [
+            ...(Array.isArray(inline.policies) ? (inline.policies as ReadonlyArray<unknown>) : []),
+            ...OWN_TOOL_SERVERS_OFF_POLICIES,
+          ],
+        }
+      : {}),
     permissions: [
       ...(Array.isArray(inline.permissions) ? (inline.permissions as ReadonlyArray<unknown>) : []),
       ...betaPermissions,
@@ -2011,6 +2047,7 @@ function acquireOpenCodeServer(
               input.ownSkills === true,
               launchLoadsProjectConfig(input),
               selfUpdate,
+              input.ownToolServers === undefined,
             )
           : undefined;
         ownConfiguration = own !== undefined;

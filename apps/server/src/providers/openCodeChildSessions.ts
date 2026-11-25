@@ -42,6 +42,8 @@ export type OpenCodeChildRoute =
       /** The session Octant started, which owns this delegated session. */
       readonly rootSource: string;
       readonly childSource: string;
+      /** This event is the one the child was learned from, before it has run. */
+      readonly created?: true;
       readonly activity?: OpenCodeChildActivity;
       /**
        * An event of the child that the owning session handles as its own: a
@@ -157,13 +159,14 @@ export class OpenCodeChildSessions {
       }
       this.#owners.set(source, { root, parent });
       const task = titleOf(event);
-      return this.#child(source, {
+      const route = this.#child(source, {
         childAgentId: source,
         ...(this.#owners.has(parent) ? { parentChildAgentId: parent } : {}),
         ...(task === undefined ? {} : { task }),
         status: "starting",
         summary: "OpenCode delegated a task to a subagent.",
       });
+      return route.kind === "child" ? { ...route, created: true } : route;
     }
     if (!this.#owners.has(source)) return { kind: "none" };
     if (FORWARDED_EVENTS.has(type)) return this.#child(source, undefined, event);
@@ -190,6 +193,19 @@ export class OpenCodeChildSessions {
     }
     const status = this.#statusFor(event, type, source);
     return this.#child(source, status);
+  }
+
+  /**
+   * Claims a subagent session OpenCode already held when its owning session
+   * was resumed, which no `session.created` event will name: without an
+   * owner its permission requests reach nobody and the subagent waits on an
+   * answer forever. Returns false when the table is full.
+   */
+  adopt(child: string, parent: string, rootSource: string): boolean {
+    if (this.#owners.has(child)) return true;
+    if (this.#owners.size >= MAX_TRACKED_CHILDREN) return false;
+    this.#owners.set(child, { root: rootSource, parent });
+    return true;
   }
 
   /**

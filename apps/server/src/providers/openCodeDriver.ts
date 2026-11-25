@@ -220,6 +220,18 @@ export interface OpenCodeClientPort {
     | ((sessionId: string, rules: ReadonlyArray<PermissionV2Rule>) => Promise<void>)
     | undefined;
   /**
+   * The sessions OpenCode holds as children of a 2.x session, with the rules
+   * each carries: the subagent sessions a resumed session delegated to before
+   * this process started. `complete` is false when OpenCode holds more than
+   * were read. Offered with `setSessionPermissions`.
+   */
+  readonly childSessions?:
+    | ((sessionId: string) => Promise<{
+        readonly sessions: ReadonlyArray<{ readonly id: string; readonly permissions: unknown }>;
+        readonly complete: boolean;
+      }>)
+    | undefined;
+  /**
    * Cancels a pending 2.x form, telling the asker why it was not answered.
    * Only a 2.x client offers it.
    */
@@ -384,6 +396,15 @@ interface SessionState {
  */
 export interface OwnPermissions {
   readonly rules: ReadonlyArray<PermissionV2Rule>;
+  /**
+   * The person's own rules for loading skills, which an OpenCode 2 session
+   * outside Strict applies where its skills are on: a skill they allow loads
+   * without asking and one they deny stays denied, as a person's own allow
+   * rule runs any other call unasked below Full access. They were dropped,
+   * so every skill asked whatever the person had written. Absent under
+   * Strict, where the level's ask for every skill stays.
+   */
+  readonly skillRules?: ReadonlyArray<PermissionV2Rule>;
   readonly toolServers: boolean;
   /**
    * The servers a Plan session starts although `toolServers` is off: the
@@ -436,6 +457,7 @@ interface ResolvedOwnSetup extends OpenCodeOwnSetup {
 function ownPermissions(
   setup: ResolvedOwnSetup | undefined,
   blockedTools: ReadonlyArray<string> | undefined,
+  strict: boolean,
 ): OwnPermissions {
   const blocked = openCodeBlockedToolNames(blockedTools);
   const base =
@@ -443,6 +465,7 @@ function ownPermissions(
       ? NO_OWN_PERMISSIONS
       : {
           rules: setup.rules,
+          ...(strict || setup.skillRules === undefined ? {} : { skillRules: setup.skillRules }),
           toolServers: setup.toolServers,
           planServers: setup.planServers,
           webTools: setup.webTools,
@@ -786,6 +809,26 @@ const BETA_API_TIMEOUT_MS = 5_000;
 const BETA_MUTATION_TIMEOUT_MS = 10_000;
 const MCP_PROBE_TIMEOUT_MS = 5_000;
 const BETA_MCP_POLL_MS = 100;
+/** What a child run says when its subagent session was stopped for running outside the level. */
+const UNHELD_SUBAGENT_SUMMARY =
+  "The subagent was stopped because OpenCode could not hold it to the thread's level.";
+const UNHELD_RESUME_MESSAGE =
+  "The saved session has more subagent sessions than Octant can hold to the thread's level.";
+/** The subagent sessions of one resumed session Octant holds and follows; the child tracker's own bound. */
+const MAX_RESUMED_CHILDREN = 256;
+
+/** A subagent session a resumed session already had, and the session that delegated to it. */
+interface ResumedChildSession {
+  readonly id: string;
+  readonly parent: string;
+}
+
+/** One rule's identity, whatever order its record's keys came in. */
+function ruleKey(rule: unknown): unknown {
+  const record = asRecord(rule);
+  return [record?.action, record?.resource, record?.effect];
+}
+
 /** What OpenCode's asker is told when Octant cancels a form it cannot show the person. */
 const UNSHOWN_FORM_MESSAGE = "This client cannot show this form, so it was not answered.";
 const BETA_WRITE_REFUSAL_MESSAGE =
@@ -1400,6 +1443,8 @@ function betaMcpStatus(body: unknown, name: string): string | undefined {
 
 /** How many of a directory's sessions are read to offer a thread. */
 const OPENCODE_LISTED_SESSIONS = 100;
+/** The pages of one session's subagent sessions a resume reads before it gives up on holding them. */
+const OPENCODE_CHILD_SESSION_PAGES = 3;
 /** 2.x serves at most 200 messages a page; a fork's anchor is looked for this far back. */
 const OPENCODE_MESSAGE_PAGE_SIZE = 200;
 const OPENCODE_MESSAGE_PAGES = 50;
@@ -1917,6 +1962,28 @@ export function makeOfficialOpenCodeClient(
               );
             }
           },
+          // `GET /api/session` filters by `parentID` and pages through
+          // `cursor.next`; each record carries the session's `permissions`
+          // (opencode v2.4.1, `Session.ListFilter` and `Session.Info`).
+          childSessions: async (sessionId: string) => {
+            const sessions: { readonly id: string; readonly permissions: unknown }[] = [];
+            let cursor: string | undefined;
+            for (let page = 0; page < OPENCODE_CHILD_SESSION_PAGES; page += 1) {
+              const query = new URLSearchParams({
+                parentID: sessionId,
+                limit: String(OPENCODE_LISTED_SESSIONS),
+              });
+              if (cursor !== undefined) query.set("cursor", cursor);
+              const body = await betaRead(`/api/session?${query}`);
+              for (const record of betaRecords(body)) {
+                const id = betaString(record.id);
+                if (id !== undefined) sessions.push({ id, permissions: record.permissions });
+              }
+              cursor = betaString(asRecord(asRecord(body)?.cursor)?.next);
+              if (cursor === undefined) return { sessions, complete: true };
+            }
+            return { sessions, complete: false };
+          },
         }
       : {}),
     ...(beta && openCodeServesSteering(server.version)
@@ -2324,6 +2391,7 @@ function makeConnection(
           }).filter((name) => Object.hasOwn(own.mcp, name));
       return {
         rules: own.rules,
+        ...(own.skillRules === undefined ? {} : { skillRules: own.skillRules }),
         mcp: setup.toolServers
           ? own.mcp
           : Object.fromEntries(
@@ -2333,9 +2401,17 @@ function makeConnection(
         planServers,
         webTools: setup.webTools,
         projectConfig: setup.projectCode,
+        ...(own.allowsToolServerByPolicy === true
+          ? { allowsToolServerByPolicy: true as const }
+          : {}),
       };
     };
     const childSessions = new OpenCodeChildSessions();
+    /**
+     * Subagent sessions the thread's level could not be set on, by the session
+     * that owns each: stopped, and whatever they still ask is declined.
+     */
+    const unheldChildren = new Map<string, string>();
     const sourceBySession = new Map<ProviderSessionId, string>();
     const pendingBySource = new Map<string, OpenCodeEvent[]>();
     let subscriptionAbort = new AbortController();
@@ -2455,7 +2531,12 @@ function makeConnection(
           sessionMayHaveChanged: true,
         },
       );
-      if (state.sourceId !== undefined) childSessions.forget(state.sourceId);
+      if (state.sourceId !== undefined) {
+        childSessions.forget(state.sourceId);
+        for (const [child, root] of unheldChildren) {
+          if (root === state.sourceId) unheldChildren.delete(child);
+        }
+      }
       state.requestSources.clear();
       cancelPendingTools(state);
       state.approvals.clear();
@@ -2560,6 +2641,76 @@ function makeConnection(
                 .catch(failed);
             },
           };
+    /** The thread's level as the rules a 2.x session of it carries. */
+    const levelRulesFor = (state: SessionState): PermissionV2Ruleset =>
+      betaSessionPermissionRules(
+        state.executionPolicy,
+        mode,
+        state.managedTools?.serverName,
+        extraFolders,
+        state.nativeSetup?.skills === true,
+        state.own,
+        state.protectedPaths,
+        readOnlyFolders,
+        platform,
+      );
+    /**
+     * Holds a subagent session OpenCode just created to the thread's level,
+     * as its owning session is held (`holdSessionToLevel`): on a launch that
+     * reads the person's own configuration, a rule they wrote for the
+     * subagent's agent would otherwise decide before the level does. Read from
+     * the opencode v2.4.1 binary (`Session.create`), a child created without
+     * rules of its own takes its parent's, so it is already held when this
+     * runs; setting them again keeps that true on a release that stops
+     * copying them. At Full access the level allows everything and nothing is
+     * set. A child whose rules cannot be set is stopped, and whatever it
+     * still asks is declined: left running, a rule of the person's could let
+     * it edit or run a command the thread's level asks about.
+     */
+    const holdChildToLevel = (state: SessionState, childSource: string): void => {
+      if (!runtimeOwnConfig || state.executionPolicy === "full-access") return;
+      const root = state.sourceId;
+      const active = client;
+      if (root === undefined || active === undefined) return;
+      const unheld = () => {
+        if (state.terminal || unheldChildren.has(childSource)) return;
+        unheldChildren.set(childSource, root);
+        void active.abort(childSource).catch(() => undefined);
+        offer({
+          kind: "child-agent-activity",
+          instanceId: options.instanceId,
+          sessionId: state.sessionId,
+          sequence: state.nextSequence++,
+          correlationId: state.correlationId,
+          occurredAt: clock() as UtcTimestamp,
+          childAgentId: childSource,
+          status: "failed",
+          summary: UNHELD_SUBAGENT_SUMMARY,
+        });
+      };
+      const setPermissions = active.setSessionPermissions;
+      if (setPermissions === undefined) {
+        unheld();
+        return;
+      }
+      void setPermissions(childSource, levelRulesFor(state)).catch(unheld);
+    };
+    /** Declines what a subagent session that could not be held to the level asks. */
+    const declineUnheldChild = (
+      state: SessionState,
+      childSource: string,
+      asked: OpenCodeEvent,
+    ): void => {
+      const type = String(asked.type);
+      const enforcement = betaEnforcement(state, childSource);
+      if (type === "permission.v2.asked") {
+        const requestId = textProperty(asked.properties, "id");
+        if (requestId !== "") enforcement?.reply(requestId, "reject");
+      } else if (type === "form.created") {
+        const formId = textProperty(Reflect.get(asked.properties, "form"), "id");
+        if (formId !== "") enforcement?.cancelForm(formId);
+      }
+    };
     /**
      * An event of a session OpenCode delegated to. Its activity is reported as
      * a child run of the owning session; its permission and question requests
@@ -2582,8 +2733,13 @@ function makeConnection(
           ...child.activity,
         });
       }
+      if (child.created === true) holdChildToLevel(state, child.childSource);
       const forwarded = child.forward;
       if (forwarded === undefined) return;
+      if (unheldChildren.has(child.childSource)) {
+        declineUnheldChild(state, child.childSource, forwarded);
+        return;
+      }
       if (String(forwarded.type) === "session.next.tool.called") {
         const reads = mapOpenCodeEvent(
           {
@@ -2739,6 +2895,18 @@ function makeConnection(
                   (!ownSetup.toolServers && ownSetup.planServers.length === 0)
                     ? {}
                     : { ownToolServers: ownSetup.mcp }),
+                  // With the person's tool servers off, the launch still
+                  // reads their own configuration where a policy can hold
+                  // those servers off; a policy of theirs that allows one
+                  // outranks it, and that launch keeps the private
+                  // configuration, which names no server of theirs.
+                  ...(!windowsChatDenyAll &&
+                  ownSetup !== undefined &&
+                  !ownSetup.toolServers &&
+                  ownSetup.planServers.length === 0 &&
+                  ownSetup.allowsToolServerByPolicy !== true
+                    ? { ownToolServersOff: true as const }
+                    : {}),
                   ...(!windowsChatDenyAll && ownSetup?.projectConfig === true
                     ? { projectConfig: true as const }
                     : {}),
@@ -2751,7 +2919,7 @@ function makeConnection(
                     managedToolServerName,
                     extraFolders,
                     ownSkills,
-                    ownPermissions(ownSetup, blockedTools),
+                    ownPermissions(ownSetup, blockedTools, strict),
                     openCodeProtectedPathsFor(
                       options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
                       strict,
@@ -3116,22 +3284,60 @@ function makeConnection(
           fail("unsupported", "OpenCode cannot hold this session to the thread's level."),
         );
       }
-      return request(() =>
-        setPermissions(
-          providerSessionId,
-          betaSessionPermissionRules(
-            state.executionPolicy,
-            mode,
-            state.managedTools?.serverName,
-            extraFolders,
-            state.nativeSetup?.skills === true,
-            state.own,
-            state.protectedPaths,
-            readOnlyFolders,
-            platform,
-          ),
-        ),
-      );
+      return request(() => setPermissions(providerSessionId, levelRulesFor(state)));
+    };
+
+    /**
+     * Holds the subagent sessions a resumed session already has to the
+     * thread's level. Each keeps the rules it was created with, and OpenCode
+     * runs one again when the model names it (the subagent tool's
+     * `sessionID`, opencode v2.4.1), so a child created while the thread was
+     * at Full access would otherwise still run unasked after the person
+     * lowered the level. Every level sets them, so a child never stays
+     * stricter or looser than its thread; one that already carries the rules
+     * is left alone. A session whose children cannot be held is not resumed;
+     * one with more of them than Octant follows starts the thread on a new
+     * session. Returns each child with its parent, for the caller to follow
+     * once the session is live.
+     */
+    const holdResumedChildren = (
+      runtimeClient: OpenCodeClientPort,
+      state: SessionState,
+      rootSessionId: string,
+    ): Effect.Effect<ReadonlyArray<ResumedChildSession>, ProviderFailure> => {
+      if (!runtimeOwnConfig) return Effect.succeed([]);
+      const setPermissions = runtimeClient.setSessionPermissions;
+      const list = runtimeClient.childSessions;
+      if (setPermissions === undefined || list === undefined) {
+        return Effect.fail(
+          fail("unsupported", "OpenCode cannot hold this session to the thread's level."),
+        );
+      }
+      const unheld = fail("stale-resume", UNHELD_RESUME_MESSAGE);
+      const rules = levelRulesFor(state);
+      const carried = JSON.stringify(rules.map(ruleKey));
+      return Effect.tryPromise({
+        try: async () => {
+          const held: ResumedChildSession[] = [];
+          const parents = [rootSessionId];
+          for (let parent = parents.shift(); parent !== undefined; parent = parents.shift()) {
+            const listed = await list(parent);
+            if (!listed.complete || held.length + listed.sessions.length > MAX_RESUMED_CHILDREN) {
+              throw unheld;
+            }
+            for (const child of listed.sessions) {
+              const current = Array.isArray(child.permissions)
+                ? JSON.stringify(child.permissions.map(ruleKey))
+                : undefined;
+              if (current !== carried) await setPermissions(child.id, rules);
+              held.push({ id: child.id, parent });
+              parents.push(child.id);
+            }
+          }
+          return held;
+        },
+        catch: (error) => (error === unheld ? unheld : providerFailure(error)),
+      });
     };
 
     const discardUnregisteredState = (
@@ -3178,7 +3384,7 @@ function makeConnection(
             input.tools ?? [],
             input.nativeSetup,
             rememberedEdits,
-            ownPermissions(ownSetup, input.blockedTools),
+            ownPermissions(ownSetup, input.blockedTools, input.strict !== false),
             openCodeProtectedPathsFor(
               options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
               input.strict !== false,
@@ -3360,7 +3566,7 @@ function makeConnection(
                 tools,
                 input.nativeSetup,
                 rememberedEdits,
-                ownPermissions(ownSetup, input.blockedTools),
+                ownPermissions(ownSetup, input.blockedTools, input.strict !== false),
                 openCodeProtectedPathsFor(
                   options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
                   input.strict !== false,
@@ -3408,15 +3614,17 @@ function makeConnection(
                         ),
                       ),
                     ),
-                    Effect.tap((session) =>
+                    Effect.flatMap((session) =>
                       session.id === input.resumeCursor.value
-                        ? holdSessionToLevel(runtimeClient, state, session.id)
-                        : Effect.void,
+                        ? holdSessionToLevel(runtimeClient, state, session.id).pipe(
+                            Effect.zipRight(holdResumedChildren(runtimeClient, state, session.id)),
+                            Effect.map((children) => ({ runtimeClient, session, children })),
+                          )
+                        : Effect.succeed({ runtimeClient, session, children: [] }),
                     ),
-                    Effect.map((session) => ({ runtimeClient, session })),
                   );
                 }),
-                Effect.flatMap(({ session }) => {
+                Effect.flatMap(({ session, children }) => {
                   if (session.id !== input.resumeCursor.value) {
                     return Effect.fail(
                       fail("stale-resume", "Provider returned a different native session."),
@@ -3451,6 +3659,12 @@ function makeConnection(
                   sourceBySession.set(input.sessionId, session.id);
                   retained.rememberCatalog(session.id, tools);
                   activate(state);
+                  // A subagent session held above raises no `session.created`
+                  // here, so it is claimed now: what it asks reaches the
+                  // person through this session, as a new child's does.
+                  for (const child of children) {
+                    childSessions.adopt(child.id, child.parent, session.id);
+                  }
                   for (const event of pendingBySource.get(session.id) ?? []) {
                     mapAndOffer(
                       state,
@@ -4859,7 +5073,9 @@ export function betaSessionPermissionRules(
     ...(own.webTools
       ? []
       : WEB_TOOLS.map((action) => ({ action, resource: "*", effect: "deny" }) as const)),
-    ...(ownSkills ? [] : [{ action: "skill", resource: "*", effect: "deny" } as const]),
+    ...(ownSkills
+      ? (own.skillRules ?? [])
+      : [{ action: "skill", resource: "*", effect: "deny" } as const]),
     // The question tool asks for this permission and then publishes a form,
     // which reaches the person as the thread's questionnaire. A question
     // changes nothing, so every posture allows it, Plan included, as

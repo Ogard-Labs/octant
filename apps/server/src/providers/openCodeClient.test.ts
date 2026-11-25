@@ -477,6 +477,47 @@ describe("official OpenCode client routing", () => {
     expect(clientAt("opencode v2.2.0").cancelForm).toBeDefined();
   });
 
+  it("reads every page of a 2.x session's subagent sessions with the rules each carries", async () => {
+    const requests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request | string, init?: RequestInit) => {
+        const request = typeof input === "string" ? new Request(input, init) : input;
+        requests.push(request.clone());
+        return new URL(request.url).searchParams.get("cursor") === null
+          ? Response.json({
+              data: [{ id: "ses_child_1", permissions: [] }],
+              cursor: { next: "page-2" },
+            })
+          : Response.json({ data: [{ id: "ses_child_2" }], cursor: {} });
+      }),
+    );
+    const client = makeOfficialOpenCodeClient(
+      {
+        authorization: "Basic redacted",
+        pid: 1,
+        runtime: "beta",
+        version: "opencode v2.4.1",
+        url: new URL("http://127.0.0.1:41728/"),
+      },
+      "/tmp/project",
+    );
+
+    expect(await client.childSessions?.("ses_1")).toEqual({
+      sessions: [
+        { id: "ses_child_1", permissions: [] },
+        { id: "ses_child_2", permissions: undefined },
+      ],
+      complete: true,
+    });
+    expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
+      "/api/session",
+      "/api/session",
+    ]);
+    expect(new URL(requests[0]?.url ?? "").searchParams.get("parentID")).toBe("ses_1");
+    expect(new URL(requests[1]?.url ?? "").searchParams.get("cursor")).toBe("page-2");
+  });
+
   it("registers app-managed MCP servers through the 2.x runtime MCP route and waits until connected", async () => {
     const requests: Request[] = [];
     let listReads = 0;
