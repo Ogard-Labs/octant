@@ -599,7 +599,8 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
               .externalContentIngested,
           strict: (owner) => deps.resolveThreadStrict(threadOf(owner)),
           outsideContent: (owner) =>
-            readApprovalOutsideContent(persistence.connection, owner.threadId),
+            readApprovalOutsideContent(persistence.connection, owner.threadId) ??
+            readApprovalOutsideContent(persistence.connection, threadOf(owner)),
           projectAppRemembered: (projectId, appId) =>
             computerUseAppRemembered(
               (persistence.readShellSettings()?.settings ?? defaultShellSettings())

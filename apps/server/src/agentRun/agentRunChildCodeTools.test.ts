@@ -90,6 +90,13 @@ describe("a Code child's own thread", () => {
     expect(threads.parentOf(CHILD_RUN)).toBe(CHILD_PARENT);
     expect((await threads.resolveRoot(child.thread, "a.ts" as never))?.rootPath).toBe(root);
     expect(await threads.resolveRoot(child.thread, "/etc/passwd" as never)).toBeUndefined();
+    // Another window's route naming the run's id reaches no checkout of it.
+    expect(threads.effectiveFor("10000000-0000-4000-8000-000000000001", child.thread)).toBe(
+      child.thread,
+    );
+    const elsewhere = threads.effectiveFor("10000000-0000-4000-8000-000000000002", child.thread);
+    expect(elsewhere.executionPolicy).toBe("plan");
+    expect(String(elsewhere.checkoutId)).not.toBe(String(child.checkout.id));
     release();
     expect(threads.readThread(decodeCodeThreadId(CHILD_RUN))).toBeUndefined();
   });
@@ -264,6 +271,10 @@ describe("a Code child's terminal", () => {
     held = false;
     await child.resources.settle();
     expect(terminals.terminate).toHaveBeenCalledTimes(1);
+    // Once its parent allows it again, the child starts a fresh shell.
+    held = true;
+    await tools?.execute(call("octant_terminal", { operation: "run", command: "ls" }));
+    expect(terminals.launch).toHaveBeenCalledTimes(2);
   });
 });
 
