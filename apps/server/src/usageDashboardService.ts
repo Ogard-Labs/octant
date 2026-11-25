@@ -290,7 +290,9 @@ function resolveProjectId(
               imageThread.threadId,
               cacheStats,
             )
-        : readOwningProjectId(connection, ownership[subjectType], subjectId);
+        : subjectType === "code-project"
+          ? subjectId
+          : readOwningProjectId(connection, ownership[subjectType], subjectId);
   cache.set(key, projectId);
   return projectId;
 }

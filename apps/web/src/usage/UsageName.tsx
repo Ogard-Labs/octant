@@ -17,6 +17,7 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   "code-thread": "Code task",
   "image-job": "Image job",
   project: "Project",
+  "code-project": "Project",
   host: "Host",
   thread: "Task",
 };
@@ -31,7 +32,9 @@ export function UsageName(props: { readonly kind: string; readonly id: string | 
   if (props.id === null || (props.kind === "thread" && props.id === USAGE_ERASED_THREADS_KEY)) {
     return <span title={ERASED_THREADS_TITLE}>Erased threads</span>;
   }
-  const known = names.get(props.kind === "thread" ? props.id : `${props.kind}/${props.id}`);
+  // Spend a Code Project made without a thread is named by the Project.
+  const key = props.kind === "thread" ? props.id : `${props.kind}/${props.id}`;
+  const known = names.get(key.replace(/^code-project\//, "project/"));
   const fallback =
     props.id.length > 24
       ? `${KIND_LABELS[props.kind] ?? "Item"} · ${props.id.slice(0, 8)}…`

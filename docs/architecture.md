@@ -2759,16 +2759,17 @@ sent, and at most 2,000 characters, so a long draft works. The host redacts and
 reduces it again, checks the Project's provider rules, sign-in and spend ceilings
 (the request is not a turn and is reserved against token ceilings as 4,000
 tokens, or refused where a monetary ceiling cannot price it), runs one short
-request, and reduces the reply with the same word rules. A request that was sent
-and got no answer is settled against the ceilings, not released, since it may
-have been paid for. The call stops when the composer goes away, when the
+request, and reduces the reply with the same word rules. What a sent request used
+is recorded under the Code Project on the usage ledger before its reservation is
+released (a `worktree-branch-suggestion` request on its own
+`worktree-branch-suggestion-usage` aggregate, whose id is the Project's, since no
+thread exists yet), so the Project's ceilings and the usage view count it. A sent
+request that got no answer is recorded as unreported usage, as a stopped turn is;
+one that was never sent gives its reservation back. The call stops when the composer goes away, when the
 Project changes, or when the person types a name; a window has at most one
 suggestion in flight on the host, and a second is declined as busy. A refused,
-failed or outdated answer changes nothing and the local name stays. The
-suggestion is not recorded on the usage ledger, because that ledger records a
-one-shot call under a thread and the draft has none; the spend ceilings count
-it. A device the host's own person paired may ask for one; a hub-introduced or
-agent-gated caller may not.
+failed or outdated answer changes nothing and the local name stays. A device the host's own person paired
+may ask for one; a hub-introduced or agent-gated caller may not.
 
 The prefix applies wherever a person starts a new Code thread: the composer on
 the host's start screen, a paired browser's thread start, the phone's thread

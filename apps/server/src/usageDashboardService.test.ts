@@ -228,6 +228,19 @@ describe("readUsageDashboard", () => {
     ).toBe("recorded");
   });
 
+  it("shows a suggested branch name under its Code Project, and not as unfiled", () => {
+    const connection = connect();
+    seedUsageRow(connection, { subjectType: "code-project", subjectId: ids.project });
+
+    const scope = { kind: "projects", projectIds: [ids.project] } as const;
+    const dashboard = read(connection, { filter: { mode: "code" } }, scope);
+    expect(dashboard.detail[0]).toMatchObject({ projectId: ids.project, mode: "code" });
+    expect(read(connection).summary.totals.totalRequests).toBe(0);
+    expect(read(connection, { filter: { mode: "chat" } }, scope).summary.totals.totalRequests).toBe(
+      0,
+    );
+  });
+
   it("shows a child run's usage under its parent thread's Project", () => {
     const connection = connect();
     seedWorkThread(connection, ids.workThread, ids.project);

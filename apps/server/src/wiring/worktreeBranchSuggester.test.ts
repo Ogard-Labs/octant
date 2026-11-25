@@ -5,6 +5,8 @@ import { createHostWorktreeBranchSuggester } from "./worktreeBranchSuggester";
 vi.mock("./providers", () => ({ makeConfiguredProviderDriver: () => ({}) }));
 const complete = vi.hoisted(() => vi.fn());
 vi.mock("../harness/nativeHarnessSingleShot", () => ({ completeOnceOutcome: complete }));
+const record = vi.hoisted(() => vi.fn());
+vi.mock("../shield/shieldUsageLedger", () => ({ recordUnplannedUsage: record }));
 
 const provider = "00000000-0000-4000-8000-000000000001" as never;
 const model = "model-a" as never;
@@ -19,6 +21,7 @@ function suggester(
   } = {},
 ) {
   const admit = vi.fn(overrides.admit ?? (() => ({ status: "admitted" as const })));
+  const settle = vi.fn();
   const port = createHostWorktreeBranchSuggester({
     persistence: {
       readProviderInstance: () => ({
@@ -40,9 +43,9 @@ function suggester(
     isProjectPolicyTargetAllowed: () => overrides.allowed ?? true,
     configuredDriverOptions: () => ({}) as never,
     providerDataDirectory: "/data",
-    spendCeiling: { admit, settle: vi.fn(), abandon: vi.fn() } as never,
+    spendCeiling: { admit, settle, abandon: vi.fn() } as never,
   });
-  return { port, admit };
+  return { port, admit, settle };
 }
 
 const input = {
@@ -86,6 +89,28 @@ describe("createHostWorktreeBranchSuggester", () => {
         estimatedCostUsdMicros: "unknown",
         turnUpperBoundTokens: 4_000,
       }),
+    );
+  });
+
+  it("records the spend under the Project before its reservation is released", async () => {
+    const { port, settle } = suggester();
+    const usage = { inputTokens: 40, outputTokens: 6 };
+    complete.mockImplementationOnce(async ({ onSend }: { readonly onSend?: () => void }) => {
+      onSend?.();
+      return { status: "completed", text: "fix login redirect", usage };
+    });
+    await port.suggest(input);
+    expect(record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        aggregateId: String(input.projectId),
+        providerInstanceId: provider,
+        modelId: model,
+        usage,
+      }),
+    );
+    expect(record.mock.invocationCallOrder[0]).toBeLessThan(
+      settle.mock.invocationCallOrder[0] ?? 0,
     );
   });
 

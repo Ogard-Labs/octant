@@ -51,7 +51,7 @@ export function CodeBranchNameField(props: CodeBranchNameFieldProps) {
       ? undefined
       : STATUS_COPY[props.suggestion];
   return (
-    <div>
+    <div className="code-where-dialog__body">
       <label htmlFor={inputId}>Branch name</label>
       <OctantInput
         aria-describedby={describedBy}
@@ -84,6 +84,7 @@ export function CodeBranchNameField(props: CodeBranchNameFieldProps) {
             }
             onClick={props.onSuggest}
             type="button"
+            variant="secondary"
           >
             {props.suggestion === "asking" ? "Asking…" : "Suggest name"}
           </OctantButton>

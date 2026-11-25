@@ -17,15 +17,16 @@ function ports(overrides: Partial<WorktreeBranchSuggestionPorts> = {}) {
   const settle = vi.fn();
   const abandon = vi.fn();
   const complete = vi.fn(
-    async (_input: {
+    async (input: {
       prompt: string;
       modelId: string;
       instructions?: string;
       signal?: AbortSignal;
-    }) => ({
-      status: "completed" as const,
-      text: "Fix login redirect on session expiry",
-    }),
+      onSend?: () => void;
+    }) => {
+      input.onSend?.();
+      return { status: "completed" as const, text: "Fix login redirect on session expiry" };
+    },
   );
   const value: WorktreeBranchSuggestionPorts = {
     open: () => ({ status: "ready", driver }),
@@ -36,6 +37,14 @@ function ports(overrides: Partial<WorktreeBranchSuggestionPorts> = {}) {
     ...overrides,
   };
   return { value, settle, abandon, complete };
+}
+
+/** A model call whose prompt was handed to the provider before this came back. */
+function answering(outcome: object): never {
+  return (async (input: { onSend?: () => void }) => {
+    input.onSend?.();
+    return outcome;
+  }) as never;
 }
 
 describe("suggestWorktreeBranchWords", () => {
@@ -62,7 +71,7 @@ describe("suggestWorktreeBranchWords", () => {
       text: "update /etc/passwd and .env for ghp_abcdefghijklmnopqrstuvwxyz0123 deploy",
     };
     const result = await suggestWorktreeBranchWords(
-      { ...value, complete: (async () => reply) as never },
+      { ...value, complete: answering(reply) },
       request,
     );
     expect(result).toEqual({ status: "suggested", words: "update-and-for" });
@@ -87,7 +96,7 @@ describe("suggestWorktreeBranchWords", () => {
     const unreached = ports({});
     await expect(
       suggestWorktreeBranchWords(
-        { ...unreached.value, complete: (async () => ({ status: "unreached" })) as never },
+        { ...unreached.value, complete: answering({ status: "unreached" }) },
         request,
       ),
     ).resolves.toEqual({ status: "failed" });
@@ -96,7 +105,7 @@ describe("suggestWorktreeBranchWords", () => {
     const empty = ports({});
     await expect(
       suggestWorktreeBranchWords(
-        { ...empty.value, complete: (async () => ({ status: "completed", text: "???" })) as never },
+        { ...empty.value, complete: answering({ status: "completed", text: "???" }) },
         request,
       ),
     ).resolves.toEqual({ status: "failed" });
@@ -112,6 +121,19 @@ describe("suggestWorktreeBranchWords", () => {
         request,
       ),
     ).resolves.toEqual({ status: "failed" });
+  });
+
+  it("records what was spent, and gives back a reservation whose request was never sent", async () => {
+    const usage = { inputTokens: 40, outputTokens: 6 };
+    const paid = ports({ complete: answering({ status: "completed", text: "fix it now", usage }) });
+    await suggestWorktreeBranchWords(paid.value, request);
+    expect(paid.settle).toHaveBeenCalledWith(usage);
+    const unsent = ports({ complete: (async () => ({ status: "unreached" })) as never });
+    await expect(suggestWorktreeBranchWords(unsent.value, request)).resolves.toEqual({
+      status: "failed",
+    });
+    expect(unsent.settle).not.toHaveBeenCalled();
+    expect(unsent.abandon).toHaveBeenCalledTimes(1);
   });
 
   it("sends only the words a branch name may carry, and nothing from a clause about a secret", async () => {
