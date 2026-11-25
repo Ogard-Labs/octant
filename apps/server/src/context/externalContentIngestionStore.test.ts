@@ -155,6 +155,39 @@ describe("ExternalContentIngestionStore", () => {
     }
   });
 
+  it("names the person or device that made the thread carry outside content, and the store's own actor when none is named", () => {
+    const { connection, store } = openHarness();
+    try {
+      const device = decodeActor({
+        kind: "remote-device",
+        actorId: ids.otherThread,
+        deviceId: ids.otherThread,
+      });
+      const record = (contentReference: string, actor?: typeof device) =>
+        store.record({
+          threadId: ids.thread,
+          provenance: { origin: "external-content", sourceLabel: "adopted-provider-session" },
+          contentReference,
+          correlationId: ids.correlation,
+          authorized: true,
+          ...(actor === undefined ? {} : { actor }),
+        });
+      expect(record("adopted-1", device).kind).toBe("recorded");
+      expect(record("adopted-2").kind).toBe("recorded");
+      const actors = connection
+        .prepare(
+          `SELECT actor_kind AS kind, actor_id AS actorId FROM event_journal WHERE event_name = ? ORDER BY rowid`,
+        )
+        .all(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested);
+      expect(actors).toEqual([
+        { kind: "remote-device", actorId: ids.otherThread },
+        { kind: "system", actorId: ids.actor },
+      ]);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("refuses, rather than claiming a mark, when every append loses to another writer", () => {
     const { connection } = openHarness();
     try {

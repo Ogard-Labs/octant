@@ -2054,15 +2054,22 @@ describe("WorkThreadService", () => {
       messages: [{ role: "person" as const, text: "Summarize the board notes" }],
     };
     for (const asked of [device, undefined]) {
+      const record = vi.fn<
+        NonNullable<WorkThreadServiceDependencies["recordExternalContentIngestion"]>
+      >(() => ({
+        kind: "recorded",
+        taint: { externalContentIngested: true, ingestedSources: [] },
+      }));
       const fixture = serviceFixture({
         threads: [thread()],
-        recordExternalContentIngestion: () => ({
-          kind: "recorded",
-          taint: { externalContentIngested: true, ingestedSources: [] },
-        }),
+        recordExternalContentIngestion: record,
       });
       expect(fixture.service.recordAdoptedSession(thread(), adopted, history, asked).status).toBe(
         "recorded",
+      );
+      // The outside-content mark names who adopted the session, not the host.
+      expect(record.mock.calls[0]?.[0].actor).toEqual(
+        asked ?? { kind: "local-user", actorId: expect.any(String) },
       );
       const actors = fixture.persistence.journal.append.mock.calls.flatMap(([input]) =>
         input.events.map((event: { readonly actor: unknown }) => event.actor),

@@ -2618,6 +2618,7 @@ export function createCodeOperationRuntime(
                 .digest("hex")}`,
               correlationId: options.uuid(),
               authorized: true,
+              actor: adoptingActor ?? options.actor,
             });
             if (
               marked === undefined ||

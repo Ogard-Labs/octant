@@ -543,6 +543,7 @@ export class WorkThreadService {
         .digest("hex")}`,
       correlationId: this.#uuid(),
       authorized: true,
+      actor: actor ?? { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
     });
     if (marked === undefined || (marked.kind !== "recorded" && marked.kind !== "already-recorded"))
       return {

@@ -7464,6 +7464,7 @@ describe("CodeOperationRuntime", () => {
         expect.objectContaining({
           threadId: String(threadId),
           provenance: { origin: "external-content", sourceLabel: "adopted-provider-session" },
+          actor: expect.objectContaining({ actorId: expect.any(String) }),
         }),
       );
       // The thread names the session it continues and offers no other.
