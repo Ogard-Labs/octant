@@ -7,7 +7,7 @@ import type { ShellSettings, WindowWorkspace } from "@octant/contracts/shell";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import type { ResolvedSidebarBackground } from "@octant/theme/backgrounds";
 import { House, PanelLeftClose, Search, SquarePen, X } from "../ui/icons";
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCenterGate";
 import { AGENTS_CENTER_NAVIGATION_ENABLED } from "../agents/agentsCenterGate";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -30,7 +30,7 @@ import { SidebarCountTiles, type SidebarTile } from "./SidebarCountTiles";
 import { SidebarRail, type SidebarRailProject } from "./SidebarRail";
 import type { VisibleMode } from "./workKind";
 import { SidebarMore } from "./SidebarMore";
-import type { RailUsage as LoadedRailUsage } from "../usage/RailUsage";
+import { RailUsage } from "../usage/RailUsage";
 import { RailAccount, SidebarProfile } from "./SidebarProfile";
 import { SidebarWhatsNew, type SidebarWhatsNewProps } from "./SidebarWhatsNew";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
@@ -169,22 +169,6 @@ export interface ShellSidebarProps {
   /** The host's own key for Settings; absent where no key opens it. */
   readonly settingsShortcut?: string;
 }
-
-/**
- * The rings wait on the host's reading anyway, so they and their card load
- * after the window first renders. A rail without them still works: a chunk that
- * cannot load leaves them out, where the failure thrown out of render would take
- * the window down. Awaited in a try for the reason `importThreadRowInfoCard` is.
- */
-async function importRailUsage(): Promise<{ readonly default: typeof LoadedRailUsage }> {
-  try {
-    const module = await import("../usage/RailUsage");
-    return { default: module.RailUsage };
-  } catch {
-    return { default: () => null };
-  }
-}
-const RailUsage = lazy(importRailUsage);
 
 const NEW_THREAD_DESTINATIONS = new Set(["new-chat", "new-code-thread", "new-work-thread"]);
 
@@ -403,11 +387,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
   };
   const railAccount = <RailAccount {...accountProps} />;
   // Above the face, the way the foot reads: what is left, then who it is.
-  const railUsage = (
-    <Suspense fallback={null}>
-      <RailUsage onOpenUsage={() => props.onOpenSettings({ section: "usage" })} />
-    </Suspense>
-  );
+  const railUsage = <RailUsage onOpenUsage={() => props.onOpenSettings({ section: "usage" })} />;
   const besideRail =
     props.railBeside !== true ? null : (
       <SidebarRail

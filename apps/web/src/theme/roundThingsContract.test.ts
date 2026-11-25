@@ -132,7 +132,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".context-window-popover__meter",
   ".context-window-popover__limit-meter",
   ".computers-card__track",
-  ".rail-usage__bar",
+  ".rail-usage-card__bar",
   ".canvas-mockup__progress-track, .canvas-mockup__slider-track",
   ".canvas-mockup__progress-fill",
   ".canvas-ref__progress-track",

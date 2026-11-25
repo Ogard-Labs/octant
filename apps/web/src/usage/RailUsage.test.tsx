@@ -14,6 +14,7 @@ interface Account {
   readonly name: string;
   /** How much of each window is used, 0 to 1. */
   readonly windows: Readonly<Record<string, number>>;
+  readonly exhausted?: true;
 }
 
 function planUsage(accounts: ReadonlyArray<Account>) {
@@ -42,7 +43,7 @@ function planUsage(accounts: ReadonlyArray<Account>) {
         updatedAt: observedAt,
         rateLimitWindows: Object.entries(row.windows).map(([window, utilization]) => ({
           window,
-          status: "allowed",
+          status: row.exhausted === true ? "exhausted" : "allowed",
           utilization,
           observedAt,
         })),
@@ -122,8 +123,29 @@ describe("RailUsage", () => {
 
     await userEvent.hover(await screen.findByRole("button", { name: /^Claude Max plan usage/ }));
     const card = await screen.findByRole("group", { name: "Claude Max plan usage" });
-    expect(card).toHaveTextContent("60% left");
+    expect(await within(card).findByText("60% left")).toBeVisible();
     expect(card).toHaveTextContent("80% left");
+  });
+
+  it("draws no arc for a window the provider calls exhausted, whatever it left unused", async () => {
+    render(
+      <PlanUsageProvider
+        {...planUsage([
+          { name: "Claude Max", windows: { five_hour: 0.97 }, exhausted: true },
+          { name: "Claude Team", windows: { five_hour: 0.4 } },
+        ])}
+      >
+        <RailUsage onOpenUsage={vi.fn()} />
+      </PlanUsageProvider>,
+    );
+
+    const arcOf = (ring: HTMLElement) => ring.querySelectorAll("circle")[1]?.style.stroke;
+    expect(
+      arcOf(await screen.findByRole("button", { name: "Claude Max plan usage, 5h 3% left" })),
+    ).toBe("none");
+    expect(
+      arcOf(screen.getByRole("button", { name: "Claude Team plan usage, 5h 60% left" })),
+    ).not.toBe("none");
   });
 
   it("keeps the three accounts with the least left, in account order, and lists them all in the account menu", async () => {

@@ -1,0 +1,56 @@
+/* The card a rail usage ring opens. It loads with the card, not the window. */
+.rail-usage-card {
+  display: grid;
+  min-width: 232px;
+  gap: var(--oct-space-3);
+}
+
+.rail-usage-card__title {
+  margin: 0;
+  font-weight: var(--oct-weight-strong);
+}
+
+.rail-usage-card__window {
+  --rail-usage-level: color-mix(in oklab, var(--oct-fg) 50%, transparent);
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.rail-usage-card__window[data-level="near"] {
+  --rail-usage-level: var(--oct-warn-fg);
+}
+
+.rail-usage-card__window[data-level="spent"] {
+  --rail-usage-level: var(--oct-danger-fg);
+}
+
+.rail-usage-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.rail-usage-card__left {
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-usage-card__window:not([data-level="ok"]) .rail-usage-card__left {
+  color: var(--rail-usage-level);
+}
+
+.rail-usage-card__bar {
+  display: block;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--oct-radius-pill);
+  background: color-mix(in oklab, var(--oct-fg) 12%, transparent);
+}
+
+.rail-usage-card__bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--rail-usage-level);
+}
