@@ -2289,8 +2289,8 @@ except where a bullet says otherwise.
   content cannot create an entry by this route. The
   text is redacted as above before storage, judged with the message around it:
   a quotation whose start or end falls inside a stretch the redaction would
-  replace (a credential's value quoted without its label, half a token, a
-  password after its label) or inside a path that names a protected file is
+  replace (a credential's value quoted without its label, half a token, any word
+  of a value that has several) or inside a path that names a protected file is
   refused, so quoting part of a secret cannot store it. It is also refused when
   it is over 400 characters or names a protected path; the caps run through the
   same merge as the sweep. A routine's run, another turn the host starts as itself, and a
@@ -2366,7 +2366,9 @@ except where a bullet says otherwise.
   path; the person's own words carry neither unless the person put them there.
   It also reads the same way in every mode, through reads the host already
   makes for Octant Shield. Secrets are redacted (the same secret shapes as
-  approvals, plus private-key blocks) before the text reaches the model and
+  approvals, private-key blocks, and the whole value after a credential label such
+  as `password:`, `token =` or `the passphrase is`, to its closing quote or the
+  end of the line) before the text reaches the model and
   again before anything is stored, and an entry or summary that still names a
   protected path is dropped.
 - **The model call.** One tool-less, single-use session per ended thread, in a

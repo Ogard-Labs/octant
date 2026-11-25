@@ -133,8 +133,13 @@ export function parsePersonMemoryDistillation(reply: string): DistilledThread {
 
 /** A quotation as it sits in a message: the person's own stretch and what surrounds it. */
 export interface PersonQuotation {
+  /** The message before the stretch, as written. */
   readonly before: string;
+  /** The stretch with its whitespace collapsed: what is stored. */
   readonly quoted: string;
+  /** The stretch as written, line breaks included. */
+  readonly raw: string;
+  /** The message after the stretch, as written. */
   readonly after: string;
 }
 
@@ -142,28 +147,71 @@ export interface PersonQuotation {
  * Every place `text` appears in the messages (whitespace and case ignored), each
  * with the message text around it, so a caller can judge the stretch in its
  * context: a credential's value quoted without its label looks harmless alone.
+ * Letters are lowered one by one and every folded unit remembers where it came
+ * from, so a letter whose lowercase form is longer (`İ`) shifts nothing.
  */
 export function personQuotationsIn(
   text: string,
   messages: ReadonlyArray<string>,
 ): ReadonlyArray<PersonQuotation> {
-  const wanted = collapseWhitespace(text).toLowerCase();
+  const wanted = fold(text).units.join("");
   if (wanted.length === 0) return [];
   const found: PersonQuotation[] = [];
   for (const message of messages) {
-    const collapsed = collapseWhitespace(message);
-    const lower = collapsed.toLowerCase();
-    // A letter that lowercases to two cannot be aligned; such a message is no source.
-    if (lower.length !== collapsed.length) continue;
-    for (let at = lower.indexOf(wanted); at >= 0; at = lower.indexOf(wanted, at + 1)) {
+    const folded = fold(message);
+    const haystack = folded.units.join("");
+    for (let at = haystack.indexOf(wanted); at >= 0; at = haystack.indexOf(wanted, at + 1)) {
+      const start = folded.starts[at];
+      const end = folded.ends[at + wanted.length - 1];
+      if (start === undefined || end === undefined) continue;
+      const raw = message.slice(start, end);
       found.push({
-        before: collapsed.slice(0, at),
-        quoted: collapsed.slice(at, at + wanted.length),
-        after: collapsed.slice(at + wanted.length),
+        before: message.slice(0, start),
+        quoted: collapseWhitespace(raw),
+        raw,
+        after: message.slice(end),
       });
     }
   }
   return found;
+}
+
+/** Lowercased UTF-16 units, runs of whitespace as one space, trimmed; each with its source range. */
+function fold(value: string): {
+  readonly units: ReadonlyArray<string>;
+  readonly starts: ReadonlyArray<number>;
+  readonly ends: ReadonlyArray<number>;
+} {
+  const units: string[] = [];
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let index = 0;
+  for (const character of value) {
+    const next = index + character.length;
+    if (/\s/u.test(character)) {
+      if (units.length > 0 && units[units.length - 1] === " ") ends[ends.length - 1] = next;
+      else if (units.length > 0) {
+        units.push(" ");
+        starts.push(index);
+        ends.push(next);
+      }
+    } else {
+      const lowered = character.toLowerCase();
+      for (let at = 0; at < lowered.length; at += 1) {
+        units.push(lowered.charAt(at));
+        starts.push(index);
+        ends.push(next);
+      }
+    }
+    index = next;
+  }
+  // A trailing space is whitespace the stretch does not hold.
+  if (units[units.length - 1] === " ") {
+    units.pop();
+    starts.pop();
+    ends.pop();
+  }
+  return { units, starts, ends };
 }
 
 function collapseWhitespace(value: string): string {

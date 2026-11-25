@@ -188,11 +188,17 @@ type Settle = "no" | "idle" | "refused";
 
 /** Secret-shaped text and private-key blocks, replaced before a model sees them and before storage. */
 export function redactForPersonMemory(text: string): string {
-  return redactSecretsAndPrivateKeys(text).replaceAll(LABELLED_PASSWORD, "[redacted]");
+  return redactSecretsAndPrivateKeys(text.replaceAll(LABELLED_CREDENTIAL, "[redacted]"));
 }
 
-/** A password or secret given after its label, which the shared secret shapes do not name. */
-const LABELLED_PASSWORD = /\b(?:password|passwd|passphrase|pwd|secret)\s*[=:]\s*\S+/gi;
+/**
+ * A credential given after its label (`password:`, `token =`, `the passphrase is`,
+ * `secret - `): the whole value goes, up to its closing quote when it is quoted
+ * and else to the end of the line, so a value of several words is not left in
+ * part (a value on the next line counts). The shared secret shapes name only some labels and take one word.
+ */
+const LABELLED_CREDENTIAL =
+  /\b(?:password|passwd|passphrase|pwd|secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|token)\b(?:[ \t]*[:=]|[ \t]+(?:is|are)\b|[ \t]+[-\u2013\u2014](?=[ \t]))[ \t]*(?:\n[ \t]*)?(?:"[^"\n]*(?:"|$)|'[^'\n]*(?:'|$)|`[^`\n]*(?:`|$)|[^\n]*)/gim;
 
 /**
  * Learns from threads in two ways. A thread the person put away is learned

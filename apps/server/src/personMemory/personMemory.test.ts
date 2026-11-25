@@ -1512,6 +1512,12 @@ describe("saving what the person asks to be remembered, at once", () => {
       ["I deploy with sk-abcdefghijklmnopqrstuvwx on Fridays.", "I deploy with sk-abcdefghij"],
       ["I deploy with sk-abcdefghijklmnopqrstuvwx on Fridays.", "klmnopqrstuvwx"],
       ["My password: hunter2hunter2 stays", "hunter2hunter2"],
+      ['my password: "correct horse battery" ok', 'horse battery"'],
+      ['api_key = "abcd efgh"', 'efgh"'],
+      ["token: abc def", "def"],
+      ["the password is hunter2", "hunter2"],
+      ["the passphrase - correct horse", "horse"],
+      ["Remember this.\nmy token: abc def\nI prefer tabs.", "def"],
       ["My PASSWORD:   hunter2hunter2 stays", "hunter2hunter2 stays"],
       [
         "Authorization: Basic dXNlcjpwYXNzd29yZA==\nI like short answers",
@@ -1542,16 +1548,16 @@ describe("saving what the person asks to be remembered, at once", () => {
 
   it("stores a quotation that holds a whole credential redacted, and one beside it untouched", async () => {
     const { h, latestMessages, remember } = saving();
-    latestMessages.push("Remember I use token: Zq81xLmNpQrStUvWxYz0123 and I prefer tabs.");
+    latestMessages.push("Remember I use token: Zq81xLmNpQrStUvWxYz0123\nand I prefer tabs.");
 
-    const whole = await remember({ text: "I use token: Zq81xLmNpQrStUvWxYz0123 and" });
+    const whole = await remember({ text: "I use token: Zq81xLmNpQrStUvWxYz0123" });
     const beside = await remember({ text: "I prefer tabs." });
 
     expect(whole?.isError).not.toBe(true);
     expect(beside?.isError).not.toBe(true);
     expect(h.journalText()).not.toContain("Zq81xLmNpQrStUvWxYz0123");
     expect(h.store.view().entries.map((entry) => entry.content)).toEqual(
-      expect.arrayContaining(["I use [redacted] and", "I prefer tabs."]),
+      expect.arrayContaining(["I use [redacted]", "I prefer tabs."]),
     );
   });
 

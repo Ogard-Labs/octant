@@ -239,7 +239,26 @@ describe("quoting the person's own words", () => {
   it("returns the person's own stretch with its surroundings when the text matches without regard to whitespace or case", () => {
     expect(
       personQuotationsIn("i prefer\n  SHORT answers", ["Hello. I prefer short   answers, thanks."]),
-    ).toEqual([{ before: "Hello. ", quoted: "I prefer short answers", after: ", thanks." }]);
+    ).toEqual([
+      {
+        before: "Hello. ",
+        quoted: "I prefer short answers",
+        raw: "I prefer short   answers",
+        after: ", thanks.",
+      },
+    ]);
+  });
+
+  it("matches inside a message whose letters change length when lowercased, with the surroundings intact", () => {
+    const found = personQuotationsIn("i prefer tabs", ["İstanbul is nice.\nI prefer tabs, İyi."]);
+    expect(found).toEqual([
+      {
+        before: "İstanbul is nice.\n",
+        quoted: "I prefer tabs",
+        raw: "I prefer tabs",
+        after: ", İyi.",
+      },
+    ]);
   });
 
   it("returns every place a text appears, and nothing for reworded, invented, or empty text", () => {

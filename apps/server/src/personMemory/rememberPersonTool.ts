@@ -113,13 +113,13 @@ export function createRememberPersonTools(input: {
  * whitespace-free run that names a protected path.
  */
 function cutsThrough(
-  { before, quoted, after }: PersonQuotation,
+  { before, raw, after }: PersonQuotation,
   namesProtectedPath: (text: string) => boolean,
 ): boolean {
-  const whole = `${before}${quoted}${after}`;
+  const whole = `${before}${raw}${after}`;
   if (
     redactForPersonMemory(whole) !==
-    `${redactForPersonMemory(before)}${redactForPersonMemory(quoted)}${redactForPersonMemory(after)}`
+    `${redactForPersonMemory(before)}${redactForPersonMemory(raw)}${redactForPersonMemory(after)}`
   ) {
     return true;
   }
@@ -130,7 +130,7 @@ function cutsThrough(
     while (end < whole.length && !/\s/u.test(whole.charAt(end))) end += 1;
     return whole.slice(start, end);
   };
-  return [before.length, before.length + quoted.length].some((edge) => {
+  return [before.length, before.length + raw.length].some((edge) => {
     const inside =
       edge > 0 && edge < whole.length && !/\s/u.test(whole.charAt(edge - 1) + whole.charAt(edge));
     return inside && namesProtectedPath(runAt(edge));
