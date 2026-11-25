@@ -25,6 +25,7 @@ import {
   ExtensionSkillCollision,
   ExtensionSource,
   ExtensionProvenance,
+  ExtensionSelection,
   ExtensionPublisherKeyFingerprint,
   SourceQualifiedSkill,
   SourceQualifiedSkillId,
@@ -32,6 +33,7 @@ import {
 } from "./extensions";
 import { ExtensionToolGrantId, extensionToolGrantRecordedFields } from "./extensionEvents";
 import { ToolExtensionId } from "./toolActions";
+import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { SecretStoreItemReference, SecretStoreKind } from "./secretStores";
 
@@ -508,11 +510,19 @@ export const decodeMcpServerConnectionListing = Schema.decodeUnknownSync(
 /**
  * Reading the listing, or asking the host to drop a server's connection and
  * its failure so the next task connects fresh. Reconnect is a person's act
- * in a local window; it never replays a call that failed.
+ * in a local window; it never replays a call that failed. `thread-sign-in`
+ * answers with only the servers one thread's next turn would get and cannot
+ * use until someone signs in; `selections` are the ones that turn would carry.
  */
 export const McpServerConnectionRequest = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("reconnect"), ...signInTarget }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("thread-sign-in"),
+    mode: OctantMode,
+    threadId: Schema.UUID,
+    selections: Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32)),
+  }).annotations(strict),
 );
 export type McpServerConnectionRequest = typeof McpServerConnectionRequest.Type;
 export const decodeMcpServerConnectionRequest = Schema.decodeUnknownSync(

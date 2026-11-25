@@ -37,6 +37,7 @@ import {
   type UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
 import type { McpSignInDeviceBinding } from "./extensions/mcpServerSignIn";
+import type { ThreadMcpSignInRequest } from "./extensions/threadMcpSignIn";
 import { isAbsolute } from "node:path";
 import { decodeWindowId, SkillFolderPath, type EventActor } from "@octant/contracts";
 import { eventActorForPrincipal } from "./principalEventActor";
@@ -141,10 +142,13 @@ export function createExtensionRouteHandler(options: {
   };
   /**
    * How each installed MCP server is connecting, read from retained facts.
-   * A paired device may read it; only a local window may reconnect.
+   * A paired device may read it; only a local window may reconnect. Which
+   * servers a thread needs signed in is told only to a principal that may
+   * sign in.
    */
   readonly mcpServerConnections?: {
     list(): Promise<McpServerConnectionListing>;
+    forThread?(request: ThreadMcpSignInRequest): Promise<McpServerConnectionListing>;
     reconnect(extensionId: string, componentId: string): Promise<McpServerReconnectResult>;
   };
   /** Lists what other agent tools on this computer know, for the person to add. */
@@ -802,7 +806,23 @@ export function createExtensionRouteHandler(options: {
           origin,
         );
       }
+      // The sign-in routes refuse everyone else, so naming a server to them
+      // would offer what they cannot do.
+      if (connection.kind === "thread-sign-in" && principalKind !== "local-window") {
+        return response(
+          failure("unauthorized", "Sign in to a server from the Octant window on this host."),
+          401,
+          origin,
+        );
+      }
       try {
+        if (connection.kind === "thread-sign-in") {
+          return response(
+            (await options.mcpServerConnections.forThread?.(connection)) ?? { servers: [] },
+            200,
+            origin,
+          );
+        }
         return response(
           connection.kind === "list"
             ? await options.mcpServerConnections.list()

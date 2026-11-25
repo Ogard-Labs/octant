@@ -317,7 +317,8 @@ function selectedToolSet(input: {
   };
 }
 
-function pinnedSelections(
+/** The selections a Project's pins add to a turn, beside the ones it names itself. */
+export function pinnedSelections(
   pinnedExtensionIds: ReadonlyArray<string>,
   explicit: ReadonlyArray<ExtensionSelection>,
   catalog: ExtensionAddressingCatalog,
