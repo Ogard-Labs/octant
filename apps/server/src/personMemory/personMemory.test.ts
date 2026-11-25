@@ -1042,6 +1042,84 @@ describe("person memory under timing and volume", () => {
     expect(h.store.view().rememberedThreads).toBe(0);
   });
 
+  it("lets a thread mark, save and cut again once Allow memory lifts Leave no trace", () => {
+    const h = harness([{ id: THREAD_1, title: "Diary", personMessages: [] }]);
+    const mark = (leavesNoTrace: boolean) =>
+      h.store.change(
+        decodePersonMemoryCommand({
+          kind: "set-thread-leaves-no-trace",
+          mode: "chat",
+          threadId: THREAD_1,
+          leavesNoTrace,
+        }),
+      );
+    mark(true);
+    mark(false);
+
+    h.store.markTurnTyped({ mode: "chat", threadId: THREAD_1, turnId: "turn-1" });
+
+    expect(h.store.isTurnTyped({ mode: "chat", threadId: THREAD_1, turnId: "turn-1" })).toBe(true);
+    expect(h.store.saveRefusal({ mode: "chat", threadId: THREAD_1 })).toBeUndefined();
+    expect(h.store.startBlockCut({ mode: "chat", threadId: THREAD_1 })).toBeDefined();
+  });
+
+  it("keeps nothing from a call that was running while the thread left no trace and was allowed again", async () => {
+    const h = harness();
+    let answer: (value: PersonMemoryModelAnswer) => void = () => undefined;
+    const pending = new Promise<PersonMemoryModelAnswer>((resolve) => {
+      answer = resolve;
+    });
+    const sweep = new PersonMemorySweep({
+      store: h.store,
+      sources: [
+        {
+          mode: "chat",
+          threads: () => [{ id: THREAD_1, completedAt: later }],
+          peek: () => ({ running: false }),
+          read: () => ({
+            title: "Invoices",
+            providerInstanceId: PROVIDER,
+            modelId: SMALL,
+            personMessages: [{ id: "message-0", at: START, text: "CSV", typed: false }],
+          }),
+        },
+      ],
+      model: {
+        resolve: ({ thread }) => ({
+          model: { providerInstanceId: thread.providerInstanceId, modelId: SMALL },
+          driverKind: "fake",
+        }),
+        complete: () => pending,
+        recordUsage: () => undefined,
+      },
+      namesProtectedPath: () => false,
+    });
+    h.advance(later);
+    const running = sweep.pass();
+    await Promise.resolve();
+    for (const leavesNoTrace of [true, false]) {
+      h.store.change(
+        decodePersonMemoryCommand({
+          kind: "set-thread-leaves-no-trace",
+          mode: "chat",
+          threadId: THREAD_1,
+          leavesNoTrace,
+        }),
+      );
+    }
+    answer({
+      status: "answered",
+      text: JSON.stringify({
+        summary: "Invoices.",
+        entries: [{ kind: "preference", content: "Prefers CSV." }],
+      }),
+    });
+    await running;
+
+    expect(h.store.view().entries).toEqual([]);
+    expect(h.store.view().rememberedThreads).toBe(0);
+  });
+
   it("does not let threads of a Project kept out use up a pass", async () => {
     const threads: FakeThread[] = Array.from({ length: 12 }, (_, index) => ({
       id: `aaaaaaaa-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`,

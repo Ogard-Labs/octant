@@ -160,11 +160,18 @@ export class PersonMemoryStore {
   /** Per thread, where its block was last cut at a turn that started a session of its own. */
   readonly #cuts = new Map<string, UtcTimestamp>();
   /**
-   * Threads purged, deleted, or marked to leave no trace while this host ran.
-   * A distillation already waiting on its model call for one of them must
-   * not write what it learned once the thread's memory was erased.
+   * Threads purged or deleted while this host ran. They never take part again,
+   * and a distillation already waiting on its model call for one must not write
+   * what it learned once the thread's memory was erased.
    */
   readonly #gone = new Set<string>();
+  /**
+   * How often each thread's memory was erased by Leave no trace while this host
+   * ran. A distillation waiting on its model call keeps the count it began at,
+   * so what it learned before an erasure is not written after, even when Allow
+   * memory has since let the thread take part again.
+   */
+  readonly #erasures = new Map<string, number>();
   readonly #unsubscribe: () => void;
 
   constructor(dependencies: PersonMemoryStoreDependencies) {
@@ -351,6 +358,11 @@ export class PersonMemoryStore {
     return this.#learned.get(threadKey(thread));
   }
 
+  /** How often the thread's memory was erased while this host ran; read before a model call. */
+  erasures(thread: { readonly mode: OctantMode; readonly threadId: string }): number {
+    return this.#erasures.get(threadKey(thread)) ?? 0;
+  }
+
   leavesNoTrace(thread: { readonly mode: OctantMode; readonly threadId: string }): boolean {
     return this.#untraced.has(threadKey(thread));
   }
@@ -430,6 +442,8 @@ export class PersonMemoryStore {
     readonly entries: ReadonlyArray<{ readonly kind: PersonMemoryKind; readonly content: string }>;
     /** The last message learned from; absent, the thread's end (`source.endedAt`). */
     readonly lastMessage?: { readonly id: string; readonly at: UtcTimestamp };
+    /** `erasures` as read before the model call this came from; absent, no call preceded it. */
+    readonly erasuresBefore?: number;
   }): "remembered" | "skipped" {
     const thread = { mode: input.source.mode, threadId: input.source.threadId };
     const key = threadKey(thread);
@@ -439,6 +453,9 @@ export class PersonMemoryStore {
     // The answer may arrive after the person forgot everything, switched
     // memory off and on, or erased this thread: it then stays unwritten.
     if (this.#gone.has(key)) return "skipped";
+    if (input.erasuresBefore !== undefined && input.erasuresBefore !== this.erasures(thread)) {
+      return "skipped";
+    }
     if (this.#since !== undefined && input.source.endedAt < this.#since) return "skipped";
     if (!this.threadTakesPart({ ...thread, projectId: input.source.projectId })) return "skipped";
     const earlier = this.#digests.get(key);
@@ -613,7 +630,7 @@ export class PersonMemoryStore {
       version: envelope.version,
     });
     // Marking a thread erases what was already remembered from it.
-    this.#gone.add(key);
+    this.#erasures.set(key, (this.#erasures.get(key) ?? 0) + 1);
     this.#forgetThread(thread, actor);
   }
 

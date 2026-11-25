@@ -430,6 +430,7 @@ export class PersonMemorySweep {
   ): Promise<{ readonly outcome: PersonMemoryDistillOutcome; readonly settle: Settle }> {
     const { store, model } = this.#options;
     this.#reads += 1;
+    const erasuresBefore = store.erasures({ mode: source.mode, threadId });
     const facts = source.read(threadId);
     if (facts === undefined) return { outcome: "skipped", settle: "no" };
     if (!store.threadTakesPart({ mode: source.mode, threadId, projectId: facts.projectId })) {
@@ -554,6 +555,7 @@ export class PersonMemorySweep {
           summary,
           entries,
           lastMessage: { id: last.id, at: decodeUtcTimestamp(last.at) },
+          erasuresBefore,
         }) === "remembered"
           ? "remembered"
           : "skipped",

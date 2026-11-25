@@ -2265,6 +2265,9 @@ except where a bullet says otherwise.
   thread again moves that start to the moment of the change, so nothing that
   ended while memory was off, kept out, or just forgotten is learned afterwards,
   and a call that was running when the person forgot everything stores nothing.
+  A thread allowed again after Leave no trace takes part from then on (its new
+  turns are marked and it may save), while a call that began before the erasure
+  still writes nothing.
   A thread with nothing the person wrote is recorded as remembered without a
   call.
 - **Saving at once.** Telling an agent "remember that I prefer X" does not wait
