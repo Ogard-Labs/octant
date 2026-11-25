@@ -35,7 +35,7 @@ export const WORK_TURN_SAFE_INPUT_TOKENS = 24_000;
  * and left the model to reconcile two blocks that said the same thing.
  */
 const WORK_ARTIFACT_REFERENCE = "octant-work-artifacts";
-const WORK_ARTIFACT_INSTRUCTIONS =
+export const WORK_ARTIFACT_INSTRUCTIONS =
   "Files you write for the person go inside this task's folder; report their real relative paths. Use format-specific tooling for binary documents. Do not claim a file opened in a preview, and never invent download URLs or artifact ids.";
 
 export type WorkTurnContextPlan =

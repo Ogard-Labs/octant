@@ -36,6 +36,7 @@ import {
   routineProposalDefinition,
 } from "../automation/routineProposalTools";
 import { routinesDefinition } from "../automation/routineTools";
+import { delegatedBrowserToolDefinition } from "../browser/browserDelegatedChildren";
 import { BROWSER_TOOL_DEFINITION } from "../browser/browserToolDefinition";
 import {
   CANVAS_TOOL_NAME,
@@ -56,10 +57,13 @@ import {
 import { REPORT_FINISHED_TOOL_DEFINITION } from "../finishedReceipts/finishedReceiptTools";
 import { followUpSuggestionInstructionsFor } from "../followUps/followUpSuggestionInstructions";
 import { githubReadDefinition } from "../github/githubReadToolService";
-import { nativeHarnessInstructions } from "../harness/nativeHarnessInstructions";
+import {
+  harnessTodayInstruction,
+  nativeHarnessInstructions,
+} from "../harness/nativeHarnessInstructions";
 import { composeSystem } from "../harness/nativeHarnessLoop";
 import { octantOrientation } from "../orientation/octantOrientation";
-import { MAC_TOOL } from "../plugins/computerUse/computerUsePlugin";
+import { DESKTOP_TOOL, MAC_TOOL } from "../plugins/computerUse/computerUsePlugin";
 import { linearReadDefinition } from "../plugins/linear/linearReadToolService";
 import { projectMemoryDefinition } from "../projectMemory/projectMemoryTools";
 import { appToolHostLines } from "../providers/appToolHostLines";
@@ -67,6 +71,8 @@ import { codexDynamicTools } from "../providers/codexDriver";
 import { encodeChatCompletionsTools } from "../providers/openAiToolEncoding";
 import { threadsToolDefinition } from "../siblingThreads/siblingThreadTools";
 import { sideTaskDefinition } from "../sideTasks/sideTaskTools";
+import { WORK_ARTIFACT_INSTRUCTIONS } from "../work/workTurnContext";
+import { STATUS_UPKEEP_INSTRUCTION } from "../work/workTurnService";
 import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
 
 /**
@@ -74,7 +80,8 @@ import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructi
  * instructions each runtime can be given, encoded the way that runtime's
  * adapter sends them. It is built from the same definitions and renderers a
  * turn uses, with no server, so a change that makes every prompt larger shows
- * as a number before it ships. What the person adds (skills, memory, files,
+ * as a number before it ships. It is an upper bound: a turn's posture withholds
+ * some of these tools, and no posture adds one. What the person adds (skills, memory, files,
  * plugins, MCP servers) and a runtime's own prompt are not Octant's and are
  * not counted.
  */
@@ -136,7 +143,7 @@ export type AgentPromptBudget = Readonly<
   Record<AgentPromptRuntime, Readonly<Record<AgentPromptContext, AgentPromptBudgetEntry>>>
 >;
 
-export interface AgentPromptOverrun {
+export interface AgentPromptDifference {
   readonly runtime: AgentPromptRuntime;
   readonly context: AgentPromptContext;
   readonly measure: keyof AgentPromptBudgetEntry;
@@ -195,6 +202,8 @@ function canvasTool(mode: OctantMode, scope: "thread" | "run"): ProviderToolDefi
   };
 }
 
+const bytes = (text: string): number => Buffer.byteLength(text, "utf8");
+
 const isHarnessToolName = Schema.is(NativeHarnessToolName);
 
 /** What a child run's session is composed of: the workspace tools and the web, never a lead's thread tools. */
@@ -208,6 +217,7 @@ const CHILD_HARNESS_TOOLS: ReadonlySet<string> = new Set([
   "web-fetch",
   "web-search",
   "ask-user",
+  "diagnostics",
 ]);
 
 function harnessTools(mode: OctantMode, child: boolean): ReadonlyArray<ProviderToolDefinition> {
@@ -225,9 +235,17 @@ function harnessTools(mode: OctantMode, child: boolean): ReadonlyArray<ProviderT
   });
 }
 
+/** A turn carries one of these, never both. */
+function widestOf(
+  left: ProviderToolDefinition,
+  right: ProviderToolDefinition,
+): ProviderToolDefinition {
+  return bytes(JSON.stringify(left)) >= bytes(JSON.stringify(right)) ? left : right;
+}
+
 const EVERYWHERE: ReadonlyArray<ProviderToolDefinition> = [
   AGENTS_TOOL_DEFINITION,
-  MAC_TOOL,
+  widestOf(MAC_TOOL, DESKTOP_TOOL),
   projectMemoryDefinition,
   PAST_THREADS_TOOL_DEFINITION,
   REMEMBER_PERSON_TOOL_DEFINITION,
@@ -300,9 +318,17 @@ function octantTools(context: AgentPromptContext): ReadonlyArray<ProviderToolDef
     case "chat-child":
       return [PAST_THREADS_TOOL_DEFINITION];
     case "work-child":
-      return [PAST_THREADS_TOOL_DEFINITION, canvasTool("work", "run"), BROWSER_TOOL_DEFINITION];
+      return [
+        PAST_THREADS_TOOL_DEFINITION,
+        canvasTool("work", "run"),
+        delegatedBrowserToolDefinition({ uploads: false, downloads: false }),
+      ];
     case "code-child":
-      return [PAST_THREADS_TOOL_DEFINITION, canvasTool("code", "run"), BROWSER_TOOL_DEFINITION];
+      return [
+        PAST_THREADS_TOOL_DEFINITION,
+        canvasTool("code", "run"),
+        delegatedBrowserToolDefinition({ uploads: false, downloads: false }),
+      ];
   }
 }
 
@@ -354,14 +380,26 @@ function promptInstructions(
   return [
     octantOrientation(mode),
     ...(runtime === "harness" ? nativeHarnessInstructions(mode, { platform: "darwin" }) : []),
+    ...(runtime === "harness"
+      ? [
+          {
+            kind: "turn-instructions" as const,
+            text: harnessTodayInstruction("2026-01-01T00:00:00.000Z"),
+          },
+        ]
+      : []),
     ...turnDecisionInstructions(mode),
     followUpSuggestionInstructionsFor(true),
+    ...(mode === "work"
+      ? [WORK_ARTIFACT_INSTRUCTIONS, STATUS_UPKEEP_INSTRUCTION].map((text) => ({
+          kind: "instructions" as const,
+          text,
+        }))
+      : []),
     ...(delivery === undefined ? [] : [{ kind: "instructions" as const, text: delivery }]),
     ...lines,
   ];
 }
-
-const bytes = (text: string): number => Buffer.byteLength(text, "utf8");
 
 function renderedInstructions(
   runtime: AgentPromptRuntime,
@@ -490,18 +528,36 @@ export function readAgentPromptBudget(
     : { status: "refused", message: missing };
 }
 
-export function overBudget(
+function differing(
   report: AgentPromptReport,
   budget: AgentPromptBudget,
-): ReadonlyArray<AgentPromptOverrun> {
+  differs: (measured: number, budget: number) => boolean,
+): ReadonlyArray<AgentPromptDifference> {
   const measured = budgetFor(report);
   return AGENT_PROMPT_RUNTIMES.flatMap((runtime) =>
     AGENT_PROMPT_CONTEXTS.flatMap((context) =>
       (["firstPromptBytes", "laterTurnBytes"] as const).flatMap((measure) => {
         const size = measured[runtime][context][measure];
         const limit = budget[runtime][context][measure];
-        return size > limit ? [{ runtime, context, measure, measured: size, budget: limit }] : [];
+        return differs(size, limit)
+          ? [{ runtime, context, measure, measured: size, budget: limit }]
+          : [];
       }),
     ),
   );
+}
+
+export function overBudget(
+  report: AgentPromptReport,
+  budget: AgentPromptBudget,
+): ReadonlyArray<AgentPromptDifference> {
+  return differing(report, budget, (measured, limit) => measured > limit);
+}
+
+/** A budget left above the real size would let later growth pass unseen. */
+export function underBudget(
+  report: AgentPromptReport,
+  budget: AgentPromptBudget,
+): ReadonlyArray<AgentPromptDifference> {
+  return differing(report, budget, (measured, limit) => measured < limit);
 }

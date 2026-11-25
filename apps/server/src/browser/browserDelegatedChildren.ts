@@ -13,6 +13,7 @@ import {
   type WindowId,
   type ProviderExecutionPolicy,
   type StoredBrowserProfile,
+  type ProviderToolDefinition,
 } from "@octant/contracts";
 import type { BrowserSessionTarget } from "@octant/contracts/browser-session-grants";
 import {
@@ -78,6 +79,47 @@ interface BrowserDelegatedChildrenOptions {
   ) => ExternalContentIngestionResult;
   readonly uuid: () => string;
   readonly now: () => number;
+}
+
+/** The Browser as a delegated caller gets it: its own context, by the profile the person granted. */
+export function delegatedBrowserToolDefinition(offers: {
+  readonly uploads: boolean;
+  readonly downloads: boolean;
+}): ProviderToolDefinition {
+  return {
+    ...BROWSER_TOOL_DEFINITION,
+    description:
+      "Use this delegated caller's own Browser context with an explicitly granted stored profile and HTTPS site. Permission never lends the parent's page or file-transfer authority.",
+    inputSchema: {
+      ...BROWSER_TOOL_DEFINITION.inputSchema,
+      properties: {
+        ...BROWSER_TOOL_DEFINITION.inputSchema.properties,
+        ...(offers.uploads
+          ? {
+              uploadPermissionId: {
+                type: "string",
+                description:
+                  "The exact host-reviewed upload manifest id; grants no account access.",
+              },
+            }
+          : {}),
+        ...(offers.downloads
+          ? {
+              downloadPermissionId: {
+                type: "string",
+                description:
+                  "For download-save, omit this to list this routine/profile's reviewed manifests without saving; retry with the exact matching permissionId as downloadPermissionId. Grants no account access.",
+              },
+            }
+          : {}),
+        profile: {
+          type: "string",
+          description:
+            "The exact granted profile: project, personal, or account:<id>. A missing permission response lists only this caller's granted profiles.",
+        },
+      },
+    },
+  };
 }
 
 /** A child owns its page and clamped authority; it never borrows its parent's page. */
@@ -168,40 +210,10 @@ export class BrowserDelegatedChildren {
     });
     const tools: AppManagedToolSet = {
       definitions: [
-        {
-          ...BROWSER_TOOL_DEFINITION,
-          description:
-            "Use this delegated caller's own Browser context with an explicitly granted stored profile and HTTPS site. Permission never lends the parent's page or file-transfer authority.",
-          inputSchema: {
-            ...BROWSER_TOOL_DEFINITION.inputSchema,
-            properties: {
-              ...BROWSER_TOOL_DEFINITION.inputSchema.properties,
-              ...(input.uploadPermissions === undefined
-                ? {}
-                : {
-                    uploadPermissionId: {
-                      type: "string",
-                      description:
-                        "The exact host-reviewed upload manifest id; grants no account access.",
-                    },
-                  }),
-              ...(input.downloadPermissions === undefined
-                ? {}
-                : {
-                    downloadPermissionId: {
-                      type: "string",
-                      description:
-                        "For download-save, omit this to list this routine/profile's reviewed manifests without saving; retry with the exact matching permissionId as downloadPermissionId. Grants no account access.",
-                    },
-                  }),
-              profile: {
-                type: "string",
-                description:
-                  "The exact granted profile: project, personal, or account:<id>. A missing permission response lists only this caller's granted profiles.",
-              },
-            },
-          },
-        },
+        delegatedBrowserToolDefinition({
+          uploads: input.uploadPermissions !== undefined,
+          downloads: input.downloadPermissions !== undefined,
+        }),
       ],
       close: () => {
         closing ??= close();

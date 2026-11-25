@@ -21,7 +21,7 @@ import {
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import { nativeHarnessGoalContext } from "./nativeHarnessGoal";
-import { nativeHarnessInstructions } from "./nativeHarnessInstructions";
+import { harnessTodayInstruction, nativeHarnessInstructions } from "./nativeHarnessInstructions";
 import { harnessStopReason, type TurnEndSummary } from "../metrics/turnEnd";
 import type { NativeHarnessRouter } from "./nativeHarnessRouter";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
@@ -135,11 +135,9 @@ export class NativeHarnessTurnObserver {
               text: `The advisor reviewed your last turn and redirects you: ${redirect}`,
             },
           ]),
-      // Codex and Claude Code tell the model the date themselves; nothing else
-      // did here, and a Work status file asks for today's date.
       {
         kind: "turn-instructions" as const,
-        text: `Today is ${this.#options.clock().slice(0, 10)} (UTC).`,
+        text: harnessTodayInstruction(this.#options.clock()),
       },
     ];
   }

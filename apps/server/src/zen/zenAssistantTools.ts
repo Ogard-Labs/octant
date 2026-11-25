@@ -264,7 +264,7 @@ function splitOperation(input: unknown): {
   return { operation: isOperation(operation) ? operation : undefined, rest };
 }
 
-export const ZEN_ASSISTANT_TOOL_DEFINITION: ProviderToolDefinition = {
+const ZEN_ASSISTANT_TOOL_DEFINITION: ProviderToolDefinition = {
   name: ZEN_ASSISTANT_TOOL_NAME,
   description:
     "Arrange this Zen space for the person. Start with get-space: it returns the space's version and each element's elementId, and every change takes that version as expectedVersion. search-threads finds threads to pin and pin-thread pins one as a card; create-widget adds an empty Notes, Checklist, or Timer widget; preview-recipe proposes a custom widget the person must confirm; place-element moves, resizes, focuses, minimizes, restores, or removes an element; update-appearance changes dimming and element opacity. A change against an out-of-date version is refused as a conflict that changes nothing and names the current version. get-space and search-threads only read. Call operation help for full usage.",

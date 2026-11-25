@@ -1,15 +1,15 @@
 {
   "claude": {
     "chat": {
-      "firstPromptBytes": 31179,
+      "firstPromptBytes": 31464,
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 47136,
+      "firstPromptBytes": 48056,
       "laterTurnBytes": 0
     },
     "code": {
-      "firstPromptBytes": 63320,
+      "firstPromptBytes": 63605,
       "laterTurnBytes": 0
     },
     "chat-child": {
@@ -17,25 +17,25 @@
       "laterTurnBytes": 0
     },
     "work-child": {
-      "firstPromptBytes": 16495,
+      "firstPromptBytes": 16098,
       "laterTurnBytes": 0
     },
     "code-child": {
-      "firstPromptBytes": 16772,
+      "firstPromptBytes": 17183,
       "laterTurnBytes": 0
     }
   },
   "codex": {
     "chat": {
-      "firstPromptBytes": 31413,
+      "firstPromptBytes": 31698,
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 47460,
+      "firstPromptBytes": 48380,
       "laterTurnBytes": 0
     },
     "code": {
-      "firstPromptBytes": 63788,
+      "firstPromptBytes": 64073,
       "laterTurnBytes": 0
     },
     "chat-child": {
@@ -43,25 +43,25 @@
       "laterTurnBytes": 0
     },
     "work-child": {
-      "firstPromptBytes": 16693,
+      "firstPromptBytes": 16296,
       "laterTurnBytes": 0
     },
     "code-child": {
-      "firstPromptBytes": 16988,
+      "firstPromptBytes": 17417,
       "laterTurnBytes": 0
     }
   },
   "opencode": {
     "chat": {
-      "firstPromptBytes": 32023,
+      "firstPromptBytes": 32308,
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 48365,
+      "firstPromptBytes": 49395,
       "laterTurnBytes": 0
     },
     "code": {
-      "firstPromptBytes": 64989,
+      "firstPromptBytes": 65274,
       "laterTurnBytes": 0
     },
     "chat-child": {
@@ -69,25 +69,25 @@
       "laterTurnBytes": 0
     },
     "work-child": {
-      "firstPromptBytes": 16679,
+      "firstPromptBytes": 16282,
       "laterTurnBytes": 0
     },
     "code-child": {
-      "firstPromptBytes": 16956,
+      "firstPromptBytes": 17367,
       "laterTurnBytes": 0
     }
   },
   "acp": {
     "chat": {
-      "firstPromptBytes": 32023,
+      "firstPromptBytes": 32308,
       "laterTurnBytes": 4724
     },
     "work": {
-      "firstPromptBytes": 48365,
-      "laterTurnBytes": 7135
+      "firstPromptBytes": 49395,
+      "laterTurnBytes": 7880
     },
     "code": {
-      "firstPromptBytes": 64989,
+      "firstPromptBytes": 65274,
       "laterTurnBytes": 8687
     },
     "chat-child": {
@@ -95,25 +95,25 @@
       "laterTurnBytes": 0
     },
     "work-child": {
-      "firstPromptBytes": 16679,
+      "firstPromptBytes": 16282,
       "laterTurnBytes": 0
     },
     "code-child": {
-      "firstPromptBytes": 16956,
+      "firstPromptBytes": 17367,
       "laterTurnBytes": 0
     }
   },
   "pi": {
     "chat": {
-      "firstPromptBytes": 32023,
+      "firstPromptBytes": 32308,
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 48365,
+      "firstPromptBytes": 49395,
       "laterTurnBytes": 0
     },
     "code": {
-      "firstPromptBytes": 64989,
+      "firstPromptBytes": 65274,
       "laterTurnBytes": 0
     },
     "chat-child": {
@@ -121,38 +121,38 @@
       "laterTurnBytes": 0
     },
     "work-child": {
-      "firstPromptBytes": 16679,
+      "firstPromptBytes": 16282,
       "laterTurnBytes": 0
     },
     "code-child": {
-      "firstPromptBytes": 16956,
+      "firstPromptBytes": 17367,
       "laterTurnBytes": 0
     }
   },
   "harness": {
     "chat": {
-      "firstPromptBytes": 40196,
-      "laterTurnBytes": 40196
+      "firstPromptBytes": 40509,
+      "laterTurnBytes": 40509
     },
     "work": {
-      "firstPromptBytes": 60680,
-      "laterTurnBytes": 60680
+      "firstPromptBytes": 61628,
+      "laterTurnBytes": 61628
     },
     "code": {
-      "firstPromptBytes": 78077,
-      "laterTurnBytes": 78077
+      "firstPromptBytes": 78390,
+      "laterTurnBytes": 78390
     },
     "chat-child": {
       "firstPromptBytes": 3451,
       "laterTurnBytes": 3511
     },
     "work-child": {
-      "firstPromptBytes": 16825,
-      "laterTurnBytes": 16887
+      "firstPromptBytes": 16428,
+      "laterTurnBytes": 16490
     },
     "code-child": {
-      "firstPromptBytes": 17132,
-      "laterTurnBytes": 17194
+      "firstPromptBytes": 17794,
+      "laterTurnBytes": 17797
     }
   }
 }
