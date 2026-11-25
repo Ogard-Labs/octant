@@ -153,6 +153,13 @@ wins.
   boundary ([principles](docs/architecture.md#overview-and-principles)).
 - Stay inside the [Current Release Boundary](docs/architecture.md#current-release-boundary):
   do not build, and do not widen, what it defers or places out of scope.
+- A new refusal, ask, cap or held-back provider feature that applies with
+  Strict off names, beside the rule in its owning specification, the
+  [hard line](docs/architecture.md#overview-and-principles) it protects. One
+  that protects none goes behind Strict or becomes a setting the person can
+  lift. (In November 2026 limits the principles had already dropped were still
+  applied by default: a helper's turn ended after 256 events, and a provider
+  lost the person's `GH_TOKEN`.)
 
 ## Originality And Architecture
 
