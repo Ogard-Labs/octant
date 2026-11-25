@@ -150,7 +150,7 @@ final class OfflineDemoTests: XCTestCase {
         add(composer)
         tap(element("mobile-home-composer-submit"))
         XCTAssertTrue(element("mobile-thread-screen").waitForExistence(timeout: 15))
-        let reply = app.staticTexts.matching(
+        let reply = app.descendants(matching: .any).matching(
             NSPredicate(format: "label CONTAINS %@", "Mock reply to: " + prompt)
         ).firstMatch
         XCTAssertTrue(reply.waitForExistence(timeout: 15))
@@ -202,7 +202,7 @@ final class OfflineDemoTests: XCTestCase {
         XCTAssertTrue(element("mobile-mock-banner").exists)
         tap(element("mobile-demo-leave"))
         enterDemo()
-        XCTAssertFalse(app.staticTexts.matching(
+        XCTAssertFalse(app.descendants(matching: .any).matching(
             NSPredicate(format: "label CONTAINS %@", "Native iOS sample reply")
         ).firstMatch.exists)
         app.terminate()
