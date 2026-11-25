@@ -10088,7 +10088,7 @@ describe("ChatService", () => {
       return { ...fixture, thread: updated.thread };
     }
 
-    it("takes an unattended turn on a pool whose Google Antigravity entry is turned off, and refuses it once it is on", async () => {
+    it("routes an unattended turn to an eligible pool candidate instead of failing on an excluded Google Antigravity personal sign-in entry", async () => {
       const antigravity = "84000000-0000-4000-8000-000000000031";
       let antigravityOn = false;
       const antigravityCandidate = {
@@ -10109,22 +10109,28 @@ describe("ChatService", () => {
           providerEnabledFor: (id) => id !== antigravity || antigravityOn,
         },
       );
-      const send = (prompt: string) =>
-        service.execute({
-          kind: "send-chat-turn",
-          threadId: thread.id,
-          expectedVersion: service.read(thread.id).thread.version,
-          prompt,
-        });
-      // Routing never sends a turn to a provider that is off, so a pool that
-      // still lists one does not block the routine's send.
+      const send = (prompt: string, context?: Parameters<typeof service.execute>[1]) =>
+        service.execute(
+          {
+            kind: "send-chat-turn",
+            threadId: thread.id,
+            expectedVersion: service.read(thread.id).thread.version,
+            prompt,
+          },
+          context,
+        );
+      // Routing skips disabled providers and providers that refuse automatic
+      // cross-model routing, so an unattended turn (or Chat-to-Chat dialogue)
+      // routes to the eligible OpenAI candidate whether Antigravity is off or on.
       await expect(send("While it is off")).resolves.toMatchObject({ kind: "turn-created" });
       await until(() => service.read(thread.id).turns[0]?.attempts[0]?.outcome === "completed");
 
       antigravityOn = true;
-      await expect(send("Once it is on")).rejects.toMatchObject({
-        failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
+      await expect(send("Once it is on", { coordinationDepth: 1 })).resolves.toMatchObject({
+        kind: "turn-created",
       });
+      await until(() => service.read(thread.id).turns[1]?.attempts[0]?.outcome === "completed");
+      expect(service.read(thread.id).turns[1]?.attempts[0]?.providerInstanceId).toBe(ids.provider);
     });
 
     it("excludes Google Antigravity on personal sign-in from automatic multi-model pool routing without probing it", async () => {

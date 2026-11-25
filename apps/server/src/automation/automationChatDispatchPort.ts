@@ -34,7 +34,7 @@ export interface AutomationChatService {
    */
   readonly execute: (
     command: unknown,
-    context?: { readonly hostRun: true } | { readonly windowId: WindowId },
+    context?: { readonly hostRun: true; readonly windowId?: WindowId },
   ) => Promise<{ readonly kind: string }>;
 }
 
@@ -161,9 +161,12 @@ async function startOrRecover(
         prompt: followUp ? automationFollowUpTurnPrompt(snapshot.taskPrompt) : snapshot.taskPrompt,
         submissionId: automationChatSubmissionId(input.run),
       },
-      // A run a person explicitly confirmed carries their window; an
-      // unattended host run carries no window and takes Chat's host-run tools.
-      input.windowId === undefined ? { hostRun: true } : { windowId: input.windowId },
+      // A run a person explicitly confirmed carries their window alongside
+      // `hostRun` so turn admission sees the person while Chat still restricts
+      // the routine to its host-run tool set (no window/proposal tools).
+      input.windowId === undefined
+        ? { hostRun: true }
+        : { hostRun: true, windowId: input.windowId },
     );
     return {
       kind: "accepted",

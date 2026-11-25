@@ -88,6 +88,11 @@ export interface AutomationDispatchServiceOptions {
     readonly run: AutomationRun;
     readonly previousLifecycle: AutomationRun["lifecycle"];
   }) => void;
+  /**
+   * Checks whether a window or paired-device scope that confirmed a run is
+   * still active before launching on a same-process re-offer.
+   */
+  readonly isConfirmedScopeCurrent?: (windowId: WindowId) => boolean;
 }
 
 const DEFAULT_LAUNCH_CLAIM_LEASE_MS = 300_000;
@@ -115,7 +120,17 @@ export class AutomationDispatchService implements AutomationDispatchPort {
   readonly #launchClaimLeaseMs: number;
   readonly #schedule: (work: () => Promise<void>) => void;
   readonly #onRunStatusChanged: AutomationDispatchServiceOptions["onRunStatusChanged"];
+  readonly #isConfirmedScopeCurrent:
+    | AutomationDispatchServiceOptions["isConfirmedScopeCurrent"]
+    | undefined;
   readonly #inflight = new Set<string>();
+  /**
+   * In-memory only: remembers the person's confirming window across
+   * same-process re-offers (busy follow-up or provider capacity waits),
+   * revalidated before launch and cleared on acceptance or terminal states.
+   * Restart recovery starts empty and fails closed.
+   */
+  readonly #confirmedScopes = new Map<string, WindowId>();
 
   constructor(options: AutomationDispatchServiceOptions) {
     this.#store = options.store;
@@ -136,9 +151,13 @@ export class AutomationDispatchService implements AutomationDispatchPort {
         void work();
       });
     this.#onRunStatusChanged = options.onRunStatusChanged;
+    this.#isConfirmedScopeCurrent = options.isConfirmedScopeCurrent;
   }
 
   offer(offer: AutomationDispatchOffer): void {
+    if (offer.confirmedByWindowId !== undefined && !isRoutineHostScope(offer.confirmedByWindowId)) {
+      this.#confirmedScopes.set(String(offer.run.id), offer.confirmedByWindowId);
+    }
     const key = `${String(offer.run.id)}:${offer.run.lifecycle}:${offer.run.version}:${String(offer.confirmedByWindowId ?? "")}`;
     if (this.#inflight.has(key)) return;
     this.#inflight.add(key);
@@ -157,6 +176,9 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     runId: AutomationRun["id"],
     confirmedByWindowId?: WindowId,
   ): Promise<void> {
+    if (confirmedByWindowId !== undefined && !isRoutineHostScope(confirmedByWindowId)) {
+      this.#confirmedScopes.set(String(runId), confirmedByWindowId);
+    }
     await this.#dispatch(definitionId, runId, confirmedByWindowId);
   }
 
@@ -165,16 +187,38 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     runId: AutomationRun["id"],
     confirmedByWindowId?: WindowId,
   ): Promise<void> {
+    const runKey = String(runId);
     const definition = this.#projection.getDefinition(definitionId);
     let run = this.#projection.getRun(runId);
-    if (definition === undefined || run === undefined) return;
-    if (run.cancellationTombstone !== undefined) return;
-    if (run.firstTurnAcceptance !== undefined) return;
-    if (run.lifecycle === "awaiting-confirmation") return;
+    if (definition === undefined || run === undefined) {
+      this.#confirmedScopes.delete(runKey);
+      return;
+    }
+    if (run.cancellationTombstone !== undefined || run.firstTurnAcceptance !== undefined) {
+      this.#confirmedScopes.delete(runKey);
+      return;
+    }
+    if (run.lifecycle === "awaiting-confirmation") {
+      if (
+        definition.lifecycle === "archived" &&
+        run.definitionSnapshot.targetPolicy === "same-thread"
+      ) {
+        this.#cancelArchivedFollowUp(run);
+      }
+      return;
+    }
 
-    const humanConfirmed =
-      confirmedByWindowId !== undefined && !isRoutineHostScope(confirmedByWindowId);
-    const turnScopeId = humanConfirmed ? confirmedByWindowId : undefined;
+    const candidateScope = confirmedByWindowId ?? this.#confirmedScopes.get(runKey);
+    const scopeValid =
+      candidateScope !== undefined &&
+      !isRoutineHostScope(candidateScope) &&
+      (this.#isConfirmedScopeCurrent === undefined ||
+        this.#isConfirmedScopeCurrent(candidateScope));
+    if (candidateScope !== undefined && !scopeValid) {
+      this.#confirmedScopes.delete(runKey);
+    }
+    const humanConfirmed = scopeValid;
+    const turnScopeId = humanConfirmed ? candidateScope : undefined;
 
     if (run.lifecycle === "queued" || run.lifecycle === "recovering-dispatch") {
       const moved = this.#moveToDispatching(definition, run);
@@ -371,6 +415,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
    * The request id is derived from the run so a repeated offer is one receipt.
    */
   #cancelArchivedFollowUp(run: AutomationRun): void {
+    this.#confirmedScopes.delete(String(run.id));
     const current = this.#projection.getRun(run.id);
     if (current === undefined || current.cancellationTombstone !== undefined) return;
     const now = this.#now();
@@ -544,6 +589,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
   }
 
   #recordAcceptance(run: AutomationRun, runtimeReceipt: string, acceptedAt: UtcTimestamp): void {
+    this.#confirmedScopes.delete(String(run.id));
     try {
       this.#store.appendFirstTurnAccepted({
         automationId: run.automationId,
@@ -654,6 +700,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
   }
 
   #failRun(run: AutomationRun, reason: AutomationRunFailureReason, message: string): void {
+    this.#confirmedScopes.delete(String(run.id));
     const current = this.#projection.getRun(run.id);
     if (current === undefined) return;
     if (

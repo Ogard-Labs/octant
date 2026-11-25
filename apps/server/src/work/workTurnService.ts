@@ -941,12 +941,21 @@ export class WorkTurnService {
       projectId: String(thread.projectId),
     });
     if (owned !== "ok") return refuse(owned);
-    if (reason !== "provider-switch")
+    if (reason !== "provider-switch") {
+      if (
+        reason === "branch" &&
+        String(previous.authority.providerInstanceId) !== String(thread.providerInstanceId)
+      ) {
+        const target = this.#persistence.readProviderInstance(thread.providerInstanceId);
+        const handoffRefusal = personalSignInRefusals(target)?.refusesManualCrossModelHandoff;
+        if (handoffRefusal !== undefined) throw this.#failure("unauthorized", handoffRefusal);
+      }
       return {
         blocks: selection.blocks,
         selection,
         record: restartHandoffRecord(selection, reason === "branch" ? "fork" : "rewind"),
       };
+    }
     const switched = withHandoverSummary(
       selection,
       this.#handoverSummary("work-thread", thread.id),

@@ -285,4 +285,24 @@ describe("createAutomationChatDispatchPort", () => {
       reason: "thread-creation-failed",
     });
   });
+
+  it("keeps hostRun set alongside the confirming window when a person confirms a Chat routine", async () => {
+    const { service, execute } = chatService({ existing: true });
+    const port = createAutomationChatDispatchPort({ chat: service, clock: () => now });
+    const run = chatRun();
+    const windowId = "00000000-0000-4000-8000-000000000099" as never;
+
+    await port.startOrRecoverFirstTurn({
+      run,
+      threadId,
+      firstTurnRequestId: run.firstTurnRequestId,
+      promptDigest: "unused" as never,
+      windowId,
+    });
+
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "send-chat-turn" }), {
+      hostRun: true,
+      windowId,
+    });
+  });
 });

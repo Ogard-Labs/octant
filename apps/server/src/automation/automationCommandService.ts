@@ -1,4 +1,5 @@
 import {
+  decodeAutomationCancelRunRequestId,
   decodeAutomationCommand,
   automationFileActivityWindowLimit,
   decodeAutomationDefinition,
@@ -41,6 +42,7 @@ import type { AutomationProjection } from "./automationProjection";
 import {
   automationRunIdForOccurrence,
   buildAutomationRunForOccurrence,
+  deterministicAutomationUuid,
 } from "./automationRunIdentity";
 
 export interface AutomationCommandServiceOptions {
@@ -544,6 +546,7 @@ export class AutomationCommandService {
       blockedRunId: _blockedRun,
       ...base
     } = current;
+    const now = this.#now();
     const changed = validateAutomationDefinition(
       decodeAutomationDefinition({
         ...base,
@@ -551,7 +554,7 @@ export class AutomationCommandService {
         ...(lifecycle === "enabled" ? this.#dueState(current.trigger) : { nextDueAt: null }),
         updatedBy: command.principal,
         version: current.version + 1,
-        updatedAt: this.#now(),
+        updatedAt: now,
       }),
     );
     this.#store.appendDefinitionLifecycleChanged({
@@ -560,6 +563,32 @@ export class AutomationCommandService {
       previousLifecycle: current.lifecycle,
       expectedVersion: current.version,
     });
+    // Archiving a follow-up cancels any held run that never launched a turn,
+    // so an awaiting-confirmation follow-up does not stay pending forever.
+    if (lifecycle === "archived" && current.targetPolicy === "same-thread") {
+      const held = this.#projection.activeRun(current.id);
+      if (
+        held !== undefined &&
+        held.lifecycle === "awaiting-confirmation" &&
+        held.cancellationTombstone === undefined &&
+        held.firstTurnAcceptance === undefined
+      ) {
+        this.#store.appendRunCancellation({
+          ...personActor(command.principal),
+          automationId: current.id,
+          runId: held.id,
+          previousLifecycle: held.lifecycle,
+          tombstone: {
+            requestId: decodeAutomationCancelRunRequestId(
+              deterministicAutomationUuid(`automation-follow-up-archived:${String(held.id)}`),
+            ),
+            cancelledAt: now as UtcTimestamp,
+          },
+          expectedVersion: held.version,
+          updatedAt: now as UtcTimestamp,
+        });
+      }
+    }
     return { kind: resultKind, automation: changed };
   }
 

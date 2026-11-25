@@ -773,6 +773,16 @@ export function wireAutomation(deps: AutomationDependencies) {
       };
     },
     resolveFacts: (input) => resolveAutomationAuthorityLiveFacts(automationAuthorityDeps, input),
+    isConfirmedScopeCurrent: (scopeId) =>
+      windowAuthorityStore.listWindowIds().some((id) => String(id) === String(scopeId)) ||
+      createHostPersonScopes({
+        localWindows: () => windowAuthorityStore.listWindowIds(),
+        devices: () => readDeviceRegistrations(persistence.connection),
+        approvedByPerson: (deviceId) =>
+          readDeviceApprovedByPerson(persistence.connection, deviceId),
+        hasFullAccess: (deviceId) =>
+          readDeviceAccessLevel(persistence.connection, deviceId) === "full",
+      }).deviceActor(scopeId) !== undefined,
     now: () => new Date().toISOString() as UtcTimestamp,
     onRunStatusChanged: observeRunStatusChanged,
   });
@@ -896,7 +906,7 @@ export function wireAutomation(deps: AutomationDependencies) {
     const turn = {
       windowId,
       thread: { id: String(thread.id), mode: "code" as const, projectId: String(thread.projectId) },
-      isAutomationOrigin: isRoutineHostScope(windowId),
+      isAutomationOrigin: routineRun !== undefined || isRoutineHostScope(windowId),
       now: Date.now,
     };
     return combineAppManagedToolSets(

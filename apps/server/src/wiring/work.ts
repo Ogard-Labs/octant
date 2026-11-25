@@ -613,7 +613,7 @@ export function wireWork(deps: WorkDependencies) {
           mode: "work" as const,
           projectId: String(input.thread.projectId),
         },
-        isAutomationOrigin: isRoutineHostScope(input.windowId),
+        isAutomationOrigin: input.routineRun !== undefined || isRoutineHostScope(input.windowId),
         now: Date.now,
       };
       // The running turn's level; with no turn running, none.

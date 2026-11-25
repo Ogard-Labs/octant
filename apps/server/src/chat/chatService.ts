@@ -2646,6 +2646,11 @@ export class ChatService {
     );
     if (among === "routable-only" && instance?.enabled !== true) return;
     const refusals = personalSignInRefusals(instance);
+    // Routing and fallback probing already skip providers that refuse automatic
+    // cross-model routing without probing them, so a pool or fallback entry
+    // pointing at one never receives an unattended or outside-agent turn.
+    if (among === "routable-only" && refusals?.refusesAutomaticCrossModelRouting !== undefined)
+      return;
     // The grant's own check read the thread's provider; a pool or fallback
     // can still route the agent's turn onto one that refuses outside agents.
     const refusal = unattended ? refusals?.refusesUnattendedRuns : refusals?.refusesOutsideAgents;
@@ -4083,13 +4088,17 @@ export class ChatService {
       projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
     });
     if (owned !== "ok") return refuse(owned);
+    if (
+      (reason === "provider-switch" || reason === "branch") &&
+      source.from !== undefined &&
+      String(source.from.providerInstanceId) !== String(thread.providerInstanceId)
+    ) {
+      const target = this.#persistence.readProviderInstance(thread.providerInstanceId);
+      const handoffRefusal = personalSignInRefusals(target)?.refusesManualCrossModelHandoff;
+      if (handoffRefusal !== undefined)
+        throw new ChatServiceError({ category: "unauthorized", message: handoffRefusal });
+    }
     if (reason === "provider-switch" && source.from !== undefined) {
-      if (String(source.from.providerInstanceId) !== String(thread.providerInstanceId)) {
-        const target = this.#persistence.readProviderInstance(thread.providerInstanceId);
-        const handoffRefusal = personalSignInRefusals(target)?.refusesManualCrossModelHandoff;
-        if (handoffRefusal !== undefined)
-          throw new ChatServiceError({ category: "unauthorized", message: handoffRefusal });
-      }
       const switched = withHandoverSummary(selection, this.#handoverSummary(thread.id));
       const record = providerSwitchHandoffRecord(switched, source.from);
       return {
@@ -5142,7 +5151,10 @@ export class ChatService {
     this.#assertResearchAvailable(thread, researchRoute);
     const toolsSupported =
       this.#effectiveAppManagedTools(probe, decodeProviderModelId(thread.modelId)) === "supported";
-    const carriesAppTools = executionContext?.windowId !== undefined && toolsSupported;
+    const carriesAppTools =
+      executionContext?.windowId !== undefined &&
+      executionContext.hostRun !== true &&
+      toolsSupported;
     // A turn the host sends with no window takes only the tools that need
     // none; the window-scoped set (Computer, the window's harness and the
     // other tools keyed on a window) stays with turns a window sends.

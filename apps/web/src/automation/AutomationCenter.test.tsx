@@ -901,4 +901,26 @@ describe("AutomationCenter arranging", () => {
     expect(empty).toHaveTextContent("No automations match these filters");
     expect(screen.getByRole("button", { name: "Clear filters" })).toBeVisible();
   });
+
+  it("includes an enabled routine awaiting confirmation under the Needs attention filter", async () => {
+    const waitingSummary = automationSummaryFixture({
+      displayName: "Needs confirm",
+      latestRunLifecycle: "awaiting-confirmation",
+    });
+    renderCenter({
+      client: fakeClient({
+        list: vi.fn(async () => ({
+          kind: "automation-list" as const,
+          items: [workSummary, waitingSummary],
+        })),
+      } as Partial<AutomationClient>),
+    });
+    await screen.findByRole("list", { name: "Automations" });
+
+    await chooseFilter("Status", "Needs attention");
+
+    const rows = screen.getByRole("list", { name: "Automations" });
+    expect(within(rows).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(rows).getByRole("listitem", { name: "Needs confirm" })).toBeVisible();
+  });
 });

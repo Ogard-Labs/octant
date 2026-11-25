@@ -4106,7 +4106,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         const selected = await this.#forkTextHandoff(input.thread, forkOrigin, input.windowId);
         if (selected.status === "refused") {
           await input.extensionTools?.close?.().catch(() => undefined);
-          return failStart(CODE_FORK_HANDOFF_REFUSALS[selected.reason]);
+          return failStart(
+            "message" in selected ? selected.message : CODE_FORK_HANDOFF_REFUSALS[selected.reason],
+          );
         }
         forkHandoff = selected;
       }
@@ -4874,11 +4876,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         >;
       }
     | { readonly status: "refused"; readonly reason: CodeForkHandoffRefusal }
+    | { readonly status: "refused"; readonly message: string }
   > {
     if (this.#options.forkContext === undefined)
       return { status: "refused", reason: "unsupported" };
     const readable = await this.#readableForkSource(thread, origin, windowId);
     if (readable.status === "refused") return readable;
+    if (String(readable.source.providerInstanceId) !== String(thread.providerInstanceId)) {
+      const target = this.#options.readProviderInstance?.(thread.providerInstanceId);
+      const handoffRefusal = personalSignInRefusals(target)?.refusesManualCrossModelHandoff;
+      if (handoffRefusal !== undefined) return { status: "refused", message: handoffRefusal };
+    }
     // The fork's handoff is read by the fork's own model, so its bound comes
     // from that model's window when the probe reported it, exactly as a
     // provider switch's does.

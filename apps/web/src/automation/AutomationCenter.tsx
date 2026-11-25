@@ -962,7 +962,11 @@ function routineListStatus(summary: AutomationSummary): "active" | "needs-attent
         summary.fileSource.reason !== "known-activity"))
   )
     return "needs-attention";
-  if (summary.latestRunLifecycle === "failed" || summary.latestRunLifecycle === "interrupted") {
+  if (
+    summary.latestRunLifecycle === "awaiting-confirmation" ||
+    summary.latestRunLifecycle === "failed" ||
+    summary.latestRunLifecycle === "interrupted"
+  ) {
     return "needs-attention";
   }
   return summary.lifecycle === "enabled" ? "active" : "finished";
