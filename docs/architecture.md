@@ -7891,7 +7891,12 @@ ls-remote` against the thread's remote and the GitHub reads they already
   raises (a paired browser on its list refresh): when the list says the open
   thread is working at an activity sequence the view has not looked at, the
   view reads the conversation once and follows the turn through the same poll
-  and operation stream a read at open starts. It does not look while it
+  and operation stream a read at open starts. When the activity moved but the
+  list says the thread is settled, as for a turn that started and finished
+  between two reads of the list, the view looks at the newest turn alone and
+  reads the conversation only for a turn it does not show. A queued turn that
+  becomes the newest as the followed one ends is read once by the followed
+  turn's poll and streamed in its place. It does not look while it
   follows a running turn, is sending one itself, or is still on its first
   read, so it never opens a second stream or reopens a turn it settled; a turn
   waiting on the person does not stop it looking, and a read that fails leaves
@@ -7911,8 +7916,9 @@ ls-remote` against the thread's remote and the GitHub reads they already
   Code turn, so it re-reads the thread on a short cadence while its newest
   turn runs or a turn waits. While it shows the newest turns settled, it looks
   at the newest turn alone, without its text, every ten seconds while in
-  front (the price of one poll), and refreshes once when one is underway; an anchored search page
-  does not look. When the running turn is
+  front (the price of one poll), and refreshes once when the host's newest
+  turn is not the one it shows, even one that already finished, or runs or
+  waits again; an anchored search page does not look. When the running turn is
   one the queue admitted itself, that message stays at the head as
   `accepted` until its turn settles, and the message behind it is offered to
   that turn under the same checks, one at a time, in order. A message
