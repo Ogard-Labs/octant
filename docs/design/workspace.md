@@ -2886,7 +2886,8 @@ thread worked on, up to 50, in flight first (open and draft), then merged, then
 closed, each group newest first, with any past 50 counted as "+N more". Each is
 one line: the state glyph in the state colour, a checks dot while it can still
 merge, the number and the title, and the repository only when the thread's pull
-requests span more than one. Checks, review, conflicts and freshness are in the
+requests span more than one. A stack (below) keeps its layers together, bottom
+first, where its newest layer would stand. Checks, review, conflicts and freshness are in the
 line's tooltip and accessible name. Past ten lines the list scrolls inside the
 card. A click opens the pull request in Review; Cmd-click, or the line's GitHub
 control, which appears with the line's hover or focus, opens it on GitHub. The
@@ -3681,7 +3682,10 @@ end.
 **The thread's pull requests.** Under its other rows, a Code thread's Changes
 section lists the pull requests this thread opened or is tied to, up to 50, in
 flight first (open and draft), then merged, then closed, each group newest
-first, under a small "Pull requests" caption. Past ten, the rest fold behind
+first, under a small "Pull requests" caption. A stack's layers stay together, bottom
+first, joined by a line, each with its place ("2 of 4") above its checks at the
+row's end ([Stacks](#pull-requests-and-issues)); the place is not on the second
+line, which gives way to the row's next step. Past ten, the rest fold behind
 one quiet "Show more (n)" row that becomes "Show less", as the sidebar folds a
 long thread list. Each pull request is one row of fixed height with the
 state's mark in its colour (open, draft, merged, closed, or a neutral mark when
@@ -3988,6 +3992,36 @@ use the success ink, failing checks the danger ink, pending checks the
 warning ink. In the Mono style open, merged and links fall back to greys and keep
 their glyphs; closed and failures keep red. The snapshot holds no label, so no
 surface draws one.
+
+**Stacks.** Open pull requests of one repository that each build on the one
+before (its base is the other's head) are shown as one stack (maintainer
+decision, 2026-11-25). The host reads the stack from the cached snapshot's
+branches, every row of it the window may read, and asks the forge for nothing;
+a list that shows part of a stack still says the true place. A stack is one
+line of two or more. A fork's pull request is in none, because its head names a
+branch of another repository; neither is one whose head branch another open pull
+request shares, nor one that several are based on. The last is usually a
+long-lived branch on its way to another: linked, an open development-to-main
+pull request made every feature a layer of the release. The place is the words
+"2 of 4" in the meta ink, with "Layer 2 of 4 of a stack, on #12" in the tooltip
+or accessible name; layers that stand next to each other are joined by one 1px
+line from glyph to glyph and are never indented, because an indent per layer
+takes the title's width. A layer a filter hid, or the thread never touched,
+leaves no line across the gap. The hover card, the thread's Environment list and
+the Pull requests list (under any sort, inside any group) keep a stack's layers
+together, bottom first, where the first of them would stand. Board cards and the
+Project's list in Environment are unchanged.
+
+The review lists the stack in its status column (the dock, under its header),
+this pull request marked. On the bottom layer Merge stack reads every layer from
+GitHub again, then asks inline with each head and the branch the stack lands on;
+a draft, a conflict, a closed, unreadable or stale layer, or one no longer based
+on the layer below, is named instead of a confirmation. The result says what
+merged and why it stopped, and stays when the stack is gone. A higher layer
+points to the bottom. Its own Merge stays, because a pull request whose base is
+another's branch is sometimes merged alone on purpose, and its confirmation says
+which branch it merges into. The Merge shortcut of the thread's list is the
+bottom layer's alone.
 
 The pull-request merge warning stays inline and nonmodal. Opening it focuses
 Cancel; Tab can leave the warning to continue reviewing. Escape within the warning

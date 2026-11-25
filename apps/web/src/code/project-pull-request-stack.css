@@ -1,0 +1,100 @@
+/* Laid out here, not by the page's status column alone: the Review dock shows
+   the same section without it. */
+.code-pr-stack {
+  --code-pr-stack-line: 24px;
+
+  display: grid;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.code-pr-stack > h2 {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  line-height: var(--oct-line-chrome-sm);
+}
+
+.code-pr-stack__note {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-pr-stack__list,
+.code-pr-stack__heads {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.code-pr-stack__layer {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: var(--code-pr-stack-line);
+  align-items: center;
+  gap: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.code-pr-stack__layer[aria-current="true"] {
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+}
+
+/* The line between a layer and the one it is based on, from glyph to glyph.
+   Each row draws its own half, so a row's height never breaks the line. */
+.code-pr-stack__layer:is([data-stack-join="previous"], [data-stack-join="both"])::before,
+.code-pr-stack__layer:is([data-stack-join="next"], [data-stack-join="both"])::after {
+  position: absolute;
+  inset-inline-start: 6.5px;
+  width: 1px;
+  height: calc(50% - 8px);
+  background: var(--oct-hairline-strong);
+  content: "";
+  pointer-events: none;
+}
+
+.code-pr-stack__layer::before {
+  top: 0;
+}
+
+.code-pr-stack__layer::after {
+  bottom: 0;
+}
+
+.code-pr-stack__state {
+  display: inline-flex;
+  flex: none;
+  color: var(--oct-pr-draft);
+}
+
+.code-pr-stack__state[data-pr-state="open"] {
+  color: var(--oct-pr-open);
+}
+
+.code-pr-stack__number {
+  flex: none;
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.code-pr-stack__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-pr-stack__merge {
+  justify-self: start;
+}
+
+.code-pr-stack__heads {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}

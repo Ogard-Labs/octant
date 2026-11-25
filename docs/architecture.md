@@ -3823,7 +3823,9 @@ on **Merge when ready** and **Auto-fix** for a Code thread's pull request
   branch of the one before it (`not-a-chain`, `duplicate`, `too-long`,
   `unreadable`). It then merges one at a time through the same path as a
   single merge, and stops at the first that does not merge, answering what
-  landed and why it stopped.
+  landed and why it stopped. The review's Merge stack sends the heads its
+  confirmation read and named
+  ([Workspace](design/workspace.md#pull-requests-and-issues)).
 - **Confirmation.** The review enables Merge only for a fresh, unambiguous,
   open, mergeable observation. Merge opens an inline confirmation that names the reviewed head
   and focuses Cancel; nothing merges until the person chooses Confirm merge.

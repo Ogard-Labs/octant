@@ -1,15 +1,18 @@
 import {
   decodeCodeProjectPullRequestDetailView,
+  decodeCodeProjectPullRequestView,
   decodeCodeThreadId,
   decodeUtcTimestamp,
   type CodeProjectPullRequestActionCommand,
   type CodeProjectPullRequestDetailQuery,
   type CodeProjectPullRequestLinkedThread,
+  type CodeProjectPullRequestStackMergeCommand,
+  type CodeProjectPullRequestStackMergeOutcome,
   type CodePullRequestLineNotesSource,
   type CodeThreadId,
 } from "@octant/contracts";
 import { decodeProjectId } from "@octant/contracts/projects";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DockProjectPullRequestReviewTool } from "../shell/DockProjectPullRequestReviewTool";
@@ -585,5 +588,201 @@ describe("the pull-request reading pane", () => {
 
     expect(sendNotes).toHaveBeenCalledTimes(1);
     expect(sendNotes.mock.calls[0]?.[1]).toContain("café.txt, new line 1");
+  });
+});
+
+describe("a pull request that is a layer of a stack", () => {
+  const layer = (number: number, headBranch: string, baseBranch: string) => ({
+    projectId: query.projectId,
+    projectName: "Octant",
+    repositoryOwner: "octant",
+    repositoryName: "octant",
+    number,
+    title: `Layer ${String(number)}`,
+    draft: false,
+    state: "open",
+    mergeability: "mergeable",
+    author: "octocat",
+    headBranch,
+    baseBranch,
+    updatedAt: "2026-08-22T07:00:00.000Z",
+    checks: "passing",
+    review: "approved",
+    linkedThreads: [],
+  });
+  const snapshot = () =>
+    decodeCodeProjectPullRequestView({
+      version: 1,
+      query: { version: 1 },
+      projects: [],
+      rows: [layer(13, "c", "b"), layer(12, "b", "a"), layer(11, "a", "main")],
+      repositoriesTruncated: false,
+      pullRequestsTruncated: false,
+      freshness: { status: "fresh", lastSuccessfulRefreshAt: "2026-08-22T08:00:00.000Z" },
+      generatedAt: "2026-08-22T08:00:00.000Z",
+    });
+  const branches: Readonly<Record<number, readonly [string, string]>> = {
+    11: ["a", "main"],
+    12: ["b", "a"],
+    13: ["c", "b"],
+  };
+  function layerDetail(number: number, overrides: Readonly<Record<string, unknown>> = {}) {
+    const view = detailView();
+    const [headBranch, baseBranch] = branches[number] ?? ["x", "main"];
+    return decodeCodeProjectPullRequestDetailView({
+      ...view,
+      query: { ...query, number },
+      detail: {
+        ...view.detail,
+        number,
+        title: `Layer ${String(number)}`,
+        url: `https://github.com/octant/octant/pull/${String(number)}`,
+        headBranch,
+        baseBranch,
+        headSha: String(number).repeat(20),
+        ...overrides,
+      },
+    });
+  }
+
+  function renderLayer(
+    number: number,
+    options: {
+      readonly outcome?: CodeProjectPullRequestStackMergeOutcome;
+      readonly details?: Readonly<Record<number, Readonly<Record<string, unknown>>>>;
+      readonly layout?: "dock" | "page";
+    } = {},
+  ) {
+    const details = options.details ?? {};
+    const refresh = vi.fn(async (command: { readonly number: number }) =>
+      layerDetail(command.number, details[command.number]),
+    );
+    const mergeStack = vi.fn(async (_command: CodeProjectPullRequestStackMergeCommand) => {
+      return options.outcome ?? { status: "merged" as const, merged: [11, 12, 13] };
+    });
+    const loadPullRequests = vi.fn(async () => snapshot());
+    render(
+      <DockProjectPullRequestReviewTool
+        layout={options.layout ?? "page"}
+        load={async () => layerDetail(number)}
+        loadPullRequests={loadPullRequests}
+        mergeStack={mergeStack}
+        onMerge={async () => ({ status: "unavailable", reason: "unavailable" })}
+        query={{ ...query, number }}
+        refresh={refresh}
+      />,
+    );
+    return { loadPullRequests, mergeStack };
+  }
+
+  it("lists the layers bottom first, marks this one, and points to the bottom to merge them", async () => {
+    renderLayer(12);
+    const stack = await screen.findByRole("region", { name: "Stack" });
+    const layers = within(stack).getAllByRole("listitem");
+    expect(layers.map((item) => item.textContent)).toEqual([
+      "#11Layer 11",
+      "#12Layer 12",
+      "#13Layer 13",
+    ]);
+    expect(layers.map((item) => item.getAttribute("aria-current"))).toEqual([null, "true", null]);
+    expect(within(stack).getByText("Merge the stack from its bottom, #11.")).toBeVisible();
+    expect(within(stack).queryByRole("button", { name: "Merge stack" })).toBeNull();
+  });
+
+  it.each(["page", "dock"] as const)(
+    "merges the stack only after its heads and branch are confirmed (%s)",
+    async (layout) => {
+      const user = userEvent.setup();
+      const { mergeStack } = renderLayer(11, { layout });
+      await user.click(await screen.findByRole("button", { name: "Merge stack" }));
+
+      const confirmation = await screen.findByRole("region", { name: "Confirm stack merge" });
+      expect(confirmation).toHaveTextContent("Merge 3 pull requests into main?");
+      expect(confirmation).toHaveTextContent("#12 1212121");
+      expect(within(confirmation).getByRole("button", { name: "Cancel" })).toHaveFocus();
+      expect(mergeStack).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole("button", { name: "Confirm stack merge" }));
+      expect(mergeStack).toHaveBeenCalledWith({
+        projectId: query.projectId,
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+        method: "squash",
+        confirmed: true,
+        items: [11, 12, 13].map((number) => ({ number, headSha: String(number).repeat(20) })),
+      });
+      expect(await screen.findByText(/^Merged #11, #12 and #13\./)).toHaveFocus();
+    },
+  );
+
+  it("merges nothing when the person cancels", async () => {
+    const user = userEvent.setup();
+    const { mergeStack } = renderLayer(11);
+    await user.click(await screen.findByRole("button", { name: "Merge stack" }));
+    await screen.findByRole("region", { name: "Confirm stack merge" });
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: "Confirm stack merge" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Merge stack" })).toHaveFocus();
+    expect(mergeStack).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a draft", { 13: { pullRequestState: "draft" } }, "#13 is a draft."],
+    ["a conflict", { 12: { mergeability: "conflicting" } }, "#12 has merge conflicts."],
+    ["a closed layer", { 12: { pullRequestState: "closed" } }, "#12 is no longer open."],
+    ["a stale reading", { 12: { freshness: "stale" } }, "#12 has no fresh GitHub observation."],
+    ["a layer that moved", { 13: { baseBranch: "main" } }, "#13 is no longer based on #12."],
+  ])("refuses to merge a stack with %s and says which layer", async (_name, details, reason) => {
+    const user = userEvent.setup();
+    const { mergeStack } = renderLayer(11, { details });
+    await user.click(await screen.findByRole("button", { name: "Merge stack" }));
+    expect(await screen.findByText(reason)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Confirm stack merge" })).toBeNull();
+    expect(mergeStack).not.toHaveBeenCalled();
+  });
+
+  it("says what merged and why it stopped, even once the stack is no longer there", async () => {
+    const user = userEvent.setup();
+    const details: Record<number, Readonly<Record<string, unknown>>> = {};
+    renderLayer(11, {
+      details,
+      outcome: {
+        status: "stopped",
+        merged: [11],
+        stoppedAt: 12,
+        outcome: { status: "refused", reason: "conflict" },
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Merge stack" }));
+    const confirm = await screen.findByRole("button", { name: "Confirm stack merge" });
+    details[11] = { pullRequestState: "merged" };
+    await user.click(confirm);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Merged #11, then stopped at #12. Merge refused: GitHub reported a merge conflict.",
+    );
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Stack" })).toBeNull());
+    expect(screen.getByRole("alert")).toBeVisible();
+  });
+
+  it.each(["page", "dock"] as const)(
+    "says which branch a higher layer merges into before it is merged alone (%s)",
+    async (layout) => {
+      const user = userEvent.setup();
+      renderLayer(12, { layout });
+      await screen.findByRole("region", { name: "Stack" });
+      await user.click(screen.getByRole("button", { name: "Merge" }));
+      expect(screen.getByRole("region", { name: "Confirm pull-request merge" })).toHaveTextContent(
+        "This merges into a, the branch of #11, and reaches main when that one does.",
+      );
+    },
+  );
+
+  it("shows no stack once a fresh reading says the layer is based on another branch", async () => {
+    const { loadPullRequests } = renderLayer(12, { details: { 12: { baseBranch: "main" } } });
+    await screen.findByRole("heading", { level: 1, name: "Layer 12" });
+    await act(async () => void (await loadPullRequests.mock.results[0]?.value));
+    expect(loadPullRequests).toHaveBeenCalled();
+    expect(screen.queryByRole("region", { name: "Stack" })).toBeNull();
   });
 });
