@@ -1,3 +1,4 @@
+import { type CleanedUpWorktreeStanding } from "@octant/domain/code-worktree-cleanup-policy";
 import {
   decodeThreadWorkingDirectory,
   MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
@@ -855,6 +856,10 @@ export interface CodeServiceOptions {
   readonly worktreeRefs?: CodeWorktreeRefsPort;
   readonly worktreeBranchSuggestion?: CodeWorktreeBranchSuggestionPort;
   readonly worktreeBranchNames?: CodeWorktreeBranchNamesPort;
+  /** Where a managed worktree's cleanup stands, when the host removed its folder; the thread view names it. */
+  readonly worktreeCleanup?: (
+    checkout: CodeCheckoutIdentity,
+  ) => Promise<CleanedUpWorktreeStanding | undefined>;
   readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
   /** Where a fork starts; without it a fork refuses as unavailable. */
   readonly forkPoints?: CodeForkPointPort;
@@ -1190,6 +1195,7 @@ export class CodeService {
   readonly #worktreeBranchNames: CodeWorktreeBranchNamesPort | undefined;
   /** Windows with a branch-name suggestion in flight: a window has at most one. */
   readonly #suggestingWindows = new Set<string>();
+  readonly #worktreeCleanup: CodeServiceOptions["worktreeCleanup"];
   readonly #managedThreadCreation: ManagedCodeThreadCreationPort | undefined;
   readonly #forkPoints: CodeForkPointPort | undefined;
   readonly #forkMergeBack: CodeServiceOptions["forkMergeBack"];
@@ -1262,6 +1268,7 @@ export class CodeService {
     this.#worktreeRefs = options.worktreeRefs;
     this.#worktreeBranchSuggestion = options.worktreeBranchSuggestion;
     this.#worktreeBranchNames = options.worktreeBranchNames;
+    this.#worktreeCleanup = options.worktreeCleanup;
     this.#managedThreadCreation = options.managedThreadCreation;
     this.#forkPoints = options.forkPoints;
     this.#forkMergeBack = options.forkMergeBack;
@@ -1682,9 +1689,11 @@ export class CodeService {
     await this.#authorizeThread(authenticatedWindowId, thread);
     const view = this.#persistence.readCodeThreadView(threadId);
     if (view === undefined) throw this.#failure("unavailable", "Code thread is unavailable.");
+    const worktreeCleanup = await this.#worktreeCleanup?.(view.checkout).catch(() => undefined);
     return {
       ...view,
       thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, view.thread),
+      ...(worktreeCleanup === undefined ? {} : { worktreeCleanup }),
     };
   }
 

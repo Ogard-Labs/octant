@@ -1,3 +1,4 @@
+import { cleanedUpWorktreeOf } from "../code/cleanedUpWorktrees";
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { ownPullRequestsFromHistory } from "../code/codeThreadMetadataService";
 import { splitRepositoryName } from "../code/pullRequestLinkService";
@@ -1306,6 +1307,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             providerInstanceId: thread.providerInstanceId,
             modelId: thread.modelId,
           }),
+        cleanedUpWorktree: cleanedUpWorktreeOf((id) => deps.managedWorktreeReceipts.load(id)),
         windowAccess: {
           canAccessProject: canAccessCodeProject,
           currentProjectAccess: (windowId, projectId) =>

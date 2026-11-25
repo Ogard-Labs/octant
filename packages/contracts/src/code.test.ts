@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
+import { decodeHostAnswer } from "./hostAnswer";
 import * as codeContracts from "./code";
 import { decodeHostAnswer } from "./hostAnswer";
 import {
@@ -223,6 +224,24 @@ describe("Code aggregate contracts", () => {
     // The strict decoder is the host's own and for what a person sends it.
     expect(() => Schema.decodeUnknownSync(olderSettings)(settings)).toThrow();
     expect(decodeCodeSettings(settings)).toMatchObject({ worktrees: settings.worktrees });
+  });
+
+  it("lets a client that decodes a host's answer leniently read settings and a field it has not heard of", () => {
+    const settings = {
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      version: 1,
+      updatedAt: now,
+      worktrees: { cleanup: { whenMerged: true, laterField: 1 } },
+      laterTopLevelField: true,
+    };
+    // The host's own decode stays strict, so a stray field never reaches the journal.
+    expect(() => decodeCodeSettings(settings)).toThrow();
+    // A client's answer decode drops what its build does not know: an earlier
+    // build meets `worktrees` the way this one meets a later field.
+    expect(decodeHostAnswer(codeContracts.CodeSettings)(settings)).toMatchObject({
+      worktrees: { cleanup: { whenMerged: true } },
+    });
   });
 
   it("decodes shell-free Code settings and rejects raw checkout/file paths", () => {
