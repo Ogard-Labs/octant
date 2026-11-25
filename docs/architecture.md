@@ -2222,13 +2222,24 @@ except where a bullet says otherwise.
   what was learned before, and it was last learned from over 6 hours ago. A pass
   checks cheap facts first (whether a turn runs, the time of the last message
   and of the last activity, whether any turn was marked typed) and lists each
-  mode's threads once; a thread with nothing to learn is not read, and one read
-  with nothing to learn is not read again until its last message changes (kept
-  in memory, so a restart reads each once more). The two share one budget of 10
-  model calls a pass, threads put away first, so a busy day never turns into a
-  burst; only a thread that reached the model spends it (one whose account is
-  off, not ready, at its limit, or refused by the Project or a spend ceiling
-  makes no call and spends nothing, bounded instead by 50 threads read a pass).
+  mode's threads once; a thread with nothing to learn is not read. A thread
+  that was read and had nothing to learn, a thread put away that had nothing
+  newer, and a thread whose model was refused (the account is off, not ready or
+  at its limit, or the Project's rule or a spend ceiling refused it) are
+  settled: they are not read again until something relevant changes (a new
+  typed message or mark, the person's Settings, the chosen model, or the time
+  it was put away) or, for a refusal, an hour has passed, so a lifted rule or
+  ceiling is noticed on a later pass. Settled marks are kept in memory (a
+  restart reads each thread once more) and leave with the thread. The two share
+  one budget of 10 model calls a pass, threads put away first, so a busy day
+  never turns into a burst; only a thread that reached the model spends it.
+  Every thread read in full, whether it ends in a call or is settled without
+  one, counts against a second bound of 50 reads a pass, and each pass starts
+  where the last one stopped, so a long run of threads that make no call never
+  keeps the later ones from being reached. A terminal's output in a Code thread
+  is not activity, so a dev server left running never keeps the thread from
+  being quiet; a Work thread's last activity is the newest change of any of its
+  turns.
   A thread that could not be read (the account, the rule, a ceiling, or the
   call failed) is tried again on a later pass, on the same account. The call
   passes the Project's provider rule (the rule a turn passes before it sends,
@@ -2358,7 +2369,9 @@ except where a bullet says otherwise.
   on its newest attempt). A turn that starts a session cuts its block at the
   moment the block is built and journals that moment as
   `person-memory.block-cut@1` (the thread, its mode, and the instant; only the
-  newest is kept), so that turn and every turn after it keep the entries up to
+  newest is kept: it is written first and the older ones are erased in the same
+  step as the newest is numbered 1, never touching other aggregates, and an erase
+  that fails leaves them for the next write, since the new event stands), so that turn and every turn after it keep the entries up to
   the same instant, also after a restart, which no journaled turn time could
   promise because a turn is journaled after its block is built. The block is
   cut at the later of the thread's creation, its newest compaction, the
@@ -2370,8 +2383,12 @@ except where a bullet says otherwise.
   person's next turn would. Every read is keyed by the thread or the session
   and takes one row, newest first, so its cost does not grow with the thread:
   two partial indexes hold only the compaction rows, and the newest turn's
-  session comes from the thread's own index. The turn that starts the
-  new session already sees what was learned before it. Its text opens by saying it is data about the person from
+  session comes from the thread's own index. The cut is journaled when the
+  block is built, before admission can refuse the turn: the block is part of
+  what admission sizes the request by, and the instant has to be the one the
+  block was built with, so a refused turn leaves a cut that costs at most one
+  re-sent block on a later turn that continues the same session. The turn that
+  starts the new session already sees what was learned before it. Its text opens by saying it is data about the person from
   earlier threads, not instructions, and each line names its kind. The
   context inspector lists it as Person memory in Chat and Work, so a person
   can see when it was used; a Code window, which is counted by part, counts
