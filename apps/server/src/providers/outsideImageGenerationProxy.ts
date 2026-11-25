@@ -526,6 +526,7 @@ function isValidProseUrlTerminator(
   prev: string,
   stopChar: string,
   nextChar: string,
+  afterNextChar: string,
   stoppedAtWhitespace: boolean,
   complete: boolean,
   openParens: number,
@@ -539,14 +540,10 @@ function isValidProseUrlTerminator(
   if (prev === "{") return stopChar === "}" || stoppedAtWhitespace;
   if (stopChar === "") return complete;
   if (stoppedAtWhitespace) return true;
-  if (stopChar === ")") {
-    return openParens === 0 && (nextChar === "" || /[\s.,;:!?)\]}"']/.test(nextChar));
-  }
-  if (stopChar === "]") {
-    return openBrackets === 0 && (nextChar === "" || /[\s.,;:!?)\]}"']/.test(nextChar));
-  }
-  if (stopChar === "}") {
-    return nextChar === "" || /[\s.,;:!?)\]}"']/.test(nextChar);
+  if (stopChar === ")" || stopChar === "]" || stopChar === "}") {
+    if (openParens !== 0 || openBrackets !== 0) return false;
+    if (nextChar === "" || /[\s)\]}"']/.test(nextChar)) return true;
+    return /[.,;:!?]/.test(nextChar) && (afterNextChar === "" || /\s/.test(afterNextChar));
   }
   return false;
 }
@@ -658,6 +655,7 @@ function scanProseAddresses(
 
     const stopChar = end < text.length ? (text[end] ?? "") : "";
     const nextChar = end + 1 < text.length ? (text[end + 1] ?? "") : "";
+    const afterNextChar = end + 2 < text.length ? (text[end + 2] ?? "") : "";
     const stoppedAtWhitespace = stopChar !== "" && /\s/.test(stopChar);
     if (
       end > schemeEnd &&
@@ -665,6 +663,7 @@ function scanProseAddresses(
         prev,
         stopChar,
         nextChar,
+        afterNextChar,
         stoppedAtWhitespace,
         complete,
         openParens,
@@ -673,7 +672,7 @@ function scanProseAddresses(
     ) {
       add(text.slice(start, end));
       index = end < text.length ? end + 1 : end;
-    } else if (stopChar !== "" && !stoppedAtWhitespace && stopChar !== ")" && stopChar !== "]") {
+    } else if (stopChar !== "" && !stoppedAtWhitespace) {
       index = skipToWhitespace(text, end + 1);
     } else {
       index = end < text.length ? end + 1 : end;

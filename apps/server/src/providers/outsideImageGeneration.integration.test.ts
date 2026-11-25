@@ -958,6 +958,21 @@ describe("an outside image driver's later fixes", () => {
         "https://cdn.images.example.test/out/a(1)",
         "failed",
       ],
+      [
+        `data: see https://cdn.images.example.test/out/a(b].png\n\n`,
+        "https://cdn.images.example.test/out/a(b",
+        "failed",
+      ],
+      [
+        `data: see https://cdn.images.example.test/out/a[b).png\n\n`,
+        "https://cdn.images.example.test/out/a[b",
+        "failed",
+      ],
+      [
+        `data: see https://cdn.images.example.test/out/a).png\n\n`,
+        "https://cdn.images.example.test/out/a",
+        "failed",
+      ],
       [JSON.stringify({ text: `[View image](${full})` }), prefix, "failed"],
     ] as const) {
       const run = harness({
