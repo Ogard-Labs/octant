@@ -107,7 +107,7 @@ describe("ThemeAppearanceEditor", () => {
     // section, a summary in a disclosure, a legend in a fieldset — so the page
     // did not read as the same surface as General. Every block now puts one
     // section label above one flat group.
-    for (const name of ["Color scheme", "Typography", "Accessibility", "Import or export theme"]) {
+    for (const name of ["Colour scheme", "Typography", "Accessibility", "Import or export theme"]) {
       const block = screen.getByText(name).closest(".settings-card-section");
       expect(block, name).not.toBeNull();
       // The label is the block's own first child, and everything it labels sits
@@ -143,7 +143,7 @@ describe("ThemeAppearanceEditor", () => {
   it("keeps every Appearance section open, the JSON transfer disclosure included", () => {
     render(<ThemeAppearanceEditor controller={controller()} />);
 
-    for (const name of ["Color scheme", "Typography", "Accessibility", "Import or export theme"]) {
+    for (const name of ["Colour scheme", "Typography", "Accessibility", "Import or export theme"]) {
       expect(screen.getByText(name).closest(".settings-card-section")).toHaveClass(
         "settings-card-section--open",
       );

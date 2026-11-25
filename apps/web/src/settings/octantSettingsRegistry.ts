@@ -50,7 +50,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("resource-cpuTargetPercent"),
-          label: "CPU target",
+          label: "CPU limit for new work",
           scope: "host",
           keywords: "cpu utilization load headroom target",
         },

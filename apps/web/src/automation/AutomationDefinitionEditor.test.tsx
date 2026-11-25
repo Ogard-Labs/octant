@@ -222,9 +222,7 @@ describe("AutomationDefinitionEditor creation", () => {
       screen.getByLabelText("Delivery"),
       "A confirmed weekly summary document exists in the Project.",
     );
-    await userEvent.click(
-      screen.getByLabelText("I confirm this delivery target for every scheduled run"),
-    );
+    await userEvent.click(screen.getByLabelText("I confirm this delivery for every scheduled run"));
     await userEvent.click(screen.getByRole("button", { name: "Save automation" }));
 
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalledOnce());
@@ -260,9 +258,7 @@ describe("AutomationDefinitionEditor creation", () => {
     await chooseLabeledOption("Schedule", "Run once");
     fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "2026-09-01T09:00" } });
     await userEvent.type(screen.getByLabelText("Delivery"), "A weekly summary exists.");
-    await userEvent.click(
-      screen.getByLabelText("I confirm this delivery target for every scheduled run"),
-    );
+    await userEvent.click(screen.getByLabelText("I confirm this delivery for every scheduled run"));
     const draft = await savedDraft(props);
     expect(draft.authorityProfile.effective).toMatchObject({
       filesystem: true,
@@ -282,9 +278,7 @@ describe("AutomationDefinitionEditor creation", () => {
     await chooseLabeledOption("Schedule", "Run once");
     fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "2026-09-01T09:00" } });
     await userEvent.type(screen.getByLabelText("Delivery"), "A weekly summary exists.");
-    await userEvent.click(
-      screen.getByLabelText("I confirm this delivery target for every scheduled run"),
-    );
+    await userEvent.click(screen.getByLabelText("I confirm this delivery for every scheduled run"));
   }
 
   async function savedDraft(props: ReturnType<typeof editorProps>) {
@@ -426,9 +420,7 @@ describe("AutomationDefinitionEditor creation", () => {
     await userEvent.click(await screen.findByRole("option", { name: "Run once" }));
     fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "2026-09-01T09:00" } });
     await userEvent.type(screen.getByLabelText("Delivery"), "The build is green or explained.");
-    await userEvent.click(
-      screen.getByLabelText("I confirm this delivery target for every scheduled run"),
-    );
+    await userEvent.click(screen.getByLabelText("I confirm this delivery for every scheduled run"));
     const draft = await savedDraft(props);
     expect(String(draft.projectId)).toBe(String(SERVER_WORK_PROJECT.projectId));
     expect(draft.binding).toMatchObject({
@@ -497,9 +489,7 @@ describe("AutomationDefinitionEditor creation", () => {
     await chooseLabeledOption("Schedule", "Run once");
     fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "2026-09-01T09:00" } });
     await userEvent.type(screen.getByLabelText("Delivery"), "A short briefing is in the thread.");
-    await userEvent.click(
-      screen.getByLabelText("I confirm this delivery target for every scheduled run"),
-    );
+    await userEvent.click(screen.getByLabelText("I confirm this delivery for every scheduled run"));
 
     const draft = await savedDraft(props);
     expect(draft.mode).toBe("chat");
@@ -532,9 +522,7 @@ describe("AutomationDefinitionEditor creation", () => {
     const optIn = screen.getByLabelText("Merge the pull requests it opens");
     expect(optIn).toHaveAccessibleDescription(/required checks passing/);
     await userEvent.click(optIn);
-    await userEvent.click(
-      screen.getByLabelText("I confirm this delivery target for every scheduled run"),
-    );
+    await userEvent.click(screen.getByLabelText("I confirm this delivery for every scheduled run"));
     await userEvent.click(screen.getByRole("button", { name: "Save automation" }));
 
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalledOnce());
@@ -559,9 +547,7 @@ describe("AutomationDefinitionEditor creation", () => {
     fireEvent.change(screen.getByLabelText("Time of day"), { target: { value: "09:30" } });
     fireEvent.change(screen.getByLabelText("Timezone"), { target: { value: "Europe/Oslo" } });
     await userEvent.type(screen.getByLabelText("Delivery"), "A weekly summary exists.");
-    await userEvent.click(
-      screen.getByLabelText("I confirm this delivery target for every scheduled run"),
-    );
+    await userEvent.click(screen.getByLabelText("I confirm this delivery for every scheduled run"));
     await userEvent.click(screen.getByRole("button", { name: "Save automation" }));
 
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalledOnce());
@@ -590,7 +576,7 @@ describe("AutomationDefinitionEditor creation", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save automation" }));
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Confirm the delivery target before saving.");
+    expect(alert).toHaveTextContent("Confirm the delivery before saving.");
     expect(props.onSubmit).not.toHaveBeenCalled();
   });
 
@@ -675,9 +661,7 @@ describe("AutomationDefinitionEditor editing", () => {
     expect(screen.getByLabelText("Delivery")).toHaveValue(
       "A confirmed weekly summary document exists in the Project.",
     );
-    const confirmation = screen.getByLabelText(
-      "I confirm this delivery target for every scheduled run",
-    );
+    const confirmation = screen.getByLabelText("I confirm this delivery for every scheduled run");
     expect(confirmation).not.toBeChecked();
 
     await userEvent.click(confirmation);
@@ -705,9 +689,7 @@ describe("AutomationDefinitionEditor editing", () => {
     expect(screen.getByLabelText("Authority profile")).toHaveTextContent("Work default");
     expect(props.onSubmit).not.toHaveBeenCalled();
     expect(blocked.authorityProfile.effective.shell).toBe(false);
-    await userEvent.click(
-      screen.getByLabelText("I confirm this delivery target for every scheduled run"),
-    );
+    await userEvent.click(screen.getByLabelText("I confirm this delivery for every scheduled run"));
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalledOnce());
     const [call] = props.onSubmit.mock.calls;
@@ -727,9 +709,7 @@ describe("AutomationDefinitionEditor editing", () => {
     });
     render(<AutomationDefinitionEditor {...props} />);
 
-    await userEvent.click(
-      screen.getByLabelText("I confirm this delivery target for every scheduled run"),
-    );
+    await userEvent.click(screen.getByLabelText("I confirm this delivery for every scheduled run"));
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     const alert = await screen.findByRole("alert");

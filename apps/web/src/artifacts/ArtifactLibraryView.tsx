@@ -460,7 +460,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
           }
           title={
             filters.tab === "shared"
-              ? "Nothing is shared right now."
+              ? "Nothing is shared right now"
               : hasActiveFilters
                 ? "No artifacts match these filters"
                 : "No artifacts yet"

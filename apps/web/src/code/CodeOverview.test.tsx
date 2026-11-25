@@ -523,7 +523,7 @@ describe("CodeOverview", () => {
       />,
     );
     expect(screen.queryByText("feature/controller")).not.toBeInTheDocument();
-    expect(screen.getByText("Code projections unavailable")).toBeVisible();
+    expect(screen.getByText("Project overview unavailable")).toBeVisible();
   });
 
   it("renders no placeholder for a facet the host did not report", async () => {
@@ -731,7 +731,7 @@ describe("CodeOverview", () => {
     );
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Code transport disconnected.");
-    expect(screen.getByText("Code projections unavailable")).toBeVisible();
+    expect(screen.getByText("Project overview unavailable")).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "First message" })).not.toBeInTheDocument();
   });
 });

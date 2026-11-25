@@ -100,7 +100,7 @@ export function agentRunRecoveryLabel(recoveryReason: string | undefined): strin
     return "Starts when the runs it comes after finish.";
   }
   if (recoveryReason === "host-restart") return "Recovered after host restart";
-  if (recoveryReason === "journal-replay") return "Recovered after journal replay";
+  if (recoveryReason === "journal-replay") return "Recovered from saved history";
   if (recoveryReason === "provider-reconnect") return "Waiting after provider reconnect";
   if (recoveryReason === "restart-without-resumable-execution") {
     return "Stopped by a host restart. Retry to run it again.";
@@ -133,7 +133,7 @@ export function agentRunCommandFailureMessage(input: {
     return "That control action is not supported for this run in its current state.";
   }
   if (input.reason === "unauthorized") return "You are not authorized to control this run.";
-  return "The AgentRun command was refused.";
+  return "That action was refused.";
 }
 
 export function agentRunTransportFailureMessage(error: unknown, fallback: string): string {

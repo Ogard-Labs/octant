@@ -420,9 +420,9 @@ export function useShellController(options: ShellControllerOptions) {
           setResizePreview(undefined);
           setStatus("ready");
           if (reason === "conflict-reload") {
-            announce("Shell state changed concurrently. Reloaded authoritative state.");
+            announce("This window was out of date and has been reloaded.");
           } else if (reason === "command-recovery") {
-            announce("Shell command outcome was uncertain. Reloaded authoritative state.");
+            announce("Octant could not confirm your last action, so this window was reloaded.");
           }
         } catch (error) {
           if (!isCurrentRequest(generation, requestGeneration, mounted)) return;
@@ -430,7 +430,7 @@ export function useShellController(options: ShellControllerOptions) {
           committedShell.current = undefined;
           setAuthoritative(undefined);
           const message = isCommandReload
-            ? `${failure.message} Queued shell operations were cancelled. Retry before issuing them again.`
+            ? `${failure.message} Your pending actions were cancelled. Try them again.`
             : failure.message;
           setErrorMessage(message);
           if (isCommandReload) announce(message);

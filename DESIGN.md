@@ -92,6 +92,17 @@ computer" and "credential store" otherwise. Vocabulary: `Project`, `thread`,
 implementation / Pull request / Merged). The word "target" does not appear in
 the interface.
 
+**Plain words.** A sentence in the interface says what the person is waiting
+for, what happened, or what to do next, in the words they use for it. It never
+names the mechanism: nothing is "authoritative", no type's name from the code
+appears (`AgentRun`), and "shell state", "projection" and "observation" give
+way to what the person sees (the workspace, a Project's data, Git status). A
+loading state is its title alone ("Loading workspace"); a line under the
+spinner stays only where it says what the title cannot, such as what happens to
+a draft while the window reconnects. Until 2026-11-25 the first sentence the app
+showed was "Loading authoritative shell state.", and thirty loading states
+repeated their title as a message (maintainer request).
+
 Avoid dashboard walls, neon developer styling, permanent low-frequency
 controls, oversized setup cards, pill-shaped controls and invented data. The
 one decorative thing is the [application ground](docs/design/application-ground.md).
@@ -1111,9 +1122,10 @@ is costly to render mounts only while open.
   or `status`). Giving it a `state` (`disconnected`, `loading`, `neutral`,
   `warning`) draws that state's glyph instead of an icon and takes `action` as
   `{ label, onClick, glyph? }`, one secondary button with a retry glyph by
-  default; a loading state spins its glyph, is a `status` region and may omit
-  `message`. **page** (`layout="page"` with a `state`) is a state that is the
-  whole window. **line** (`layout="line"`) is the quiet single line a page shows
+  default; a loading state spins its glyph, is a `status` region and is its
+  title alone, with no `message` (see Plain words under
+  [Principles](#principles)). **page** (`layout="page"` with a `state`) is a
+  state that is the whole window. **line** (`layout="line"`) is the quiet single line a page shows
   when it has nothing on it: `title`, `detail`, `icon`, `action` and `tone`
   (`page` or `lane`). Parts Root, Header, Content, Description, Eyebrow, Media,
   Title stay exported for composed states.
@@ -1934,6 +1946,7 @@ but never repaint a shared control.
 | `theme/composerColumnsContract.test.ts`, `theme/interfaceTypographyContract.test.ts` | Composer columns; interface typography reach                                                                                                                                                                                                                                                                                                              |
 | `ui/iconScaleContract.test.ts`, `ui/focusOwnershipContract.test.ts`                  | Icon sizes and stroke; focus ownership                                                                                                                                                                                                                                                                                                                    |
 | `theme/translucencyContract.test.ts`                                                 | One coat on the shell and clear panes under glass; dense float with no backdrop filter under host glass; no backdrop filter on a surface inside a translucent shell; opaque under reduced transparency and increased contrast; the coat floors computed from the role colours                                                                             |
+| `theme/plainWordsContract.test.ts`                                                   | No sentence a person can read says "target", "authoritative" or a type's name from the code; a loading state carries no message                                                                                                                                                                                                                           |
 | `gallery/Gallery.test.tsx`                                                           | Every adapter appears in the component gallery or is listed with a reason                                                                                                                                                                                                                                                                                 |
 | `visualCheck/visualCheck.chromium.test.ts` (workflow `visual-check.yml`)             | The key screens still draw as their baselines in `apps/web/visual-baselines` (see Visual check below)                                                                                                                                                                                                                                                     |
 

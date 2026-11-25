@@ -429,7 +429,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         install(await client.bootstrap());
         if (mounted.current) {
           setMessage(
-            `${message} Loaded authoritative provider state; review the result before retrying.`,
+            `${message} The current provider state was reloaded; review it before retrying.`,
           );
         }
       } catch {

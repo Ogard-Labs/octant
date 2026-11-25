@@ -678,7 +678,7 @@ function CreatePullRequest(
         <OctantAlert layout="row" tone="warning">
           {result.state === "unavailable" && result.failureCode === "no-remote"
             ? "This checkout has no GitHub remote, so there is nowhere to open a pull request. Add a GitHub remote to the repository, then retry."
-            : `Pull request creation is ${result.state}. Confirm the GitHub CLI is installed and signed in and that the delivery target names a GitHub repository.`}
+            : `Pull request creation is ${result.state}. Confirm the GitHub CLI is installed and signed in and that this thread delivers to a GitHub repository.`}
         </OctantAlert>
       ) : null}
       {failure === undefined ? null : (

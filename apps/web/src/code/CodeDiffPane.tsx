@@ -351,7 +351,7 @@ function AvailableDiff(
         setDiscardMessage(
           `${path} was ${result.state}. Refresh checkout state before trying again.`,
         );
-      else setDiscardMessage("Discard requested. Waiting for authoritative checkout refresh.");
+      else setDiscardMessage("Discard requested. Waiting for the checkout to refresh.");
     } catch {
       setDiscardMessage("Discard failed. Refresh checkout state and retry.");
     } finally {

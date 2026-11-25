@@ -102,7 +102,7 @@ describe("server-reported task access details", () => {
     );
     expect(await screen.findByText(/Task account · main-model/)).toBeVisible();
     expect(screen.getByText("Runtime web research: unsupported by this runtime")).toBeVisible();
-    expect(screen.getByText("Force Stop: temporarily unavailable")).toBeVisible();
+    expect(screen.getByText("Force stop: temporarily unavailable")).toBeVisible();
     expect(screen.queryByRole("button", { name: /full access/i })).toBeNull();
   });
   it("says a Full access thread's Octant tools are mixed with tools Octant did not supply", async () => {

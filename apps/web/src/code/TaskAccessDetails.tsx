@@ -82,7 +82,7 @@ const CAPABILITY = {
   appManagedTools: "Octant-managed tools",
   nativeWebResearch: "Runtime web research",
   nativeChildAgents: "Runtime child agents",
-  forceStop: "Force Stop",
+  forceStop: "Force stop",
 } as const;
 
 /** Expands the existing indicator; every recovery uses an existing person action. */

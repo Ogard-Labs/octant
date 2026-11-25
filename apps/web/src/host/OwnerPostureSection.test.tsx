@@ -58,7 +58,7 @@ describe("owner Code recovery controls", () => {
     const user = userEvent.setup();
     render(<OwnerPostureSection spokes={[spoke]} />);
     await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
-    await user.click(screen.getByLabelText("Recovery target"));
+    await user.click(screen.getByLabelText("Thread or Project"));
     await user.click(await screen.findByRole("option", { name: "Work thread: Work task" }));
     await user.click(screen.getByLabelText("Requested level"));
     await screen.findByRole("option", { name: "Auto" });
@@ -78,7 +78,7 @@ describe("owner Code recovery controls", () => {
     const user = userEvent.setup();
     render(<OwnerPostureSection spokes={[spoke]} />);
     await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
-    await user.click(screen.getByLabelText("Recovery target"));
+    await user.click(screen.getByLabelText("Thread or Project"));
     await user.click(await screen.findByRole("option", { name: "Thread: Release task" }));
     expect(screen.getByText("Current level: Auto")).toBeVisible();
     expect(screen.getByLabelText("Requested level")).toHaveTextContent("Auto");
@@ -89,7 +89,7 @@ describe("owner Code recovery controls", () => {
     const user = userEvent.setup();
     render(<OwnerPostureSection spokes={[spoke]} />);
     await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
-    await user.click(screen.getByLabelText("Recovery target"));
+    await user.click(screen.getByLabelText("Thread or Project"));
     await user.click(await screen.findByRole("option", { name: "Thread: Release task" }));
     expect(screen.getByText("Current level: Ask first")).toBeVisible();
     await user.click(screen.getByLabelText("Requested level"));
@@ -110,14 +110,14 @@ describe("owner Code recovery controls", () => {
     const user = userEvent.setup();
     render(<OwnerPostureSection spokes={[spoke]} />);
     await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
-    await user.click(screen.getByLabelText("Recovery target"));
+    await user.click(screen.getByLabelText("Thread or Project"));
     await user.click(await screen.findByRole("option", { name: "Thread: Release task" }));
     await user.click(screen.getByLabelText("Requested level"));
     await user.click(await screen.findByRole("option", { name: "Plan (read only)" }));
     await user.click(screen.getByRole("button", { name: "Apply level" }));
     expect(screen.getByRole("status")).toHaveTextContent("Refresh its level");
     expect(changePosture).toHaveBeenCalledTimes(1);
-    expect(screen.queryByLabelText("Recovery target")).toBeNull();
+    expect(screen.queryByLabelText("Thread or Project")).toBeNull();
   });
 });
 
@@ -147,7 +147,7 @@ describe("owner wake switches", () => {
     const user = userEvent.setup();
     render(<OwnerPostureSection spokes={[spoke]} />);
     await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
-    await user.click(screen.getByLabelText("Recovery target"));
+    await user.click(screen.getByLabelText("Thread or Project"));
     await user.click(await screen.findByRole("option", { name: "Thread: Release task" }));
     await user.click(screen.getByRole("button", { name: "Read wake switches" }));
     return user;
@@ -228,7 +228,7 @@ function currentHost(memberId = "host") {
 }
 
 async function chooseCurrent(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByLabelText("Recovery target"));
+  await user.click(screen.getByLabelText("Thread or Project"));
   await user.click(await screen.findByRole("option", { name: "Thread: Current task" }));
   await user.click(screen.getByLabelText("Requested level"));
   await user.click(await screen.findByRole("option", { name: "Full access" }));
@@ -284,7 +284,7 @@ describe("owner recovery across host changes", () => {
     const user = userEvent.setup();
     const view = render(<OwnerPostureSection spokes={[old.spoke]} />);
     await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
-    await user.click(screen.getByLabelText("Recovery target"));
+    await user.click(screen.getByLabelText("Thread or Project"));
     await user.click(await screen.findByRole("option", { name: "Thread: Release task" }));
     view.rerender(<OwnerPostureSection spokes={[next.spoke]} />);
     expect(screen.queryByText("Current level: Ask first")).toBeNull();

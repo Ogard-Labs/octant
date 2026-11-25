@@ -253,10 +253,7 @@ function AppleWorkbenchState(
 ) {
   const presentation = {
     loading: ["Loading Apple toolchain", "Discovering Xcode, SDKs, and Simulator destinations."],
-    waiting: [
-      "Waiting for Apple evidence",
-      "No authoritative Apple action state is available yet.",
-    ],
+    waiting: ["Waiting for Apple evidence", "No Apple action has reported a result yet."],
     unavailable: [
       "Apple toolchain unavailable",
       "Install or select Xcode and an available Simulator runtime, then retry.",
@@ -269,7 +266,7 @@ function AppleWorkbenchState(
       "Apple action failed",
       props.errorMessage ?? "Review the normalized diagnostics and retry.",
     ],
-    ready: ["Waiting for Apple evidence", "No authoritative Apple action state is available yet."],
+    ready: ["Waiting for Apple evidence", "No Apple action has reported a result yet."],
   } as const;
   const [title, message] = presentation[props.status];
   return (

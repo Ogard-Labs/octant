@@ -3469,7 +3469,7 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
         <div className="setgroup">
           {isAvailable("sidebar-background") ? (
             <SettingRow
-              description="A preset gradient behind the sidebar, or none. Adjust the overlay color and opacity for readability."
+              description="A preset gradient behind the sidebar, or none. Adjust the overlay colour and opacity for readability."
               focused={focusedSetting === settingId("sidebar-background")}
               label="Sidebar background"
               scope="app"
@@ -3836,9 +3836,9 @@ function SidebarBackgroundSettings({
         </div>
       ) : null}
       <label className="settings-view__field">
-        <span>Overlay color</span>
+        <span>Overlay colour</span>
         <OctantInput
-          aria-label="Sidebar overlay color"
+          aria-label="Sidebar overlay colour"
           disabled={suspended}
           className="settings-view__text-input"
           onChange={(event) =>

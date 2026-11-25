@@ -116,7 +116,7 @@ describe("AutomationCenter default surface", () => {
   it("shows search, the view switch, one Filter menu, compact rows, and one create control", async () => {
     renderCenter();
 
-    expect(screen.getByRole("status")).toHaveTextContent("Loading automations.");
+    expect(screen.getByRole("status")).toHaveTextContent("Loading automations");
     const rows = await screen.findByRole("list", { name: "Automations" });
     expect(screen.getByLabelText("Search automations")).toBeVisible();
     expect(screen.getByRole("button", { name: "Filter" })).toBeVisible();
@@ -507,7 +507,7 @@ describe("AutomationCenter detail disclosure", () => {
     expect(within(detail).getByText("The provider refused this run's sign-in.")).toBeVisible();
     expect(
       within(detail).queryByText(
-        "The confirmed delivery target is no longer valid. Edit and confirm a new target.",
+        "The confirmed delivery is no longer valid. Edit and confirm it again.",
       ),
     ).toBeNull();
   });
@@ -649,7 +649,7 @@ describe("AutomationCenter creation and editing", () => {
     });
     await userEvent.type(within(form).getByLabelText("Delivery"), "A summary exists.");
     await userEvent.click(
-      within(form).getByLabelText("I confirm this delivery target for every scheduled run"),
+      within(form).getByLabelText("I confirm this delivery for every scheduled run"),
     );
     await userEvent.click(within(form).getByRole("button", { name: "Save automation" }));
 
@@ -686,7 +686,7 @@ describe("AutomationCenter creation and editing", () => {
     expect(within(form).getByLabelText("Name")).toHaveValue("Weekly summary");
 
     await userEvent.click(
-      within(form).getByLabelText("I confirm this delivery target for every scheduled run"),
+      within(form).getByLabelText("I confirm this delivery for every scheduled run"),
     );
     await userEvent.click(within(form).getByRole("button", { name: "Save changes" }));
 

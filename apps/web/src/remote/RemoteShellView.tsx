@@ -155,19 +155,13 @@ export function RemoteShellView(props: RemoteShellViewProps) {
     state.kind === "negotiating" ||
     state.kind === "authenticating"
   ) {
-    return (
-      <OctantEmpty
-        message="Establishing the authenticated remote session."
-        state="loading"
-        title="Connecting to Octant"
-      />
-    );
+    return <OctantEmpty state="loading" title="Connecting to Octant" />;
   }
 
   if (state.kind === "reconnecting") {
     return (
       <OctantEmpty
-        message="Your draft is preserved locally. Reconnecting does not queue authority offline."
+        message="Your draft is kept on this device. Nothing is sent until you are back online."
         state="loading"
         title="Reconnecting"
       />

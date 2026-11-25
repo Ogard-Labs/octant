@@ -474,7 +474,7 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
                 value={accent}
               />
               <span className="add-provider-wizard__hint">
-                Shown as a color on this account in the model picker.
+                Shown as a colour on this account in the model picker.
               </span>
             </div>
           ) : null}

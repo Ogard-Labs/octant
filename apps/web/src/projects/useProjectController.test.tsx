@@ -234,7 +234,7 @@ describe("useProjectController", () => {
       mutation.reject({ category: "conflict", message: "Changed.", currentVersion: 1 }),
     );
     await first;
-    expect(result.current.announcement).toMatch(/reloaded authoritative memory/i);
+    expect(result.current.announcement).toMatch(/memory changed elsewhere, so it was reloaded/i);
     expect(server.api.executeMemory).toHaveBeenCalledTimes(1);
   });
 
@@ -501,7 +501,7 @@ describe("useProjectController", () => {
 
     expect(server.api.bootstrap).toHaveBeenCalledTimes(2);
     expect(result.current.activeProject?.name).toBe("Research");
-    expect(result.current.announcement).toMatch(/reloaded authoritative/i);
+    expect(result.current.announcement).toMatch(/changed elsewhere, so it was reloaded/i);
   });
 
   it("renames with the authoritative expected version and reloads the committed Project", async () => {

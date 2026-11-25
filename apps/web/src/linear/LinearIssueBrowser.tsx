@@ -246,12 +246,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
       </div>
 
       {list.status === "loading" ? (
-        <OctantEmpty
-          eyebrow="Linear"
-          message="Reading issues from the connected workspace."
-          state="loading"
-          title="Loading issues"
-        />
+        <OctantEmpty eyebrow="Linear" state="loading" title="Loading issues" />
       ) : null}
 
       {list.status === "error" && page === undefined ? (
@@ -363,12 +358,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
               <p className="linear-issues__status">Select an issue to read its description.</p>
             ) : null}
             {detail.status === "loading" ? (
-              <OctantEmpty
-                eyebrow="Linear"
-                message="Reading the selected issue."
-                state="loading"
-                title="Loading issue"
-              />
+              <OctantEmpty eyebrow="Linear" state="loading" title="Loading issue" />
             ) : null}
             {detail.status === "error" ? (
               <OctantEmpty

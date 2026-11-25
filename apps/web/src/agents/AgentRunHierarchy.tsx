@@ -293,7 +293,7 @@ export function AgentRunHierarchy(props: {
         setErrorMessage(
           error instanceof AgentRunClientFailure
             ? error.message
-            : "AgentRun acknowledgement failed. Retry against authoritative state.",
+            : "The acknowledgement did not go through. Refresh and try again.",
         );
       }
     },
@@ -309,14 +309,14 @@ export function AgentRunHierarchy(props: {
         });
         const failed = results.find((result) => result.kind === "run-command-failed");
         if (failed !== undefined) {
-          setErrorMessage(failed.message ?? "AgentRun cancellation was rejected.");
+          setErrorMessage(failed.message ?? "The cancellation was refused.");
         }
         await refresh();
       } catch (error) {
         setErrorMessage(
           error instanceof AgentRunClientFailure
             ? error.message
-            : "AgentRun cancellation failed. Retry against authoritative state.",
+            : "The agent could not be cancelled. Refresh and try again.",
         );
       }
     },
@@ -346,7 +346,7 @@ export function AgentRunHierarchy(props: {
         setErrorMessage(
           error instanceof AgentRunClientFailure
             ? error.message
-            : "AgentRun usage-resume command failed. Retry against authoritative state.",
+            : "The agent could not be resumed. Refresh and try again.",
         );
       }
     },
@@ -361,12 +361,12 @@ export function AgentRunHierarchy(props: {
   if (status === "error" && entries.length + observations.length === 0) {
     return (
       <OctantEmpty
-        action={{ label: "Retry Agents", onClick: () => void refresh() }}
+        action={{ label: "Retry", onClick: () => void refresh() }}
         eyebrow="Agents"
-        message={errorMessage ?? "The local AgentRun service is unavailable."}
+        message={errorMessage ?? "Agents could not be loaded."}
         role="alert"
         state="warning"
-        title="Subagents unavailable"
+        title="Agents unavailable"
       />
     );
   }

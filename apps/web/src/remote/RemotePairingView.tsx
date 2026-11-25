@@ -82,7 +82,7 @@ export function RemotePairingView(props: RemotePairingViewProps) {
       return (
         <RemotePairingShellState
           state="loading"
-          title="Contacting Octant host..."
+          title="Contacting Octant host…"
           message="Fetching the host identity and pairing policy."
         />
       );
@@ -97,7 +97,7 @@ export function RemotePairingView(props: RemotePairingViewProps) {
       return (
         <RemotePairingShellState
           state="loading"
-          title="Sending pairing request..."
+          title="Sending pairing request…"
           message="The host will be asked to approve this browser."
         />
       );
@@ -105,7 +105,7 @@ export function RemotePairingView(props: RemotePairingViewProps) {
       return (
         <RemotePairingShellState
           state="loading"
-          title="Resuming remote session..."
+          title="Resuming remote session…"
           message="Checking this browser's paired device without exposing its key material."
         />
       );

@@ -363,7 +363,7 @@ describe("useProviderController", () => {
     expect(api.execute).toHaveBeenCalledOnce();
     expect(api.bootstrap).toHaveBeenCalledTimes(2);
     expect(result.current.instances[0]?.displayName).toBe("Recovered name");
-    expect(result.current.message).toMatch(/authoritative provider state/i);
+    expect(result.current.message).toMatch(/current provider state was reloaded/i);
   });
 
   it("updates a provider CLI and refreshes the native provider snapshot", async () => {

@@ -242,7 +242,7 @@ function AgentsCenterToolbar(props: {
     controller.setModeFilter("all");
   };
   return (
-    <div aria-label="Agents Center controls" className="surface-toolbar" role="group">
+    <div aria-label="Agents controls" className="surface-toolbar" role="group">
       <label className="surface-toolbar__search agents-center__search">
         <span className="sr-only">Search agent runs</span>
         <Search aria-hidden="true" size={14} />
@@ -347,9 +347,7 @@ function AgentsCenterListBody(props: {
   // oxlint-disable-next-line react-hooks/exhaustive-deps
   const now = useMemo(() => new Date().toISOString(), [controller.visibleItems]);
   if (controller.list.status === "loading") {
-    return (
-      <OctantEmpty eyebrow="Agents" message="Loading agent runs." state="loading" title="Loading" />
-    );
+    return <OctantEmpty eyebrow="Agents" state="loading" title="Loading agents" />;
   }
   if (controller.list.status === "unavailable") {
     return (

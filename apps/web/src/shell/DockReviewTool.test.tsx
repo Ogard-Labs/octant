@@ -172,7 +172,7 @@ describe("Review beside the active thread", () => {
     );
   });
 
-  it("states when Git observation is unavailable", async () => {
+  it("states when Git status is unavailable", async () => {
     render(
       <DockReviewTool
         {...bound({
@@ -182,7 +182,7 @@ describe("Review beside the active thread", () => {
         })}
       />,
     );
-    expect(await screen.findByRole("alert")).toHaveTextContent("Git observation is unavailable");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Git status is unavailable");
   });
 
   it("clears the previous thread's files before the next checkout loads", async () => {
