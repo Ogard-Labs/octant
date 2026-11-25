@@ -167,6 +167,7 @@ export interface BrowserAutomationRouteDependencies {
   readonly windowCanOpenThread?: (
     windowId: WindowId,
     threadId: BrowserThreadId,
+    principal: ClientPrincipal,
   ) => Promise<boolean>;
   readonly taskProfiles?: {
     read(
@@ -233,13 +234,16 @@ export function createBrowserAutomationRouteHandler(
   // window that can open the thread reads one: not a paired device, and not a
   // window of another thread. The thread need not be live: captures are its
   // history, and an archived thread opened from the archive still shows them.
+  // A paired browser has no desktop layout, so who asked decides it with the
+  // scope: without the device, a Chat thread would look closed to it.
   const captureReadRefusal = async (
     windowId: WindowId,
-    canActAsPerson: boolean,
+    principal: ClientPrincipal,
     threadId: BrowserThreadId,
     origin: string | null,
   ): Promise<Response | undefined> =>
-    canActAsPerson && (await dependencies.windowCanOpenThread?.(windowId, threadId)) === true
+    principalActsAsHostPerson(principal) &&
+    (await dependencies.windowCanOpenThread?.(windowId, threadId, principal)) === true
       ? undefined
       : notThisWindowsThread(origin);
   // Taking a capture drives the Browser, so it needs the thread's live Browser
@@ -1072,7 +1076,7 @@ export function createBrowserAutomationRouteHandler(
         const input = decodeBrowserCapturesCommand(decoded.value);
         const refusal = await captureReadRefusal(
           windowId,
-          actsAsHostPerson,
+          authenticatedPrincipal,
           input.threadId,
           origin,
         );
@@ -1090,7 +1094,7 @@ export function createBrowserAutomationRouteHandler(
         const input = decodeBrowserStepsCommand(decoded.value);
         const refusal = await captureReadRefusal(
           windowId,
-          actsAsHostPerson,
+          authenticatedPrincipal,
           input.threadId,
           origin,
         );
@@ -1140,7 +1144,7 @@ export function createBrowserAutomationRouteHandler(
         const input = decodeBrowserCaptureImageCommand(decoded.value);
         const refusal = await captureReadRefusal(
           windowId,
-          actsAsHostPerson,
+          authenticatedPrincipal,
           input.threadId,
           origin,
         );

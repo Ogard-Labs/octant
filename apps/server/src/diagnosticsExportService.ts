@@ -10,6 +10,7 @@ import {
   type DiagnosticsExportOutcome,
   type DiagnosticsExportRequest,
   type DiagnosticHostHealth,
+  type EventActor,
 } from "@octant/contracts";
 import {
   buildDiagnosticsExportReceipt,
@@ -56,6 +57,8 @@ export interface DiagnosticsExportServiceDeps {
   readonly idGenerator?: () => string;
   /** UUID generator for journal event identities; defaults to `randomUUID`. */
   readonly eventIdGenerator?: () => string;
+  /** Who asked: the local person or the paired device; absent, the local person. */
+  readonly actor?: EventActor;
 }
 
 /**
@@ -231,7 +234,7 @@ export function exportDiagnosticsEvidence(
           eventName: DIAGNOSTICS_EXPORT_RECEIPT_RECORDED,
           eventVersion: 1,
           correlationId: request.correlationId,
-          actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+          actor: deps.actor ?? { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
           occurredAt: createdAt,
           payload: { receipt },
         },

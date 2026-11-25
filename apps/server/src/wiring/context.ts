@@ -210,6 +210,7 @@ export function wireContext(deps: ContextDependencies) {
   const windowCanOpenThreadById = async (
     windowId: WindowId,
     threadId: string,
+    principal?: ClientPrincipal,
   ): Promise<boolean> => {
     const id = String(threadId);
     let threadKind: "chat-thread" | "work-thread" | "code-thread" | undefined;
@@ -224,7 +225,9 @@ export function wireContext(deps: ContextDependencies) {
     } catch {
       return false;
     }
-    return threadKind !== undefined && (await windowCanOpenThread(windowId, threadKind, id));
+    return (
+      threadKind !== undefined && (await windowCanOpenThread(windowId, threadKind, id, principal))
+    );
   };
   // Which Projects a window can open, by the rule its threads are opened by.
   const windowCanOpenProjectById = async (

@@ -583,7 +583,14 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
         path === "/api/replica-sync/status" ||
         path.startsWith("/api/speech/") ||
         path.startsWith("/api/agent-profiles") ||
-        path.startsWith("/api/agent-grants")) &&
+        path.startsWith("/api/agent-grants") ||
+        path.startsWith("/api/diagnostics/") ||
+        path.startsWith("/api/protected-files") ||
+        path.startsWith("/api/access/safe-networks") ||
+        path.startsWith("/api/shield/servers") ||
+        path.startsWith("/api/apple/") ||
+        path.startsWith("/api/browser/") ||
+        path.startsWith("/api/spend-ceilings")) &&
       (method === "POST" || method === "GET")
     ) {
       if (!verifyProductProof(init, url)) {

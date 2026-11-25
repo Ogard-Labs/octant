@@ -14,10 +14,29 @@ describe("remote forward list vs route classifier", () => {
     expect(compareRemoteForwardListToClassifier()).toEqual([]);
   });
 
-  it("does not forward diagnostics export or host export", () => {
+  it("forwards the diagnostics export, journal growth and support bundle, and never the desktop save or the host export", () => {
     const policy = createRemoteRoutePolicy({ origin });
     for (const probe of [
       { path: "/api/diagnostics/export", method: "POST" },
+      { path: "/api/diagnostics/journal-growth", method: "GET" },
+      { path: "/api/diagnostics/bundle", method: "POST" },
+      { path: "/api/diagnostics/bundle/preview", method: "GET" },
+    ]) {
+      const decision = policy.inspect(
+        new Request(`${origin}${probe.path}`, {
+          method: probe.method,
+          headers: {
+            host: "octant.example:8443",
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(probe.method === "GET" ? {} : { "content-type": "application/json" }),
+          },
+        }),
+      );
+      expect(decision.kind).toBe("allow");
+    }
+    for (const probe of [
+      { path: "/api/diagnostics/bundle/save", method: "POST" },
       { path: "/api/host-control/export", method: "GET" },
     ]) {
       const decision = policy.inspect(

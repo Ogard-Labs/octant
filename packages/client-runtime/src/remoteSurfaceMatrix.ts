@@ -80,6 +80,7 @@ export type RemoteShellSurfaceKind =
   | "provider-credentials"
   | "device-management"
   | "agent-access"
+  | "diagnostics"
   | "listener-controls"
   | "host-controls";
 
@@ -236,6 +237,13 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
       "Make, change and revoke outside agents' grants, issue connection codes and confirm keys.",
     availability: "local-host-only",
     catalogAction: "agent-access.manage",
+  },
+  {
+    id: "diagnostics",
+    label: "Diagnostics",
+    description: "Save a diagnostics bundle, a failure report and read the journal's growth.",
+    availability: "local-host-only",
+    catalogAction: "diagnostics.export",
   },
   {
     id: "listener-controls",

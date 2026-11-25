@@ -329,8 +329,9 @@ thread made.
   every level, Full access included: it is on the closed list of
   [the Full access rule](../architecture.md#security-and-authority), where a
   Private page needs no site approval. An unanswered approval waits in Needs
-  you instead of expiring (maintainer request, 2026-11-12). Not built yet:
-  today an unanswered approval expires.
+  you instead of expiring (maintainer request, 2026-11-12): no Browser ask has
+  an expiry, and each ends with an answer, its turn, its thread's archive, its
+  window, or the host.
 - **Remembered per profile.** "Always allow" on that approval remembers the pair
   (origin, profile) in the shell settings
   (`rememberedBrowserProfileSites`), journaled like today's remembered origins:
@@ -437,10 +438,24 @@ Mac does; what changes is how the content travels and what may keep it.
   protections stay: the text a device reads never carries a password or
   one-time-code field's value. What the page itself shows the device shows.
 - **Approvals.** A profile site approval raised by any turn is offered to every
-  window and person-paired device that can see the thread, the phone that
+  window and every device paired at Full that can see the thread (a device
+  below Full is shown none and answers none, and keeps nothing), the phone that
   started the turn included, and the first answer settles it, journaled with
   its answerer. "Always allow" and "Allow all sites in this profile" from a
-  device are remembered exactly as from a window.
+  device are remembered exactly as from a window. The phone draws each Browser
+  prompt on the thread's screen with the site, the profile, the direction and
+  files of an upload or download and the agent's reason, and offers only the
+  answers the host keeps for its session: a session that is not the host's
+  person is offered the one-time answer and Deny, never "Always allow". An
+  approving answer asks the phone for its confirmation first, a Deny does not,
+  and when another client answered first, the prompt ran out, or the host
+  refuses, the card says which. A script or a page tool's arguments is shown
+  whole, selectable and scrollable, and text the card cannot show in full
+  leaves Cancel the only answer. A Private site ask in a Code thread is worded
+  as the web words it ("Asked by a program in a terminal", never by the
+  thread's agent). The card stays settled after the phone's own answer until
+  the host's list drops the prompt. A session that may only watch is refused
+  these prompts, so the phone does not read them for it.
 - **Opening, switching, listing and clearing.** A device opens a profile page,
   switches a page to a profile, lists profiles and clears one through the
   same routes as a window, each journaled with the device as the actor; the

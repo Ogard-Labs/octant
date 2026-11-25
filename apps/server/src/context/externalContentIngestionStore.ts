@@ -55,6 +55,11 @@ export interface RecordExternalContentIngestionInput {
   readonly contentReference: unknown;
   readonly correlationId: unknown;
   readonly authorized: boolean;
+  /**
+   * Who the record names. Absent, the store's own actor: the host. A person or
+   * device who made the thread carry outside content is named instead.
+   */
+  readonly actor?: EventActorValue;
 }
 
 export interface ExternalContentIngestionStoreOptions {
@@ -115,10 +120,10 @@ export class ExternalContentIngestionStore {
       return { kind: "refused", reason: decision.reason };
     }
 
-    return this.#append(decoded.payload);
+    return this.#append(decoded.payload, input.actor === undefined ? this.#actor : input.actor);
   }
 
-  #append(payload: ContentIngestedPayload): ExternalContentIngestionResult {
+  #append(payload: ContentIngestedPayload, actor: EventActorValue): ExternalContentIngestionResult {
     const aggregateId = decodeAggregateId(String(payload.threadId));
     for (let attempt = 0; attempt < MAX_APPEND_ATTEMPTS; attempt += 1) {
       if (
@@ -149,7 +154,7 @@ export class ExternalContentIngestionStore {
               eventName: this.#eventName,
               eventVersion: 1,
               correlationId: payload.correlationId,
-              actor: this.#actor,
+              actor,
               occurredAt: decodeTimestamp(this.#clock()),
               payload,
             },
@@ -192,6 +197,7 @@ const RECORD_INPUT_KEYS = new Set([
   "contentReference",
   "correlationId",
   "authorized",
+  "actor",
 ]);
 
 function decodeIngestionInput(
