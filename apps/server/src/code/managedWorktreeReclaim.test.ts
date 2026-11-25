@@ -348,6 +348,10 @@ describe("restorable cleanup of a managed worktree", () => {
       ],
       ["checkout", (w) => w.state.worktrees.set(target, { branch: "refs/heads/other", head })],
       ["edit", (w) => (w.state.dirty = true)],
+      // Git's own refusal covers neither of these: it deletes ignored files and
+      // cannot see an edit it was told to skip.
+      ["ignored file", (w) => (w.state.unrecoverable = true)],
+      ["hidden edit", (w) => (w.state.hazard = "hidden-edits")],
     ];
     for (const [, change] of changes) {
       const w = await world();

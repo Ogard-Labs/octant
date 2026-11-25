@@ -148,6 +148,7 @@ export class WorktreeReclaimSweep {
           continue;
         }
         if (this.#options.threadHasWork(thread.id)) {
+          unsettled ||= resuming;
           skipped.push({ threadId: thread.id, reason: "working" });
           continue;
         }
@@ -161,7 +162,11 @@ export class WorktreeReclaimSweep {
         );
         if (result.status === "reclaimed") reclaimed.push(thread.id);
         else {
-          if (result.status === "waiting" || result.status === "interrupted") unsettled = true;
+          // A cleanup still pending, refused or not, is handed back by a later
+          // pass when its choice no longer stands.
+          if (resuming || result.status === "waiting" || result.status === "interrupted") {
+            unsettled = true;
+          }
           skipped.push({
             threadId: thread.id,
             reason:

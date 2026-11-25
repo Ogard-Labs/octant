@@ -334,7 +334,7 @@ export class ManagedWorktreeReclaimService {
 
   /**
    * What changed in the folder since the cleanup recorded its branch and commit,
-   * or nothing. Anything that cannot be read counts as changed: the worktree
+   * or what Git must not be asked to delete, or nothing. Anything that cannot be read counts as changed: the worktree
    * stays the thread's.
    */
   async #changedSince(
@@ -346,9 +346,13 @@ export class ManagedWorktreeReclaimService {
     if (reclaim === undefined) return "unverified";
     try {
       if (!(await this.#stillThere(receipt, repositoryRoot, signal))) return "mismatched";
-      const dirty = await this.#git.isDirty(receipt.canonicalWorktreePath, signal);
-      if (dirty.status !== "observed") return "unverified";
-      return dirty.dirty ? "dirty" : undefined;
+      // Everything Git would not refuse itself is read again too: it deletes
+      // ignored files and cannot see an edit it was told to skip.
+      const folder = await this.#checkFolder(receipt, "inactivity", reclaim.branch, signal);
+      if (folder !== undefined) {
+        return folder.status === "refused" ? folder.reason : "unverified";
+      }
+      return (await this.#stillThere(receipt, repositoryRoot, signal)) ? undefined : "mismatched";
     } catch {
       return "unverified";
     }

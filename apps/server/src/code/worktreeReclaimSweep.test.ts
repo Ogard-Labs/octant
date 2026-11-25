@@ -144,6 +144,24 @@ describe("worktree reclaim sweep", () => {
     expect(abandon).toHaveBeenCalledWith(`receipt-${ids.idle}`, expect.any(AbortSignal));
   });
 
+  it("hands a refused or working pending cleanup back once the choice is turned off", async () => {
+    for (const held of ["refused", "working"] as const) {
+      const choices: { current: { inactivityDays: number } | undefined } = {
+        current: { inactivityDays: 14 },
+      };
+      const { sweep, abandon } = setup({
+        choicesNow: () => choices.current,
+        reclaim: async () => ({ status: "refused", reason: "path-collision" }),
+        receipts: { idle: receipt(ids.idle, "cleanup-pending", true) },
+        ...(held === "working" ? { working: ["idle"] as const } : {}),
+      });
+      await sweep.pass();
+      choices.current = undefined;
+      await sweep.pass();
+      expect(abandon, held).toHaveBeenCalledWith(`receipt-${ids.idle}`, expect.any(AbortSignal));
+    }
+  });
+
   it("cleans up open and archived threads idle for the chosen days, and leaves a recently used one", async () => {
     const { sweep, reclaim } = setup({
       choices: { inactivityDays: 14 },

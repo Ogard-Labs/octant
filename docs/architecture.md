@@ -2578,8 +2578,8 @@ are unambiguous (its folder and any worktree holding one of its branches are not
 locked, prunable or detached; a locked, missing or prunable worktree of
 something else in the repository never refuses it); nothing the host tracks for the
 thread is working (the idle check below), asked before and again after the
-receipt leaves `ready`, and the branch, commit and changes are read once more,
-right before Git is asked (a commit, checkout or edit in a terminal outside
+receipt leaves `ready`, and the branch, commit, changes, ignored files and hidden
+edits are read once more, right before Git is asked (a commit, checkout or edit in a terminal outside
 Octant in between gives the worktree back, so the recorded commit never differs
 from the folder's); the folder is clean; it holds nothing a branch cannot
 give back, meaning no untracked file, ignored file or empty folder; and Git is
