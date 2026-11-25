@@ -1244,6 +1244,39 @@ describe("remote route policy", () => {
     expect(inspect("/api/pending-requests/defer", "POST")).toMatchObject({ maxBodyBytes: 1_024 });
   });
 
+  it("forwards the cleaned-up worktree list and a restore with a one-thread body, and leaves both without a catalogued action", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    const forwarded = { kind: "allow", surface: "authenticated-product" };
+    expect(inspect("/api/code/cleaned-up-worktrees", "GET")).toMatchObject(forwarded);
+    expect(inspect("/api/code/cleaned-up-worktrees/restore", "POST")).toMatchObject({
+      ...forwarded,
+      maxBodyBytes: 1_024,
+    });
+    expect(inspect("/api/code/cleaned-up-worktrees/restore", "GET")).toMatchObject({
+      kind: "reject",
+    });
+    // The restore has no catalogued action, so the product dispatch refuses
+    // every session but a device the host's own person paired; the list reads
+    // as a Code read there, and its route refuses what is not that person too.
+    expect(
+      classifyProductAction(
+        new Request(`${origin}/api/code/cleaned-up-worktrees/restore`, { method: "POST" }),
+      ),
+    ).toBeUndefined();
+  });
+
   it("forwards the new-device alert read for every device, a hub guest included, as a read", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (method: "GET" | "POST") =>

@@ -8,6 +8,8 @@ import { CodeSettingsView, type CodeSettingsUpdate } from "./CodeSettingsView";
 const settings = {
   defaultExecutionPolicy: "approval-gated",
   defaultPermissionPersistence: "current-session",
+  // A host that has the worktree choices always answers with them.
+  worktrees: {},
   version: 1,
   updatedAt: "2026-07-21T12:00:00.000Z",
 } as const;
@@ -77,6 +79,13 @@ describe("CodeSettingsView", () => {
     expect(update).toHaveBeenLastCalledWith(
       expect.objectContaining({ worktrees: { branchPrefix: "henrik/" } }),
     );
+  });
+
+  it("shows no worktree controls for a host whose settings do not carry them, since it would reject the update", () => {
+    const { worktrees: _worktrees, ...earlierHost } = settings;
+    render(<CodeSettingsView onUpdate={vi.fn(async () => true)} settings={earlierHost as never} />);
+    expect(screen.queryByRole("textbox", { name: "Branch prefix" })).toBeNull();
+    expect(screen.queryByRole("switch", { name: "Clean up when a thread is archived" })).toBeNull();
   });
 
   it("refuses a branch prefix Git would reject without saving it", async () => {

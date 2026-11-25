@@ -1112,6 +1112,16 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedRequestHeaders: [...REMOTE_REQUEST_HEADERS, OWNER_UNLOCK_HEADER] as const,
     allowedContentTypes: ["application/json"] as const,
   })),
+  // Restoring a cleaned-up worktree from the thread, for a device the host's own
+  // person paired: the body is one thread id, and the route refuses any other
+  // principal. Listing them is a GET under the `/api/code/` prefix above.
+  {
+    kind: "exact" as const,
+    path: "/api/code/cleaned-up-worktrees/restore",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 1_024,
+  },
   {
     kind: "exact" as const,
     path: "/api/code/evidence",

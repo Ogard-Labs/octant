@@ -4,6 +4,7 @@ import { nativeFolderTransfer } from "../composer/folderDrop.test-fixture";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import { decodeThreadMentionCandidate, type ThreadMessageQueueResult } from "@octant/contracts";
 import type { ThreadMentionClient } from "@octant/client-runtime";
+import type { ArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
 import {
   decodeCodeAttachmentId,
   decodeCodeCheckoutId,
@@ -793,19 +794,74 @@ describe("CodeThreadWorkspace", () => {
       expect(screen.queryByRole("button", { name: "Restore worktree" })).not.toBeInTheDocument();
     });
 
-    it("offers the button to a device the host's own person paired", () => {
+    const restoreClient = (answer: () => Promise<unknown>) =>
+      ({ restore: vi.fn(answer) }) as unknown as ArchivedWorktreesClient;
+
+    it("offers the button to a device the host's own person paired, over its session, and restores from it", async () => {
+      const user = userEvent.setup();
+      const worktreeClient = restoreClient(async () => ({
+        kind: "cleaned-up-worktree-restored",
+        threadId,
+      }));
+      // The session has neither a host URL nor a window capability.
+      const reloadThreadView = vi.fn(async () => {
+        throw new Error("the first view reload failed");
+      });
       render(
         <CodeThreadWorkspace
           actsAsHostPerson
+          controller={withCleanup({ reloadThreadView })}
+          pairedDevice
+          providerGroups={[providerGroup()]}
+          threadId={threadId}
+          worktreeClient={worktreeClient}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: "Restore worktree" }));
+      expect(worktreeClient.restore).toHaveBeenCalledWith(threadId);
+      // The notice goes with the host's answer even though the view reload failed.
+      await waitFor(() =>
+        expect(screen.queryByText(cleanedUpWorktreeSentence("cleaned-up"))).not.toBeInTheDocument(),
+      );
+      expect(screen.queryByRole("button", { name: "Restore worktree" })).not.toBeInTheDocument();
+    });
+
+    it("gives a device the hub introduced no button even when a session client exists", () => {
+      render(
+        <CodeThreadWorkspace
           controller={withCleanup()}
           pairedDevice
           providerGroups={[providerGroup()]}
-          serverUrl="http://127.0.0.1:4000"
           threadId={threadId}
-          windowCapability="capability"
+          worktreeClient={restoreClient(async () => undefined)}
         />,
       );
-      expect(screen.getByRole("button", { name: "Restore worktree" })).toBeVisible();
+      expect(screen.getByText(cleanedUpWorktreeSentence("cleaned-up"))).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Restore worktree" })).not.toBeInTheDocument();
+    });
+
+    it("treats a worktree another window already restored as back, not as a refusal", async () => {
+      const user = userEvent.setup();
+      const worktreeClient = restoreClient(async () => ({
+        kind: "cleaned-up-worktree-refused",
+        reason: "not-cleaned-up",
+        message: "That thread's worktree was not cleaned up.",
+      }));
+      render(
+        <CodeThreadWorkspace
+          controller={withCleanup({ reloadThreadView: vi.fn(async () => undefined) })}
+          providerGroups={[providerGroup()]}
+          threadId={threadId}
+          worktreeClient={worktreeClient}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: "Restore worktree" }));
+      await waitFor(() =>
+        expect(screen.queryByText(cleanedUpWorktreeSentence("cleaned-up"))).not.toBeInTheDocument(),
+      );
+      expect(
+        screen.queryByText("That thread's worktree was not cleaned up."),
+      ).not.toBeInTheDocument();
     });
   });
 

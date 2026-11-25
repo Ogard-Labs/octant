@@ -23,12 +23,24 @@ function branchNamingOf(worktrees: CodeWorktreeSettings | undefined) {
 /**
  * Settings › Code › Worktrees › Naming and Cleanup. Every control saves as it
  * is changed, whole: the host replaces the worktree choices with what is sent.
+ * A host that has these choices always answers with them, empty for the
+ * defaults. One that does not never does, and rejects an update that names
+ * them, so its window shows no controls rather than ones that cannot save.
  */
 export function CodeWorktreeSettingsSection(props: {
   readonly settings: CodeSettings;
   readonly onUpdate: (input: CodeSettingsUpdate) => Promise<boolean>;
 }) {
-  const worktrees = props.settings.worktrees;
+  if (props.settings.worktrees === undefined) return null;
+  return <WorktreeSettingsControls {...props} worktrees={props.settings.worktrees} />;
+}
+
+function WorktreeSettingsControls(props: {
+  readonly settings: CodeSettings;
+  readonly worktrees: CodeWorktreeSettings;
+  readonly onUpdate: (input: CodeSettingsUpdate) => Promise<boolean>;
+}) {
+  const { worktrees } = props;
   const [prefix, setPrefix] = useState(worktrees?.branchPrefix ?? DEFAULT_BRANCH_PREFIX);
   const [days, setDays] = useState(
     String(worktrees?.cleanup?.inactivityDays ?? DEFAULT_INACTIVITY_DAYS),

@@ -277,6 +277,8 @@ describe("CodeService reads", () => {
         defaultPermissionPersistence: "current-session",
         requireGitRepository: true,
         defaultDiffLayout: "unified",
+        // Always answered, so a window can tell this host from one that predates it.
+        worktrees: {},
         version: 0,
         updatedAt: now,
       },
@@ -1370,7 +1372,16 @@ describe("CodeService commands", () => {
       worktrees: {},
     });
     if (back.kind !== "settings-updated") throw new Error("settings were not updated");
-    expect(back.settings.worktrees).toBeUndefined();
+    // The answer carries the empty choice; the journal keeps none.
+    expect(back.settings.worktrees).toEqual({});
+    const journaled = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as
+      | {
+          readonly events: ReadonlyArray<{
+            readonly payload: { readonly settings: { readonly worktrees?: unknown } };
+          }>;
+        }
+      | undefined;
+    expect(journaled?.events[0]?.payload.settings.worktrees).toBeUndefined();
   });
 
   it("keeps Android snapshot boot off until a person turns it on, then across later default changes", async () => {
