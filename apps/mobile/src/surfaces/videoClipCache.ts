@@ -32,7 +32,7 @@ export async function cacheVideoClip(
     file.create();
     const handle = file.open();
     try {
-      await client.readClip({ ...input, write: (bytes) => handle.writeBytes(bytes) });
+      await client.readClip({ ...input, write: (bytes) => handle.writeBytesSync(bytes) });
     } finally {
       handle.close();
     }

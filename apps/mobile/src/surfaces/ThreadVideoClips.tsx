@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View, Platform } from "react-native";
 import { useEvent } from "expo";
 import type { File } from "expo-file-system";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -172,7 +172,11 @@ function CachedClip(props: {
 
 function ClipPlayer({ file, signal }: { readonly file: File; readonly signal: AbortSignal }) {
   const { colors } = useTheme();
-  const player = useVideoPlayer(file.uri);
+  const player = useVideoPlayer(file.uri, (opened) => {
+    // SDK 58 lets a clip mix with other apps' audio on iOS; it has always
+    // taken over from them here.
+    if (Platform.OS === "ios") opened.audioMixingMode = "doNotMix";
+  });
   const { status } = useEvent(player, "statusChange", { status: player.status });
   const [saveStatus, setSaveStatus] = useState<"saving" | "saved" | "failed">();
   const saving = useRef(false);
