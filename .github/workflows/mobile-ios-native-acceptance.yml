@@ -10,6 +10,11 @@ on:
       - .github/workflows/mobile-ios-native-acceptance.yml
       - bun.lock
   workflow_dispatch:
+    inputs:
+      keep_app:
+        description: Keep the built Simulator app with the evidence, to look at it on another Mac
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -46,6 +51,8 @@ jobs:
           restore-keys: ios-cocoapods-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - name: Build and exercise the Release app without accounts or store signing
+        env:
+          OCTANT_KEEP_SIMULATOR_APP: ${{ inputs.keep_app && '1' || '' }}
         run: python3 scripts/mobile-ios-native/run.py
       - uses: actions/upload-artifact@v4
         if: always()
