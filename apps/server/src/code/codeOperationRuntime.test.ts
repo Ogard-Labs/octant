@@ -1196,7 +1196,12 @@ describe("CodeOperationRuntime", () => {
           sessionId,
           prompt: fixture.prompt,
         });
-        await vi.waitFor(() => expect(streamed).toBeGreaterThan(1_000), { interval: 1 });
+        // Only Stop's latency is measured. A loaded CI runner streamed 997 deltas
+        // in the default second, so reaching the flood has a deadline of its own.
+        await vi.waitFor(() => expect(streamed).toBeGreaterThan(1_000), {
+          interval: 1,
+          timeout: 10_000,
+        });
         const stopIssued = performance.now();
         const stopped = await fixture.runtime.execute(windowId, {
           kind: "cancel-provider-turn",
