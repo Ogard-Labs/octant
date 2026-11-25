@@ -11,7 +11,7 @@ import { hapticFailure, hapticSuccess } from "../ui/haptics";
 export function useThreadRowAction(input: {
   readonly row: MobileInboxRow;
   readonly transport: MobileRemoteTransport | undefined;
-  readonly onDone: () => void;
+  readonly onDone: (action: MobileThreadRestAction) => void;
   readonly onFailed: (message: string) => void;
 }): { readonly busy: boolean; readonly run: (action: MobileThreadRestAction) => void } {
   const [busy, setBusy] = useState(false);
@@ -30,7 +30,7 @@ export function useThreadRowAction(input: {
               return;
             }
             hapticSuccess();
-            input.onDone();
+            input.onDone(action);
           },
           () => input.onFailed("The host could not be reached. Nothing changed."),
         )

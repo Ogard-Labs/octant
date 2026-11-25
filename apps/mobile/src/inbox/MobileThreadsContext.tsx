@@ -37,6 +37,11 @@ export interface MobileThreads {
   readonly refresh: () => Promise<void>;
   /** The person has this thread open, or (with none) has left it. */
   readonly reading: (row: MobileInboxRow | undefined) => void;
+  /** A thread was just settled, which the person may still take back. */
+  readonly settled: (row: MobileInboxRow) => void;
+  /** The thread Undo would take back. */
+  readonly undoable: MobileInboxRow | undefined;
+  readonly clearUndo: () => void;
   /** What was being written in a thread, kept while the app runs. */
   readonly drafts: ThreadDrafts;
   readonly hostLabel: (hostId: string) => string;
@@ -211,6 +216,8 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
     [cursors, held],
   );
   const [drafts] = useState(createThreadDrafts);
+  const [undoable, settled] = useState<MobileInboxRow | undefined>();
+  const clearUndo = useCallback(() => settled(undefined), []);
   const value = useMemo<MobileThreads>(() => {
     const labels = new Map(hosts.map((host) => [host.hostId, host.label]));
     const names = new Map(
@@ -224,6 +231,9 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
       refresh,
       reading,
       drafts,
+      settled,
+      undoable,
+      clearUndo,
       projects,
       hostLabel: (hostId) => labels.get(hostId) ?? hostId.slice(0, 8),
       provider: (row) =>
@@ -233,7 +243,20 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
       projectName: (row) =>
         row.projectId === undefined ? undefined : names.get(`${row.hostId}:${row.projectId}`),
     };
-  }, [drafts, error, failures, hosts, loading, projects, providers, reading, refresh, rows]);
+  }, [
+    clearUndo,
+    drafts,
+    error,
+    failures,
+    hosts,
+    loading,
+    projects,
+    providers,
+    reading,
+    refresh,
+    rows,
+    undoable,
+  ]);
 
   return <Context.Provider value={value}>{props.children}</Context.Provider>;
 }

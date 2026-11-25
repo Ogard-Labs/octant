@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Alert, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { Icon } from "../ui/Icon";
 import type { MobileInboxRow } from "@octant/client-runtime";
 import { space, typography, useTheme, withAlpha, type ThemeColors } from "../../design-system";
@@ -8,7 +8,10 @@ import { useMobileSession } from "../session/MobileSessionContext";
 import type { MobileIconName } from "../ui/IconButton";
 import { ProviderMark } from "../ui/ProviderMark";
 import { useMobileThreads } from "./MobileThreadsContext";
+import { threadRowActions } from "./threadRowActions";
 import { ThreadRowMenu } from "./ThreadRowMenu";
+import { ThreadRowSwipe, type SwipeAction } from "./ThreadRowSwipe";
+import { useThreadRowAction } from "./useThreadRowAction";
 import { threadModeIcon, threadModeLabel } from "./threadRowPresentation";
 import {
   projectMonogram,
@@ -80,7 +83,8 @@ export function ThreadRow(props: {
   const { row } = props;
   const { colors } = useTheme();
   const { transports } = useMobileSession();
-  const { hostLabel, projectName, provider: providerOf, refresh } = useMobileThreads();
+  const { hostLabel, projectName, provider: providerOf, refresh, settled } = useMobileThreads();
+  const transport = transports.find((entry) => entry.hostId === row.hostId);
   const project = projectName(row);
   const provider = providerOf(row);
   const state = threadRowState(row, new Date());
@@ -140,6 +144,29 @@ export function ThreadRow(props: {
   const pullRequests = row.pullRequests;
   const pullRequestInk =
     pullRequests === undefined ? "" : PULL_REQUEST_INK(pullRequests.state, colors);
+  const { run } = useThreadRowAction({
+    row,
+    transport,
+    onDone: (action) => {
+      if (action.kind === "put-away") settled(row);
+      void refresh();
+    },
+    onFailed: (message) => Alert.alert(title, message),
+  });
+  const offered = threadRowActions(row, new Date()).flatMap((offer) =>
+    offer.kind === "action" ? [offer.action] : [],
+  );
+  const swiped = (id: string, fill: string): ReadonlyArray<SwipeAction> =>
+    offered
+      .filter((action) => action.id === id)
+      .map((action) => ({ ...action, fill, onPress: () => run(action.run) }));
+  // The everyday ones; the row's menu holds the rest, snooze times among them.
+  const leading = swiped("pin", colors.paletteOrange);
+  const trailing = [
+    ...swiped("put-away", colors.success),
+    ...swiped("reopen", colors.paletteBlue),
+    ...swiped("wake", colors.palettePurple),
+  ];
   const stateWord = (
     <View style={styles.state}>
       {icon === undefined ? null : <Icon color={ink} name={icon} size={glyph(15)} />}
@@ -149,84 +176,82 @@ export function ThreadRow(props: {
     </View>
   );
   return (
-    <ThreadRowMenu
-      onChanged={() => void refresh()}
-      row={row}
-      transport={transports.find((transport) => transport.hostId === row.hostId)}
-    >
-      {({ onLongPress, onOffer }) => (
-        <Pressable
-          accessibilityActions={[{ name: "longpress", label: "Thread actions" }]}
-          accessibilityLabel={[
-            title,
-            state.spoken,
-            project === undefined ? "" : formatScreenshotSafeLabel(project),
-            place,
-            pullRequests === undefined
-              ? ""
-              : pullRequests.count === 1
-                ? `Pull request ${pullRequests.number}`
-                : `${pullRequests.count} pull requests`,
-            provider === undefined ? "" : formatScreenshotSafeLabel(provider.displayName),
-          ]
-            .filter((part) => part.length > 0)
-            .join(", ")}
-          accessibilityRole="button"
-          onAccessibilityAction={onOffer}
-          {...(onLongPress === undefined ? {} : { onLongPress })}
-          onPress={() => props.onOpen(row)}
-          style={({ pressed }) => [styles.row, pressed ? styles.pressed : null]}
-          testID={`mobile-home-thread-row-${row.mode}-${row.threadId}`}
-        >
-          <View
-            style={[
-              styles.badge,
-              { backgroundColor: withAlpha(hue, 0.18) },
-              quiet ? styles.quiet : null,
-            ]}
+    <ThreadRowSwipe leading={leading} trailing={trailing}>
+      <ThreadRowMenu onChanged={() => void refresh()} row={row} transport={transport}>
+        {({ onLongPress, onOffer }) => (
+          <Pressable
+            accessibilityActions={[{ name: "longpress", label: "Thread actions" }]}
+            accessibilityLabel={[
+              title,
+              state.spoken,
+              project === undefined ? "" : formatScreenshotSafeLabel(project),
+              place,
+              pullRequests === undefined
+                ? ""
+                : pullRequests.count === 1
+                  ? `Pull request ${pullRequests.number}`
+                  : `${pullRequests.count} pull requests`,
+              provider === undefined ? "" : formatScreenshotSafeLabel(provider.displayName),
+            ]
+              .filter((part) => part.length > 0)
+              .join(", ")}
+            accessibilityRole="button"
+            onAccessibilityAction={onOffer}
+            {...(onLongPress === undefined ? {} : { onLongPress })}
+            onPress={() => props.onOpen(row)}
+            style={({ pressed }) => [styles.row, pressed ? styles.pressed : null]}
+            testID={`mobile-home-thread-row-${row.mode}-${row.threadId}`}
           >
-            {letters === "" ? (
-              <Icon color={hue} name={threadModeIcon(row.mode)} size={12} />
-            ) : (
-              <Text allowFontScaling={false} style={[styles.letters, { color: hue }]}>
-                {letters}
-              </Text>
-            )}
-          </View>
-          <View style={styles.body}>
-            <View style={[styles.line, quiet ? styles.quiet : null]}>
-              {row.pinned === true ? (
-                <Icon color={colors.textTertiary} name="pin" size={glyph(13)} />
-              ) : null}
-              <Text numberOfLines={large ? 3 : 1} style={styles.title}>
-                {title}
-              </Text>
-              {large ? null : stateWord}
-            </View>
-            {large ? <View style={quiet ? styles.quiet : null}>{stateWord}</View> : null}
-            <View style={[large ? styles.lines : styles.line, quiet ? styles.quiet : null]}>
-              <View style={large ? styles.placeAlone : styles.place}>
-                <Icon color={colors.textTertiary} name="desktop-outline" size={glyph(13)} />
-                <Text numberOfLines={large ? 2 : 1} style={styles.placeText}>
-                  {place}
+            <View
+              style={[
+                styles.badge,
+                { backgroundColor: withAlpha(hue, 0.18) },
+                quiet ? styles.quiet : null,
+              ]}
+            >
+              {letters === "" ? (
+                <Icon color={hue} name={threadModeIcon(row.mode)} size={12} />
+              ) : (
+                <Text allowFontScaling={false} style={[styles.letters, { color: hue }]}>
+                  {letters}
                 </Text>
+              )}
+            </View>
+            <View style={styles.body}>
+              <View style={[styles.line, quiet ? styles.quiet : null]}>
+                {row.pinned === true ? (
+                  <Icon color={colors.textTertiary} name="pin" size={glyph(13)} />
+                ) : null}
+                <Text numberOfLines={large ? 3 : 1} style={styles.title}>
+                  {title}
+                </Text>
+                {large ? null : stateWord}
               </View>
-              {pullRequests === undefined ? null : (
-                <View style={styles.pullRequest}>
-                  <Icon color={pullRequestInk} name="git-pull-request-outline" size={glyph(14)} />
-                  <Text style={[styles.pullRequestText, { color: pullRequestInk }]}>
-                    {pullRequestChip(pullRequests)}
+              {large ? <View style={quiet ? styles.quiet : null}>{stateWord}</View> : null}
+              <View style={[large ? styles.lines : styles.line, quiet ? styles.quiet : null]}>
+                <View style={large ? styles.placeAlone : styles.place}>
+                  <Icon color={colors.textTertiary} name="desktop-outline" size={glyph(13)} />
+                  <Text numberOfLines={large ? 2 : 1} style={styles.placeText}>
+                    {place}
                   </Text>
                 </View>
-              )}
-              {provider === undefined ? null : (
-                <ProviderMark driverKind={provider.driverKind} size={glyph(15)} />
-              )}
+                {pullRequests === undefined ? null : (
+                  <View style={styles.pullRequest}>
+                    <Icon color={pullRequestInk} name="git-pull-request-outline" size={glyph(14)} />
+                    <Text style={[styles.pullRequestText, { color: pullRequestInk }]}>
+                      {pullRequestChip(pullRequests)}
+                    </Text>
+                  </View>
+                )}
+                {provider === undefined ? null : (
+                  <ProviderMark driverKind={provider.driverKind} size={glyph(15)} />
+                )}
+              </View>
             </View>
-          </View>
-          {props.last ? null : <View pointerEvents="none" style={styles.separator} />}
-        </Pressable>
-      )}
-    </ThreadRowMenu>
+            {props.last ? null : <View pointerEvents="none" style={styles.separator} />}
+          </Pressable>
+        )}
+      </ThreadRowMenu>
+    </ThreadRowSwipe>
   );
 }

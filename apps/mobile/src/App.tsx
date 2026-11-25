@@ -1,5 +1,6 @@
 import { createInMemoryExpoSecureStringStorage } from "@octant/client-runtime";
 import { createAppearanceStore } from "./appearance/AppearanceStore";
+import { GestureRoot } from "./navigation/GestureRoot";
 import { MobileEntryGate } from "./demo/MobileEntryGate";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -67,41 +68,46 @@ function AppShell(props: {
   );
 
   return (
-    <View style={styles.safeArea}>
-      <StatusBar barStyle={scheme === "dark" ? "light-content" : "dark-content"} />
-      {props.mockScenario !== undefined ? (
-        <SafeAreaView edges={["top"]}>
-          <View accessibilityRole="text" style={styles.mockBanner} testID="mobile-mock-banner">
-            <Text maxFontSizeMultiplier={1.3} style={styles.mockBannerText}>
-              {props.onLeaveDemo === undefined
-                ? `Mock data · ${props.mockScenario.label}`
-                : "Offline demo · sample data"}
-            </Text>
-            {props.onLeaveDemo === undefined ? null : (
-              <Pressable
-                accessibilityRole="button"
-                hitSlop={{ top: 10, bottom: 10, left: 8, right: 16 }}
-                onPress={props.onLeaveDemo}
-                testID="mobile-demo-leave"
-              >
-                <Text maxFontSizeMultiplier={1.3} style={[styles.mockBannerText, styles.demoExit]}>
-                  Leave demo
-                </Text>
-              </Pressable>
-            )}
-          </View>
-        </SafeAreaView>
-      ) : null}
-      <RootNavigator
-        onDeepLinkConsumed={props.onDeepLinkConsumed}
-        {...(props.pendingDeepLinkRow === undefined
-          ? {}
-          : { pendingDeepLinkRow: props.pendingDeepLinkRow })}
-        {...(props.pendingComputersLink === undefined
-          ? {}
-          : { pendingComputersLink: props.pendingComputersLink })}
-      />
-    </View>
+    <GestureRoot>
+      <View style={styles.safeArea}>
+        <StatusBar barStyle={scheme === "dark" ? "light-content" : "dark-content"} />
+        {props.mockScenario !== undefined ? (
+          <SafeAreaView edges={["top"]}>
+            <View accessibilityRole="text" style={styles.mockBanner} testID="mobile-mock-banner">
+              <Text maxFontSizeMultiplier={1.3} style={styles.mockBannerText}>
+                {props.onLeaveDemo === undefined
+                  ? `Mock data · ${props.mockScenario.label}`
+                  : "Offline demo · sample data"}
+              </Text>
+              {props.onLeaveDemo === undefined ? null : (
+                <Pressable
+                  accessibilityRole="button"
+                  hitSlop={{ top: 10, bottom: 10, left: 8, right: 16 }}
+                  onPress={props.onLeaveDemo}
+                  testID="mobile-demo-leave"
+                >
+                  <Text
+                    maxFontSizeMultiplier={1.3}
+                    style={[styles.mockBannerText, styles.demoExit]}
+                  >
+                    Leave demo
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          </SafeAreaView>
+        ) : null}
+        <RootNavigator
+          onDeepLinkConsumed={props.onDeepLinkConsumed}
+          {...(props.pendingDeepLinkRow === undefined
+            ? {}
+            : { pendingDeepLinkRow: props.pendingDeepLinkRow })}
+          {...(props.pendingComputersLink === undefined
+            ? {}
+            : { pendingComputersLink: props.pendingComputersLink })}
+        />
+      </View>
+    </GestureRoot>
   );
 }
 

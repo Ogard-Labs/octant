@@ -18,6 +18,7 @@ import { searchHitsBesideList } from "./agentsListPresentation";
 import { EmptyPlace } from "../ui/EmptyPlace";
 import { useMobileThreads } from "./MobileThreadsContext";
 import { ThreadListNotices } from "./ThreadListNotices";
+import { ThreadUndo } from "./ThreadUndo";
 import { ThreadGroup } from "./ThreadGroup";
 import { filterThreads, type MobileThreadFilter } from "./threadFilters";
 import {
@@ -284,6 +285,7 @@ export function ThreadsScreen(props: {
           })}
         </View>
       </ScrollView>
+      <ThreadUndo />
     </View>
   );
 }
