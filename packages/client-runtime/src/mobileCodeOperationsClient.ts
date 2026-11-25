@@ -422,6 +422,34 @@ export interface MobileCodeConversation {
 }
 
 /**
+ * Whether a Code thread's newest turn runs or waits, from one turn of the
+ * window read and none of the text behind it: the phone's light look at a
+ * thread it shows settled, since a turn started elsewhere reaches it no other
+ * way. Undefined from a host without the window read.
+ */
+export async function readMobileCodeTurnUnderway(
+  transport: MobileRemoteTransport,
+  threadId: string,
+): Promise<boolean | undefined> {
+  const response = await transport.authenticatedFetch({
+    method: "GET",
+    path: `/api/code/threads/${encodeURIComponent(threadId)}/conversation/window`,
+    query: "?limit=1",
+  });
+  if (response.status === 404) return undefined;
+  const window = await decodeJson(
+    response,
+    decodeHostAnswer(CodeConversationWindow),
+    "Could not load the Code conversation from the host.",
+  );
+  if (String(window.threadId) !== threadId) {
+    throw new MobileInboxFailure("unavailable", "Code conversation identity mismatch.");
+  }
+  const newest = window.turns.at(-1)?.status;
+  return newest === "incomplete" || newest === "waiting";
+}
+
+/**
  * A Code thread's newest turns with the text behind every prompt and reply.
  * The window route hands back references; the evidence batch route resolves
  * them in one batch. Turns are kept newest first while their references fit

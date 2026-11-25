@@ -74,6 +74,7 @@ import { useThreadTurnActions } from "./thread/useThreadTurnActions";
 import { useWorkThread } from "./thread/useWorkThread";
 import {
   MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS,
+  MOBILE_CHAT_IDLE_REFRESH_MAX_DELAY_MS,
   enteredMobileForeground,
 } from "./threadRefreshPolicy";
 import { useRemoteSessionStanding } from "./useRemoteSessionStanding";
@@ -233,6 +234,20 @@ export function ThreadScreen(props: ThreadScreenProps) {
     }, MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS);
     return () => clearInterval(timer);
   }, [codeRereads, mode, refresh, workTurnLive]);
+
+  // A turn started on another device reaches a settled Code page no other
+  // way, so the page takes one light look at the newest turn on the idle
+  // cadence; finding one underway refreshes it once, and the re-reads above
+  // take over from there.
+  const codeLooksForNewTurn = mode === "code" && code.looksForNewTurn;
+  const noticeCodeTurn = code.noticeTurnStartedElsewhere;
+  useEffect(() => {
+    if (!codeLooksForNewTurn) return;
+    const timer = setInterval(() => {
+      if (AppState.currentState === "active") void noticeCodeTurn();
+    }, MOBILE_CHAT_IDLE_REFRESH_MAX_DELAY_MS);
+    return () => clearInterval(timer);
+  }, [codeLooksForNewTurn, noticeCodeTurn]);
 
   const turnActions = useThreadTurnActions({
     transport,

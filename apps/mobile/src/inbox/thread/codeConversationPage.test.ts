@@ -4,7 +4,11 @@ import {
   type MobileCodeConversation,
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
-import { rereadsCodeThread, loadCodeConversationPage } from "./codeConversationPage";
+import {
+  rereadsCodeThread,
+  loadCodeConversationPage,
+  looksForTurnStartedElsewhere,
+} from "./codeConversationPage";
 
 vi.mock("@octant/client-runtime", async () => {
   const actual =
@@ -80,5 +84,27 @@ describe("whether the phone keeps re-reading a Code thread", () => {
 
   it("does not take an earlier turn left incomplete for one that runs", () => {
     expect(rereadsCodeThread([{ status: "incomplete" }, { status: "completed" }])).toBe(false);
+  });
+});
+
+describe("whether the phone looks for a turn started elsewhere", () => {
+  it("looks while it shows the newest turns settled, and not while it re-reads a running turn", () => {
+    expect(looksForTurnStartedElsewhere(page(["a"], { hasEarlier: false, hasLater: false }))).toBe(
+      true,
+    );
+    const running = page(["a"], { hasEarlier: false, hasLater: false });
+    expect(
+      looksForTurnStartedElsewhere({
+        ...running,
+        turns: running.turns.map((turn) => ({ ...turn, status: "incomplete" })),
+      }),
+    ).toBe(false);
+    expect(looksForTurnStartedElsewhere(undefined)).toBe(false);
+  });
+
+  it("leaves an anchored search page in place", () => {
+    expect(
+      looksForTurnStartedElsewhere(page(["older", "hit"], { hasEarlier: true, hasLater: true })),
+    ).toBe(false);
   });
 });

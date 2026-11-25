@@ -43,3 +43,12 @@ export function rereadsCodeThread(
 ): boolean {
   return turns.at(-1)?.status === "incomplete" || turns.some((turn) => turn.status === "waiting");
 }
+
+/**
+ * Whether the phone takes a light look, now and then, for a turn started on
+ * another device: it shows the newest turns and none of them runs. A turn
+ * that runs is re-read already, and an anchored search page stays in place.
+ */
+export function looksForTurnStartedElsewhere(shown: MobileCodeConversation | undefined): boolean {
+  return shown !== undefined && !shown.hasLater && !rereadsCodeThread(shown.turns);
+}

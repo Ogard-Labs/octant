@@ -8,6 +8,7 @@ import {
   mergeMobilePullRequest,
   setMobileMergeWhenReady,
   observeMobilePullRequest,
+  readMobileCodeTurnUnderway,
   sendMobileCodeTurn,
 } from "./mobileCodeOperationsClient";
 import type { MobileRemoteTransport } from "./mobileInboxClient";
@@ -747,6 +748,44 @@ describe("mobile Code follow-through", () => {
     );
     expect(requests[0]?.query).toBe(`?limit=${MOBILE_CODE_CONVERSATION_TURNS}`);
     expect(requests.some((request) => request.path.endsWith("/conversation"))).toBe(false);
+  });
+
+  it("looks at only the newest turn, without its text, to tell whether a turn is underway", async () => {
+    const answers = [
+      { status: "incomplete", underway: true },
+      { status: "waiting", underway: true },
+      { status: "completed", underway: false },
+    ];
+    for (const { status, underway } of answers) {
+      const fetch = vi.fn(async (input: { method: string; path: string; query?: string }) =>
+        input.path === `/api/code/threads/${threadId}/conversation/window`
+          ? jsonResponse({
+              version: 1,
+              threadId,
+              turns: [{ ...numberedTurn(1), status }],
+              hasEarlier: true,
+              hasLater: false,
+            })
+          : jsonResponse({ category: "unavailable" }, 404),
+      );
+      const transport = {
+        hostId: "host-1",
+        authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+      };
+      await expect(readMobileCodeTurnUnderway(transport, threadId)).resolves.toBe(underway);
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(fetch).toHaveBeenCalledWith(expect.objectContaining({ query: "?limit=1" }));
+    }
+    const older = vi.fn(async () => jsonResponse({ category: "unavailable" }, 404));
+    await expect(
+      readMobileCodeTurnUnderway(
+        {
+          hostId: "host-1",
+          authenticatedFetch: older as MobileRemoteTransport["authenticatedFetch"],
+        },
+        threadId,
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("shows the tail of the forward read on a host without the window read", async () => {

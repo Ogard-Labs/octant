@@ -3,11 +3,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   loadMobileCodeConversation,
   loadMobileCodeThread,
+  readMobileCodeTurnUnderway,
   sendMobileCodeTurn,
   type MobileCodeConversation,
 } from "@octant/client-runtime";
 import type { CodeThread } from "@octant/contracts";
-import { loadCodeConversationPage, rereadsCodeThread } from "./codeConversationPage";
+import {
+  loadCodeConversationPage,
+  looksForTurnStartedElsewhere,
+  rereadsCodeThread,
+} from "./codeConversationPage";
 import { runLoad, runMutation, sendThenReload } from "./runMutation";
 import type { RefreshOptions, ThreadHookInput } from "./threadTypes";
 import { useThreadAttachments } from "./useThreadAttachments";
@@ -129,6 +134,20 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
     });
   };
 
+  /**
+   * One light look at the newest turn; a turn underway that the shown page
+   * does not have brings one refresh, after which the page re-reads itself.
+   */
+  const noticeTurnStartedElsewhere = useCallback(async () => {
+    if (!enabled || transport === undefined || identity === undefined || threadId === undefined) {
+      return;
+    }
+    const underway = await readMobileCodeTurnUnderway(transport, threadId).catch(() => undefined);
+    if (underway === true && guard.isSelected(identity) && anchor.current === undefined) {
+      await refresh({ quiet: true });
+    }
+  }, [enabled, guard, identity, refresh, threadId, transport]);
+
   const jumpToLatest = useCallback(async () => {
     anchor.current = undefined;
     pendingFocus.current = undefined;
@@ -144,6 +163,8 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
     turns,
     live: (turns ?? []).some((turn) => turn.status === "waiting"),
     rereads: rereadsCodeThread(turns ?? []),
+    looksForNewTurn: looksForTurnStartedElsewhere(conversation),
+    noticeTurnStartedElsewhere,
     refresh,
     jumpToLatest,
     sendFollowUp,
