@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rename, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -800,6 +800,35 @@ describe("managed worktree Node ports", () => {
       expect(await readFile(join(w.created.targetPath, ".env"), "utf8")).toBe("SECRET=1\n");
       expect(await listed(w)).toContain(w.created.targetPath);
       expect(await w.state()).not.toBe("ready");
+    });
+
+    it("restores only the recorded checkout and runs no hook the repository configured", async () => {
+      for (const where of ["hooks", "hooksPath"] as const) {
+        const w = await readyWorktree();
+        await committedFile(w);
+        await expect(w.reclaim(), where).resolves.toMatchObject({ status: "reclaimed" });
+        const repository = await realpath(w.fixture.repository);
+        const directory =
+          where === "hooks"
+            ? join(repository, ".git", "hooks")
+            : join(w.fixture.root, "shared-hooks");
+        await mkdir(directory, { recursive: true });
+        const hook = join(directory, "post-checkout");
+        await writeFile(hook, "#!/bin/sh\ntouch generated-by-hook.txt\n");
+        await chmod(hook, 0o755);
+        if (where === "hooksPath") {
+          await w.git("-C", repository, "config", "core.hooksPath", directory);
+        }
+        await expect(w.restore(), where).resolves.toMatchObject({ status: "restored" });
+        expect(
+          await w.ports.filesystem.pathExists(
+            join(w.created.targetPath, "generated-by-hook.txt"),
+            signal,
+          ),
+          where,
+        ).toBe(false);
+        expect(await w.state(), where).toBe("ready");
+      }
     });
 
     it("does not call a restored folder ready while it has no index or a lock left, and makes it whole", async () => {

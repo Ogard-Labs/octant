@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstat, open, readFile, realpath } from "node:fs/promises";
+import { devNull } from "node:os";
 import { join } from "node:path";
 import { runBoundedGit, GIT_MUTATION_TIME_LIMIT_MS, GIT_READ_TIME_LIMIT_MS } from "./boundedGit";
 import { readFolderAgainstCommit } from "./folderAgainstCommit";
@@ -352,9 +353,23 @@ export function createManagedWorktreeNodePorts(): {
     restoreWorktree: async (input, signal) => {
       const validation = await run("git", ["check-ref-format", "--branch", input.branch], signal);
       if (validation.exitCode !== 0) return { status: "rejected" };
+      // Restore recreates the recorded checkout and nothing else: no hook the
+      // repository or the person's config names runs (`post-checkout` may write
+      // files the verification would then take for a partial folder). A command
+      // line `-c` outranks every config file, `core.hooksPath` included.
       const result = await run(
         "git",
-        ["-C", input.repositoryRoot, "worktree", "add", "--", input.targetPath, input.branch],
+        [
+          "-c",
+          `core.hooksPath=${devNull}`,
+          "-C",
+          input.repositoryRoot,
+          "worktree",
+          "add",
+          "--",
+          input.targetPath,
+          input.branch,
+        ],
         signal,
         GIT_MUTATION_TIME_LIMIT_MS,
       );
