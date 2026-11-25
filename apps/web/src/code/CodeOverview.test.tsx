@@ -237,6 +237,41 @@ describe("CodeOverview", () => {
     );
   });
 
+  it("draws a thread that is still loading as its title alone, and a failed one with its reason", () => {
+    const { rerender } = render(
+      <CodeOverview
+        controller={{ ...controller(), activeView: undefined, status: "loading" }}
+        threadId={ids.thread as never}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Loading Code thread" })).toBeVisible();
+    expect(document.querySelector('[data-slot="empty-description"]')).toBeNull();
+
+    rerender(
+      <CodeOverview
+        controller={{ ...controller(), activeView: undefined, status: "conflict-reload" }}
+        threadId={ids.thread as never}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Reloading Code thread" })).toBeVisible();
+    expect(document.querySelector('[data-slot="empty-description"]')).toBeNull();
+
+    rerender(
+      <CodeOverview
+        controller={{
+          ...controller(),
+          activeView: undefined,
+          errorCategory: "unavailable" as never,
+          errorMessage: "This thread could not be read.",
+          status: "ready",
+        }}
+        threadId={ids.thread as never}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Code thread unavailable" })).toBeVisible();
+    expect(screen.getByText("This thread could not be read.")).toBeVisible();
+  });
+
   it("renders only authoritative thread, checkout, policy, and delivery facts", () => {
     const onOpenReview = vi.fn();
     const onOpenSurface = vi.fn();

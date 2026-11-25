@@ -44,6 +44,11 @@ const CODE_NOT_PROSE = /&&|\|\||=|;|^[([]/;
 const PROSE_LINE = /^[A-Za-z’'“"][^=(){}[\]<>]*[^=(){}[\]<>,;:]$/;
 const STARTS_A_STATEMENT =
   /^(?:readonly|const|let|var|return|import|export|case|default|type|interface|break|continue|else|try|finally|async|await|throw|function|yield|static|public|private|declare|extends|implements)\b/;
+// A label written in braces between two tags, or on a line of its own.
+const BRACED_LABEL = /(?:(?<=>)|^)\s*\{\s*(?:"([^"\n]*)"|'([^'\n]*)'|`([^`\n]*)`)\s*\}\s*(?=<|$)/g;
+// One or two capitalised words alone on a line: a button's or a heading's
+// text after the formatter has broken the tag around it.
+const SHORT_LABEL_LINE = /^[A-Z][A-Za-z’'-]*(?: [A-Za-z’'-]+)?[.…!?]?$/;
 // An expression broken over lines can look like a line of words: it gives
 // itself away with an operator, a keyword or a member read.
 const AN_EXPRESSION =
@@ -57,10 +62,11 @@ function plain(text: string): string {
 }
 
 /**
- * The strings a person can read. Four shapes are read: a prop or field shown
+ * The strings a person can read. Five shapes are read: a prop or field shown
  * as it stands (a label, a title, a message), any other quoted string that
  * starts with a capital and holds at least two words, the text between two
- * tags, and a line of running text inside an element. Class lists, selectors,
+ * tags (written plainly or as a string in braces), a line of running text
+ * inside an element, and one or two capitalised words alone on a line. Class lists, selectors,
  * identifiers and Settings search keywords start in lower case or hold no
  * space, so they fall out. A sentence that starts in lower case inside a plain
  * string is not read; that is the price of leaving keywords alone.
@@ -87,6 +93,8 @@ function readableSentences(path: string): ReadonlyArray<Sentence> {
       if (!CODE_NOT_PROSE.test((match[1] ?? "").trim())) add(match[1]);
     }
     const bare = line.trim();
+    for (const match of bare.matchAll(BRACED_LABEL)) add(match[1] ?? match[2] ?? match[3]);
+    if (SHORT_LABEL_LINE.test(bare)) add(bare);
     if (
       PROSE_LINE.test(bare) &&
       bare.split(/\s+/).length >= 3 &&

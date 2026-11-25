@@ -1728,7 +1728,13 @@ function renderCodeTab(
   const coordinatorWorkerAsks = coordinatorWorkerAsksFor(tab, props);
   const coordinatorWorkers = coordinatorWorkersSourceFor(tab, props);
   const content = (
-    <Suspense fallback={<OctantEmpty eyebrow="Code workspace" state="loading" title={tab.title} />}>
+    <Suspense
+      // The spinner is hidden from a screen reader, so the title says it: the
+      // tab's name alone read as a state with nothing happening in it.
+      fallback={
+        <OctantEmpty eyebrow="Code workspace" state="loading" title={`Loading ${tab.title}`} />
+      }
+    >
       <CodeWorkspaceTab
         {...(props.revealTurn?.mode === "code" &&
         String(props.revealTurn.threadId) === String(tab.threadId)
