@@ -92,6 +92,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   ],
   // ── Remaining ──
   [
+    "apps/server/src/threadSecrets/threadSecretTools.ts",
+    "The thread-secret operations, ahead of the credential tool that offers them (docs/architecture.md, Thread secrets). Remove once the tool does.",
+  ],
+  [
     "apps/server/src/remote/remoteExitEvidenceADriver.ts",
     "Browser-realm bundle entry built by remoteExitEvidenceA.smoke.test.ts via `bun build`; excluded from the server tsconfig on purpose. Remove once that evidence is served by a product caller or the smoke is retired.",
   ],

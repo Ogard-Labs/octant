@@ -9,9 +9,11 @@ import {
   ActiveThreadSecret,
   ThreadSecretAnswer,
   ThreadSecretJournalRecord,
+  ThreadSecretMemoryRecord,
   ThreadSecretRequestCard,
   ThreadSecretRequestInput,
   ThreadSecretRequestResult,
+  ThreadSecretRunInput,
 } from "./threadSecrets";
 
 const ID = "00000000-0000-4000-8000-000000000001";
@@ -111,19 +113,41 @@ describe("what an agent may ask for", () => {
     expect(() => decode({ ...input, fields: [field(1), field(1)] })).toThrow();
   });
 
-  it("keeps the spaces in a value pasted in chat", () => {
-    expect(decode({ ...input, value: "  two words  " }).value).toBe("  two words  ");
-  });
-
-  it("refuses a pasted value with fields, an empty one, and one no variable can carry", () => {
-    expect(() => decode({ ...input, value: "private", fields: [field(1)] })).toThrow();
-    expect(() => decode({ ...input, value: "" })).toThrow();
-    expect(() => decode({ ...input, value: "a\u0000b" })).toThrow();
+  it("refuses a value from the agent, wherever it got it", () => {
+    for (const key of ["value", "secret", "values"])
+      expect(() => decode({ ...input, [key]: "private" })).toThrow();
   });
 
   it("refuses a lifetime or a 1Password reference chosen by the agent", () => {
     expect(() => decode({ ...input, lifetime: "remember" })).toThrow();
     expect(() => decode({ ...input, reference: "op://Private/Item/field" })).toThrow();
+  });
+});
+
+describe("a command run with a secret", () => {
+  const decode = Schema.decodeUnknownSync(ThreadSecretRunInput);
+  const run = { operation: "run-with-secret", command: "deploy", secrets: ["DEPLOY_TOKEN"] };
+
+  it("names the secrets it is given and never carries one", () => {
+    expect(decode(run)).toEqual(run);
+    expect(decode({ ...run, secrets: ["SERVICE_TOKEN", "A"] }).secrets).toHaveLength(2);
+    expect(() => decode({ ...run, environment: { TOKEN: "private" } })).toThrow();
+    expect(() => decode({ ...run, value: "private" })).toThrow();
+  });
+
+  it("refuses no command, no secret, a repeated one, and a name that is not one", () => {
+    for (const over of [
+      { command: "  " },
+      { command: "a\u0000b" },
+      { command: "x".repeat(1_501) },
+      { command: "x".repeat(1_450), secrets: ["A".repeat(60)] },
+      { secrets: [] },
+      { secrets: ["A", "A"] },
+      { secrets: ["PATH; rm"] },
+      { secrets: ["A", "B", "C", "D", "E", "F", "G", "H", "I"] },
+      { timeoutMs: 0 },
+    ])
+      expect(() => decode({ ...run, ...over })).toThrow();
   });
 });
 
@@ -160,7 +184,7 @@ describe("what the agent gets back", () => {
     },
     {
       status: "saved",
-      delivery: "op-run",
+      delivery: "each-use",
       name: "DEPLOY_TOKEN",
       env: "OCTANT_SECRET_DEPLOY_TOKEN",
     },
@@ -184,7 +208,7 @@ describe("what the agent gets back", () => {
   });
 
   it("refuses a file path when the value reaches commands only as a variable", () => {
-    for (const delivery of ["environment", "op-run"])
+    for (const delivery of ["environment", "each-use"])
       expect(() =>
         decode({ status: "saved", delivery, name: "A", env: "OCTANT_SECRET_A", file: "/a" }),
       ).toThrow();
@@ -323,20 +347,48 @@ describe("what the journal keeps", () => {
   });
 });
 
+describe("what the host remembers", () => {
+  const decode = Schema.decodeUnknownSync(ThreadSecretMemoryRecord);
+
+  it("is a name and where its value is, never a value or a thread", () => {
+    const records = [
+      { name: "thread-secret.remembered", id: ID, secretName: "TOKEN", source: "pasted" },
+      {
+        name: "thread-secret.remembered",
+        id: ID,
+        secretName: "TOKEN",
+        source: "onepassword",
+        store: "onepassword",
+        reference: "op://Private/Deploy/credential",
+      },
+      { name: "thread-secret.forgotten", id: ID },
+    ];
+    for (const record of records) {
+      expect(decode(record)).toEqual(record);
+      for (const key of ["value", "secret", "threadId", "label"])
+        expect(() => decode({ ...record, [key]: "private" })).toThrow();
+    }
+    expect(() => decode({ ...records[0], reference: "op://Private/Deploy/credential" })).toThrow();
+  });
+});
+
 describe("what the agent is told", () => {
   it("tells the agent to ask in the card, how to use sudo, and to stop on a decline", () => {
     const { description } = OCTANT_CREDENTIAL_TOOL;
     expect(description).toContain("request-secret");
+    expect(description).toContain("run-with-secret");
     expect(description).toContain("Never ask for a secret in chat");
+    expect(description).toMatch(/pasted .* in chat, do not use it/i);
     expect(description).toContain("sudo -n");
     expect(description).toContain(`sudo -S -p '' <cmd> < "$file"`);
-    expect(description).toContain("printf");
+    expect(description).toContain("sandbox");
     expect(description).toContain("declined");
     expect(description).toMatch(/do not ask again/i);
   });
 
   it("advertises request-secret and its inputs only where the host offers it", () => {
     expect(CREDENTIAL_TOOL_OPERATIONS).toContain("request-secret");
+    expect(CREDENTIAL_TOOL_OPERATIONS).toContain("run-with-secret");
     expect(Object.keys(OCTANT_CREDENTIAL_TOOL.inputSchema.properties)).toEqual([
       "operation",
       "id",
@@ -348,13 +400,17 @@ describe("what the agent is told", () => {
       "placeholder",
       "fields",
       "delivery",
-      "value",
       "clientRequestId",
+      "command",
+      "secrets",
+      "timeoutMs",
     ]);
     expect(Object.keys(OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS.inputSchema.properties)).toEqual([
       "operation",
       "id",
     ]);
-    expect(OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS.description).not.toContain("request-secret");
+    const without = JSON.stringify(OCTANT_CREDENTIAL_TOOL_WITHOUT_SECRETS);
+    expect(without).not.toContain("request-secret");
+    expect(without).not.toContain("run-with-secret");
   });
 });

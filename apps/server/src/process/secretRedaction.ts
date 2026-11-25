@@ -71,7 +71,7 @@ export function holdSecretValue(value: string): () => void {
  * longer encoded text (`user:password` is the common one), and its URL and
  * JSON escapes. A form that is too short to replace is left out.
  */
-function secretForms(value: string): ReadonlyArray<string> {
+export function secretForms(value: string): ReadonlyArray<string> {
   const bytes = Buffer.from(value, "utf8");
   // Half a surrogate pair cannot be URL-encoded; its UTF-8 bytes can.
   const encodedUrl = encodeURIComponent(bytes.toString("utf8"));

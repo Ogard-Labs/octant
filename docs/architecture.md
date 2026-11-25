@@ -19677,12 +19677,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
 
 - **Thread secrets.** An agent in a Code or Work thread may ask the person for a
   secret its work needs: an API key, a token, or an account password for `sudo`
-  (maintainer decision, 2026-11-24). The host half is built; the tool operation,
-  the card, Remember, Fresh each use, a secret already pasted in chat and
-  `run-with-secret` are not built yet, so no agent is offered any of it.
+  (maintainer decision, 2026-11-24). The host half is built, with `run-with-secret`, Fresh each use and
+  Remember; the tool operation and the card are not built yet, so no agent is offered any of it.
   - **Request.** The agent names the secret, a label, a kind (`token` or
     `account-password`), a reason, an optional setup page, up to eight fields and
-    a delivery. Labels, reasons and placeholders are one line of visible text: no
+    a delivery. It can never pass a value: the person enters it in the card every
+    time, and one pasted in chat is not picked up, stays in the chat and should be
+    changed (maintainer decision, 2026-11-24). Labels, reasons and placeholders are one line of visible text: no
     control, reordering or zero-width character, so the card cannot imitate
     Octant's own words. A setup page is an http or https address with no sign-in
     in it, shown as the browser will open it. Chat is refused. A thread has at
@@ -19707,6 +19708,38 @@ approval-gated` command that undoes it. The terminal shows no one-time
     active secret returns a new handle per field with no card, never a wider
     delivery, and never another turn's secret when it was given for one turn. The
     same retry key returns the same answer while it is still true.
+  - **Run with a secret.** `run-with-secret` runs one command with the secrets it
+    names as `OCTANT_SECRET_<NAME>` variables, for any provider in Code and Work.
+    It is asked for as the thread's other commands are: the running turn's level,
+    remembered answers, Octant Shield, new hosts and forge rules, with a line in
+    Octant's words saying which variables it is given, and the whole command or
+    nothing. Values are read only after that, held only for the command, and reach
+    it only in its process's environment, never in its arguments, the approval, the
+    Judge, a receipt or a log. The secret is spent and its use recorded as the
+    command starts, so one the host refuses spends nothing, and a one-command secret
+    goes to exactly one. A secret granted as a handle is never lent. The command runs
+    in the thread's own shell, sandbox and folders, and its output is redacted before
+    it is cut, with a value's remains taken off a cut edge. Plan and server Projects
+    refuse it: on a server the value would show in its process list. `sudo` needs a
+    thread with no sandbox, since a sandbox lets nothing raise its privileges; and at
+    Full access the `reads-secrets-then-egress` tag reads the command's text, so a
+    use is recorded and not tagged.
+  - **Fresh each use.** A 1Password item the person chose to have read at each use is
+    read by the broker as each command starts being prepared or each handle is
+    redeemed. It is written nowhere, and kept nowhere but in what redacts it.
+  - **Remembered secrets.** A secret a person chose to have Octant remember is kept
+    for the host, not the thread, so a thread's purge leaves it. A typed value lives
+    only in the credential broker's `/v1/thread-secret-credentials/*` namespace
+    (Keychain service `thread-secret-credentials.v1`, Secret Service attribute
+    `octant.thread-secret-credentials.v1`, a Credential Manager purpose of its own),
+    keyed by an opaque secret id and served only on those routes, so no provider,
+    connector, search key or other secret with the same UUID can read, replace or
+    delete one. A linked item is kept as its address alone.
+    `thread-secret-memory.recorded@1` on one host-wide aggregate holds the name and
+    where the value is, before the store has it. It is offered on a later card for
+    its own name, never for an account password, and used only when the person picks
+    it there. A new one of the name replaces it. A step that fails, or a turn that
+    stops meanwhile, leaves nothing kept.
   - **Files.** `<runtime>/thread-secrets/<host>/<thread>/<NAME>` on macOS and
     Linux, folder 0700 and file 0600, where `<host>` names the data directory:
     every host of one user shares the runtime folder, and each clears its own as

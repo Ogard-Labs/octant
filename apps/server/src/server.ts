@@ -40,6 +40,11 @@ import type { NarrationForTurn } from "./speech/narrationTool";
 import type { TranscriptionForTurn } from "./speech/transcriptionTool";
 import { CredentialRequests } from "./credentials/credentialRequests";
 import { holdSecretValue } from "./process/secretRedaction";
+import { makeThreadSecretCredentialBrokerClient } from "./providers/credentialBrokerClient";
+import {
+  RememberedThreadSecrets,
+  threadSecretMemoryJournal,
+} from "./threadSecrets/rememberedThreadSecrets";
 import { createThreadSecretFiles } from "./threadSecrets/threadSecretFiles";
 import { createThreadSecretRoutes } from "./threadSecrets/threadSecretRoutes";
 import { threadSecretsJournal } from "./threadSecrets/threadSecretsJournal";
@@ -1807,6 +1812,22 @@ export function startOctantServer(
     );
     yield* Effect.addFinalizer(() => Effect.sync(() => credentialRequests.close()));
     const readLinkedSecret = commandBroker?.requestCardRead;
+    const rememberedThreadSecrets =
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : new RememberedThreadSecrets({
+            journal: threadSecretMemoryJournal({
+              journal: persistence.journal,
+              connection: persistence.connection,
+              uuid: randomUUID,
+              now: () => new Date().toISOString(),
+            }),
+            store: makeThreadSecretCredentialBrokerClient({
+              url: options.credentialBrokerUrl,
+              token: options.credentialBrokerToken,
+            }),
+            uuid: randomUUID,
+          });
     const threadSecrets = new ThreadSecretService({
       uuid: randomUUID,
       now: processAuthorityTime,
@@ -1820,6 +1841,7 @@ export function startOctantServer(
         ? {}
         : { files: createThreadSecretFiles({ root: options.threadSecretsDirectory }) }),
       hold: holdSecretValue,
+      ...(rememberedThreadSecrets === undefined ? {} : { remembered: rememberedThreadSecrets }),
       ...(readLinkedSecret === undefined ? {} : { readReference: readLinkedSecret }),
       onAsked: onWaitingAsk,
       onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
