@@ -284,7 +284,10 @@ quit requests.
 A host-only launch waits 30 seconds after the host is ready for its first current
 Nightly lease. This spans the existing 15-second status retry, a status operation
 of up to three seconds, a window registration operation of up to three seconds,
-and a finite scheduling margin. It does not extend any native or lease deadline.
+and a finite scheduling margin. Status is answered only after the host is ready,
+so Nightly's [first-window retry](#reconnecting-after-host-loss) begins within
+a few seconds of readiness and ends inside this grace. The grace does not extend
+any native or lease deadline.
 Empty notifications and unsuccessful acquisition do not restart the grace. A
 real first lease cancels it; a later final-client departure uses the conditional
 quit above. Ordinary reopen cancels the grace, and a reopen that
@@ -305,12 +308,29 @@ from loss, including cleanup of the old lease. Refused attempts back off from
 remain three seconds; an exchange already in flight can take its own bounded
 cleanup time. A malformed receipt ends recovery immediately. Exhaustion explains
 the failure and closes Nightly. Ordinary first-launch refusal does not start
-this recovery loop.
+this recovery loop. Instead, a first registration that Octant was too slow or
+too early to answer (a missed deadline, no window server yet, a host still
+starting) is asked again with the same backoff, always with a new native handle.
+No attempt starts after 15 seconds; one in flight keeps its own bound. A refused
+identity, a malformed receipt, and a failure after the window exists are never
+asked again. A launch that still fails logs the refusal's reason code, and says
+whether Octant did not answer in time or refused the window. A refused registration counts as cleaned up when the host
+answers that it holds no such window, when no host is listening, or when Octant
+answers both the registration and its revocation as unavailable (it drops a
+registration it refuses that way). An unanswered registration stays unconfirmed.
 
 Every attempt registers a new native handle and obtains a fresh host instance,
 server-issued window identity, renderer identity and capability. The native
 window protocol independently validates the current peer's audit token and full
 signed identity for each exchange; the one-shot status preflight is not reopened.
+Each process validates its own signed identity once and keeps only a success:
+its running code cannot become another app, and the peer still validates it in
+full every time. The exit watch Octant puts on a newly admitted Nightly re-checks
+the kernel's audit token and running code, not the bundle validated earlier in
+the same request. (One full check hashes the bundle twice, measured on 2026-11-25
+at 0.56 seconds for the 970 MB Nightly on an 18-core Mac with a warm cache. The
+four checks a registration used to make left almost none of the 2.5-second native
+deadline, and a slower Mac missed it on every launch.)
 No cached descriptor grants authority, and recovery never launches a host or
 trusts a discovered replacement. Person close or quit cancels the loop and
 destroys/revokes an acquisition that completes late. A pending renderer load
