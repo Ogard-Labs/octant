@@ -1257,8 +1257,8 @@ owns its file, quota and per-operation rules.
 
 Tool definitions carry the agent's usage guidance alongside their argument
 schemas. App-owned tools are capability families: one tool per object —
-`octant_browser`, `octant_computer`, `octant_threads` in Work and Code, in
-Code `octant_terminal`, `octant_apple`, `octant_android`, `octant_pull_request`,
+`octant_browser`, `octant_computer`, `octant_threads` and `octant_terminal` in
+Work and Code, in Code `octant_apple`, `octant_android`, `octant_pull_request`,
 and `octant_github`, and for Zen's assistant `octant_zen` — with its actions in
 an `operation` enum. The always-visible tool prefix stays small and
 cache-stable, so a family's description says only what an agent must know
@@ -1822,7 +1822,9 @@ Full access runs it, and below Full access each command the agent types into
 it (`run` or `write`) asks the person in the thread with the command shown
 first; an approval for a command that starts the terminal also mints the
 host's one-use approval for that start. Reading and stopping it ask nothing.
-A host that cannot ask refuses it below Full access.
+A host that cannot ask refuses it below Full access. In Work it is one shell
+per thread in the thread's folder, at the thread's level and confined as its
+own commands are; a routine's run is offered none.
 
 ## Modes: Chat, Work, and Code
 

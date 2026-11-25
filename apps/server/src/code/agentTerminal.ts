@@ -21,20 +21,20 @@ export function createAgentTerminal(options: {
   readonly launch: () => Promise<AgentTerminalLaunch | { readonly refused: string }>;
 }): { readonly port: AgentTerminalPort; readonly close: () => Promise<void> } {
   const { terminals, terminalId } = options;
-  let started = false;
   let closed = false;
   let launching: Promise<unknown> | undefined;
   const answer = (error: string, message?: string) => ({
     result: { error, ...(message === undefined ? {} : { message }) },
     isError: true,
   });
-  const read = async () => {
-    if (!started) throw new Error("No terminal was started.");
-    return terminals.attach(terminalId);
-  };
+  // Read by id, so a terminal one turn started is the next turn's too.
+  const read = async () => terminals.attach(terminalId);
   const terminate = async () => {
-    if (!started) return;
-    await terminals.terminate(terminalId);
+    try {
+      await terminals.terminate(terminalId);
+    } catch {
+      // Nothing was started under this id, or it is already gone.
+    }
   };
   return {
     port: {
@@ -43,7 +43,6 @@ export function createAgentTerminal(options: {
         const launch = await options.launch();
         if ("refused" in launch) return answer("terminal-unavailable", launch.refused);
         if (closed) return answer("tool-closed");
-        started = true;
         try {
           const starting = terminals.launch({
             ...launch,
@@ -56,7 +55,6 @@ export function createAgentTerminal(options: {
           const snapshot = await starting;
           return snapshot.status === "running" ? undefined : terminalSnapshot(snapshot);
         } catch (error) {
-          started = false;
           return answer(
             "terminal-unavailable",
             error instanceof Error ? error.message : "The terminal could not start.",
@@ -72,8 +70,11 @@ export function createAgentTerminal(options: {
         }
       },
       stop: async () => {
-        if (!started) return answer("unavailable", "Terminal is unavailable.");
-        return terminalSnapshot(await terminals.terminate(terminalId));
+        try {
+          return terminalSnapshot(await terminals.terminate(terminalId));
+        } catch {
+          return answer("unavailable", "Terminal is unavailable.");
+        }
       },
       interrupt: async () => {
         terminals.write(terminalId, "\u0003");
@@ -89,7 +90,6 @@ export function createAgentTerminal(options: {
         await terminate();
       } finally {
         // A caller that may act again later starts a fresh shell.
-        started = false;
         launching = undefined;
         closed = false;
       }

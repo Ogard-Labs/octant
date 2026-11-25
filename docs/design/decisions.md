@@ -878,7 +878,7 @@ Input rides the workbench control channel with actor attribution. Agent device t
 - The grant lives in host memory, so a restart asks again. It ends with the window's authority, a successful shutdown or a discovery that finds the destination no longer booted. It never covers boot, shutdown, Open URL or Rotate. _Here only._
 - Open URL and Rotate are effects confirmed on their own; an input whose delivery is unknown is reported interrupted, and an off-screen point is refused, never clamped.
 - An explicit successful screenshot may deliver one PNG through the provider image channel, read through thread and checkout authority; oversized, unavailable or non-PNG output is refused, never resized. Boot, run, open, input and discovery never send screen images. _Here only._
-- `octant_terminal` follows the thread's level: Plan refuses it, Full access runs it, and below that each command the agent types asks the person with the command shown.
+- `octant_terminal` follows the thread's level: Plan refuses it, Full access runs it, and below that each command the agent types asks the person with the command shown. Work gets it too, as one shell per thread in its folder, confined at the thread's level, with no routine run offered it; code intelligence and GitHub reads stay Code-only for now, because both are bound to a Code checkout and its delivery repository (maintainer decision, 2026-11-17; terminal built, the Work reads not built).
 
 Status: Built. Since: —. Detail: [Architecture: Device transport and evidence](../architecture.md#device-transport-and-evidence).
 
