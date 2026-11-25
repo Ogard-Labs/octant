@@ -269,9 +269,9 @@ export class PersonMemoryStore {
         PERSON_MEMORY_BLOCK_CUT,
         { threadId: thread.threadId, mode: thread.mode, cutOff },
       );
-    } catch (error) {
-      if (error instanceof ConcurrencyConflict) return undefined;
-      throw error;
+    } catch {
+      // The turn goes on with the block's earlier cut: memory never fails a turn.
+      return undefined;
     }
     this.#cuts.set(threadKey(ref), cutOff);
     return cutOff;
