@@ -17,6 +17,8 @@ import { lookup } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
+import type { Readable } from "node:stream";
+import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
 import { isPublicNetworkAddress } from "@octant/domain/network-address-policy";
 import type {
   ProviderCredentialLease,
@@ -318,7 +320,7 @@ export function makePinnedImageFetch(
           port: url.port.length > 0 ? Number(url.port) : secure ? 443 : 80,
           path: `${url.pathname}${url.search}`,
           method: "GET",
-          headers: { host: url.host },
+          headers: { host: url.host, "accept-encoding": "gzip, deflate, br" },
           // A fresh connection each time: a pooled socket opened for an
           // earlier answer would skip this lookup and its check.
           agent: false,
@@ -335,31 +337,44 @@ export function makePinnedImageFetch(
           const status = incoming.statusCode ?? 502;
           const nullBody = status === 204 || status === 205 || status === 304;
           if (nullBody) incoming.resume();
-          const chunks = nullBody ? undefined : incoming[Symbol.asyncIterator]();
+          const decoded = nullBody
+            ? { ok: true as const, stream: undefined, destroy: () => incoming.destroy() }
+            : decodeHttpBodyStream(incoming, headers);
+          if (!decoded.ok) {
+            incoming.destroy();
+            reject(new Error(decoded.reason));
+            return;
+          }
+          const chunks = decoded.stream?.[Symbol.asyncIterator]();
           const body =
             chunks === undefined
               ? null
               : new ReadableStream<Uint8Array>({
                   async pull(controller) {
-                    const next: IteratorResult<unknown> = await chunks.next();
-                    if (next.done === true) {
-                      controller.close();
-                      return;
+                    try {
+                      const next: IteratorResult<unknown> = await chunks.next();
+                      if (next.done === true) {
+                        controller.close();
+                        return;
+                      }
+                      controller.enqueue(
+                        next.value instanceof Uint8Array
+                          ? next.value
+                          : new TextEncoder().encode(String(next.value)),
+                      );
+                    } catch (error) {
+                      decoded.destroy();
+                      controller.error(error);
                     }
-                    controller.enqueue(
-                      next.value instanceof Uint8Array
-                        ? next.value
-                        : new TextEncoder().encode(String(next.value)),
-                    );
                   },
                   cancel() {
-                    incoming.destroy();
+                    decoded.destroy();
                   },
                 });
           try {
             resolve(new Response(body, { status, headers }));
           } catch (error) {
-            incoming.destroy();
+            decoded.destroy();
             reject(error instanceof Error ? error : new Error(String(error)));
           }
         },
@@ -367,6 +382,66 @@ export function makePinnedImageFetch(
       request.on("error", reject);
       request.end();
     });
+}
+
+const MAX_CONTENT_ENCODING_LAYERS = 4;
+
+/**
+ * Decodes HTTP `Content-Encoding` layers in reverse order so `makePinnedImageFetch`
+ * matches `fetch`'s transparent decompression while streaming decoded bytes
+ * through `boundResponse`'s size ceiling. Strips `content-encoding` and the
+ * wire `content-length` once decoded so the decoded stream is checked directly.
+ */
+function decodeHttpBodyStream(
+  incoming: Readable,
+  headers: Headers,
+):
+  | { readonly ok: true; readonly stream: Readable; readonly destroy: () => void }
+  | { readonly ok: false; readonly reason: string } {
+  const raw = headers.get("content-encoding");
+  const encodings =
+    raw === null
+      ? []
+      : raw
+          .split(",")
+          .map((token) => token.trim().toLowerCase())
+          .filter((token) => token.length > 0 && token !== "identity");
+  if (encodings.length === 0) {
+    return { ok: true, stream: incoming, destroy: () => incoming.destroy() };
+  }
+  if (encodings.length > MAX_CONTENT_ENCODING_LAYERS) {
+    return { ok: false, reason: "The image response declared too many content encodings." };
+  }
+  const streams: Array<Readable> = [incoming];
+  let current: Readable = incoming;
+  const destroyAll = () => {
+    for (let index = streams.length - 1; index >= 0; index -= 1) {
+      streams[index]?.destroy();
+    }
+  };
+  for (let index = encodings.length - 1; index >= 0; index -= 1) {
+    const encoding = encodings[index];
+    const decoder =
+      encoding === "gzip" || encoding === "x-gzip"
+        ? createGunzip()
+        : encoding === "deflate"
+          ? createInflate()
+          : encoding === "br"
+            ? createBrotliDecompress()
+            : undefined;
+    if (decoder === undefined) {
+      destroyAll();
+      return { ok: false, reason: "The image response used an unsupported content encoding." };
+    }
+    const upstream = current;
+    upstream.on("error", (error) => decoder.destroy(error));
+    upstream.pipe(decoder);
+    streams.push(decoder);
+    current = decoder;
+  }
+  headers.delete("content-encoding");
+  headers.delete("content-length");
+  return { ok: true, stream: current, destroy: destroyAll };
 }
 
 /**

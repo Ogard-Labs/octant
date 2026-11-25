@@ -4537,7 +4537,7 @@ describe("ProviderSettingsView", () => {
   it("classifies an outside image profile as a media profile without Check connection", () => {
     const outsideImage: ProviderInstance = {
       id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000098"),
-      displayName: "Example Outside Image",
+      displayName: "Example Outside Studio",
       enabled: true,
       environmentPolicy: "inherit-host",
       version: 1 as ProviderInstance["version"],
@@ -4563,11 +4563,11 @@ describe("ProviderSettingsView", () => {
       ...fixture({ instance: outsideImage }),
       onProviderCredentialStatus,
     });
-    const row = screen.getByRole("article", { name: "Example Outside Image" });
+    const row = screen.getByRole("article", { name: "Example Outside Studio" });
     expect(
-      within(row).queryByRole("button", { name: "Check connection for Example Outside Image" }),
+      within(row).queryByRole("button", { name: "Check connection for Example Outside Studio" }),
     ).toBeNull();
-    expect(row.textContent).toContain("Image");
+    expect(within(row).getByText("Outside image driver Image")).toBeVisible();
     expect(onProviderCredentialStatus).not.toHaveBeenCalled();
   });
 

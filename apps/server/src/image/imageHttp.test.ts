@@ -1,6 +1,7 @@
 import { MAX_GENERATED_IMAGE_BYTES, MAX_IMAGE_VARIANTS } from "@octant/contracts";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { gzipSync } from "node:zlib";
 import { describe, expect, it, vi } from "vitest";
 import {
   fetchApprovedImageUrl,
@@ -231,6 +232,62 @@ describe("the pinned approved-image transport", () => {
         `${origin}/reset.png`,
       );
       expect(result).toEqual({ bytes: new Uint8Array() });
+    } finally {
+      await new Promise<void>((closed) => server.close(() => closed()));
+    }
+  });
+
+  it("decodes gzip responses and enforces maxBytes on decoded bytes", async () => {
+    const gzippedPng = gzipSync(Buffer.from(png));
+    const gzippedLarge = gzipSync(Buffer.alloc(10_000, 0x41));
+    expect(gzippedLarge.byteLength).toBeLessThan(200);
+    const server = createServer((request, response) => {
+      if (request.url === "/gzip.png") {
+        response.writeHead(200, {
+          "content-type": "image/png",
+          "content-encoding": "gzip",
+          "content-length": String(gzippedPng.byteLength),
+        });
+        response.end(gzippedPng);
+        return;
+      }
+      if (request.url === "/bomb.png") {
+        response.writeHead(200, {
+          "content-type": "image/png",
+          "content-encoding": "gzip",
+          "content-length": String(gzippedLarge.byteLength),
+        });
+        response.end(gzippedLarge);
+        return;
+      }
+      response.writeHead(200, {
+        "content-type": "image/png",
+        "content-encoding": "unknown-codec",
+      });
+      response.end(Buffer.from(png));
+    });
+    await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const origin = `http://images.proxy.test:${port}`;
+      const fetch = makePinnedImageFetch({
+        resolveAll: async () => ["127.0.0.1"],
+        allowedOrigin: origin,
+      });
+
+      const decoded = await fetchWith(fetch, `${origin}/gzip.png`);
+      expect(decoded).toEqual({ bytes: png });
+
+      const oversized = await fetchApprovedImageUrl({
+        url: `${origin}/bomb.png`,
+        fetch,
+        maxBytes: 1_000,
+        timeoutMs: 5_000,
+      });
+      expect(oversized).toMatchObject({ failure: { category: "protocol" } });
+
+      const unsupported = await fetchWith(fetch, `${origin}/unknown.png`);
+      expect("failure" in unsupported).toBe(true);
     } finally {
       await new Promise<void>((closed) => server.close(() => closed()));
     }

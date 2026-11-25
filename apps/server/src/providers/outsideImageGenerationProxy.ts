@@ -432,11 +432,12 @@ function extractReturnedAddresses(responseText: string, out: Set<string>, comple
   for (const match of text.matchAll(/(?:^|\s)<(https?:\/\/[^\s"<>\\`{}^]+)>/g)) {
     if (match[1] !== undefined) add(match[1]);
   }
-  // SSE `data:` fields allow zero or one space after the colon; requiring a
-  // line ending while streaming keeps partial URLs at chunk boundaries refused.
+  // SSE `data:` fields allow zero or one space after the colon and LF, CRLF,
+  // or CR line endings; requiring a line ending while streaming keeps partial
+  // URLs at chunk boundaries refused.
   const sseData = complete
-    ? /(?:^|\r?\n)data: ?(https?:\/\/[^\s"<>\\`{}^]+)(?=$|\r?\n)/g
-    : /(?:^|\r?\n)data: ?(https?:\/\/[^\s"<>\\`{}^]+)(?=\r?\n)/g;
+    ? /(?:^|\r\n|\n|\r)data: ?(https?:\/\/[^\s"<>\\`{}^]+)(?=$|\r\n|\n|\r)/g
+    : /(?:^|\r\n|\n|\r)data: ?(https?:\/\/[^\s"<>\\`{}^]+)(?=\r\n|\n|\r)/g;
   for (const match of text.matchAll(sseData)) {
     if (match[1] !== undefined) add(match[1]);
   }

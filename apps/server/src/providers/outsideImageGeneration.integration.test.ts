@@ -883,6 +883,7 @@ describe("an outside image driver's later fixes", () => {
     const imageFetch = vi.fn(() => new Response(png, { status: 200 }));
     for (const [payload, expectedStatus] of [
       [`data:${named}\n\n`, "completed"],
+      [`data:${named}\r\r`, "completed"],
       [`data:${named}`, "failed"],
     ] as const) {
       let resolveChunkSeen: (() => void) | undefined;
@@ -921,7 +922,7 @@ describe("an outside image driver's later fixes", () => {
         expect(job.failure?.category).toBe("unauthorized");
       }
     }
-    expect(imageFetch).toHaveBeenCalledTimes(1);
+    expect(imageFetch).toHaveBeenCalledTimes(2);
   });
 
   it("refuses a URL prefix that has not yet been delimited in an open stream", async () => {
