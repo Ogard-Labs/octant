@@ -1,9 +1,10 @@
 import { File, Paths } from "expo-file-system";
 import type { SealedFile } from "./sealedText";
 
-export function outboxFile(): SealedFile {
-  const file = () => new File(Paths.document, "outbox.v1.sealed");
-  const next = () => new File(Paths.document, "outbox.v1.sealed.next");
+/** A sealed file in the app's documents, by its name there. */
+export function sealedFile(name: string): SealedFile {
+  const file = () => new File(Paths.document, name);
+  const next = () => new File(Paths.document, `${name}.next`);
   return {
     read: () => {
       // Moving over a file removes it first, so after a crash in between only

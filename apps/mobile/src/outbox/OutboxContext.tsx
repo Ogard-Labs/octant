@@ -7,13 +7,13 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { queueMobileMessage, type RemoteSessionStanding } from "@octant/client-runtime";
+import { queueMobileMessage } from "@octant/client-runtime";
 import { MOBILE_COPY } from "../copy";
 import { createExpoSecureStringStorage } from "../hosts/expoSecureStorage";
 import { useMobileThreads } from "../inbox/MobileThreadsContext";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { waitingFor, type Pairing, type WaitingMessage } from "./outbox";
-import { outboxFile } from "./outboxFile";
+import { sealedFile } from "./sealedFile";
 import { OutboxStore, type OutboxPorts } from "./outboxStore";
 import { createSealedText } from "./sealedText";
 
@@ -27,8 +27,6 @@ export interface OutboxApi {
   readonly keep: (message: Omit<WaitingMessage, "pairing">) => string | undefined;
   readonly remove: (id: string) => void;
   readonly tryAgain: (message: WaitingMessage) => void;
-  readonly lastStanding: (hostId: string) => RemoteSessionStanding | undefined;
-  readonly noteStanding: (hostId: string, standing: RemoteSessionStanding) => void;
 }
 
 const Context = createContext<OutboxApi | undefined>(undefined);
@@ -60,7 +58,8 @@ let liveStore: OutboxStore | undefined;
 function createLiveStore(): OutboxStore {
   const sealed = createSealedText({
     crypto: globalThis.crypto,
-    file: outboxFile(),
+    file: sealedFile("outbox.v1.sealed"),
+    keyName: "octant.outbox.key.v1",
     storage: createExpoSecureStringStorage(),
   });
   return new OutboxStore({ ...PORTS, load: sealed.load, keep: sealed.keep });
@@ -136,14 +135,6 @@ export function OutboxProvider(props: {
       },
       remove: (id) => store.remove(id),
       tryAgain: (message) => store.tryAgain(message.id, pairings.get(message.hostId)),
-      lastStanding: (hostId) => {
-        const pairing = pairings.get(hostId);
-        return pairing === undefined ? undefined : store.lastStanding(pairing);
-      },
-      noteStanding: (hostId, standing) => {
-        const pairing = pairings.get(hostId);
-        if (pairing !== undefined) store.noteStanding(pairing, standing);
-      },
     }),
     [outbox, pairings, store, unsaved],
   );

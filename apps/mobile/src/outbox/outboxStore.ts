@@ -1,8 +1,4 @@
-import type {
-  MobileRemoteTransport,
-  MobileSendResult,
-  RemoteSessionStanding,
-} from "@octant/client-runtime";
+import type { MobileRemoteTransport, MobileSendResult } from "@octant/client-runtime";
 import {
   addWaiting,
   dropHostsNotIn,
@@ -68,8 +64,6 @@ export class OutboxStore {
   #again = false;
   #timer: ReturnType<typeof setTimeout> | undefined;
   readonly #listeners = new Set<() => void>();
-  // By pairing: what was said of an earlier one says nothing of this one.
-  readonly #standings = new Map<string, RemoteSessionStanding>();
 
   constructor(ports: OutboxPorts) {
     this.#ports = ports;
@@ -125,15 +119,6 @@ export class OutboxStore {
     if (!this.#loaded) return;
     if (dropHostsNotIn(this.#snapshot.outbox, hostIds) !== this.#snapshot.outbox)
       void this.#change((outbox) => dropHostsNotIn(outbox, hostIds));
-  }
-
-  /** What a computer last said of this phone's session, while the app runs. */
-  lastStanding(pairing: Pairing): RemoteSessionStanding | undefined {
-    return this.#standings.get(`${pairing.hostKeyFingerprint}:${pairing.keyId}`);
-  }
-
-  noteStanding(pairing: Pairing, standing: RemoteSessionStanding): void {
-    this.#standings.set(`${pairing.hostKeyFingerprint}:${pairing.keyId}`, standing);
   }
 
   #publish(snapshot: OutboxSnapshot): void {

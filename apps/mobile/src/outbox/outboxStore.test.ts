@@ -176,13 +176,4 @@ describe("the messages that wait", () => {
     await settle();
     expect(at.sent).toEqual(["A", "B", "A"]);
   });
-
-  it("remembers what a computer last said of the phone through a lock", () => {
-    const store = new OutboxStore(phone().ports);
-    store.attach()();
-    store.noteStanding(pairing, { actsAsHostPerson: true });
-    store.attach();
-    expect(store.lastStanding(pairing)).toEqual({ actsAsHostPerson: true });
-    expect(store.lastStanding({ ...pairing, keyId: "phone-2" })).toBeUndefined();
-  });
 });

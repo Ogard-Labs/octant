@@ -13,6 +13,7 @@ function phone() {
     text: () =>
       createSealedText({
         crypto: globalThis.crypto,
+        keyName: "test.key",
         storage: {
           getItem: async (key) => secure.get(key) ?? null,
           setItem: async (key, value) => void secure.set(key, value),
@@ -60,6 +61,7 @@ describe("text kept on the phone", () => {
     let fails = true;
     const text = createSealedText({
       crypto: globalThis.crypto,
+      keyName: "test.key",
       storage: {
         getItem: async (key) => {
           if (fails) throw new Error("The keychain did not answer.");

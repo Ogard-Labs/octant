@@ -113,6 +113,18 @@ These rules hold for every phase and are not reopened by any slice:
   another computer under the same id never gets it, and a new pairing with the
   same computer waits for the person. Nothing is sent before it is kept as sent,
   and nothing the person deleted leaves the phone afterwards.
+- **The thread list outlives a restart** (maintainer decision, 2026-11-25), so
+  a message can still wait after the app was closed. For each paired computer
+  the phone keeps its newest 500 threads, their Project names and what that
+  computer last said this phone's session may do, sealed under a key of their
+  own in its secure storage (`apps/mobile/src/inbox/keptThreads.ts`). They
+  are bound to the pairing they were read under: a computer paired again,
+  under its key or the phone's, a computer taken off the phone, or one that
+  rejected it gets nothing back. Whether a turn runs, an ask waits or a thread
+  was read is not kept, and what a computer says once it answers replaces what
+  was kept. The kept session only lets a message wait; the computer checks
+  the session again when the message arrives. New threads are not started
+  offline.
 - Sensors (camera, microphone, photo library, files) are touched only on an
   explicit, visible user act, never in the background, and their permission
   strings name each use.

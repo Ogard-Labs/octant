@@ -7,7 +7,6 @@ export interface SealedFile {
   readonly remove: () => void;
 }
 
-const KEY_NAME = "octant.outbox.key.v1";
 const IV_BYTES = 12;
 
 const toBase64 = (bytes: Uint8Array): string => {
@@ -26,11 +25,13 @@ export function createSealedText(ports: {
   readonly storage: ExpoSecureStringStorage;
   readonly file: SealedFile;
   readonly crypto: Pick<Crypto, "getRandomValues" | "subtle">;
+  /** Each text has its own key, so letting one go leaves the others readable. */
+  readonly keyName: string;
 }): {
   readonly load: () => Promise<string | null>;
   readonly keep: (text: string | undefined) => Promise<void>;
 } {
-  const { crypto, file, storage } = ports;
+  const { crypto, file, keyName: KEY_NAME, storage } = ports;
   const imported = (raw: Uint8Array<ArrayBuffer>) =>
     crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
   const forget = async () => {

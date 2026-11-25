@@ -128,7 +128,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const models = usePlacementHostModels(transport);
   // The page already ends above the bar, which the keyboard covers.
   const insets = useSafeAreaInsets();
-  const { drafts, projectName } = useMobileThreads();
+  const { drafts, lastStanding: standingKept, noteStanding, projectName } = useMobileThreads();
   const draftKey =
     // With the computer's own key: another under its id starts from nothing.
     selected === undefined
@@ -166,7 +166,6 @@ export function ThreadScreen(props: ThreadScreenProps) {
   // The surfaces on offer come from the shared remote matrix, so a host that
   // would refuse one never has it shown here.
   const outbox = useOutbox();
-  const { noteStanding } = outbox;
   const whileHere = useWhileHere();
   const noteAnswered = useCallback(
     (answered: RemoteSessionStanding) => {
@@ -337,7 +336,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
   // Only a computer that cannot be reached right now is written to for later;
   // one that rejected this phone, or that the phone may only watch, is not.
   // Which of the two it is, is what that computer last said of this session.
-  const lastStanding = hostId === undefined ? undefined : outbox.lastStanding(hostId);
+  const lastStanding = hostId === undefined ? undefined : standingKept(hostId);
   const unreached =
     !offlineDemo &&
     lastStanding !== undefined &&
