@@ -5,6 +5,7 @@ import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
 import type { CodeSettingsUpdate } from "./CodeSettingsView";
 
 const NAMING_OPTIONS = [
@@ -12,13 +13,15 @@ const NAMING_OPTIONS = [
   { id: "prompt", label: "Prefix and words from the prompt" },
 ] as const;
 
+const DEFAULT_INACTIVITY_DAYS = 30;
+
 /** What the host does for a store with no choice: the same as before the setting existed. */
 function branchNamingOf(worktrees: CodeWorktreeSettings | undefined) {
   return worktrees?.branchNaming ?? "short-id";
 }
 
 /**
- * Settings › Code › Worktrees › Naming. Every control saves as it
+ * Settings › Code › Worktrees › Naming and Cleanup. Every control saves as it
  * is changed, whole: the host replaces the worktree choices with what is sent.
  */
 export function CodeWorktreeSettingsSection(props: {
@@ -27,7 +30,12 @@ export function CodeWorktreeSettingsSection(props: {
 }) {
   const worktrees = props.settings.worktrees;
   const [prefix, setPrefix] = useState(worktrees?.branchPrefix ?? DEFAULT_BRANCH_PREFIX);
+  const [days, setDays] = useState(
+    String(worktrees?.cleanup?.inactivityDays ?? DEFAULT_INACTIVITY_DAYS),
+  );
   const [message, setMessage] = useState<string>();
+  const cleanup = worktrees?.cleanup;
+  const inactivityOn = cleanup?.inactivityDays !== undefined;
 
   async function save(next: CodeWorktreeSettings): Promise<boolean> {
     let saved = false;
@@ -45,8 +53,16 @@ export function CodeWorktreeSettingsSection(props: {
       saved = false;
     }
     setMessage(saved ? undefined : "Worktree settings could not be saved.");
-    if (!saved) setPrefix(worktrees?.branchPrefix ?? DEFAULT_BRANCH_PREFIX);
+    if (!saved) {
+      setPrefix(worktrees?.branchPrefix ?? DEFAULT_BRANCH_PREFIX);
+      setDays(String(worktrees?.cleanup?.inactivityDays ?? DEFAULT_INACTIVITY_DAYS));
+    }
     return saved;
+  }
+
+  function withCleanup(change: Partial<NonNullable<CodeWorktreeSettings["cleanup"]>>) {
+    const merged = { ...cleanup, ...change };
+    return { ...worktrees, cleanup: merged } satisfies CodeWorktreeSettings;
   }
 
   function commitPrefix() {
@@ -60,6 +76,16 @@ export function CodeWorktreeSettingsSection(props: {
     }
     const { branchPrefix: _previous, ...rest } = worktrees ?? {};
     void save(trimmed === DEFAULT_BRANCH_PREFIX ? rest : { ...rest, branchPrefix: trimmed });
+  }
+
+  function commitDays() {
+    const parsed = Number(days);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 365) {
+      setMessage("Inactivity is a whole number of days from 1 to 365.");
+      return;
+    }
+    if (parsed === cleanup?.inactivityDays) return;
+    void save(withCleanup({ inactivityDays: parsed }));
   }
 
   return (
@@ -99,6 +125,68 @@ export function CodeWorktreeSettingsSection(props: {
             value={branchNamingOf(worktrees)}
           />
         </SettingRow>
+        <SettingRow
+          description="When you archive a thread, remove its worktree folder if everything is committed and pushed or merged. The branch stays."
+          label="Clean up when a thread is archived"
+          scope="app"
+          settingId="code-worktree-cleanup-archive"
+        >
+          <OctantSwitch
+            checked={cleanup?.onArchive !== false}
+            label="Clean up when a thread is archived"
+            onCheckedChange={(checked) => void save(withCleanup({ onArchive: checked }))}
+          />
+        </SettingRow>
+        <SettingRow
+          description="Also remove the worktree folder of a thread that is still open, a day after its last activity, once everything is committed and pushed or merged. The branch stays, and Cleaned-up worktrees below brings the folder back."
+          label="Clean up merged worktrees"
+          scope="app"
+          settingId="code-worktree-cleanup-merged"
+        >
+          <OctantSwitch
+            checked={cleanup?.whenMerged === true}
+            label="Clean up merged worktrees"
+            onCheckedChange={(checked) => void save(withCleanup({ whenMerged: checked }))}
+          />
+        </SettingRow>
+        <SettingRow
+          description="Remove the worktree folder of a thread nobody has used for a while, open or archived. Only a folder with no uncommitted, untracked or ignored files goes. The branch, the thread and its checkpoints stay, and the thread takes no new turn until you restore the folder under Cleaned-up worktrees."
+          label="Clean up after inactivity"
+          scope="app"
+          settingId="code-worktree-cleanup-inactivity"
+        >
+          <OctantSwitch
+            checked={inactivityOn}
+            label="Clean up after inactivity"
+            onCheckedChange={(checked) => {
+              if (checked) {
+                void save(withCleanup({ inactivityDays: Number(days) || DEFAULT_INACTIVITY_DAYS }));
+                return;
+              }
+              const { inactivityDays: _off, ...rest } = cleanup ?? {};
+              void save({ ...worktrees, cleanup: rest });
+            }}
+          />
+        </SettingRow>
+        {inactivityOn ? (
+          <SettingRow
+            description="Days without a turn or a change before the folder is removed."
+            label="Days of inactivity"
+            scope="app"
+            settingId="code-worktree-cleanup-days"
+          >
+            <OctantInput
+              aria-label="Days of inactivity"
+              className="settings-view__text-input"
+              id="code-worktree-cleanup-days"
+              inputMode="numeric"
+              onBlur={commitDays}
+              onChange={(event) => setDays(event.currentTarget.value)}
+              type="text"
+              value={days}
+            />
+          </SettingRow>
+        ) : null}
       </div>
       <div className="settings-feedback-slot" aria-live="polite">
         {message === undefined ? null : (

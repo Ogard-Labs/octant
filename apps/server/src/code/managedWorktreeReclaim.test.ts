@@ -203,6 +203,7 @@ async function world(
       signal,
     );
   const restore = () => service.restore({ receiptId: created.receiptId }, signal);
+  const abandon = () => service.abandon({ receiptId: created.receiptId }, signal);
   const current = async (): Promise<ManagedWorktreeReceipt> => {
     const loaded = await receipts.load(created.receiptId);
     if (loaded === undefined) throw new Error("receipt vanished");
@@ -217,7 +218,16 @@ async function world(
       git,
       authority: options_.authority,
     }).cleanup({ receiptId: created.receiptId, confirmedByLocalUser: true }, signal);
-  return { state, reclaim, restore, current, receipts, receiptId: created.receiptId, plainCleanup };
+  return {
+    state,
+    reclaim,
+    restore,
+    abandon,
+    current,
+    receipts,
+    receiptId: created.receiptId,
+    plainCleanup,
+  };
 }
 
 describe("restorable cleanup of a managed worktree", () => {
@@ -383,6 +393,28 @@ describe("restorable cleanup of a managed worktree", () => {
     await expect(changed.reclaim()).resolves.toEqual({ status: "refused", reason: "mismatched" });
     expect(await changed.current()).toMatchObject({ state: "ready" });
     expect(changed.state.disk.has(target)).toBe(true);
+  });
+
+  it("lets a person's changed mind return an interrupted cleanup to a working checkout, or finish it as restorable when the folder is already gone", async () => {
+    const kept = await world();
+    kept.state.failures.add("removeWorktree");
+    await kept.reclaim();
+    await expect(kept.abandon()).resolves.toMatchObject({ status: "restored" });
+    expect((await kept.current()).state).toBe("ready");
+    expect(kept.state.disk.has(target)).toBe(true);
+
+    const gone = await world();
+    const transition = vi.spyOn(gone.receipts, "transition");
+    transition.mockImplementationOnce(async () => {
+      throw new Error("crash before the receipt was written");
+    });
+    await gone.reclaim();
+    transition.mockRestore();
+    await expect(gone.abandon()).resolves.toMatchObject({ status: "reclaimed" });
+    await expect(gone.restore()).resolves.toMatchObject({ status: "restored" });
+
+    const plain = await world();
+    await expect(plain.abandon()).resolves.toMatchObject({ status: "restored" });
   });
 
   it("returns an interrupted cleanup to ready when the thread starts working again, so it can take turns", async () => {

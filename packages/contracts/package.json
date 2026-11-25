@@ -95,6 +95,7 @@
     "./strict-notice": "./src/strictNotice.ts",
     "./mcp-plan-read-only": "./src/mcpPlanReadOnly.ts",
     "./archived-worktrees": "./src/archivedWorktrees.ts",
+    "./cleaned-up-worktrees": "./src/cleanedUpWorktrees.ts",
     "./disk-cleanup": "./src/diskCleanup.ts",
     "./person-memory": "./src/personMemory.ts",
     "./todos": "./src/todos.ts",

@@ -138,6 +138,42 @@ export class ManagedWorktreeReclaimService {
     return this.#finishReclaim(receipt, observation.repositoryRoot, signal);
   }
 
+  /**
+   * Gives up an interrupted cleanup the person no longer wants: a folder still
+   * there goes back to being the thread's working checkout, and one Git already
+   * removed becomes a cleaned-up checkout that can be restored, since nothing
+   * can put the files back.
+   */
+  async abandon(
+    input: Readonly<{ receiptId: string }>,
+    signal: AbortSignal,
+  ): Promise<ManagedWorktreeReclaimResult> {
+    let receipt: ManagedWorktreeReceipt | undefined;
+    try {
+      receipt = await this.#receipts.load(input.receiptId);
+    } catch {
+      return { status: "interrupted" };
+    }
+    if (receipt === undefined) return { status: "refused", reason: "unowned" };
+    if (receipt.state === "ready") return { status: "restored", receipt };
+    if (receipt.state !== "cleanup-pending" || receipt.reclaim === undefined) {
+      return { status: "refused", reason: "not-reclaimed" };
+    }
+    const known = await this.#checkAuthority(receipt, signal);
+    if (known !== undefined) return known;
+    const observed = await this.#observe(receipt, signal);
+    if (observed.status !== "available") return observed.result;
+    if (observed.targets.length === 0) {
+      return this.#finishReclaim(receipt, observed.observation.repositoryRoot, signal);
+    }
+    if (observed.targets.length !== 1) return { status: "refused", reason: "inventory-ambiguous" };
+    try {
+      return { status: "restored", receipt: await this.#receipts.abortReclaim(receipt.receiptId) };
+    } catch {
+      return { status: "interrupted", receipt };
+    }
+  }
+
   async restore(
     input: Readonly<{ receiptId: string }>,
     signal: AbortSignal,

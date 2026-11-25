@@ -45,6 +45,7 @@ export * from "./remoteServerPagePolicy";
 export * from "./pushNotificationPolicy";
 export * from "./automationNotificationPolicy";
 export * from "./mobileHardeningPolicy";
+export * from "./codeWorktreeCleanupPolicy";
 export * from "./codeWorktreeNaming";
 export * from "./codeWorktreeSourcePolicy";
 export * from "./deliveryTargetPolicy";
