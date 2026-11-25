@@ -68,9 +68,9 @@ const WITHHELD_COPY: Readonly<Record<PairedBrowserWithheldReason, string>> = {
 /** What the panel says once this phone no longer holds the page. */
 export function pairedControlEndedMessage(reason: PairedBrowserEndReason): string {
   if (reason === "handed-back") return "Handed back to the agent.";
-  // Answering the agent's sign-in prompt ends the hold; nothing was cut short.
+  // The host sends one reason whether the prompt was answered or its turn stopped.
   if (reason === "agent-sign-in")
-    return "The sign-in request was answered. The agent has the page.";
+    return "The sign-in request ended, so this phone no longer holds the page.";
   return "Remote control ended. Finish this on the computer or take over again.";
 }
 

@@ -213,9 +213,9 @@ async function mountPanel(props: {
 }
 
 describe("what the panel says once the phone no longer holds the page", () => {
-  it("does not tell the person to finish a sign-in they just answered", () => {
+  it("does not say whether a sign-in was answered, nor tell the person to finish it elsewhere", () => {
     expect(pairedControlEndedMessage("agent-sign-in")).toBe(
-      "The sign-in request was answered. The agent has the page.",
+      "The sign-in request ended, so this phone no longer holds the page.",
     );
     expect(pairedControlEndedMessage("disconnected")).toContain("take over again");
   });
