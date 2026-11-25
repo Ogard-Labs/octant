@@ -2,10 +2,16 @@ import type { NavigatorAssistantSnapshot } from "@octant/contracts";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { OctantButton } from "../ui/base/OctantButton";
 import { NavigatorPopover } from "./NavigatorPopover";
 import { useNavigatorAssistant } from "./useNavigatorAssistant";
+
+// The popover loads its panel when it opens. Loading it here keeps a cold
+// transform on a busy runner from counting against the wait for the dialog.
+beforeAll(async () => {
+  await import("./NavigatorPanel");
+});
 
 function snapshot(): NavigatorAssistantSnapshot {
   return {
