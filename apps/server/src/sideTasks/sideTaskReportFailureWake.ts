@@ -40,13 +40,18 @@ export interface SideTaskReportFailureWakePorts {
 interface ChatAttemptPeek {
   readonly attempt?: {
     readonly id?: string;
+    readonly turnId?: string;
     readonly outcome?: string;
     readonly failure?: { readonly code?: string };
   };
 }
 
 interface ChatTurnPeek {
-  readonly turn?: { readonly attempts?: ReadonlyArray<{ readonly id?: string }> };
+  readonly turn?: {
+    readonly id?: string;
+    readonly delivery?: { readonly kind?: string };
+    readonly attempts?: ReadonlyArray<{ readonly id?: string }>;
+  };
 }
 
 interface WorkTurnPeek {
@@ -58,6 +63,7 @@ interface CodeFramePeek {
   readonly event?: {
     readonly kind?: string;
     readonly state?: string;
+    readonly delivery?: { readonly kind?: string };
     readonly result?: { readonly kind?: string; readonly state?: string };
   };
 }
@@ -87,7 +93,11 @@ export class SideTaskReportFailureWake {
   readonly #ports: SideTaskReportFailureWakePorts;
   /** Code turns a person asked to stop, until their end is journaled. */
   readonly #codeStops = new Set<string>();
-  /** Chat attempts and Code turns that started in this host, until they end. */
+  /**
+   * Report turns that started in this host: Chat attempts and Code operations
+   * until they end, and the Chat turns whose retries start new attempts. Only
+   * report turns are kept, so a turn that never ends holds little.
+   */
   readonly #startedHere = new Set<string>();
 
   constructor(ports: SideTaskReportFailureWakePorts) {
@@ -119,7 +129,10 @@ export class SideTaskReportFailureWake {
     const ports = this.#ports;
     const isReport = (mark: ReadMark): boolean => mark?.kind === "side-task-report";
     if (event.eventName === "chat.turn-created@1") {
-      for (const attempt of (event.payload as ChatTurnPeek | undefined)?.turn?.attempts ?? [])
+      const turn = (event.payload as ChatTurnPeek | undefined)?.turn;
+      if (turn?.delivery?.kind !== "side-task-report" || turn.id === undefined) return undefined;
+      this.#startedHere.add(`chat-turn:${turn.id}`);
+      for (const attempt of turn.attempts ?? [])
         if (attempt.id !== undefined) this.#startedHere.add(`chat:${attempt.id}`);
       return undefined;
     }
@@ -129,7 +142,7 @@ export class SideTaskReportFailureWake {
       const peek = (event.payload as ChatAttemptPeek | undefined)?.attempt;
       const key = `chat:${peek?.id ?? ""}`;
       if (peek?.outcome === "queued" || peek?.outcome === "streaming") {
-        this.#startedHere.add(key);
+        if (this.#startedHere.has(`chat-turn:${peek.turnId ?? ""}`)) this.#startedHere.add(key);
         return undefined;
       }
       // Parked on a question the attempt is still live; only its end counts.
@@ -154,14 +167,17 @@ export class SideTaskReportFailureWake {
         : undefined;
     }
     if (event.eventName === "code.operation-event-recorded@1") {
-      if (isCodeStopRequest(event.payload)) {
-        this.#codeStops.add(String(decodeCodeOperationEventFrame(event.payload).operationId));
-        return undefined;
-      }
       // Only the operation is read: the start is the turn's largest frame.
       const peek = event.payload as CodeFramePeek | undefined;
+      const operation = typeof peek?.operationId === "string" ? peek.operationId : undefined;
+      if (isCodeStopRequest(event.payload)) {
+        if (operation !== undefined && this.#startedHere.has(`code:${operation}`))
+          this.#codeStops.add(operation);
+        return undefined;
+      }
       if (peek?.event?.kind === "conversation-turn-started") {
-        if (typeof peek.operationId === "string") this.#startedHere.add(`code:${peek.operationId}`);
+        if (operation !== undefined && peek.event.delivery?.kind === "side-task-report")
+          this.#startedHere.add(`code:${operation}`);
         return undefined;
       }
       const end = codeFrameEnd(event.payload);

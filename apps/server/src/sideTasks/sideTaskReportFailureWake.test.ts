@@ -34,6 +34,20 @@ const chat = (outcome: string) => ({
     },
   },
 });
+// A report turn's start, which the wake reads before the attempt runs.
+const chatReportCreated = {
+  eventName: "chat.turn-created@1",
+  payload: {
+    kind: "turn-created",
+    turn: {
+      id: turn,
+      delivery: { kind: "side-task-report" },
+      attempts: [{ id: "00000000-0000-4000-8000-0000000000ee" }],
+    },
+  },
+};
+const codeReportStarted = () =>
+  code({ kind: "conversation-turn-started", delivery: { kind: "side-task-report" } });
 const work = (status: string, extra: object = {}) => ({
   eventName: "work.turn-updated@1",
   payload: {
@@ -64,9 +78,8 @@ const failedResult = {
 
 function started(event: object): object {
   const { eventName } = event as { readonly eventName: string };
-  if (eventName === "chat.attempt-updated@1") return chat("streaming");
-  if (eventName === "code.operation-event-recorded@1")
-    return code({ kind: "conversation-turn-started" });
+  if (eventName === "chat.attempt-updated@1") return chatReportCreated;
+  if (eventName === "code.operation-event-recorded@1") return codeReportStarted();
   return work("running");
 }
 
@@ -138,6 +151,7 @@ describe("a report's turn that fails", () => {
       wakeCode: () => wakes.push("code"),
     });
     service.onCommittedEvents([
+      chatReportCreated,
       chat("streaming"),
       chat("waiting"),
       chat("interrupted"),
@@ -157,6 +171,11 @@ describe("a report's turn that fails", () => {
       wakeCode: () => wakes.push("code"),
     });
     // Recovery settles a turn the previous host started, after this listens.
+    // A person's turn that started here is no report either.
+    service.onCommittedEvents([
+      chat("streaming") as EventEnvelope,
+      code({ kind: "conversation-turn-started" }) as EventEnvelope,
+    ]);
     service.onCommittedEvents([
       chat("interrupted") as EventEnvelope,
       code({ kind: "operation-state", state: "interrupted" }) as EventEnvelope,
@@ -175,7 +194,7 @@ describe("a report's turn that fails", () => {
       wakeWork: () => wakes.push("work"),
       wakeCode: () => wakes.push("code"),
     });
-    const start = code({ kind: "conversation-turn-started" }) as EventEnvelope;
+    const start = codeReportStarted() as EventEnvelope;
     service.onCommittedEvents([
       start,
       code({ kind: "conversation-turn-stop-requested" }) as EventEnvelope,
