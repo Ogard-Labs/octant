@@ -116,6 +116,15 @@ async function show(
 }
 
 describe("a secret's card on the phone", () => {
+  it.each([
+    ["saved", "Deploy token · Saved securely"],
+    ["declined", "Deploy token · Declined"],
+  ])("keeps a quiet row for a card that was %s, with nothing to answer", async (state, text) => {
+    const view = await show({ state });
+    expect(view.container.textContent).toBe(text);
+    expect(view.input()).toBeNull();
+  });
+
   it("masks the value, sends it exactly as typed after the phone's own confirmation, and clears it", async () => {
     const view = await show();
     expect(view.container.textContent).toContain("Deploy token");

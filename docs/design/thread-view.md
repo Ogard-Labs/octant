@@ -1008,18 +1008,22 @@ remembered secret of the same name. A 1Password source takes a typed `op://`
 address or the item picker at the input's trailing edge, which goes from vault to
 item to field with a filter and Back, and a checkbox to read the item again at
 each use. Choosing another source keeps nothing of the one before. A field the
-agent marked not secret shows what is typed.
+agent marked not secret shows what is typed, except on an account password's card,
+which masks every field.
 
 Clicking the card, outside its controls and not to select text, focuses its first
 empty input. Enter submits, except during text composition. What is typed is sent
 exactly as typed, stays in the card alone, and leaves the input as it is sent; it
-comes back only when the host says it took nothing. An outcome that is not known
+comes back only when the host says it took nothing. A pasted value of several lines
+is kept exactly and shown as their number, with a control to clear it; one longer
+than 4,096 characters is not pasted, and the card says so. An outcome that is not known
 says so, and nothing is sent twice. A value too short to hide, if a command prints
 it, says so before it is sent. A refusal stays on the open card with what to do.
 An answered card becomes one quiet row with its title and **Saved securely** or
 **Declined**, until its turn ends. At narrow widths the row and the footer wrap.
 A card never times out. The phone's card has the same parts in the phone's own
-controls, asks for the phone's confirmation before Save, and offers no 1Password.
+controls, asks for the phone's confirmation before Save, takes a value of one line,
+and offers no 1Password.
 
 ## Native Code approvals
 

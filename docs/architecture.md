@@ -19707,8 +19707,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     paired device's card, a window that could drive its thread. A phone this
     host's person paired at Full reads a thread's cards and answers one on
     `/api/thread-secrets/paired`; an agent's grant, a device the hub introduced
-    and a device the person paired below Full are refused, and the grant is
-    journaled as the device that answered. A phone takes a typed value or a
+    and a device the person paired below Full are refused, the device's session
+    and standing are read again after each wait before anything is granted, and
+    the grant is journaled as the device that answered. A phone takes a typed value or a
     remembered typed one. A linked store stays with its person at the computer:
     its sources are left out of a phone's card and an answer naming one is
     refused as `not-linked`. Needs you lists the card by its title and reason
@@ -19738,7 +19739,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     bounds it and nothing under Strict writes a file. Time is the authority clock,
     which counts a suspended host's time.
   - **Delivery.** A `handle` is redeemed once, by a registered host or plugin
-    consumer, for its own thread, and never by a command. The thread's authority,
+    consumer, for its own thread, and never by a command. While none is registered
+    a request for one is refused before anyone is asked, and the agent is told to
+    ask for a `file`. The thread's authority,
     Strict, the turn, the consumer's registration and the cancellation signal are
     read before the value is read and again after it. A 1Password item is read
     again at every redemption. The value stays redacted until the consumer says

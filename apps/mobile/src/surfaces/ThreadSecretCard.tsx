@@ -63,20 +63,27 @@ export function ThreadSecretCards(props: ThreadSecretCardsProps) {
     [transport, threadId],
   );
   const resource = usePolledResource(load, { intervalMs: props.refreshIntervalMs ?? 2_000 });
-  const waiting = (resource.value ?? []).filter(
-    ({ state }) => state === "pending" || state === "saving",
-  );
+  const { colors } = useTheme();
   return (
     <>
-      {waiting.map((card) => (
-        <SecretCard
-          {...props}
-          card={card}
-          key={card.id}
-          onAnswered={() => void resource.reload()}
-          stale={resource.error !== undefined}
-        />
-      ))}
+      {(resource.value ?? []).map((card) =>
+        card.state === "pending" || card.state === "saving" ? (
+          <SecretCard
+            {...props}
+            card={card}
+            key={card.id}
+            onAnswered={() => void resource.reload()}
+            stale={resource.error !== undefined}
+          />
+        ) : (
+          <Text
+            key={card.id}
+            style={[mobileTypography.caption, styles.answered, { color: colors.textSecondary }]}
+          >
+            {`${card.label} · ${card.state === "saved" ? "Saved securely" : card.state === "declined" ? "Declined" : "Closed"}`}
+          </Text>
+        ),
+      )}
     </>
   );
 }
@@ -345,6 +352,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     gap: mobileSpacing.xs,
   },
+  answered: { marginHorizontal: mobileSpacing.md, marginBottom: mobileSpacing.sm },
   choice: { minHeight: 44, justifyContent: "center" },
   field: { gap: mobileSpacing.xs },
   row: {
