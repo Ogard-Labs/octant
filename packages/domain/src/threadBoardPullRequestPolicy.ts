@@ -1,6 +1,7 @@
 import type {
   CodeProjectPullRequestFreshness,
   CodeProjectPullRequestRow,
+  PullRequestStackPlace,
   ThreadBoardPullRequestFreshness,
   ThreadBoardPullRequestRelationship,
   ThreadBoardPullRequestState,
@@ -14,6 +15,11 @@ import {
   MAX_THREAD_NAVIGATION_PULL_REQUEST_DISPLAY,
   MAX_THREAD_TOUCHED_ISSUES,
 } from "@octant/contracts";
+import {
+  derivePullRequestStacks,
+  keepStacksTogether,
+  pullRequestStackPlaces,
+} from "./pullRequestStackPolicy";
 
 export interface ThreadBoardPullRequestJoinRow {
   readonly row: CodeProjectPullRequestRow;
@@ -80,6 +86,7 @@ export function matchPullRequestRowsToCodeThread(input: {
 function summarizePullRequest(
   match: ThreadBoardPullRequestJoinRow,
   freshness: ThreadBoardPullRequestFreshness,
+  stack: PullRequestStackPlace | undefined,
 ): ThreadBoardPullRequestSummary {
   const { row, relationship } = match;
   const state = deriveThreadBoardPullRequestState({ state: row.state, draft: row.draft });
@@ -108,6 +115,7 @@ function summarizePullRequest(
     ...(row.deletions === undefined ? {} : { deletions: row.deletions }),
     ...(row.checkCounts === undefined ? {} : { checkCounts: row.checkCounts }),
     ...(row.merging === undefined ? {} : { merging: row.merging }),
+    ...(stack === undefined ? {} : { stack }),
   };
 }
 
@@ -119,20 +127,20 @@ function byMostRecentlyUpdated(
 }
 
 function boundSummaries(
-  input: ThreadBoardPullRequestJoinInput & {
-    readonly matches: ReadonlyArray<ThreadBoardPullRequestJoinRow>;
-  },
-  order: (left: ThreadBoardPullRequestJoinRow, right: ThreadBoardPullRequestJoinRow) => number,
+  input: ThreadBoardPullRequestJoinInput,
+  ordered: ReadonlyArray<ThreadBoardPullRequestJoinRow>,
   limit: number,
+  stackPlaces?: ReadonlyMap<CodeProjectPullRequestRow, PullRequestStackPlace>,
 ): ThreadBoardPullRequestSummaries {
   if (input.githubRevoked || input.rows.length === 0) {
     return { items: [], hiddenCount: 0 };
   }
   const freshness = summaryFreshness(input.snapshotFreshness);
-  const sorted = [...input.matches].sort(order);
   return {
-    items: sorted.slice(0, limit).map((match) => summarizePullRequest(match, freshness)),
-    hiddenCount: Math.max(0, sorted.length - limit),
+    items: ordered
+      .slice(0, limit)
+      .map((match) => summarizePullRequest(match, freshness, stackPlaces?.get(match.row))),
+    hiddenCount: Math.max(0, ordered.length - limit),
   };
 }
 
@@ -142,7 +150,11 @@ export function composeThreadBoardPullRequestSummaries(
     readonly matches: ReadonlyArray<ThreadBoardPullRequestJoinRow>;
   },
 ): ThreadBoardPullRequestSummaries {
-  return boundSummaries(input, byMostRecentlyUpdated, MAX_THREAD_BOARD_PULL_REQUEST_DISPLAY);
+  return boundSummaries(
+    input,
+    [...input.matches].sort(byMostRecentlyUpdated),
+    MAX_THREAD_BOARD_PULL_REQUEST_DISPLAY,
+  );
 }
 
 /**
@@ -163,18 +175,32 @@ function lifecycleRank(match: ThreadBoardPullRequestJoinRow): number {
 /**
  * Every pull request a Code thread worked on, as its navigation entry carries
  * them for the sidebar's hover card and the Environment tool: in-flight first,
- * then merged, then closed, each group most recently updated first.
+ * then merged, then closed, each group most recently updated first. A stack's
+ * layers stay together, bottom first, where its newest one stands: in the order
+ * they were updated, a stack read as unrelated pull requests out of order.
+ *
+ * The stacks are read from every row the window may read, not only the
+ * thread's, so a thread that worked on part of one still says its true place.
  */
 export function composeThreadNavigationPullRequestSummaries(
   input: ThreadBoardPullRequestJoinInput & {
     readonly matches: ReadonlyArray<ThreadBoardPullRequestJoinRow>;
   },
 ): ThreadBoardPullRequestSummaries {
-  return boundSummaries(
-    input,
+  const matchOf = new Map(input.matches.map((match) => [match.row, match] as const));
+  const ordered = [...input.matches].sort(
     (left, right) =>
       lifecycleRank(left) - lifecycleRank(right) || byMostRecentlyUpdated(left, right),
+  );
+  const together = keepStacksTogether(
+    ordered.map((match) => match.row),
+    derivePullRequestStacks(input.rows),
+  );
+  return boundSummaries(
+    input,
+    together.flatMap((row) => matchOf.get(row) ?? []),
     MAX_THREAD_NAVIGATION_PULL_REQUEST_DISPLAY,
+    pullRequestStackPlaces(input.rows),
   );
 }
 
