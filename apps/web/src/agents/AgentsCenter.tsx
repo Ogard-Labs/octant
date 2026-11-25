@@ -416,7 +416,7 @@ function AgentsCenterListBody(props: {
     <div className="agents-table">
       {/* The column names, drawn once. Each row says the same things in its
           own accessible name and description, so this line is for the eye. */}
-      <div aria-hidden="true" className="agents-table__head">
+      <div aria-hidden="true" className="surface-table__head agents-table__head">
         <span>Agent</span>
         <span>Status</span>
         <span>Started</span>
@@ -427,7 +427,7 @@ function AgentsCenterListBody(props: {
       <ul
         aria-busy={controller.list.status === "refreshing"}
         aria-label="Agent runs"
-        className="agents-center__rows"
+        className="surface-table__rows agents-center__rows"
         data-refreshing={controller.list.status === "refreshing" ? "true" : undefined}
       >
         {controller.visibleItems.map((summary) => {
@@ -436,29 +436,28 @@ function AgentsCenterListBody(props: {
             summary.resultAcknowledgement.required && !summary.resultAcknowledgement.acknowledged;
           const usage = usageCell(summary);
           return (
-            <li className="agents-center-row" key={String(summary.runId)}>
+            <li className="surface-table__row agents-center-row" key={String(summary.runId)}>
               <OctantButton
                 // Named for the task alone; where it ran, its state and its
                 // figures are the description, so a screen reader hears the
                 // name first and the rest after.
                 aria-describedby={`${rowId}-where ${rowId}-state ${rowId}-started ${rowId}-time ${rowId}-usage`}
                 aria-label={summary.task}
-                className="agents-center-row__open"
+                className="surface-table__open surface-table__open--cells surface-table__open--top agents-center-row__open"
                 data-agent-run-row={String(summary.runId)}
                 onClick={() => props.onSelect(String(summary.runId))}
                 type="button"
                 variant="bare"
               >
                 <span className="agents-center-row__agent">
-                  <span className="agents-center-row__task">{summary.task}</span>
-                  <span className="agents-center-row__where" id={`${rowId}-where`}>
+                  <span className="oct-row-label surface-table__label">{summary.task}</span>
+                  <span className="oct-meta surface-table__meta" id={`${rowId}-where`}>
                     {`${summary.parentThreadTitle} · ${agentRunModeLabel(summary.mode)} · ${
                       summary.projectId === undefined
                         ? "No Project"
                         : (props.projectNames.get(String(summary.projectId)) ?? "Project")
-                    }`}
+                    } · `}
                     <span className="agents-center-row__provider">
-                      {" · "}
                       <RanOn providerLabels={props.providerLabels} route={summary.route} />
                     </span>
                   </span>

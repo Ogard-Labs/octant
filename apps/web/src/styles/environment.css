@@ -342,9 +342,13 @@ button.environment-link:active {
   flex: 0 1 auto;
 }
 
-/* The path follows the name on its line and is cut before the name is. */
+/* The path follows the name on its line and is cut before the name is. It
+   starts from no width and takes what the name leaves: with its own width as
+   the basis and a large shrink factor, the name still gave up a fraction of a
+   pixel, and an ellipsis needs a whole letter's room, so "Octant" read
+   "Octa…" beside 190px of path (seen 2026-11-25). */
 .environment-row__path {
-  flex: 1 100 auto;
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   color: var(--oct-meta);

@@ -268,3 +268,20 @@
 .gallery-settings {
   max-width: 640px;
 }
+
+/* The page table specimen: the page's own part of a table is its columns and
+   how its cells stack. */
+.gallery-page-table {
+  --surface-table-columns: minmax(0, 1fr) 7rem 6rem;
+  width: 100%;
+}
+
+.gallery-page-table__open {
+  grid-column: 1 / -1;
+}
+
+.gallery-page-table__name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}

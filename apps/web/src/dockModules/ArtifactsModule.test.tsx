@@ -98,10 +98,10 @@ it("lists the Project's artifacts in the library's table and thins its columns f
   // Versions words go at 360px.
   const css = readFileSync(resolve(import.meta.dirname, "../styles/artifacts.css"), "utf8");
   expect(css).toMatch(
-    /^\.artifact-table--dock \.artifact-table__head,\s*\.artifact-table--dock \.artifact-table-row\s*\{\s*--artifact-columns: minmax\(0, 1fr\) auto;/m,
+    /^\.artifact-table--dock \.artifact-table__head,\s*\.artifact-table--dock \.artifact-table-row\s*\{\s*--surface-table-columns: minmax\(0, 1fr\) auto;/m,
   );
   expect(css).toMatch(
-    /@container \(max-width: 480px\)[^@]*--artifact-columns: minmax\(0, 1fr\) auto;/,
+    /@container \(max-width: 480px\)[^@]*--surface-table-columns: minmax\(0, 1fr\) auto;/,
   );
   expect(css).toMatch(
     /@container \(max-width: 360px\)\s*\{\s*\.artifact-table-row__action\s*\{\s*display: none;/,

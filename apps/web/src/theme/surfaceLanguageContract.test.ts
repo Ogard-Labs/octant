@@ -77,6 +77,56 @@ describe("surface language", () => {
     expect(component).not.toContain(">Close<");
   });
 
+  it("draws the Agents, Artifacts and Automations lists as the one page table", () => {
+    const surface = read("styles/surface.css");
+    expect(surface).toMatch(
+      /\.surface-table__head,\s*\.surface-table__row \{[^}]*grid-template-columns: var\(--surface-table-columns\)/,
+    );
+    // Each page names its columns and draws its cells; the head, the rows'
+    // rail and hover, and the open button's reset are the table's. Three
+    // hand-drawn copies had three row heights and two label sizes, so a page's
+    // own head, row and open button may place themselves and nothing more.
+    const pages = [
+      {
+        markup: "agents/AgentsCenter.tsx",
+        sheet: "styles/agents-center.css",
+        own: [".agents-table__head", ".agents-center-row", ".agents-center-row__open"],
+      },
+      {
+        markup: "artifacts/ArtifactTableRow.tsx",
+        sheet: "styles/artifacts.css",
+        own: [".artifact-table__head", ".artifact-table-row", ".artifact-table-row__open"],
+      },
+      {
+        markup: "automation/AutomationCenter.tsx",
+        sheet: "styles/automation.css",
+        own: [".automation-table__head", ".automation-row", ".automation-row__open"],
+      },
+    ] as const;
+    const theTables =
+      /(?:^|[\s;])(?:min-height|height|padding(?:-block|-inline)?|border(?:-bottom|-width)?|background|grid-template-columns|column-gap|font-size|font-weight)\s*:/;
+    for (const page of pages) {
+      const component = read(page.markup);
+      expect(component).toContain('className="surface-table__head ');
+      expect(component).toMatch(/className="surface-table__row /);
+      expect(component).toContain("oct-row-label surface-table__label");
+      expect(component).toContain("oct-meta surface-table__meta");
+      const rules = read(page.sheet).replace(/\/\*[\s\S]*?\*\//g, "");
+      expect(rules).toContain("--surface-table-columns:");
+      const redrawn: string[] = [];
+      for (const block of rules.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const selectors = (block[1] ?? "").split(",").map((each) => each.trim());
+        // A hover on the row itself is the table's too; a rule about a cell
+        // inside the row is the page's own.
+        const named = selectors.filter((selector) =>
+          page.own.some((own) => selector === own || selector === `${own}:hover`),
+        );
+        if (named.length > 0 && theTables.test(block[2] ?? "")) redrawn.push(...named);
+      }
+      expect(redrawn).toEqual([]);
+    }
+  });
+
   it("gives destinations and Settings one page title", () => {
     const surface = read("styles/surface.css");
     const title = surface.match(/\.oct-page-title \{[^}]*\}/)?.[0] ?? "";
