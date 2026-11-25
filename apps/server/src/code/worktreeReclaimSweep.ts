@@ -75,6 +75,13 @@ export class WorktreeReclaimSweep {
   #timer: ReturnType<typeof setTimeout> | undefined;
   #running = false;
   #stopped = false;
+  /**
+   * Whether a cleanup may be pending. True until one pass has looked, since a
+   * restart can leave one, and again whenever a cleanup this pass touched was
+   * not settled. Only this timer begins a cleanup, so with no choice on and
+   * nothing pending a pass has nothing to find.
+   */
+  #mayHavePending = true;
 
   constructor(options: WorktreeReclaimSweepOptions) {
     this.#options = options;
@@ -102,23 +109,31 @@ export class WorktreeReclaimSweep {
     const skipped: Array<{ threadId: CodeThreadId; reason: WorktreeReclaimSkipReason }> = [];
     if (this.#stopped) return { reclaimed, abandoned, skipped };
     const choices = this.#options.cleanup();
+    const chosen = choices?.whenMerged === true || (choices?.inactivityDays ?? 0) >= 1;
+    if (!chosen && !this.#mayHavePending) return { reclaimed, abandoned, skipped };
+    let unsettled = false;
     const now = this.#clock();
     let looked = 0;
     for (const thread of this.#options.threads()) {
       if (this.#stopped) break;
       if (looked > 0 && looked % BATCH === 0) await new Promise((resolve) => setImmediate(resolve));
       looked += 1;
+      let readable = false;
       try {
         const checkout = this.#options.readCheckout(thread.checkoutId);
         if (checkout?.kind !== "managed-worktree") continue;
         const receipt = await this.#options.loadReceipt(String(checkout.ownershipReceiptId));
+        readable = true;
         const resuming = receipt?.state === "cleanup-pending" && receipt.reclaim !== undefined;
         if (receipt === undefined || (receipt.state !== "ready" && !resuming)) continue;
-        const trigger = worktreeReclaimTrigger({
-          choices,
-          lastActivityAt: this.#lastActivityAt(thread, receipt),
-          now,
-        });
+        // With no choice on, no thread's activity is worth reading.
+        const trigger = chosen
+          ? worktreeReclaimTrigger({
+              choices,
+              lastActivityAt: this.#lastActivityAt(thread, receipt),
+              now,
+            })
+          : undefined;
         if (trigger === undefined) {
           if (!resuming) continue;
           // A cleanup was under way, and the person has since turned it off or
@@ -126,7 +141,10 @@ export class WorktreeReclaimSweep {
           const settled = await this.#options.abandon(receipt.receiptId, this.#abort.signal);
           if (settled.status === "restored") abandoned.push(thread.id);
           else if (settled.status === "reclaimed") reclaimed.push(thread.id);
-          else skipped.push({ threadId: thread.id, reason: "waiting" });
+          else {
+            unsettled = true;
+            skipped.push({ threadId: thread.id, reason: "waiting" });
+          }
           continue;
         }
         if (this.#options.threadHasWork(thread.id)) {
@@ -143,6 +161,7 @@ export class WorktreeReclaimSweep {
         );
         if (result.status === "reclaimed") reclaimed.push(thread.id);
         else {
+          if (result.status === "waiting" || result.status === "interrupted") unsettled = true;
           skipped.push({
             threadId: thread.id,
             reason:
@@ -154,9 +173,13 @@ export class WorktreeReclaimSweep {
           });
         }
       } catch {
+        // A receipt that cannot be read says nothing about a pending cleanup.
+        if (readable) unsettled = true;
         skipped.push({ threadId: thread.id, reason: "failed" });
       }
     }
+    // A pass cut short by a stop has not looked at everything.
+    this.#mayHavePending = unsettled || this.#stopped;
     return { reclaimed, abandoned, skipped };
   }
 

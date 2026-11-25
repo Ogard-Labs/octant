@@ -1,4 +1,5 @@
 import { decodeCodeThreadId } from "@octant/contracts";
+import type { WorktreeCleanupChoices } from "@octant/domain/code-worktree-cleanup-policy";
 import { describe, expect, it, vi } from "vitest";
 import type { ManagedWorktreeReceipt } from "./managedWorktreeReceiptStore";
 import type { ManagedWorktreeReclaimResult } from "./managedWorktreeReclaim";
@@ -40,6 +41,9 @@ function receipt(
 
 function setup(
   options: {
+    readonly choicesNow?: () => WorktreeCleanupChoices | undefined;
+    readonly onLoad?: (receiptId: string) => void;
+    readonly onActivity?: (threadId: string) => void;
     readonly choices?: WorktreeReclaimSweepOptions["cleanup"] extends () => infer R ? R : never;
     readonly activity?: Partial<Record<keyof typeof ids, number>>;
     readonly receipts?: Partial<Record<keyof typeof ids, ManagedWorktreeReceipt>>;
@@ -74,19 +78,21 @@ function setup(
     }),
   );
   const sweep = new WorktreeReclaimSweep({
-    cleanup: () => options.choices,
+    cleanup: () => (options.choicesNow ? options.choicesNow() : options.choices),
     threads: () => threads as never,
     readCheckout: (checkoutId) =>
       String(checkoutId) === String(ids.plain)
         ? ({ kind: "existing-worktree" } as never)
         : ({ kind: "managed-worktree", ownershipReceiptId: `receipt-${checkoutId}` } as never),
     loadReceipt: async (receiptId) => {
+      options.onLoad?.(receiptId);
       const name = names.find((candidate) => `receipt-${ids[candidate]}` === receiptId);
       if (name === undefined) return undefined;
       if (name === "broken") throw new Error("receipt unreadable");
       return options.receipts?.[name] ?? receipt(ids[name]);
     },
     lastActivityAt: (threadId) => {
+      options.onActivity?.(threadId);
       const name = names.find((candidate) => ids[candidate] === threadId);
       return name === undefined ? undefined : options.activity?.[name];
     },
@@ -105,6 +111,37 @@ describe("worktree reclaim sweep", () => {
       await expect(sweep.pass()).resolves.toMatchObject({ reclaimed: [] });
       expect(reclaim).not.toHaveBeenCalled();
     }
+  });
+
+  it("does no per-thread work on a default install once it has looked for a cleanup a restart cut short", async () => {
+    const loads: string[] = [];
+    const activity: string[] = [];
+    const { sweep } = setup({
+      choices: undefined,
+      onLoad: (id) => loads.push(id),
+      onActivity: (id) => activity.push(id),
+    });
+    await sweep.pass();
+    expect(activity).toEqual([]);
+    const firstPass = loads.length;
+    await sweep.pass();
+    await sweep.pass();
+    expect(loads.length).toBe(firstPass);
+  });
+
+  it("keeps looking while a cleanup is unsettled, though the choice was turned off", async () => {
+    const choices: { current: { inactivityDays: number } | undefined } = {
+      current: { inactivityDays: 14 },
+    };
+    const { sweep, abandon } = setup({
+      choicesNow: () => choices.current,
+      reclaim: async () => ({ status: "waiting" }),
+      receipts: { idle: receipt(ids.idle, "cleanup-pending", true) },
+    });
+    await sweep.pass();
+    choices.current = undefined;
+    await sweep.pass();
+    expect(abandon).toHaveBeenCalledWith(`receipt-${ids.idle}`, expect.any(AbortSignal));
   });
 
   it("cleans up open and archived threads idle for the chosen days, and leaves a recently used one", async () => {
