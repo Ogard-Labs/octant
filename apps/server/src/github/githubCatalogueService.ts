@@ -49,6 +49,7 @@ interface CataloguePort {
       readonly state: "open" | "closed" | "all";
       readonly search?: string;
       readonly assignee?: "none";
+      readonly closedReason?: "completed" | "not-planned";
     },
     signal: AbortSignal,
   ): Promise<GhCatalogueResult<GhCataloguePageObservation<GhIssueObservationRow>>>;
@@ -344,6 +345,7 @@ export class GithubCatalogueService {
           state: request.state ?? DEFAULT_ISSUE_STATE,
           ...(request.search === undefined ? {} : { search: request.search }),
           ...(request.assignee === undefined ? {} : { assignee: request.assignee }),
+          ...(request.closedReason === undefined ? {} : { closedReason: request.closedReason }),
         },
         signal,
       );

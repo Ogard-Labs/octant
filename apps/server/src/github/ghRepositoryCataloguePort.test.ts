@@ -179,6 +179,165 @@ describe("readIssue", () => {
   });
 });
 
+function issueItem(number: number, overrides: Record<string, unknown> = {}) {
+  return searchItem({
+    number,
+    html_url: `https://github.com/octant/octant/issues/${number}`,
+    ...overrides,
+  });
+}
+
+describe("why an issue was closed", () => {
+  const reasons = [
+    issueItem(1, { state: "closed", state_reason: "completed" }),
+    issueItem(2, { state: "closed", state_reason: "not_planned" }),
+    issueItem(3, { state: "closed", state_reason: "duplicate" }),
+    issueItem(4, { state: "closed", state_reason: null }),
+    issueItem(5, { state: "closed", state_reason: "a_reason_added_later" }),
+    issueItem(6, { state: "closed" }),
+    issueItem(7, { state: "open", state_reason: "reopened" }),
+    issueItem(8, { state: "open", state_reason: "completed" }),
+    issueItem(9, { state: "closed", state_reason: "reopened" }),
+  ];
+  const expected = [
+    "completed",
+    "not-planned",
+    "duplicate",
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+  ];
+
+  it("reports the reason GitHub gives for a closed issue and nothing for any other answer", async () => {
+    const run = vi.fn(async () => ({ exitCode: 0, stdout: JSON.stringify(reasons) }));
+    const port = new GhRepositoryCataloguePort({ command: { run } });
+    const result = await port.listIssues(
+      { owner: "octant", name: "octant", pageSize: 20, state: "all" },
+      new AbortController().signal,
+    );
+    if (result.kind !== "ok") throw new Error(result.kind);
+    expect(result.value.rows.map((row) => row.stateReason)).toEqual(expected);
+    expect(result.value.rows.filter((row) => "stateReason" in row)).toHaveLength(3);
+  });
+
+  it("reports the reason on a title search and on a repository search", async () => {
+    const { port } = portReturning([reasons]);
+    const listed = await port.listIssues(
+      { owner: "octant", name: "octant", pageSize: 20, state: "all", search: "crash" },
+      new AbortController().signal,
+    );
+    const searched = await port.searchIssuesAndPullRequests(
+      { owner: "octant", name: "octant", query: "crash", pageSize: 20, state: "all" },
+      new AbortController().signal,
+    );
+    if (listed.kind !== "ok" || searched.kind !== "ok") throw new Error("search failed");
+    expect(listed.value.rows.map((row) => row.stateReason)).toEqual(expected);
+    expect(searched.value.rows.map((row) => row.stateReason)).toEqual(expected);
+  });
+
+  it("gives a closed pull request no reason", async () => {
+    const { port } = portReturning([
+      [searchItem({ state: "closed", state_reason: "completed", pull_request: {} })],
+    ]);
+    const searched = await port.searchIssuesAndPullRequests(
+      { owner: "octant", name: "octant", query: "crash", pageSize: 20, state: "all" },
+      new AbortController().signal,
+    );
+    if (searched.kind !== "ok") throw new Error(searched.kind);
+    expect(searched.value.rows[0]).not.toHaveProperty("stateReason");
+  });
+
+  it("reports the reason on one issue read by number", async () => {
+    const run = vi.fn(async (arguments_: readonly string[]) => ({
+      exitCode: 0,
+      stdout: arguments_[1]?.includes("/comments")
+        ? "[]"
+        : JSON.stringify(
+            issueItem(7, {
+              state: "closed",
+              state_reason: "not_planned",
+              created_at: "2026-08-20T10:00:00Z",
+              body: "",
+              labels: [],
+            }),
+          ),
+    }));
+    const port = new GhRepositoryCataloguePort({ command: { run } });
+    const result = await port.readIssue(
+      { owner: "octant", name: "octant", number: 7 },
+      new AbortController().signal,
+    );
+    expect(result).toMatchObject({ kind: "ok", value: { stateReason: "not-planned" } });
+  });
+
+  it("reads a closed reason through issue search, scoped to the repository's closed issues", async () => {
+    const { port, run } = portReturning([[]]);
+    const queries: string[] = [];
+    for (const request of [
+      { closedReason: "completed" as const },
+      { closedReason: "not-planned" as const, assignee: "none" as const },
+      { closedReason: "completed" as const, search: "label:bug crash" },
+    ]) {
+      await port.listIssues(
+        { owner: "octant", name: "octant", pageSize: 20, state: "closed", ...request },
+        new AbortController().signal,
+      );
+      const path = String((run.mock.lastCall as unknown as [string[]])[0][1]);
+      expect(path.startsWith("search/issues?q=")).toBe(true);
+      queries.push(decodeURIComponent(path.slice("search/issues?q=".length).split("&")[0] ?? ""));
+    }
+    expect(queries).toEqual([
+      "repo:octant/octant type:issue is:closed reason:completed",
+      'repo:octant/octant type:issue is:closed reason:"not planned" no:assignee',
+      'repo:octant/octant type:issue is:closed reason:completed "crash" in:title',
+    ]);
+  });
+
+  it("answers an empty list when every search term was dropped, reason or not", async () => {
+    const { port, run } = portReturning([[]]);
+    expect(
+      await port.listIssues(
+        {
+          owner: "octant",
+          name: "octant",
+          pageSize: 20,
+          state: "closed",
+          closedReason: "completed",
+          search: "label:bug",
+        },
+        new AbortController().signal,
+      ),
+    ).toEqual({ kind: "ok", value: { rows: [], hasNextPage: false } });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("refuses to continue a page cursor under a different closed reason", async () => {
+    const { port } = portReturning([
+      [1, 2, 3].map((n) => issueItem(n, { state: "closed", state_reason: "completed" })),
+    ]);
+    const read = (closedReason?: "completed" | "not-planned", cursor?: string) =>
+      port.listIssues(
+        {
+          owner: "octant",
+          name: "octant",
+          pageSize: 2,
+          state: "closed",
+          ...(closedReason === undefined ? {} : { closedReason }),
+          ...(cursor === undefined ? {} : { cursor }),
+        },
+        new AbortController().signal,
+      );
+    const first = await read("completed");
+    if (first.kind !== "ok" || first.value.endCursor === undefined) throw new Error("no cursor");
+    expect(await read("completed", first.value.endCursor)).toMatchObject({ kind: "ok" });
+    expect(await read("not-planned", first.value.endCursor)).toEqual({ kind: "invalid-cursor" });
+    expect(await read(undefined, first.value.endCursor)).toEqual({ kind: "invalid-cursor" });
+  });
+});
+
 describe("searchIssuesAndPullRequests", () => {
   it("searches only the named repository and drops qualifiers that would leave it", async () => {
     const { port, run } = portReturning([
