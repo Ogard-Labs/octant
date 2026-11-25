@@ -1,3 +1,4 @@
+import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import type { AgentGrantClient } from "@octant/client-runtime/agent-grant-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { PairedDeviceAdministrationClient } from "@octant/client-runtime/paired-device-administration-client";
@@ -6,7 +7,7 @@ import type { ProviderClient } from "@octant/client-runtime/provider-client";
 import type { ProviderCloudSessionClient } from "@octant/client-runtime/provider-cloud-session-client";
 import type { RemoteShellSurfaceKind } from "@octant/client-runtime";
 import type { AgentAccessCommand } from "@octant/contracts";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { AgentAccessSettingsSection } from "../agentAccess/AgentAccessSettingsSection";
 import { ExtensionsSettingsView } from "../extensions/ExtensionsSettingsView";
 import type {
@@ -20,7 +21,9 @@ import { useProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { RemotePairedDevices } from "./RemotePairedDevices";
 
-type HostSettingsSection = "extensions" | "providers" | "devices" | "agents";
+type HostSettingsSection = "extensions" | "providers" | "devices" | "agents" | "diagnostics";
+
+const RemoteDiagnostics = lazy(() => import("./RemoteDiagnostics"));
 
 const SECTIONS: ReadonlyArray<{
   readonly id: HostSettingsSection;
@@ -32,6 +35,7 @@ const SECTIONS: ReadonlyArray<{
   { id: "providers", label: "Providers", surface: "provider-setup" },
   { id: "devices", label: "Paired devices", surface: "device-management" },
   { id: "agents", label: "Agent access", surface: "agent-access" },
+  { id: "diagnostics", label: "Diagnostics", surface: "diagnostics" },
 ];
 
 export interface RemoteHostSettingsProps {
@@ -44,6 +48,8 @@ export interface RemoteHostSettingsProps {
   readonly pairedDevices: PairedDeviceAdministrationClient;
   /** Outside agents' grants, made, changed and revoked over the session. */
   readonly agentGrants: AgentGrantClient;
+  /** The diagnostics bundle, failure report and journal growth over the session. */
+  readonly diagnosticsClient: DiagnosticsExportClient;
   /** The host's Projects, which a grant names. */
   readonly projectClient: Pick<ProjectClient, "bootstrap">;
   /** The host's address as this browser reached it. */
@@ -94,6 +100,11 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
       ) : null}
       {open === "agents" ? (
         <RemoteAgentAccess client={props.agentGrants} projectClient={props.projectClient} />
+      ) : null}
+      {open === "diagnostics" ? (
+        <Suspense fallback={null}>
+          <RemoteDiagnostics client={props.diagnosticsClient} />
+        </Suspense>
       ) : null}
       {open === "providers" ? (
         <RemoteProviderSettings

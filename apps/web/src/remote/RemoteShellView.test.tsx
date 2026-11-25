@@ -507,6 +507,36 @@ function answerProduct(
         memory: [],
       });
     }
+    if (method === "GET" && path === "/api/diagnostics/bundle/preview") {
+      return Response.json({
+        bundleVersion: 1,
+        generatedAt: now,
+        sections: [
+          {
+            id: "providers",
+            title: "Providers",
+            includes: "Each enabled provider by kind.",
+            entries: 2,
+            available: true,
+          },
+        ],
+        neverIncluded: ["Messages, prompts, replies, or notes."],
+      });
+    }
+    if (method === "POST" && path === "/api/diagnostics/bundle") {
+      return Response.json({
+        kind: "exported",
+        files: [{ path: "readme.txt", contents: "Octant support bundle" }],
+        receipt: {
+          bundleId: "00000000-0000-4000-8000-000000000001",
+          exportedAt: now,
+          destinationCategory: "browser-download",
+          sections: ["providers"],
+          fileCount: 1,
+          byteCount: 21,
+        },
+      });
+    }
     return Response.json(
       { category: "unavailable", message: "Not on this host." },
       { status: 404 },
@@ -984,6 +1014,65 @@ describe("RemoteShellView", () => {
       expect(request.headers.get("x-octant-window-capability")).toBeNull();
     }
   });
+
+  it("saves a diagnostics bundle through a browser download for a browser the host's own person paired at Full", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const downloads: string[] = [];
+    URL.createObjectURL = vi.fn(() => "blob:octant");
+    URL.revokeObjectURL = vi.fn();
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        downloads.push(this.download);
+      });
+    try {
+      const { bridge } = await readyBridge(seen, false, true, false, false, () => "full");
+      render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+      const settings = await screen.findByRole("region", { name: "Host settings" });
+      await user.click(await within(settings).findByRole("button", { name: "Diagnostics" }));
+      await user.click(await within(settings).findByRole("button", { name: "Save diagnostics…" }));
+      await user.click(await within(settings).findByRole("button", { name: "Save file" }));
+
+      await waitFor(() => expect(downloads).toHaveLength(1));
+      expect(downloads[0]).toMatch(/^octant-diagnostics-.*\.zip$/);
+      const exportRequest = seen.find(
+        (request) => request.method === "POST" && request.path === "/api/diagnostics/bundle",
+      );
+      expect(exportRequest?.body).toEqual({ destinationCategory: "browser-download" });
+      expect(exportRequest?.headers.get("x-octant-window-capability")).toBeNull();
+    } finally {
+      click.mockRestore();
+    }
+  });
+
+  it.each([
+    ["a read-only", { actsAsHostPerson: false, accessLevel: "read-only" as const }],
+    [
+      "an approve-and-steer",
+      { actsAsHostPerson: false, accessLevel: "approve-and-steer" as const },
+    ],
+    ["a hub-introduced", { actsAsHostPerson: false, accessLevel: undefined }],
+  ])(
+    "offers %s session no diagnostics and never asks the host for one",
+    async (_name, standing) => {
+      const seen: ProductRequest[] = [];
+      const { bridge } = await readyBridge(
+        seen,
+        false,
+        standing.actsAsHostPerson,
+        false,
+        false,
+        standing.accessLevel,
+      );
+      render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+      await screen.findByRole("note", { name: "Local host only surfaces" });
+      expect(screen.queryByRole("button", { name: "Diagnostics" })).toBeNull();
+      expect(seen.some((request) => request.path.startsWith("/api/diagnostics"))).toBe(false);
+    },
+  );
 
   it("offers a restricted session no host settings", async () => {
     const { bridge } = await readyBridge([], false, false);
