@@ -786,22 +786,33 @@ describe("CodeService reads", () => {
     expect(after.runtime[0]).not.toHaveProperty("liveStep");
   });
 
-  it("says an idle thread waits on a pull request, and not while a turn runs or waits on the person", async () => {
+  it("says an idle thread waits on a pull request, and not while a turn runs, waits on the person, or is settled", async () => {
     const waiting = thread();
     const other = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
+    const settled = thread({
+      id: decodeCodeThreadId("00000000-0000-4000-8000-000000001009"),
+      completedAt: decodeUtcTimestamp(now),
+    });
     const liveTurns = new LiveTurnRegistry();
     let parked = false;
     const fixture = serviceFixture({
-      threads: [waiting, other],
+      threads: [waiting, other, settled],
       liveTurns,
       awaitsHarnessApproval: () => parked,
-      threadWaitingSince: (threadId) =>
-        threadId === String(waiting.id) ? "2026-11-25T10:00:00.000Z" : undefined,
+      threadsWaitingSince: () =>
+        new Map([
+          [String(waiting.id), "2026-11-25T10:00:00.000Z"],
+          [String(settled.id), "2026-11-25T10:00:00.000Z"],
+        ]),
     });
 
     const idle = await fixture.service.navigation(ids.window);
     expect(idle.runtime[0]).toMatchObject({ waitingSince: "2026-11-25T10:00:00.000Z" });
     expect(idle.runtime[1]).not.toHaveProperty("waitingSince");
+    // Settled, its watch has not read it as gone yet, but it waits on nothing.
+    expect(
+      idle.runtime.find((row) => String(row.threadId) === String(settled.id)),
+    ).not.toHaveProperty("waitingSince");
 
     const tracker = liveTurns.tracker(String(waiting.id), "code-navigation");
     tracker.begin(now);
@@ -7331,7 +7342,7 @@ function serviceFixture(
     readonly serverGitHistory?: CodeServiceOptions["serverGitHistory"];
     readonly liveTurns?: CodeServiceOptions["liveTurns"];
     readonly awaitsHarnessApproval?: CodeServiceOptions["awaitsHarnessApproval"];
-    readonly threadWaitingSince?: CodeServiceOptions["threadWaitingSince"];
+    readonly threadsWaitingSince?: CodeServiceOptions["threadsWaitingSince"];
     readonly turnAwaiting?: CodeServiceOptions["turnAwaiting"];
     readonly forkMergeBack?: CodeServiceOptions["forkMergeBack"];
     readonly forkConversation?: CodeServiceOptions["forkConversation"];
@@ -7478,9 +7489,9 @@ function serviceFixture(
     ...(options.linkedIssues === undefined ? {} : { linkedIssues: options.linkedIssues }),
     ...(options.issueContext === undefined ? {} : { issueContext: options.issueContext }),
     ...(options.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
-    ...(options.threadWaitingSince === undefined
+    ...(options.threadsWaitingSince === undefined
       ? {}
-      : { threadWaitingSince: options.threadWaitingSince }),
+      : { threadsWaitingSince: options.threadsWaitingSince }),
     ...(options.awaitsHarnessApproval === undefined
       ? {}
       : { awaitsHarnessApproval: options.awaitsHarnessApproval }),

@@ -38,9 +38,11 @@ export const SIDEBAR_THREAD_STATUS_ORDER = [
   "working",
   "attention",
   "limited",
-  "waiting",
   "woke",
   "unread",
+  // Last: a watch stays on after it wakes the thread, so ranking the wait
+  // above new activity would hide every turn it started behind "Waiting".
+  "waiting",
 ] as const satisfies ReadonlyArray<SidebarThreadStatus>;
 
 /**

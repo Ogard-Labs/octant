@@ -828,13 +828,23 @@ export class CodeProjectPullRequestSwitchService
     return waits.slice(0, MAX_CODE_THREAD_PULL_REQUEST_WAITS);
   }
 
-  /** When the thread began waiting on a pull request, for its sidebar row; absent when it is not. */
-  threadWaitingSince(threadId: CodeThreadId): string | undefined {
-    let earliest: string | undefined;
-    for (const wait of this.threadWaits(threadId)) {
-      if (earliest === undefined || Date.parse(wait.since) < Date.parse(earliest)) {
-        earliest = wait.since;
-      }
+  /**
+   * When each thread began waiting on a pull request, for the sidebar rows:
+   * the earliest watch or Auto-fix it owns. One pass for every thread, because
+   * the navigation read asks for all of them at once.
+   */
+  threadsWaitingSince(): ReadonlyMap<string, string> {
+    this.#canonicalizeFolds();
+    const earliest = new Map<string, string>();
+    const note = (threadId: string, since: string) => {
+      const held = earliest.get(threadId);
+      if (held === undefined || Date.parse(since) < Date.parse(held)) earliest.set(threadId, since);
+    };
+    for (const { autoFix, watch } of this.#folds.values()) {
+      if (watch.status === "on" && watch.threadId !== undefined)
+        note(watch.threadId, watch.enabledAt);
+      if (autoFix.status === "on" && autoFix.threadId !== undefined)
+        note(autoFix.threadId, autoFix.enabledAt);
     }
     return earliest;
   }

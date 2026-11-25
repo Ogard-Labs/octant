@@ -1337,8 +1337,8 @@ runs out of room (each entry's full text on hover), and **Details** and
   1 pull request"). Merge when ready
   belongs to the pull request, so it never shows here.
 
-With nothing running or waiting, and while a turn holds the thread (the turn
-shows its own work), the row takes no space. **Stop** is in the row only when
+With nothing running or waiting, while a turn holds the thread (the turn shows
+its own work), and on a settled or archived thread, the row takes no space. **Stop** is in the row only when
 it means one thing: every live task, which end together with their session, or
 the one pull request. Otherwise each is stopped by name in Details.
 

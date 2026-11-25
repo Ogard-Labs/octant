@@ -390,6 +390,13 @@ describe("buildSidebarStatusView", () => {
           title: "Watching its pull request",
           waitingSince: "2026-08-14T09:00:00.000Z",
         }),
+        // A turn its watch started is read before it counts as waiting.
+        thread({
+          threadId: "watched-unread",
+          title: "Woken by its pull request",
+          unread: true,
+          waitingSince: "2026-08-14T09:00:00.000Z",
+        }),
         thread({
           threadId: "asks",
           title: "Asks",
@@ -409,8 +416,8 @@ describe("buildSidebarStatusView", () => {
     ).toEqual([
       ["Pinned", ["pinned"]],
       ["Needs you", ["asks"]],
+      ["Ready for review", ["review", "watched-unread"]],
       ["Waiting", ["watching"]],
-      ["Ready for review", ["review"]],
       ["Idle", ["idle-new", "idle-old"]],
     ]);
     // A thread waiting on an approval needs you, so it is not listed as working.

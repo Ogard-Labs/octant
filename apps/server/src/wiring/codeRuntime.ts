@@ -2509,10 +2509,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     }
     // The switch service is built later from what the Code service exposes, so
     // a row reads it through this late binding; until then no row waits.
-    let threadWaitingSince: ((threadId: string) => string | undefined) | undefined;
+    let threadsWaitingSince: (() => ReadonlyMap<string, string>) | undefined;
     const { codeCompletedThreadSource, codeService } = buildCodeService(
       codeOperationRuntime,
-      (threadId) => threadWaitingSince?.(threadId),
+      () => threadsWaitingSince?.() ?? new Map(),
     );
     builtCodeService = codeService instanceof CodeService ? codeService : undefined;
     yield* Effect.promise(() => codeOperationRuntime?.reconcile?.() ?? Promise.resolve());
@@ -3480,8 +3480,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       logs: (input) => pullRequestSwitchService.ciLogs(input),
       rerun: (input) => pullRequestSwitchService.ciRerun(input),
     };
-    threadWaitingSince = (threadId) =>
-      pullRequestSwitchService.threadWaitingSince(decodeCodeThreadId(threadId));
+    threadsWaitingSince = () => pullRequestSwitchService.threadsWaitingSince();
     bindPullRequestSwitchReconciler(pullRequestSwitchService);
     // Host-local and idle-free: the forge is read only while a switch or a watch is on.
     const pullRequestSwitchAbort = new AbortController();
@@ -3611,7 +3610,17 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       windowAuthorityStore: deps.windowAuthorityStore,
       canOpenThread: canOpenCodeThread,
       isPerson: isCodePerson,
-      waits: pullRequestSwitchService,
+      waits: {
+        // A settled or archived thread waits on nothing, even while its watch
+        // has not yet read it as gone; stopping one stays open to the person.
+        threadWaits: (threadId) => {
+          const thread = persistence.readCodeThread(threadId);
+          return thread?.lifecycle === "active" && thread.completedAt === undefined
+            ? pullRequestSwitchService.threadWaits(threadId)
+            : [];
+        },
+        stopThreadWait: (input) => pullRequestSwitchService.stopThreadWait(input),
+      },
     });
     const pullRequestReviewers = new PullRequestReviewerRegistry();
     pullRequestReviewers.register({

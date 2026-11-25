@@ -231,13 +231,21 @@ describe("a saved view that reads thread status", () => {
   });
 
   it("finds a thread waiting on its pull request under the Waiting status", () => {
-    const watching = { projectId: alpha.id, status: { waiting: true, unread: true } };
+    const watching = { projectId: alpha.id, status: { waiting: true } };
+    const woken = { projectId: alpha.id, status: { waiting: true, unread: true } };
     expect(
-      filterProjectViewThreads([working, watching, quiet], {
+      filterProjectViewThreads([working, watching, woken, quiet], {
         ...DEFAULT_PROJECT_VIEW_FILTERS,
         statuses: ["waiting"],
       }),
     ).toEqual([watching]);
+    // A view saved for new activity still finds the turn a watch started.
+    expect(
+      filterProjectViewThreads([watching, woken], {
+        ...DEFAULT_PROJECT_VIEW_FILTERS,
+        statuses: ["unread"],
+      }),
+    ).toEqual([woken]);
   });
 
   it("shows every thread when the view named no status", () => {

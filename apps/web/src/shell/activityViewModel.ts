@@ -324,17 +324,17 @@ export function buildSidebarStatusView(input: {
       holds: (thread) => thread.pinned === true || thread.coordinator === true,
     },
     { id: "needs-input", label: "Needs you", holds: (thread) => thread.activity === "attention" },
-    // Waiting on a pull request is not the person's to answer, but it is not
-    // finished either, so it sits after Needs you and before review.
-    {
-      id: "waiting",
-      label: "Waiting",
-      holds: (thread) => threadRowStatusInput(thread).waiting === true,
-    },
     {
       id: "ready-for-review",
       label: "Ready for review",
       holds: (thread) => thread.activity === "unread",
+    },
+    // Waiting on a pull request is not the person's to answer, and a turn the
+    // watch started is still theirs to read first, so it sits after review.
+    {
+      id: "waiting",
+      label: "Waiting",
+      holds: (thread) => threadRowStatusInput(thread).waiting === true,
     },
     { id: "idle", label: "Idle", holds: () => true },
   ];

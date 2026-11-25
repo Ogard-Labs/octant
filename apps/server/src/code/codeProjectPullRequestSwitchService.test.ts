@@ -1287,6 +1287,10 @@ describe("a thread watching its own pull request", () => {
       },
     ]);
     expect(f.service.threadWaits(bystanderThreadId)).toEqual([]);
+    // The sidebar reads every thread's start in one pass.
+    expect(f.service.threadsWaitingSince()).toEqual(
+      new Map([[String(threadId), "2026-10-31T10:00:00.000Z"]]),
+    );
   });
 
   it("lists Auto-fix and babysitting under the thread that repairs the pull request", async () => {

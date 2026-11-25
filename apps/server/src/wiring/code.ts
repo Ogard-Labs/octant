@@ -1056,7 +1056,7 @@ export function wireCode(deps: CodeDependencies) {
     const serverGitHistories = new Map<string, GitHistoryPort>();
     const buildCodeService = (
       codeOperationRuntime: CodeOperationRuntime | undefined,
-      threadWaitingSince?: (threadId: string) => string | undefined,
+      threadsWaitingSince?: () => ReadonlyMap<string, string>,
     ) => {
       archivedWorktreeTurns = codeOperationRuntime;
       const codeService =
@@ -1068,7 +1068,7 @@ export function wireCode(deps: CodeDependencies) {
               .coordinatorsPerProject,
           moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
           liveTurns,
-          ...(threadWaitingSince === undefined ? {} : { threadWaitingSince }),
+          ...(threadsWaitingSince === undefined ? {} : { threadsWaitingSince }),
           awaitsHarnessApproval: threadAwaitsHarnessApproval,
           unfinishedWork: threadUnfinishedWork,
           turnAwaiting: (threadId) => codeOperationRuntime?.turnAwaiting?.(threadId),

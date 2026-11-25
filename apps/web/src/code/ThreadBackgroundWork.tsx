@@ -49,6 +49,10 @@ export function ThreadBackgroundWork<Id extends string>(props: {
   const [message, setMessage] = useState<string>();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const detailsButton = useRef<HTMLButtonElement>(null);
+  const section = useRef<HTMLElement>(null);
+  // Each source's answers apply in the order they were asked, so a slow poll
+  // asked before a Stop cannot bring the stopped entry back.
+  const asked = useRef({ tasks: 0, waits: 0 });
   const activeThread = useRef(String(threadId));
   activeThread.current = String(threadId);
 
@@ -64,15 +68,18 @@ export function ThreadBackgroundWork<Id extends string>(props: {
     async (signal?: AbortSignal) => {
       const key = String(threadId);
       const current = () => signal?.aborted !== true && activeThread.current === key;
+      const tasksAsk = ++asked.current.tasks;
+      const waitsAsk = ++asked.current.waits;
       // One source failing keeps its last answer and never hides the other's.
       await Promise.allSettled([
         client?.liveTasks(threadId).then((live) => {
-          if (current()) setTasks(live.turnRunning ? [] : live.tasks);
+          if (current() && tasksAsk === asked.current.tasks)
+            setTasks(live.turnRunning ? [] : live.tasks);
         }),
         waitThreadId === undefined
           ? undefined
           : waitClient?.waits(waitThreadId).then((next) => {
-              if (current()) setWaits(next);
+              if (current() && waitsAsk === asked.current.waits) setWaits(next);
             }),
       ]);
     },
@@ -86,16 +93,33 @@ export function ThreadBackgroundWork<Id extends string>(props: {
   );
 
   const stop = async (target: string, act: () => Promise<unknown>, failure: string) => {
+    // A stop that ends after the person moved to another thread says nothing
+    // there: its failure and its busy state belong to the thread it was for.
+    const key = String(threadId);
+    const here = () => activeThread.current === key;
     setStopping(target);
     setMessage(undefined);
     try {
       await act();
       await refresh();
     } catch {
-      setMessage(failure);
+      if (here()) setMessage(failure);
     } finally {
-      setStopping(undefined);
+      if (here()) setStopping(undefined);
     }
+  };
+  const closeDetails = () => {
+    // With nothing left the row goes with the dialog, taking Details with it,
+    // so focus goes to the composer the row sat in rather than to the page.
+    const composer =
+      tasks.length + (turnRunning ? 0 : waits.length) === 0
+        ? section.current
+            ?.closest(".composer-frame")
+            ?.querySelector<HTMLElement>("textarea, [contenteditable='true']")
+        : undefined;
+    setDetailsOpen(false);
+    if (composer !== undefined && composer !== null)
+      queueMicrotask(() => composer.focus({ preventScroll: true }));
   };
   const stopTasks = () =>
     client === undefined
@@ -124,7 +148,7 @@ export function ThreadBackgroundWork<Id extends string>(props: {
   const onlyWait = tasks.length === 0 && shownWaits.length === 1 ? shownWaits[0] : undefined;
   const onlyTasks = tasks.length > 0 && shownWaits.length === 0;
   return (
-    <section aria-label="Background work" className="thread-background-work">
+    <section aria-label="Background work" className="thread-background-work" ref={section}>
       {shown ? (
         <div className="thread-background-work__row">
           <Terminal aria-hidden="true" size={14} className="thread-background-work__icon" />
@@ -209,7 +233,7 @@ export function ThreadBackgroundWork<Id extends string>(props: {
             restoreFocus={detailsButton}
             onStopTasks={stopTasks}
             onStopWait={stopWait}
-            onClose={() => setDetailsOpen(false)}
+            onClose={closeDetails}
           />
         </Suspense>
       ) : null}

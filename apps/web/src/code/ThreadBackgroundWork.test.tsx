@@ -186,6 +186,54 @@ describe("a thread's background work", () => {
     expect(within(dialog).getByText("Watching pull request #372")).toBeTruthy();
   });
 
+  it("hands focus to the composer when Details closes after the last wait was stopped", async () => {
+    const user = userEvent.setup();
+    const { pullRequests } = waiting([wait()]);
+    render(
+      <div className="composer-frame">
+        <ThreadBackgroundWork threadId={threadId} client={undefined} pullRequests={pullRequests} />
+        <textarea aria-label="Message" />
+      </div>,
+    );
+    await user.click(await screen.findByRole("button", { name: "Show background work details" }));
+    const dialog = await screen.findByRole("dialog", { name: "Background work" });
+    await user.click(
+      within(dialog).getByRole("button", { name: "Stop: Watching pull request #372" }),
+    );
+    await within(dialog).findByText("Nothing is running or waiting in this thread.");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
+  });
+
+  it("says nothing on the next thread when a stop on the last one fails after the switch", async () => {
+    const user = userEvent.setup();
+    const { pullRequests, stop } = waiting([wait()]);
+    let fail: (error: Error) => void = () => undefined;
+    stop.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    const { rerender } = render(
+      <ThreadBackgroundWork threadId={threadId} client={undefined} pullRequests={pullRequests} />,
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Stop: Watching pull request #372" }),
+    );
+    const next = waiting([]);
+    rerender(
+      <ThreadBackgroundWork
+        threadId={otherThreadId}
+        client={undefined}
+        pullRequests={{ ...next.pullRequests, threadId: otherThreadId }}
+      />,
+    );
+    fail(new Error("offline"));
+    await waitFor(() => expect(next.client.waits).toHaveBeenCalled());
+    expect(screen.queryByText("The host could not stop this. Try again.")).toBeNull();
+  });
+
   it("keeps showing live tasks when the pull-request read fails", async () => {
     const { pullRequests, client: waits } = waiting([]);
     vi.mocked(waits.waits).mockRejectedValue(new Error("unavailable"));

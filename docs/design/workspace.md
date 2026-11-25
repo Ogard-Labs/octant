@@ -398,8 +398,8 @@ tree. **Status** is each mode's default until a person picks another
 arrangement, and each mode keeps its own pick (a pick made before Status
 existed is kept). It lists the threads flat under counted headings in the
 order a person acts on them: **Pinned**, **Needs you** (waiting on an
-approval or an answer), **Waiting** (a Code thread waiting on its pull
-request), **Ready for review** (a finished turn nobody has looked at), and
+approval or an answer), **Ready for review** (a finished turn nobody has
+looked at), **Waiting** (a Code thread waiting on its pull request), and
 **Idle** (everything else), newest first within each. A
 thread appears once, under the first heading that holds it.
 
@@ -658,14 +658,17 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
 
 The sidebar speaks about what a thread is doing now with one vocabulary, in
 descending strength: `working` (Working), `attention` (Needs attention),
-`limited` (Limited), `waiting` (Waiting), `woke` (Snooze ended), and `unread`
-(New activity).
+`limited` (Limited), `woke` (Snooze ended), `unread` (New activity), and
+`waiting` (Waiting).
 Waiting (maintainer request, 2026-11-25) is a Code thread between turns that
 still waits on a pull request: its agent's watch, or babysitting or Auto-fix it
 repairs. The host projects the earliest start of those waits as the thread's
-`waitingSince`, never while a turn runs or waits on the person, and the row
-reads "Waiting 6m" beside a fading-clock mark, as Working gives its elapsed
-time. `@octant/contracts`
+`waitingSince`, never while a turn runs or waits on the person, and never for a
+settled or archived thread, and the row reads "Waiting 6m" beside a
+fading-clock mark, as Working gives its elapsed time. It ranks last because a
+watch stays on after it wakes the thread: ranked higher, every turn the watch
+started would hide behind "Waiting" and drop out of a view saved for New
+activity, so the row shows the new-activity dot until the person reads it. `@octant/contracts`
 (`SidebarThreadStatus`) declares the legal set because a saved Project View
 persists it; `@octant/domain` (`sidebarThreadStatusPolicy`) owns the order,
 labels, roll-up, and comparison, and its label record is typed over the

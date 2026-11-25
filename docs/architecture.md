@@ -4812,7 +4812,8 @@ CI or reviewers should be woken, not left polling; maintainer request,
   thread's own watch and the Auto-fix or babysitting it repairs, to a window or
   the host person's own paired device that may open the thread. It reads local
   state only: no forge call, and unlike a pull request's own view it vouches
-  for nothing. `POST /api/code-thread-waits/stop` stops one of them for the
+  for nothing. A settled or archived thread lists nothing, though its watch
+  may not have read it as gone yet. `POST /api/code-thread-waits/stop` stops one of them for the
   person (a routine's scope and a hub-introduced device are refused). It only
   takes reach away, so it asks the forge and the Project nothing: the thread
   must own the wait, and the command names when that wait began, so it never

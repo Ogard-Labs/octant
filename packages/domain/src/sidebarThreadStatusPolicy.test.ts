@@ -50,13 +50,12 @@ describe("resolveSidebarThreadStatus", () => {
     );
   });
 
-  it("shows a thread waiting on a pull request after an obligation and ahead of an ended snooze", () => {
-    expect(resolveSidebarThreadStatus(thread({ attention: true, waiting: true }))).toBe(
-      "attention",
-    );
-    expect(resolveSidebarThreadStatus(thread({ waiting: true, woke: true, unread: true }))).toBe(
-      "waiting",
-    );
+  it("shows a thread waiting on a pull request only when nothing else is to say", () => {
+    // A watch stays on after it wakes the thread, so the turn it started must
+    // still read as new activity.
+    expect(resolveSidebarThreadStatus(thread({ waiting: true, unread: true }))).toBe("unread");
+    expect(resolveSidebarThreadStatus(thread({ waiting: true, woke: true }))).toBe("woke");
+    expect(resolveSidebarThreadStatus(thread({ waiting: true }))).toBe("waiting");
   });
 
   it("shows an ended snooze ahead of unread activity", () => {
