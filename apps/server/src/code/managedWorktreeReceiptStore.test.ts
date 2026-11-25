@@ -265,6 +265,38 @@ describe("ManagedWorktreeReceiptStore", () => {
       );
     });
 
+    it("records when the checkout became usable again after a restore or an abandoned cleanup, and for nothing else", async () => {
+      const directory = await dataDirectory();
+      const later = "2026-07-21T12:00:00.000Z";
+      const receipts = new ManagedWorktreeReceiptStore({
+        dataDirectory: directory,
+        clock: () => later,
+        uuid: () => receiptId,
+      });
+      await receipts.create(input);
+      const first = await receipts.transition(receiptId, "ready");
+      expect(first.readyAgainAt).toBeUndefined();
+      await receipts.beginReclaim(receiptId, record);
+      const abandoned = await receipts.abortReclaim(receiptId);
+      expect(abandoned.readyAgainAt).toBe(later);
+
+      const other = await dataDirectory();
+      const written = store(other);
+      await written.create(input);
+      await written.transition(receiptId, "ready");
+      await written.beginReclaim(receiptId, record);
+      await written.transition(receiptId, "reclaimed");
+      await written.transition(receiptId, "restoring");
+      const restoredAt = new ManagedWorktreeReceiptStore({
+        dataDirectory: other,
+        clock: () => later,
+        uuid: () => receiptId,
+      });
+      expect((await restoredAt.transition(receiptId, "ready")).readyAgainAt).toBe(later);
+      const switched = await restoredAt.recordVerifiedBranch(receiptId, "octant/x", "d".repeat(40));
+      expect(switched.readyAgainAt).toBe(later);
+    });
+
     it("refuses a different record for a cleanup already under way, and any step that skips one", async () => {
       const directory = await dataDirectory();
       const receipts = store(directory);

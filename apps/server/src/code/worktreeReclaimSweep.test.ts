@@ -128,6 +128,17 @@ describe("worktree reclaim sweep", () => {
     expect((await sweep.pass()).reclaimed).not.toContain(ids.idle);
   });
 
+  it("counts a restore or an abandoned cleanup as activity, for the inactivity and the merged choices alike", async () => {
+    const back = { ...receipt(ids.idle), readyAgainAt: new Date(now - 2 * 3_600_000).toISOString() };
+    const old = new Date(now - 3 * DAY).toISOString();
+    for (const choices of [{ inactivityDays: 1 }, { whenMerged: true }]) {
+      const fresh = setup({ choices, receipts: { idle: back } });
+      expect((await fresh.sweep.pass()).reclaimed).not.toContain(ids.idle);
+      const stale = setup({ choices, receipts: { idle: { ...back, readyAgainAt: old } } });
+      expect((await stale.sweep.pass()).reclaimed).toContain(ids.idle);
+    }
+  });
+
   it("asks for delivered work only for the merged choice, after its wait", async () => {
     const { sweep, reclaim } = setup({
       choices: { whenMerged: true },

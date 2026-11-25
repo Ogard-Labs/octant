@@ -94,6 +94,13 @@ export interface ManagedWorktreeReceipt extends CreateManagedWorktreeReceiptInpu
    * cleanup, which only the reclaim path may finish; it is never a removal.
    */
   readonly reclaim?: ManagedWorktreeReclaim;
+  /**
+   * When a restore or an abandoned cleanup last handed the folder back to its
+   * thread. Neither writes to the thread's own record or journal, so the
+   * cleanup timer reads this to give the person a fresh window instead of
+   * removing a worktree they just restored.
+   */
+  readonly readyAgainAt?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -193,7 +200,7 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
   if (
     !isRecord(value) ||
     Object.keys(value).length < requiredReceiptFields.length ||
-    Object.keys(value).length > requiredReceiptFields.length + 6 ||
+    Object.keys(value).length > requiredReceiptFields.length + 7 ||
     requiredReceiptFields.some((field) => !(field in value)) ||
     Object.keys(value).some(
       (field) =>
@@ -203,7 +210,8 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
         field !== "seed" &&
         field !== "currentBranch" &&
         field !== "currentHead" &&
-        field !== "reclaim",
+        field !== "reclaim" &&
+        field !== "readyAgainAt",
     ) ||
     value.version !== RECEIPT_VERSION ||
     !isUuid(value.receiptId) ||
@@ -222,6 +230,7 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
     !isTimestamp(value.updatedAt) ||
     (value.source !== undefined && !isSource(value.source)) ||
     (value.reclaim !== undefined && !isReclaim(value.reclaim)) ||
+    (value.readyAgainAt !== undefined && !isTimestamp(value.readyAgainAt)) ||
     (value.currentBranch !== undefined && !isIntent(value.currentBranch, 255)) ||
     (value.currentHead !== undefined &&
       (typeof value.currentHead !== "string" ||
@@ -252,6 +261,7 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
       ? {}
       : { source: value.source as ManagedWorktreeSourceProvenance }),
     ...(value.reclaim === undefined ? {} : { reclaim: value.reclaim as ManagedWorktreeReclaim }),
+    ...(value.readyAgainAt === undefined ? {} : { readyAgainAt: value.readyAgainAt as string }),
     ...(value.currentBranch === undefined ? {} : { currentBranch: value.currentBranch as string }),
     ...(value.currentHead === undefined ? {} : { currentHead: value.currentHead as string }),
   };
@@ -375,7 +385,15 @@ export class ManagedWorktreeReceiptStore {
     // it back is spent.
     const { reclaim: _spent, ...rest } = current;
     const kept = state === "ready" || state === "removed" ? rest : current;
-    const next = decodeReceipt({ ...kept, state, updatedAt: this.#clock() });
+    const now = this.#clock();
+    // Only a restore finishing hands the folder back; a first `ready` is creation.
+    const handedBack = state === "ready" && current.state === "restoring";
+    const next = decodeReceipt({
+      ...kept,
+      state,
+      updatedAt: now,
+      ...(handedBack ? { readyAgainAt: now } : {}),
+    });
     await this.#write(next);
     return next;
   }
@@ -435,7 +453,8 @@ export class ManagedWorktreeReceiptStore {
       throw new Error("invalid managed worktree receipt transition");
     }
     const { reclaim: _spent, ...rest } = current;
-    const next = decodeReceipt({ ...rest, state: "ready", updatedAt: this.#clock() });
+    const now = this.#clock();
+    const next = decodeReceipt({ ...rest, state: "ready", updatedAt: now, readyAgainAt: now });
     await this.#write(next);
     return next;
   }

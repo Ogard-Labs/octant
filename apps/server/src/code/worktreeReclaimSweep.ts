@@ -116,7 +116,7 @@ export class WorktreeReclaimSweep {
         if (receipt === undefined || (receipt.state !== "ready" && !resuming)) continue;
         const trigger = worktreeReclaimTrigger({
           choices,
-          lastActivityAt: this.#lastActivityAt(thread),
+          lastActivityAt: this.#lastActivityAt(thread, receipt),
           now,
         });
         if (trigger === undefined) {
@@ -160,10 +160,20 @@ export class WorktreeReclaimSweep {
     return { reclaimed, abandoned, skipped };
   }
 
-  #lastActivityAt(thread: CodeThread): number {
+  /**
+   * A restore and an abandoned cleanup write neither the thread's record nor
+   * its journal, so the receipt's own "ready again" time counts too; without
+   * it a worktree a person just restored would be removed on the next pass.
+   */
+  #lastActivityAt(thread: CodeThread, receipt: ManagedWorktreeReceipt): number {
     const changed = Date.parse(thread.updatedAt);
     const journaled = this.#options.lastActivityAt(thread.id);
-    return Math.max(Number.isFinite(changed) ? changed : 0, journaled ?? 0);
+    const handedBack = receipt.readyAgainAt === undefined ? 0 : Date.parse(receipt.readyAgainAt);
+    return Math.max(
+      Number.isFinite(changed) ? changed : 0,
+      journaled ?? 0,
+      Number.isFinite(handedBack) ? handedBack : 0,
+    );
   }
 
   async #runThenSchedule(): Promise<void> {
