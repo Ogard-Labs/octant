@@ -507,7 +507,11 @@ describe("AgentRunOrchestrationService", () => {
       });
     }
     const reserve = vi.spyOn(capacity, "tryReserve");
-    const { orchestration, persistence } = createHarness(capacity);
+    // A paused parent does not hold a run waiting for room: the capacity queue
+    // starts it when a slot frees, so it needs no one.
+    const { orchestration, persistence } = createHarness(capacity, true, undefined, {
+      isHeld: () => true,
+    });
     const admitted = orchestration.admit({
       command: requestCommand(),
       parentAuthority: authority,
@@ -518,6 +522,7 @@ describe("AgentRunOrchestrationService", () => {
     if (admitted.kind !== "run-updated") return;
     expect(admitted.run.lifecycleStatus).toBe("waiting");
     expect(admitted.run.recoveryReason).toMatch(/capacity/i);
+    expect(orchestration.startsWithoutPerson(admitted.run)).toBe(true);
     expect(persistence.getById(admitted.run.id)).toMatchObject({
       lifecycleStatus: "waiting",
       recoveryReason: "provider-capacity-saturated",
@@ -1419,11 +1424,16 @@ describe("AgentRun dependency graphs", () => {
   });
 
   it("keeps a run parked on its dependencies across a restart", () => {
-    const { persistence, admit, run } = graphHarness();
+    const { persistence, orchestration, admit, run } = graphHarness();
     const first = run(requestIds[0]);
     const dependent = admit(requestIds[1], [String(first)]);
+    expect(orchestration.startsWithoutPerson(dependent)).toBe(true);
 
     persistence.reconcileAfterRestart();
+    // Its sibling was interrupted and starts again only when a person retries it.
+    const parked = persistence.getById(dependent.id);
+    if (parked === undefined) throw new Error("The dependent is gone.");
+    expect(orchestration.startsWithoutPerson(parked)).toBe(false);
 
     // The running dependency is interrupted like any child a restart catches;
     // the parked run never held execution, so it keeps waiting for a retry.

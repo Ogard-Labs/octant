@@ -667,23 +667,45 @@ export class AgentRunOrchestrationService {
     return result;
   }
 
-  /** Whether this child waits for a provider slot, by the host's record and not its reason text. */
   /**
-   * Whether the host will start this waiting run with no one doing anything:
-   * it waits for room under the subagent limit, for a free request slot, or
-   * for siblings, and nothing holds it. A paused parent, a hold since restart,
-   * or a pool that named no eligible model needs a person (a resume, or a new
-   * request), as does every other wait.
+   * Whether the host will start this waiting run with no one doing anything,
+   * read from the same holds its start paths read:
+   * - room under the subagent limit: the capacity queue starts it whatever its
+   *   parent's session is doing;
+   * - a free request slot: retried until a slot frees, unless the parent's
+   *   session is held;
+   * - siblings: started once they all complete, unless held since the restart
+   *   or by the parent's session, and only while each sibling it still waits on
+   *   is itself on its way (queued, starting, running, or a wait like this).
+   * A pool that named no eligible model, a sibling a person must retry, and
+   * every other wait need a person.
    */
-  startsWithoutPerson(run: AgentRun): boolean {
+  startsWithoutPerson(run: AgentRun, visited: ReadonlySet<AgentRunId> = new Set()): boolean {
     if (run.lifecycleStatus !== "waiting") return false;
-    if (this.#parentSessions?.isHeld(run.parentThreadId) === true) return false;
     if (run.recoveryReason === AGENT_RUN_CAPACITY_WAITING_REASON) return true;
-    if (run.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON)
-      return !this.#heldSinceRestart.has(run.id);
-    return this.waitsForProviderSlot(run);
+    if (this.#parentSessions?.isHeld(run.parentThreadId) === true) return false;
+    if (run.recoveryReason !== AGENT_RUN_DEPENDENCY_WAITING_REASON) {
+      return this.waitsForProviderSlot(run);
+    }
+    if (this.#heldSinceRestart.has(run.id) || visited.has(run.id)) return false;
+    const decision = decideAgentRunDependencies(run, (id) => this.#persistence.getById(id));
+    if (decision.kind === "ready") return true;
+    if (decision.kind !== "wait") return false;
+    const seen = new Set([...visited, run.id]);
+    return decision.pending.every((siblingId) => {
+      const sibling = this.#persistence.getById(siblingId);
+      if (sibling === undefined) return false;
+      const { lifecycleStatus } = sibling;
+      return (
+        lifecycleStatus === "queued" ||
+        lifecycleStatus === "starting" ||
+        lifecycleStatus === "running" ||
+        this.startsWithoutPerson(sibling, seen)
+      );
+    });
   }
 
+  /** Whether this child waits for a provider slot, by the host's record and not its reason text. */
   waitsForProviderSlot(run: Pick<AgentRun, "id" | "lifecycleStatus">): boolean {
     return run.lifecycleStatus === "waiting" && this.#providerSlotRefusals.has(run.id);
   }
