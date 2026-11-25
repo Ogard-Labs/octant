@@ -1107,12 +1107,23 @@ export function wireAutomation(deps: AutomationDependencies) {
     projection: persistence.automationProjection,
     commands: {
       // Every authenticated command wakes the scheduler so pause/resume/
-      // run-now/cancel re-arm timers immediately instead of at the next poll.
+      // cancel re-arm timers immediately instead of at the next poll.
+      // Human-confirmed and Run-now runs offer with the person's window via
+      // `onHumanConfirmedRun` first so the scheduler never races unattended.
       execute: (command, provenance, source, eventSource) => {
         const result = automationCommandService.execute(command, provenance, source, eventSource);
-        automationScheduler.poke();
+        if (
+          result.kind !== "automation-run-confirmed" &&
+          !(command.kind === "run-now-automation" && result.kind === "automation-run-accepted")
+        ) {
+          automationScheduler.poke();
+        }
         return result;
       },
+    },
+    onHumanConfirmedRun: ({ definition, run, windowId }) => {
+      automationDispatch.offer({ definition, run, confirmedByWindowId: windowId });
+      automationScheduler.poke();
     },
     windowAuthorityStore,
     projects: projectService,

@@ -14,6 +14,7 @@ import {
   type CodeThreadId,
   type WorkThreadId,
   type UtcTimestamp,
+  type WindowId,
 } from "@octant/contracts";
 import { decideAutomationFollowUp, type AutomationFollowUpThreadFacts } from "@octant/domain";
 import {
@@ -33,7 +34,7 @@ import type {
   AutomationCodeDispatchPort,
   AutomationWorkDispatchPort,
 } from "./automationModeDispatchPorts";
-import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 
 export interface AutomationDispatchServiceOptions {
   readonly store: Pick<
@@ -138,12 +139,12 @@ export class AutomationDispatchService implements AutomationDispatchPort {
   }
 
   offer(offer: AutomationDispatchOffer): void {
-    const key = `${String(offer.run.id)}:${offer.run.lifecycle}:${offer.run.version}`;
+    const key = `${String(offer.run.id)}:${offer.run.lifecycle}:${offer.run.version}:${String(offer.confirmedByWindowId ?? "")}`;
     if (this.#inflight.has(key)) return;
     this.#inflight.add(key);
     this.#schedule(async () => {
       try {
-        await this.#dispatch(offer.definition.id, offer.run.id);
+        await this.#dispatch(offer.definition.id, offer.run.id, offer.confirmedByWindowId);
       } finally {
         this.#inflight.delete(key);
       }
@@ -151,16 +152,29 @@ export class AutomationDispatchService implements AutomationDispatchPort {
   }
 
   /** Test/helper entry: process one run to completion of the dispatch attempt. */
-  async dispatchNow(definitionId: AutomationId, runId: AutomationRun["id"]): Promise<void> {
-    await this.#dispatch(definitionId, runId);
+  async dispatchNow(
+    definitionId: AutomationId,
+    runId: AutomationRun["id"],
+    confirmedByWindowId?: WindowId,
+  ): Promise<void> {
+    await this.#dispatch(definitionId, runId, confirmedByWindowId);
   }
 
-  async #dispatch(definitionId: AutomationId, runId: AutomationRun["id"]): Promise<void> {
+  async #dispatch(
+    definitionId: AutomationId,
+    runId: AutomationRun["id"],
+    confirmedByWindowId?: WindowId,
+  ): Promise<void> {
     const definition = this.#projection.getDefinition(definitionId);
     let run = this.#projection.getRun(runId);
     if (definition === undefined || run === undefined) return;
     if (run.cancellationTombstone !== undefined) return;
     if (run.firstTurnAcceptance !== undefined) return;
+    if (run.lifecycle === "awaiting-confirmation") return;
+
+    const humanConfirmed =
+      confirmedByWindowId !== undefined && !isRoutineHostScope(confirmedByWindowId);
+    const turnScopeId = humanConfirmed ? confirmedByWindowId : undefined;
 
     if (run.lifecycle === "queued" || run.lifecycle === "recovering-dispatch") {
       const moved = this.#moveToDispatching(definition, run);
@@ -182,13 +196,24 @@ export class AutomationDispatchService implements AutomationDispatchPort {
         this.#refuse(definition, run, revalidation.reason, revalidation.message);
         return;
       }
-      // Refused here, not in the revalidation source polling and file arming
-      // share, so a routine on such a provider keeps observing and each run
-      // is journaled as refused with why, before any thread exists. Read from
-      // the live instance, so a routine saved earlier is refused too.
-      const unattended = personalSignInRefusals(facts.providerInstance)?.refusesUnattendedRuns;
-      if (unattended !== undefined) {
-        this.#refuse(definition, run, "provider-capability-mismatch", unattended);
+      // Checked here, not in the revalidation source polling and file arming
+      // share, so a routine on a personal sign-in that does not permit
+      // unattended runs keeps observing and holds each due run for explicit
+      // human confirmation (or refuses it when the profile sets "refuse"),
+      // before any thread exists. Read from the live instance, so a routine
+      // saved earlier is handled too.
+      const personal = personalSignInRefusals(facts.providerInstance);
+      if (personal?.refusesUnattendedRuns !== undefined && !humanConfirmed) {
+        if (personal.routineConfirmation === "prompt-human") {
+          this.#markAwaitingConfirmation(definition, run);
+          return;
+        }
+        this.#refuse(
+          definition,
+          run,
+          "provider-capability-mismatch",
+          personal.refusesUnattendedRuns,
+        );
         return;
       }
       if (run.definitionSnapshot.mode === "work" && !this.#work.available) {
@@ -217,6 +242,15 @@ export class AutomationDispatchService implements AutomationDispatchPort {
       if (created === undefined) return;
       run = this.#projection.getRun(runId);
       if (run === undefined || run.dispatchIntent === undefined) return;
+    } else if (!humanConfirmed) {
+      // A run that already recorded its thread before a restart is never
+      // recovered unattended on a personal sign-in that refuses unattended runs.
+      const facts = this.#resolveFacts({ definition, run });
+      const unattended = personalSignInRefusals(facts.providerInstance)?.refusesUnattendedRuns;
+      if (unattended !== undefined) {
+        this.#failRun(run, "provider-capability-mismatch", unattended);
+        return;
+      }
     }
 
     run = this.#projection.getRun(runId);
@@ -245,7 +279,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     }
 
     try {
-      const launch = await this.#launchFirstTurn(run);
+      const launch = await this.#launchFirstTurn(run, turnScopeId);
       if (launch.kind === "waiting-capacity") return;
       if (launch.kind === "failed") {
         if (launch.reason === "cancelled") return;
@@ -454,7 +488,10 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     }
   }
 
-  async #launchFirstTurn(run: AutomationRun): Promise<
+  async #launchFirstTurn(
+    run: AutomationRun,
+    turnScopeId?: WindowId,
+  ): Promise<
     | {
         readonly kind: "accepted";
         readonly runtimeReceipt: string;
@@ -485,7 +522,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
         threadId: intent.threadId as unknown as CodeThreadId,
         firstTurnRequestId: run.firstTurnRequestId,
         promptDigest: intent.promptDigest,
-        scopeId: ROUTINE_HOST_SCOPE_ID,
+        scopeId: turnScopeId ?? ROUTINE_HOST_SCOPE_ID,
       });
     }
     if (run.definitionSnapshot.mode === "chat" && this.#chat !== undefined) {
@@ -494,6 +531,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
         threadId: decodeChatThreadId(String(intent.threadId)),
         firstTurnRequestId: run.firstTurnRequestId,
         promptDigest: intent.promptDigest,
+        ...(turnScopeId === undefined ? {} : { windowId: turnScopeId }),
       });
     }
     return this.#work.startOrRecoverFirstTurn({
@@ -501,7 +539,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
       threadId: intent.threadId as unknown as WorkThreadId,
       firstTurnRequestId: run.firstTurnRequestId,
       promptDigest: intent.promptDigest,
-      scopeId: ROUTINE_HOST_SCOPE_ID,
+      scopeId: turnScopeId ?? ROUTINE_HOST_SCOPE_ID,
     });
   }
 
@@ -538,6 +576,41 @@ export class AutomationDispatchService implements AutomationDispatchPort {
       });
     } catch (error) {
       if (!isConflict(error)) throw error;
+    }
+  }
+
+  #markAwaitingConfirmation(definition: AutomationDefinition, run: AutomationRun): void {
+    const current = this.#projection.getRun(run.id);
+    if (current === undefined || current.lifecycle === "awaiting-confirmation") return;
+    if (
+      current.dispatchIntent !== undefined ||
+      current.firstTurnAcceptance !== undefined ||
+      current.cancellationTombstone !== undefined
+    ) {
+      return;
+    }
+    const previousLifecycle = current.lifecycle;
+    try {
+      this.#store.appendRunStatusChanged({
+        automationId: definition.id,
+        runId: current.id,
+        previousLifecycle,
+        lifecycle: "awaiting-confirmation",
+        version: current.version + 1,
+        expectedVersion: current.version,
+        updatedAt: this.#now(),
+      });
+    } catch (error) {
+      if (!isConflict(error)) throw error;
+      return;
+    }
+    const updated = this.#projection.getRun(run.id);
+    if (updated !== undefined) {
+      try {
+        this.#onRunStatusChanged?.({ run: updated, previousLifecycle });
+      } catch {
+        // Notification failure never changes run lifecycle truth.
+      }
     }
   }
 

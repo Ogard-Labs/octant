@@ -105,6 +105,8 @@ export interface AutomationChatDispatchPort {
     readonly threadId: ChatThreadId;
     readonly firstTurnRequestId: AutomationFirstTurnRequestId;
     readonly promptDigest: AutomationDigest;
+    /** Present when a person explicitly confirmed or started this run. */
+    readonly windowId?: WindowId;
   }) => Promise<AutomationFirstTurnLaunchOutcome>;
 }
 

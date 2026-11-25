@@ -242,6 +242,23 @@ describe("Octant Shield as the host wires it", () => {
     expect(resolveDriver).not.toHaveBeenCalledWith(providerInstanceId);
   });
 
+  it("skips the thread's own account when backgroundModelUnavailable refuses background calls on it", async () => {
+    const resolveDriver = vi.fn(() => undefined);
+    const shield = hostShieldWith(thread(), {
+      backgroundModelUnavailable: () =>
+        "Google doesn't support background or automated model calls on a personal Google sign-in.",
+      resolveDriver,
+    });
+    expect(shield.availableFor(providerInstanceId as never)).toBe(false);
+    const decision = await shield.review({
+      threadId,
+      call: command("make deploy"),
+      boundRoot: "/Users/dev/app",
+    });
+    expect(decision).toBeUndefined();
+    expect(resolveDriver).not.toHaveBeenCalled();
+  });
+
   describe("on a Work thread", () => {
     const work = (access: WorkThread["access"] = "auto") =>
       ({

@@ -8,6 +8,7 @@ import {
   type AutomationCommand,
   type AutomationDefinition,
   type AutomationId,
+  type UtcTimestamp,
 } from "@octant/contracts";
 import { EventActor } from "@octant/contracts/events";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
@@ -64,6 +65,7 @@ afterEach(() => {
 interface Harness {
   readonly projection: AutomationProjection;
   readonly service: AutomationCommandService;
+  readonly store: AutomationEventStore;
   readonly journal: Journal;
 }
 
@@ -86,7 +88,7 @@ function createHarness(): Harness {
     hostId: "local",
     clock: () => now,
   });
-  return { projection, service, journal };
+  return { projection, service, store, journal };
 }
 
 const principal = automationLocalWindowPrincipal();
@@ -627,5 +629,68 @@ describe("automation command service", () => {
       runNowRequestId: AUTOMATION_TEST_IDS.runNowRequest,
     } as unknown as AutomationCommand);
     expect(result).toMatchObject({ kind: "automation-command-failed", reason: "terminal" });
+  });
+
+  it("confirms an awaiting-confirmation run into dispatching and rejects stale or non-waiting runs", () => {
+    const harness = createHarness();
+    const { service, store } = harness;
+    const definition = created(harness, automationId("3092"));
+    const accepted = service.execute({
+      kind: "run-now-automation",
+      automationId: definition.id,
+      expectedVersion: 1,
+      principal,
+      origin: interactive,
+      runNowRequestId: AUTOMATION_TEST_IDS.runNowRequest,
+    } as unknown as AutomationCommand);
+    expect(accepted.kind).toBe("automation-run-accepted");
+    if (accepted.kind !== "automation-run-accepted") return;
+
+    // A queued run cannot be confirmed.
+    const notWaiting = service.execute({
+      kind: "confirm-automation-run",
+      automationId: definition.id,
+      expectedVersion: 1,
+      principal,
+      origin: interactive,
+      runId: accepted.run.id,
+      expectedRunVersion: 1,
+    } as unknown as AutomationCommand);
+    expect(notWaiting).toMatchObject({ kind: "automation-command-failed", reason: "invalid" });
+
+    store.appendRunStatusChanged({
+      automationId: definition.id,
+      runId: accepted.run.id,
+      previousLifecycle: "queued",
+      lifecycle: "awaiting-confirmation",
+      version: 2,
+      expectedVersion: 1,
+      updatedAt: "2026-08-10T13:01:00.000Z" as UtcTimestamp,
+    });
+
+    const stale = service.execute({
+      kind: "confirm-automation-run",
+      automationId: definition.id,
+      expectedVersion: 1,
+      principal,
+      origin: interactive,
+      runId: accepted.run.id,
+      expectedRunVersion: 1,
+    } as unknown as AutomationCommand);
+    expect(stale).toMatchObject({ kind: "automation-command-failed", reason: "stale-version" });
+
+    const confirmed = service.execute({
+      kind: "confirm-automation-run",
+      automationId: definition.id,
+      expectedVersion: 1,
+      principal,
+      origin: interactive,
+      runId: accepted.run.id,
+      expectedRunVersion: 2,
+    } as unknown as AutomationCommand);
+    expect(confirmed.kind).toBe("automation-run-confirmed");
+    if (confirmed.kind !== "automation-run-confirmed") return;
+    expect(confirmed.run.lifecycle).toBe("dispatching");
+    expect(confirmed.run.version).toBe(3);
   });
 });

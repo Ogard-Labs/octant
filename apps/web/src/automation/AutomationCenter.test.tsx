@@ -429,6 +429,39 @@ describe("AutomationCenter detail disclosure", () => {
     );
   });
 
+  it("shows confirmation guidance and confirms an awaiting-confirmation run via Send now", async () => {
+    const waitingRun = automationRunFixture(definition, {
+      id: AUTOMATION_UI_TEST_IDS.otherRun,
+      lifecycle: "awaiting-confirmation",
+      threadId: undefined,
+      dispatchIntent: undefined,
+      firstTurnAcceptance: undefined,
+    } as never);
+    const client = fakeClient({
+      get: vi.fn(async () => ({
+        kind: "automation-detail" as const,
+        automation: definition,
+        runs: [waitingRun],
+      })),
+    });
+    renderCenter({ client });
+    const detail = await openDetail();
+
+    expect(
+      within(detail).getByText(/This run is waiting for your confirmation before starting/i),
+    ).toBeVisible();
+    await userEvent.click(within(detail).getByRole("button", { name: "Send now" }));
+    await waitFor(() =>
+      expect(client.execute).toHaveBeenLastCalledWith({
+        kind: "confirm-automation-run",
+        automationId: definition.id,
+        expectedVersion: definition.version,
+        runId: waitingRun.id,
+        expectedRunVersion: waitingRun.version,
+      }),
+    );
+  });
+
   it("names a blocked definition's typed reason as plain text", async () => {
     const blocked = automationDefinitionFixture({
       lifecycle: "paused",

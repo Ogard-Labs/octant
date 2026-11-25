@@ -21,6 +21,7 @@ import {
   decodeProviderProbeResult,
   acpAgentProfile,
   isAcpAgentKind,
+  personalSignInRefusals,
   type AcpAgentAuthentication,
   type AcpAgentGoogleCloud,
   type ProviderExecutionPolicy,
@@ -1822,6 +1823,7 @@ function makeConnection(
       readonly sessionId: ProviderSessionId;
       readonly modelId: string;
       readonly executionPolicy: ProviderExecutionPolicy;
+      readonly singleUse?: boolean;
       readonly answersOncePerCall?: boolean;
       readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
@@ -1977,6 +1979,18 @@ function makeConnection(
             }
             const refusal = profile.refuses?.(mode, input.executionPolicy);
             if (refusal !== undefined) throw failure("incompatible", refusal);
+            if (input.singleUse === true) {
+              const backgroundRefusal = personalSignInRefusals({
+                driverKind: profile.kind,
+                configuration:
+                  options.authentication === undefined
+                    ? {}
+                    : { authentication: options.authentication },
+              })?.refusesBackgroundModelCalls;
+              if (backgroundRefusal !== undefined) {
+                throw failure("unauthorized", backgroundRefusal);
+              }
+            }
             const shellRefusal = shellWithoutRequestRefusal(mode, input.executionPolicy);
             if (shellRefusal !== undefined) throw failure("unsupported", shellRefusal);
             // A Project trusted for the agent, outside Plan, and any session

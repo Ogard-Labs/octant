@@ -248,7 +248,7 @@ describe("agentRunTargetAvailability", () => {
     ]);
   });
 
-  it("never offers Google Antigravity as a helper target, and names why", () => {
+  it("offers Google Antigravity on personal sign-in as a helper target when helper runs are not restricted by the profile", () => {
     const antigravity = runtime("80000000-0000-4000-8000-000000000023", "Antigravity", "acp");
     const gemini = runtime("80000000-0000-4000-8000-000000000024", "Gemini CLI", "acp");
     const availability = agentRunTargetAvailability({
@@ -264,15 +264,11 @@ describe("agentRunTargetAvailability", () => {
       }),
       isTargetAllowed: () => true,
     });
-    expect(availability.targets.map((target) => target.displayName)).toEqual(["Gemini CLI"]);
-    expect(availability.unavailable).toEqual([
-      {
-        providerInstanceId: antigravity.id,
-        displayName: "Antigravity",
-        driverKind: "antigravity",
-        reason: "helper-runs-refused",
-      },
+    expect(availability.targets.map((target) => target.displayName)).toEqual([
+      "Antigravity",
+      "Gemini CLI",
     ]);
+    expect(availability.unavailable).toEqual([]);
   });
 
   it("an Agent Platform account a helper would launch under Strict is not offered as a helper target, and a helper start on it is refused by name", () => {

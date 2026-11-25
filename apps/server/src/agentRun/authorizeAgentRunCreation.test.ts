@@ -399,13 +399,11 @@ describe("authorizeAgentRunCreation", () => {
     );
     const on = (parentDriverKind: string) =>
       authorize({ workspace, chat: thread, parentThreadId: String(thread.id), parentDriverKind });
-    expect(on("antigravity")?.helperRunRefusal).toMatch(
-      /^Google doesn't support Google Antigravity as a helper agent, or starting helpers from it/,
-    );
+    expect(on("antigravity")).not.toHaveProperty("helperRunRefusal");
     expect(on("gemini")).not.toHaveProperty("helperRunRefusal");
   });
 
-  it("judges a Chat parent by its running turn's provider, and with none running by the thread's own", () => {
+  it("leaves helper runs allowed when the running turn's profile omits refusesHelperRuns", () => {
     const thread = chatThread();
     const workspace = withSurface(
       defaultWindowWorkspace(ids.window),
@@ -427,12 +425,7 @@ describe("authorizeAgentRunCreation", () => {
         driverKindFor: (id) => (id === routed ? "antigravity" : "gemini"),
         ...(liveProvider === undefined ? {} : { liveProvider }),
       });
-    // A pool or fallback put the running turn on Antigravity: no helper.
-    expect(on(routed)?.helperRunRefusal).toMatch(
-      /^Google doesn't support Google Antigravity as a helper agent/,
-    );
-    // No turn running (an earlier attempt on Antigravity has settled): a
-    // retry or resume is judged by the thread's own provider, and runs.
+    expect(on(routed)).not.toHaveProperty("helperRunRefusal");
     expect(on(undefined)).not.toHaveProperty("helperRunRefusal");
   });
 

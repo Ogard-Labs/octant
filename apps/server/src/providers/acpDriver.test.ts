@@ -5302,6 +5302,52 @@ describe("steering a running ACP turn", () => {
       );
     },
   );
+  it("refuses single-use background sessions on Google Antigravity personal sign-in before launching agy, while allowing api-key and other ACP agents", async () => {
+    const personal = fixture(antigravity, { runtimeVersion: "1.5.12" });
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        Effect.scoped(
+          personal.driver.acquire({ instanceId, projectRoot, mode: "code" }).pipe(
+            Effect.flatMap((connection) =>
+              connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+                singleUse: true,
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(refused).toMatchObject({ category: "unauthorized" });
+    expect(personal.starts).toHaveLength(0);
+
+    const apiKey = fixture(antigravity, {
+      runtimeVersion: "1.5.12",
+      authentication: "api-key",
+      authMethods: [{ id: "oauth-personal" }, { id: "gemini-api-key" }],
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* apiKey.driver.acquire({
+            instanceId,
+            projectRoot,
+            mode: "code",
+          });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            singleUse: true,
+          });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+    expect(apiKey.starts).toHaveLength(1);
+  });
 });
 
 describe("ACP Chat on Windows", () => {

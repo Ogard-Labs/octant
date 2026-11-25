@@ -954,15 +954,10 @@ describe("AutomationDispatchService", () => {
     await dispatcher.dispatchNow(definition.id, run.id);
 
     expect(code.create).not.toHaveBeenCalled();
-    expect(session.projection.getRun(run.id)?.failure).toMatchObject({
-      reason: "provider-capability-mismatch",
-      message: expect.stringContaining(
-        "Google doesn't support unattended runs of Google Antigravity",
-      ),
-    });
-    expect(session.projection.getDefinition(definition.id)?.blockedReason).toBe(
-      "provider-capability-mismatch",
-    );
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("awaiting-confirmation");
+    expect(session.projection.getRun(run.id)?.failure).toBeUndefined();
+    expect(session.projection.getDefinition(definition.id)?.blockedReason).toBeUndefined();
+    expect(session.projection.getDefinition(definition.id)?.lifecycle).toBe("enabled");
     session.connection.close();
   });
 
@@ -1006,11 +1001,12 @@ describe("AutomationDispatchService", () => {
     }
   });
 
-  it("an Antigravity instance on personal sign-in still refuses a routine", async () => {
+  it("holds an Antigravity personal sign-in routine for confirmation and launches it once confirmed by a person's window", async () => {
     const session = openSession();
     const definition = codeDefinition();
     const run = claimQueuedRun(session, definition);
     const code = createCodePort();
+    const confirmedWindowId = "00000000-0000-4000-8000-000000000099" as never;
     const dispatcher = new AutomationDispatchService({
       store: session.store,
       projection: session.projection,
@@ -1036,6 +1032,73 @@ describe("AutomationDispatchService", () => {
     await dispatcher.dispatchNow(definition.id, run.id);
 
     expect(code.create).not.toHaveBeenCalled();
+    const held = session.projection.getRun(run.id);
+    expect(held?.lifecycle).toBe("awaiting-confirmation");
+    expect(held?.threadId).toBeUndefined();
+
+    // Unattended offers while awaiting-confirmation do not launch the run.
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(code.create).not.toHaveBeenCalled();
+
+    // Confirming moves the run to dispatching and dispatches under the confirming window.
+    session.store.appendRunStatusChanged({
+      automationId: definition.id,
+      runId: run.id,
+      previousLifecycle: "awaiting-confirmation",
+      lifecycle: "dispatching",
+      version: (held?.version ?? 1) + 1,
+      expectedVersion: held?.version ?? 1,
+      updatedAt: "2026-08-10T13:01:00.000Z" as UtcTimestamp,
+    });
+
+    await dispatcher.dispatchNow(definition.id, run.id, confirmedWindowId);
+
+    expect(code.create).toHaveBeenCalledOnce();
+    expect(code.launch).toHaveBeenCalledWith(
+      expect.objectContaining({ scopeId: confirmedWindowId }),
+    );
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+    session.connection.close();
+  });
+
+  it("fails closed on unattended post-intent recovery of an Antigravity personal sign-in run", async () => {
+    const session = openSession();
+    const definition = codeDefinition();
+    const run = claimQueuedRun(session, definition);
+    const code = createCodePort();
+    code.launch.mockResolvedValueOnce({ kind: "waiting-capacity", message: "wait" });
+    const confirmedWindowId = "00000000-0000-4000-8000-000000000099" as never;
+    const dispatcher = new AutomationDispatchService({
+      store: session.store,
+      projection: session.projection,
+      code: code.port,
+      work: unavailableAutomationWorkDispatchPort(),
+      capacity: alwaysAdmit(),
+      resolveFacts: () => ({
+        ...matchingFacts(definition),
+        providerInstance: {
+          id: AUTOMATION_TEST_IDS.providerInstance,
+          enabled: true,
+          driverKind: "antigravity",
+          configuration: {
+            kind: "antigravity-acp",
+            binaryPath: "/opt/homebrew/bin/agy",
+            authentication: "provider-owned",
+          },
+        } as never,
+      }),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+    });
+
+    // Confirmed launch records intent but waits on capacity before first turn acceptance.
+    await dispatcher.dispatchNow(definition.id, run.id, confirmedWindowId);
+    expect(session.projection.getRun(run.id)?.dispatchIntent).toBeDefined();
+    expect(session.projection.getRun(run.id)?.firstTurnAcceptance).toBeUndefined();
+
+    // A later unattended recovery without a confirming window fails closed instead of starting agy.
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(code.launch).toHaveBeenCalledTimes(1);
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("failed");
     expect(session.projection.getRun(run.id)?.failure?.reason).toBe("provider-capability-mismatch");
     session.connection.close();
   });

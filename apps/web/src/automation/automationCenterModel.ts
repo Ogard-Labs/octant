@@ -42,6 +42,7 @@ export function automationLifecycleLabel(lifecycle: AutomationLifecycle): string
 
 const runStatusLabels: Record<AutomationRunLifecycle, string> = {
   queued: "Queued",
+  "awaiting-confirmation": "Needs confirmation",
   dispatching: "Dispatching",
   "recovering-dispatch": "Recovering",
   running: "Running",

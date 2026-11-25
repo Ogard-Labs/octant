@@ -38,6 +38,7 @@ import {
   decodeWorkThreadId,
   LOCAL_HOST_ID,
   type OctantMode,
+  personalSignInRefusals,
   type ProviderInstanceId,
   ToolEgressLaunchId,
   type ProviderRuntimeEvent,
@@ -1087,6 +1088,9 @@ export function wireHarness(deps: HarnessDependencies) {
     },
     chosenModel: () => persistence.readCodeSettings()?.settings.shieldModel,
     chosenModelUnavailable: (choice) => automaticModelAccountUnavailable(choice.providerInstanceId),
+    backgroundModelUnavailable: (providerInstanceId) =>
+      personalSignInRefusals(persistence.readProviderInstance(providerInstanceId))
+        ?.refusesBackgroundModelCalls,
     readTurnExecutionPolicy: (threadId) => readTurnExecutionPolicy(threadId),
     // Work threads are reviewed at Auto as Code threads are; a Work turn's
     // level is its running turn's, else the thread's own.

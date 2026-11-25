@@ -1536,6 +1536,20 @@ export class ChatService {
       };
     }
     const routingVendorId = decodeMultiModelRoutingVendorId(instance.driverKind);
+    if (personalSignInRefusals(instance)?.refusesAutomaticCrossModelRouting !== undefined) {
+      return {
+        candidate,
+        routingVendorId,
+        configured: true,
+        readiness: "unavailable",
+        modelAvailable: false,
+        compatibleModes: [],
+        projectAllowed: true,
+        profileAllowed: true,
+        supportedCapabilities: [],
+        authorityAllowed: false,
+      };
+    }
     if (!instance.enabled) {
       // A disabled instance is ineligible without constructing its driver or
       // invoking probe(), which could spawn a CLI, touch credentials, or make
@@ -4070,6 +4084,12 @@ export class ChatService {
     });
     if (owned !== "ok") return refuse(owned);
     if (reason === "provider-switch" && source.from !== undefined) {
+      if (String(source.from.providerInstanceId) !== String(thread.providerInstanceId)) {
+        const target = this.#persistence.readProviderInstance(thread.providerInstanceId);
+        const handoffRefusal = personalSignInRefusals(target)?.refusesManualCrossModelHandoff;
+        if (handoffRefusal !== undefined)
+          throw new ChatServiceError({ category: "unauthorized", message: handoffRefusal });
+      }
       const switched = withHandoverSummary(selection, this.#handoverSummary(thread.id));
       const record = providerSwitchHandoffRecord(switched, source.from);
       return {
@@ -5688,14 +5708,25 @@ export class ChatService {
       return { thread, providerInstanceId, driver: probed.driver, probe: probed.probe };
     }
     const preference = settings.providerFallback;
+    const fallbackInstance =
+      preference === undefined ||
+      String(preference.providerInstanceId) === String(providerInstanceId)
+        ? undefined
+        : this.#persistence.readProviderInstance(
+            decodeProviderInstanceId(preference.providerInstanceId),
+          );
+    const fallbackRefusedForAutoRouting =
+      personalSignInRefusals(fallbackInstance)?.refusesAutomaticCrossModelRouting !== undefined;
     if (
       preference !== undefined &&
-      String(preference.providerInstanceId) !== String(providerInstanceId)
+      String(preference.providerInstanceId) !== String(providerInstanceId) &&
+      !fallbackRefusedForAutoRouting
     )
       this.#refuseUnattendedOn(preference.providerInstanceId, executionContext, "routable-only");
     const candidate =
       preference === undefined ||
-      String(preference.providerInstanceId) === String(providerInstanceId)
+      String(preference.providerInstanceId) === String(providerInstanceId) ||
+      fallbackRefusedForAutoRouting
         ? undefined
         : await this.#probeFallbackProvider(
             decodeProviderInstanceId(preference.providerInstanceId),

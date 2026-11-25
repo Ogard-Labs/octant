@@ -85,6 +85,14 @@ export interface HostShieldDependencies {
    * sentence; undefined when it can. The decision then goes to the person.
    */
   readonly chosenModelUnavailable?: (choice: ShieldModelChoice) => string | undefined;
+  /**
+   * Why a provider account cannot be used as the default Shield Judge (e.g. an
+   * agent whose personal sign-in refuses background model calls); undefined
+   * when it can.
+   */
+  readonly backgroundModelUnavailable?: (
+    providerInstanceId: ProviderInstanceId,
+  ) => string | undefined;
   /** The person's Auto reviewer for a thread: its Project's, else Settings'. */
   readonly chosenReviewer?: (thread: CodeThread | WorkThread) => AutoReviewer | undefined;
   readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle" | "abandon">;
@@ -194,6 +202,11 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
       thread: { providerInstanceId: thread.providerInstanceId, modelId: thread.modelId },
       catalog: deps.catalog,
     });
+    const defaultUnavailable =
+      chosen === undefined
+        ? deps.backgroundModelUnavailable?.(model.providerInstanceId)
+        : undefined;
+    if (defaultUnavailable !== undefined) return undefined;
     const driver = deps.resolveDriver(model.providerInstanceId);
     return driver === undefined
       ? undefined
@@ -205,6 +218,12 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
     // A chosen account that cannot be asked still reviews: the Judge says why
     // and sends each decision to the person, rather than the prompt skipping it.
     if (chosen !== undefined && deps.chosenModelUnavailable?.(chosen) !== undefined) return true;
+    if (
+      chosen === undefined &&
+      deps.backgroundModelUnavailable?.(providerInstanceId) !== undefined
+    ) {
+      return false;
+    }
     return deps.resolveDriver(chosen?.providerInstanceId ?? providerInstanceId) !== undefined;
   };
   const shield = new OctantShield({

@@ -50,6 +50,7 @@ export interface AutomationCommandServiceOptions {
     | "appendDefinitionUpdated"
     | "appendDefinitionLifecycleChanged"
     | "appendRunCreated"
+    | "appendRunStatusChanged"
     | "appendRunCancellation"
     | "appendOccurrenceLedger"
     | "appendFileSourceWindowChanged"
@@ -169,6 +170,8 @@ export class AutomationCommandService {
           return this.#changeLifecycle(command, "archived", "automation-archived");
         case "run-now-automation":
           return this.#runNow(command);
+        case "confirm-automation-run":
+          return this.#confirmRun(command);
         case "cancel-current-automation-run":
           return this.#cancelCurrentRun(command);
       }
@@ -656,6 +659,64 @@ export class AutomationCommandService {
       throw error;
     }
     return { kind: "automation-run-accepted", run };
+  }
+
+  /**
+   * Explicitly confirms a run that paused in `awaiting-confirmation` (for
+   * example, a routine targeting a personal sign-in that does not permit
+   * unattended runs). Moves it to `dispatching` with the person's actor so the
+   * dispatcher can launch its first turn under the confirming window.
+   */
+  #confirmRun(
+    command: Extract<AutomationCommand, { readonly kind: "confirm-automation-run" }>,
+  ): AutomationCommandResult {
+    const run = this.#projection.getRun(command.runId);
+    if (run === undefined || String(run.automationId) !== String(command.automationId)) {
+      return failure("not-found", "Automation run does not exist for this Automation.", {
+        automationId: command.automationId,
+        runId: command.runId,
+      });
+    }
+    const definition = this.#projection.getDefinition(command.automationId);
+    const gate = this.#gateDefinitionMutation(definition, command);
+    if (gate !== undefined) return gate;
+    if (command.expectedRunVersion !== run.version) {
+      return failure("stale-version", "Automation run expected version is stale.", {
+        automationId: command.automationId,
+        runId: run.id,
+      });
+    }
+    if (run.lifecycle !== "awaiting-confirmation") {
+      return failure("invalid", "Only a run waiting for confirmation can be confirmed.", {
+        automationId: command.automationId,
+        runId: run.id,
+      });
+    }
+    if (run.cancellationTombstone !== undefined || run.firstTurnAcceptance !== undefined) {
+      return failure("terminal", "Automation run can no longer be confirmed.", {
+        automationId: command.automationId,
+        runId: run.id,
+      });
+    }
+    const now = this.#now();
+    this.#store.appendRunStatusChanged({
+      ...personActor(command.principal),
+      automationId: command.automationId,
+      runId: run.id,
+      previousLifecycle: run.lifecycle,
+      lifecycle: "dispatching",
+      version: run.version + 1,
+      expectedVersion: run.version,
+      updatedAt: now,
+    });
+    const confirmed = this.#projection.getRun(run.id);
+    if (confirmed === undefined) {
+      return failure("invalid", "Confirmed Automation run is missing from the projection.", {
+        automationId: command.automationId,
+        runId: run.id,
+      });
+    }
+    return { kind: "automation-run-confirmed", run: confirmed };
   }
 
   #cancelCurrentRun(

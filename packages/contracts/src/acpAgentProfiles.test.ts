@@ -24,7 +24,21 @@ describe("personal sign-in limits", () => {
     configuration: authentication === undefined ? {} : { authentication },
   });
 
-  it("an Antigravity instance on personal sign-in keeps every limit", () => {
+  it("an Antigravity instance on personal sign-in keeps its granular reversible limits, and no other profile declares personalSignIn", () => {
+    for (const kind of ACP_AGENT_KINDS) {
+      const profile = acpAgentProfile(kind);
+      if (kind === "antigravity") {
+        expect(profile.personalSignIn?.refusesUnattendedRuns).toBeTruthy();
+        expect(profile.personalSignIn?.routineConfirmation).toBe("prompt-human");
+        expect(profile.personalSignIn?.refusesBackgroundModelCalls).toBeTruthy();
+        expect(profile.personalSignIn?.refusesOutsideAgents).toBeTruthy();
+        expect(profile.personalSignIn?.refusesAutomaticCrossModelRouting).toBeTruthy();
+        expect(profile.personalSignIn?.refusesHelperRuns).toBeUndefined();
+        expect(profile.personalSignIn?.refusesManualCrossModelHandoff).toBeUndefined();
+      } else {
+        expect(profile.personalSignIn, kind).toBeUndefined();
+      }
+    }
     for (const instance of [antigravity(), antigravity("provider-owned")]) {
       expect(personalSignInRefusals(instance)).toEqual(
         acpAgentProfile("antigravity").personalSignIn,

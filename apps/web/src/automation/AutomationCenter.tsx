@@ -132,6 +132,7 @@ type EditorState =
 
 const ACTIVE_RUN_LIFECYCLES = new Set([
   "queued",
+  "awaiting-confirmation",
   "dispatching",
   "recovering-dispatch",
   "running",
@@ -1048,6 +1049,14 @@ function AutomationDetail(props: {
           {automationBlockedMessage(automation, runs)}
         </p>
       )}
+      {activeRun?.lifecycle !== "awaiting-confirmation" ? null : (
+        <p className="automation-detail__blocked" role="status">
+          This run is waiting for your confirmation before starting because its provider does not
+          support unattended runs on a personal sign-in. Confirm with Send now to start it
+          interactively, or switch the provider to an API key or Agent Platform in Settings for
+          unattended runs.
+        </p>
+      )}
 
       <div className="automation-detail__actions">
         <OctantButton onClick={props.onEdit} type="button" variant="secondary">
@@ -1126,25 +1135,47 @@ function AutomationDetail(props: {
           </>
         )}
         {activeRun === undefined ? null : (
-          <OctantButton
-            onClick={() =>
-              void controller.execute(
-                {
-                  kind: "cancel-current-automation-run",
-                  automationId: automation.id,
-                  expectedVersion: automation.version,
-                  runId: activeRun.id,
-                  cancelRunRequestId: props.generateId(),
-                  expectedRunVersion: activeRun.version,
-                } as unknown as AutomationClientCommand,
-                "Run cancellation requested.",
-              )
-            }
-            type="button"
-            variant="secondary"
-          >
-            Cancel current run
-          </OctantButton>
+          <>
+            {activeRun.lifecycle === "awaiting-confirmation" ? (
+              <OctantButton
+                onClick={() =>
+                  void controller.execute(
+                    {
+                      kind: "confirm-automation-run",
+                      automationId: automation.id,
+                      expectedVersion: automation.version,
+                      runId: activeRun.id,
+                      expectedRunVersion: activeRun.version,
+                    },
+                    "Run confirmed.",
+                  )
+                }
+                type="button"
+                variant="solid"
+              >
+                Send now
+              </OctantButton>
+            ) : null}
+            <OctantButton
+              onClick={() =>
+                void controller.execute(
+                  {
+                    kind: "cancel-current-automation-run",
+                    automationId: automation.id,
+                    expectedVersion: automation.version,
+                    runId: activeRun.id,
+                    cancelRunRequestId: props.generateId(),
+                    expectedRunVersion: activeRun.version,
+                  } as unknown as AutomationClientCommand,
+                  "Run cancellation requested.",
+                )
+              }
+              type="button"
+              variant="secondary"
+            >
+              Cancel current run
+            </OctantButton>
+          </>
         )}
       </div>
 

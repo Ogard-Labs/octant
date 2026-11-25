@@ -1533,7 +1533,7 @@ describe("ChatService", () => {
     },
   );
 
-  it("sends no turn nobody sent that would fall back onto Google Antigravity, and takes the person's own", async () => {
+  it("skips Google Antigravity on personal sign-in as a Chat provider fallback without probing it", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000012");
     const fallbackProvider = "84000000-0000-4000-8000-000000000007";
     let fallbackProbes = 0;
@@ -1568,32 +1568,19 @@ describe("ChatService", () => {
         context,
       );
 
-    // The thread's own provider is not Antigravity; the turn would run there
-    // only through the fallback, which is what the check reads.
+    // Automatic cross-model failover never probes or routes onto Antigravity on
+    // personal sign-in for unattended, outside-agent, or interactive turns.
     await expect(send(undefined)).rejects.toMatchObject({
-      failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
+      failure: { category: "unavailable" },
     });
-    expect(service.read(created.thread.id).turns).toHaveLength(0);
-    // Refused from the fallback's declaration, before it is probed, so no
-    // Antigravity session opens for a turn that will not run.
-    expect(fallbackProbes).toBe(0);
-    // An outside agent's send carries its grant's scope as a window, yet is
-    // never the person: its grant checked only the thread's own provider.
     await expect(send({ windowId: window, fromOutsideAgent: true })).rejects.toMatchObject({
-      failure: {
-        category: "unauthorized",
-        message:
-          "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or switch this provider to a Gemini API key or Agent Platform in Settings.",
-      },
+      failure: { category: "unavailable" },
+    });
+    await expect(send({ windowId: window })).rejects.toMatchObject({
+      failure: { category: "unavailable" },
     });
     expect(service.read(created.thread.id).turns).toHaveLength(0);
-
-    // The person's own send their fallback routes there runs (maintainer
-    // decision, 2026-11-21).
-    await expect(send({ windowId: window })).resolves.toMatchObject({ kind: "turn-created" });
-    expect(service.read(created.thread.id).turns[0]?.attempts[0]?.providerInstanceId).toBe(
-      fallbackProvider,
-    );
+    expect(fallbackProbes).toBe(0);
   });
 
   it("still refuses a turn nobody sent on a thread whose own Google Antigravity provider is turned off", async () => {
@@ -10138,6 +10125,56 @@ describe("ChatService", () => {
       await expect(send("Once it is on")).rejects.toMatchObject({
         failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
       });
+    });
+
+    it("excludes Google Antigravity on personal sign-in from automatic multi-model pool routing without probing it", async () => {
+      const antigravity = "84000000-0000-4000-8000-000000000032";
+      const window = decodeWindowId("84000000-0000-4000-8000-000000000019");
+      let antigravityProbes = 0;
+      const antigravityCandidate = {
+        hostId: "local" as HostId,
+        providerInstanceId: antigravity,
+        modelId: "model-a",
+      } as MultiModelPoolCandidate;
+      const { service } = openFixture({
+        probe: dualModelProbe(),
+        driverKindFor: (id) => (id === antigravity ? "antigravity" : "openai-compatible"),
+        probeFor: (id) => {
+          if (id !== antigravity) return undefined;
+          antigravityProbes += 1;
+          return probeFixture({ instanceId: decodeProviderInstanceId(antigravity) });
+        },
+      });
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Pooled thread with Antigravity",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      const updated = await service.execute({
+        kind: "select-chat-multi-model-pool",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        pool: pool({
+          candidates: [antigravityCandidate, poolCandidate("model-a")],
+          higherCostFallbackAllowed: true,
+        }),
+      });
+      if (updated.kind !== "thread-updated") throw new Error("Expected thread-updated result.");
+      const thread = updated.thread;
+      const sent = await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: thread.id,
+          expectedVersion: service.read(thread.id).thread.version,
+          prompt: "Route me",
+        },
+        { windowId: window },
+      );
+      if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+      await until(() => service.read(thread.id).turns[0]?.attempts[0]?.outcome === "completed");
+      expect(antigravityProbes).toBe(0);
+      expect(service.read(thread.id).turns[0]?.attempts[0]?.providerInstanceId).toBe(ids.provider);
     });
 
     it("persists exactly one selected route decision for the requested candidate before provider execution starts", async () => {

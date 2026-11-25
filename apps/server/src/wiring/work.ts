@@ -37,6 +37,7 @@ import {
   decodeWorkTurnUpdated,
   decodeWorkTurnRequestId,
   LOCAL_HOST_ID,
+  personalSignInRefusals,
   type AutomationRunReference,
   RUNTIME_STARTED_TURN_PROMPT,
   type OctantMode,
@@ -1595,12 +1596,16 @@ export function wireWork(deps: WorkDependencies) {
       readiness: (providerInstanceId) => {
         const instance = persistence.readProviderInstance(providerInstanceId);
         if (instance === undefined || !instance.enabled) return undefined;
+        if (personalSignInRefusals(instance)?.refusesBackgroundModelCalls !== undefined)
+          return undefined;
         return providerRuntimeRegistry.observedState(providerInstanceId)?.readiness;
       },
       complete: makeThreadHandOffCompletion({
         resolveDriver: (providerInstanceId) => {
           const instance = persistence.readProviderInstance(providerInstanceId);
           if (instance === undefined || !instance.enabled) return undefined;
+          if (personalSignInRefusals(instance)?.refusesBackgroundModelCalls !== undefined)
+            return undefined;
           try {
             return makeConfiguredProviderDriver(instance, configuredDriverOptions);
           } catch {

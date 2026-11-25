@@ -1,8 +1,9 @@
-import type {
-  ProviderInstance,
-  ProviderInstanceId,
-  ProviderReadiness,
-  ProviderUsageLimitsSnapshot,
+import {
+  personalSignInRefusals,
+  type ProviderInstance,
+  type ProviderInstanceId,
+  type ProviderReadiness,
+  type ProviderUsageLimitsSnapshot,
 } from "@octant/contracts";
 import { automaticModelUnavailableReason } from "@octant/domain/automatic-model-policy";
 
@@ -20,7 +21,7 @@ export function createAutomaticModelAccountCheck(input: {
   const nowMs = input.nowMs ?? Date.now;
   return (providerInstanceId) => {
     const instance = input.readProviderInstance(providerInstanceId);
-    return automaticModelUnavailableReason({
+    const reason = automaticModelUnavailableReason({
       instance:
         instance === undefined
           ? undefined
@@ -28,6 +29,8 @@ export function createAutomaticModelAccountCheck(input: {
       readiness: input.readiness(providerInstanceId),
       atLimit: instance !== undefined && atLimit(input.limits(), providerInstanceId, nowMs()),
     });
+    if (reason !== undefined) return reason;
+    return personalSignInRefusals(instance)?.refusesBackgroundModelCalls;
   };
 }
 
