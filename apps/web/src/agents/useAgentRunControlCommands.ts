@@ -53,7 +53,7 @@ export function useAgentRunControlCommands(
           error,
           error instanceof AgentRunClientFailure
             ? error.message
-            : "AgentRun acknowledgement failed. Retry against authoritative state.",
+            : "The acknowledgement did not go through. Try again in a moment.",
         );
       }
     },
@@ -78,7 +78,7 @@ export function useAgentRunControlCommands(
           error,
           error instanceof AgentRunClientFailure
             ? error.message
-            : "AgentRun cancellation failed. Retry against authoritative state.",
+            : "The agent could not be cancelled. Try again in a moment.",
         );
       }
     },
@@ -116,7 +116,7 @@ export function useAgentRunControlCommands(
           error,
           error instanceof AgentRunClientFailure
             ? error.message
-            : "AgentRun command failed. Retry against authoritative state.",
+            : "That action did not go through. Try again in a moment.",
         );
       }
     },

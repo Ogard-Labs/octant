@@ -255,7 +255,7 @@ describe("CodeThreadBoard", () => {
     );
 
     expect(screen.getByText("Thread 01")).toBeVisible();
-    expect(screen.queryByText("Loading the board.")).toBeNull();
+    expect(screen.queryByText("Loading board")).toBeNull();
     expect(loadBoard).toHaveBeenCalledTimes(1);
   });
 
@@ -731,16 +731,16 @@ describe("CodeThreadBoard", () => {
 
     const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
     expect(within(waiting).getByText("Recovering thread")).toBeVisible();
-    expect(within(waiting).getByText(/Project projection missing/)).toBeVisible();
+    expect(within(waiting).getByText(/Project data missing/)).toBeVisible();
     expect(screen.queryByRole("region", { name: /Recovery/ })).not.toBeInTheDocument();
     // The reason truncates in a box of its own. As bare text in the flex fact
     // it could not take an ellipsis and was cut mid-letter; the full sentence
     // stays on the fact's title.
-    const reason = within(waiting).getByText(/Project projection missing/);
+    const reason = within(waiting).getByText(/Project data missing/);
     expect(reason).toHaveClass("fact__text");
     expect(reason.parentElement).toHaveAttribute(
       "title",
-      expect.stringMatching(/Project projection missing/),
+      expect.stringMatching(/Project data missing/),
     );
   });
 
@@ -893,7 +893,7 @@ describe("CodeThreadBoard", () => {
     expect(article.querySelector(".board-card-eyebrow")).toHaveTextContent("Project A");
     const facts = article.querySelector(".board-card-facts");
     if (facts === null) throw new Error("Expected card facts");
-    expect(facts).toHaveTextContent(/Project projection missing/);
+    expect(facts).toHaveTextContent(/Project data missing/);
     expect(facts).not.toHaveTextContent("Current checkout");
     expect(facts).not.toHaveTextContent("3 of 7 tasks");
     const meta = article.querySelector(".board-card-meta");

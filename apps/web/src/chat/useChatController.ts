@@ -1041,7 +1041,7 @@ export function useChatController(options: ChatControllerOptions) {
           if (command.kind === "update-chat-settings") {
             setSettingsMessage(
               reloaded
-                ? "Chat defaults changed elsewhere. Current authoritative values were loaded; review them and save again."
+                ? "Chat defaults changed elsewhere. The current values were loaded; review them and save again."
                 : "Chat defaults changed elsewhere but could not be reloaded. Reconnect, reload the current values, and try again.",
             );
           }

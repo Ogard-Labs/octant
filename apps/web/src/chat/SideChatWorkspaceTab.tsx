@@ -184,9 +184,7 @@ function SideChatSidecarSurface(props: {
         ? props.notice
         : null}
       {returnNotice === undefined ? null : <OctantAlert tone="neutral">{returnNotice}</OctantAlert>}
-      <Suspense
-        fallback={<OctantEmpty message="Loading chat." state="loading" title="Loading chat" />}
-      >
+      <Suspense fallback={<OctantEmpty state="loading" title="Loading chat" />}>
         <ChatWorkspace
           controller={controller}
           sideChatReturnPending={returnPending}

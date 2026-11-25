@@ -13,6 +13,8 @@ export interface ThreadSnoozeLike {
   readonly at: string;
   /** A provider turn was running when the snooze was set. */
   readonly duringTurn?: boolean | undefined;
+  /** Who parked the thread; the limit-recovery surface names itself. */
+  readonly origin?: string | undefined;
 }
 
 export interface ThreadRestLike {
@@ -104,22 +106,91 @@ export function threadWoke(
   return snoozeElapsed(thread.snooze, input.now) || snoozeRaisedHand(thread.snooze, input);
 }
 
+/**
+ * Work a thread started that is not done: a side task whose thread works,
+ * needs the person, or still owes its report here, or a child run still going.
+ */
+export interface ThreadUnfinishedWork {
+  readonly kind: "side-task-working" | "side-task-attention" | "side-task-report" | "child-run";
+  /** The side task's title, or the child run's task. */
+  readonly title: string;
+}
+
 export type CompleteThreadDecision =
   | { readonly status: "ok" }
-  | { readonly status: "refused"; readonly reason: "archived" | "executing" | "awaiting-input" };
+  | { readonly status: "refused"; readonly reason: "archived" | "executing" | "awaiting-input" }
+  | {
+      readonly status: "refused";
+      readonly reason: "unfinished-work";
+      readonly work: ThreadUnfinishedWork;
+    };
 
 /**
  * Completing hides the thread, so it is refused while work is in flight: a
- * running turn would finish out of sight, and a pending approval or question
- * would never be answered.
+ * running turn would finish out of sight, a pending approval or question
+ * would never be answered, and a side task's report would bring the thread
+ * back. Unfinished work is named before the thread's own turn, because a Work
+ * thread with a running child reads as executing too.
  */
 export function decideCompleteThread(
-  input: ThreadRestSignals & { readonly lifecycle: RestingThreadLifecycle },
+  input: ThreadRestSignals & {
+    readonly lifecycle: RestingThreadLifecycle;
+    readonly unfinishedWork?: ThreadUnfinishedWork | undefined;
+  },
 ): CompleteThreadDecision {
   if (lifecycleIsClosed(input.lifecycle)) return { status: "refused", reason: "archived" };
+  if (input.unfinishedWork !== undefined) {
+    return { status: "refused", reason: "unfinished-work", work: input.unfinishedWork };
+  }
   if (input.executing) return { status: "refused", reason: "executing" };
   if (input.awaitingInput) return { status: "refused", reason: "awaiting-input" };
   return { status: "ok" };
+}
+
+const UNFINISHED_TITLE_LENGTH = 80;
+
+/** The sentence a refused Settle shows, naming the work that is not done. */
+export function unfinishedWorkRefusal(work: ThreadUnfinishedWork): string {
+  const line = work.title.replace(/\s+/g, " ").trim();
+  const title =
+    line.length <= UNFINISHED_TITLE_LENGTH
+      ? line
+      : `${line.slice(0, UNFINISHED_TITLE_LENGTH - 1).trimEnd()}…`;
+  switch (work.kind) {
+    case "side-task-working":
+      return `The side task “${title}” is still working. Settle this thread once it is done.`;
+    case "side-task-attention":
+      return `The side task “${title}” needs you. Answer it before settling this thread.`;
+    case "side-task-report":
+      return `The side task “${title}” has a report on its way here. Settle this thread once it arrives.`;
+    case "child-run":
+      return `The child run “${title}” is still running. Settle this thread once it is done.`;
+  }
+}
+
+/**
+ * What a thread's rest becomes when it takes a side task's report. The thread
+ * is no longer settled, because work of its own was not done; a snooze is the
+ * person's choice of when to look, so the report's turn runs under it. One set
+ * during a turn has ended with that turn and goes: kept, the report's own turn
+ * would read as the one it waits for and hide the thread again.
+ */
+export function restAfterReport<T extends ThreadRestLike>(
+  thread: T,
+): Omit<T, "completedAt" | "snooze"> & Pick<Partial<T>, "snooze"> {
+  const { completedAt: _completedAt, snooze, ...rest } = thread;
+  return snooze === undefined || snooze.duringTurn === true ? rest : { ...rest, snooze };
+}
+
+/**
+ * What a thread's rest becomes when a side task's report started a turn that
+ * failed: the person's snooze ends, so the failure is not hidden under it. A
+ * usage-limit snooze is the limit's own and stays until its reset.
+ */
+export function restAfterReportFailure<T extends ThreadRestLike>(thread: T): T | Omit<T, "snooze"> {
+  if (thread.snooze === undefined || thread.snooze.origin === "usage-limit") return thread;
+  const { snooze: _snooze, ...rest } = thread;
+  return rest;
 }
 
 export type SnoozeThreadDecision =

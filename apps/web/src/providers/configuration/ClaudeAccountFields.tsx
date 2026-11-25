@@ -280,7 +280,7 @@ function ProviderAccountSettingsFields(props: {
         ) : null}
       </SettingRow>
       <SettingRow
-        description="Shown as a color on this account in the model picker."
+        description="Shown as a colour on this account in the model picker."
         label="Account accent"
         scope="host"
         settingId={`${props.settingPrefix}-accent`}

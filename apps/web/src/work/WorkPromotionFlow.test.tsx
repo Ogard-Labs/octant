@@ -133,18 +133,16 @@ describe("WorkPromotionFlow", () => {
       expect(propose).not.toHaveBeenCalled();
       const proposal = screen.getByRole("region", { name: "Continue in Code" });
       expect(within(proposal).getByRole("status")).toHaveTextContent(
-        missing === "artifact"
-          ? "No Work artifact to hand over yet"
-          : "No active Code Project to target",
+        missing === "artifact" ? "No Work artifact to hand over yet" : "No active Code Project",
       );
       expect(
         screen.queryByRole("combobox", {
-          name: missing === "artifact" ? "Selected Work artifact" : "Target Code Project",
+          name: missing === "artifact" ? "Selected Work artifact" : "Code Project",
         }),
       ).toBeNull();
       expect(
         screen.getByRole("combobox", {
-          name: missing === "artifact" ? "Target Code Project" : "Selected Work artifact",
+          name: missing === "artifact" ? "Code Project" : "Selected Work artifact",
         }),
       ).toBeEnabled();
       expect(propose).not.toHaveBeenCalled();

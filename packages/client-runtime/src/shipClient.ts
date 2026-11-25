@@ -43,7 +43,7 @@ export function createShipClient(options: ShipClientOptions): ShipClient {
           headers: { "x-octant-window-capability": options.windowCapability },
           ...(signal === undefined ? {} : { signal }),
         },
-        "Ship targets are unavailable.",
+        "Delivery destinations could not be loaded.",
       );
       const result = decodeHostAnswer(ShipResult)({
         kind: "ship-targets",

@@ -1,3 +1,4 @@
+import "../styles/surface-table.css";
 import { useId } from "react";
 import { artifactEditedAgo } from "@octant/domain";
 import { Link2, Lock } from "../ui/icons";
@@ -21,7 +22,7 @@ export interface ArtifactTableRowProps {
 /** The column names, drawn once over each list; every row says the same in its own words. */
 export function ArtifactTableHead() {
   return (
-    <div aria-hidden="true" className="artifact-table__head">
+    <div aria-hidden="true" className="surface-table__head artifact-table__head">
       <span>Name</span>
       <span>Tags</span>
       <span>Shared</span>
@@ -42,19 +43,19 @@ export function ArtifactTableRow(props: ArtifactTableRowProps) {
   const rowId = useId();
   const edited = artifactEditedAgo(String(entry.updatedAt), props.observedAt);
   return (
-    <li className="artifact-table-row">
+    <li className="surface-table__row artifact-table-row">
       <OctantButton
         // Named for the artifact alone; where it lives, whether it is shared
         // and when it changed are its description.
         aria-describedby={`${rowId}-meta ${rowId}-share ${rowId}-edited`}
         aria-label={entry.title}
-        className="artifact-table-row__open"
+        className="surface-table__open artifact-table-row__open"
         onClick={() => props.onOpen(entry)}
         type="button"
         variant="bare"
       >
-        <span className="artifact-table-row__title">{entry.title}</span>
-        <span className="artifact-table-row__meta" id={`${rowId}-meta`}>
+        <span className="oct-row-label surface-table__label">{entry.title}</span>
+        <span className="oct-meta surface-table__meta" id={`${rowId}-meta`}>
           {entry.projectName ?? "No Project"} · {KIND_LABEL[entry.kind]}
         </span>
       </OctantButton>

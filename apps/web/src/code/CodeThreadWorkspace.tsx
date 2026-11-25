@@ -127,8 +127,8 @@ import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceCompos
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { SentMessageText } from "../transcript/SentMessageText";
 import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
+import { SideTaskReportCards } from "../agents/SideTaskReportCards";
 import { SteeredMessages } from "../messageQueue/SteeredMessages";
-import { isChildResultDelivery } from "../agents/childResultDelivery";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
 import { InlineThreadPlan } from "../plan/InlineThreadPlan";
@@ -1056,15 +1056,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             ? {}
             : { action: { label: "Retry Code", onClick: props.controller.retry } })}
           eyebrow="Code workspace"
-          message={
-            props.controller.errorMessage ??
-            (props.controller.status === "conflict-reload"
-              ? "Loading current authoritative Code state."
-              : "Loading the selected Code thread.")
-          }
+          {...(props.controller.errorMessage === undefined
+            ? {}
+            : { message: props.controller.errorMessage })}
           {...(unavailable === undefined ? {} : { role: "alert" as const })}
           state={unavailable === undefined ? "loading" : "warning"}
-          title={unavailable === undefined ? "Loading Code thread" : "Code thread unavailable"}
+          title={
+            unavailable !== undefined
+              ? "Code thread unavailable"
+              : props.controller.status === "conflict-reload"
+                ? "Reloading Code thread"
+                : "Loading Code thread"
+          }
         />
       </section>
     );
@@ -2097,7 +2100,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           <OctantAlert className="thread-column code-thread-workspace__callout" tone="warning">
             <p>
               {thread.lifecycle === "waiting"
-                ? "This thread is waiting for authoritative recovery or user input."
+                ? "This thread is waiting for you, or for Octant to recover it."
                 : "This thread was interrupted and requires an explicit retry."}
             </p>
           </OctantAlert>
@@ -2111,11 +2114,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           >
             <div className="code-thread-workspace__transcript code-thread-workspace__transcript--empty thread-column">
               {props.controller.conversationHistory === "loading" ? (
-                <OctantEmpty
-                  message="Loading the existing thread transcript from this host."
-                  state="loading"
-                  title="Loading conversation"
-                />
+                <OctantEmpty state="loading" title="Loading conversation" />
               ) : readOnly ? (
                 <OctantEmpty state="neutral" title="No messages yet" />
               ) : showEmptyConversation ? (
@@ -2290,12 +2289,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       />
                     </>
                   );
-                // Code's conversation turns do not carry the delivery mark, so the
-                // host's own delivery wording is what says this is a subagent's
-                // result and not something the person typed.
-                const delivered = message.role === "user" && isChildResultDelivery(message.text);
+                // The journaled delivery mark — not the prompt's wording — says
+                // this turn is the host's own delivery and not something the
+                // person typed.
+                const delivered =
+                  message.role === "user" && message.delivery?.kind === "agent-result";
+                const reportDelivery =
+                  message.role === "user" && message.delivery?.kind === "side-task-report";
+                const hostDelivered = delivered || reportDelivery;
                 const sentBy =
-                  message.role !== "user" || delivered || message.operationId === undefined
+                  message.role !== "user" || hostDelivered || message.operationId === undefined
                     ? undefined
                     : agentTurnSender(
                         String(message.sourceThreadId ?? props.threadId),
@@ -2369,15 +2372,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       aria-label={
                         delivered
                           ? "Subagent results"
-                          : followUpPrompt !== undefined
-                            ? "Scheduled follow-up"
-                            : message.role === "user"
-                              ? sentBy === undefined
-                                ? "Your message"
-                                : `Message from ${sentBy}`
-                              : "Assistant message"
+                          : reportDelivery
+                            ? "Report from side task"
+                            : followUpPrompt !== undefined
+                              ? "Scheduled follow-up"
+                              : message.role === "user"
+                                ? sentBy === undefined
+                                  ? "Your message"
+                                  : `Message from ${sentBy}`
+                                : "Assistant message"
                       }
-                      className={`code-thread-workspace__message ${delivered ? "turn-child-result" : message.role === "user" ? "turn-user" : "turn-agent"}`}
+                      className={`code-thread-workspace__message ${hostDelivered ? "turn-child-result" : message.role === "user" ? "turn-user" : "turn-agent"}`}
                     >
                       <TurnActionMenu
                         actions={
@@ -2451,6 +2456,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       >
                         {delivered ? (
                           <ChildResultCards providerGroups={providerGroups} text={message.text} />
+                        ) : reportDelivery ? (
+                          <SideTaskReportCards text={message.text} />
                         ) : message.role === "user" ? (
                           <>
                             {/* What the user typed stays exactly as they typed it,
@@ -2672,7 +2679,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                           message.sourceThreadId !== props.threadId
                                         ? "This receipt belongs to the original source thread. Open that thread to review its files."
                                         : message.checkoutId !== view.checkout.id
-                                          ? "This receipt belongs to an earlier checkout binding. Its files cannot be retargeted to this checkout."
+                                          ? "This receipt belongs to an earlier checkout, so its files cannot be reviewed here."
                                           : "Review these files after this turn finishes.",
                                 })}
                           />

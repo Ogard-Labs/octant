@@ -435,9 +435,7 @@ function ComputerUseActivityPreview(props: {
     <div className="thread-activity-pip__visual thread-activity-pip__empty">
       <MonitorUp aria-hidden="true" size={20} />
       <strong>{computerUseState(props.session.state)}</strong>
-      <span>
-        Native pixels stay on the authoritative host; activity and approvals remain visible.
-      </span>
+      <span>The screen itself stays on the host; activity and approvals remain visible.</span>
     </div>
   );
 }

@@ -1628,7 +1628,7 @@ describe("CodeProjectPullRequests", () => {
     await screen.findByText("List active pull requests");
     const chips = screen.getByRole("group", { name: "Narrow by status" });
     expect(within(chips).getByRole("button", { name: /^All/ })).toHaveTextContent("All");
-    expect(screen.getByText("Choose a pull request to read it.")).toBeVisible();
+    expect(screen.getByText("Select a pull request to read it")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: /List active pull requests/ }));
     expect(await screen.findByText("Reading #12")).toBeVisible();

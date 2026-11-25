@@ -984,7 +984,7 @@ describe("SettingsView", () => {
     const chatController = {
       ...chatControllerFixture(),
       settingsMessage:
-        "Chat defaults changed elsewhere. Current authoritative values were loaded; review them and save again.",
+        "Chat defaults changed elsewhere. The current values were loaded; review them and save again.",
     } as ChatController;
     renderSettings({ chatController });
 
@@ -1278,7 +1278,7 @@ describe("SettingsView", () => {
     });
     navigateTo("Sidebar");
     expect(screen.getByRole("combobox", { name: "Sidebar background type" })).toBeDisabled();
-    expect(screen.getByLabelText("Sidebar overlay color")).toBeDisabled();
+    expect(screen.getByLabelText("Sidebar overlay colour")).toBeDisabled();
     expect(screen.getByRole("slider", { name: "Sidebar overlay opacity" })).toBeDisabled();
     expect(
       screen.getByText(/background sits behind everything, including the sidebar/),

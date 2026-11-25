@@ -6944,6 +6944,7 @@ function serviceFixture(
     readonly touchedIssues?: CodeServiceOptions["touchedIssues"];
     readonly readLatestFinishedReceipt?: CodeServiceOptions["readLatestFinishedReceipt"];
     readonly putAwayWhenDone?: CodeServiceOptions["putAwayWhenDone"];
+    readonly unfinishedWork?: CodeServiceOptions["unfinishedWork"];
     readonly gitHistory?: CodeServiceOptions["gitHistory"];
     readonly serverGitHistory?: CodeServiceOptions["serverGitHistory"];
     readonly liveTurns?: CodeServiceOptions["liveTurns"];
@@ -7053,6 +7054,7 @@ function serviceFixture(
       ? {}
       : { readLatestFinishedReceipt: options.readLatestFinishedReceipt }),
     ...(options.putAwayWhenDone === undefined ? {} : { putAwayWhenDone: options.putAwayWhenDone }),
+    ...(options.unfinishedWork === undefined ? {} : { unfinishedWork: options.unfinishedWork }),
     persistence: persistence as unknown as CodePersistencePort,
     access,
     checkouts,
@@ -7395,6 +7397,78 @@ describe("completing and snoozing a Code thread", () => {
       reason: "busy",
     });
     expect(running.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("settles no thread whose side task is not done: Settle says why, Mark done only marks, and the host leaves it alone", async () => {
+    const merged = { baseRepository: "acme/app", number: 42 };
+    const same = (left: typeof merged, right: typeof merged) => left.number === right.number;
+    const unfinishedWork = vi.fn(
+      () => ({ kind: "side-task-working", title: "Fix the docs" }) as const,
+    );
+    const held = serviceFixture({ putAwayWhenDone: () => true, unfinishedWork });
+    await expect(
+      held.service.execute(ids.window, {
+        kind: "complete-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid",
+        message: expect.stringMatching(/side task “Fix the docs” is still working/),
+      },
+    });
+    expect(held.service.settleFinishedThread(ids.thread)).toEqual({
+      status: "skipped",
+      reason: "child-work",
+    });
+    expect(held.service.putAwayMergedThread(ids.thread, [merged], same)).toEqual({
+      status: "skipped",
+      reason: "child-work",
+    });
+    expect(held.persistence.journal.append).not.toHaveBeenCalled();
+    expect(unfinishedWork).toHaveBeenCalledWith(String(ids.thread));
+
+    const marked = await held.service.execute(ids.window, {
+      kind: "mark-code-thread-done",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    if (!("thread" in marked)) throw new Error("expected the marked thread");
+    expect(marked.thread.markedDoneAt).toBe(now);
+    expect(marked.thread).not.toHaveProperty("completedAt");
+
+    const done = serviceFixture({ unfinishedWork: () => undefined });
+    expect(done.service.settleFinishedThread(ids.thread)).toEqual({ status: "settled" });
+  });
+
+  it("keeps a person's snooze when a side task's report starts a turn, and brings a settled thread back", () => {
+    const snooze = { until: laterAt, at: nowAt };
+    const recorded = (fixture: ReturnType<typeof serviceFixture>) =>
+      (
+        fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as
+          | { events: Array<{ payload: { thread: Record<string, unknown> } }> }
+          | undefined
+      )?.events[0]?.payload.thread;
+
+    const settled = serviceFixture({ threads: [thread({ completedAt: nowAt, snooze })] });
+    settled.service.noteReportAdmitted(ids.thread);
+    expect(recorded(settled)).toMatchObject({ snooze });
+    expect(recorded(settled)).not.toHaveProperty("completedAt");
+
+    const snoozed = serviceFixture({ threads: [thread({ snooze })] });
+    snoozed.service.noteReportAdmitted(ids.thread);
+    expect(snoozed.persistence.journal.append).not.toHaveBeenCalled();
+
+    const ended = serviceFixture({
+      threads: [thread({ snooze: { ...snooze, duringTurn: true } })],
+    });
+    ended.service.noteReportAdmitted(ids.thread);
+    expect(recorded(ended)).not.toHaveProperty("snooze");
+
+    // The report's turn failed: the person sees it instead of the wake time.
+    snoozed.service.noteReportTurnFailed(ids.thread);
+    expect(recorded(snoozed)).not.toHaveProperty("snooze");
   });
 
   it("journals a person's unlink of a pull request on the thread, and refuses one from a routine", async () => {

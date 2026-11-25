@@ -41,9 +41,7 @@ export default function BrowserModule(props: Props) {
       : { contextId: decodeBrowserContextId(props.browserContextId) }),
   };
   return (
-    <Suspense
-      fallback={<OctantEmpty message="Loading browser." state="loading" title="Loading browser" />}
-    >
+    <Suspense fallback={<OctantEmpty state="loading" title="Loading browser" />}>
       <BrowserWorkspace
         canDrawOnPage
         dockTabId={props.utilityTabId ?? "browser"}

@@ -40,7 +40,9 @@ export function ShipPanel(props: ShipPanelProps) {
     try {
       setTargets(await client.targets());
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Ship targets are unavailable.");
+      setNotice(
+        error instanceof Error ? error.message : "Delivery destinations could not be loaded.",
+      );
     }
   }, [client]);
 
@@ -88,7 +90,7 @@ export function ShipPanel(props: ShipPanelProps) {
   return (
     <section aria-label="Delivery" className="ship-panel">
       <PaneBar title="Delivery">
-        <InfoTip text="Octant delivers to a target you already own and runs none of its own. Nothing is routed through Octant, and each delivery is approved on its own." />
+        <InfoTip text="Octant delivers to a destination you already own and runs none of its own. Nothing is routed through Octant, and each delivery is approved on its own." />
       </PaneBar>
 
       {enabled.length === 0 ? null : (

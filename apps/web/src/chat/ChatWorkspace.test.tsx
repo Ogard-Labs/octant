@@ -1688,6 +1688,26 @@ describe("ChatWorkspace", () => {
     expect(screen.queryByText("Connection lost.")).not.toBeInTheDocument();
   });
 
+  it("draws a thread that is still loading as its title alone, and a lost host with its sentence", () => {
+    const { rerender } = render(
+      <ChatWorkspace
+        controller={controllerFixture({ activeView: undefined, status: "loading" })}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Loading conversation" })).toBeVisible();
+    expect(document.querySelector('[data-slot="empty-description"]')).toBeNull();
+
+    rerender(
+      <ChatWorkspace
+        controller={controllerFixture({ activeView: undefined, status: "disconnected" })}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Chat is disconnected" })).toBeVisible();
+    expect(screen.getByText("The host connection is unavailable.")).toBeVisible();
+  });
+
   it("says Reconnected for a moment when the host answers again", async () => {
     const controller = controllerFixture({ status: "disconnected" });
     const { rerender } = render(

@@ -142,12 +142,12 @@ function ChatEnvironmentFacts(props: {
   if (!props.available || view === undefined) {
     const unresolvedProject =
       view?.thread.projectId !== undefined && props.project === undefined
-        ? "Authoritative Chat context is unavailable."
+        ? "This thread's Project could not be found."
         : undefined;
     return (
       <p className="environment-chat-group__status" role="status">
         {props.controller.status === "loading"
-          ? "Loading authoritative Chat context."
+          ? "Loading Chat context."
           : (props.controller.errorMessage ?? unresolvedProject ?? props.unavailableMessage)}
       </p>
     );

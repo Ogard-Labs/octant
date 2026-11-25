@@ -111,15 +111,18 @@ export function CodeOverview(props: CodeOverviewProps) {
           ? {}
           : { action: { label: "Retry Code", onClick: props.controller.retry } })}
         eyebrow="Code workspace"
-        message={
-          props.controller.errorMessage ??
-          (props.controller.status === "conflict-reload"
-            ? "Loading current authoritative Code state."
-            : "Loading the selected Code thread.")
-        }
+        {...(props.controller.errorMessage === undefined
+          ? {}
+          : { message: props.controller.errorMessage })}
         {...(unavailable === undefined ? {} : { role: "alert" as const })}
         state={unavailable === undefined ? "loading" : "warning"}
-        title={unavailable === undefined ? "Loading Code thread" : "Code thread unavailable"}
+        title={
+          unavailable !== undefined
+            ? "Code thread unavailable"
+            : props.controller.status === "conflict-reload"
+              ? "Reloading Code thread"
+              : "Loading Code thread"
+        }
       />
     );
   }
@@ -147,7 +150,7 @@ export function CodeOverview(props: CodeOverviewProps) {
             <strong>{lifecycleLabel(thread.lifecycle)}</strong>
             <p>
               {thread.lifecycle === "waiting"
-                ? "This thread is waiting for authoritative recovery or user input."
+                ? "This thread is waiting for you, or for Octant to recover it."
                 : "This thread was interrupted and requires an explicit retry."}
             </p>
           </div>
@@ -341,9 +344,7 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
         setBoardState({
           kind: "unavailable",
           message:
-            error instanceof Error
-              ? error.message
-              : "The Code Project projections are unavailable.",
+            error instanceof Error ? error.message : "This Project's overview could not be loaded.",
         });
       },
     );
@@ -507,11 +508,11 @@ function CodeProjectSessions(props: {
         <OctantAlert
           action={
             <OctantButton onClick={props.onRetry} type="button" variant="secondary">
-              <RefreshCw aria-hidden="true" size={14} /> Retry projections
+              <RefreshCw aria-hidden="true" size={14} /> Retry
             </OctantButton>
           }
           className="code-project-overview__state"
-          title="Code projections unavailable"
+          title="Project overview unavailable"
           tone="warning"
         >
           <p>{props.boardState.message}</p>

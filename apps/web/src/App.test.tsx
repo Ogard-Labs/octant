@@ -1645,7 +1645,9 @@ describe("App", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Project authority is unavailable" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Octant could not open this window" }),
+    ).toBeVisible();
     expect(screen.queryByRole("main", { name: "Octant workspace" })).not.toBeInTheDocument();
   });
 

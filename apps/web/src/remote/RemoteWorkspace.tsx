@@ -430,9 +430,7 @@ function RemoteChatSurface(
       }
     >
       {activeThreadId === undefined ? null : (
-        <Suspense
-          fallback={<OctantEmpty message="Loading chat." state="loading" title="Loading chat" />}
-        >
+        <Suspense fallback={<OctantEmpty state="loading" title="Loading chat" />}>
           <ChatWorkspace
             canvasClient={canvasClient}
             controller={controller}
@@ -513,9 +511,7 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
       }
     >
       {activeThread === undefined ? null : (
-        <Suspense
-          fallback={<OctantEmpty message="Loading work." state="loading" title="Loading work" />}
-        >
+        <Suspense fallback={<OctantEmpty state="loading" title="Loading work" />}>
           <WorkThreadWorkspace
             readOnly={props.readOnly === true}
             key={String(activeThread.id)}

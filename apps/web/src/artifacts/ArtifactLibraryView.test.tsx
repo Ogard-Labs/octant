@@ -280,7 +280,7 @@ describe("the artifact gallery", () => {
       listing: { ...listing, entries: [], matchCount: 0 } as ArtifactLibraryListing,
     });
 
-    const title = screen.getByText("Nothing is shared right now.");
+    const title = screen.getByText("Nothing is shared right now");
     expect(title.closest("[role='status']")).toHaveClass("surface-empty");
     expect(screen.getByText("Artifacts you share will appear here.")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "View all artifacts" }));

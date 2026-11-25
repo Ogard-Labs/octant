@@ -50,7 +50,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("resource-cpuTargetPercent"),
-          label: "CPU target",
+          label: "CPU limit for new work",
           scope: "host",
           keywords: "cpu utilization load headroom target",
         },
@@ -642,7 +642,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("sidebar-background"),
           label: "Sidebar background",
           scope: "app",
-          keywords: "sidebar background preset gradient overlay color opacity",
+          keywords: "sidebar background preset gradient overlay colour color opacity",
         },
       ],
     },

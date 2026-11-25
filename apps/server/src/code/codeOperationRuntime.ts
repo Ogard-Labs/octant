@@ -117,6 +117,7 @@ import type {
   ProviderWakeupSchedule,
 } from "@octant/provider-sdk/driver";
 import type { Journal } from "../persistence/journal";
+import type { SideTaskReportAdmission } from "../sideTasks/sideTaskReports";
 import type { OutlivingSessions } from "../providers/outlivingSessions";
 import { createGhPullRequestPort } from "./ghPullRequestActionPort";
 import type { PullRequestLinkReader, PullRequestLinkRecorder } from "./pullRequestLinkService";
@@ -526,6 +527,8 @@ export interface CodeOperationRuntimeOptions {
    * not bring back.
    */
   readonly onProviderTurnRequested?: (threadId: CodeThreadId) => void;
+  /** A side task's report was admitted; its turn is about to be journaled. */
+  readonly onSideTaskReportAdmitted?: CodeOperationServiceOptions["onSideTaskReportAdmitted"];
   /**
    * The thread's provider turn just stopped on its account's usage limit, as
    * the provider itself reported it. Fires once the turn has closed. A
@@ -563,6 +566,11 @@ export interface CodeOperationRuntimeOptions {
   readonly agentRuns?: {
     readonly getById: (runId: AgentRunId) => AgentRun | undefined;
   };
+  /**
+   * Read access to journaled side-task reports, for verifying the report mark
+   * a `start-provider-turn` claims. Absent means report claims are refused.
+   */
+  readonly sideTaskReports?: SideTaskReportAdmission;
   readonly probeProvider?: (
     instanceId: CodeThread["providerInstanceId"],
   ) => Promise<Pick<ProviderProbeResult, "readiness" | "models">>;
@@ -1651,6 +1659,10 @@ export function createCodeOperationRuntime(
       ? {}
       : { isProviderModelAllowed: options.isProviderModelAllowed }),
     ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
+    ...(options.sideTaskReports === undefined ? {} : { sideTaskReports: options.sideTaskReports }),
+    ...(options.onSideTaskReportAdmitted === undefined
+      ? {}
+      : { onSideTaskReportAdmitted: options.onSideTaskReportAdmitted }),
     onScopedOperation: ({ command, executeOptions }) => {
       // The service invokes this only after its authoritative scope check and
       // replay lookup, but before approval or the operation side effect. That
@@ -1662,7 +1674,13 @@ export function createCodeOperationRuntime(
       // The host's own limit-recovery dispatch is not the person re-engaging,
       // so it must not wake a snooze or reopen a completion the way their
       // turn would; the spent limit-owned snooze goes in the settle instead.
-      if (command.kind === "start-provider-turn" && executeOptions?.limitRecovery !== true)
+      // A side task's report is not the person either, and one the thread
+      // cannot take yet is retried, so it changes the rest only once admitted.
+      if (
+        command.kind === "start-provider-turn" &&
+        executeOptions?.limitRecovery !== true &&
+        command.delivery?.kind !== "side-task-report"
+      )
         options.onProviderTurnRequested?.(command.threadId);
       const started = codeRuntimeWorkStarted(command);
       if (started !== undefined)

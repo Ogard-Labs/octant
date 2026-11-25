@@ -53,7 +53,9 @@ export function createChatAgentResultDeliveryPort(input: {
         });
         return agentResultDeliveryReceipt(
           delivery,
-          result.kind === "turn-created" ? result.turn.delivery : undefined,
+          result.kind === "turn-created" && result.turn.delivery?.kind === "agent-result"
+            ? result.turn.delivery
+            : undefined,
         );
       } catch (error) {
         if (

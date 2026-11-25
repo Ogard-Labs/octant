@@ -218,7 +218,7 @@ describe("buildAutomationDraft", () => {
     const result = buildAutomationDraft({ ...validFormInput(), deliveryTargetConfirmed: false });
     expect(result.kind).toBe("invalid");
     if (result.kind !== "invalid") return;
-    expect(result.issues).toContain("Confirm the delivery target before saving.");
+    expect(result.issues).toContain("Confirm the delivery before saving.");
   });
 
   it("requires name, prompt, Project, and both profiles", () => {

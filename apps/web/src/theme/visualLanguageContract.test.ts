@@ -753,7 +753,6 @@ describe("the public-block visual language", () => {
       ".octant-sheet__popup",
       ".folder-picker__search input",
       ".octant-popover-search input",
-      ".artifact-library__search-input",
       ".artifact-tags__input",
       ".browser-workspace__omnibox input",
       // Static cards that draw a fill and no edge; nothing in them takes focus

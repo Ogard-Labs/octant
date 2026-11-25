@@ -111,7 +111,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
                 ? `${label} failed. ${result.detail}`
                 : `${label} ${result.state}. Refresh checkout state before retrying.`,
         );
-      else setLastResult(`${label} requested. Waiting for authoritative checkout refresh.`);
+      else setLastResult(`${label} requested. Waiting for the checkout to refresh.`);
     } catch {
       setFailure("Git command failed. Refresh checkout state and retry.");
     }

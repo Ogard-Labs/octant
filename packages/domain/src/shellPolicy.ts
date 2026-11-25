@@ -349,7 +349,7 @@ export function filterEnvironmentSections(
   if (mode === "chat") {
     const hasAuthoritativeContext = capabilities.hasAuthoritativeContext ?? true;
     const hasProjectMemory = capabilities.hasProjectMemory ?? true;
-    const contextUnavailableReason = "Authoritative Chat context is unavailable.";
+    const contextUnavailableReason = "Chat context is unavailable.";
     return [
       section(
         "project-context",

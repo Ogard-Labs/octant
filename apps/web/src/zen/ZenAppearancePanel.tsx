@@ -317,9 +317,9 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
             pictures off the bottom of it. */}
         <OctantCollapsible className="zen-appearance__custom" summary="Custom fill">
           <label>
-            Solid color
+            Solid colour
             <OctantInput
-              aria-label="Solid color"
+              aria-label="Solid colour"
               onChange={(event) => setSolidColor(event.currentTarget.value)}
               type="color"
               value={HEX.test(solidColor) ? solidColor : ZEN_FILL_SEED_FROM}
@@ -333,7 +333,7 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
             type="button"
             variant="secondary"
           >
-            Apply solid color
+            Apply solid colour
           </OctantButton>
           <label>
             Gradient style

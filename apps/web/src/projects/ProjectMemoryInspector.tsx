@@ -162,7 +162,7 @@ export function ProjectMemoryInspector(props: ProjectMemoryInspectorProps) {
             <p role="status">Loading Project memory…</p>
           ) : null}
           {props.status === "conflict-reload" ? (
-            <p role="status">Reloading authoritative memory…</p>
+            <p role="status">Reloading Project memory…</p>
           ) : null}
           {props.status === "error" ? (
             <OctantAlert className="project-memory-inspector__error" tone="danger">

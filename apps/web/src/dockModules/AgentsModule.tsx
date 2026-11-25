@@ -20,7 +20,7 @@ type Props = Pick<
 
 export default function AgentsModule(props: Props) {
   if (props.agentRunClient === undefined) {
-    return unavailable("Agents", "This thread has no AgentRun service available.");
+    return unavailable("Agents", "Agents are not available in this thread.");
   }
   return (
     <>

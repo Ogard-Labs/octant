@@ -601,12 +601,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         <div className="chat-workspace__load-state">
           <OctantEmpty
             action={{ label: "Retry chat", onClick: props.controller.retry }}
-            message={
-              props.controller.errorMessage ??
-              (props.controller.status === "disconnected"
-                ? "The host connection is unavailable."
-                : "Reading this thread from the host.")
-            }
+            {...(props.controller.errorMessage !== undefined
+              ? { message: props.controller.errorMessage }
+              : props.controller.status === "disconnected"
+                ? { message: "The host connection is unavailable." }
+                : {})}
             role={props.controller.status === "disconnected" ? "alert" : "status"}
             state={props.controller.status === "disconnected" ? "disconnected" : "loading"}
             title={
