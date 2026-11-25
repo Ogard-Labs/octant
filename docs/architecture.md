@@ -1650,8 +1650,9 @@ document as a future version. Frames follow the
   by what the frame holds, and the Run control there says so. This tier has
   shipped. A design or prototype also has a per-Canvas "Allow network" switch
   that only the person sets, off by default and journaled (maintainer
-  decision, 2026-11-12; not built yet: a paired device is not offered the
-  switch, and today only a local window sets it). While it is on, a running page of that Canvas may ask
+  decision, 2026-11-12; a browser the host's own person paired is offered the
+  switch as a local window is, and a hub-introduced or restricted device is
+  not). While it is on, a running page of that Canvas may ask
   the host to fetch for it through token-bound proxy paths its page policy
   names: a script's `GET`, a script's `POST` of a JSON body of at most
   256 KiB, an image, and a font, and no WebSocket, media, or other method
@@ -1719,8 +1720,8 @@ document as a future version. Frames follow the
   Markdown export writes the title. A public link is an export too: off until
   the person turns on Settings › Permissions › Public links, published only from
   the approval card in a local window or on a paired device (maintainer
-  decision, 2026-11-12; not built yet: today a local window only) and never by
-  an agent, it carries the
+  decision, 2026-11-12; a browser the host's own person paired shows the card
+  too) and never by an agent, it carries the
   share filter's blocks without host, Project, thread, or source identity to
   the public Canvas share service, which can read it, draws design frames only
   from a separate user-content origin, and deletes it on revoke or expiry (see
@@ -2549,9 +2550,10 @@ keep, largest first, with the Project, branch, folder, and a bounded size
 cleanup as a confirmed local-user request: it refuses uncommitted changes, an
 active thread, and a thread whose turn is still in progress, and keeps the
 branch. Listing and removing are the person's, at a local window or a paired
-device (maintainer decision, 2026-11-12; not built yet: today a paired device is
-refused both, because the list names folders on this computer and removal
-deletes from its disk). The receipt's
+device (maintainer decision, 2026-11-12; a browser the host's own person paired
+lists and removes them, and a hub-introduced or restricted device is refused
+both, because the list names folders on this
+computer and removal deletes from its disk). The receipt's
 `cleanup-pending` and `removed` states record each removal, as they do for the
 other cleanup callers. Cleanup on archive is on unless a person turns it off in
 Settings › Code › Worktrees.
@@ -2826,7 +2828,8 @@ workspace is gone (orphaned) or that Xcode has not opened for 30 days
 (unused); a workspace on an unmounted volume is neither. Removing one reads
 it again and keeps a folder Xcode has opened since. Both lists and every
 removal are the person's, at a local window or a paired device (maintainer
-decision, 2026-11-12; not built yet: today a local window's only); nothing is journaled, because none of
+decision, 2026-11-12; a browser the host's own person paired does both as a
+window does, and a hub-introduced or restricted device is refused); nothing is journaled, because none of
 these folders is Octant's.
 
 A Code fork (`fork-code-thread`) is a managed-worktree creation the host
@@ -4045,9 +4048,20 @@ on **Merge when ready** and **Auto-fix** for a Code thread's pull request
   with the head the person reviewed. The server reads every one first and
   refuses the stack whole unless each is open and each base is the head
   branch of the one before it (`not-a-chain`, `duplicate`, `too-long`,
-  `unreadable`). It then merges one at a time through the same path as a
-  single merge, and stops at the first that does not merge, answering what
-  landed and why it stopped.
+  `unreadable`), each head is the one the command names (`stale`), and the
+  bottom lands on the branch the command names, when it names one
+  (`base-changed`). It then merges one at a time through the same path as a
+  single merge, each held to that branch as well as to its head, because a
+  changed base moves no commit. A layer is pointed at the destination before its
+  merge; GitHub then says its mergeability is unknown for a moment, which the
+  merge refuses, so the host waits for the answer within a bound. A layer counts
+  as merged only when the forge shows it merged: one GitHub took but holds in a
+  merge queue stops the stack (`not-landed`) before the next is touched. It stops
+  at the first that does not merge, answering what landed, why it stopped, and
+  the branch that layer is now based on: it is not pointed back, because the
+  layer below has landed and its old base would strand it. The review's Merge
+  stack sends the heads and the branch its confirmation read and named
+  ([Workspace](design/workspace.md#pull-requests-and-issues)).
 - **Confirmation.** The review enables Merge only for a fresh, unambiguous,
   open, mergeable observation. Merge opens an inline confirmation that names the reviewed head
   and focuses Cancel; nothing merges until the person chooses Confirm merge.
@@ -8193,8 +8207,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   confinement unchanged (maintainer request, 2026-11-12); the catalog lists effective outside drivers in their own group from
   the registry snapshot. Third-party provider-driver plugins are in scope for the
   first preview under [Outside provider drivers](design/outside-provider-drivers.md),
-  as harness endpoints or as media generators: an outside image driver lists
-  its declared models and prices in the same group and adds an image profile
+  as harness endpoints or as media generators: an outside image or video driver
+  lists its declared models in the same group and adds an image or video profile
   ([Outside media generation drivers](design/outside-provider-drivers.md#outside-media-generation-drivers)). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
@@ -8315,7 +8329,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   fresh connection, with the original name kept as `Host` and as the TLS
   server name the certificate is verified against. No redirect is followed,
   so the first hop is the only one. This holds for bundled and outside image
-  drivers alike, and closes DNS rebinding between a check and the fetch.
+  drivers and for an outside video driver's clips, and closes DNS rebinding
+  between a check and the fetch.
   The **Image generator** surface (profile menu, host-wide `image-library`
   scope;
   any registered window may use the `image-library` scope, while thread scopes
@@ -13948,8 +13963,9 @@ ten minutes by default, up to a day; maintainer decision, 2026-11-21), in the
 window that asked, and refuses when the account or
 its folder changed since (`changed-plan`), comparing the command written out as text when its turn comes, not a hash. **The person only**: every step
 needs a local window's capability or a paired device's session (maintainer
-decision, 2026-11-12; not built yet: today a request forwarded from a paired
-device is refused, `not-a-local-window`), and no agent tool or route reaches
+decision, 2026-11-12; a request forwarded from a device the host's own person
+paired is taken, and one from any other device is refused,
+`not-a-local-window`), and no agent tool or route reaches
 it, since an agent holds neither. **No shell**: the program is started with
 an argument list, every value is validated first (names are
 `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, a web address must parse as http or https
@@ -18108,8 +18124,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | Oh My Pi                  | `oh-my-pi`                                                                                                                                   | `no`  | `no`              | `no`              | `none`           |
 
   The image profiles (`openai-image`, `gemini-native-image`, `bfl-image`,
-  `ideogram-image`, and an outside package's `outside-image`) are not turn
-  drivers and are not in the matrix.
+  `ideogram-image`, and an outside package's `outside-image`) and the video
+  profiles (`gemini-video`, `runway-video`, `fal-video`, and an outside
+  package's `outside-video`) are not turn drivers and are not in the matrix.
 
   Where each provider is weaker than Claude Code and Codex:
 
@@ -18661,7 +18678,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   everywhere until reconfirmed, and the desktop app loads them into the profile's
   Electron session, with `chrome.tabs` for the profile's own pages and
   `chrome.action.onClicked` answered by the app. A signed-in page's approval from a phone-started turn is answered on that phone or at any window or paired device that may drive the thread
-  (maintainer decision, 2026-11-12; not built yet: today it waits for a local window), and a kept screenshot's record names the profile. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
+  (maintainer decision, 2026-11-12; a browser the host's own person paired reads and answers it; a hub-introduced or restricted device never sees it), and a kept screenshot's record names the profile. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,
@@ -19814,9 +19831,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
     boundary above is unchanged: the new route sits behind the same bridge
     secret, window capability, no-`Origin`, and loopback checks.
 
-- **The credential tool.** An agent reaches both person-held credential paths
-  below, one-use cards and named credential commands, through one app-managed
-  Code tool, `octant_credential`. Its operations are `help`; `list`, which
+- **The credential tool.** An agent reaches the person-held credential paths
+  below, one-use cards, named credential commands and
+  [thread secrets](#thread-secrets), through one app-managed tool,
+  `octant_credential`, in Code, and in Work for thread secrets alone. Its
+  operations are `request-secret` and `run-with-secret`, which thread secrets
+  describe; `help`; `list`, which
   returns the registered operations (id, label, reason) and the saved commands
   (id, label, executable, arguments, Project directory) this thread can use,
   never a destination request, account, vault reference or value; `request`,
@@ -19828,10 +19848,16 @@ approval-gated` command that undoes it. The terminal shows no one-time
   command saved for this Code Project. Both are host-memory facts, so the
   decision is taken when the turn's tools are composed; a command saved during
   a turn is offered from the next turn, and a side that was not offered stays
-  refused for the whole turn, so the schema a provider sees lists exactly the
-  operations it can call. The profile allowlist names `octant_credential` for
+  refused for the whole turn. Where thread secrets are offered, which is every
+  Code turn the profile allows and every Work turn whose person can answer a
+  card, the tool is always there and its definition never changes, in Plan too:
+  a provider that keeps a session's tools takes a changed definition for a new
+  one, and entering Plan or saving a first command would break off the session.
+  Where they are not, the schema a provider sees lists exactly the operations
+  it can call. No provider defers the tool behind tool search. The profile allowlist names `octant_credential` for
   both sides; a stored allowlist that names only a former tool name admits
-  neither side, so it fails closed. The description says values are never returned and that the tool
+  neither side, so it fails closed. The description says to ask with a card instead of in chat, that a decline
+  is final, that no operation returns a value, and that the tool
   is not a general command runner: ordinary commands stay with the terminal and
   shell. The verbs follow the repository's tool families (`help`, `list`);
   `request` matches the card's own name, and `run-saved` says in the name that
@@ -19901,8 +19927,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
 
 - **Thread secrets.** An agent in a Code or Work thread may ask the person for a
   secret its work needs: an API key, a token, or an account password for `sudo`
-  (maintainer decision, 2026-11-24). The host half is built, with `run-with-secret`, Fresh each use and
-  Remember; the tool operation and the card are not built yet, so no agent is offered any of it.
+  (maintainer decision, 2026-11-24). Built.
   - **Request.** The agent names the secret, a label, a kind (`token` or
     `account-password`), a reason, an optional setup page, up to eight fields and
     a delivery. It can never pass a value: the person enters it in the card every
@@ -19913,7 +19938,40 @@ approval-gated` command that undoes it. The terminal shows no one-time
     in it, shown as the browser will open it. Chat is refused. A thread has at
     most two cards waiting, so its cards cannot keep another thread's from
     opening. A card never expires: it ends with its answer, its turn, its
-    thread's archive, its window, its authority or the host.
+    thread's archive, its window, its authority or the host. The agent asks
+    with `octant_credential` in a Code or Work turn started at a window here or
+    at a device this host's person paired at Full; a routine's turn has nobody
+    to answer and is offered none of it, and Plan refuses each use.
+  - **Where it is answered.** The [card](design/thread-view.md#secret-cards)
+    submits to `/api/thread-secrets`, which the private listener never forwards
+    and which takes a local window alone: the window that raised it, or, for a
+    paired device's card, a window that could drive its thread. A phone this
+    host's person paired at Full reads a thread's cards and answers one on
+    `/api/thread-secrets/paired`; an agent's grant, a device the hub introduced
+    and a device the person paired below Full are refused. The device's session
+    and standing are read again once every field is read, and again once a value
+    is kept, before anything is granted, and the grant is journaled as the device
+    that answered. A phone takes a typed value or a remembered typed one. A linked store stays with its person at the computer:
+    its sources are left out of a phone's card and an answer naming one is
+    refused as `not-linked`. Needs you lists the card by its title and reason
+    to whoever may answer it, and the paired phones' notification names the
+    thread and nothing of the ask. A client away from this computer that is not
+    the phone app shows no card.
+  - **Picking a 1Password item.** A waiting card can list the linked store's
+    vaults, a vault's items and an item's fields by name. The broker runs the
+    tool with ids alone as arguments, reads an id, a label and a field's
+    address from its output and drops the rest, so nothing a field holds and no
+    user name leaves it. It lists at most 1,000 names and says when more were
+    there, only while the store is linked and the card waits, and an unlink
+    meanwhile shows nothing. One-time codes, files and empty fields are left
+    out. The address is by id, so a renamed item still answers. The default
+    account is listed.
+  - **Seeing and ending them.** The thread's info panel lists its active
+    secrets and Settings › Secret stores lists every thread's, each with its
+    source, its time left and Revoke, and what Octant remembers with Forget.
+    A revoke ends the secret everywhere and deletes its file. Forgetting
+    deletes a typed value from the credential store and changes nothing in
+    1Password; a thread that holds the secret keeps it for its own time.
   - **Lifetime.** The person chooses on every card: this command, this turn, one
     hour, 24 hours, until the thread is archived, or Remember. It starts on their
     last choice for that name and kind, else 24 hours, else this turn under
@@ -19922,7 +19980,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     bounds it and nothing under Strict writes a file. Time is the authority clock,
     which counts a suspended host's time.
   - **Delivery.** A `handle` is redeemed once, by a registered host or plugin
-    consumer, for its own thread, and never by a command. The thread's authority,
+    consumer, for its own thread, and never by a command. While none is registered
+    a request for one is refused before anyone is asked, and the agent is told to
+    ask for a `file`. The thread's authority,
     Strict, the turn, the consumer's registration and the cancellation signal are
     read before the value is read and again after it. A 1Password item is read
     again at every redemption. The value stays redacted until the consumer says
@@ -19985,9 +20045,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     alignment, and its URL and JSON forms are replaced in runtime events, the
     service log, exports and tool-call records, at any depth, and in a key unless
     it reads as a field name. An agent cannot switch this off: a field it calls
-    not secret is spared only when the person typed it for a token. Matches are
-    found in the original text and overlapping ones replaced as one. An ended
-    value stays redacted, and is kept for nothing else, until the host stops
+    not secret is spared only when the person typed it for a token, on one line.
+    Matches are found in the original text and overlapping ones replaced as one.
+    An ended value stays redacted, and is kept for nothing else, until the host stops
     (maintainer decision, 2026-11-24): the token usually still works and may
     still be in the agent's context. At most 128 ended values are kept, the
     longest ended leaving first.
@@ -21391,7 +21451,7 @@ whole, journal first, as `shield-servers.server-set@1` or
 Project's list is journaled whole as `shield-servers.project-servers-set@1`
 under the Project's id, and `shield-servers.project-override-cleared@1`
 returns the Project to the account list. Startup replays them; only a person,
-at a local window or a paired device (not built yet for the device), changes them (`GET`/`POST /api/shield/servers`, with
+at a local window or on a device the host's own person paired, changes them (`GET`/`POST /api/shield/servers`, with
 `?projectId=` for a Project's list). An account server's row also offers
 **Make this an Octant computer** (`POST /api/shield/servers/member-install`,
 for a window or a device the host's own person paired): the signed headless
@@ -21590,8 +21650,8 @@ this; it would need each runtime's profile to open the relays.
 **The credential broker for SSH.** For a server registered to sign in with
 a key Octant keeps, the credential broker makes an Ed25519 key the first time
 the person asks for it (**Show key** in Settings, `show-server-key` on
-`POST /api/shield/servers`, from a local window or, not built yet, a paired
-device, for a server whose sign-in
+`POST /api/shield/servers`, from a local window or a device the host's own
+person paired, for a server whose sign-in
 is `octant-key`) and keeps it in a credential namespace of its own (the
 `app.octant.ssh-keys.v1` Keychain service, the `octant.ssh-keys.v1` Secret
 Service attribute), keyed by the server's id. Its routes (`/v1/ssh-keys/ensure`,

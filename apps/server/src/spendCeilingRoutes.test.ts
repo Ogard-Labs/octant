@@ -1,5 +1,6 @@
 import { decodeWindowId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { ConcurrencyConflict, JournalWriteFailed } from "./persistence/journalErrors";
 import { createSpendCeilingRouteHandler } from "./spendCeilingRoutes";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
@@ -87,5 +88,40 @@ describe("spend ceiling routes", () => {
     expect(await response?.json()).toEqual({
       error: "Spend ceiling command could not be applied.",
     });
+  });
+
+  it("sets a ceiling for a device the host's own person paired, and refuses a hub-introduced and a restricted device", async () => {
+    const execute = vi.fn((..._args: ReadonlyArray<unknown>) => ({ kind: "refused" }));
+    const handler = handlerWith(execute);
+    const deviceId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const send = async (admittedBy: "host-person" | "hub-roster" | undefined) => {
+      const request = new Request("http://127.0.0.1:3100/api/spend-ceilings/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(request, {
+        principal: {
+          kind: "remote-device",
+          hostId: "11111111-1111-4111-8111-111111111111",
+          deviceId,
+          credentialGeneration: 1,
+          origin: "https://remote.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "eeeeeeee-eeee-4eee-8eee-0000000000aa",
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        } as never,
+        scopeId: windowId,
+      });
+      return await handler(request);
+    };
+    for (const admittedBy of [undefined, "hub-roster"] as const) {
+      expect((await send(admittedBy))?.status).toBe(403);
+    }
+    expect(execute).not.toHaveBeenCalled();
+    await send("host-person");
+    expect(execute).toHaveBeenCalledOnce();
+    expect(execute.mock.calls[0]?.[2]).toMatchObject({ kind: "remote-device", deviceId });
   });
 });

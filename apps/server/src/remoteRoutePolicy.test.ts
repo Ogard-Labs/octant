@@ -319,6 +319,8 @@ describe("remote route policy", () => {
       { path: "/api/artifacts/synced", method: "POST" },
       { path: "/api/threads/tool-call-records", method: "POST" },
       { path: "/api/provider-tooling/list", method: "POST" },
+      { path: "/api/mcp-plan-read-only", method: "GET" },
+      { path: "/api/mcp-plan-read-only/commands", method: "POST" },
       { path: "/api/code-live-tasks?threadId=t1", method: "GET" },
       { path: "/api/work-live-tasks?threadId=t1", method: "GET" },
       { path: "/api/replica-store/settings", method: "GET" },
@@ -1056,6 +1058,32 @@ describe("remote route policy", () => {
     ]) {
       expect(inspect(path, "POST")).toMatchObject({ kind: "reject" });
     }
+  });
+
+  it("forwards a secret's card on a phone, and keeps the window's own path on the host", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    expect(inspect("/api/thread-secrets/paired", "POST")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+    expect(inspect("/api/thread-secrets/paired", "GET")).toMatchObject({ kind: "reject" });
+    for (const method of ["GET", "POST"] as const)
+      expect(inspect("/api/thread-secrets", method)).toMatchObject({ kind: "reject" });
+    expect(
+      classifyProductAction(new Request(`${origin}/api/thread-secrets/paired`, { method: "POST" })),
+    ).toBeUndefined();
   });
 
   it("forwards a provider key on its way to the credential broker, and keeps the desktop bridge's own key routes on the host", () => {

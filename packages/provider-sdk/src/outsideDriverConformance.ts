@@ -161,6 +161,9 @@ export async function runOutsideDriverConformance(
     if (holder !== undefined && params.requestId !== holder.sendId) {
       return violate("a brokered request made for a send did not name it with requestId");
     }
+    if (params.method === "PUT" || params.method === "DELETE") {
+      return violate(`a harness-endpoint driver asked for a ${params.method}`);
+    }
     const refusal = brokeredRequestRefusal(params, origin, fixture.key);
     if (refusal !== undefined) return violate(refusal);
     const headers = new Headers();

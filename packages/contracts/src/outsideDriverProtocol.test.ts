@@ -5,8 +5,12 @@ import {
   decodeOutsideDriverProbeResult,
   decodeOutsideDriverSessionSendResult,
   decodeOutsideDriverToHostMessage,
+  decodeOutsideDriverVideoForgetResult,
+  decodeOutsideDriverVideoPollResult,
+  decodeOutsideDriverVideoStartResult,
   HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS,
   HOST_IMAGE_GENERATION_PROTOCOL_VERSIONS,
+  HOST_VIDEO_GENERATION_PROTOCOL_VERSIONS,
   OUTSIDE_DRIVER_IMAGE_BASE64_CHARACTERS,
   OUTSIDE_DRIVER_REFERENCE_IMAGE_BASE64_CHARACTERS,
   OutsideDriverImageGenerateParams,
@@ -21,7 +25,7 @@ describe("outside image generation protocol", () => {
     const decode = Schema.decodeUnknownSync(OutsideProviderDriverProtocolVersion);
     expect(outsideDriverProtocolFamily(decode("image-generation/1"))).toBe("image-generation");
     expect(outsideDriverProtocolFamily(decode("harness-endpoint/1"))).toBe("harness-endpoint");
-    expect(() => decode("video-generation/1")).toThrow();
+    expect(() => decode("audio-generation/1")).toThrow();
   });
 
   it("reads a completed job's images as bytes or an address, and a refusal with no text", () => {
@@ -92,6 +96,56 @@ describe("outside image generation protocol", () => {
         references: [{ mediaType: "image/png", data: overCeiling }],
       })._tag,
     ).toBe("Left");
+  });
+});
+
+describe("outside video generation protocol", () => {
+  it("speaks video-generation/1 as a family of its own", () => {
+    expect(HOST_VIDEO_GENERATION_PROTOCOL_VERSIONS).toEqual(["video-generation/1"]);
+    const decode = Schema.decodeUnknownSync(OutsideProviderDriverProtocolVersion);
+    expect(outsideDriverProtocolFamily(decode("video-generation/1"))).toBe("video-generation");
+  });
+
+  it("reads a started job, a running, finished, refused, failed and cancelled one, and a removal", () => {
+    for (const result of [{ status: "started", remoteId: "job-1" }, { status: "refused" }]) {
+      expect(decodeOutsideDriverVideoStartResult(result)._tag).toBe("Right");
+    }
+    for (const result of [
+      { status: "running" },
+      { status: "completed", url: "https://cdn.example.test/clip.mp4" },
+      {
+        status: "completed",
+        url: "https://cdn.example.test/clip.mp4",
+        usage: { billedSeconds: 5, inputTokens: 10, outputTokens: 20 },
+      },
+      { status: "refused", billed: true },
+      { status: "failed", category: "provider-failed", billed: true, usage: { billedSeconds: 2 } },
+      { status: "cancelled" },
+    ]) {
+      expect(decodeOutsideDriverVideoPollResult(result)._tag).toBe("Right");
+    }
+    expect(decodeOutsideDriverVideoForgetResult({ status: "removed" })._tag).toBe("Right");
+  });
+
+  it("takes no price, free text, inline clip or empty usage from a running driver", () => {
+    for (const result of [
+      { status: "started", remoteId: "" },
+      { status: "started", remoteId: "x".repeat(513) },
+      { status: "refused", message: "attacker text" },
+    ]) {
+      expect(decodeOutsideDriverVideoStartResult(result)._tag).toBe("Left");
+    }
+    for (const result of [
+      { status: "completed", url: "https://cdn.example.test/c.mp4", usage: { costUsdMicros: 1 } },
+      { status: "completed", url: "https://cdn.example.test/c.mp4", usage: { billedSeconds: 0 } },
+      { status: "completed", url: "https://cdn.example.test/c.mp4", price: 1 },
+      { status: "completed", data: "AAAA" },
+      { status: "refused", text: "attacker text" },
+      { status: "failed", category: "provider-failed", message: "attacker text" },
+      { status: "failed", category: "made-up" },
+    ]) {
+      expect(decodeOutsideDriverVideoPollResult(result)._tag).toBe("Left");
+    }
   });
 });
 
@@ -170,12 +224,12 @@ describe("outside driver wire protocol", () => {
       },
     ],
     [
-      "a brokered request with a method other than GET or POST",
+      "a brokered request with a method the protocol does not name",
       {
         jsonrpc: "2.0",
         id: 1,
         method: "http/request",
-        params: { url: "https://x.test/", method: "DELETE" },
+        params: { url: "https://x.test/", method: "PATCH" },
       },
     ],
   ])("refuses %s", (_name, message) => {

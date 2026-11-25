@@ -47,6 +47,8 @@ export type GhPullRequestSummaryResult =
       baseBranch: string;
       headSha: string;
       baseSha?: string;
+      /** "unknown" while GitHub is still working it out, as after a base change. */
+      mergeability?: "mergeable" | "conflicting" | "unknown";
     }>
   | Readonly<{ status: "unavailable" }>;
 
@@ -119,7 +121,7 @@ export class GhPullRequestActionPort {
         "--repo",
         repository,
         "--json",
-        "state,headRefName,baseRefName,headRefOid,baseRefOid",
+        "state,headRefName,baseRefName,headRefOid,baseRefOid,mergeable",
       ],
       undefined,
       signal,
@@ -155,6 +157,12 @@ export class GhPullRequestActionPort {
       baseBranch: value.baseRefName,
       headSha: value.headRefOid,
       ...(baseSha === undefined ? {} : { baseSha }),
+      mergeability:
+        value.mergeable === "MERGEABLE"
+          ? "mergeable"
+          : value.mergeable === "CONFLICTING"
+            ? "conflicting"
+            : "unknown",
     };
   }
 

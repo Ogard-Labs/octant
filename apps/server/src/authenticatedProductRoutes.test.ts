@@ -228,6 +228,7 @@ describe("authenticated product route dispatch", () => {
       ["/api/code/project-terminals", "POST"],
       ["/api/context/commands", "POST"],
       ["/api/providers/credentials/set", "POST"],
+      ["/api/thread-secrets/paired", "POST"],
       ["/api/remote/devices/revoke", "POST"],
       ["/api/remote/pairing-requests/approve", "POST"],
       ["/api/host-control/lifecycle", "POST"],
@@ -242,6 +243,8 @@ describe("authenticated product route dispatch", () => {
       ["/api/replica-store/commands", "POST"],
       ["/api/replica-membership/commands", "POST"],
       ["/api/provider-tooling/list", "POST"],
+      ["/api/mcp-plan-read-only", "GET"],
+      ["/api/mcp-plan-read-only/commands", "POST"],
       ["/api/code-live-tasks", "GET"],
       ["/api/work-live-tasks", "GET"],
     ] as const;
@@ -275,6 +278,7 @@ describe("authenticated product route dispatch", () => {
       ["/api/providers/commands", "POST"],
       ["/api/code/project-terminals", "POST"],
       ["/api/providers/credentials/set", "POST"],
+      ["/api/thread-secrets/paired", "POST"],
       ["/api/remote/devices/revoke", "POST"],
       ["/api/remote/pairing-requests/approve", "POST"],
       ["/api/host-control/lifecycle", "POST"],
@@ -291,6 +295,8 @@ describe("authenticated product route dispatch", () => {
       ["/api/replica-store/commands", "POST"],
       ["/api/replica-membership/commands", "POST"],
       ["/api/provider-tooling/list", "POST"],
+      ["/api/mcp-plan-read-only", "GET"],
+      ["/api/mcp-plan-read-only/commands", "POST"],
       ["/api/code-live-tasks", "GET"],
       ["/api/work-live-tasks", "GET"],
     ] as const) {

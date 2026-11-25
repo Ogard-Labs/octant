@@ -3,6 +3,8 @@ import { createHostWorktreeBranchSuggester } from "./worktreeBranchSuggester";
 
 // The driver would start a real provider; what is under test is who may reach it.
 vi.mock("./providers", () => ({ makeConfiguredProviderDriver: () => ({}) }));
+const complete = vi.hoisted(() => vi.fn());
+vi.mock("../harness/nativeHarnessSingleShot", () => ({ completeOnceOutcome: complete }));
 
 const provider = "00000000-0000-4000-8000-000000000001" as never;
 const model = "model-a" as never;
@@ -85,5 +87,19 @@ describe("createHostWorktreeBranchSuggester", () => {
         turnUpperBoundTokens: 4_000,
       }),
     );
+  });
+
+  it("stops the model call when the person's request goes away", async () => {
+    const { port } = suggester();
+    const request = new AbortController();
+    complete.mockImplementationOnce(
+      ({ signal }: { readonly signal?: AbortSignal }) =>
+        new Promise((resolve) => {
+          signal?.addEventListener("abort", () => resolve({ status: "failed" }));
+        }),
+    );
+    const suggestion = port.suggest({ ...input, signal: request.signal });
+    request.abort();
+    await expect(suggestion).resolves.toEqual({ status: "failed" });
   });
 });

@@ -994,7 +994,8 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             return failureResponse(
               {
                 category: "unauthorized",
-                message: "Coordinators and wake switches are set at a window on this computer.",
+                message:
+                  "Only you, from a window or a device you paired, can set coordinators and wake switches.",
               },
               403,
               origin,
@@ -1037,9 +1038,9 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
-          // When the host removes worktree folders from this computer's disk
-          // is the person's choice, at a window on it or on a device they
-          // paired; no agent-gated or hub-introduced caller may set it.
+          // How new worktrees are named is the person's choice, at a window on
+          // this computer or on a device they paired; no agent-gated or
+          // hub-introduced caller may set it.
           if (
             command?.kind === "update-code-settings" &&
             command.worktrees !== undefined &&

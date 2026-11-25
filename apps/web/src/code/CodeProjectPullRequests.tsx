@@ -9,13 +9,20 @@ import type {
   CodeProjectPullRequestRow,
   CodeProjectPullRequestView,
   ProjectId,
+  PullRequestStackPlace,
 } from "@octant/contracts";
+import {
+  derivePullRequestStacks,
+  keepStacksTogether,
+  pullRequestStackPlaces,
+} from "@octant/domain/pull-request-stack-policy";
 import {
   ArrowLeft,
   Check,
   GitPullRequest,
   Eye,
   GitPullRequestDraft,
+  Layers,
   Link2,
   ListFilter,
   MoreHorizontal,
@@ -25,9 +32,10 @@ import {
   X,
   type IconComponent,
 } from "../ui/icons";
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import "./pull-request-page.css";
 import { pullRequestRowStateMark } from "./pullRequestState";
+import { stackJoin, stackPlaceSentence, stackPlaceWords } from "./stackPlace";
 import {
   defaultBoardStorage,
   readStoredValue,
@@ -316,6 +324,11 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       : workspace.status === "error"
         ? workspace.view
         : undefined;
+  // Read from every row of the snapshot, so a filter that hides a layer leaves
+  // the others' places as they are. Kept with the view, so a row's place is the
+  // same object until the rows change.
+  const stacks = useMemo(() => derivePullRequestStacks(view?.rows ?? []), [view]);
+  const stackPlaces = useMemo(() => pullRequestStackPlaces(stacks), [stacks]);
   const dock = props.presentation === "dock";
   const projectId = props.projectId;
   const busy = workspace.status === "loading" || workspace.status === "refreshing";
@@ -349,9 +362,12 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   // A chip and the menu count what the list would hold under every other
   // choice, so a number beside a choice is never one the list then contradicts.
   const searched = dock ? matchingSearch : filterByRepositories(matchingSearch, repositories);
-  const visibleRows = sortPullRequests(
-    filterPullRequests(searched, dock ? NO_PULL_REQUEST_FILTERS : filters, props.viewerLogin),
-    dock ? "updated" : sort,
+  const visibleRows = keepStacksTogether(
+    sortPullRequests(
+      filterPullRequests(searched, dock ? NO_PULL_REQUEST_FILTERS : filters, props.viewerLogin),
+      dock ? "updated" : sort,
+    ),
+    stacks,
   );
   // Whether the control is there never depends on a chip or a filter, so
   // choosing one cannot make it appear or go.
@@ -775,6 +791,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                   )}
                   rows={group.rows}
                   selectedRowKey={selectedKey}
+                  stackPlaces={stackPlaces}
                   title={`${group.owner}/${group.name}`}
                   {...(props.backgroundRefresh === undefined
                     ? {}
@@ -803,6 +820,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                   project={project}
                   rows={[]}
                   selectedRowKey={selectedKey}
+                  stackPlaces={stackPlaces}
                   title={`${project.repositoryOwner}/${project.repositoryName}`}
                   {...(props.backgroundRefresh === undefined
                     ? {}
@@ -823,6 +841,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                 qualifyRepository={qualifyRepository}
                 rows={dock ? visibleRows : visibleRows.slice(0, shown)}
                 selectedRowKey={selectedKey}
+                stackPlaces={stackPlaces}
               />
               {dock || visibleRows.length <= shown ? null : (
                 <OctantButton
@@ -1258,6 +1277,8 @@ function RepositorySettingsMenu(props: {
   );
 }
 
+type StackPlaces = ReadonlyMap<CodeProjectPullRequestRow, PullRequestStackPlace>;
+
 function RepositoryGroup(props: {
   readonly title: string;
   readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
@@ -1266,6 +1287,7 @@ function RepositoryGroup(props: {
   readonly onRefresh: () => void;
   readonly emptyCopy?: string;
   readonly selectedRowKey: string | undefined;
+  readonly stackPlaces: StackPlaces;
   readonly onBabysit: ((row: CodeProjectPullRequestRow) => ReactNode) | undefined;
   readonly onSelectRow: ((row: CodeProjectPullRequestRow) => void) | undefined;
   readonly backgroundRefresh?: ProjectSetting;
@@ -1329,6 +1351,7 @@ function RepositoryGroup(props: {
           qualifyRepository={false}
           rows={props.rows}
           selectedRowKey={props.selectedRowKey}
+          stackPlaces={props.stackPlaces}
         />
       )}
     </WorkListGroup>
@@ -1338,6 +1361,7 @@ function RepositoryGroup(props: {
 function PullRequestRows(props: {
   readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
   readonly selectedRowKey: string | undefined;
+  readonly stackPlaces: StackPlaces;
   readonly onBabysit: ((row: CodeProjectPullRequestRow) => ReactNode) | undefined;
   readonly onSelectRow: ((row: CodeProjectPullRequestRow) => void) | undefined;
   /** Name the owner too: the list spans repositories and no group head says it. */
@@ -1353,18 +1377,27 @@ function PullRequestRows(props: {
     const row = latest.current.rows.find((candidate) => projectPullRequestKey(candidate) === key);
     if (row !== undefined) latest.current.onSelectRow?.(row);
   }, []);
+  const stackItems = props.rows.map((row) => ({
+    identity: row,
+    stack: props.stackPlaces.get(row),
+  }));
   return (
     <WorkList>
-      {props.rows.map((row) => {
+      {props.rows.map((row, index) => {
         const rowKey = projectPullRequestKey(row);
         return (
-          <li key={rowKey} className={props.onBabysit ? "pr-page__watch-row" : undefined}>
+          <li
+            key={rowKey}
+            className={props.onBabysit ? "pr-page__watch-row" : undefined}
+            data-stack-join={stackJoin(stackItems, index)}
+          >
             <PullRequestRow
               onSelect={select}
               qualifyRepository={props.qualifyRepository}
               row={row}
               rowKey={rowKey}
               selected={props.selectedRowKey === rowKey}
+              stack={props.stackPlaces.get(row)}
             />
             {props.onBabysit &&
               row.state !== "closed" &&
@@ -1387,10 +1420,12 @@ const PullRequestRow = memo(function PullRequestRow(props: {
   readonly row: CodeProjectPullRequestRow;
   readonly rowKey: string;
   readonly selected: boolean;
+  readonly stack: PullRequestStackPlace | undefined;
   readonly qualifyRepository: boolean;
   readonly onSelect: (key: string) => void;
 }) {
-  const { row } = props;
+  const { row, stack } = props;
+  const stackSentence = stack === undefined ? undefined : `${stackPlaceSentence(stack)}.`;
   // A draft is said by its glyph, so only a state that needs the person is a pill.
   const attention = row.draft ? undefined : pullRequestAttention(row);
   const sentence = pullRequestStatusSentence(row);
@@ -1403,14 +1438,25 @@ const PullRequestRow = memo(function PullRequestRow(props: {
       // The branches and every fact the one word leaves out are text for a
       // screen reader, and the whole row opens them as a tooltip on hover and
       // on keyboard focus, so none of it is pointer-only.
-      description={`${sentence} ${branches}.`}
+      description={[sentence, `${branches}.`, stackSentence]
+        .filter((part) => part !== undefined)
+        .join(" ")}
       extras={
-        row.linkedThreads.length === 0 ? null : (
-          <span className="work-list__linked" title={`Linked: ${linked}`}>
-            <Link2 aria-hidden="true" size={12} />
-            <span className="sr-only">Linked: {linked}</span>
-          </span>
-        )
+        <>
+          {stack === undefined ? null : (
+            // The description says the place in words.
+            <span aria-hidden="true" className="work-list__stack">
+              <Layers size={12} />
+              {stackPlaceWords(stack)}
+            </span>
+          )}
+          {row.linkedThreads.length === 0 ? null : (
+            <span className="work-list__linked" title={`Linked: ${linked}`}>
+              <Link2 aria-hidden="true" size={12} />
+              <span className="sr-only">Linked: {linked}</span>
+            </span>
+          )}
+        </>
       }
       id={props.rowKey}
       number={row.number}
@@ -1428,6 +1474,7 @@ const PullRequestRow = memo(function PullRequestRow(props: {
         <span className="work-list__tooltip">
           <span>{sentence}</span>
           <span>{branches}</span>
+          {stackSentence === undefined ? null : <span>{stackSentence}</span>}
         </span>
       }
       trailing={

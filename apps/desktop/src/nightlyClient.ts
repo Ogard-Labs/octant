@@ -741,10 +741,21 @@ export async function runNightlyClient(
   }
   const client = await recovery.start();
   opening = false;
-  if (client.kind !== "opened")
+  if (client.kind !== "opened") {
+    // Quitting while the first window is still being asked for is not a failure.
+    if (quitRequested) return { kind: "started" };
+    // The reason is a short code from a closed set; it tells a slow or starting
+    // Octant from one that refused Nightly's identity.
+    writeDiagnostic(
+      `${identity.productName}: the first window was refused (${client.reason.slice(0, 64)}).`,
+    );
     return {
       kind: "refused",
-      message: "Octant Nightly could not register its window with the matching Octant host.",
+      message:
+        client.retryable === true
+          ? "Octant did not answer Octant Nightly's window request in time. Quit and reopen Octant, then open Octant Nightly again."
+          : "Octant Nightly could not register its window with the matching Octant host.",
     };
+  }
   return { kind: "started" };
 }

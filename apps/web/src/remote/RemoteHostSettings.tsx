@@ -6,7 +6,7 @@ import type { ProviderClient } from "@octant/client-runtime/provider-client";
 import type { ProviderCloudSessionClient } from "@octant/client-runtime/provider-cloud-session-client";
 import type { RemoteShellSurfaceKind } from "@octant/client-runtime";
 import type { AgentAccessCommand } from "@octant/contracts";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { AgentAccessSettingsSection } from "../agentAccess/AgentAccessSettingsSection";
 import { ExtensionsSettingsView } from "../extensions/ExtensionsSettingsView";
 import type {
@@ -19,19 +19,34 @@ import { providerSettingsViewProps } from "../providers/providerSettingsViewProp
 import { useProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { RemotePairedDevices } from "./RemotePairedDevices";
+import type { RemoteProductPort } from "./remoteProductClients";
 
-type HostSettingsSection = "extensions" | "providers" | "devices" | "agents";
+// Loaded when the Claude and Codex tab is opened, from the desktop Settings view it is made of.
+const LazyProviderTooling = lazy(async () => ({
+  default: (await import("../shell/SettingsView")).RemoteProviderTooling,
+}));
+
+// Loaded when the section is opened, from the desktop Settings view it is made of.
+const LazyRemoteHostPermissions = lazy(async () => ({
+  default: (await import("../shell/SettingsView")).RemoteHostPermissions,
+}));
+
+type HostSettingsSection = "extensions" | "providers" | "devices" | "agents" | "permissions";
 
 const SECTIONS: ReadonlyArray<{
   readonly id: HostSettingsSection;
   readonly label: string;
-  /** The matrix surface whose routes the section sends to. */
-  readonly surface: RemoteShellSurfaceKind;
+  /**
+   * The matrix surface whose routes the section sends to. Absent where the
+   * section stands on what the shell hands it.
+   */
+  readonly surface?: RemoteShellSurfaceKind;
 }> = [
   { id: "extensions", label: "Extensions", surface: "extension-install" },
   { id: "providers", label: "Providers", surface: "provider-setup" },
   { id: "devices", label: "Paired devices", surface: "device-management" },
   { id: "agents", label: "Agent access", surface: "agent-access" },
+  { id: "permissions", label: "Permissions" },
 ];
 
 export interface RemoteHostSettingsProps {
@@ -52,6 +67,13 @@ export interface RemoteHostSettingsProps {
   readonly providerOAuth: (
     command: ProviderOAuthCommand,
   ) => Promise<ProviderOAuthCommandResult | undefined>;
+  /**
+   * The session, given only for a browser the host's own person paired: it
+   * offers the Claude and Codex tab and the Permissions section, which build
+   * their own clients over it when opened. Absent, neither is offered and the
+   * host refuses the routes anyway.
+   */
+  readonly personPort?: RemoteProductPort;
   /** Opts supported endpoints in or out of provider cloud jobs over the session. */
   readonly providerCloudSessionClient?: ProviderCloudSessionClient;
 }
@@ -68,13 +90,17 @@ export interface RemoteHostSettingsProps {
  * the host's credential store and is never read back.
  */
 export function RemoteHostSettings(props: RemoteHostSettingsProps) {
-  const sections = SECTIONS.filter((section) => props.reachable.has(section.surface));
+  const sections = SECTIONS.filter((section) =>
+    section.id === "permissions"
+      ? props.personPort !== undefined
+      : section.surface !== undefined && props.reachable.has(section.surface),
+  );
   const [open, setOpen] = useState<HostSettingsSection>();
   if (sections.length === 0) return null;
   return (
-    <section aria-label="Host settings" className="remote-shell__device-panel">
+    <section aria-label="Host settings" className="remote-shell__device-panel min-w-0">
       <h2 className="remote-shell__section-title">Host settings</h2>
-      <div className="flex gap-1">
+      <div className="flex flex-wrap gap-1">
         {sections.map((section) => (
           <OctantButton
             aria-pressed={open === section.id}
@@ -88,12 +114,24 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
           </OctantButton>
         ))}
       </div>
-      {open === "extensions" ? <ExtensionsSettingsView client={props.extensionClient} /> : null}
+      {open === "extensions" ? (
+        <RemoteExtensions
+          client={props.extensionClient}
+          providerClient={props.providerClient}
+          personPort={props.personPort}
+          onOpenProviders={() => setOpen("providers")}
+        />
+      ) : null}
       {open === "devices" ? (
         <RemotePairedDevices client={props.pairedDevices} origin={props.origin} />
       ) : null}
       {open === "agents" ? (
         <RemoteAgentAccess client={props.agentGrants} projectClient={props.projectClient} />
+      ) : null}
+      {open === "permissions" && props.personPort !== undefined ? (
+        <Suspense fallback={null}>
+          <LazyRemoteHostPermissions port={props.personPort} projectClient={props.projectClient} />
+        </Suspense>
       ) : null}
       {open === "providers" ? (
         <RemoteProviderSettings
@@ -106,6 +144,64 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
         />
       ) : null}
     </section>
+  );
+}
+
+/**
+ * Skills & Extensions, with the Claude and Codex tab where the host's own
+ * person paired this browser: the host's accounts come from its provider list,
+ * and the commands run on the host through the session.
+ */
+function RemoteExtensions(props: {
+  readonly client: ExtensionClient;
+  readonly providerClient: ProviderClient;
+  readonly personPort: RemoteProductPort | undefined;
+  readonly onOpenProviders: () => void;
+}) {
+  const { personPort } = props;
+  if (personPort === undefined) return <ExtensionsSettingsView client={props.client} />;
+  return (
+    <RemoteExtensionsWithAccountTools
+      client={props.client}
+      onOpenProviders={props.onOpenProviders}
+      providerClient={props.providerClient}
+      port={personPort}
+    />
+  );
+}
+
+function RemoteExtensionsWithAccountTools(props: {
+  readonly client: ExtensionClient;
+  readonly providerClient: ProviderClient;
+  readonly port: RemoteProductPort;
+  readonly onOpenProviders: () => void;
+}) {
+  const controller = useProviderController({ client: props.providerClient });
+  const accounts = controller.instances.flatMap((instance) =>
+    instance.driverKind === "claude" || instance.driverKind === "codex"
+      ? [
+          {
+            id: String(instance.id),
+            displayName: instance.displayName,
+            driverKind: instance.driverKind,
+            nativeSetup: instance.nativeSetup !== false,
+          },
+        ]
+      : [],
+  );
+  return (
+    <ExtensionsSettingsView
+      accountTools={
+        <Suspense fallback={null}>
+          <LazyProviderTooling
+            accounts={accounts}
+            port={props.port}
+            onOpenRunAsItself={props.onOpenProviders}
+          />
+        </Suspense>
+      }
+      client={props.client}
+    />
   );
 }
 

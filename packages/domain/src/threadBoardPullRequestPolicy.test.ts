@@ -24,6 +24,8 @@ function row(overrides: {
   readonly review?: "unknown" | "none" | "pending" | "approved" | "changes-requested";
   readonly linkedThreadIds?: ReadonlyArray<string>;
   readonly updatedAt?: string;
+  readonly baseBranch?: string;
+  readonly headBranch?: string;
 }) {
   return {
     projectId,
@@ -36,8 +38,8 @@ function row(overrides: {
     state: overrides.state ?? "open",
     mergeability: overrides.mergeability ?? "mergeable",
     author: "octocat",
-    baseBranch: "main",
-    headBranch: "feature/board",
+    baseBranch: overrides.baseBranch ?? "main",
+    headBranch: overrides.headBranch ?? "feature/board",
     updatedAt: overrides.updatedAt ?? "2026-08-22T08:00:00Z",
     checks: overrides.checks ?? "passing",
     review: overrides.review ?? "approved",
@@ -179,6 +181,60 @@ describe("thread board pull-request policy", () => {
     // Within a group the most recently updated comes first.
     expect(summaries.items[0]?.identity.number).toBe(50);
     expect(summaries.items[1]?.identity.number).toBe(48);
+  });
+
+  it("keeps a stack together, bottom first, where its newest layer stands, with true positions", () => {
+    const layer = (number: number, headBranch: string, baseBranch: string, hour: number) =>
+      row({ number, headBranch, baseBranch, updatedAt: `2026-08-22T0${String(hour)}:00:00Z` });
+    const bottom = layer(21, "a", "main", 1);
+    const middle = layer(22, "b", "a", 2);
+    const top = layer(23, "c", "b", 6);
+    const newer = layer(30, "x", "main", 7);
+    const older = layer(31, "y", "main", 3);
+    const rows = [older, top, bottom, newer, middle];
+    const compose = (matched: ReadonlyArray<(typeof rows)[number]>) =>
+      composeThreadNavigationPullRequestSummaries({
+        rows,
+        snapshotFreshness: {
+          status: "fresh",
+          lastSuccessfulRefreshAt: decodeTimestamp("2026-08-22T08:00:00.000Z"),
+        },
+        githubRevoked: false,
+        matches: matched.map((match) => ({ row: match })),
+      }).items.map((summary) => [summary.identity.number, summary.stack]);
+
+    expect(compose(rows)).toEqual([
+      [30, undefined],
+      [21, { position: 1, size: 3 }],
+      [22, { position: 2, size: 3, parent: 21 }],
+      [23, { position: 3, size: 3, parent: 22 }],
+      [31, undefined],
+    ]);
+    // A thread that worked on part of the stack still says where its layers stand.
+    expect(compose([top, middle])).toEqual([
+      [22, { position: 2, size: 3, parent: 21 }],
+      [23, { position: 3, size: 3, parent: 22 }],
+    ]);
+  });
+
+  it("leaves a board card's order and facts as they were when its pull requests are a stack", () => {
+    const bottom = row({ number: 21, headBranch: "a", updatedAt: "2026-08-22T01:00:00Z" });
+    const top = row({
+      number: 22,
+      headBranch: "b",
+      baseBranch: "a",
+      updatedAt: "2026-08-22T02:00:00Z",
+    });
+    const summaries = composeThreadBoardPullRequestSummaries({
+      rows: [bottom, top],
+      snapshotFreshness: { status: "stale" },
+      githubRevoked: false,
+      matches: [{ row: bottom }, { row: top }],
+    });
+    expect(summaries.items.map((summary) => [summary.identity.number, summary.stack])).toEqual([
+      [22, undefined],
+      [21, undefined],
+    ]);
   });
 
   it("preserves a restart-recovered identity as unknown and stale", () => {

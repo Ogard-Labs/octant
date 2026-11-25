@@ -139,6 +139,138 @@ describe("outside provider driver entry", () => {
     ).toBe("not-one-provider-driver");
   });
 
+  describe("a video generation driver", () => {
+    const videoModel = {
+      modelId: "example-video-1",
+      displayName: "Example Video",
+      durations: { kind: "range", min: 2, max: 10 },
+      resolutions: ["720p"],
+      aspectRatios: [{ ratio: "16:9" }],
+      audio: "none",
+      inputs: { firstFrame: true, lastFrame: false, maxReferenceImages: 0 },
+      price: { kind: "per-second", rates: [{ resolution: "720p", usdMicrosPerSecond: 50_000 }] },
+      job: { cancel: "running", removal: { kind: "delete" }, resumeWindowHours: 24 },
+    };
+    const videoComponent = (models: ReadonlyArray<Record<string, unknown>> = [videoModel]) => ({
+      ...driverComponent,
+      displayName: "Example video",
+      mediaGeneration: { media: "video", models },
+    });
+    const videoEntry = (overrides: Record<string, unknown> = {}) =>
+      entry({
+        driverKind: "outside-video",
+        protocolVersions: ["video-generation/1"],
+        manifest: manifest({ components: [videoComponent()] }),
+        ...overrides,
+      });
+
+    it("declares its video models, prices and job control as package data", () => {
+      expect(readOutsideProviderDriverEntry(videoEntry()).status).toBe("accepted");
+      const accepted = decodeOutsideProviderDriverEntry(videoEntry());
+      expect(accepted.manifest.components[0]?.mediaGeneration).toEqual(
+        videoComponent().mediaGeneration,
+      );
+    });
+
+    it("refuses a family, protocol and declaration that disagree", () => {
+      const mismatch = "media-declaration-mismatch";
+      expect(refusal(videoEntry({ protocolVersions: ["image-generation/1"] }))).toBe(mismatch);
+      expect(refusal(videoEntry({ protocolVersions: ["harness-endpoint/1"] }))).toBe(mismatch);
+      expect(refusal(entry({ protocolVersions: ["video-generation/1"] }))).toBe(mismatch);
+      expect(refusal(videoEntry({ manifest: manifest({ components: [driverComponent] }) }))).toBe(
+        mismatch,
+      );
+      expect(refusal(entry({ manifest: manifest({ components: [videoComponent()] }) }))).toBe(
+        mismatch,
+      );
+      expect(
+        refusal(
+          videoEntry({
+            driverKind: "outside-image",
+            protocolVersions: ["image-generation/1"],
+          }),
+        ),
+      ).toBe(mismatch);
+    });
+
+    it.each([
+      [
+        "a free rate",
+        { price: { kind: "per-second", rates: [{ resolution: "720p", usdMicrosPerSecond: 0 }] } },
+      ],
+      [
+        "a fractional rate",
+        { price: { kind: "per-second", rates: [{ resolution: "720p", usdMicrosPerSecond: 1.5 }] } },
+      ],
+      [
+        "a rate above the cap",
+        {
+          price: {
+            kind: "per-second",
+            rates: [{ resolution: "720p", usdMicrosPerSecond: 100_000_001 }],
+          },
+        },
+      ],
+      [
+        "a free clip",
+        {
+          price: {
+            kind: "per-clip",
+            rates: [{ durationSeconds: 5, resolution: "720p", usdMicros: 0 }],
+          },
+        },
+      ],
+      [
+        "free output tokens",
+        {
+          price: {
+            kind: "per-token",
+            outputTokensPerSecond: [{ resolution: "720p", tokens: 100 }],
+            outputUsdMicrosPerMillionTokens: 0,
+          },
+        },
+      ],
+      ["a clip length past the bound", { durations: { kind: "range", min: 1, max: 601 } }],
+      ["a listed length past the bound", { durations: { kind: "values", values: [5, 601] } }],
+      [
+        "hundreds of thousands of lengths",
+        { durations: { kind: "values", values: Array.from({ length: 300_000 }, () => 5) } },
+      ],
+      [
+        "a provider copy kept past a year",
+        { job: { ...videoModel.job, removal: { kind: "expires", afterHours: 8_761 } } },
+      ],
+      ["an invented field", { estimatedPrice: 1 }],
+    ])("refuses a model that declares %s", (_label, change) => {
+      expect(
+        refusal(
+          videoEntry({
+            manifest: manifest({ components: [videoComponent([{ ...videoModel, ...change }])] }),
+          }),
+        ),
+      ).toBe("entry-invalid");
+    });
+
+    it("refuses a model declared twice, and accepts one that publishes no price", () => {
+      expect(
+        refusal(
+          videoEntry({
+            manifest: manifest({ components: [videoComponent([videoModel, videoModel])] }),
+          }),
+        ),
+      ).toBe("entry-invalid");
+      expect(
+        readOutsideProviderDriverEntry(
+          videoEntry({
+            manifest: manifest({
+              components: [videoComponent([{ ...videoModel, price: { kind: "unpublished" } }])],
+            }),
+          }),
+        ).status,
+      ).toBe("accepted");
+    });
+  });
+
   describe("an image generation driver", () => {
     const imageComponent = {
       ...driverComponent,
