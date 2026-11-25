@@ -294,6 +294,11 @@ function render(
 interface Snapshot {
   readonly value: string;
   readonly caret: number;
+  /**
+   * The person's own input left this text. An undo or redo that lands on it
+   * counts as typed again; one that lands on text a caller wrote does not.
+   */
+  readonly typed: boolean;
 }
 
 /**
@@ -345,7 +350,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       at: number;
       typing: boolean;
     }>({
-      entries: [{ value, caret: value.length }],
+      entries: [{ value, caret: value.length, typed: false }],
       index: 0,
       at: 0,
       typing: false,
@@ -364,10 +369,11 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     // so its caller's state is current before the next key arrives; the prompt
     // reports its changes the same way, or an Enter right after typing would
     // send the draft as it was before.
-    const report = (root: ComposerInputElement) => {
+    const report = (root: ComposerInputElement, typed = true) => {
       // Only the person's own edits come through here: typing, paste, cut, undo,
-      // and dictation. A value a caller writes does not.
-      noteTypedComposerText(modelRef.current);
+      // and dictation. A value a caller writes does not, and undoing back to one
+      // is not typing it.
+      if (typed) noteTypedComposerText(modelRef.current);
       flushSync(() => onChangeRef.current?.({ target: root, currentTarget: root }));
     };
 
@@ -442,7 +448,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       modelRef.current = next;
       pendingRef.current = { start: caret, end: caret };
       lastSelectionRef.current = { start: caret, end: caret };
-      remember({ value: next, caret }, options.typing);
+      remember({ value: next, caret, typed: true }, options.typing);
       reportedRef.current = next;
       report(root);
       tick();
@@ -465,7 +471,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       modelRef.current = snapshot.value;
       pendingRef.current = { start: snapshot.caret, end: snapshot.caret };
       reportedRef.current = snapshot.value;
-      report(root);
+      report(root, snapshot.typed);
       tick();
     };
 
@@ -546,7 +552,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
           // carries state beside the text (the file joins the send) that
           // undoing the text alone would leave behind.
           historyRef.current = {
-            entries: [{ value, caret: value.length }],
+            entries: [{ value, caret: value.length, typed: false }],
             index: 0,
             at: 0,
             typing: false,
@@ -610,7 +616,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       // `change` on an editable element themselves.
       const onNativeChange = () => {
         reportedRef.current = modelRef.current;
-        remember({ value: modelRef.current, caret: modelRef.current.length }, false);
+        remember({ value: modelRef.current, caret: modelRef.current.length, typed: false }, false);
         onChangeRef.current?.({ target: root, currentTarget: root });
         tick();
       };

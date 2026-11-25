@@ -81,6 +81,28 @@ describe("ComposerInput", () => {
     expect(composerTextWasTyped("Written by another button")).toBe(false);
   });
 
+  it("counts undone or redone text as typed only if it was typed when it was current", async () => {
+    forgetTypedComposerText();
+    render(<Controlled value="Prefilled by a button" />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    input.focus();
+
+    await userEvent.keyboard("!");
+    const typed = (input as ComposerInputElement).value;
+    expect(composerTextWasTyped(typed)).toBe(true);
+
+    // Undoing the person's edit lands on the text the button wrote.
+    forgetTypedComposerText();
+    await userEvent.keyboard("{Control>}z{/Control}");
+    expect((input as ComposerInputElement).value).toBe("Prefilled by a button");
+    expect(composerTextWasTyped("Prefilled by a button")).toBe(false);
+
+    // Redoing it lands on what the person typed.
+    await userEvent.keyboard("{Control>}{Shift>}z{/Shift}{/Control}");
+    expect((input as ComposerInputElement).value).toBe(typed);
+    expect(composerTextWasTyped(typed)).toBe(true);
+  });
+
   it("accepts a value assigned with a change event", () => {
     render(<Prompt />);
     const input = screen.getByRole("textbox", { name: "Message" });
