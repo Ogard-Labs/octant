@@ -1101,9 +1101,7 @@ html[data-octant-native-host="true"] .sidebar__chrome {
   margin-left: auto;
 }
 
-/* Search and Activity use the same compact shell icon recipe. */
-.sidebar__chrome-actions .shell-icon-button,
-.sidebar__chrome-activity .shell-icon-button {
+.sidebar__chrome-actions .shell-icon-button {
   width: var(--oct-rail-button-h);
   min-width: var(--oct-rail-button-h);
   height: var(--oct-rail-button-h);
@@ -1111,7 +1109,6 @@ html[data-octant-native-host="true"] .sidebar__chrome {
 }
 
 .sidebar__chrome-actions,
-.sidebar__chrome-activity,
 .sidebar__primary-actions {
   display: inline-flex;
   flex: 0 0 auto;
@@ -1121,10 +1118,6 @@ html[data-octant-native-host="true"] .sidebar__chrome {
 
 .sidebar__primary-actions {
   order: 2;
-}
-
-.sidebar__chrome-activity {
-  order: 1;
 }
 
 /* Space separates the navigation actions from the Project tree. A rule here
@@ -1787,9 +1780,7 @@ html[data-octant-density="compact"]
   white-space: nowrap;
 }
 
-.sidebar-navigation__thread-meta,
-.sidebar-navigation__thread-unread,
-.sidebar-navigation__thread-follow-up {
+.sidebar-navigation__thread-unread {
   padding: 0;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
@@ -1965,29 +1956,13 @@ html[data-octant-density="compact"]
 /* The age and the status give their place to the actions, so neither is ever
    drawn over the other. */
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):hover
-  :is(
-    .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-when,
-    .sidebar-navigation__thread-state
-  ),
+  :is(.sidebar-navigation__thread-when, .sidebar-navigation__thread-state),
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):focus-within
-  :is(
-    .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-when,
-    .sidebar-navigation__thread-state
-  ),
+  :is(.sidebar-navigation__thread-when, .sidebar-navigation__thread-state),
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([aria-expanded="true"])
-  :is(
-    .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-when,
-    .sidebar-navigation__thread-state
-  ),
+  :is(.sidebar-navigation__thread-when, .sidebar-navigation__thread-state),
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([data-popup-open])
-  :is(
-    .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-when,
-    .sidebar-navigation__thread-state
-  ) {
+  :is(.sidebar-navigation__thread-when, .sidebar-navigation__thread-state) {
   opacity: 0;
 }
 
@@ -2752,6 +2727,11 @@ html[data-octant-density="compact"]
     overflow-y: visible;
   }
 
+  /* A row reached with the keyboard scrolls clear of the foot over it. */
+  .project-nav__list:not(:last-child) * {
+    scroll-margin-bottom: 40vh;
+  }
+
   .sidebar-live-dock {
     position: sticky;
     bottom: 0;
@@ -2836,95 +2816,6 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
 .new-thread-welcome__mark {
   margin-bottom: 4px;
   color: var(--oct-accent-fg);
-}
-
-.draft-thread__eyebrow {
-  display: block;
-  margin: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.draft-thread__description {
-  max-width: 58ch;
-  margin: 2px 0 0;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-sm);
-  line-height: 1.5;
-}
-
-/* Recent work under the composer. These rows are the way back into open work
-   from a start screen, so they stay quiet until pointed at and never compete
-   with the prompt above them. The button recipe fixes its own height, which a
-   two-line row has to opt out of. */
-/* The Continue list keeps the same clear step below the cards that the
-   cards keep below the composer, so the three read as separate bands. */
-.draft-thread__recent {
-  order: 4;
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-2);
-  margin-top: 56px;
-}
-
-/* "Continue" is a section label over a hairline, the head every list
-   surface gives a group (DESIGN.md "Page shell"). */
-.draft-thread__recent-title {
-  margin: 0;
-  padding: 0 0 var(--oct-space-2);
-  border-bottom: 1px solid var(--oct-hairline);
-  color: var(--oct-muted);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-  letter-spacing: var(--oct-tracking-snug);
-  line-height: 1.3;
-}
-
-.draft-thread__recent-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-/* The bare variant draws nothing, so this takes the ghost hover fill itself. */
-.draft-thread__recent-item:hover {
-  background: var(--muted);
-}
-
-.draft-thread__recent-item:active {
-  background: var(--oct-wash-pressed);
-}
-
-.draft-thread__recent-item {
-  display: flex;
-  width: 100%;
-  height: auto;
-  min-height: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  padding: var(--oct-space-2) var(--oct-space-3);
-  border-radius: var(--oct-radius-md);
-  font-weight: 400;
-  text-align: left;
-  white-space: normal;
-}
-
-.draft-thread__recent-name {
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-}
-
-.draft-thread__recent-detail {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-detail);
 }
 
 /* A New coordinator draft's settings, one quiet line under the composer:

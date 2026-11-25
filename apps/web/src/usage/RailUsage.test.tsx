@@ -17,15 +17,16 @@ interface Account {
   readonly exhausted?: true;
 }
 
+/** The account ids run against the person's order, which the host's snapshot never follows. */
 function planUsage(accounts: ReadonlyArray<Account>) {
   const rows = accounts.map((account, index) => ({
     ...account,
-    id: `10000000-0000-4000-8000-00000000000${String(index + 1)}`,
+    id: `10000000-0000-4000-8000-00000000000${String(9 - index)}`,
   }));
   const snapshot = decodeProviderUsageLimitsSnapshot({
     version: 1,
     refreshedAt: observedAt,
-    entries: rows.map((row) => ({
+    entries: [...rows].reverse().map((row) => ({
       providerInstanceId: row.id,
       status: "available",
       source: "provider-runtime",
@@ -127,11 +128,11 @@ describe("RailUsage", () => {
     expect(card).toHaveTextContent("80% left");
   });
 
-  it("draws no arc for a window the provider calls exhausted, whatever it left unused", async () => {
+  it("offers nothing as left of a window the provider calls exhausted, whatever it left unused", async () => {
     render(
       <PlanUsageProvider
         {...planUsage([
-          { name: "Claude Max", windows: { five_hour: 0.97 }, exhausted: true },
+          { name: "Codex", windows: { five_hour: 0.4 }, exhausted: true },
           { name: "Claude Team", windows: { five_hour: 0.4 } },
         ])}
       >
@@ -139,16 +140,52 @@ describe("RailUsage", () => {
       </PlanUsageProvider>,
     );
 
-    const arcOf = (ring: HTMLElement) => ring.querySelectorAll("circle")[1]?.style.stroke;
-    expect(
-      arcOf(await screen.findByRole("button", { name: "Claude Max plan usage, 5h 3% left" })),
-    ).toBe("none");
+    const arcOf = (ring: HTMLElement) => ring.querySelector(".rail-usage-ring__arc");
+    const spent = await screen.findByRole("button", {
+      name: "Codex plan usage, 5h limit reached",
+    });
+    expect(arcOf(spent)).toBeNull();
     expect(
       arcOf(screen.getByRole("button", { name: "Claude Team plan usage, 5h 60% left" })),
-    ).not.toBe("none");
+    ).not.toBeNull();
+
+    await userEvent.hover(spent);
+    const card = await screen.findByRole("group", { name: "Codex plan usage" });
+    expect(await within(card).findByText("limit reached")).toBeVisible();
+    expect(card).not.toHaveTextContent("60%");
+    expect(card.querySelector<HTMLElement>(".rail-usage-card__bar > span")?.style.width).toBe(
+      "0px",
+    );
   });
 
-  it("keeps the three accounts with the least left, in account order, and lists them all in the account menu", async () => {
+  it("rings an account at its limit before those that only have less unused", async () => {
+    const user = userEvent.setup();
+    render(
+      <PlanUsageProvider
+        {...planUsage([
+          { name: "Codex", windows: { five_hour: 0.1 }, exhausted: true },
+          ...four.filter((account) => account.name !== "Lab"),
+        ])}
+      >
+        <RailUsage onOpenUsage={vi.fn()} />
+        <RailAccount onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />
+      </PlanUsageProvider>,
+    );
+
+    const group = await screen.findByRole("group", { name: "Plan usage" });
+    expect(
+      within(group)
+        .getAllByRole("button")
+        .map((ring) => ring.getAttribute("aria-label")?.split(" plan usage")[0]),
+    ).toEqual(["Codex", "Team", "Studio"]);
+
+    await user.click(screen.getByRole("button", { name: "Account menu, Ada" }));
+    expect(
+      await screen.findByRole("menuitem", { name: "Codex, 5h limit reached" }),
+    ).toHaveTextContent("5h limit");
+  });
+
+  it("keeps the three accounts with the least left, in the person's order, and lists them all in the account menu", async () => {
     const user = userEvent.setup();
     render(
       <PlanUsageProvider {...planUsage(four)}>

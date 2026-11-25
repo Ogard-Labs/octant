@@ -1,7 +1,38 @@
-/* The card a rail usage ring opens. It loads with the card, not the window. */
+/* The rail's usage rings and their cards, loaded with them after the window. The
+   arc is the meta ink, so a healthy plan is as quiet as the rail's icons. */
+.rail-usage-ring {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke-width: 2;
+  transform: rotate(-90deg);
+}
+
+.rail-usage-ring__track {
+  stroke: color-mix(in oklab, var(--oct-fg) 12%, transparent);
+}
+
+.rail-usage-ring__arc {
+  stroke: color-mix(in oklab, var(--oct-fg) 50%, transparent);
+  stroke-linecap: round;
+}
+
+.rail-usage-ring[data-level="near"] .rail-usage-ring__arc {
+  stroke: var(--oct-warn-fg);
+}
+
+/* Held back, so an empty ring cannot read as a full one. */
+.rail-usage-ring[data-level="spent"] .rail-usage-ring__track {
+  stroke: color-mix(in oklab, var(--oct-danger-fg) 55%, transparent);
+}
+
 .rail-usage-card {
   display: grid;
   min-width: 232px;
+  /* An account can report a window per model; past the room beside the rail
+     (less the popup's own padding) they scroll. */
+  max-height: calc(var(--available-height, 100vh) - 2 * var(--oct-space-3));
+  overflow-y: auto;
   gap: var(--oct-space-3);
 }
 

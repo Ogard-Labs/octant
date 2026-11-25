@@ -41,12 +41,9 @@ describe("the shell's edges and gaps", () => {
     for (const selector of [".window-chrome__trailing", ".dock-tool-buttons"]) {
       expect(rule(shell, selector), selector).toMatch(/gap:\s*var\(--oct-space-1\)/);
     }
-    expect(
-      rule(
-        shell,
-        ".sidebar__chrome-actions,\n.sidebar__chrome-activity,\n.sidebar__primary-actions",
-      ),
-    ).toMatch(/gap:\s*var\(--oct-space-1\)/);
+    expect(rule(shell, ".sidebar__chrome-actions,\n.sidebar__primary-actions")).toMatch(
+      /gap:\s*var\(--oct-space-1\)/,
+    );
   });
 
   it("collapses an empty Project slot so it adds no second gap between controls", () => {

@@ -3079,12 +3079,15 @@ held, as More does, and its focus ring is the circle it is.
 **Plan usage.** Above the face stands one 26px ring for each account that
 reports a plan window, the provider's mark inside it: the arc is what is left
 of the window with the least left, in the meta ink, or the warning ink close to
-its limit; a spent window is an empty ring in the danger ink. An account with no
+its limit; a spent window is an empty ring in the danger ink and says "limit
+reached" in place of a share, whatever the provider left unused, and it comes
+before any window with room. An account with no
 reported figure has no ring, because an empty ring would claim a limit nobody
 reported. Pointing at a ring or focusing it opens a card with every window, its
 share left, its reset, and the reading's age when it is hours old; its
-accessible name says each window's share, and pressing it opens Settings ›
-Usage. The rail draws the three accounts with the least left, in account order;
+accessible name says each window's standing, and pressing it opens Settings ›
+Usage. The card scrolls inside the room beside the rail. The rail draws the
+three accounts with the least left, in the person's own account order;
 with more than three, and wherever no rail shows, the account menu carries a
 Plan usage group with every account. The one ring the avatar carried before
 (2026-11-17) showed the tightest window of all accounts without saying whose it

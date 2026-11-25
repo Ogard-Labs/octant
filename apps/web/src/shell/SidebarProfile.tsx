@@ -138,8 +138,7 @@ function AccountMenuPopup(props: SidebarProfileProps & { readonly side: "top" | 
   const openUsage = () => props.onOpenSettings({ section: "usage" });
   // The rail's rings already say this; the menu repeats it only where no rail
   // stands, or where the rail has more accounts than it rings.
-  const usageLines =
-    props.side === "top" || usage.lines.length > RAIL_USAGE_LIMIT ? usage.lines : [];
+  const usageLines = props.side === "top" || usage.length > RAIL_USAGE_LIMIT ? usage : [];
   const name = props.profile.displayName ?? "";
   return (
     <OctantMenuPortal>
@@ -179,7 +178,7 @@ function AccountMenuPopup(props: SidebarProfileProps & { readonly side: "top" | 
                 <OctantMenuGroupLabel>Plan usage</OctantMenuGroupLabel>
                 {usageLines.map((line) => (
                   <OctantMenuItem
-                    aria-label={`${line.instance.displayName}, ${line.lowest.short} ${String(line.lowest.percent)}% left`}
+                    aria-label={`${line.instance.displayName}, ${line.lowest.short} ${line.lowest.standing}`}
                     key={String(line.instance.id)}
                     onClick={openUsage}
                   >
@@ -191,12 +190,13 @@ function AccountMenuPopup(props: SidebarProfileProps & { readonly side: "top" | 
                     />
                     <span className="flex min-w-0 flex-1 flex-col">
                       <span className="truncate">{line.instance.displayName}</span>
-                      {line.reset === undefined ? null : (
-                        <span className="truncate oct-menu-detail">{line.reset}</span>
+                      {line.lowest.reset === undefined ? null : (
+                        <span className="truncate oct-menu-detail">{line.lowest.reset}</span>
                       )}
                     </span>
                     <span className="rail-account__left" data-level={line.lowest.level}>
-                      {line.lowest.short} {line.lowest.percent}%
+                      {line.lowest.short}{" "}
+                      {line.lowest.level === "spent" ? "limit" : `${String(line.lowest.percent)}%`}
                     </span>
                   </OctantMenuItem>
                 ))}

@@ -725,7 +725,7 @@ describe("InboxView page", () => {
     );
     expect(await screen.findByLabelText("Plan usage left")).toBeVisible();
     await userEvent.click(
-      screen.getByRole("button", { name: "Claude Max plan usage, 5h 60% left" }),
+      await screen.findByRole("button", { name: "Claude Max plan usage, 5h 60% left" }),
     );
     expect(onOpenUsage).toHaveBeenCalledOnce();
     expect(list).toHaveBeenCalledTimes(1);
