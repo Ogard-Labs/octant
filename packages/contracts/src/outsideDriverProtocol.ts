@@ -1,5 +1,4 @@
 import { Schema } from "effect";
-import { MAX_GENERATED_IMAGE_BYTES } from "./imageGeneration";
 import { NativeHarnessTranscriptToolCall } from "./nativeHarnessTranscript";
 import {
   ProviderCapabilities,
@@ -377,12 +376,16 @@ export type OutsideDriverToHostMessage = typeof OutsideDriverToHostMessage.Type;
 export const OUTSIDE_DRIVER_IMAGE_BASE64_CHARACTERS = 4_000_000;
 
 /**
- * The largest base64 payload a reference image may carry from the host to the
- * driver: matches `MAX_GENERATED_IMAGE_BYTES` so every reference image
- * `ImageJobService` accepts crosses without violating the protocol schema.
+ * The most combined reference-image bytes an outside image job accepts: 2.5 MiB
+ * (~3.5M base64 characters), leaving headroom inside the 4 MiB brokered
+ * `http/request` line limit so a driver can forward references in JSON without
+ * hitting the channel frame cap.
  */
+export const OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES = 2_621_440;
+
+/** The largest base64 payload one reference image may carry to an outside image driver. */
 export const OUTSIDE_DRIVER_REFERENCE_IMAGE_BASE64_CHARACTERS =
-  Math.ceil(MAX_GENERATED_IMAGE_BYTES / 3) * 4;
+  Math.ceil(OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES / 3) * 4;
 
 const OutsideDriverImageMediaType = Schema.Literal(
   "image/png",

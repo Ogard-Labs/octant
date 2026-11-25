@@ -72,15 +72,15 @@ describe("outside image generation protocol", () => {
     }
   });
 
-  it("allows reference images larger than the inline result limit up to the host image ceiling", () => {
+  it("caps reference image base64 at the 2.5 MiB broker-safe ceiling", () => {
     const decodeParams = Schema.decodeUnknownEither(OutsideDriverImageGenerateParams);
-    const largeReference = "A".repeat(OUTSIDE_DRIVER_IMAGE_BASE64_CHARACTERS + 4);
+    const atCeiling = "A".repeat(OUTSIDE_DRIVER_REFERENCE_IMAGE_BASE64_CHARACTERS);
     expect(
       decodeParams({
         modelId: "outside-model-1",
         prompt: "edit this",
         variantCount: 1,
-        references: [{ mediaType: "image/png", data: largeReference }],
+        references: [{ mediaType: "image/png", data: atCeiling }],
       })._tag,
     ).toBe("Right");
     const overCeiling = "A".repeat(OUTSIDE_DRIVER_REFERENCE_IMAGE_BASE64_CHARACTERS + 4);

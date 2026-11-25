@@ -10,6 +10,7 @@ import {
   decodeOutsideDriverImageGenerateResult,
   decodeOutsideDriverInitializeResult,
   HOST_IMAGE_GENERATION_PROTOCOL_VERSIONS,
+  OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES,
   OUTSIDE_DRIVER_METHODS,
   type OutsideDriverGeneratedImage,
   type OutsideDriverImageGenerateParams,
@@ -109,16 +110,53 @@ async function resolvesPublicly(
 const SAFETY_REFUSAL = "The image provider declined this request.";
 
 /**
- * The most `image/chunk` notifications one image may stream. Bounds per-chunk
- * allocation overhead so a driver cannot exhaust host memory by sending
- * millions of four-character chunks within the byte ceiling.
+ * Decoded `image/chunk` bytes are copied into fixed-size blocks as they arrive
+ * so allocation overhead stays bounded (at most ~80 blocks for 20 MiB) even
+ * when a driver streams many small or independently-padded chunks.
  */
-const MAX_CHUNKS_PER_IMAGE = 1_024;
+const STREAMED_IMAGE_BLOCK_BYTES = 256 * 1024;
 
-interface StreamedImageChunks {
-  readonly buffers: Array<Buffer>;
+/** Maximum unique provider-returned URLs retained across one image job. */
+const MAX_RELAYED_ADDRESSES_PER_JOB = 1_024;
+const MAX_RELAYED_ADDRESS_LENGTH = 8_192;
+
+interface StreamedImageBlocks {
+  readonly blocks: Array<Uint8Array>;
   bytes: number;
-  ended: boolean;
+  offsetInLast: number;
+}
+
+function appendStreamedImageBytes(state: StreamedImageBlocks, piece: Uint8Array): void {
+  let remainingOffset = 0;
+  while (remainingOffset < piece.byteLength) {
+    let tail = state.blocks[state.blocks.length - 1];
+    if (tail === undefined || state.offsetInLast === tail.byteLength) {
+      tail = new Uint8Array(STREAMED_IMAGE_BLOCK_BYTES);
+      state.blocks.push(tail);
+      state.offsetInLast = 0;
+    }
+    const copyLength = Math.min(
+      piece.byteLength - remainingOffset,
+      tail.byteLength - state.offsetInLast,
+    );
+    tail.set(piece.subarray(remainingOffset, remainingOffset + copyLength), state.offsetInLast);
+    state.offsetInLast += copyLength;
+    state.bytes += copyLength;
+    remainingOffset += copyLength;
+  }
+}
+
+function assembleStreamedImageBlocks(state: StreamedImageBlocks): Uint8Array {
+  const result = new Uint8Array(state.bytes);
+  let written = 0;
+  for (let i = 0; i < state.blocks.length; i += 1) {
+    const block = state.blocks[i];
+    if (block === undefined) continue;
+    const slice = i === state.blocks.length - 1 ? block.subarray(0, state.offsetInLast) : block;
+    result.set(slice, written);
+    written += slice.byteLength;
+  }
+  return result;
 }
 
 const imageInvalid = () =>
@@ -183,8 +221,8 @@ export function makeOutsideImageGenerationProxy(options: OutsideImageGenerationP
   /** One image's bytes as the host accepts them, or a closed failure. */
   const accept = async (
     image: OutsideDriverGeneratedImage,
-    relayed: ReadonlyArray<string>,
-    streamed: StreamedImageChunks | undefined,
+    hasReturnedAddress: (url: string) => boolean,
+    streamed: StreamedImageBlocks | undefined,
     signal: AbortSignal | undefined,
     ports: OutsideImageJobPorts,
   ): Promise<ImageAdapterImage> => {
@@ -194,14 +232,11 @@ export function makeOutsideImageGenerationProxy(options: OutsideImageGenerationP
       bytes = Uint8Array.from(Buffer.from(image.data, "base64"));
       named = image.mediaType;
     } else if ("chunked" in image) {
-      if (streamed === undefined || streamed.buffers.length === 0) throw imageInvalid();
-      bytes = Uint8Array.from(Buffer.concat(streamed.buffers, streamed.bytes));
+      if (streamed === undefined || streamed.bytes === 0) throw imageInvalid();
+      bytes = assembleStreamedImageBlocks(streamed);
       named = image.mediaType;
     } else {
-      if (
-        !isFetchableImageAddress(image.url, origin) ||
-        !returnedAddresses(relayed).has(image.url)
-      ) {
+      if (!isFetchableImageAddress(image.url, origin) || !hasReturnedAddress(image.url)) {
         throw outsideDriverFailure(
           "unauthorized",
           "The image driver named an image address the provider did not return.",
@@ -232,6 +267,16 @@ export function makeOutsideImageGenerationProxy(options: OutsideImageGenerationP
     ports: OutsideImageJobPorts,
     onProviderResponse: () => void,
   ): Promise<ImageAdapterResult> => {
+    const totalReferenceBytes = (request.references ?? []).reduce(
+      (sum, reference) => sum + reference.bytes.byteLength,
+      0,
+    );
+    if (totalReferenceBytes > OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES) {
+      throw outsideDriverFailure(
+        "invalid-configuration",
+        "Reference images for an outside image driver cannot exceed 2.5 MiB combined.",
+      );
+    }
     await ensureInitialized();
     if (request.signal?.aborted === true) {
       throw outsideDriverFailure("interrupted", "The provider request was cancelled.");
@@ -250,33 +295,55 @@ export function makeOutsideImageGenerationProxy(options: OutsideImageGenerationP
       ...(request.aspectRatio === undefined ? {} : { aspectRatio: request.aspectRatio }),
       ...(request.resolution === undefined ? {} : { resolution: request.resolution }),
     };
-    // Chunks are decoded on arrival and bounded by both chunk count and decoded
-    // bytes per image, so a driver cannot amplify host memory with tiny chunks.
-    const chunks = new Map<number, StreamedImageChunks>();
+    // Chunks are decoded on arrival into fixed-size blocks bounded by
+    // MAX_GENERATED_IMAGE_BYTES per image, independent of wire chunk count.
+    const chunks = new Map<number, StreamedImageBlocks>();
+    // Completed brokered responses immediately release their raw text after
+    // bounded URL extraction, while in-flight streams expose every chunk
+    // already sent to the driver before `http/end`.
+    const inFlightResponses = new Map<number, Array<string>>();
+    const settledAddresses = new Set<string>();
+    const hasReturnedAddress = (url: string): boolean => {
+      if (settledAddresses.has(url)) return true;
+      for (const parts of inFlightResponses.values()) {
+        const live = new Set<string>();
+        extractReturnedAddresses(parts.join(""), live);
+        if (live.has(url)) return true;
+      }
+      return false;
+    };
     let oversized = false;
     const call = link.call(OUTSIDE_DRIVER_METHODS.imageGenerate, params, {
       timeoutMs: limits.sendTimeoutMs,
-      keepRelayed: true,
       onProviderResponse,
+      onRelayedResponseChunk: (httpId, text) => {
+        const parts = inFlightResponses.get(httpId);
+        if (parts === undefined) inFlightResponses.set(httpId, [text]);
+        else parts.push(text);
+      },
+      onRelayedResponseEnd: (httpId) => {
+        const parts = inFlightResponses.get(httpId);
+        if (parts === undefined) return;
+        inFlightResponses.delete(httpId);
+        extractReturnedAddresses(parts.join(""), settledAddresses);
+      },
       onImageChunk: (image, data) => {
         if (oversized) return;
-        const state = chunks.get(image) ?? { buffers: [], bytes: 0, ended: false };
-        if (image >= variantCount || state.ended || state.buffers.length >= MAX_CHUNKS_PER_IMAGE) {
+        if (image >= variantCount) {
           oversized = true;
           chunks.clear();
           link.cancel(call.id);
           return;
         }
         const piece = Buffer.from(data, "base64");
+        const state = chunks.get(image) ?? { blocks: [], bytes: 0, offsetInLast: 0 };
         if (state.bytes + piece.byteLength > MAX_GENERATED_IMAGE_BYTES) {
           oversized = true;
           chunks.clear();
           link.cancel(call.id);
           return;
         }
-        state.buffers.push(piece);
-        state.bytes += piece.byteLength;
-        state.ended = data.includes("=");
+        appendStreamedImageBytes(state, piece);
         chunks.set(image, state);
       },
     });
@@ -297,10 +364,14 @@ export function makeOutsideImageGenerationProxy(options: OutsideImageGenerationP
       if (result.images.length > variantCount) throw tooManyImages();
       const images: Array<ImageAdapterImage> = [];
       for (const [index, image] of result.images.entries()) {
-        images.push(await accept(image, call.relayed, chunks.get(index), request.signal, ports));
+        const streamed = chunks.get(index);
+        chunks.delete(index);
+        images.push(await accept(image, hasReturnedAddress, streamed, request.signal, ports));
       }
       return { status: "completed", images };
     } finally {
+      chunks.clear();
+      inFlightResponses.clear();
       request.signal?.removeEventListener("abort", cancel);
     }
   };
@@ -322,44 +393,63 @@ export function makeOutsideImageGenerationProxy(options: OutsideImageGenerationP
 }
 
 /**
- * Every complete address the provider's relayed answers contain, as whole
- * tokens. JSON responses are parsed so exact decoded string values stay intact
- * (including valid URL characters like apostrophes); non-JSON responses fall
- * back to whole-token URL scanning. The driver's address must equal one of
- * them, so a prefix or a longer address that merely contains it
+ * Extracts every complete address from one provider response into `out`,
+ * capped at `MAX_RELAYED_ADDRESSES_PER_JOB`. JSON responses are parsed so
+ * exact decoded keys and values stay intact (including apostrophes and
+ * delimited links like `<https://...>`), while non-JSON or partial streaming
+ * responses fall back to whole-token scanning. The driver's address must equal
+ * one of them, so a prefix or a longer address that merely contains it
  * (`https://images.example.test.attacker.invalid/…`) authorizes nothing.
  */
-function returnedAddresses(relayed: ReadonlyArray<string>): ReadonlySet<string> {
-  const addresses = new Set<string>();
-  for (const responseText of relayed) {
-    const trimmed = responseText.trim();
-    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-      try {
-        collectJsonAddresses(JSON.parse(trimmed), addresses);
-        continue;
-      } catch {
-        // Non-JSON or multi-document body (e.g. NDJSON/SSE); scan tokens below.
-      }
-    }
-    // Plain-text or framed responses may still carry JSON-escaped `/` or `\uXXXX`.
-    const text = responseText
-      .replace(/\\u([0-9a-fA-F]{4})/g, (_escape, hex: string) =>
-        String.fromCharCode(Number.parseInt(hex, 16)),
-      )
-      .replaceAll("\\/", "/");
-    for (const match of text.match(/https?:\/\/[^\s"'<>\\`{}|^]+/g) ?? []) {
-      addresses.add(match);
+function extractReturnedAddresses(responseText: string, out: Set<string>): void {
+  const add = (candidate: string) => {
+    if (out.size >= MAX_RELAYED_ADDRESSES_PER_JOB) return;
+    if (candidate.length <= MAX_RELAYED_ADDRESS_LENGTH) out.add(candidate);
+  };
+  const trimmed = responseText.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      collectJsonAddresses(JSON.parse(trimmed), add);
+      return;
+    } catch {
+      // Non-JSON or partial/multi-document body (e.g. SSE); scan tokens below.
     }
   }
-  return addresses;
+  const text = responseText
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_escape, hex: string) =>
+      String.fromCharCode(Number.parseInt(hex, 16)),
+    )
+    .replaceAll("\\/", "/");
+  for (const match of text.match(/https?:\/\/[^\s"'<>\\`{}|^]+/g) ?? []) {
+    add(match);
+  }
+  // Double-quoted JSON strings in partial/SSE chunks may hold apostrophes.
+  for (const match of text.matchAll(/"(https?:\/\/[^"\\\s<>`{}|^]+)"/g)) {
+    if (match[1] !== undefined) add(match[1]);
+  }
+  for (const match of text.matchAll(/<(https?:\/\/[^\s"<>\\`{}|^]+)>/g)) {
+    if (match[1] !== undefined) add(match[1]);
+  }
 }
 
-function collectJsonAddresses(root: unknown, out: Set<string>): void {
+function collectJsonStringAddresses(text: string, add: (candidate: string) => void): void {
+  if ((text.startsWith("http://") || text.startsWith("https://")) && !/[\s"<>\\`{}|^]/.test(text)) {
+    add(text);
+  }
+  for (const match of text.match(/https?:\/\/[^\s"'<>\\`{}|^]+/g) ?? []) {
+    add(match);
+  }
+  for (const match of text.matchAll(/<(https?:\/\/[^\s"<>\\`{}|^]+)>/g)) {
+    if (match[1] !== undefined) add(match[1]);
+  }
+}
+
+function collectJsonAddresses(root: unknown, add: (candidate: string) => void): void {
   const stack: Array<unknown> = [root];
   while (stack.length > 0) {
     const value = stack.pop();
     if (typeof value === "string") {
-      if (value.startsWith("http://") || value.startsWith("https://")) out.add(value);
+      collectJsonStringAddresses(value, add);
       continue;
     }
     if (Array.isArray(value)) {
@@ -367,7 +457,10 @@ function collectJsonAddresses(root: unknown, out: Set<string>): void {
       continue;
     }
     if (value !== null && typeof value === "object") {
-      for (const entry of Object.values(value)) stack.push(entry);
+      for (const [key, entry] of Object.entries(value)) {
+        collectJsonStringAddresses(key, add);
+        stack.push(entry);
+      }
     }
   }
 }

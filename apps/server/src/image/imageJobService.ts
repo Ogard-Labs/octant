@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES } from "@octant/contracts/outside-driver-protocol";
 import {
   AggregateId,
   AggregateVersion,
@@ -416,8 +417,18 @@ export class ImageJobService {
         error instanceof Error ? error.message : "The image profile is not eligible.",
       );
     }
-    // Decided before anything is reserved or sent: an outside profile whose
-    // package is not installed, trusted and enabled at its digest runs nothing.
+    // Decided before anything is reserved or sent: an outside profile refuses
+    // combined references that would overflow its brokered request line, and
+    // an unadmitted driver package runs nothing.
+    if (
+      instance.driverKind === "outside-image" &&
+      referenceBytes > OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES
+    ) {
+      throw new ImageJobServiceError(
+        "invalid",
+        "Reference images for an outside image driver cannot exceed 2.5 MiB combined.",
+      );
+    }
     if (
       instance.driverKind === "outside-image" &&
       this.#outsideImageDrivers?.admits(instance) !== true

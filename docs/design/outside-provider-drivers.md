@@ -183,7 +183,10 @@ Rules, each taking the fail-closed option:
   disable, uninstall, rollback and withdrawn-trust rules; the crash limit and
   its journaled hold apply.
 - **Not yet.** A request body is UTF-8 text, as for harness endpoints, so a
-  provider that takes only a multipart upload needs a protocol addition.
+  provider that takes only a multipart upload needs a protocol addition, and
+  combined reference images for an outside image job are capped at 2.5 MiB so
+  they fit inside the 4 MiB brokered `http/request` line limit until a
+  streamed upload path exists.
   Changing an outside image profile's address or models is a command the host
   takes; its Settings form is not built yet (remove and add the profile).
 

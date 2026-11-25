@@ -216,11 +216,12 @@ interface PendingCall {
   /** The notification that tells the driver the host settled this call early, if any. */
   readonly cancelMethod: string | undefined;
   /**
-   * When set, the text of every response relayed for this call, so the host
-   * can later check an address the driver names against what the provider
-   * actually answered.
+   * When set, receives each decoded text piece of a relayed broker response
+   * immediately before the host writes `http/chunk`, and a completion signal
+   * when that response's body finishes.
    */
-  readonly relayed: Array<string> | undefined;
+  readonly onRelayedResponseChunk: ((httpId: number, text: string) => void) | undefined;
+  readonly onRelayedResponseEnd: ((httpId: number) => void) | undefined;
   /** Receives each `image/chunk` the driver streams for this call; absent refuses them. */
   readonly onImageChunk: ((image: number, data: string) => void) | undefined;
   readonly onProviderResponse: (() => void) | undefined;
@@ -281,15 +282,14 @@ class OutsideDriverLink {
       readonly timeoutMs: number;
       readonly onEvent?: (event: OutsideDriverStreamEvent) => void;
       readonly cloudPorts?: CloudSessionPorts;
-      readonly keepRelayed?: boolean;
+      readonly onRelayedResponseChunk?: (httpId: number, text: string) => void;
+      readonly onRelayedResponseEnd?: (httpId: number) => void;
       readonly onImageChunk?: (image: number, data: string) => void;
       readonly onProviderResponse?: () => void;
     },
   ): {
     readonly id: number;
     readonly settled: Promise<unknown>;
-    /** The response text relayed for this call so far, when `keepRelayed` was set. */
-    readonly relayed: ReadonlyArray<string>;
   } {
     const id = this.#nextId;
     this.#nextId += 1;
@@ -304,7 +304,6 @@ class OutsideDriverLink {
         : method === OUTSIDE_DRIVER_METHODS.imageGenerate
           ? OUTSIDE_DRIVER_METHODS.imageCancel
           : undefined;
-    const relayed: Array<string> = [];
     const settled = new Promise<unknown>((resolve, reject) => {
       if (this.#stopped !== undefined) {
         reject(this.#stopped);
@@ -327,13 +326,14 @@ class OutsideDriverLink {
         brokered: new Set(),
         cloudPorts: options.cloudPorts,
         cancelMethod,
-        relayed: options.keepRelayed === true ? relayed : undefined,
+        onRelayedResponseChunk: options.onRelayedResponseChunk,
+        onRelayedResponseEnd: options.onRelayedResponseEnd,
         onImageChunk: options.onImageChunk,
         onProviderResponse: options.onProviderResponse,
       });
       this.#write({ jsonrpc: "2.0", id, method, params });
     });
-    return { id, settled, relayed };
+    return { id, settled };
   }
 
   notify(method: string, params: unknown): void {
@@ -495,7 +495,7 @@ class OutsideDriverLink {
       id: httpId,
       result: { status: response.status, headers: relayedHeaders(response.headers, params) },
     });
-    const outcome = await this.#relayBody(httpId, response, controller.signal, owner?.relayed);
+    const outcome = await this.#relayBody(httpId, response, controller.signal, owner);
     this.notify(
       OUTSIDE_DRIVER_METHODS.httpEnd,
       outcome === undefined
@@ -509,12 +509,11 @@ class OutsideDriverLink {
     httpId: OutsideDriverMessageId,
     response: Response,
     signal: AbortSignal,
-    relayed?: Array<string>,
+    owner?: PendingCall,
   ): Promise<ProviderFailure | undefined> {
     if (response.body === null) return undefined;
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    const relayedParts = relayed === undefined ? undefined : ([] as Array<string>);
     let bytes = 0;
     const chunkCharacters = Math.max(1, Math.floor(this.#limits.messageBytes / 8));
     try {
@@ -529,7 +528,7 @@ class OutsideDriverLink {
           return failure("protocol", "The provider response exceeded the size limit.");
         }
         const text = decoder.decode(read.value, { stream: true });
-        relayedParts?.push(text);
+        if (text.length > 0) owner?.onRelayedResponseChunk?.(httpId, text);
         for (let offset = 0; offset < text.length; offset += chunkCharacters) {
           // The end that follows an abort is the last line for this call.
           if (signal.aborted) return interrupted();
@@ -540,7 +539,7 @@ class OutsideDriverLink {
         }
       }
       const rest = decoder.decode();
-      if (rest.length > 0) relayedParts?.push(rest);
+      if (rest.length > 0) owner?.onRelayedResponseChunk?.(httpId, rest);
       if (signal.aborted) return interrupted();
       if (rest.length > 0) this.notify(OUTSIDE_DRIVER_METHODS.httpChunk, { httpId, data: rest });
       return undefined;
@@ -549,9 +548,7 @@ class OutsideDriverLink {
       if (signal.aborted) return interrupted();
       return failure("unavailable", "The provider response could not be read.");
     } finally {
-      if (relayed !== undefined && relayedParts !== undefined && relayedParts.length > 0) {
-        relayed.push(relayedParts.join(""));
-      }
+      owner?.onRelayedResponseEnd?.(httpId);
       reader.cancel().catch(() => undefined);
     }
   }
