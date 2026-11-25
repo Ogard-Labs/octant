@@ -426,6 +426,71 @@ describe("ProviderUsageLimitsPanel", () => {
     ).toHaveAttribute("value", "15");
   });
 
+  it("shows remaining monthly Vibe Code allowance, reset time, and PAYG as a label", async () => {
+    vi.useFakeTimers({ now: new Date("2026-11-25T12:00:00.000Z") });
+    const vibe = decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: "2026-11-25T12:00:00.000Z",
+      entries: [
+        {
+          providerInstanceId,
+          status: "available",
+          source: "provider-runtime",
+          observedAt: "2026-11-25T12:00:00.000Z",
+          limits: {
+            providerInstanceId,
+            scope: "account",
+            requests: { status: "unavailable" },
+            tokens: { status: "unavailable" },
+            concurrency: { status: "unavailable" },
+            retry: { status: "inactive" },
+            quota: "available",
+            source: "runtime-reported",
+            confidence: "high",
+            updatedAt: "2026-11-25T12:00:00.000Z",
+            rateLimitWindows: [
+              {
+                window: "monthly",
+                status: "allowed",
+                utilization: 0.12,
+                resetsAt: "2026-12-01T00:00:00.000Z",
+                observedAt: "2026-11-25T12:00:00.000Z",
+                overage: { status: "allowed", disabledReason: "Pay as you go on" },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    try {
+      await act(async () => {
+        render(
+          <ProviderUsageLimitsPanel
+            client={{ list: async () => vibe, refresh: async () => vibe }}
+            instances={[
+              {
+                ...provider,
+                driverKind: "mistral-vibe",
+                displayName: "Mistral Vibe",
+              } as ProviderInstance,
+            ]}
+          />,
+        );
+      });
+
+      expect(screen.getByRole("meter", { name: "Monthly window remaining" })).toHaveAttribute(
+        "value",
+        "88",
+      );
+      expect(screen.getByText("88% left")).toBeVisible();
+      expect(screen.getByText("Pay as you go on")).toBeVisible();
+      expect(screen.getByText(/Resets in /)).toBeVisible();
+      expect(screen.queryByText(/0% left/)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("says plan limits do not apply instead of drawing empty bars", async () => {
     const unavailable = decodeProviderUsageLimitsSnapshot({
       version: 1,
