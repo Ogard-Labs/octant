@@ -799,6 +799,8 @@ export class PersonMemoryStore {
    * Writes an aggregate's one current state: the new event goes in at the next
    * version first, then the older events are erased, so a failure in between
    * leaves the old and the new (the later one wins at replay), never neither.
+   * The new event stands once it is journaled: an erase that fails is left for
+   * the next replace, which erases everything older than itself.
    */
   #replace(
     aggregateType: string,
@@ -813,10 +815,22 @@ export class PersonMemoryStore {
       eventName,
       payload,
     );
-    if (written.version > 1) this.#eraseBefore(aggregateType, aggregateId, written.version);
+    if (written.version > 1) {
+      try {
+        this.#eraseBefore(aggregateType, aggregateId, written.version);
+      } catch {
+        // The older events stay; the next replace erases them.
+      }
+    }
     return written;
   }
 
+  /**
+   * Erases an aggregate's events older than `version` and numbers the one that
+   * remains 1, because the store verifier reads a first version above 1 as a
+   * gap. The newest event keeps its sequence, so the aggregate's head and every
+   * projection checkpoint stay valid and no whole-table reconcile is needed.
+   */
   #eraseBefore(aggregateType: string, aggregateId: string, version: number): void {
     const { connection } = this.#dependencies;
     connection.pragma("foreign_keys = OFF");
@@ -835,8 +849,18 @@ export class PersonMemoryStore {
              WHERE aggregate_type = ? AND aggregate_id = ? AND aggregate_version < ?`,
           )
           .run(aggregateType, aggregateId, version);
-        reconcileAggregateHeads(connection);
-        clampCheckpointsToJournalHead(connection);
+        connection
+          .prepare(
+            `UPDATE event_journal SET aggregate_version = 1
+             WHERE aggregate_type = ? AND aggregate_id = ? AND aggregate_version = ?`,
+          )
+          .run(aggregateType, aggregateId, version);
+        connection
+          .prepare(
+            `UPDATE aggregate_heads SET aggregate_version = 1
+             WHERE aggregate_type = ? AND aggregate_id = ? AND aggregate_version = ?`,
+          )
+          .run(aggregateType, aggregateId, version);
       })();
     } finally {
       connection.pragma("foreign_keys = ON");

@@ -25,6 +25,7 @@ import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjectio
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { rebuildAll, verifyDatabase } from "../persistence/recovery";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { BENCHMARKS_PROJECT_ID } from "../benchmarks/benchmarkChatPort";
@@ -93,13 +94,14 @@ function harness(threads: FakeThread[]) {
   directories.push(directory);
   const connection: SqliteConnection = openSqlite(join(directory, "events.sqlite3"));
   applyMigrations(connection, MIGRATIONS, () => START);
+  const projections = new ProjectionRegistry().register(new AggregateHeadsProjection());
   const journal = new Journal({
     connection,
     registry: registerPersonMemoryEvents(new EventRegistry())
       .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)
       .register("chat.deleted@1", 1, ChatDeleted)
       .register(HUB_DELEGATION_RECORDED, 1, HubDelegationRecordedPayload),
-    projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+    projections,
     clock: () => START,
   });
   let now = START;
@@ -216,6 +218,7 @@ function harness(threads: FakeThread[]) {
   return {
     connection,
     journal,
+    projections,
     store,
     sweep,
     sweepWith,
@@ -1851,6 +1854,56 @@ describe("where a thread's block is cut, and how a digest is replaced", () => {
     h.store.change(decodePersonMemoryCommand({ kind: "forget-person-memory", confirmed: true }));
     expect(cutEvents(h)).toEqual([]);
     expect(h.store.blockCut(thread)).toBeUndefined();
+  });
+
+  it("leaves a journal that verifies, rebuilds and replays after several replaces of one aggregate", () => {
+    const h = harness([]);
+    for (const at of ["10:00", "11:00", "12:00", "13:00"]) {
+      h.advance(`2026-11-01T${at}:00.000Z`);
+      h.store.startBlockCut(thread);
+    }
+    h.store.startBlockCut({ ...thread, threadId: THREAD_2 });
+    const check = () =>
+      verifyDatabase({
+        connection: h.connection,
+        journal: h.journal,
+        projections: h.projections,
+      });
+
+    expect(check().issues).toEqual([]);
+    rebuildAll({
+      connection: h.connection,
+      journal: h.journal,
+      projections: h.projections,
+      clock: () => later,
+    });
+    expect(check().issues).toEqual([]);
+    const restarted = reopen(h);
+    expect(restarted.blockCut(thread)).toBe("2026-11-01T13:00:00.000Z");
+    restarted.close();
+    // The next replace after a restart still appends at the version that exists.
+    h.advance("2026-11-01T14:00:00.000Z");
+    expect(h.store.startBlockCut(thread)).toBe("2026-11-01T14:00:00.000Z");
+    expect(check().issues).toEqual([]);
+  });
+
+  it("keeps the new event in memory when erasing the older ones fails", () => {
+    const h = harness([]);
+    h.advance("2026-11-01T10:00:00.000Z");
+    h.store.startBlockCut(thread);
+    h.advance("2026-11-01T12:00:00.000Z");
+    const prepare = h.connection.prepare.bind(h.connection);
+    h.connection.prepare = (sql: string) => {
+      if (sql.includes("DELETE FROM event_journal")) throw new Error("SQLITE_BUSY");
+      return prepare(sql);
+    };
+
+    expect(h.store.startBlockCut(thread)).toBe("2026-11-01T12:00:00.000Z");
+    expect(h.store.blockCut(thread)).toBe("2026-11-01T12:00:00.000Z");
+    h.connection.prepare = prepare;
+    h.advance("2026-11-01T13:00:00.000Z");
+    h.store.startBlockCut(thread);
+    expect(cutEvents(h).map((event) => event.cutOff)).toEqual(["2026-11-01T13:00:00.000Z"]);
   });
 
   it("keeps the earlier digest in the journal when the later one cannot be written", async () => {
