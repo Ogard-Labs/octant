@@ -332,6 +332,9 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   };
 
 export function wireWork(deps: WorkDependencies) {
+  // Where each Work thread's agent shell was started, so a later turn in
+  // another folder ends it instead of reusing it.
+  const workTerminalFolders = new Map<string, string>();
   const imageDescriber = deps.imageDescriber;
   const {
     threadSecretFacts,
@@ -1315,6 +1318,13 @@ export function wireWork(deps: WorkDependencies) {
                 recordExternalContentIngestion: (mark) =>
                   externalContentIngestionStore.record(mark),
                 uuid: randomUUID,
+                startedIn: {
+                  get: () => workTerminalFolders.get(String(input.thread.id)),
+                  set: (started) => {
+                    if (started === undefined) workTerminalFolders.delete(String(input.thread.id));
+                    else workTerminalFolders.set(String(input.thread.id), started);
+                  },
+                },
               });
         const secretTools = !browserSupported
           ? undefined

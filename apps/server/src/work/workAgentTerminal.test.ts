@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createWorkTerminalTools } from "./workAgentTerminal";
 
 const WORK_THREAD = "33333333-3333-4333-8333-333333333333";
@@ -37,6 +37,9 @@ function terminals() {
   };
 }
 
+const folder = { current: "/work/folder" };
+const started: { current: string | undefined } = { current: undefined };
+
 function tools(
   overrides: {
     readonly posture?: "plan" | "approval-gated" | "auto-accept-edits" | "full-access";
@@ -50,7 +53,6 @@ function tools(
     threadId: WORK_THREAD,
     projectId: "77777777-7777-4777-8777-777777777777",
     terminals: service as never,
-    folder: async () => "/work/folder",
     posture: () => posture,
     current: () => true,
     ...(overrides.ask === undefined ? {} : { ask: overrides.ask }),
@@ -60,6 +62,13 @@ function tools(
     shell: () => "/bin/zsh",
     recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }) as never,
     uuid: () => crypto.randomUUID(),
+    folder: async () => folder.current,
+    startedIn: {
+      get: () => started.current,
+      set: (value: string | undefined) => {
+        started.current = value;
+      },
+    },
   });
   return {
     set,
@@ -71,6 +80,11 @@ function tools(
 }
 
 describe("a Work thread's terminal", () => {
+  beforeEach(() => {
+    folder.current = "/work/folder";
+    started.current = undefined;
+  });
+
   it("asks before each command below Full access, and runs it in the thread's folder at its level", async () => {
     const ask = vi.fn(async (_summary: string) => "approved" as const);
     const { set, service } = tools({ ask });
@@ -124,5 +138,47 @@ describe("a Work thread's terminal", () => {
     expect(service.launch).toHaveBeenCalledTimes(1);
     await next.set.execute(call({ operation: "stop" }));
     expect(service.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it("ends a shell started in a folder the thread no longer works in", async () => {
+    const service = terminals();
+    const first = tools({ posture: "full-access", service });
+    await first.set.execute(call({ operation: "run", command: "npm run dev" }));
+    folder.current = "/work/folder/docs";
+    const next = tools({ posture: "full-access", service });
+    expect(await next.set.execute(call({ operation: "write", command: "rm x" }))).toMatchObject({
+      isError: true,
+      result: { error: "terminal-folder-changed" },
+    });
+    expect(service.terminate).toHaveBeenCalledTimes(1);
+    expect(service.write).not.toHaveBeenCalledWith(expect.anything(), "rm x");
+    await next.set.execute(call({ operation: "run", command: "ls" }));
+    expect(service.launch.mock.calls[1]?.[0]).toMatchObject({ cwd: "/work/folder/docs" });
+  });
+
+  it("starts nothing when the thread is archived while its sandbox is prepared", async () => {
+    const service = terminals();
+    let active = true;
+    const set = createWorkTerminalTools({
+      threadId: WORK_THREAD,
+      projectId: "77777777-7777-4777-8777-777777777777",
+      terminals: service as never,
+      folder: async () => "/work/folder",
+      posture: () => "full-access",
+      current: () => active,
+      protections: async () => {
+        active = false;
+        return { launch: {}, end: async () => undefined };
+      },
+      platform: "darwin",
+      strict: () => true,
+      shell: () => "/bin/zsh",
+      recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }) as never,
+      uuid: () => crypto.randomUUID(),
+      startedIn: { get: () => undefined, set: () => undefined },
+    });
+    await set.execute(call({ operation: "run", command: "ls" }));
+    const admit = service.launch.mock.calls[0]?.[0]["admit"];
+    expect(typeof admit === "function" && admit()).toBe(false);
   });
 });
