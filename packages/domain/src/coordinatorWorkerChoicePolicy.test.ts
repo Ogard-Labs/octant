@@ -702,6 +702,68 @@ describe("usageLimitFromReading", () => {
     expect(usageLimitFromReading(failed(), at)).toBeUndefined();
   });
 
+  it("does not count a spent included window when extra usage is still allowed", () => {
+    expect(
+      usageLimitFromReading(
+        reading([
+          {
+            window: "monthly",
+            status: "exhausted",
+            utilization: 1,
+            resetsAt: "2026-12-01T00:00:00.000Z",
+            overage: { status: "allowed" },
+          },
+        ]),
+        now,
+      ),
+    ).toBeUndefined();
+    expect(
+      usageLimitFromReading(
+        reading([
+          {
+            window: "monthly",
+            status: "exhausted",
+            utilization: 1,
+            resetsAt: "2026-12-01T00:00:00.000Z",
+            overage: { status: "allowed", disabledReason: "Pay as you go on" },
+          },
+        ]),
+        now,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("still counts a spent included window when extra usage is off or exhausted", () => {
+    expect(
+      usageLimitFromReading(
+        reading([
+          {
+            window: "monthly",
+            status: "exhausted",
+            utilization: 1,
+            resetsAt: "2026-12-01T00:00:00.000Z",
+            overage: { status: "allowed", disabledReason: "Pay as you go off" },
+          },
+        ]),
+        now,
+      ),
+    ).toEqual({ until: "2026-12-01T00:00:00.000Z" });
+    expect(
+      usageLimitFromReading(
+        reading([
+          {
+            window: "monthly",
+            status: "exhausted",
+            utilization: 1,
+            resetsAt: "2026-12-01T00:00:00.000Z",
+            overage: { status: "exhausted" },
+          },
+        ]),
+        now,
+      ),
+    ).toEqual({ until: "2026-12-01T00:00:00.000Z" });
+  });
+
   it("never counts a reading below its limit, or one whose reset has passed", () => {
     expect(
       usageLimitFromReading(

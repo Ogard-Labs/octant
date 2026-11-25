@@ -527,6 +527,12 @@ describe("makeProviderDriver", () => {
     },
   );
 
+  it("attaches Vibe account-usage facts so remaining quota can be read", () => {
+    const fixture = factoryFixture();
+    const driver = makeProviderDriver(provider("mistral-vibe"), fixture.options);
+    expect(driver.contextFacts?.observeServiceLimits).toBeTypeOf("function");
+  });
+
   it.each([
     ["glm", "glm-acp", "/missing/glm"],
     ["gemini", "gemini-acp", "/missing/gemini"],
