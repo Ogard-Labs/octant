@@ -474,6 +474,26 @@ describe("Browser page offers", () => {
     expect(await subject.claim(otherWindow, cmd)).toMatchObject({ status: "claimed" });
   });
 
+  it("re-reserves a lapsed page for the open that names it, and says so when another window holds it", async () => {
+    const harness = open();
+    harness.sessions.opened(page(id(1), thread(1)));
+    let clock = 0;
+    const subject = offers(harness, { now: () => clock });
+    const cmd = command(id(1), thread(1));
+    expect(await subject.claim(windowId, cmd)).toMatchObject({ status: "claimed" });
+    clock += 121_000;
+    // The person's open names the page after the reservation lapsed: it holds it again.
+    expect(subject.holdForOpen(windowId, cmd)).toBe("held");
+    expect(subject.holds(windowId, cmd)).toBe(true);
+    expect(await subject.claim(otherWindow, cmd)).toMatchObject({ reason: "not-offered" });
+    // Lapsed again, another window claims first: the first window's open is refused.
+    clock += 121_000;
+    expect(await subject.claim(otherWindow, cmd)).toMatchObject({ status: "claimed" });
+    expect(subject.holdForOpen(windowId, cmd)).toBe("held-by-other");
+    expect(subject.holdForOpen(otherWindow, cmd)).toBe("held");
+    expect(subject.holdForOpen(windowId, command(id(9), thread(1)))).toBe("not-offered");
+  });
+
   it("ends the old record as reopened only when the reserved open succeeds, and supersedes older offers of the thread", async () => {
     const harness = open();
     harness.sessions.opened(page(id(1), thread(1)));

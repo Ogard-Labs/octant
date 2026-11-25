@@ -125,6 +125,23 @@ export class BrowserPageOffers {
     );
   }
 
+  /**
+   * What the open that names this page may do. A reservation that lapsed (the
+   * two minutes ran out, or it was given back) is taken again here, with no
+   * wait between the check and the write, unless another window or device holds
+   * the page now; then the open is refused rather than run as an ordinary one.
+   */
+  holdForOpen(
+    windowId: WindowId,
+    command: BrowserPageOfferCommand,
+  ): "held" | "held-by-other" | "not-offered" {
+    const page = this.#offeredFor(windowId, command);
+    if (page === undefined || page === "not-allowed") return "not-offered";
+    if (this.#heldByOther(page.pageId, windowId)) return "held-by-other";
+    if (this.#expired(page.pageId)) this.#reserve(page.pageId, windowId);
+    return "held";
+  }
+
   /** Gives the reservation back: the open failed, was declined, or was abandoned. */
   release(windowId: WindowId, command: BrowserPageOfferCommand): BrowserPageReleaseResult {
     if (!this.#options.canOpenBrowser(windowId, command.threadId, command.mode))
@@ -194,13 +211,23 @@ export class BrowserPageOffers {
     windowId: WindowId,
     command: BrowserPageOfferCommand,
   ): OpenBrowserPage | "not-allowed" | undefined {
+    const page = this.#offeredFor(windowId, command);
+    if (page === undefined || page === "not-allowed") return page;
+    if (this.#heldByOther(page.pageId, windowId)) return undefined;
+    return page;
+  }
+
+  /** The offered page a command names, whoever holds it. */
+  #offeredFor(
+    windowId: WindowId,
+    command: BrowserPageOfferCommand,
+  ): OpenBrowserPage | "not-allowed" | undefined {
     if (!this.#isOffered(String(command.pageId))) return undefined;
     const page = this.#options.sessions.page(String(command.pageId));
     if (page === undefined || page.threadId !== String(command.threadId)) return undefined;
     if (page.mode !== command.mode) return undefined;
     if (!this.#options.canOpenBrowser(windowId, command.threadId, page.mode)) return "not-allowed";
     if (this.#options.hasOpenPage(command.threadId)) return undefined;
-    if (this.#heldByOther(page.pageId, windowId)) return undefined;
     return page;
   }
 }

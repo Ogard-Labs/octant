@@ -155,7 +155,7 @@ export interface BrowserAutomationRouteDependencies {
     readonly threadTitle: (threadId: BrowserThreadId, mode: "work" | "code") => string | undefined;
   };
   /** The page a restart took, offered back; absent on a host that records none. */
-  readonly pageOffers?: Pick<BrowserPageOffers, "read" | "claim" | "dismiss" | "release" | "holds">;
+  readonly pageOffers?: Pick<BrowserPageOffers, "read" | "claim" | "dismiss" | "release" | "holdForOpen">;
   /** The thread's kept screenshots; absent on a host that keeps none. */
   readonly captures?: Pick<BrowserCaptureService, "list" | "read" | "listSteps">;
   /**
@@ -958,6 +958,25 @@ export function createBrowserAutomationRouteHandler(
             origin,
           );
         }
+        const reopenHold =
+          input.reopenPageId !== undefined && actsAsHostPerson
+            ? dependencies.pageOffers?.holdForOpen(windowId, {
+                threadId: input.threadId,
+                mode: input.action.authority.mode === "code" ? "code" : "work",
+                pageId: input.reopenPageId,
+              })
+            : undefined;
+        if (reopenHold === "held-by-other") {
+          return failure(
+            {
+              category: "unavailable",
+              message:
+                "Another window or device is reopening this page. Try again once it has finished.",
+            },
+            409,
+            origin,
+          );
+        }
         return success(
           decodeBrowserAutomationSnapshot(
             await dependencies.service.create({
@@ -969,14 +988,9 @@ export function createBrowserAutomationRouteHandler(
               openedByPerson: true,
               actor,
               // Honoured only while this window or device holds the page's
-              // reservation; otherwise it is an ordinary open.
-              ...(input.reopenPageId !== undefined &&
-              actsAsHostPerson &&
-              dependencies.pageOffers?.holds(windowId, {
-                threadId: input.threadId,
-                mode: input.action.authority.mode === "code" ? "code" : "work",
-                pageId: input.reopenPageId,
-              }) === true
+              // reservation, which an open that names it takes again if it
+              // lapsed; otherwise it is an ordinary open.
+              ...(reopenHold === "held" && input.reopenPageId !== undefined
                 ? { reopensPageId: String(input.reopenPageId) }
                 : {}),
               // A signed-in page opens for the host's own person (at a local

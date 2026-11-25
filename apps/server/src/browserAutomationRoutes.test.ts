@@ -2392,7 +2392,7 @@ describe("browser page offer routes", () => {
       claim: vi.fn(async () => ({ status: "claimed" as const, profile: offer.profile })),
       dismiss: vi.fn((..._args: ReadonlyArray<unknown>) => ({ status: "dismissed" as const })),
       release: vi.fn(() => ({ status: "released" as const })),
-      holds: vi.fn(() => true),
+      holdForOpen: vi.fn((..._args: ReadonlyArray<unknown>) => "held" as string),
     };
     const handler = createBrowserAutomationRouteHandler({
       service,
@@ -2454,10 +2454,22 @@ describe("browser page offer routes", () => {
     expect(service.create).toHaveBeenLastCalledWith(
       expect.objectContaining({ openedByPerson: true, reopensPageId: pageId }),
     );
-    pageOffers.holds.mockReturnValue(false);
+    pageOffers.holdForOpen.mockReturnValue("not-offered");
     await call("/api/browser/contexts", open);
     const unheld = service.create.mock.calls.at(-1)?.[0] as { reopensPageId?: string };
     expect(unheld.reopensPageId).toBeUndefined();
+  });
+
+  it("refuses an open that names a page another window holds, with a reason the pane shows", async () => {
+    const { call, service, pageOffers } = routes();
+    pageOffers.holdForOpen.mockReturnValue("held-by-other");
+    const response = await call("/api/browser/contexts", { ...body(), reopenPageId: pageId });
+    expect(response?.status).toBe(409);
+    expect(await response?.json()).toMatchObject({
+      category: "unavailable",
+      message: expect.stringContaining("Another window or device"),
+    });
+    expect(service.create).not.toHaveBeenCalled();
   });
 
   it("gives a reservation back on the release route", async () => {
