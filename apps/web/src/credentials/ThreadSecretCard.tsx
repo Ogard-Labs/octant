@@ -328,16 +328,20 @@ function SecretField(props: {
   const onPaste = (event: ClipboardEvent<HTMLInputElement>) => {
     if (!typed) return;
     const { selectionStart, selectionEnd, value } = event.currentTarget;
+    const pasted = event.clipboardData.getData("text/plain");
+    // Over a count of lines there is no text to paste into: it is replaced.
     const text =
-      value.slice(0, selectionStart ?? value.length) +
-      event.clipboardData.getData("text/plain") +
-      value.slice(selectionEnd ?? value.length);
+      lines > 1
+        ? pasted
+        : value.slice(0, selectionStart ?? value.length) +
+          pasted +
+          value.slice(selectionEnd ?? value.length);
     if (text.length > MAX_VALUE_LENGTH) {
       event.preventDefault();
       props.onProblem(TOO_LONG);
-    } else if (linesOf(text) > 1) {
+    } else if (lines > 1 || linesOf(text) > 1) {
       event.preventDefault();
-      props.onChange({ text });
+      props.onChange({ text: linesOf(text) > 1 ? text : text.replace(/[\r\n]+$/u, "") });
     }
   };
   return (

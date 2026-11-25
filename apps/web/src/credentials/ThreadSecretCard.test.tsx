@@ -102,6 +102,26 @@ describe("the secret card", () => {
     expect(save()).toBeDisabled();
   });
 
+  it.each([
+    ["three\nfour\n", "three\nfour\n"],
+    ["single-value\n", "single-value"],
+  ])(
+    "replaces pasted lines with what is pasted next, and nothing of their count (%j)",
+    async (next, value) => {
+      const { user, send } = setup();
+      await user.click(input());
+      await user.paste("one\ntwo");
+      await user.click(input());
+      await user.paste(next);
+      await user.click(save());
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fields: [{ name: "DEPLOY_TOKEN", source: "pasted", value }],
+        }),
+      );
+    },
+  );
+
   it("takes one line pasted with its line break as that line", async () => {
     const { user } = setup();
     await user.click(input());
