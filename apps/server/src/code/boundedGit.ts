@@ -252,7 +252,7 @@ export function runBoundedGit(options: BoundedGitOptions): Promise<BoundedGitRes
           settleIfDone();
           return;
         }
-        if (Date.now() >= killedAt + confirm) {
+        if (performance.now() >= killedAt + confirm) {
           // Still there after SIGKILL: keep looking after this call has gone,
           // and let the lock that guards the folder wait for it.
           registerSurvivor(receiptIds, outlive(pid, probe, child));
@@ -269,7 +269,7 @@ export function runBoundedGit(options: BoundedGitOptions): Promise<BoundedGitRes
       if (stopped !== undefined || settled) return;
       stopped = why;
       signalTree(child, "SIGTERM");
-      const killedAt = Date.now() + grace;
+      const killedAt = performance.now() + grace;
       // The escalation is never cancelled by the direct child leaving: only the
       // group being gone ends it.
       timers.push(

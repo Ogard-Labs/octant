@@ -66,11 +66,11 @@ describe("runBoundedGit", () => {
       )
       .toBe(true);
     const { child, grandchild } = await pids();
-    const started = Date.now();
+    const started = performance.now();
     stop.abort(new Error("the person stopped it"));
     await expect(running).rejects.toThrow("the person stopped it");
     // SIGTERM was ignored, so the settle waited for the kill, not for the sleep.
-    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(performance.now() - started).toBeLessThan(10_000);
     expect(alive(child)).toBe(false);
     expect(alive(grandchild)).toBe(false);
   });
@@ -199,12 +199,12 @@ describe("runBoundedGit", () => {
             ),
           )
           .toBe(true);
-        const began = Date.now();
+        const began = performance.now();
         stop.abort(new Error("stopped"));
         await expect(ended).resolves.toContain("stopped");
         // Not before SIGKILL, and well before it would count as surviving.
-        expect(Date.now() - began).toBeGreaterThanOrEqual(390);
-        expect(Date.now() - began).toBeLessThan(3_000);
+        expect(performance.now() - began).toBeGreaterThanOrEqual(390);
+        expect(performance.now() - began).toBeLessThan(3_000);
         expect(alive(await keeper())).toBe(true);
         await waitForSurvivingGit("zombies");
       } finally {
