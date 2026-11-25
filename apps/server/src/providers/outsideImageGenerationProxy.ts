@@ -396,11 +396,11 @@ export function makeOutsideImageGenerationProxy(options: OutsideImageGenerationP
 /**
  * Extracts every complete address from one provider response into `out`,
  * capped at `MAX_RELAYED_ADDRESSES_PER_JOB`. Completed JSON responses are
- * parsed so exact decoded keys and values stay intact (including apostrophes,
- * pipes, and delimited links like `<https://...>`), while non-JSON or partial
- * streaming responses scan only complete delimited tokens so a truncated
- * chunk cannot authorize a URL prefix and an embedded query parameter cannot
- * authorize an inner URL.
+ * parsed directly, SSE responses are framed by line and event so comments and
+ * metadata never interfere with `data:` payloads, and partial JSON uses a
+ * linear string-literal scanner (no backtracking regexes and no bare-URL
+ * fallback over raw JSON escapes). A truncated chunk cannot authorize a URL
+ * prefix, and an embedded query parameter cannot authorize an inner URL.
  */
 function extractReturnedAddresses(responseText: string, out: Set<string>, complete: boolean): void {
   const add = (candidate: string) => {
@@ -414,38 +414,124 @@ function extractReturnedAddresses(responseText: string, out: Set<string>, comple
         collectJsonAddresses(JSON.parse(trimmed), add);
         return;
       } catch {
-        // Non-JSON or multi-document body (e.g. SSE); scan delimited tokens below.
+        // Non-JSON or multi-document body (e.g. NDJSON/SSE); frame lines below.
       }
     }
   }
-  // Parse complete JSON string literals (e.g. inside SSE chunks) directly so
-  // escaped quotes or delimiters never split one URL into inner URLs, and
-  // truncated chunks without a closing quote match nothing.
-  for (const match of responseText.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
+  const lines = responseText.split(/\r\n|\n|\r/);
+  const endsWithNewline = /(?:\r\n|\n|\r)$/.test(responseText);
+  if (endsWithNewline) lines.pop();
+  const sseDataLines: Array<string> = [];
+  const flushSse = () => {
+    if (sseDataLines.length === 0) return;
+    extractPayloadAddresses(sseDataLines.join("\n"), add, true);
+    sseDataLines.length = 0;
+  };
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line === undefined) continue;
+    const lineComplete = complete || endsWithNewline || index < lines.length - 1;
+    if (line.length === 0) {
+      flushSse();
+      continue;
+    }
+    // SSE comments (`: ...`) and control fields never hold image payloads.
+    if (line.startsWith(":")) continue;
+    if (/^(?:event|id|retry):/.test(line)) continue;
+    if (line.startsWith("data:")) {
+      const value = line.startsWith("data: ") ? line.slice(6) : line.slice(5);
+      if (lineComplete) {
+        sseDataLines.push(value);
+        // Also inspect each complete single-line `data:` value immediately so
+        // live streams that answer before the trailing blank line still work.
+        extractPayloadAddresses(value, add, true);
+      } else {
+        extractPayloadAddresses(value, add, false);
+      }
+      continue;
+    }
+    flushSse();
+    extractPayloadAddresses(line, add, lineComplete);
+  }
+  if (complete) flushSse();
+}
+
+function extractPayloadAddresses(
+  payload: string,
+  add: (candidate: string) => void,
+  payloadComplete: boolean,
+): void {
+  const trimmed = payload.trim();
+  if (trimmed.length === 0) return;
+  const jsonShaped = trimmed.startsWith("{") || trimmed.startsWith("[");
+  if (payloadComplete && jsonShaped) {
     try {
-      const decoded: unknown = JSON.parse(match[0]);
-      if (typeof decoded === "string") collectJsonStringAddresses(decoded, add);
+      collectJsonAddresses(JSON.parse(trimmed), add);
+      return;
     } catch {
-      // Incomplete or non-JSON quoted text; ignore.
+      // Partial or malformed JSON; scan complete JSON string literals below.
     }
   }
-  for (const match of responseText.matchAll(/(?:^|\s)<(https?:\/\/[^\s"<>\\`{}^]+)>/g)) {
+  if (jsonShaped) {
+    scanJsonStringLiterals(payload, add);
+    return;
+  }
+  if (
+    payloadComplete &&
+    (trimmed.startsWith("http://") || trimmed.startsWith("https://")) &&
+    !/\s/.test(trimmed)
+  ) {
+    if (!/["<>\\`{}^]/.test(trimmed)) add(trimmed);
+    return;
+  }
+  scanJsonStringLiterals(payload, add);
+  for (const match of payload.matchAll(/(?:^|\s)<(https?:\/\/[^\s"<>\\`{}^]+)>/g)) {
     if (match[1] !== undefined) add(match[1]);
   }
-  // SSE `data:` fields allow zero or one space after the colon and LF, CRLF,
-  // or CR line endings; requiring a line ending while streaming keeps partial
-  // URLs at chunk boundaries refused.
-  const sseData = complete
-    ? /(?:^|\r\n|\n|\r)data: ?(https?:\/\/[^\s"<>\\`{}^]+)(?=$|\r\n|\n|\r)/g
-    : /(?:^|\r\n|\n|\r)data: ?(https?:\/\/[^\s"<>\\`{}^]+)(?=\r\n|\n|\r)/g;
-  for (const match of responseText.matchAll(sseData)) {
+  const bare = payloadComplete
+    ? /(?:^|[\s(\[{])(https?:\/\/[^\s"<>\\`{}^)\]}]+)(?=$|[\s"<>`{}^)\]}])/g
+    : /(?:^|[\s(\[{])(https?:\/\/[^\s"<>\\`{}^)\]}]+)(?=[\s"<>`{}^)\]}])/g;
+  for (const match of payload.matchAll(bare)) {
     if (match[1] !== undefined) add(match[1]);
   }
-  const bare = complete
-    ? /(?:^|[\s(\[{])(https?:\/\/[^\s"<>\\`{}^)\]}]+)(?=$|[\s"<>\\`{}^)\]}])/g
-    : /(?:^|[\s(\[{])(https?:\/\/[^\s"<>\\`{}^)\]}]+)(?=[\s"<>\\`{}^)\]}])/g;
-  for (const match of responseText.matchAll(bare)) {
-    if (match[1] !== undefined) add(match[1]);
+}
+
+/**
+ * Linear, non-backtracking scanner for complete JSON string literals inside
+ * partial JSON or mixed text. Oversized literals (such as inline base64
+ * images) are skipped without `JSON.parse` or regex recursion.
+ */
+function scanJsonStringLiterals(text: string, add: (candidate: string) => void): void {
+  const maxLiteralLength = MAX_RELAYED_ADDRESS_LENGTH * 6;
+  let index = 0;
+  while (index < text.length) {
+    const start = text.indexOf('"', index);
+    if (start === -1) break;
+    let end = start + 1;
+    let closed = false;
+    while (end < text.length) {
+      const code = text.charCodeAt(end);
+      if (code === 92) {
+        // Skip escaped character (`\`).
+        end += 2;
+        continue;
+      }
+      if (code === 34) {
+        closed = true;
+        break;
+      }
+      end += 1;
+    }
+    if (!closed) break;
+    if (end - start <= maxLiteralLength) {
+      try {
+        const decoded: unknown = JSON.parse(text.slice(start, end + 1));
+        if (typeof decoded === "string") collectJsonStringAddresses(decoded, add);
+      } catch {
+        // Non-JSON quoted text; ignore.
+      }
+    }
+    index = end + 1;
   }
 }
 
@@ -461,7 +547,7 @@ function collectJsonStringAddresses(text: string, add: (candidate: string) => vo
     if (match[1] !== undefined) add(match[1]);
   }
   for (const match of text.matchAll(
-    /(?:^|[\s"(\[{])(https?:\/\/[^\s"<>\\`{}^)\]}]+)(?=$|[\s"<>\\`{}^)\]}])/g,
+    /(?:^|[\s"(\[{])(https?:\/\/[^\s"<>\\`{}^)\]}]+)(?=$|[\s"<>`{}^)\]}])/g,
   )) {
     if (match[1] !== undefined) add(match[1]);
   }

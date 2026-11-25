@@ -368,8 +368,10 @@ describe("the pinned approved-image transport", () => {
         "content-encoding": entry.encoding,
         "content-length": String(entry.body.byteLength + 2),
       });
-      response.write(entry.body, () => {
-        setTimeout(() => response.end(Buffer.from([0x00, 0x00])), 10);
+      // Send the full compressed stream plus one trailing byte so the decoder
+      // reaches EOF while the HTTP response is still open, then finish cleanly.
+      response.write(Buffer.concat([entry.body, Buffer.from([0x00])]), () => {
+        setTimeout(() => response.end(Buffer.from([0x00])), 20);
       });
     });
     await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));

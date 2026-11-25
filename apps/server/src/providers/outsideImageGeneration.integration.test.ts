@@ -822,6 +822,10 @@ describe("an outside image driver's later fixes", () => {
         'data: {"url":"https://cdn.images.example.test/image.png?label=\\u0022https://evil.example.test/x\\u0022"}\n\n',
         "https://evil.example.test/x",
       ],
+      [
+        'data: {"text":"see https://cdn.images.example.test/out/1.png\\u0026sig=secret","more":',
+        "https://cdn.images.example.test/out/1.png",
+      ],
     ] as const) {
       const run = harness({
         handlers: {
@@ -896,6 +900,8 @@ describe("an outside image driver's later fixes", () => {
     for (const [payload, expectedStatus] of [
       [`data:${named}\n\n`, "completed"],
       [`event:done\rdata:${named}\r\r`, "completed"],
+      [`: Rendering a 12" preview\ndata: {"url":"${named}"}\n\n`, "completed"],
+      [`data: {"blob":"${"A".repeat(200_000)}","url":"${named}"}\n\n`, "completed"],
       [`data:${named}`, "failed"],
     ] as const) {
       let resolveChunkSeen: (() => void) | undefined;
@@ -934,7 +940,7 @@ describe("an outside image driver's later fixes", () => {
         expect(job.failure?.category).toBe("unauthorized");
       }
     }
-    expect(imageFetch).toHaveBeenCalledTimes(2);
+    expect(imageFetch).toHaveBeenCalledTimes(4);
   });
 
   it("refuses a URL prefix that has not yet been delimited in an open stream", async () => {
