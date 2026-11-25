@@ -129,8 +129,7 @@ bool peer_has_exited(WindowPeer &peer) {
   return result < 0 || (result == 1 && (event.fflags & NOTE_EXIT));
 }
 std::unique_ptr<WindowPeer> watch_window_peer(audit_token_t token,
-                                              const Identity &self,
-                                              Deadline deadline) {
+                                              const Identity &self) {
   auto peer = std::make_unique<WindowPeer>();
   peer->token = token;
   peer->watch = kqueue();
@@ -143,10 +142,8 @@ std::unique_ptr<WindowPeer> watch_window_peer(audit_token_t token,
     return nullptr;
   // Installing a PID watch alone does not bind an incarnation. Re-check the
   // kernel audit token after installation, and refuse an already-dead peer.
-  Identity verified;
-  std::string reason;
-  if (!validate_identity(token, self.scope, false, self.team, verified,
-                         deadline, reason) ||
+  // The caller validated this peer's full identity within the same request.
+  if (!guest_is_current(token, self.scope, nightly_id, self.team) ||
       peer_has_exited(*peer))
     return nullptr;
   return peer;
@@ -218,7 +215,7 @@ void serve_windows(std::shared_ptr<WindowState> owned, Identity self,
       if (peers.size() >= 32)
         accepted = false;
       else {
-        auto watched = watch_window_peer(token, self, deadline);
+        auto watched = watch_window_peer(token, self);
         if (!watched)
           accepted = false;
         else

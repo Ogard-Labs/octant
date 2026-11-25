@@ -89,6 +89,40 @@ describe("ordinary Nightly client window", () => {
     });
     expect(f.createWindow).not.toHaveBeenCalled();
   });
+  it.each(["expired", "not-running"])(
+    "counts a refused registration as cleaned up when the host holds no such window: %s",
+    async (reason) => {
+      const f = fixture();
+      vi.mocked(f.native.openWindow).mockResolvedValueOnce({
+        kind: "refused",
+        reason: "unavailable",
+      });
+      vi.mocked(f.native.revokeWindow).mockResolvedValueOnce({ kind: "refused", reason });
+      expect(await f.open()).toEqual({
+        kind: "refused",
+        reason: "unavailable",
+        retryable: true,
+      });
+      expect(f.createWindow).not.toHaveBeenCalled();
+    },
+  );
+  it("still reports failed cleanup when a refused registration may have left a lease", async () => {
+    const f = fixture();
+    vi.mocked(f.native.openWindow).mockResolvedValueOnce({
+      kind: "refused",
+      reason: "deadline-exceeded",
+    });
+    vi.mocked(f.native.revokeWindow).mockResolvedValueOnce({
+      kind: "refused",
+      reason: "deadline-exceeded",
+    });
+    expect(await f.open()).toEqual({
+      kind: "refused",
+      reason: "deadline-exceeded",
+      retryable: true,
+      cleanupFailed: true,
+    });
+  });
   it("cancels a pending renderer load without showing its late completion", async () => {
     const f = fixture();
     const controller = new AbortController();
