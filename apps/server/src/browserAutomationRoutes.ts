@@ -155,7 +155,7 @@ export interface BrowserAutomationRouteDependencies {
     readonly threadTitle: (threadId: BrowserThreadId, mode: "work" | "code") => string | undefined;
   };
   /** The page a restart took, offered back; absent on a host that records none. */
-  readonly pageOffers?: Pick<BrowserPageOffers, "read" | "claim" | "dismiss">;
+  readonly pageOffers?: Pick<BrowserPageOffers, "read" | "claim" | "dismiss" | "release" | "holds">;
   /** The thread's kept screenshots; absent on a host that keeps none. */
   readonly captures?: Pick<BrowserCaptureService, "list" | "read" | "listSteps">;
   /**
@@ -958,6 +958,22 @@ export function createBrowserAutomationRouteHandler(
             await dependencies.service.create({
               windowId,
               ...input,
+              // The one route a person opens a page from. Every other caller
+              // of `create` leaves this unsaid, so only this page is recorded
+              // as the person's.
+              openedByPerson: true,
+              actor,
+              // Honoured only while this window or device holds the page's
+              // reservation; otherwise it is an ordinary open.
+              ...(input.reopenPageId !== undefined &&
+              actsAsHostPerson &&
+              dependencies.pageOffers?.holds(windowId, {
+                threadId: input.threadId,
+                mode: input.action.authority.mode === "code" ? "code" : "work",
+                pageId: input.reopenPageId,
+              }) === true
+                ? { reopensPageId: String(input.reopenPageId) }
+                : {}),
               // A signed-in page opens for the host's own person (at a local
               // window or on a device they paired); a hub-introduced or
               // restricted device is refused before any runtime is asked.
@@ -1034,6 +1050,7 @@ export function createBrowserAutomationRouteHandler(
       }
       if (
         url.pathname === "/api/browser/page-offer/claim" ||
+        url.pathname === "/api/browser/page-offer/release" ||
         url.pathname === "/api/browser/page-offer/dismiss"
       ) {
         const input = decodeBrowserPageOfferCommand(decoded.value);
@@ -1044,7 +1061,9 @@ export function createBrowserAutomationRouteHandler(
         return success(
           url.pathname === "/api/browser/page-offer/claim"
             ? await dependencies.pageOffers.claim(windowId, input)
-            : dependencies.pageOffers.dismiss(windowId, input),
+            : url.pathname === "/api/browser/page-offer/release"
+              ? dependencies.pageOffers.release(windowId, input)
+              : dependencies.pageOffers.dismiss(windowId, input, actor),
           origin,
         );
       }
@@ -1145,7 +1164,7 @@ export function createBrowserAutomationRouteHandler(
         const input = decodeBrowserThreadContextCommand(decoded.value);
         return success(
           decodeBrowserAutomationSnapshot(
-            await dependencies.service.releaseThread(windowId, input.threadId, "person"),
+            await dependencies.service.releaseThread(windowId, input.threadId, "person", actor),
           ),
           origin,
         );
@@ -1315,7 +1334,13 @@ export function createBrowserAutomationRouteHandler(
         const input = decodeBrowserContextStopCommand(decoded.value);
         return success(
           decodeBrowserAutomationSnapshot(
-            await dependencies.service.stop(windowId, input.threadId, input.contextId, "person"),
+            await dependencies.service.stop(
+              windowId,
+              input.threadId,
+              input.contextId,
+              "person",
+              actor,
+            ),
           ),
           origin,
         );

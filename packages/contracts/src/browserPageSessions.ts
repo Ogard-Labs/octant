@@ -18,8 +18,8 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * offer to open a blank page in the same profile again.
  *
  * One aggregate per page (aggregate id = page id), so the pair of events of a
- * closed page can leave the journal together and a claim is one append at the
- * version the open left. Nothing here names an address, title, or content of
+ * closed page can leave the journal together at the next start and an end is
+ * one append at the version the open left. Nothing here names an address, title, or content of
  * the page: the record exists to open a blank page, never to restore one.
  */
 export const BROWSER_PAGE_AGGREGATE_TYPE = "browser-page";
@@ -84,11 +84,13 @@ export const decodeBrowserPageClosed = Schema.decodeUnknownSync(BrowserPageClose
 /**
  * The offer on the thread's Browser read. `offered` carries the profile the
  * blank page opens in; `profile-gone` says the profile no longer exists, so
- * the pane explains instead of offering, and only Dismiss is left.
+ * the pane explains instead of offering, and only Dismiss is left;
+ * `profile-unchecked` says the host could not look the profile up just now, so
+ * the offer stays and the open itself finds out.
  */
 export const BrowserPageReopenOffer = Schema.Struct({
   pageId: BrowserContextId,
-  status: Schema.Literal("offered", "profile-gone"),
+  status: Schema.Literal("offered", "profile-gone", "profile-unchecked"),
   profile: BrowserProfile,
 }).annotations(strict);
 export type BrowserPageReopenOffer = typeof BrowserPageReopenOffer.Type;
@@ -102,7 +104,7 @@ export type BrowserPageOfferCommand = typeof BrowserPageOfferCommand.Type;
 export const decodeBrowserPageOfferCommand = Schema.decodeUnknownSync(BrowserPageOfferCommand);
 
 export const BrowserPageOfferRefusalReason = Schema.Literal(
-  /** Another window claimed it, it was dismissed, or the restart did not take that page. */
+  /** Another window holds it, it was reopened or dismissed, or the restart did not take that page. */
   "not-offered",
   "profile-gone",
   "not-allowed",
@@ -118,6 +120,16 @@ export const BrowserPageClaimResult = Schema.Union(
 );
 export type BrowserPageClaimResult = typeof BrowserPageClaimResult.Type;
 export const decodeBrowserPageClaimResult = Schema.decodeUnknownSync(BrowserPageClaimResult);
+
+/** Gives a reservation back: the open it was for failed, was declined, or was abandoned. */
+export const BrowserPageReleaseResult = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("released") }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: BrowserPageOfferRefusalReason,
+  }).annotations(strict),
+);
+export type BrowserPageReleaseResult = typeof BrowserPageReleaseResult.Type;
 
 export const BrowserPageDismissResult = Schema.Union(
   Schema.Struct({ status: Schema.Literal("dismissed") }).annotations(strict),

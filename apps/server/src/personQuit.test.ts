@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeWindowId } from "@octant/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { NATIVE_MAIN_AUTHORITY_HEADER } from "./desktopBrokerAdmission";
 import {
   consumePersonQuit,
@@ -62,6 +62,20 @@ describe("a person's quit", () => {
     const response = await handle(request({ "x-octant-desktop-secret": secret }));
     expect(response?.status).toBe(204);
     expect(consumePersonQuit(directory)).toBe(true);
+  });
+
+  it("tells the host's own work a quit is under way only for the desktop that holds the bridge secret", async () => {
+    const onPersonQuit = vi.fn();
+    const handle = createPersonQuitRouteHandler({
+      desktopBridgeSecret: secret,
+      dataDirectory: dataDirectory(),
+      onPersonQuit,
+    });
+    await handle(request({ "x-octant-desktop-secret": "guessed" }));
+    await handle(request({ "x-octant-desktop-secret": secret }, { method: "GET" }));
+    expect(onPersonQuit).not.toHaveBeenCalled();
+    await handle(request({ "x-octant-desktop-secret": secret }));
+    expect(onPersonQuit).toHaveBeenCalledOnce();
   });
 
   it("is refused from anything but the local desktop, and nothing is recorded", async () => {

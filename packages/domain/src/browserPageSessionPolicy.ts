@@ -3,11 +3,15 @@ import type { BrowserPageOpened, BrowserProfile } from "@octant/contracts";
 /**
  * What decides whether a page is a Browser session the host records so that a
  * restart can offer it back. Only the person's own page in a thread's Browser
- * pane is one: a routine, a subagent's delivered result, a terminal grant, a
- * page the host runs for a scheduled owner, and the page a single Open of its
- * own takes keep the restore they already have, and Chat has no Browser.
+ * pane is one, and only when the person's own open route says the person
+ * opened it: the thread's agent opens pages in the same context, and so do a
+ * subagent, a routine, a saved flow, a terminal grant and a page the host runs
+ * for a scheduled owner. Those keep the restore they already have, a page a
+ * single Open of its own takes does too, and Chat has no Browser.
  */
 export interface BrowserPageRecordFacts {
+  /** True only when the person's own open route made the request. */
+  readonly openedByPerson: boolean;
   readonly mode: "chat" | "work" | "code";
   readonly dedicated: boolean;
   readonly hostRun: boolean;
@@ -17,6 +21,7 @@ export interface BrowserPageRecordFacts {
 
 export function isRecordedBrowserSession(facts: BrowserPageRecordFacts): boolean {
   return (
+    facts.openedByPerson &&
     facts.mode !== "chat" &&
     !facts.dedicated &&
     !facts.hostRun &&

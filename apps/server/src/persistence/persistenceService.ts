@@ -65,6 +65,7 @@ import {
   MigrationHistoryMismatch,
 } from "./migrationErrors";
 import { MIGRATIONS } from "./migrations";
+import { compactClosedBrowserPages } from "./browserPageProjection";
 import { compactSupersededCheckoutObservations } from "./journalCompaction";
 import {
   clearJournalWatermark,
@@ -522,14 +523,26 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
     // After catch-up so heads and the checkout projection are current, and
     // before restart reconciliation so its append continues from the compacted
     // head rather than racing the renumbering.
-    const compaction = compactSupersededCheckoutObservations(connection);
-    if (compaction.eventsRemoved > 0) {
+    const checkoutCompaction = compactSupersededCheckoutObservations(connection);
+    if (checkoutCompaction.eventsRemoved > 0) {
       console.warn(
-        `Octant journal compaction removed ${compaction.eventsRemoved} superseded checkout observation(s) across ${compaction.checkoutsCompacted} checkout(s).`,
+        `Octant journal compaction removed ${checkoutCompaction.eventsRemoved} superseded checkout observation(s) across ${checkoutCompaction.checkoutsCompacted} checkout(s).`,
       );
-    } else if (fingerprint !== undefined && scannedHead !== verifiedThrough) {
+    }
+    // The pages a Browser pane held and then ended leave here and nowhere else:
+    // no deletion at run time may clear the verification watermark.
+    const pageCompaction = compactClosedBrowserPages(connection);
+    const compaction = {
+      eventsRemoved: checkoutCompaction.eventsRemoved + pageCompaction.eventsRemoved,
+    };
+    if (
+      compaction.eventsRemoved === 0 &&
+      fingerprint !== undefined &&
+      scannedHead !== verifiedThrough
+    ) {
       // Only a scan that found the journal compatible and left its rows
-      // untouched may move the watermark. The status check below clears it
+      // untouched may move the watermark; a start that removed rows leaves the
+      // deletion's clearing in place. The status check below clears it
       // again if it refuses the start, so a refused tail is never skipped.
       recordJournalWatermark(connection, fingerprint, scannedHead, clock());
     }

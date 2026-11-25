@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   BrowserPageOpened,
   decodeBrowserThreadId,
+  decodeEventActor,
   decodeWindowId,
   type BrowserPageCloseReason,
   type BrowserProfile,
@@ -14,7 +15,11 @@ import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
-import { BrowserPageProjection } from "../persistence/browserPageProjection";
+import {
+  BrowserPageProjection,
+  compactClosedBrowserPages,
+} from "../persistence/browserPageProjection";
+import { recordJournalWatermark } from "../persistence/journalWatermark";
 import { rebuildProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
@@ -27,6 +32,7 @@ import { BrowserPageSessions } from "./browserPageSessions";
 const now = "2026-11-25T09:00:00.000Z";
 const projectId = "a0000000-0000-4000-8000-0000000000a1";
 const windowId = decodeWindowId("a0000000-0000-4000-8000-0000000000b1");
+const otherWindow = decodeWindowId("a0000000-0000-4000-8000-0000000000b2");
 const accountId = "a0000000-0000-4000-8000-0000000000c1";
 const directories: string[] = [];
 afterEach(() => {
@@ -84,6 +90,7 @@ const page = (
   }) as never;
 const id = (n: number) => `b0000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const thread = (n: number) => id(1000 + n);
+const actor = { kind: "local-user" as const, actorId: OCTANT_LOCAL_ACTOR_ID };
 
 describe("Browser session records", () => {
   it("records a start and an end, and the open row leaves with the end", () => {
@@ -179,21 +186,37 @@ describe("Browser session records", () => {
     ).toThrow();
   });
 
-  it("keeps the journal and the table bounded across a thousand opens and closes", () => {
+  it("deletes nothing from the journal while it runs, so the verification watermark survives", () => {
     const { sessions, connection } = open();
+    recordJournalWatermark(connection, "fingerprint", 1, now);
+    for (let n = 0; n < 100; n += 1) {
+      sessions.opened(page(id(n), thread(1)));
+      sessions.ended(id(n), thread(1), "closed-by-person");
+    }
+    const watermark = connection
+      .prepare("SELECT verified_through FROM journal_verification_watermark")
+      .get();
+    expect(watermark).toEqual({ verified_through: 1 });
+    expect(sessions.open()).toEqual([]);
+  });
+
+  it("leaves no more than the open pages once the persistence start compacts the ended ones", () => {
+    const { sessions, connection, events } = open();
     for (let n = 0; n < 1000; n += 1) {
       sessions.opened(page(id(n), thread(1)));
       sessions.ended(id(n), thread(1), "closed-by-person");
     }
     sessions.opened(page(id(5000), thread(1)));
-    const kept = (
-      connection
-        .prepare(`SELECT count(*) AS n FROM event_journal WHERE aggregate_type = 'browser-page'`)
-        .get() as { n: number }
-    ).n;
-    expect(kept).toBeLessThanOrEqual(2 * 32 + 1);
+    const report = compactClosedBrowserPages(connection);
+    expect(report).toEqual({ pagesRemoved: 1000, eventsRemoved: 2000 });
+    expect(events().map((row) => row.aggregate_id)).toEqual([id(5000)]);
     expect(sessions.open().map((row) => row.pageId)).toEqual([id(5000)]);
-    // The projection checkpoint still matches the journal after the sweeps.
+    // The heads of the removed aggregates left with them, and only theirs.
+    const heads = connection
+      .prepare(`SELECT aggregate_id FROM aggregate_heads WHERE aggregate_type = 'browser-page'`)
+      .all();
+    expect(heads).toEqual([{ aggregate_id: id(5000) }]);
+    // The projection checkpoint still matches the journal after the sweep.
     const head = connection
       .prepare(`SELECT coalesce(max(global_sequence), 0) AS n FROM event_journal`)
       .get() as { n: number };
@@ -201,6 +224,20 @@ describe("Browser session records", () => {
       .prepare(`SELECT last_sequence AS n FROM projection_checkpoints WHERE projection_name = ?`)
       .get("browser-page") as { n: number } | undefined;
     expect(checkpoint?.n ?? 0).toBeLessThanOrEqual(head.n);
+    // A page that opens after the sweep still appends at its own version.
+    expect(sessions.ended(id(5000), thread(1), "closed-by-person")).toBe(true);
+  });
+
+  it("offers no more pages after a start than the bound, newest first", () => {
+    const { sessions } = open();
+    for (let n = 1; n <= 40; n += 1) {
+      sessions.opened(page(id(n), thread(n)));
+    }
+    const offered = sessions.settleAtStart(() => false);
+    expect(offered.size).toBe(25);
+    expect(offered.has(id(40))).toBe(true);
+    expect(offered.has(id(1))).toBe(false);
+    expect(sessions.open()).toHaveLength(25);
   });
 
   it("does not offer a page whose start never reached the journal, and offers one whose end did not", () => {
@@ -210,17 +247,17 @@ describe("Browser session records", () => {
     // A crash between closing the page and journaling the end leaves the start,
     // so the next start offers it and the person can dismiss it.
     sessions.opened(page(id(1), thread(1)));
-    const offered = sessions.settleAtStart(() => true);
+    const offered = sessions.settleAtStart(() => false);
     expect([...offered]).toEqual([id(1)]);
   });
 
   it("settles the pages a run left: ends those of a closed thread and offers the newest of each thread", () => {
-    const { sessions, events } = open();
+    const { sessions, events, connection } = open();
     sessions.opened(page(id(1), thread(1)));
     sessions.opened(page(id(2), thread(1)));
     sessions.opened(page(id(3), thread(2)));
     sessions.opened(page(id(4), thread(3)));
-    const offered = sessions.settleAtStart((row) => row.threadId !== thread(3));
+    const offered = sessions.settleAtStart((row) => row.threadId === thread(3));
     expect([...offered].sort()).toEqual([id(2), id(3)].sort());
     expect(
       sessions
@@ -228,7 +265,8 @@ describe("Browser session records", () => {
         .map((row) => row.pageId)
         .sort(),
     ).toEqual([id(2), id(3)].sort());
-    // Settled pages left no history once swept.
+    // Settled pages end in the journal; the next persistence start compacts them.
+    compactClosedBrowserPages(connection);
     expect(events().every((row) => [id(2), id(3)].includes(row.aggregate_id))).toBe(true);
   });
 });
@@ -241,6 +279,28 @@ describe("Browser session diagnostics", () => {
     expect(growth).toContain("browser-page");
     for (const secret of [id(1), thread(1), projectId, String(windowId)]) {
       expect(growth).not.toContain(secret);
+    }
+  });
+});
+
+describe("Browser session views", () => {
+  it("feeds no usage, activity or other view: only its own table holds a trace", () => {
+    const { sessions, connection } = open();
+    sessions.opened(page(id(1), thread(1)));
+    sessions.opened(page(id(2), thread(2)));
+    sessions.ended(id(2), thread(2), "closed-by-person");
+    const tables = connection
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE '%projection%'
+         AND name NOT IN ('browser_page_projection', 'projection_checkpoints', 'projection_quarantine')`,
+      )
+      .all() as ReadonlyArray<{ name: string }>;
+    expect(tables.length).toBeGreaterThan(5);
+    for (const { name } of tables) {
+      const count = connection.prepare(`SELECT count(*) AS n FROM "${name}"`).get() as {
+        n: number;
+      };
+      expect(count.n, name).toBe(0);
     }
   });
 });
@@ -277,13 +337,13 @@ describe("Browser page offers", () => {
     harness: ReturnType<typeof open>,
     overrides: Partial<ConstructorParameters<typeof BrowserPageOffers>[0]> = {},
   ) {
-    const offered = harness.sessions.settleAtStart(() => true);
+    const offered = harness.sessions.settleAtStart(() => false);
     return new BrowserPageOffers({
       sessions: harness.sessions,
       offeredAtStart: offered,
       canOpenBrowser: () => true,
       hasOpenPage: () => false,
-      profileExists: async () => true,
+      profileState: async () => "exists" as const,
       ...overrides,
     });
   }
@@ -317,39 +377,149 @@ describe("Browser page offers", () => {
   it("says the profile is gone instead of offering it, and refuses the claim", async () => {
     const harness = open();
     harness.sessions.opened(page(id(1), thread(1), { profileKind: "account", accountId } as never));
-    const subject = offers(harness, { profileExists: async () => false });
+    const subject = offers(harness, { profileState: async () => "gone" as const });
     const read = await subject.read(windowId, decodeBrowserThreadId(thread(1)));
     expect(read?.status).toBe("profile-gone");
     expect(await subject.claim(windowId, command(id(1), thread(1)))).toEqual({
       status: "refused",
       reason: "profile-gone",
     });
-    expect(subject.dismiss(windowId, command(id(1), thread(1)))).toEqual({ status: "dismissed" });
+    expect(subject.dismiss(windowId, command(id(1), thread(1)), actor)).toEqual({
+      status: "dismissed",
+    });
   });
 
-  it("lets exactly one of two windows claim, and ends the offer for the next start", async () => {
+  it("lets exactly one of two windows reserve the page, and writes no end by itself", async () => {
     const harness = open();
     harness.sessions.opened(page(id(1), thread(1)));
     const subject = offers(harness);
     const results = await Promise.all([
       subject.claim(windowId, command(id(1), thread(1))),
-      subject.claim(windowId, command(id(1), thread(1))),
+      subject.claim(otherWindow, command(id(1), thread(1))),
     ]);
     expect(results.filter((result) => result.status === "claimed")).toHaveLength(1);
     expect(results.filter((result) => result.status === "refused")).toEqual([
       { status: "refused", reason: "not-offered" },
     ]);
-    // The claim wrote the end, so a later start offers nothing.
-    expect([...harness.sessions.settleAtStart(() => true)]).toEqual([]);
+    // A reservation is not an ending: the record is still open for the next start.
+    expect(harness.sessions.open().map((row) => row.pageId)).toEqual([id(1)]);
+    // The holder still sees the offer after a reload; the other window does not.
+    const holder = results[0]?.status === "claimed" ? windowId : otherWindow;
+    const other = holder === windowId ? otherWindow : windowId;
+    expect(await subject.read(holder, decodeBrowserThreadId(thread(1)))).toMatchObject({
+      status: "offered",
+    });
+    expect(await subject.read(other, decodeBrowserThreadId(thread(1)))).toBeUndefined();
+  });
+
+  it("gives the page back when the open fails, is abandoned, or the window goes away", async () => {
+    const harness = open();
+    harness.sessions.opened(page(id(1), thread(1)));
+    const subject = offers(harness);
+    const cmd = command(id(1), thread(1));
+    expect(await subject.claim(windowId, cmd)).toMatchObject({ status: "claimed" });
+    expect(await subject.claim(otherWindow, cmd)).toMatchObject({ reason: "not-offered" });
+    expect(subject.release(otherWindow, cmd)).toEqual({ status: "released" });
+    expect(await subject.claim(otherWindow, cmd)).toMatchObject({ reason: "not-offered" });
+    expect(subject.release(windowId, cmd)).toEqual({ status: "released" });
+    expect(await subject.claim(otherWindow, cmd)).toMatchObject({ status: "claimed" });
+    subject.releaseWindow(otherWindow);
+    expect(await subject.claim(windowId, cmd)).toMatchObject({ status: "claimed" });
+    expect(harness.sessions.open()).toHaveLength(1);
+  });
+
+  it("lets a reservation lapse so a window that vanished cannot hold the page for good", async () => {
+    const harness = open();
+    harness.sessions.opened(page(id(1), thread(1)));
+    let clock = 0;
+    const subject = offers(harness, { now: () => clock });
+    const cmd = command(id(1), thread(1));
+    expect(await subject.claim(windowId, cmd)).toMatchObject({ status: "claimed" });
+    expect(subject.holds(windowId, cmd)).toBe(true);
+    clock += 121_000;
+    expect(subject.holds(windowId, cmd)).toBe(false);
+    expect(await subject.claim(otherWindow, cmd)).toMatchObject({ status: "claimed" });
+  });
+
+  it("ends the old record as reopened only when the reserved open succeeds, and supersedes older offers of the thread", async () => {
+    const harness = open();
+    harness.sessions.opened(page(id(1), thread(1)));
+    harness.sessions.opened(page(id(2), thread(2)));
+    const subject = offers(harness);
+    expect(await subject.claim(windowId, command(id(1), thread(1)))).toMatchObject({
+      status: "claimed",
+    });
+    // The open that was reserved for it succeeds: the new page ends the old record.
+    harness.sessions.opened(page(id(10), thread(1)), { actor, reopens: id(1) });
+    expect(harness.sessions.page(id(1))).toBeUndefined();
+    const closed = harness.connection
+      .prepare(
+        `SELECT payload_json FROM event_journal WHERE aggregate_id = ? AND event_name = 'browser.page-closed@1'`,
+      )
+      .get(id(1)) as { payload_json: string };
+    expect(JSON.parse(closed.payload_json).reason).toBe("reopened");
+    expect(await subject.read(windowId, decodeBrowserThreadId(thread(1)))).toBeUndefined();
+    // An open of its own in another thread ends that thread's carried offer.
+    harness.sessions.opened(page(id(11), thread(2)), { actor });
+    expect(harness.sessions.page(id(2))).toBeUndefined();
+    expect([...harness.sessions.settleAtStart(() => false)].sort()).toEqual([id(10), id(11)]);
+  });
+
+  it("keeps the offer and says it could not be checked when the profile list cannot be read", async () => {
+    const harness = open();
+    harness.sessions.opened(page(id(1), thread(1), { profileKind: "account", accountId } as never));
+    const subject = offers(harness, { profileState: async () => "unknown" as const });
+    expect(await subject.read(windowId, decodeBrowserThreadId(thread(1)))).toMatchObject({
+      status: "profile-unchecked",
+    });
+    expect(await subject.claim(windowId, command(id(1), thread(1)))).toMatchObject({
+      status: "claimed",
+    });
+  });
+
+  it("holds the offer for a thread that cannot open a Browser now and shows it when it can", async () => {
+    const harness = open();
+    harness.sessions.opened(page(id(1), thread(1)));
+    // The thread is live but its mode is off or its Project archived: not ended.
+    const hidden = harness.sessions.settleAtStart(() => false);
+    expect([...hidden]).toEqual([id(1)]);
+    let allowed = false;
+    const subject = new BrowserPageOffers({
+      sessions: harness.sessions,
+      offeredAtStart: hidden,
+      canOpenBrowser: () => allowed,
+      hasOpenPage: () => false,
+      profileState: async () => "exists",
+    });
+    expect(await subject.read(windowId, decodeBrowserThreadId(thread(1)))).toBeUndefined();
+    expect(harness.sessions.open()).toHaveLength(1);
+    allowed = true;
+    expect(await subject.read(windowId, decodeBrowserThreadId(thread(1)))).toMatchObject({
+      status: "offered",
+    });
   });
 
   it("ends the offer on dismiss and does not offer it at the next start", async () => {
     const harness = open();
     harness.sessions.opened(page(id(1), thread(1)));
     const subject = offers(harness);
-    expect(subject.dismiss(windowId, command(id(1), thread(1)))).toEqual({ status: "dismissed" });
+    const deviceActor = decodeEventActor({
+      kind: "remote-device",
+      actorId: "c0000000-0000-4000-8000-0000000000d1",
+      deviceId: "c0000000-0000-4000-8000-0000000000d1",
+    });
+    expect(subject.dismiss(windowId, command(id(1), thread(1)), deviceActor)).toEqual({
+      status: "dismissed",
+    });
+    // The end names the device that dismissed, never the host's own actor.
+    const written = harness.connection
+      .prepare(
+        `SELECT actor_kind FROM event_journal WHERE aggregate_id = ? AND event_name = 'browser.page-closed@1'`,
+      )
+      .get(id(1));
+    expect(written).toEqual({ actor_kind: "remote-device" });
     expect(await subject.read(windowId, decodeBrowserThreadId(thread(1)))).toBeUndefined();
-    expect([...harness.sessions.settleAtStart(() => true)]).toEqual([]);
+    expect([...harness.sessions.settleAtStart(() => false)]).toEqual([]);
   });
 
   it("refuses a window that cannot open the thread before changing anything", async () => {
@@ -360,7 +530,7 @@ describe("Browser page offers", () => {
       status: "refused",
       reason: "not-allowed",
     });
-    expect(subject.dismiss(windowId, command(id(1), thread(1)))).toEqual({
+    expect(subject.dismiss(windowId, command(id(1), thread(1)), actor)).toEqual({
       status: "refused",
       reason: "not-allowed",
     });

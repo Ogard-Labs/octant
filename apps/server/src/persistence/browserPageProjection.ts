@@ -12,7 +12,7 @@ import {
 import { Schema } from "effect";
 import type { Projection } from "./projection";
 import type { SqliteConnection } from "./sqlitePort";
-import { clampCheckpointsToJournalHead, reconcileAggregateHeads } from "./threadPurge";
+import { clampCheckpointsToJournalHead } from "./threadPurge";
 
 /**
  * The Browser pages the journal records as open: an open event with no end.
@@ -112,6 +112,20 @@ export function readOpenBrowserPages(connection: SqliteConnection): ReadonlyArra
   ).map(toOpenPage);
 }
 
+/** The open pages of one thread, by the thread index. */
+export function readOpenBrowserPagesOfThread(
+  connection: SqliteConnection,
+  threadId: string,
+): ReadonlyArray<OpenBrowserPage> {
+  return (
+    connection
+      .prepare(
+        `SELECT ${COLUMNS} FROM browser_page_projection WHERE thread_id = ? ORDER BY last_sequence ASC`,
+      )
+      .all(threadId) as ReadonlyArray<BrowserPageRow>
+  ).map(toOpenPage);
+}
+
 export function readOpenBrowserPage(
   connection: SqliteConnection,
   pageId: string,
@@ -126,9 +140,21 @@ export function readOpenBrowserPage(
  * Remove the journal history of pages that ended, both events of each page
  * together, so a thread that opens and closes a page a thousand times leaves
  * no more than the pages open now. Their projection rows are already gone, so
- * no projection reads what leaves. Returns how many pages left.
+ * no projection reads what leaves.
+ *
+ * Only the persistence start calls this, before it records the journal
+ * verification watermark, because any deletion from the journal clears the
+ * watermark (migration 96) and the start accounts for that. Whole aggregates
+ * leave, so only their own heads are touched.
  */
-export function compactClosedBrowserPages(connection: SqliteConnection): number {
+export interface BrowserPageCompactionReport {
+  readonly pagesRemoved: number;
+  readonly eventsRemoved: number;
+}
+
+export function compactClosedBrowserPages(
+  connection: SqliteConnection,
+): BrowserPageCompactionReport {
   // Off for the deletion like a thread purge: the quarantine rows that name a
   // deleted event leave in the same transaction.
   connection.pragma("foreign_keys = OFF");
@@ -139,8 +165,8 @@ export function compactClosedBrowserPages(connection: SqliteConnection): number 
   }
 }
 
-function deleteClosedPages(connection: SqliteConnection): number {
-  return connection.transaction((): number => {
+function deleteClosedPages(connection: SqliteConnection): BrowserPageCompactionReport {
+  return connection.transaction((): BrowserPageCompactionReport => {
     const closed = connection
       .prepare(
         `SELECT DISTINCT aggregate_id FROM event_journal
@@ -149,6 +175,7 @@ function deleteClosedPages(connection: SqliteConnection): number {
       .all(BROWSER_PAGE_AGGREGATE_TYPE, BROWSER_PAGE_CLOSED) as ReadonlyArray<{
       readonly aggregate_id: string;
     }>;
+    let eventsRemoved = 0;
     for (const { aggregate_id } of closed) {
       connection
         .prepare(
@@ -157,14 +184,15 @@ function deleteClosedPages(connection: SqliteConnection): number {
              WHERE aggregate_type = ? AND aggregate_id = ?)`,
         )
         .run(BROWSER_PAGE_AGGREGATE_TYPE, aggregate_id);
-      connection
+      const removed = connection
         .prepare(`DELETE FROM event_journal WHERE aggregate_type = ? AND aggregate_id = ?`)
         .run(BROWSER_PAGE_AGGREGATE_TYPE, aggregate_id);
+      eventsRemoved += removed.changes;
+      connection
+        .prepare(`DELETE FROM aggregate_heads WHERE aggregate_type = ? AND aggregate_id = ?`)
+        .run(BROWSER_PAGE_AGGREGATE_TYPE, aggregate_id);
     }
-    if (closed.length > 0) {
-      reconcileAggregateHeads(connection);
-      clampCheckpointsToJournalHead(connection);
-    }
-    return closed.length;
+    if (closed.length > 0) clampCheckpointsToJournalHead(connection);
+    return { pagesRemoved: closed.length, eventsRemoved };
   })();
 }

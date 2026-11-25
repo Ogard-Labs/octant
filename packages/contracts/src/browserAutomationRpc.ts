@@ -167,6 +167,12 @@ export const BrowserContextCreateCommand = Schema.Struct({
    * agent, cannot both become the shared page or both be handed it.
    */
   ownPageWhenShared: Schema.optional(Schema.Boolean),
+  /**
+   * The page a restart took that this Open reopens. The host honours it only
+   * while the caller holds that page's reservation (the offer's claim), and a
+   * successful Open then ends the old record as reopened.
+   */
+  reopenPageId: Schema.optional(BrowserContextId),
 }).annotations(strict);
 export type BrowserContextCreateCommand = typeof BrowserContextCreateCommand.Type;
 

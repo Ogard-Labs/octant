@@ -7,6 +7,7 @@ import {
 } from "./browserPageSessionPolicy";
 
 const person = {
+  openedByPerson: true,
   mode: "code",
   dedicated: false,
   hostRun: false,
@@ -19,6 +20,9 @@ describe("browser session recording", () => {
     expect(isRecordedBrowserSession(person)).toBe(true);
     expect(isRecordedBrowserSession({ ...person, mode: "work" })).toBe(true);
     expect(isRecordedBrowserSession({ ...person, mode: "chat" })).toBe(false);
+    // The agent opens pages in the same context; nothing but the person's own
+    // open route says the person did.
+    expect(isRecordedBrowserSession({ ...person, openedByPerson: false })).toBe(false);
     expect(isRecordedBrowserSession({ ...person, dedicated: true })).toBe(false);
     expect(isRecordedBrowserSession({ ...person, hostRun: true })).toBe(false);
     expect(isRecordedBrowserSession({ ...person, unattended: true })).toBe(false);

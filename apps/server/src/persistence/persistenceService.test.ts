@@ -2,10 +2,14 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeWindowId } from "@octant/contracts";
+import { randomUUID } from "node:crypto";
 import { Effect, Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { BrowserPageSessions } from "../browser/browserPageSessions";
 import { EventRegistry } from "./eventRegistry";
-import { ShellService } from "../shellService";
+import { Journal } from "./journal";
+import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
+import { OCTANT_LOCAL_ACTOR_ID, ShellService } from "../shellService";
 import { applyMigrations, MIGRATIONS, type Migration } from "./migrations";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import { Persistence, PersistenceStartupFailed, makePersistenceLive } from "./persistenceService";
@@ -672,6 +676,61 @@ describe("PersistenceLive", () => {
       expect(firstStart).toBeGreaterThan(0);
       expect(secondStart).toBe(0);
       expect(watermarkRow(directory)).toMatchObject({ verified_through: 3 });
+    });
+
+    it("compacts ended Browser pages at the start, accounts for it in the watermark, and verifies cheaply again after", async () => {
+      const directory = temporaryDirectory();
+      seedVerifiedJournal(directory).close();
+      await startupDecodeCount(directory);
+      expect(watermarkRow(directory)).toMatchObject({ verified_through: 3 });
+
+      // A run opens and closes pages; none of that deletes anything.
+      const run = openSqlite(join(directory, "octant.sqlite3"));
+      const runtime = createPhase1RuntimeRegistries();
+      const sessions = new BrowserPageSessions({
+        journal: new Journal({
+          connection: run,
+          registry: runtime.events,
+          projections: runtime.projections,
+          clock: () => now,
+        }),
+        connection: run,
+        uuid: randomUUID,
+        clock: () => now,
+        actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      });
+      const page = (n: number) => ({
+        pageId: `b0000000-0000-4000-8000-00000000000${n}` as never,
+        threadId: "b0000000-0000-4000-8000-0000000010a1" as never,
+        windowId: "a0000000-0000-4000-8000-0000000000b1" as never,
+        mode: "code" as const,
+        profileKind: "private" as const,
+        projectId: "a0000000-0000-4000-8000-0000000000a1" as never,
+      });
+      sessions.opened(page(1));
+      sessions.ended(String(page(1).pageId), String(page(1).threadId), "closed-by-person");
+      sessions.opened(page(2));
+      const remaining = () =>
+        run.prepare(`SELECT aggregate_id FROM event_journal WHERE aggregate_type = 'browser-page'`);
+      expect(remaining().all()).toHaveLength(3);
+      expect(watermarkRow(directory)).toMatchObject({ verified_through: 3 });
+      run.close();
+
+      // The start removes the ended page, so it records no watermark itself.
+      await startupDecodeCount(directory);
+      expect(watermarkRow(directory)).toBeUndefined();
+      const after = openSqlite(join(directory, "octant.sqlite3"));
+      expect(
+        after
+          .prepare(`SELECT aggregate_id FROM event_journal WHERE aggregate_type = 'browser-page'`)
+          .all(),
+      ).toEqual([{ aggregate_id: String(page(2).pageId) }]);
+      after.close();
+
+      // The next start verifies once and records; the one after decodes nothing.
+      expect(await startupDecodeCount(directory)).toBeGreaterThan(0);
+      expect(watermarkRow(directory)).not.toBeUndefined();
+      expect(await startupDecodeCount(directory)).toBe(0);
     });
 
     it("scans from the start again on the first start of a different build", async () => {

@@ -64,6 +64,7 @@ import {
 import {
   BrowserPageClaimResult,
   BrowserPageDismissResult,
+  BrowserPageReleaseResult,
   decodeBrowserPageOfferCommand,
   type BrowserPageOfferCommand,
 } from "@octant/contracts/browser-page-sessions";
@@ -120,13 +121,19 @@ export interface BrowserAutomationClient {
     signal?: AbortSignal,
   ): Promise<typeof BrowserCredentialResult.Type>;
   /**
-   * Claim the page a restart took, once, and learn the profile to open a blank
-   * page in. Absent on a client that cannot.
+   * Reserve the page a restart took for this window, and learn the profile to
+   * open a blank page in. The open that follows names the page; nothing ends
+   * until it succeeds. Absent on a client that cannot.
    */
   claimPageOffer?(
     input: BrowserPageOfferCommand,
     signal?: AbortSignal,
   ): Promise<typeof BrowserPageClaimResult.Type>;
+  /** Gives a claim back when the open it was for failed or was abandoned. */
+  releasePageOffer?(
+    input: BrowserPageOfferCommand,
+    signal?: AbortSignal,
+  ): Promise<typeof BrowserPageReleaseResult.Type>;
   dismissPageOffer?(
     input: BrowserPageOfferCommand,
     signal?: AbortSignal,
@@ -289,6 +296,14 @@ export function createBrowserAutomationClient(
         "/api/browser/page-offer/claim",
         decodeBrowserPageOfferCommand(input),
         decodeHostAnswer(BrowserPageClaimResult),
+        signal,
+      ),
+    releasePageOffer: (input, signal) =>
+      post(
+        options,
+        "/api/browser/page-offer/release",
+        decodeBrowserPageOfferCommand(input),
+        decodeHostAnswer(BrowserPageReleaseResult),
         signal,
       ),
     dismissPageOffer: (input, signal) =>

@@ -18,9 +18,9 @@ import { chooseBrowserPageOffers } from "@octant/domain";
 import { Schema } from "effect";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import {
-  compactClosedBrowserPages,
   readOpenBrowserPage,
   readOpenBrowserPages,
+  readOpenBrowserPagesOfThread,
   type OpenBrowserPage,
 } from "../persistence/browserPageProjection";
 import type { Journal } from "../persistence/journal";
@@ -34,11 +34,11 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 
 /**
- * How many ended pages may sit in the journal before their events are swept
- * out. A page that opens and closes a thousand times leaves at most this many
- * pairs, however long the host runs.
+ * How many pages a restart may leave offered at once. The projection holds only
+ * pages with a start and no end, and the journal history of ended pages leaves
+ * at the persistence start, so this bounds what a long run of crashes can offer.
  */
-const SWEEP_AFTER_ENDS = 32;
+const MAX_CARRIED_PAGES = 25;
 
 export interface BrowserPageSessionsOptions {
   readonly journal: Pick<Journal, "append">;
@@ -52,7 +52,8 @@ export interface BrowserPageSessionsOptions {
  * The host's record of the Browser pages a thread's pane held, so a restart
  * or crash can offer one back. A page's start and end are two events on one
  * aggregate; an end is an append at the version the start left, so of two
- * windows that both try to end the same page, one append wins.
+ * windows that both try to end the same page, one append wins. A run never
+ * deletes journal rows: ended pages leave at the next persistence start.
  *
  * Recording is best effort: a page that cannot be journaled still opens, and
  * a page whose end cannot be journaled is the conservative failure, because it
@@ -64,7 +65,8 @@ export class BrowserPageSessions {
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #actor: EventActor;
-  #endsSinceSweep = 0;
+  /** The pages the previous run left, which this run may still offer. */
+  #carried: ReadonlySet<string> = new Set();
 
   constructor(options: BrowserPageSessionsOptions) {
     this.#journal = options.journal;
@@ -74,13 +76,36 @@ export class BrowserPageSessions {
     this.#actor = options.actor;
   }
 
-  /** Records that a page opened. Never throws. */
-  opened(page: Omit<BrowserPageOpened, "openedAt">): void {
+  /**
+   * Records that a page opened, by the request's actor, and ends what it
+   * replaces: the page it reopens, and any other page the last run left for
+   * this thread. Never throws.
+   */
+  opened(
+    page: Omit<BrowserPageOpened, "openedAt">,
+    options: { readonly actor?: EventActor; readonly reopens?: string } = {},
+  ): void {
+    const actor = options.actor ?? this.#actor;
     try {
       const payload = decodeBrowserPageOpened({ ...page, openedAt: this.#clock() });
-      this.#append(String(payload.pageId), 0, BROWSER_PAGE_OPENED, payload, payload.openedAt);
+      this.#append(
+        String(payload.pageId),
+        0,
+        BROWSER_PAGE_OPENED,
+        payload,
+        payload.openedAt,
+        actor,
+      );
     } catch {
       // A page that cannot be recorded is never offered back; it opens as usual.
+      return;
+    }
+    const threadId = String(page.threadId);
+    for (const older of readOpenBrowserPagesOfThread(this.#connection, threadId)) {
+      const reopened = older.pageId === options.reopens;
+      if (older.pageId === String(page.pageId) || (!reopened && !this.#carried.has(older.pageId)))
+        continue;
+      this.ended(older.pageId, threadId, reopened ? "reopened" : "superseded", actor);
     }
   }
 
@@ -89,7 +114,12 @@ export class BrowserPageSessions {
    * page never recorded, one already ended, and a lost race all answer false.
    * Never throws.
    */
-  ended(pageId: string, threadId: string, reason: BrowserPageCloseReason): boolean {
+  ended(
+    pageId: string,
+    threadId: string,
+    reason: BrowserPageCloseReason,
+    actor: EventActor = this.#actor,
+  ): boolean {
     try {
       const aggregateId = decodeAggregateId(pageId);
       if (readAggregateVersion(this.#connection, BROWSER_PAGE_AGGREGATE_TYPE, aggregateId) !== 1)
@@ -101,9 +131,8 @@ export class BrowserPageSessions {
         BROWSER_PAGE_CLOSED,
         decodeBrowserPageClosed({ pageId, threadId, reason, closedAt }),
         closedAt,
+        actor,
       );
-      this.#endsSinceSweep += 1;
-      if (this.#endsSinceSweep >= SWEEP_AFTER_ENDS) this.sweep();
       return true;
     } catch {
       // A lost race (another window ended it first) and a write that failed
@@ -117,6 +146,10 @@ export class BrowserPageSessions {
     return readOpenBrowserPages(this.#connection);
   }
 
+  openOfThread(threadId: string): ReadonlyArray<OpenBrowserPage> {
+    return readOpenBrowserPagesOfThread(this.#connection, threadId);
+  }
+
   page(pageId: string): OpenBrowserPage | undefined {
     return readOpenBrowserPage(this.#connection, pageId);
   }
@@ -124,30 +157,26 @@ export class BrowserPageSessions {
   /**
    * Settles what the previous run left, once, before the host serves a
    * command. Every page still recorded open is a page that run did not end.
-   * One whose thread can no longer open a Browser is ended as such, and of the
-   * rest only the newest of a thread stays offered. Returns the ids offered.
+   * One whose thread is archived or deleted is ended; one whose thread merely
+   * cannot open a Browser now (a mode off, a Project archived) stays, unseen
+   * until it can. Of the rest only the newest of a thread stays, and no more
+   * than a fixed number in all. Returns the ids that stay offered.
    */
-  settleAtStart(stillOffered: (page: OpenBrowserPage) => boolean): ReadonlySet<string> {
-    const left = this.open();
+  settleAtStart(threadEnded: (page: OpenBrowserPage) => boolean): ReadonlySet<string> {
     const kept: OpenBrowserPage[] = [];
-    for (const page of left) {
-      if (stillOffered(page)) kept.push(page);
-      else this.ended(page.pageId, page.threadId, "thread-ended");
+    for (const page of this.open()) {
+      if (threadEnded(page)) this.ended(page.pageId, page.threadId, "thread-ended");
+      else kept.push(page);
     }
     const chosen = chooseBrowserPageOffers(kept);
     for (const page of chosen.superseded) this.ended(page.pageId, page.threadId, "superseded");
-    this.sweep();
-    return new Set(chosen.offered.map((page) => page.pageId));
-  }
-
-  /** Removes the journal history of ended pages. */
-  sweep(): void {
-    this.#endsSinceSweep = 0;
-    try {
-      compactClosedBrowserPages(this.#connection);
-    } catch {
-      // The history stays until the next sweep; reads never depend on it.
-    }
+    const newest = [...chosen.offered]
+      .reverse()
+      .sort((a, b) => b.openedAt.localeCompare(a.openedAt));
+    for (const page of newest.slice(MAX_CARRIED_PAGES))
+      this.ended(page.pageId, page.threadId, "superseded");
+    this.#carried = new Set(newest.slice(0, MAX_CARRIED_PAGES).map((page) => page.pageId));
+    return this.#carried;
   }
 
   #append(
@@ -156,6 +185,7 @@ export class BrowserPageSessions {
     eventName: string,
     payload: unknown,
     occurredAt: string,
+    actor: EventActor,
   ): void {
     this.#journal.append({
       aggregate: {
@@ -169,7 +199,7 @@ export class BrowserPageSessions {
           eventName: decodeEventName(eventName),
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: this.#actor,
+          actor,
           occurredAt: decodeTimestamp(occurredAt),
           payload,
         },

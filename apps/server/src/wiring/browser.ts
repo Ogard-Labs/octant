@@ -718,15 +718,21 @@ export function wireBrowser(deps: BrowserDependencies) {
       connection: persistence.connection,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
-      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
-    const offeredPageIds = pageSessions.settleAtStart(
-      (page) =>
-        browserAuthority.resolve(decodeBrowserThreadId(page.threadId), page.mode) !== undefined,
-    );
+    // Only an archived or deleted thread ends its page for good. A thread whose
+    // mode is off or whose Project is archived keeps the record, unseen, until
+    // it can open a Browser again.
+    const offeredPageIds = pageSessions.settleAtStart((page) => {
+      const thread =
+        page.mode === "work"
+          ? workThreadProjection.read(decodeWorkThreadId(page.threadId))
+          : persistence.readCodeThread(decodeCodeThreadId(page.threadId));
+      return thread === undefined || thread.lifecycle !== "active";
+    });
     onThreadArchived((threadId) => {
-      for (const page of pageSessions.open()) {
-        if (page.threadId === threadId) pageSessions.ended(page.pageId, threadId, "thread-ended");
+      for (const page of pageSessions.openOfThread(threadId)) {
+        pageSessions.ended(page.pageId, threadId, "thread-ended");
       }
     });
     const browserAutomationService = new BrowserAutomationService({
@@ -798,8 +804,9 @@ export function wireBrowser(deps: BrowserDependencies) {
       canOpenBrowser: (windowId, threadId, mode) =>
         browserAuthority.canAccessWindow(windowId, threadId, mode),
       hasOpenPage: (threadId) => browserAutomationService.hasOpenPage(threadId),
-      profileExists: (profile) => browserAutomationService.profileExists(profile),
+      profileState: (profile) => browserAutomationService.profileState(profile),
     });
+    onWindowRevoked((windowId) => browserPageOffers.releaseWindow(windowId));
     const credentialMetadataBroker =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined

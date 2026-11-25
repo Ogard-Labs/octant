@@ -469,6 +469,7 @@ export class BrowserAutomationService {
   readonly #strict: (threadId: string) => boolean;
   readonly #downloads: BrowserDownloadRecorder | undefined;
   readonly #pageSessions: BrowserAutomationServiceOptions["pageSessions"];
+  #quitting = false;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #now: () => number;
@@ -632,6 +633,17 @@ export class BrowserAutomationService {
       BrowserProfileCaller,
       "person-paired-device" | "remote-device" | "terminal-grant"
     >;
+    /**
+     * True only from the person's own open route. An agent, a subagent, a
+     * routine, a saved flow, a terminal grant and the host's own run open
+     * pages in the same context and never say so, so their pages are never
+     * recorded as the person's.
+     */
+    readonly openedByPerson?: boolean | undefined;
+    /** Who asked, for the journal; the host's own actor when the request names none. */
+    readonly actor?: EventActor | undefined;
+    /** The page a restart took that this Open reopens; the route checked the reservation. */
+    readonly reopensPageId?: string | undefined;
   }): Promise<BrowserAutomationSnapshot> {
     if (!this.#flowRunAllows(input.threadId, input.flowRun))
       return failedSnapshot(
@@ -821,7 +833,7 @@ export class BrowserAutomationService {
         owned.status = "running";
         owned.lastActivityAt = this.#now();
         this.#scheduleExpiry(owned);
-        this.#notePageOpened(owned, input.profileCaller);
+        this.#notePageOpened(owned, input);
       } catch (error) {
         if (owned.record.state === "creating") {
           owned.status = owned.abort.signal.aborted ? "interrupted" : "failed";
@@ -2466,6 +2478,7 @@ export class BrowserAutomationService {
     threadId: BrowserThreadId,
     contextId: BrowserContextId,
     endedBy: "person" | "agent" = "person",
+    actor?: EventActor,
   ): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(contextId);
     if (owned === undefined) throw new Error("Browser context is stale or unknown.");
@@ -2479,7 +2492,7 @@ export class BrowserAutomationService {
         "failed",
       );
     }
-    await this.#destroy(owned, "user-requested", "ready", closedBy(endedBy));
+    await this.#destroy(owned, "user-requested", "ready", closedBy(endedBy), actor);
     owned.failure = undefined;
     return snapshot(owned);
   }
@@ -3116,6 +3129,7 @@ export class BrowserAutomationService {
     windowId: WindowId,
     threadId: BrowserThreadId,
     endedBy: "person" | "agent" = "agent",
+    actor?: EventActor,
   ): Promise<BrowserAutomationSnapshot> {
     this.#forgetExpiry(windowId, threadId);
     const ownedContexts = [...this.#contexts.values()].filter(
@@ -3123,7 +3137,7 @@ export class BrowserAutomationService {
     );
     await Promise.all(
       ownedContexts.map(async (owned) => {
-        await this.#destroy(owned, "user-requested", "ready", closedBy(endedBy));
+        await this.#destroy(owned, "user-requested", "ready", closedBy(endedBy), actor);
         this.#contexts.delete(owned.record.contextId);
       }),
     );
@@ -3138,10 +3152,16 @@ export class BrowserAutomationService {
         .filter((owned) => owned.windowId === windowId)
         .map(async (owned) => {
           owned.abort.abort();
-          // A window ends when the person closes it and when the app quits, and
-          // the host cannot tell the two apart here. A page a Quit ended must be
-          // offered back, so this ending writes no end.
-          await this.#destroy(owned, "authority-revoked", "interrupted", "keep");
+          // A window closed by the person, and a remote device's session that
+          // ended, are ordinary endings and write the end. A Quit keeps the
+          // record open: the desktop reports it to the host before it revokes
+          // the windows, so `holdPagesForQuit` has been called by now.
+          await this.#destroy(
+            owned,
+            "authority-revoked",
+            "interrupted",
+            this.#quitting ? "keep" : "authority-ended",
+          );
         }),
     );
   }
@@ -3849,8 +3869,9 @@ export class BrowserAutomationService {
     reason: BrowserContextRecord["stopReason"],
     status: BrowserWorkspaceStatus,
     pageEnd?: BrowserPageCloseReason | "keep",
+    actor?: EventActor,
   ): Promise<void> {
-    if (pageEnd !== "keep") this.#notePageEnded(owned, pageEnd ?? pageEndOf(reason));
+    if (pageEnd !== "keep") this.#notePageEnded(owned, pageEnd ?? pageEndOf(reason), actor);
     const creating = owned.record.state === "creating";
     owned.abort.abort();
     owned.cancelExpiry?.();
@@ -3969,36 +3990,66 @@ export class BrowserAutomationService {
    */
   #notePageOpened(
     owned: OwnedContext,
-    profileCaller: "person-paired-device" | "remote-device" | "terminal-grant" | undefined,
+    input: {
+      readonly profileCaller?: "person-paired-device" | "remote-device" | "terminal-grant";
+      readonly openedByPerson?: boolean | undefined;
+      readonly actor?: EventActor | undefined;
+      readonly reopensPageId?: string | undefined;
+    },
   ): void {
     const authority = owned.record.authority;
     if (
       this.#pageSessions === undefined ||
       authority.mode === "chat" ||
       !isRecordedBrowserSession({
+        openedByPerson: input.openedByPerson === true,
         mode: authority.mode,
         dedicated: owned.dedicated,
         hostRun: this.#executionOwner !== undefined,
         unattended: this.#isUnattendedScope(owned.windowId),
-        terminalGrant: profileCaller === "terminal-grant",
+        terminalGrant: input.profileCaller === "terminal-grant",
       })
     )
       return;
-    this.#pageSessions.opened({
-      pageId: owned.record.contextId,
-      threadId: owned.threadId,
-      windowId: owned.windowId,
-      mode: authority.mode,
-      projectId: authority.projectId,
-      ...browserPageProfileFacts(owned.record.policy.profile),
-    });
+    this.#pageSessions.opened(
+      {
+        pageId: owned.record.contextId,
+        threadId: owned.threadId,
+        windowId: owned.windowId,
+        mode: authority.mode,
+        projectId: authority.projectId,
+        ...browserPageProfileFacts(owned.record.policy.profile),
+      },
+      {
+        ...(input.actor === undefined ? {} : { actor: input.actor }),
+        ...(input.reopensPageId === undefined ? {} : { reopens: input.reopensPageId }),
+      },
+    );
     owned.pageRecorded = true;
   }
 
-  #notePageEnded(owned: OwnedContext, reason: BrowserPageCloseReason | undefined): void {
+  #notePageEnded(
+    owned: OwnedContext,
+    reason: BrowserPageCloseReason | undefined,
+    actor?: EventActor,
+  ): void {
     if (!owned.pageRecorded || reason === undefined) return;
     owned.pageRecorded = false;
-    this.#pageSessions?.ended(String(owned.record.contextId), String(owned.threadId), reason);
+    this.#pageSessions?.ended(
+      String(owned.record.contextId),
+      String(owned.threadId),
+      reason,
+      ...(actor === undefined ? [] : [actor]),
+    );
+  }
+
+  /**
+   * The person's Quit was accepted and the desktop reported it: from here the
+   * windows it revokes are the app leaving, not the person closing them, so
+   * their pages keep their record and a restart offers them back.
+   */
+  holdPagesForQuit(): void {
+    this.#quitting = true;
   }
 
   /** Whether the thread has a page of its own Browser pane open in any window. */
@@ -4014,17 +4065,21 @@ export class BrowserAutomationService {
   /**
    * Whether the profile a record names still exists on this host. Private,
    * Project and Personal always do; a named account is gone once it is removed.
+   * A profile list that cannot be read now answers `unknown`, never `gone`.
    */
-  async profileExists(profile: BrowserProfile): Promise<boolean> {
-    if (profile.kind !== "account") return true;
-    const rows = await this.#runtime.profiles?.list(false).catch(() => undefined);
-    return (
-      rows?.some(
-        (entry) =>
-          entry.profile.kind === "account" &&
-          String(entry.profile.profileId) === String(profile.profileId),
-      ) === true
-    );
+  async profileState(profile: BrowserProfile): Promise<"exists" | "gone" | "unknown"> {
+    if (profile.kind !== "account") return "exists";
+    const profiles = this.#runtime.profiles;
+    if (profiles === undefined) return "unknown";
+    const rows = await profiles.list(false).catch(() => undefined);
+    if (rows === undefined) return "unknown";
+    return rows.some(
+      (entry) =>
+        entry.profile.kind === "account" &&
+        String(entry.profile.profileId) === String(profile.profileId),
+    )
+      ? "exists"
+      : "gone";
   }
 
   #forgetExpiry(windowId: WindowId, threadId?: BrowserThreadId): void {

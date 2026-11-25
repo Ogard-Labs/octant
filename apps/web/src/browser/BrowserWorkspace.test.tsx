@@ -3156,8 +3156,9 @@ describe("BrowserWorkspace reopening a page a restart took", () => {
   } as const;
   afterEach(() => globalThis.localStorage.clear());
 
-  function offered(status: "offered" | "profile-gone" = "offered") {
+  function offered(status: "offered" | "profile-gone" | "profile-unchecked" = "offered") {
     const browser = client();
+    // The host keeps offering the page to the window that holds it.
     browser.inspectThread = vi.fn(
       async () =>
         ({
@@ -3172,6 +3173,7 @@ describe("BrowserWorkspace reopening a page a restart took", () => {
       profile: { kind: "personal" as const },
     }));
     browser.dismissPageOffer = vi.fn(async () => ({ status: "dismissed" as const }));
+    browser.releasePageOffer = vi.fn(async () => ({ status: "released" as const }));
     return browser;
   }
 
@@ -3192,7 +3194,7 @@ describe("BrowserWorkspace reopening a page a restart took", () => {
     expect(screen.queryByRole("button", { name: "Reopen page" })).not.toBeInTheDocument();
   });
 
-  it("claims once, preselects the profile, and opens the next page there with the person's address", async () => {
+  it("reserves once, moves focus to the address, preselects the profile, and opens the next page there naming the page", async () => {
     const browser = offered();
     render(<BrowserWorkspace client={browser} tab={tab} />);
     fireEvent.click(await screen.findByRole("button", { name: "Reopen page" }));
@@ -3203,6 +3205,7 @@ describe("BrowserWorkspace reopening a page a restart took", () => {
     expect(browser.create).not.toHaveBeenCalled();
     expect(await screen.findByText(/Enter an address to open a page in Personal/)).toBeVisible();
     expect(screen.queryByRole("button", { name: "Reopen page" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Browser URL")).toHaveFocus());
     fireEvent.change(screen.getByLabelText("Browser URL"), {
       target: { value: "https://example.com/" },
     });
@@ -3210,15 +3213,38 @@ describe("BrowserWorkspace reopening a page a restart took", () => {
     await waitFor(() => expect(browser.create).toHaveBeenCalledOnce());
     expect(vi.mocked(browser.create).mock.calls[0]?.[0]).toMatchObject({
       policy: { profile: { kind: "personal" } },
+      reopenPageId: pageId,
     });
   });
 
-  it("dismisses the offer without opening anything", async () => {
+  it("gives the reservation back and keeps the offer when the open fails or is declined", async () => {
+    const browser = offered();
+    browser.create = vi.fn(async () => {
+      throw new Error("The site was declined.");
+    });
+    render(<BrowserWorkspace client={browser} tab={tab} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Reopen page" }));
+    await screen.findByText(/Enter an address to open a page in Personal/);
+    fireEvent.change(screen.getByLabelText("Browser URL"), {
+      target: { value: "https://example.com/" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
+    await waitFor(() =>
+      expect(browser.releasePageOffer).toHaveBeenCalledWith({ threadId, mode: "work", pageId }),
+    );
+    // The offer is back, and a second try reserves the page again.
+    expect(await screen.findByRole("button", { name: "Reopen page" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reopen page" }));
+    await waitFor(() => expect(browser.claimPageOffer).toHaveBeenCalledTimes(2));
+  });
+
+  it("dismisses the offer without opening anything and moves focus to the address", async () => {
     const browser = offered();
     render(<BrowserWorkspace client={browser} tab={tab} />);
     fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(browser.dismissPageOffer).toHaveBeenCalledOnce());
     expect(screen.queryByRole("button", { name: "Reopen page" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Browser URL")).toHaveFocus());
     expect(browser.claimPageOffer).not.toHaveBeenCalled();
     expect(browser.create).not.toHaveBeenCalled();
   });
@@ -3230,7 +3256,14 @@ describe("BrowserWorkspace reopening a page a restart took", () => {
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
   });
 
-  it("says so when another window already reopened the page", async () => {
+  it("keeps Reopen when the profile could not be checked now, and says so", async () => {
+    render(<BrowserWorkspace client={offered("profile-unchecked")} tab={tab} />);
+    expect(await screen.findByText(/could not be checked now/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Reopen page" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+  });
+
+  it("says so when another window already holds the page", async () => {
     const browser = offered();
     browser.claimPageOffer = vi.fn(async () => ({
       status: "refused" as const,
@@ -3240,5 +3273,32 @@ describe("BrowserWorkspace reopening a page a restart took", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Reopen page" }));
     expect(await screen.findByText("That page was already reopened or dismissed.")).toBeVisible();
     expect(browser.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps the chosen profile across a thread switch and never shows one thread's offer or choice in another", async () => {
+    const otherThread = "21000000-0000-4000-8000-0000000000bb";
+    const browser = offered();
+    const base = browser.inspectThread;
+    browser.inspectThread = vi.fn(async (input) =>
+      String(input.threadId) === otherThread
+        ? ({ status: "ready", threadId: otherThread, evidence: [] } as any)
+        : base(input),
+    );
+    const { rerender } = render(<BrowserWorkspace client={browser} tab={tab} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Reopen page" }));
+    await screen.findByText(/Enter an address to open a page in Personal/);
+    rerender(<BrowserWorkspace client={browser} tab={{ ...tab, threadId: otherThread as any }} />);
+    await waitFor(() =>
+      expect(browser.inspectThread).toHaveBeenCalledWith(
+        expect.objectContaining({ threadId: otherThread }),
+        expect.anything(),
+      ),
+    );
+    expect(
+      screen.queryByText(/Enter an address to open a page in Personal/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reopen page" })).not.toBeInTheDocument();
+    rerender(<BrowserWorkspace client={browser} tab={tab} />);
+    expect(await screen.findByText(/Enter an address to open a page in Personal/)).toBeVisible();
   });
 });
