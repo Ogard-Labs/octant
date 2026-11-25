@@ -37,7 +37,7 @@ const survivors = new Set<Promise<void>>();
  * helper that outlived its Git is never writing while the next operation runs.
  */
 export async function waitForSurvivingGit(): Promise<void> {
-  while (survivors.size > 0) await Promise.all([...survivors]);
+  while (survivors.size > 0) await Promise.all(survivors);
 }
 
 export interface BoundedGitResult {
