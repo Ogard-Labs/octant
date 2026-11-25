@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { Appearance, Platform } from "react-native";
 import {
   ThemeProvider,
   type ColorSchemePreference,
@@ -71,6 +72,14 @@ export function AppearanceProvider(props: {
       cancelled = true;
     };
   }, [store]);
+
+  // The system draws the bars, menus, sheets and alerts, so it has to know when
+  // the person chose a scheme other than the phone's.
+  useEffect(() => {
+    if (!ready || Platform.OS === "web") return;
+    const choice = preferences.colorSchemePreference;
+    Appearance.setColorScheme(choice === "system" ? "auto" : choice);
+  }, [preferences.colorSchemePreference, ready]);
 
   const setCustomBackground = useCallback(
     async (dataUri: string) => {

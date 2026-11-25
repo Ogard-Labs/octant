@@ -2,8 +2,7 @@ import { useMemo } from "react";
 import { Pressable, ScrollView, StyleSheet, Text } from "react-native";
 import { radii, space, useTheme } from "../../design-system";
 
-/** One choice among a few, each with how many it holds. */
-export function FilterChips<Id extends string>(props: {
+export interface FilterChipsProps<Id extends string> {
   readonly options: ReadonlyArray<{
     readonly id: Id;
     readonly label: string;
@@ -12,7 +11,10 @@ export function FilterChips<Id extends string>(props: {
   readonly selected: Id;
   readonly onSelect: (id: Id) => void;
   readonly testID: string;
-}) {
+}
+
+/** One choice among a few, each with how many it holds. */
+export function FilterChips<Id extends string>(props: FilterChipsProps<Id>) {
   const { colors } = useTheme();
   const styles = useMemo(
     () =>

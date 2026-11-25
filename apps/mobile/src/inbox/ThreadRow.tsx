@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { Icon } from "../ui/Icon";
 import type { MobileInboxRow } from "@octant/client-runtime";
 import { space, typography, useTheme, withAlpha, type ThemeColors } from "../../design-system";
@@ -59,12 +59,15 @@ function projectHue(name: string, colors: ThemeColors): string {
 const PULL_REQUEST_INK = (state: string, colors: ThemeColors): string =>
   state === "merged" ? colors.merged : state === "open" ? colors.paletteGreen : colors.textTertiary;
 
+/** From here a title and its state no longer fit one line side by side. */
+const LARGE_TEXT = 1.4;
+
 /**
  * One thread in any list: its Project's letters and title, the computer and
  * mode under it, and at the end its state in words with its pull requests and
- * its provider's mark. A
- * long press offers what the row menu offers. A running thread steps back,
- * since nothing is asked of the person there.
+ * its provider's mark. At the largest text sizes the title takes the width and
+ * its state goes under it. A long press offers what the row menu offers. A
+ * running thread steps back, since nothing is asked of the person there.
  */
 export function ThreadRow(props: {
   readonly row: MobileInboxRow;
@@ -82,6 +85,10 @@ export function ThreadRow(props: {
   const ink = stateInk(state.kind, colors);
   const letters = project === undefined ? "" : projectMonogram(project);
   const hue = project === undefined ? colors.textSecondary : projectHue(project, colors);
+  // The glyphs stand for words, so they follow the text size as words would.
+  const { fontScale } = useWindowDimensions();
+  const large = fontScale >= LARGE_TEXT;
+  const glyph = (size: number) => Math.round(size * Math.min(Math.max(fontScale, 1), 2));
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -128,6 +135,14 @@ export function ThreadRow(props: {
   const pullRequests = row.pullRequests;
   const pullRequestInk =
     pullRequests === undefined ? "" : PULL_REQUEST_INK(pullRequests.state, colors);
+  const stateWord = (
+    <View style={styles.state}>
+      {icon === undefined ? null : <Icon color={ink} name={icon} size={glyph(15)} />}
+      <Text numberOfLines={1} style={[styles.stateWord, { color: ink }]}>
+        {state.word}
+      </Text>
+    </View>
+  );
   return (
     <ThreadRowMenu
       onChanged={() => void refresh()}
@@ -176,35 +191,31 @@ export function ThreadRow(props: {
           <View style={styles.body}>
             <View style={[styles.line, quiet ? styles.quiet : null]}>
               {row.pinned === true ? (
-                <Icon color={colors.textTertiary} name="pin" size={13} />
+                <Icon color={colors.textTertiary} name="pin" size={glyph(13)} />
               ) : null}
-              <Text numberOfLines={1} style={styles.title}>
+              <Text numberOfLines={large ? 3 : 1} style={styles.title}>
                 {title}
               </Text>
-              <View style={styles.state}>
-                {icon === undefined ? null : <Icon color={ink} name={icon} size={15} />}
-                <Text numberOfLines={1} style={[styles.stateWord, { color: ink }]}>
-                  {state.word}
-                </Text>
-              </View>
+              {large ? null : stateWord}
             </View>
+            {large ? <View style={quiet ? styles.quiet : null}>{stateWord}</View> : null}
             <View style={[styles.line, quiet ? styles.quiet : null]}>
               <View style={styles.place}>
-                <Icon color={colors.textTertiary} name="desktop-outline" size={13} />
-                <Text numberOfLines={1} style={styles.placeText}>
+                <Icon color={colors.textTertiary} name="desktop-outline" size={glyph(13)} />
+                <Text numberOfLines={large ? 2 : 1} style={styles.placeText}>
                   {place}
                 </Text>
               </View>
               {pullRequests === undefined ? null : (
                 <View style={styles.pullRequest}>
-                  <Icon color={pullRequestInk} name="git-pull-request-outline" size={14} />
+                  <Icon color={pullRequestInk} name="git-pull-request-outline" size={glyph(14)} />
                   <Text style={[styles.pullRequestText, { color: pullRequestInk }]}>
                     {pullRequestChip(pullRequests)}
                   </Text>
                 </View>
               )}
               {provider === undefined ? null : (
-                <ProviderMark driverKind={provider.driverKind} size={15} />
+                <ProviderMark driverKind={provider.driverKind} size={glyph(15)} />
               )}
             </View>
           </View>

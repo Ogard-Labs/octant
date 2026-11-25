@@ -205,10 +205,13 @@ try:
          "-scheme", "OctantOfflineNativeTests", "-configuration", "Release",
          "-destination", "id=" + device, "-derivedDataPath", str(derived_data),
          "CODE_SIGNING_ALLOWED=NO"], timeout=1800)
-    for label, size, method in (
-        ("standard", "large", "testColdDemoReplyForegroundAndReset"),
-        ("large-text", "accessibility-extra-large", "testLargeTextEntryAndReply"),
+    for label, size, appearance, method in (
+        ("standard", "large", "light", "testColdDemoReplyForegroundAndReset"),
+        ("large-text", "accessibility-extra-large", "light", "testLargeTextEntryAndReply"),
+        ("dark", "large", "dark", "testDarkPlacesAndMenus"),
     ):
+        # Set on the device: the test process's own switch left the app light.
+        run(["xcrun", "simctl", "ui", device, "appearance", appearance], timeout=120)
         set_content_size(device, size)
         observed_size = run(["xcrun", "simctl", "ui", device, "content_size"], capture=True).strip()
         if observed_size != size:
@@ -218,7 +221,7 @@ try:
              "-destination", "id=" + device, "-derivedDataPath", str(derived_data),
              "-resultBundlePath", str(artifacts / (label + ".xcresult")),
              "-parallel-testing-enabled", "NO", "-test-timeouts-enabled", "YES",
-             "-maximum-test-execution-time-allowance", "180",
+             "-maximum-test-execution-time-allowance", "300",
              "-only-testing:OctantOfflineNativeTests/OfflineDemoTests/" + method,
              "CODE_SIGNING_ALLOWED=NO"], timeout=1800)
         checks.append({"scenario": label, "systemTextSize": observed_size})

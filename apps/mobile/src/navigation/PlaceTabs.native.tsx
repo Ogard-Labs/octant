@@ -50,7 +50,7 @@ function useAndroidIcons(): AndroidIcons {
 
 /** The system's own tab bar: icons only, each with a spoken label. */
 export function PlaceTabs(props: PlaceTabsProps) {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const androidIcons = useAndroidIcons();
   // The native bar holds the selection; a request names the state it was
   // derived from, so a late one cannot undo a tap.
@@ -66,6 +66,7 @@ export function PlaceTabs(props: PlaceTabsProps) {
   return (
     <View style={StyleSheet.absoluteFill}>
       <Tabs.Host
+        colorScheme={scheme}
         ios={{
           tabBarTintColor: colors.accent,
           ...(NEW_IS_PROMINENT && !props.newDisabled ? { prominentScreenKey: NEW_KEY } : {}),

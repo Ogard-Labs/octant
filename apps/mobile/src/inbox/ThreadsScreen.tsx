@@ -120,7 +120,8 @@ export function ThreadsScreen(props: {
           paddingTop: space.xs,
           paddingBottom: space.sm,
         },
-        pillRow: { flexGrow: 0 },
+        // A pill's glass casts past the strip, which would cut it off.
+        pillRow: { flexGrow: 0, overflow: "visible" },
       }),
     [],
   );

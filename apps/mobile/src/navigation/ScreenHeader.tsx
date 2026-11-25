@@ -55,7 +55,7 @@ export function ScreenHeader(props: {
         },
         place: { color: colors.textPrimary, fontSize: 28, fontWeight: "700", letterSpacing: -0.4 },
         subtitle: { color: colors.textSecondary, fontSize: typography.meta.fontSize },
-        titles: { maxWidth: 230 },
+        titles: { maxWidth: 230, alignItems: "center" },
         actions: { flexDirection: "row", alignItems: "center" },
       }),
     [colors],

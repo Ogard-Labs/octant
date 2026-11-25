@@ -242,7 +242,7 @@ const ROOT_OPTIONS = { headerLargeTitleEnabled: true } as const;
 // On Liquid Glass a place's list runs under its bar and fades there; its name
 // is in the bar (ScreenHeader). Older systems keep the large title.
 const PLACE_OPTIONS = hasLiquidGlass()
-  ? ({ headerTransparent: true, scrollEdgeEffects: { top: "soft" } } as const)
+  ? ({ headerTransparent: true, scrollEdgeEffects: { top: "hard" } } as const)
   : ROOT_OPTIONS;
 const HomeStack = () => <PlaceStack place="home" />;
 const ThreadsStack = () => <PlaceStack place="threads" />;

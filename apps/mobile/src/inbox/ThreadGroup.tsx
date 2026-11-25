@@ -23,7 +23,7 @@ export function ThreadGroup(props: {
     () =>
       StyleSheet.create({
         heading: {
-          minHeight: 44,
+          minHeight: 40,
           flexDirection: "row",
           alignItems: "center",
           gap: 10,
