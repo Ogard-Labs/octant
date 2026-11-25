@@ -1654,7 +1654,10 @@ export function useCodeController(options: CodeControllerOptions) {
         let cursor = Number(initial.lastSequence);
         let operationStream: Promise<void> | undefined;
         const startConversationOperationStream = (operationId: CodeOperationId) => {
-          if (operationStream !== undefined) return;
+          // A turn this window sends has its own stream; a second would write
+          // the reply twice.
+          if (operationStream !== undefined || sentTurnStreaming.current === String(operationId))
+            return;
           operationStream = (async () => {
             let operationCursor = 0;
             let assistantText = "";
@@ -1986,6 +1989,7 @@ export function useCodeController(options: CodeControllerOptions) {
         // the reply that continues it may come from anywhere.
         let triedActivity = activityAtOpen;
         let following = false;
+        let retryPending = false;
         const followTurn = async () => {
           const hydrated = await hydrateConversation(threadId, request, controller.signal);
           if (hydrated === undefined) return false;
@@ -2035,11 +2039,14 @@ export function useCodeController(options: CodeControllerOptions) {
           const lookAgainLater = () => {
             triedActivity = lookedAt;
             // A settled thread's activity may not move again, so the look is
-            // tried again on its own, once per failure, until it succeeds or
-            // the view moves on.
-            void waitForReconnect(controller.signal, FAILED_LOOK_RETRY_MS).then(() =>
-              follow(activity, working),
-            );
+            // tried again on its own until it succeeds or the view moves on;
+            // one retry waits at a time, however many looks failed meanwhile.
+            if (retryPending) return;
+            retryPending = true;
+            void waitForReconnect(controller.signal, FAILED_LOOK_RETRY_MS).then(() => {
+              retryPending = false;
+              follow(activity, working);
+            });
           };
           void (working ? followTurn() : lookAtNewestTurn())
             .then((read) => {

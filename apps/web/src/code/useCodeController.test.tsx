@@ -3502,6 +3502,66 @@ describe("useCodeController", () => {
       unmount();
     });
 
+    it("opens no second stream for a turn this window sent when a thread event arrives while it runs", async () => {
+      const { client, host } = runningThread();
+      host.threads[String(ids.thread)]?.turns.splice(0, 1);
+      let renamed = () => {};
+      const rename = new Promise<void>((resolve) => {
+        renamed = resolve;
+      });
+      async function* threadEvents(signal: AbortSignal) {
+        await rename;
+        yield {
+          threadId: ids.thread,
+          sequence: 2,
+          event: { kind: "thread-updated", thread: thread(2) },
+        } as never;
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      }
+      const sentTurns: string[] = [];
+      const sent = fakeClient({
+        ...client,
+        subscribe: vi.fn((_threadId, _cursor, signal) => threadEvents(signal)) as never,
+        executeOperation: vi.fn(async (command: CodeOperationCommand) => {
+          sentTurns.push(String(command.operationId));
+          host.threads[String(ids.thread)]?.turns.push({
+            ...conversationTurn(command.operationId, "60000000-0000-4000-8000-000000000002"),
+            status: "incomplete",
+          } as never);
+          return {
+            kind: "provider-turn-state",
+            operationId: command.operationId,
+            state: "running",
+          };
+        }) as never,
+      });
+      const { result, unmount } = renderHook(() =>
+        useCodeController({
+          activeThreadId: ids.thread,
+          client: sent,
+          navigationRefreshMs: 0,
+          reconnectDelayMs: 60_000,
+        }),
+      );
+      await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+      void result.current.sendFollowUp("Add the index");
+      await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+      const reads = vi.mocked(host.client.conversationWindow).mock.calls.length;
+      // Another window renames the thread while this window's turn runs.
+      renamed();
+      await waitFor(() =>
+        expect(vi.mocked(host.client.conversationWindow).mock.calls.length).toBeGreaterThan(reads),
+      );
+      await act(async () => undefined);
+      const streamsOfSent = vi
+        .mocked(client.subscribeOperation)
+        .mock.calls.filter(([, operationId]) => String(operationId) === sentTurns[0]);
+      expect(streamsOfSent).toHaveLength(1);
+      unmount();
+    });
+
     it("shows in a turn this window sent, which no conversation read follows", async () => {
       const { client, hold, host, say } = runningThread();
       host.threads[String(ids.thread)]?.turns.splice(0, 1);
