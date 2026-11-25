@@ -95,10 +95,12 @@ describe("createHostWorktreeBranchSuggester", () => {
   it("records the spend under the Project before its reservation is released", async () => {
     const { port, settle } = suggester();
     const usage = { inputTokens: 40, outputTokens: 6 };
-    complete.mockImplementationOnce(async ({ onSend }: { readonly onSend?: () => void }) => {
-      onSend?.();
-      return { status: "completed", text: "fix login redirect", usage };
-    });
+    complete.mockImplementationOnce(
+      async ({ onSend }: { readonly onSend?: (sent: boolean) => void }) => {
+        onSend?.(true);
+        return { status: "completed", text: "fix login redirect", usage };
+      },
+    );
     await port.suggest(input);
     expect(record).toHaveBeenCalledWith(
       expect.anything(),

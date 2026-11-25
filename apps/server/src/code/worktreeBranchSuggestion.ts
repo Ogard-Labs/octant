@@ -95,8 +95,8 @@ export async function suggestWorktreeBranchWords(
       instructions: INSTRUCTIONS,
       timeoutMs: TIMEOUT_MS,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
-      onSend: () => {
-        sent = true;
+      onSend: (handedOver) => {
+        sent = handedOver;
       },
     });
   } catch {

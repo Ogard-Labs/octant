@@ -63,8 +63,12 @@ export interface OneShotInput {
   readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
   /** Stops the request, and ends its connection, when the caller no longer wants the answer. */
   readonly signal?: AbortSignal;
-  /** Called as the prompt is handed to the provider: from here on it may be paid for. */
-  readonly onSend?: () => void;
+  /**
+   * Called with true as the prompt is handed to the provider: from here on it
+   * may be paid for. Called again with false when the provider's own checks
+   * refused it before anything left this computer.
+   */
+  readonly onSend?: (sent: boolean) => void;
 }
 
 export async function completeOnceOutcome(input: OneShotInput): Promise<OneShotOutcome> {
@@ -124,23 +128,34 @@ export async function completeOnceOutcome(input: OneShotInput): Promise<OneShotO
                     ? {}
                     : { cacheWriteInputTokens: event.cacheWriteInputTokens }),
                   ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+                  ...(event.estimatedCostUsd === undefined
+                    ? {}
+                    : { estimatedCostUsd: event.estimatedCostUsd }),
                 };
               }
             }),
           ),
         ),
       send: Effect.suspend(() => {
-        input.onSend?.();
-        return connection.send({
-          sessionId: input.sessionId,
-          prompt: input.prompt,
-          context:
-            input.instructions === undefined
-              ? []
-              : [{ kind: "instructions", text: input.instructions }],
-          attachments: [...(input.attachments ?? [])],
-          tools: [],
-        });
+        input.onSend?.(true);
+        return connection
+          .send({
+            sessionId: input.sessionId,
+            prompt: input.prompt,
+            context:
+              input.instructions === undefined
+                ? []
+                : [{ kind: "instructions", text: input.instructions }],
+            attachments: [...(input.attachments ?? [])],
+            tools: [],
+          })
+          .pipe(
+            Effect.tapError((failure) =>
+              Effect.sync(() => {
+                if (failure.category === "invalid-configuration") input.onSend?.(false);
+              }),
+            ),
+          );
       }),
     });
     yield* Fiber.join(collected);
