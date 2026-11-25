@@ -2003,7 +2003,8 @@ built under [Provider reach Octant no longer narrows](../architecture.md#securit
 maintainer decision, 2026-11-16). A Linux launch reaches the bridge as Pi's
 does: on the shared host network a provider launch has by default, or, when
 Network limits proxy the launch, through the egress forwarder's loopback
-relay, which opens only the bridge's port; Windows is not offered the tools.
+relay, which opens only the bridge's port; a Windows launch, which has no
+Octant sandbox, reaches it directly ([Windows launches](#windows-launches)).
 Those two exact releases are a launch-confinement attestation (the
 hostile-configuration check proves no other tool enters the launch), not a
 feature claim, so the release-range rule under
