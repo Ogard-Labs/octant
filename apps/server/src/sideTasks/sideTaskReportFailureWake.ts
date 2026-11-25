@@ -95,8 +95,8 @@ export class SideTaskReportFailureWake {
   readonly #codeStops = new Set<string>();
   /**
    * Report turns that started in this host: Chat attempts and Code operations
-   * until they end, and the Chat turns whose retries start new attempts. Only
-   * report turns are kept, so a turn that never ends holds little.
+   * until they end, and a Chat turn until it completes or is stopped, since a
+   * failed one may start a retry. Only report turns are kept.
    */
   readonly #startedHere = new Set<string>();
 
@@ -148,6 +148,9 @@ export class SideTaskReportFailureWake {
       // Parked on a question the attempt is still live; only its end counts.
       if (peek?.outcome === "waiting") return undefined;
       const startedHere = this.#startedHere.delete(key);
+      // A completed or stopped turn takes no retry; a failed one may.
+      if (peek?.outcome === "completed" || peek?.outcome === "cancelled")
+        this.#startedHere.delete(`chat-turn:${peek.turnId ?? ""}`);
       if (peek?.outcome !== "failed" && peek?.outcome !== "interrupted") return undefined;
       // A Stop the provider never confirmed is still the person's Stop.
       if (peek.failure?.code === "stop-unconfirmed") return undefined;

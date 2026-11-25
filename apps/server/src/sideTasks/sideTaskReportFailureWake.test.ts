@@ -160,6 +160,46 @@ describe("a report's turn that fails", () => {
     expect(wakes).toEqual(["chat"]);
   });
 
+  it("counts a Chat report's retry as started here, and forgets the turn once it completes", async () => {
+    const wakes: string[] = [];
+    const service = new SideTaskReportFailureWake({
+      chatTurnMark: () => report,
+      workTurnMark: () => report,
+      codeTurnMark: () => report,
+      wakeChat: () => wakes.push("chat"),
+      wakeWork: () => wakes.push("work"),
+      wakeCode: () => wakes.push("code"),
+    });
+    const retry = (outcome: string) => {
+      const event = chat(outcome);
+      return {
+        ...event,
+        payload: {
+          ...event.payload,
+          attempt: { ...event.payload.attempt, id: "00000000-0000-4000-8000-0000000000f9" },
+        },
+      };
+    };
+    service.onCommittedEvents([
+      chatReportCreated,
+      chat("failed"),
+      retry("queued"),
+      retry("interrupted"),
+    ] as EventEnvelope[]);
+    await Promise.resolve();
+    expect(wakes).toEqual(["chat", "chat"]);
+
+    // A completed turn starts no retry, so a later attempt is not one of its own.
+    service.onCommittedEvents([
+      chatReportCreated,
+      chat("completed"),
+      retry("queued"),
+      retry("interrupted"),
+    ] as EventEnvelope[]);
+    await Promise.resolve();
+    expect(wakes).toEqual(["chat", "chat"]);
+  });
+
   it("leaves a turn a restart cut off to restart recovery, in Chat and Code", async () => {
     const wakes: string[] = [];
     const service = new SideTaskReportFailureWake({
