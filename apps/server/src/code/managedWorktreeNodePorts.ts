@@ -15,7 +15,12 @@ import type {
   ManagedWorktreeRepositoryPort,
 } from "./managedWorktreeService";
 import { childProcessEnvironment } from "../childProcessEnvironment";
-import { readUntrackedAndIgnored, readWorktreeStatus } from "./hostGitReads";
+import {
+  readCleanupHazard,
+  readRemovalDamage,
+  readUntrackedAndIgnored,
+  readWorktreeStatus,
+} from "./hostGitReads";
 
 const execFileAsync = promisify(execFile);
 // Git runs hooks and configured programs from the repository it is pointed at,
@@ -238,6 +243,26 @@ export function createManagedWorktreeNodePorts(): {
       }
       return reading.status === "runs-filters" ? { status: "unavailable" } : { status: "failed" };
     },
+    findCleanupHazard: async (targetPath, signal) => {
+      const reading = await readCleanupHazard(targetPath, signal);
+      return reading.status === "observed"
+        ? {
+            status: "observed",
+            ...(reading.hazard === undefined ? {} : { hazard: reading.hazard }),
+          }
+        : { status: "failed" };
+    },
+    readRemovalDamage: async (targetPath, signal) => {
+      const reading = await readRemovalDamage(targetPath, signal);
+      if (reading.status === "observed") {
+        return {
+          status: "observed",
+          missingTrackedFiles: reading.missingTrackedFiles,
+          otherChanges: reading.otherChanges,
+        };
+      }
+      return reading.status === "runs-filters" ? { status: "unavailable" } : { status: "failed" };
+    },
     resolveBranchHead: async (input, signal) => {
       const validation = await run("git", ["check-ref-format", "--branch", input.branch], signal);
       if (validation.exitCode !== 0) return { status: "failed" };
@@ -285,6 +310,24 @@ export function createManagedWorktreeNodePorts(): {
         signal,
       );
       if (result.exitCode !== 0) return { status: "failed" };
+      if (input.startPoint !== undefined) {
+        // A worktree nobody committed to sits on the commit it started from;
+        // every other ref contains that commit, which is not delivery.
+        const ahead = await run(
+          "git",
+          [
+            "-C",
+            input.targetPath,
+            "rev-list",
+            "--count",
+            "--end-of-options",
+            `${input.startPoint}..HEAD`,
+          ],
+          signal,
+        );
+        if (ahead.exitCode !== 0) return { status: "failed" };
+        if (Number(ahead.stdout.trim()) === 0) return { status: "observed", delivered: false };
+      }
       const own = `refs/heads/${input.branch}`;
       return {
         status: "observed",

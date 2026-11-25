@@ -265,6 +265,17 @@ function canTransition(
   );
 }
 
+/**
+ * The folder a receipt names, only while a thread may use it. A cleaned-up,
+ * restoring or cleanup-pending checkout has no folder to run in, so a reader
+ * that would hand the path to a turn, a tool or a child run goes through this.
+ */
+export function readyWorktreePath(
+  receipt: Pick<ManagedWorktreeReceipt, "state" | "canonicalWorktreePath"> | undefined,
+): string | undefined {
+  return receipt?.state === "ready" ? receipt.canonicalWorktreePath : undefined;
+}
+
 export class ManagedWorktreeReceiptStore {
   readonly #root: string;
   readonly #clock: () => string;

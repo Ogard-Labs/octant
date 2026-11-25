@@ -107,7 +107,15 @@ export interface ManagedWorktreeGitPort {
    * removal is refused.
    */
   isDelivered?(
-    input: Readonly<{ targetPath: string; branch: string }>,
+    input: Readonly<{
+      targetPath: string;
+      branch: string;
+      /**
+       * The commit the branch started from. With it, a branch that never moved
+       * past it has no work of its own, so it is not delivered.
+       */
+      startPoint?: string;
+    }>,
     signal: AbortSignal,
   ): Promise<Readonly<{ status: "observed"; delivered: boolean }> | Readonly<{ status: "failed" }>>;
   /**
@@ -128,6 +136,27 @@ export interface ManagedWorktreeGitPort {
     signal: AbortSignal,
   ): Promise<
     | Readonly<{ status: "observed"; found: boolean }>
+    | Readonly<{ status: "unavailable" | "failed" }>
+  >;
+  /**
+   * What makes a restorable cleanup unsafe even when status shows nothing:
+   * files Git was told to ignore changes to, a sparse checkout, a submodule, or
+   * an operation under way. A port without it cannot tell, so the cleanup is
+   * refused.
+   */
+  findCleanupHazard?(
+    targetPath: string,
+    signal: AbortSignal,
+  ): Promise<
+    | Readonly<{ status: "observed"; hazard?: "hidden-edits" | "unsupported" }>
+    | Readonly<{ status: "unavailable" | "failed" }>
+  >;
+  /** What a removal that stopped part way left behind; see `findCleanupHazard` for a port without it. */
+  readRemovalDamage?(
+    targetPath: string,
+    signal: AbortSignal,
+  ): Promise<
+    | Readonly<{ status: "observed"; missingTrackedFiles: number; otherChanges: number }>
     | Readonly<{ status: "unavailable" | "failed" }>
   >;
   /** The commit one local branch points at, or none when it does not exist. */
@@ -207,6 +236,7 @@ export type ManagedWorktreeRefusalReason =
   | "restore-mismatch"
   | "unowned"
   | "unrecoverable-files"
+  | "unsupported-checkout"
   | "unverified"
   | "working";
 

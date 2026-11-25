@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -380,9 +380,11 @@ describe("managed worktree Node ports", () => {
         created,
         git,
         checkoutId,
-        reclaim: () =>
+        receipts,
+        receiptId: created.receipt.receiptId,
+        reclaim: (trigger: "inactivity" | "delivered" = "inactivity") =>
           reclaimService.reclaim(
-            { receiptId: created.receipt.receiptId, trigger: "inactivity", isIdle: () => true },
+            { receiptId: created.receipt.receiptId, trigger, isIdle: () => true },
             signal,
           ),
         restore: () => reclaimService.restore({ receiptId: created.receipt.receiptId }, signal),
@@ -478,6 +480,104 @@ describe("managed worktree Node ports", () => {
       await expect(w.restore()).resolves.toEqual({ status: "refused", reason: "restore-mismatch" });
       expect(await w.ports.filesystem.pathExists(w.created.targetPath, signal)).toBe(false);
       expect(await w.state()).toBe("reclaimed");
+    });
+
+    async function committedFile(w: Awaited<ReturnType<typeof readyWorktree>>) {
+      await writeFile(join(w.created.targetPath, "tracked.txt"), "one\n");
+      await w.git("-C", w.created.targetPath, "add", "tracked.txt");
+      await w.git("-C", w.created.targetPath, "commit", "-m", "track");
+    }
+
+    it("keeps a folder whose edit Git was told to ignore, and one on a sparse checkout", async () => {
+      for (const flag of ["--skip-worktree", "--assume-unchanged"]) {
+        const w = await readyWorktree();
+        await committedFile(w);
+        await w.git("-C", w.created.targetPath, "update-index", flag, "tracked.txt");
+        await writeFile(join(w.created.targetPath, "tracked.txt"), "edited and invisible\n");
+        await expect(w.reclaim(), flag).resolves.toEqual({
+          status: "refused",
+          reason: "unrecoverable-files",
+        });
+        expect(await w.ports.filesystem.pathExists(w.created.targetPath, signal)).toBe(true);
+        expect(await w.state()).toBe("ready");
+      }
+      const sparse = await readyWorktree();
+      await sparse.git("-C", sparse.created.targetPath, "config", "core.sparseCheckout", "true");
+      await expect(sparse.reclaim()).resolves.toEqual({
+        status: "refused",
+        reason: "unsupported-checkout",
+      });
+      expect(await sparse.state()).toBe("ready");
+    });
+
+    it("keeps a folder with a submodule or an operation under way, before the receipt leaves ready", async () => {
+      const withSubmodule = await readyWorktree();
+      const library = join(withSubmodule.fixture.root, "library");
+      await withSubmodule.git("init", "-b", "main", library);
+      await withSubmodule.git("-C", library, "commit", "--allow-empty", "-m", "library");
+      await withSubmodule.git(
+        "-C",
+        withSubmodule.created.targetPath,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        library,
+        "vendor",
+      );
+      await withSubmodule.git("-C", withSubmodule.created.targetPath, "commit", "-m", "link");
+      await expect(withSubmodule.reclaim()).resolves.toEqual({
+        status: "refused",
+        reason: "unsupported-checkout",
+      });
+      expect(await withSubmodule.state()).toBe("ready");
+
+      const merging = await readyWorktree();
+      const gitDirectory = (
+        await merging.git("-C", merging.created.targetPath, "rev-parse", "--absolute-git-dir")
+      ).stdout.trim();
+      await writeFile(join(gitDirectory, "MERGE_HEAD"), `${"a".repeat(40)}\n`);
+      await expect(merging.reclaim()).resolves.toEqual({
+        status: "refused",
+        reason: "unsupported-checkout",
+      });
+      expect(await merging.state()).toBe("ready");
+    });
+
+    it("counts a worktree nobody committed to as delivered only for the archive, never for the merged trigger", async () => {
+      const w = await readyWorktree();
+      await expect(w.reclaim("delivered")).resolves.toEqual({
+        status: "refused",
+        reason: "undelivered",
+      });
+      expect(await w.state()).toBe("ready");
+      await w.git("-C", w.created.targetPath, "commit", "--allow-empty", "-m", "work");
+      await w.git("-C", w.fixture.repository, "merge", "--ff-only", "feature/restorable");
+      await expect(w.reclaim("delivered")).resolves.toMatchObject({ status: "reclaimed" });
+    });
+
+    it("finishes a removal that was cut short instead of handing back a half-deleted folder", async () => {
+      const w = await readyWorktree();
+      await committedFile(w);
+      const head = (await w.git("-C", w.created.targetPath, "rev-parse", "HEAD")).stdout.trim();
+      await w.receipts.beginReclaim(w.receiptId, { branch: "feature/restorable", head });
+      await rm(join(w.created.targetPath, "tracked.txt"));
+      await expect(w.reclaim()).resolves.toMatchObject({ status: "reclaimed" });
+      expect(await w.ports.filesystem.pathExists(w.created.targetPath, signal)).toBe(false);
+      await expect(w.restore()).resolves.toMatchObject({ status: "restored" });
+      expect(await readFile(join(w.created.targetPath, "tracked.txt"), "utf8")).toBe("one\n");
+    });
+
+    it("leaves a half-deleted folder that also holds other changes where it is, blocked", async () => {
+      const w = await readyWorktree();
+      await committedFile(w);
+      const head = (await w.git("-C", w.created.targetPath, "rev-parse", "HEAD")).stdout.trim();
+      await w.receipts.beginReclaim(w.receiptId, { branch: "feature/restorable", head });
+      await rm(join(w.created.targetPath, "tracked.txt"));
+      await writeFile(join(w.created.targetPath, "notes.txt"), "keep me");
+      await expect(w.reclaim()).resolves.toMatchObject({ status: "refused" });
+      expect(await readFile(join(w.created.targetPath, "notes.txt"), "utf8")).toBe("keep me");
+      expect(await w.state()).toBe("cleanup-pending");
     });
   });
 

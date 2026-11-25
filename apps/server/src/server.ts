@@ -57,7 +57,11 @@ import { makePublishedSnapshotSource } from "./publishedSnapshotSource";
 import { makeClaudeLibraryPublishes } from "./claudeLibraryPublishes";
 import { assertReadableChatThread } from "./chat/chatService";
 import { createThreadReadAuthority } from "./threadReadAuthority";
-import type { PublishedSnapshotRunRequest, WindowId } from "@octant/contracts";
+import {
+  decodeThreadMessageQueueScope,
+  type PublishedSnapshotRunRequest,
+  type WindowId,
+} from "@octant/contracts";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { MAX_CODE_FILE_BODY_SIZE } from "./codeRoutes";
 import { existsSync, statSync } from "node:fs";
@@ -101,6 +105,7 @@ import { wireFoundations } from "./wiring/foundations";
 import { wireHarnessState } from "./wiring/harnessState";
 import { wireWorkRequestState } from "./wiring/workRequestState";
 import { wireCode } from "./wiring/code";
+import { threadHasWork } from "./code/threadCleanupWork";
 import { wireBrowser } from "./wiring/browser";
 import { wireCodeRuntime } from "./wiring/codeRuntime";
 import { wireDevices } from "./wiring/devices";
@@ -827,6 +832,7 @@ export function startOctantServer(
       agentProfileRoutes,
       archivedWorktreeRoutes,
       worktreeReclaimSweep,
+      setThreadWorkCheck,
       buildCodeService,
       diskCleanupRoutes,
       canAccessCodeProject,
@@ -2186,6 +2192,7 @@ export function startOctantServer(
       zenRoutes,
     });
     const {
+      childWorkGoing,
       defaultTodoListHost,
       composeHostDiagnostics,
       externalContentRoutes,
@@ -2303,6 +2310,26 @@ export function startOctantServer(
       parentRunsAtFullAccess,
     });
     todos.setDefaultListHost(defaultTodoListHost);
+    // The idle check of a restorable worktree cleanup: every kind of work the
+    // host tracks for a thread, the same turns and child runs a move waits for.
+    setThreadWorkCheck((threadId) =>
+      threadHasWork(
+        {
+          projectOf: (id) => persistence.readCodeThread(id)?.projectId,
+          turnInProgress: (id) => codeOperationRuntime?.turnInProgress?.(String(id)) !== false,
+          liveTurn: (id) => liveTurns.read(String(id)) !== undefined,
+          childWorkGoing: (id) => childWorkGoing(String(id)),
+          debugSession: (id) => debugService.hasSession(id),
+          projectTerminalRunning: (projectId) => projectTerminals?.hasRunning(projectId) === true,
+          queuedMessage: (id) =>
+            threadMessageQueue.hasQueued(
+              decodeThreadMessageQueueScope({ mode: "code", threadId: String(id) }),
+            ),
+          pendingWakeups: (id) => threadWakeups.service?.list("code", String(id)).length,
+        },
+        threadId,
+      ),
+    );
     benchmarkThreadPurge.purge = async (threadId, mode) => {
       const outcome = await threadRetention.purge(
         {

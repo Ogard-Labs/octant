@@ -604,6 +604,22 @@ export class ProjectTerminalService {
   }
 
   /**
+   * Whether any shell of the Project is running or still starting. A terminal
+   * records its Project and not a folder, so the host cannot say which of the
+   * Project's worktrees it is in; a cleanup of any of them waits for it.
+   */
+  hasRunning(projectId: ProjectId): boolean {
+    return (
+      [...this.#owners.values()].some(
+        (owner) => !owner.ended && String(owner.projectId) === String(projectId),
+      ) ||
+      [...this.#startingServerWork.values()].some(
+        (starting) => !starting.cancelled && String(starting.projectId) === String(projectId),
+      )
+    );
+  }
+
+  /**
    * What a running Project terminal runs, as its start recorded it: its Work
    * task's provider program, or undefined for a shell or a terminal this host
    * does not hold. A Zen card records it, so its restart asks for the same.
