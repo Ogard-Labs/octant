@@ -127,6 +127,25 @@ describe("a report's turn that fails", () => {
     await expect(woken(event, report)).resolves.toEqual([]);
   });
 
+  it("ends the snooze when a Chat report turn parked on a question is interrupted", async () => {
+    const wakes: string[] = [];
+    const service = new SideTaskReportFailureWake({
+      chatTurnMark: () => report,
+      workTurnMark: () => report,
+      codeTurnMark: () => report,
+      wakeChat: () => wakes.push("chat"),
+      wakeWork: () => wakes.push("work"),
+      wakeCode: () => wakes.push("code"),
+    });
+    service.onCommittedEvents([
+      chat("streaming"),
+      chat("waiting"),
+      chat("interrupted"),
+    ] as EventEnvelope[]);
+    await Promise.resolve();
+    expect(wakes).toEqual(["chat"]);
+  });
+
   it("leaves a turn a restart cut off to restart recovery, in Chat and Code", async () => {
     const wakes: string[] = [];
     const service = new SideTaskReportFailureWake({

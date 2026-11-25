@@ -132,6 +132,8 @@ export class SideTaskReportFailureWake {
         this.#startedHere.add(key);
         return undefined;
       }
+      // Parked on a question the attempt is still live; only its end counts.
+      if (peek?.outcome === "waiting") return undefined;
       const startedHere = this.#startedHere.delete(key);
       if (peek?.outcome !== "failed" && peek?.outcome !== "interrupted") return undefined;
       // A Stop the provider never confirmed is still the person's Stop.
