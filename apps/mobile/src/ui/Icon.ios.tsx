@@ -1,3 +1,4 @@
+import { View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SymbolView } from "expo-symbols";
 import type { IconProps } from "./Icon";
@@ -10,15 +11,23 @@ export function Icon(props: IconProps) {
   );
   const symbol = systemSymbol(props.name);
   if (symbol === undefined) return fallback;
+  const box = props.size * 1.15;
   return (
-    <SymbolView
-      fallback={fallback}
-      name={symbol}
-      resizeMode="scaleAspectFit"
-      size={props.size}
-      style={[{ width: props.size * 1.15, height: props.size * 1.15 }, props.style]}
-      tintColor={props.color}
-      weight="medium"
-    />
+    // The control that draws it has the spoken name; a symbol announces its own.
+    <View
+      accessibilityElementsHidden
+      accessible={false}
+      style={[{ width: box, height: box }, props.style]}
+    >
+      <SymbolView
+        fallback={fallback}
+        name={symbol}
+        resizeMode="scaleAspectFit"
+        size={props.size}
+        style={{ width: box, height: box }}
+        tintColor={props.color}
+        weight="medium"
+      />
+    </View>
   );
 }

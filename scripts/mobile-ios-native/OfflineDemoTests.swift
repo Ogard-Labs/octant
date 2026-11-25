@@ -43,11 +43,12 @@ final class OfflineDemoTests: XCTestCase {
     @MainActor
     private func visitPlaces() {
         for (tab, screen) in [
-            ("mobile-tab-threads", "mobile-threads"),
-            ("mobile-tab-inbox", "mobile-inbox"),
-            ("mobile-tab-home", "mobile-inbox-home"),
+            ("Threads", "mobile-threads"),
+            ("Inbox", "mobile-inbox"),
+            ("Home", "mobile-inbox-home"),
         ] {
-            tap(element(tab))
+            // By the name VoiceOver says: the system bar's items carry no identifier.
+            tap(app.tabBars.buttons[tab])
             XCTAssertTrue(element(screen).waitForExistence(timeout: 15))
             let evidence = XCTAttachment(screenshot: app.screenshot())
             evidence.name = "Place \(screen)"
@@ -59,7 +60,8 @@ final class OfflineDemoTests: XCTestCase {
     @MainActor
     private func createReply(_ prompt: String) {
         // New beside the bar starts a thread from every place.
-        tap(element("mobile-new-thread"))
+        // In the system bar where it has a place for New, else a button over the list.
+        tap(app.buttons["New thread"].firstMatch)
         let input = element("mobile-home-composer-input")
         let keyboard = app.keyboards.firstMatch
         XCTAssertTrue(keyboard.waitForExistence(timeout: 15))

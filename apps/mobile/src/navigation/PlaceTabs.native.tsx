@@ -10,9 +10,12 @@ import type { PlaceTabsProps } from "./PlaceTabs.types";
 import { placeFor, shippedMobilePlaces, type MobilePlaceId } from "./places";
 
 const NEW_KEY = "new";
-// iOS 27 sets one tab apart from the others. Before it, New is a button of its
-// own, as it is on Android.
-const NEW_IS_A_TAB = Platform.OS === "ios" && Number.parseInt(String(Platform.Version), 10) >= 27;
+// iOS 26.1 sets a search tab apart at the bar's trailing end, and iOS 27 any one
+// tab. New takes that place and only answers the press. Before that, New is a
+// button of its own, as it is on Android.
+const IOS = Platform.OS === "ios" ? Number.parseFloat(String(Platform.Version)) : 0;
+const NEW_IS_A_TAB = IOS >= 26.1;
+const NEW_IS_PROMINENT = IOS >= 27;
 
 type AndroidIcons = Readonly<
   Partial<Record<MobilePlaceId, readonly [ImageSourcePropType, ImageSourcePropType]>>
@@ -65,7 +68,7 @@ export function PlaceTabs(props: PlaceTabsProps) {
       <Tabs.Host
         ios={{
           tabBarTintColor: colors.accent,
-          ...(NEW_IS_A_TAB && !props.newDisabled ? { prominentScreenKey: NEW_KEY } : {}),
+          ...(NEW_IS_PROMINENT && !props.newDisabled ? { prominentScreenKey: NEW_KEY } : {}),
         }}
         navStateRequest={request}
         onTabSelected={(event) => {
@@ -120,7 +123,10 @@ export function PlaceTabs(props: PlaceTabsProps) {
         })}
         {NEW_IS_A_TAB && !props.newDisabled ? (
           <Tabs.Screen
-            ios={{ icon: { type: "sfSymbol", name: "square.and.pencil" } }}
+            ios={{
+              icon: { type: "sfSymbol", name: "square.and.pencil" },
+              ...(NEW_IS_PROMINENT ? {} : { role: "search" as const }),
+            }}
             key={NEW_KEY}
             preventNativeSelection
             screenKey={NEW_KEY}
