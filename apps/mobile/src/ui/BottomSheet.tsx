@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   KeyboardAvoidingView,
   Modal,
@@ -6,6 +6,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
   type StyleProp,
   type ViewStyle,
@@ -24,8 +25,16 @@ export interface BottomSheetProps {
   readonly sheetStyle?: StyleProp<ViewStyle>;
 }
 
+/** From here the system draws a sheet as a card in the middle of the screen. */
+const FLOATING_SHEET_WIDTH = 600;
+
 export function BottomSheet(props: BottomSheetProps) {
   const { colors } = useTheme();
+  const screen = useWindowDimensions();
+  // Where the card starts on the screen. The keyboard is measured against the
+  // screen and the card against itself, so without it the card's foot, with the
+  // composer, stays that far under the keyboard.
+  const [sheetTop, setSheetTop] = useState(0);
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -103,6 +112,13 @@ export function BottomSheet(props: BottomSheetProps) {
       >
         <KeyboardAvoidingView
           behavior="padding"
+          keyboardVerticalOffset={sheetTop}
+          onLayout={(event) => {
+            const { height, width } = event.nativeEvent.layout;
+            // The card reaches the bottom of a phone's screen. On a wider one it
+            // floats, and the system moves it off the keyboard itself.
+            setSheetTop(width < FLOATING_SHEET_WIDTH ? Math.max(0, screen.height - height) : 0);
+          }}
           style={[styles.page, { backgroundColor: colors.canvas }]}
           testID={props.testID ?? "mobile-bottom-sheet"}
         >
