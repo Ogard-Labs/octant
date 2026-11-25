@@ -1,10 +1,7 @@
-import { execFile } from "node:child_process";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { createGitCommandEnvironment } from "../gitEnvironmentPort";
-
-const execFileAsync = promisify(execFile);
+import { runBoundedGit } from "./boundedGit";
 
 /**
  * The environment the host reads a repository with when it is not inside any
@@ -30,34 +27,33 @@ export interface HostGitResult {
   readonly stderr: string;
 }
 
-/** Runs git with an argument vector, never a shell, under the read environment. */
+/**
+ * Runs git with an argument vector, never a shell, under the read environment.
+ * It returns only after the child has exited, and a read that outlives its time
+ * limit is a failed read (exit code 1), as before.
+ */
 export async function runHostGit(
   args: ReadonlyArray<string>,
   signal: AbortSignal,
   timeoutMs = 10_000,
 ): Promise<HostGitResult> {
   try {
-    const result = await execFileAsync("git", ["--no-pager", ...args], {
-      encoding: "utf8",
+    const result = await runBoundedGit({
+      executable: "git",
+      args: ["--no-pager", ...args],
       env: hostGitReadEnvironment(process.env),
-      maxBuffer: 8 * 1024 * 1024,
-      shell: false,
       signal,
-      timeout: timeoutMs,
-      windowsHide: true,
+      timeoutMs,
+      maxBuffer: 8 * 1024 * 1024,
     });
-    return { exitCode: 0, stdout: result.stdout, stderr: result.stderr };
+    return {
+      exitCode: result.timedOut ? 1 : result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
   } catch (error) {
     if (signal.aborted) throw error;
-    if (typeof error === "object" && error !== null) {
-      const failure = error as { code?: unknown; stdout?: unknown; stderr?: unknown };
-      return {
-        exitCode: typeof failure.code === "number" ? failure.code : 1,
-        stdout: typeof failure.stdout === "string" ? failure.stdout : "",
-        stderr: typeof failure.stderr === "string" ? failure.stderr : "",
-      };
-    }
-    throw error;
+    return { exitCode: 1, stdout: "", stderr: "" };
   }
 }
 

@@ -97,6 +97,13 @@ export interface ManagedWorktreeGitPort {
       targetPath: string;
       /** Discards uncommitted changes (`git worktree remove --force`); only a discarding cleanup sets it. */
       force?: boolean;
+      /**
+       * Also removes a worktree Git has locked (`--force --force`). Only the
+       * discard of this host's own interrupted `git worktree add`, whose lock
+       * reason is `initializing`, sets it, and only after the folder was proven
+       * to hold nothing but the recorded commit's files.
+       */
+      overrideLock?: true;
     }>,
     signal: AbortSignal,
   ): Promise<Readonly<{ status: "removed" | "rejected" }>>;
@@ -181,6 +188,32 @@ export interface ManagedWorktreeGitPort {
   ): Promise<
     Readonly<{ status: "observed"; files: number }> | Readonly<{ status: "unavailable" | "failed" }>
   >;
+  /**
+   * Whether every file in a folder is exactly the recorded commit's file at the
+   * same path, so nothing in it can be a person's work. Reads the folder and the
+   * commit's tree and runs nothing the repository configured; a folder with a
+   * file the commit lacks or holds differently, or a shape it cannot compare
+   * (a submodule, an unreadable file), does not match.
+   */
+  readFolderAgainstCommit?(
+    input: Readonly<{ repositoryRoot: string; targetPath: string; head: string }>,
+    signal: AbortSignal,
+  ): Promise<
+    | Readonly<{ status: "observed"; matches: boolean }>
+    | Readonly<{ status: "unavailable" | "failed" }>
+  >;
+  /**
+   * Whether a worktree Git says it just added is whole: its own index exists,
+   * no `index.lock` is left, and status against its commit is clean. A restore
+   * killed during the add can leave a folder Git lists without any of these.
+   */
+  inspectRestoredFolder?(
+    targetPath: string,
+    signal: AbortSignal,
+  ): Promise<
+    | Readonly<{ status: "observed"; whole: boolean }>
+    | Readonly<{ status: "unavailable" | "failed" }>
+  >;
   /** The commit one local branch points at, or none when it does not exist. */
   resolveBranchHead?(
     input: Readonly<{ repositoryRoot: string; branch: string }>,
@@ -243,6 +276,9 @@ export type ManagedWorktreeRefusalReason =
   | "active-thread"
   | "branch-collision"
   | "cleanup-running"
+  | "restore-running"
+  | "files-missing"
+  | "partial-folder"
   | "confirmation-required"
   | "dirty"
   | "git-refused"

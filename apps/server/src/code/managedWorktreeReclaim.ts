@@ -18,6 +18,8 @@ export interface ManagedWorktreeReclaimReceiptPort {
     state: "reclaimed" | "restoring" | "ready",
   ): Promise<ManagedWorktreeReceipt>;
   beginReclaim(receiptId: string, reclaim: ManagedWorktreeReclaim): Promise<ManagedWorktreeReceipt>;
+  /** Recorded in the receipt just before Git is asked to remove the folder. */
+  markRemovalStarted(receiptId: string): Promise<ManagedWorktreeReceipt>;
   abortReclaim(receiptId: string): Promise<ManagedWorktreeReceipt>;
 }
 
@@ -65,7 +67,12 @@ type AvailableObservation = Extract<RepositoryIdentityObservation, { status: "av
  */
 type Inventory =
   | Readonly<{ kind: "ambiguous" }>
-  | Readonly<{ kind: "clear"; leftover?: ObservedGitWorktree }>;
+  | Readonly<{
+      kind: "clear";
+      leftover?: ObservedGitWorktree;
+      /** This service's own `git worktree add` that was killed: locked `initializing`. */
+      interruptedAdd?: ObservedGitWorktree;
+    }>;
 
 function pathOf(worktree: ObservedGitWorktree): string {
   return worktree.status === "present" ? worktree.canonicalPath : worktree.reportedPath;
@@ -86,6 +93,7 @@ export class ManagedWorktreeReclaimService {
   readonly #git: ManagedWorktreeGitPort;
   readonly #authority: ManagedWorktreeAuthorityPort;
   readonly #locks = new Map<string, Promise<void>>();
+  readonly #holders = new Map<string, "cleanup" | "restore">();
   readonly #removalTimeLimitMs: number;
   readonly #restoreWaitMs: number;
 
@@ -104,11 +112,33 @@ export class ManagedWorktreeReclaimService {
    * restore each read the receipt and the folder and then change both, so two
    * overlapping would act on a state the other is about to change; the later
    * one waits and reads what the earlier left. Anything else that changes the
-   * same receipt's folder (an archive cleanup) takes the same lock.
+   * same receipt's folder (an archive cleanup) takes the same lock. `kind` says
+   * what holds the lock, so a person's Restore that has to wait can say so.
    */
-  async exclusive<T>(receiptId: string, run: () => Promise<T>): Promise<T> {
+  exclusive<T>(
+    receiptId: string,
+    run: () => Promise<T>,
+    kind: "cleanup" | "restore" = "cleanup",
+  ): Promise<T> {
+    return this.#enqueue(receiptId, kind, run);
+  }
+
+  async #enqueue<T>(
+    receiptId: string,
+    kind: "cleanup" | "restore",
+    run: () => Promise<T>,
+    started?: () => void,
+  ): Promise<T> {
     const previous = this.#locks.get(receiptId) ?? Promise.resolve();
-    const operation = previous.then(run);
+    const operation = previous.then(async () => {
+      this.#holders.set(receiptId, kind);
+      started?.();
+      try {
+        return await run();
+      } finally {
+        this.#holders.delete(receiptId);
+      }
+    });
     const settled = operation.then(
       () => undefined,
       () => undefined,
@@ -122,26 +152,48 @@ export class ManagedWorktreeReclaimService {
   }
 
   /**
-   * The person's own operations wait for the receipt only a little: a cleanup
-   * that still runs is said so, not waited on until it ends.
+   * The person's own operations wait for the receipt only a little, in all: a
+   * cleanup or restore that still holds it is said so, and whatever queued
+   * behind it is not left to run later on its own. The wait ends at the limit
+   * even when several operations are in line.
    */
   async #whenFree(
     receiptId: string,
     run: () => Promise<ManagedWorktreeReclaimResult>,
   ): Promise<ManagedWorktreeReclaimResult> {
-    const previous = this.#locks.get(receiptId);
-    if (previous !== undefined) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const free = await Promise.race([
-        previous.then(() => true),
-        new Promise<boolean>((resolve) => {
-          timer = setTimeout(() => resolve(false), this.#restoreWaitMs);
-        }),
-      ]);
-      clearTimeout(timer);
-      if (!free) return { status: "refused", reason: "cleanup-running" };
+    let begun = false;
+    let skipped = false;
+    let begin: () => void = () => undefined;
+    const reached = new Promise<void>((resolve) => {
+      begin = resolve;
+    });
+    const operation = this.#enqueue<ManagedWorktreeReclaimResult>(
+      receiptId,
+      "restore",
+      async () => {
+        if (skipped) return { status: "waiting" };
+        begun = true;
+        return run();
+      },
+      begin,
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const waited = await Promise.race([
+      reached.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), this.#restoreWaitMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (!waited && !begun) {
+      skipped = true;
+      void operation.catch(() => undefined);
+      return {
+        status: "refused",
+        reason: this.#holders.get(receiptId) === "restore" ? "restore-running" : "cleanup-running",
+      };
     }
-    return this.exclusive(receiptId, run);
+    return operation;
   }
 
   reclaim(
@@ -230,6 +282,9 @@ export class ManagedWorktreeReclaimService {
     if (!input.isIdle()) return this.#giveUp(receipt, "working", signal);
 
     try {
+      // Recorded before Git is asked, so a missing file found later is known to
+      // be Git's partial removal and not a file the person deleted while waiting.
+      receipt = await this.#receipts.markRemovalStarted(receipt.receiptId);
       const removed = await this.#removeFolder(observation.repositoryRoot, receipt, false);
       if (removed.status !== "removed") {
         return this.#afterRejectedRemoval(receipt, observation.repositoryRoot, signal);
@@ -339,9 +394,19 @@ export class ManagedWorktreeReclaimService {
       // Other changes beside the missing files are the person's. Nothing is
       // deleted: the missing files are put back and the thread has its folder.
       if (damage.otherChanges > 0) return this.#giveUp(receipt, "dirty", signal);
+      // No removal of ours was ever started, so the files were deleted by the
+      // person while the cleanup sat pending: their change, not Git's.
+      if (reclaim.removalStarted !== true) return this.#giveUp(receipt, "dirty", signal);
       const refused = await this.#removalRefusal(receipt, reclaim, repositoryRoot, signal);
       if (refused !== undefined) return refused;
       if (!isIdle()) return { status: "refused", reason: "working" };
+      // The proof is read last, right before the forced removal, so a change
+      // made while the checks above ran is seen by it.
+      const last = await this.#git.readRemovalDamage(receipt.canonicalWorktreePath, signal);
+      if (last.status === "unavailable") return { status: "refused", reason: "unverified" };
+      if (last.status !== "observed") return { status: "waiting", receipt };
+      if (last.missingTrackedFiles === 0) return undefined;
+      if (last.otherChanges > 0) return this.#giveUp(receipt, "dirty", signal);
       const removed = await this.#removeFolder(repositoryRoot, receipt, true);
       if (removed.status !== "removed") return { status: "waiting", receipt };
     } catch {
@@ -435,7 +500,12 @@ export class ManagedWorktreeReclaimService {
     }
     if (observed.targets.length !== 1) return { status: "refused", reason: "inventory-ambiguous" };
     const back = await this.#returnToThread(receipt, signal);
-    return back.status === "back" ? { status: "restored", receipt: back.receipt } : back.result;
+    if (back.status !== "back") return back.result;
+    // The thread has its folder either way; the person is told what to do when
+    // Git could not put every file back.
+    return back.filesMissing
+      ? { status: "refused", reason: "files-missing" }
+      : { status: "restored", receipt: back.receipt };
   }
 
   restore(
@@ -906,21 +976,38 @@ export class ManagedWorktreeReclaimService {
    * Hands the folder back to the thread and drops the cleanup. Whatever a
    * removal that stopped part way took is put back from the folder's own
    * index first, so the thread resumes on a whole checkout; nothing is deleted
-   * or overwritten, and the folder's other contents stay as they are.
+   * or overwritten, and the folder's other contents stay as they are. Files
+   * are put back only after this host started a removal: before that a missing
+   * file is the person's own deletion and stays deleted. The receipt always
+   * returns to `ready`, never stays pending: when Git could not put every file
+   * back, `filesMissing` tells the caller to say what to do, and the thread
+   * still takes turns on the folder it has.
    */
   async #returnToThread(
     receipt: ManagedWorktreeReceipt,
     signal: AbortSignal,
   ): Promise<
-    | Readonly<{ status: "back"; receipt: ManagedWorktreeReceipt }>
+    | Readonly<{ status: "back"; receipt: ManagedWorktreeReceipt; filesMissing: boolean }>
     | Readonly<{ status: "stuck"; result: ManagedWorktreeReclaimResult }>
   > {
     try {
-      const restored = await this.#git.restoreMissingFiles?.(receipt.canonicalWorktreePath, signal);
-      if (restored !== undefined && restored.status !== "observed") {
-        return { status: "stuck", result: { status: "refused", reason: "git-refused" } };
+      let filesMissing = false;
+      if (receipt.reclaim?.removalStarted === true) {
+        const restored = await this.#git.restoreMissingFiles?.(
+          receipt.canonicalWorktreePath,
+          signal,
+        );
+        if (restored !== undefined && restored.status !== "observed") {
+          // Putting them back failed; whether anything is missing is read again.
+          const damage = await this.#git.readRemovalDamage?.(receipt.canonicalWorktreePath, signal);
+          filesMissing = !(damage?.status === "observed" && damage.missingTrackedFiles === 0);
+        }
       }
-      return { status: "back", receipt: await this.#receipts.abortReclaim(receipt.receiptId) };
+      return {
+        status: "back",
+        receipt: await this.#receipts.abortReclaim(receipt.receiptId),
+        filesMissing,
+      };
     } catch {
       return { status: "stuck", result: { status: "interrupted", receipt } };
     }

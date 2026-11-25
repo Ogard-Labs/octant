@@ -37,6 +37,12 @@ const REFUSALS: Record<CleanedUpWorktreeRefusalReason, string> = {
     "Something else is using the worktree's folder or branch, or Git has it locked. Unlock or move it away, then restore again.",
   "cleanup-running":
     "A cleanup of this worktree is still running. Wait for it to finish, then restore again.",
+  "restore-running":
+    "This worktree is already being restored. Wait for that to finish, then check the thread.",
+  "files-missing":
+    "The thread has its worktree back, but Git could not put back every file a cut-short cleanup took. Run git checkout -- . in the worktree's folder to restore them.",
+  "partial-folder":
+    "A restore that was cut short left a folder with files that are not on the branch, so nothing was deleted. Move that folder away, then restore again.",
   "needs-attention":
     "Git could not put the worktree's folder back. Check the folder and the repository's worktrees, then restore again.",
   unverified: "The worktree could not be checked, so it was not restored.",
@@ -159,6 +165,12 @@ function mapRefusal(
         return cleanedUpRefusal("folder-in-use");
       case "cleanup-running":
         return cleanedUpRefusal("cleanup-running");
+      case "restore-running":
+        return cleanedUpRefusal("restore-running");
+      case "files-missing":
+        return cleanedUpRefusal("files-missing");
+      case "partial-folder":
+        return cleanedUpRefusal("partial-folder");
       case "not-reclaimed":
         return cleanedUpRefusal("not-cleaned-up");
       case "unowned":

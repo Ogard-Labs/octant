@@ -66,6 +66,13 @@ export type ManagedWorktreeReceiptLookup = Omit<CreateManagedWorktreeReceiptInpu
 export interface ManagedWorktreeReclaim {
   readonly branch: string;
   readonly head: string;
+  /**
+   * Set just before this host asks Git to remove the folder. A folder with
+   * tracked files missing is Git's own partial removal only after that; before
+   * it, a missing file is something the person deleted while the cleanup sat
+   * pending, and is theirs.
+   */
+  readonly removalStarted?: true;
 }
 
 export interface ManagedWorktreeReceipt extends CreateManagedWorktreeReceiptInput {
@@ -174,7 +181,8 @@ function isSource(value: unknown): value is ManagedWorktreeSourceProvenance {
 function isReclaim(value: unknown): value is ManagedWorktreeReclaim {
   return (
     isRecord(value) &&
-    Object.keys(value).length === 2 &&
+    Object.keys(value).length === (value.removalStarted === undefined ? 2 : 3) &&
+    (value.removalStarted === undefined || value.removalStarted === true) &&
     isIntent(value.branch, 255) &&
     typeof value.head === "string" &&
     /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value.head)
@@ -395,6 +403,22 @@ export class ManagedWorktreeReceiptStore {
       ...current,
       state: "cleanup-pending",
       reclaim,
+      updatedAt: this.#clock(),
+    });
+    await this.#write(next);
+    return next;
+  }
+
+  /** Records that this host is about to ask Git to remove the folder; see `removalStarted`. */
+  async markRemovalStarted(receiptId: string): Promise<ManagedWorktreeReceipt> {
+    const current = await this.load(receiptId);
+    if (current?.state !== "cleanup-pending" || current.reclaim === undefined) {
+      throw new Error("invalid managed worktree receipt transition");
+    }
+    if (current.reclaim.removalStarted === true) return current;
+    const next = decodeReceipt({
+      ...current,
+      reclaim: { ...current.reclaim, removalStarted: true },
       updatedAt: this.#clock(),
     });
     await this.#write(next);
