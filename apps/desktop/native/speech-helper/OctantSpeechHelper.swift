@@ -246,6 +246,9 @@ private func transcribe(_ locale: Locale, _ request: Request) async throws {
         }
         return text
     }
+    // The whole clip is here and the analyzer is about to run: from now on,
+    // the host closing stdin stops work in progress rather than a read.
+    answer(["event": "analysing"])
     if let end = try await analyzer.analyzeSequence(inputs) {
         try await analyzer.finalizeAndFinish(through: end)
     } else {

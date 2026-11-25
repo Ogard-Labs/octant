@@ -31,39 +31,39 @@ afterAll(async () => {
 });
 
 /**
- * Sends `bytes` and, with `leaveAfterMs`, closes the helper's input that long
- * after, as a host does when the person cancels or the host stops.
+ * Sends `bytes` and, with `leaveWhenAnalysing`, closes the helper's input as
+ * soon as it says the analyzer is running, as a host does when the person
+ * cancels or the host stops.
  */
 function exchange(
   bytes: Uint8Array,
-  options: { readonly hold: boolean; readonly leaveAfterMs?: number },
+  options: { readonly hold: boolean; readonly leaveWhenAnalysing?: boolean },
 ): Promise<{
   readonly code: number | null;
   readonly stdout: string;
   readonly stderr: string;
-  readonly elapsedMs: number;
 }> {
   return new Promise((settle) => {
-    const started = Date.now();
     const child = spawn(helperPath, [], { stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     // Whatever the helper does, the test does not leave it running.
     const guard = setTimeout(() => child.kill("SIGKILL"), 60_000);
-    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+      if (options.leaveWhenAnalysing === true && stdout.includes('"analysing"')) child.stdin.end();
+    });
     child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
     child.stdin.on("error", () => undefined);
     child.on("exit", (code) => {
       clearTimeout(guard);
-      settle({ code, stdout, stderr, elapsedMs: Date.now() - started });
+      settle({ code, stdout, stderr });
     });
     if (!options.hold) {
       child.stdin.end(bytes);
       return;
     }
     child.stdin.write(bytes);
-    if (options.leaveAfterMs !== undefined)
-      setTimeout(() => child.stdin.end(), options.leaveAfterMs);
   });
 }
 
@@ -238,13 +238,19 @@ describe("speech helper process", () => {
       pcm,
     );
 
-    const answered = await exchange(request, { hold: true });
-    expect(JSON.parse(answered.stdout)).toMatchObject({ event: "transcript" });
-    expect(answered.elapsedMs).toBeGreaterThan(1_500);
+    const lines = (stdout: string) =>
+      stdout
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { readonly event: string });
 
-    const left = await exchange(request, { hold: true, leaveAfterMs: 300 });
-    expect(left.stdout).toBe("");
+    const answered = await exchange(request, { hold: true });
+    expect(lines(answered.stdout).map(({ event }) => event)).toEqual(["analysing", "transcript"]);
+
+    // Closed only once the analyzer is running, so this is a cancellation of
+    // work in progress, not a clip cut short.
+    const left = await exchange(request, { hold: true, leaveWhenAnalysing: true });
+    expect(lines(left.stdout).map(({ event }) => event)).toEqual(["analysing"]);
     expect(left.stderr).toBe("");
-    expect(left.elapsedMs).toBeLessThan(1_500);
   }, 90_000);
 });

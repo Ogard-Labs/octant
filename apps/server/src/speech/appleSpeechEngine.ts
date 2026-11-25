@@ -186,6 +186,7 @@ export function createAppleSpeechEngine(options: AppleSpeechEngineOptions = {}):
             settle({ kind: "failed" });
             return;
           }
+          if (event.kind === "analysing") continue;
           if (event.kind !== "progress") {
             settle(event);
             return;
@@ -343,7 +344,11 @@ function readStatus(answer: HelperAnswer): SpeechLocalEngineStatus {
 
 function readEvent(
   line: Uint8Array,
-): HelperAnswer | { readonly kind: "progress"; readonly fraction: number } | undefined {
+):
+  | HelperAnswer
+  | { readonly kind: "progress"; readonly fraction: number }
+  | { readonly kind: "analysing" }
+  | undefined {
   let value: unknown;
   try {
     value = JSON.parse(Buffer.from(line).toString("utf8"));
@@ -365,6 +370,8 @@ function readEvent(
         typeof value.language === "string"
         ? { kind: "status", state: value.state, language: value.language }
         : undefined;
+    case "analysing":
+      return { kind: "analysing" };
     case "downloaded":
       return { kind: "downloaded" };
     case "transcript":

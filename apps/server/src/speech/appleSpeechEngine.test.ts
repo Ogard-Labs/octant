@@ -125,6 +125,13 @@ describe("on-device speech engine", () => {
     expect(helper(0).request.header).not.toHaveProperty("language");
   });
 
+  it("waits past the helper saying it has started analysing", async () => {
+    const { engine, helper } = setup();
+    const result = engine.transcribe({ pcm });
+    helper(0).say({ event: "analysing" }, { event: "transcript", text: "hei" });
+    expect(await result).toEqual({ status: "completed", text: "hei" });
+  });
+
   it("keeps two dictations apart", async () => {
     const { engine, helper } = setup();
     const first = engine.transcribe({ pcm });
