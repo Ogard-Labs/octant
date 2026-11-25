@@ -31,7 +31,6 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   '.check input[type="radio"]:checked::after',
   ".device-pick__radio",
   ".code-where__dot",
-  ".agents-center-row__dot",
   // A to-do's tick: the To-dos design draws it as a circle, as a radio is.
   ".todo-row__check",
   // Avatars and monogram glyphs.
@@ -57,8 +56,6 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".mrow-dot",
   ".tabitem .dot-badge",
   ".endpoint-state__dot",
-  ".host-selector__dot",
-  ".browser-workspace__server-dot",
   ".environment-thread-pr__checks",
   ".thread-row-info-card__pr-checks",
   '.dock-tile__control[data-active="true"]::after',
@@ -66,14 +63,11 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".computers-card__dot",
   ".pull-requests-card__dot",
   ".guided-tour__dot",
-  ".dock-card__dot",
   ".library__dot",
   ".project-tile__dot",
-  ".work-list__active-dot",
   ".device-dot",
   ".canvas-block__summary-dot",
   ".canvas-block__note::before",
-  ".canvas-design__running-dot",
   // A notice's tone icon sits on a small round dot of its tone.
   ".callout > svg",
   // The composer's attach, microphone, send and stop: the box they stand in is

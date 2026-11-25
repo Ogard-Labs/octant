@@ -32,6 +32,7 @@ import { CANVAS_NETWORK_PAGE_RENEW_INTERVAL_MS } from "@octant/contracts/canvas-
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
+import { OctantStatusDot } from "../../ui/base/OctantStatusDot";
 import {
   designAssetUrls,
   designDocument,
@@ -851,7 +852,7 @@ function RunningDesignBlock({
           {state.kind === "running" ? (
             <>
               <span className="canvas-design__running" role="status">
-                <span aria-hidden="true" className="canvas-design__running-dot" />
+                <OctantStatusDot small tone="success" />
                 Running
               </span>
               {block.size === "document" ? null : <FullscreenButton fullscreen={fullscreen} />}

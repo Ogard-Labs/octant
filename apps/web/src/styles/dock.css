@@ -446,21 +446,10 @@
   font-size: var(--oct-text-xs);
 }
 
-/* A server that answers is marked in the success ink; one that does not is
-   the meta ink, and the Environment tab explains why. */
+/* The 14px slot an icon takes (4 + the small status dot's 6 + 4), so a row's
+   name starts on one column whether its mark is an icon or a dot. */
 .dock-card__dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  /* The 14px slot an icon takes (4 + 6 + 4), so a row's name starts on one
-     column whether its mark is an icon or a dot. */
   margin-inline: var(--oct-space-1);
-  border-radius: 50%;
-  background: var(--oct-meta);
-}
-
-.dock-card__dot[data-listening="true"] {
-  background: var(--octant-success-text);
 }
 
 /* The context window's fill: a short bar in the meta ink, no hue. */

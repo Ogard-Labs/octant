@@ -11,10 +11,6 @@
   position: absolute;
   top: 5px;
   right: 5px;
-  width: 6px;
-  height: 6px;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-accent);
 }
 
 .work-list__groups {

@@ -122,6 +122,7 @@ import {
 import { makeBrowserToolAction, normalizeBrowserUrl } from "./browserNavigation";
 import { RENDERER_OVERLAY_SELECTOR } from "./rendererOverlaySelector";
 import { OctantSpinner } from "../ui/base/OctantSpinner";
+import { OctantStatusDot } from "../ui/base/OctantStatusDot";
 
 const BROWSER_REFRESH_INTERVAL_MS = 500;
 const BROWSER_MAX_REFRESH_INTERVAL_MS = 5_000;
@@ -2340,7 +2341,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
                           </span>
                           {/* Every listed server answered the host's probe, so the
                               dot marks it running rather than telling rows apart. */}
-                          <span aria-hidden="true" className="browser-workspace__server-dot" />
+                          <OctantStatusDot tone="success" />
                         </span>
                       </OctantButton>
                     </li>

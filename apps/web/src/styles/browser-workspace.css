@@ -296,14 +296,6 @@
   font-family: var(--oct-font-mono);
 }
 
-.browser-workspace__server-dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--oct-success);
-}
-
 .browser-workspace__local-note {
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);

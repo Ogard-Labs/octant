@@ -4146,30 +4146,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   font-weight: var(--oct-weight-medium);
 }
 
-.host-selector__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--octant-text-muted);
-  flex-shrink: 0;
-}
-
-.host-selector__dot--healthy {
-  background: var(--octant-success-text);
-}
-
-.host-selector__dot--stale {
-  background: var(--octant-warning-text);
-}
-
-.host-selector__dot--connecting {
-  background: var(--octant-text-muted);
-}
-
-.host-selector__dot--disconnected {
-  background: var(--octant-danger-text);
-}
-
 .host-selector__health {
   color: var(--octant-text-muted);
   font-size: var(--oct-text-detail);

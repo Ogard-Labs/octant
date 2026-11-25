@@ -15,6 +15,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import type { RunningThreadFact } from "./dockThreadOverviewModel";
 import { OctantSpinner } from "../ui/base/OctantSpinner";
+import { OctantStatusDot } from "../ui/base/OctantStatusDot";
 
 export interface DockThreadFacts {
   readonly project?: string;
@@ -173,10 +174,10 @@ export function DockThreadOverview(props: DockThreadOverviewProps) {
         >
           {servers.map((server) => (
             <div className="dock-card__row" key={server.id}>
-              <span
-                aria-hidden="true"
+              <OctantStatusDot
                 className="dock-card__dot"
-                data-listening={server.listening ? "true" : "false"}
+                small
+                tone={server.listening ? "success" : "neutral"}
               />
               <span className="dock-card__label">{server.label}</span>
               <span className="dock-card__meta">{`:${String(server.port)}`}</span>
