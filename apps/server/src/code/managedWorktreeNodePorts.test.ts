@@ -519,7 +519,9 @@ describe("managed worktree Node ports", () => {
         kind: "cleaned-up-worktree-restored",
       });
       expect(await w.state()).toBe("ready");
-      expect((await w.git("-C", w.created.targetPath, "rev-parse", "HEAD")).stdout.trim()).toBe(head);
+      expect((await w.git("-C", w.created.targetPath, "rev-parse", "HEAD")).stdout.trim()).toBe(
+        head,
+      );
     });
 
     async function committedFile(w: Awaited<ReturnType<typeof readyWorktree>>) {

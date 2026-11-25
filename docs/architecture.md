@@ -2561,10 +2561,15 @@ Settings › Code › Worktrees.
 _Restorable cleanup (maintainer decision, 2026-11-25)._ A managed worktree folder can also be removed so that it can be brought back
 (`ManagedWorktreeReclaimService`). It runs for a person's choices in
 `worktrees.cleanup`: **inactivity** (a number of days without a turn or change,
-off by default; open and archived threads alike) and **merged** (a day after the
+off by default; open and archived threads alike; a restore, or a cleanup the
+person's choices abandoned, counts as a change, through the receipt's
+`readyAgainAt`, so a worktree just restored is not removed again by the next
+pass) and **merged** (a day after the
 last activity, once the branch has a commit of its own that is pushed or merged;
 a worktree nobody committed to is only eligible for inactivity; off by default).
-With neither on the host removes nothing. The service removes a folder only when
+With neither on the host removes nothing, and the timer reads no thread's
+activity: it looks at the receipts once at startup, to settle a cleanup a restart
+cut short, and then only while a cleanup it began is unsettled. The service removes a folder only when
 all of these hold, each read fresh from the server: the receipt is Octant's own
 and `ready` (or an interrupted restorable cleanup of the same record); the thread
 and checkout it names are the host's and the folder is the one derived for that
@@ -2573,7 +2578,10 @@ are unambiguous (its folder and any worktree holding one of its branches are not
 locked, prunable or detached; a locked, missing or prunable worktree of
 something else in the repository never refuses it); nothing the host tracks for the
 thread is working (the idle check below), asked before and again after the
-receipt leaves `ready`; the folder is clean; it holds nothing a branch cannot
+receipt leaves `ready`, and the branch, commit and changes are read once more,
+right before Git is asked (a commit, checkout or edit in a terminal outside
+Octant in between gives the worktree back, so the recorded commit never differs
+from the folder's); the folder is clean; it holds nothing a branch cannot
 give back, meaning no untracked file, ignored file or empty folder; and Git is
 not hiding anything: no file marked skip-worktree or assume-unchanged (an edit
 to one shows in neither status nor removal), no sparse checkout, no submodule or
@@ -2642,7 +2650,10 @@ way worktree discovery finds it, so relative paths and Windows separators and
 case match) and replacing nothing, so Git lists it as the
 worktree it was and any file the commit does not hold is an ordinary change;
 the rules above then decide between finishing and handing back. A folder Octant
-cannot relink asks the person to move it away. Every Git call made under a receipt's lock is bounded and the lock is
+cannot relink asks the person to move it away. So does a pending cleanup whose
+registration is gone (someone ran `git worktree prune`) while its folder is
+still there: Restore refuses with a message naming the folder, and works once
+the folder is moved. Every Git call made under a receipt's lock is bounded and the lock is
 released only after the child has exited: SIGTERM, a two-second grace, then
 SIGKILL to the child's process group, then a wait for it to close. Reads stop at two
 minutes and a removal, forced removal, leftover drop, `git worktree add`, the
@@ -2662,7 +2673,8 @@ removal and then restores what it left. A restore never demotes `restoring` to
 `reclaimed` while a matching folder is there. Erasing a thread (one
 receipt at a time, holding no other) and a Benchmarks discard take the same
 lock, so a restore in flight cannot recreate a folder and branch for a thread
-being erased. A turn cannot start between the `ready` read and the receipt
+being erased; the erase waits for a receipt at most 30 seconds, then fails as its
+other steps do, and its removal never runs once it has given up. A turn cannot start between the `ready` read and the receipt
 leaving `ready`: a turn holds its thread as starting before it reads any
 receipt, and the second idle check, made after the receipt has left `ready`,
 sees that hold or the live turn it became, while a turn that reads the receipt
@@ -2673,15 +2685,18 @@ is under way, once it is cleaned up, and while a restore is under way. The
 thread says so: `CodeThreadView.worktreeCleanup` (sent only to a client that
 reads the thread with `?reads=worktree-cleanup`, because an earlier client's
 strict view decoder refuses a key it does not know; it sees the unavailable
-checkout it always saw) makes the thread view show "This thread's worktree was cleaned up…" with
+checkout it always saw; an earlier host answers 400 to any query, so a client
+reads again without it and remembers that for the host, while a 400 the plain
+read shares is shown as it is) makes the thread view show "This thread's worktree was cleaned up…" with
 **Restore worktree** and hold sending, and the host's refusal of a turn, a
 queued message or a wake-up that fires names the same sentence. **Restore
 worktree** (the thread's notice and Settings › Code › Worktrees › Cleaned-up
 worktrees) recreates the folder with `git worktree add` on the recorded branch
 and makes the receipt `ready` only after the new folder reports that branch and
 commit and its own index exists, no `index.lock` is left and status is clean;
-a branch that moved or was deleted, a branch another worktree holds, or a folder
-that is already there refuses it, and a folder that does not match is taken away
+a branch that moved or was deleted (the refusal names the recorded branch and
+commit, so the person can put the branch back; Restore then works), a branch
+another worktree holds, or a folder that is already there refuses it, and a folder that does not match is taken away
 again. A restore killed during `git worktree add` leaves its entry locked
 `initializing` with a partial folder, an `index.lock` and no index: it is
 recognised as this service's own on its path and recorded branch, discarded

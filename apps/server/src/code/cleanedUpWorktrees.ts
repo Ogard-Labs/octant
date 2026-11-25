@@ -175,7 +175,10 @@ function mapRefusal(
           receipt.reclaim === undefined ? undefined : branchChangedMessage(receipt.reclaim),
         );
       case "path-collision":
-        return cleanedUpRefusal("folder-in-use", folderInTheWayMessage(receipt.canonicalWorktreePath));
+        return cleanedUpRefusal(
+          "folder-in-use",
+          folderInTheWayMessage(receipt.canonicalWorktreePath),
+        );
       case "branch-collision":
       case "inventory-ambiguous":
         return cleanedUpRefusal("folder-in-use");

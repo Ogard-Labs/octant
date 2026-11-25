@@ -181,9 +181,7 @@ export class ManagedWorktreeReclaimService {
     waitMs: number,
     run: () => Promise<T>,
   ): Promise<Readonly<{ status: "ran"; value: T }> | Readonly<{ status: "busy" }>> {
-    return this.#withinWait<
-      Readonly<{ status: "ran"; value: T }> | Readonly<{ status: "busy" }>
-    >(
+    return this.#withinWait<Readonly<{ status: "ran"; value: T }> | Readonly<{ status: "busy" }>>(
       receiptId,
       waitMs,
       async () => ({ status: "ran", value: await run() }),

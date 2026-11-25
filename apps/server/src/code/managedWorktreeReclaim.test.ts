@@ -346,10 +346,7 @@ describe("restorable cleanup of a managed worktree", () => {
         "commit",
         (w) => w.state.worktrees.set(target, { branch: `refs/heads/${branch}`, head: moved }),
       ],
-      [
-        "checkout",
-        (w) => w.state.worktrees.set(target, { branch: "refs/heads/other", head }),
-      ],
+      ["checkout", (w) => w.state.worktrees.set(target, { branch: "refs/heads/other", head })],
       ["edit", (w) => (w.state.dirty = true)],
     ];
     for (const [, change] of changes) {

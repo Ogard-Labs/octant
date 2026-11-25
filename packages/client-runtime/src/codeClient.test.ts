@@ -407,18 +407,30 @@ describe("code client", () => {
     const fetch = vi.fn(async (url: string) =>
       url.includes("?") ? refusal() : Response.json(view),
     );
-    const client = createCodeClient({ baseUrl, fetch: fetch as never, windowCapability: capability });
+    const client = createCodeClient({
+      baseUrl,
+      fetch: fetch as never,
+      windowCapability: capability,
+    });
 
     await expect(client.thread(ids.thread as never)).resolves.toMatchObject({ lastSequence: 3 });
     await expect(client.thread(ids.thread as never)).resolves.toMatchObject({ lastSequence: 3 });
-    expect(fetch.mock.calls.map(([url]) => String(url).includes("?"))).toEqual([true, false, false]);
+    expect(fetch.mock.calls.map(([url]) => String(url).includes("?"))).toEqual([
+      true,
+      false,
+      false,
+    ]);
   });
 
   it("shows a real 400 on a thread read instead of hiding it behind the older-host retry", async () => {
     const refusal = () =>
       Response.json({ category: "invalid", message: "Code request is invalid." }, { status: 400 });
     const fetch = vi.fn(async () => refusal());
-    const client = createCodeClient({ baseUrl, fetch: fetch as never, windowCapability: capability });
+    const client = createCodeClient({
+      baseUrl,
+      fetch: fetch as never,
+      windowCapability: capability,
+    });
 
     await expect(client.thread(ids.thread as never)).rejects.toMatchObject({
       category: "invalid",

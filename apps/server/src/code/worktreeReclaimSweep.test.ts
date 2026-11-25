@@ -166,7 +166,10 @@ describe("worktree reclaim sweep", () => {
   });
 
   it("counts a restore or an abandoned cleanup as activity, for the inactivity and the merged choices alike", async () => {
-    const back = { ...receipt(ids.idle), readyAgainAt: new Date(now - 2 * 3_600_000).toISOString() };
+    const back = {
+      ...receipt(ids.idle),
+      readyAgainAt: new Date(now - 2 * 3_600_000).toISOString(),
+    };
     const old = new Date(now - 3 * DAY).toISOString();
     for (const choices of [{ inactivityDays: 1 }, { whenMerged: true }]) {
       const fresh = setup({ choices, receipts: { idle: back } });
