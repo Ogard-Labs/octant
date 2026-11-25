@@ -55,7 +55,9 @@ Outside image generation drivers are built (maintainer approval, 2026-11-22):
 a package can declare an `outside-image` driver that speaks
 `image-generation/1`, and its profile runs through the host's own image job
 service (see [Outside media generation drivers](#outside-media-generation-drivers)).
-Outside video drivers are designed there and wait on the video seam.
+Outside video generation drivers are built the same way: an `outside-video`
+driver speaks `video-generation/1`, and its profile runs through the host's own
+video job service.
 The maintainer authorized this scope on 2026-10-26, brought it into the first
 preview on 2026-11-06, and accepted the [maintainer decisions](#maintainer-decisions)
 below on 2026-10-26. Slices and their evidence are tracked in Linear; this
@@ -69,8 +71,8 @@ its models in Chat, Work, and Code without an Octant release. The driver runs in
 its own OS-confined process with no network, no filesystem beyond its package,
 and no credential: it translates between Octant's harness and one model
 service's wire protocol, and the host does everything else. The same holds
-for a driver that generates images: the person adds an image profile from it,
-and Octant's image tools use it exactly as they use a bundled image driver.
+for a driver that generates images or video: the person adds a media profile
+from it, and Octant's media tools use it exactly as they use a bundled one.
 
 ## First use case: an outside harness endpoint
 
@@ -191,36 +193,83 @@ Rules, each taking the fail-closed option:
   takes; its Settings form is not built yet (remove and add the profile).
 
 **Video.** An outside video driver follows the same shape on the
-provider-neutral video seam (`@octant/provider-sdk/video-generation`), once
-that seam and its job service exist on `main`. Designed, not built:
+provider-neutral video seam (`@octant/provider-sdk/video-generation`), and the
+video job service runs it as it runs a bundled video driver. What differs from
+an image driver, each rule taking the fail-closed option:
 
-- **Identity.** One reserved family, `outside-video`, added to the seam's
-  closed `VideoDriverKind` set as `outside-image` joins the provider kinds.
+- **Identity.** One reserved family, `outside-video`, in the closed provider
+  kinds and in the seam's `VideoDriverKind` set, with its own instance arm
+  (`OutsideVideoProviderConfiguration`, the same fields as the image one).
 - **Declaration.** The component's `mediaGeneration` takes `media: "video"`
-  with one to 64 `VideoModelCapabilities` entries, exactly the seam's schema
+  with one to 64 `VideoModelCapabilities` entries, the seam's own schema
   (durations, resolutions, aspect ratios, audio, inputs, `VideoPrice`, and
   `VideoJobControl`). The host's adapter answers `models()` from this
-  declaration alone, so prices, cancel and removal facts are reviewed,
-  digest-bound data; a running driver cannot change them, and a model whose
-  price is `unpublished` is refused while a spend limit is set.
+  declaration alone, without a process, so prices, cancel and removal facts
+  are reviewed, digest-bound data; a running driver cannot change them, and a
+  model whose price is `unpublished` is refused while a spend limit is set.
+- **What a declaration may say.** A published rate is a whole number of
+  micro-dollars above zero and at most 100 US dollars a second or a clip, or
+  10,000 US dollars a million tokens; a clip is at most 600 seconds; a resume
+  window or a provider's copy is at most a year. Anything else is refused at
+  inspection as `entry-invalid`. _Rationale:_ a free rate would reserve nothing
+  and let a clip past any limit, and an unbounded length would be expanded into
+  a list on the host.
+- **Who receives the clip.** The card names the host of the address the person
+  configured. A package's or a profile's own name is never shown as the
+  recipient.
 - **Protocol `video-generation/1`.** After `initialize`, the host sends
   `video/start` (model, prompt, the frozen clip options, first frame, last
-  frame and reference images as bytes), `video/poll`, `video/cancel` (only
-  for a model that declares it can cancel) and `video/forget` (only for one
-  that declares `removal: delete`), each naming the remote id the start
-  returned. Results mirror `VideoAdapterStart`, `VideoAdapterPoll` and
-  `VideoAdapterForget` with no free text; usage is read only as the counts
-  the seam names, never as a price.
+  frame and reference images as bytes), `video/poll`, `video/cancel` (only for
+  a model that declares it can stop a running clip) and `video/forget` (only
+  for one that declares `removal: delete`; a declared expiry is left to it),
+  each naming the remote id the start returned. Results mirror
+  `VideoAdapterStart`, `VideoAdapterPoll` and `VideoAdapterForget` with no free
+  text. Images are capped at 2.5 MiB combined, as for an outside image job.
+- **Brokered calls.** Every `http/request` names the call it serves; one that
+  names none stops the driver, so nothing billable travels outside a call the
+  host accounts for. A `PUT` or `DELETE`, which a stop or a removal needs, may
+  serve only a video call; from any other family or call it stops the driver.
+- **What a start may have cost.** Decided from what the host saw leave and come
+  back, never from what the driver says. When a request that could start a clip
+  left and the provider did not refuse it outright (a 4xx other than 408, or a
+  gateway error that proves the origin was not reached), a start that then
+  fails, is called a refusal, or answers unreadably settles at the estimate.
+  When nothing left, or every request was refused outright, it is charged
+  nothing. A `GET` cannot start a clip. _Rationale:_ a driver that named its
+  own category could otherwise turn an accepted, billed clip into a free one.
+- **Usage.** Counts only (tokens, billed seconds), above zero; never an amount.
+  The host prices them at the declared rate and never settles above the
+  reservation.
+- **How an accepted clip ends.** A check that could not be made (the driver
+  exited, the provider is unreachable, limits or refuses the check) says
+  nothing about the clip and is made again until the job's time runs out. An
+  answer the host cannot read stops the driver and ends the clip as billed,
+  because no one can say any longer how it ended. A failure or refusal the
+  driver states properly is billed only when it says so, as for a bundled
+  driver; the host cannot verify that statement, and a person's own provider
+  bill remains the authority.
 - **The clip.** A clip can reach the seam's 1 GB bound, far past a channel
-  line, so a completed poll names the clip by address only. The host fetches
-  it with the seam's approved-URL fetch, once, without the key, and only when
-  that exact address appeared in a response it relayed for this job, then
-  checks it with the seam's MP4 sniffing.
+  line, so a completed check names the clip by address only. The host fetches
+  it once, without the key, over HTTPS or the configured origin, through the
+  image downloader's pinned lookup, and only when that exact address appeared
+  whole in a response it relayed for that same check, then checks it with the
+  seam's MP4 sniffing. An address the provider did not return, one that
+  resolves to a private network, or bytes that are no clip end the job as
+  billed and store nothing; a download that breaks off is tried again.
+- **A profile that changes while a clip runs.** Every call asks again whether
+  the profile is on, bound to the same driver and address, and admitted. When
+  it is not, nothing more is sent and the clip settles at its estimate. A clip
+  still in the queue ends unstarted and unbilled instead, as an image job does,
+  when the trusted digest, the address, or the model's declaration moved.
+- **Process.** It starts at the profile's first clip, or when a restart resumes
+  a clip the provider accepted; reading what is offered starts nothing.
 - **What stays the host's.** The poll interval, the job time, the reservation
   and settlement, storage, restart recovery (resuming a remote id within the
   declared window) and the forget retries are the seam's job service, as for
-  the bundled video drivers; a driver process that stops mid-job ends the
-  poll with a closed reason, and the job service decides what follows.
+  the bundled video drivers.
+- **Not yet.** Changing an outside video profile's address or models is a
+  command the host takes; its Settings form is not built yet (remove and add
+  the profile).
 
 ## What exists today
 
@@ -678,7 +727,8 @@ takes the fail-closed option.
   `session/cancel`; a release sends `session/release`, and the host refuses
   every later send itself. The proxy has no `verifyToolCapability`: Verify
   tools is the host's, built with admission in slice 5.
-- **The brokered call.** `GET` or `POST`; headers as name and value pairs with
+- **The brokered call.** `GET` or `POST` (and, for a video driver's own calls
+  only, `PUT` or `DELETE`); headers as name and value pairs with
   no line breaks; bodies as UTF-8 text both ways, since the services a driver
   translates speak text. The driver may not set `authorization`,
   `proxy-authorization`, `cookie`, `host`, or the header it asks the key in,
@@ -1311,8 +1361,8 @@ alternatives considered and the reason for the choice follow it.
    agent CLIs with filesystem and shell reach and need their own confinement
    design.
    Revised (maintainer approval, 2026-11-22): media generation drivers are
-   admitted too, on the same terms; image generation is built and video
-   follows the video seam ([Outside media generation drivers](#outside-media-generation-drivers)).
+   admitted too, on the same terms; image and video generation are built
+   ([Outside media generation drivers](#outside-media-generation-drivers)).
    Like a harness endpoint, a media driver launches nothing and holds no
    authority: it translates one service's wire protocol, and the host makes
    every call, holds the key, and owns the price and spend.

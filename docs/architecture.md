@@ -7969,8 +7969,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   confinement unchanged (maintainer request, 2026-11-12); the catalog lists effective outside drivers in their own group from
   the registry snapshot. Third-party provider-driver plugins are in scope for the
   first preview under [Outside provider drivers](design/outside-provider-drivers.md),
-  as harness endpoints or as media generators: an outside image driver lists
-  its declared models and prices in the same group and adds an image profile
+  as harness endpoints or as media generators: an outside image or video driver
+  lists its declared models in the same group and adds an image or video profile
   ([Outside media generation drivers](design/outside-provider-drivers.md#outside-media-generation-drivers)). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
@@ -8091,7 +8091,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   fresh connection, with the original name kept as `Host` and as the TLS
   server name the certificate is verified against. No redirect is followed,
   so the first hop is the only one. This holds for bundled and outside image
-  drivers alike, and closes DNS rebinding between a check and the fetch.
+  drivers and for an outside video driver's clips, and closes DNS rebinding
+  between a check and the fetch.
   The **Image generator** surface (profile menu, host-wide `image-library`
   scope;
   any registered window may use the `image-library` scope, while thread scopes
@@ -17884,8 +17885,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | Oh My Pi                  | `oh-my-pi`                                                                                                                                   | `no`  | `no`              | `no`              | `none`           |
 
   The image profiles (`openai-image`, `gemini-native-image`, `bfl-image`,
-  `ideogram-image`, and an outside package's `outside-image`) are not turn
-  drivers and are not in the matrix.
+  `ideogram-image`, and an outside package's `outside-image`) and the video
+  profiles (`gemini-video`, `runway-video`, `fal-video`, and an outside
+  package's `outside-video`) are not turn drivers and are not in the matrix.
 
   Where each provider is weaker than Claude Code and Codex:
 
