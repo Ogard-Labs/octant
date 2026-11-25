@@ -2490,7 +2490,7 @@ describe("person memory and the journal verification watermark", () => {
   const stateOf = (store: PersonMemoryStore) => ({
     cuts: [THREAD_1, THREAD_2].map((threadId) => store.blockCut(chat(threadId))),
     learned: [THREAD_1, THREAD_2].map((threadId) => store.learnedThrough(chat(threadId))),
-    remembered: [THREAD_1, THREAD_2].map((threadId) => store.isRemembered(chat(threadId))),
+    remembered: [THREAD_1, THREAD_2].map((threadId) => store.isRemembered(source(threadId, START))),
     typed: [THREAD_1, THREAD_2].map((threadId) => [...store.typedTurnIds(chat(threadId))].sort()),
     hits: store.search({ mode: "work", threadId: THREAD_3 }, "invoices"),
     block: store.blockFor({ ...chat(THREAD_3), cutOff: later }),
