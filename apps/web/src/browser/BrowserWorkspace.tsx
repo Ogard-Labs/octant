@@ -1428,7 +1428,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         return;
       }
       setSnapshot((previous) => {
-        if (previous === undefined) return previous;
+        // The answer landed after a thread switch: the snapshot is another
+        // thread's, and its own offer is not the one that was answered.
+        if (previous === undefined || String(previous.threadId) !== String(threadId))
+          return previous;
         const { reopenOffer: _answered, ...rest } = previous;
         return rest;
       });

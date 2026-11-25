@@ -3275,6 +3275,47 @@ describe("BrowserWorkspace reopening a page a restart took", () => {
     expect(browser.create).not.toHaveBeenCalled();
   });
 
+  it("leaves another thread's offer alone when an answer lands after a thread switch", async () => {
+    const otherThread = "21000000-0000-4000-8000-0000000000bb";
+    const browser = offered();
+    const base = browser.inspectThread;
+    browser.inspectThread = vi.fn(async (input) =>
+      String(input.threadId) === otherThread
+        ? ({
+            status: "ready",
+            threadId: otherThread,
+            evidence: [],
+            reopenOffer: {
+              pageId: "61000000-0000-4000-8000-000000000002",
+              status: "offered",
+              profile: { kind: "personal" },
+            },
+          } as any)
+        : base(input),
+    );
+    let answer: (value: { status: "dismissed" }) => void = () => undefined;
+    browser.dismissPageOffer = vi.fn(
+      () =>
+        new Promise<{ status: "dismissed" }>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const { rerender } = render(<BrowserWorkspace client={browser} tab={tab} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(browser.dismissPageOffer).toHaveBeenCalledOnce());
+    rerender(<BrowserWorkspace client={browser} tab={{ ...tab, threadId: otherThread as any }} />);
+    await waitFor(() =>
+      expect(browser.inspectThread).toHaveBeenCalledWith(
+        expect.objectContaining({ threadId: otherThread }),
+        expect.anything(),
+      ),
+    );
+    expect(await screen.findByRole("button", { name: "Reopen page" })).toBeInTheDocument();
+    answer({ status: "dismissed" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.getByRole("button", { name: "Reopen page" })).toBeInTheDocument();
+  });
+
   it("keeps the chosen profile across a thread switch and never shows one thread's offer or choice in another", async () => {
     const otherThread = "21000000-0000-4000-8000-0000000000bb";
     const browser = offered();
