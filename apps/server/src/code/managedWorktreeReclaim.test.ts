@@ -50,6 +50,8 @@ async function world(
     readonly receiptThread?: string;
     /** A Git port that cannot look for untracked and ignored files at all. */
     readonly withoutIgnoredCheck?: boolean;
+    readonly removalTimeLimitMs?: number;
+    readonly restoreWaitMs?: number;
   } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), "octant-reclaim-"));
@@ -82,12 +84,19 @@ async function world(
     gate: undefined as Promise<void> | undefined,
     hazard: undefined as undefined | "hidden-edits" | "unsupported",
     damage: { missingTrackedFiles: 0, otherChanges: 0 },
+    restoreFilesFails: false,
+    /** A Git removal that never ends on its own; only its signal stops it. */
+    hang: false,
+    observed: 0,
+    onObserve: undefined as undefined | ((count: number) => void),
     delivered: true,
     authorityCheckout: checkoutId as string,
     calls: [] as string[],
     failures: new Set<string>(),
   };
   const observe = async (): Promise<RepositoryIdentityObservation> => {
+    state.observed += 1;
+    state.onObserve?.(state.observed);
     const main = {
       status: "present" as const,
       reportedPath: repositoryRoot,
@@ -135,8 +144,13 @@ async function world(
     fetchRemote: async () => ({ status: "failed" }),
     addWorktree: async () => ({ status: "rejected" }),
     isDirty: async () => ({ status: "observed", dirty: state.dirty }),
-    removeWorktree: async (input) => {
+    removeWorktree: async (input, signal) => {
       state.calls.push("removalStarted");
+      if (state.hang) {
+        await new Promise<never>((_, reject) =>
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
+        );
+      }
       await state.gate;
       return failing("removeWorktree", () => {
         if (state.removeRejected) return { status: "rejected" as const };
@@ -169,6 +183,12 @@ async function world(
       ...(state.hazard === undefined ? {} : { hazard: state.hazard }),
     }),
     readRemovalDamage: async () => ({ status: "observed" as const, ...state.damage }),
+    restoreMissingFiles: async () => {
+      state.calls.push("restoreMissingFiles");
+      if (state.restoreFilesFails) return { status: "failed" as const };
+      state.damage = { ...state.damage, missingTrackedFiles: 0 };
+      return { status: "observed" as const, files: 1 };
+    },
     resolveBranchHead: async (input) =>
       failing("resolveBranchHead", () => {
         const tip = state.branchHeads.get(input.branch);
@@ -204,6 +224,10 @@ async function world(
       pathExists: async (path: string) => state.disk.has(path),
     },
     git,
+    ...(options.removalTimeLimitMs === undefined
+      ? {}
+      : { removalTimeLimitMs: options.removalTimeLimitMs }),
+    ...(options.restoreWaitMs === undefined ? {} : { restoreWaitMs: options.restoreWaitMs }),
     authority: {
       observeCleanupEligibility: async () => ({
         status: "eligible" as const,
@@ -469,10 +493,88 @@ describe("restorable cleanup of a managed worktree", () => {
     mixed.state.failures.add("removeWorktree");
     await mixed.reclaim();
     mixed.state.damage = { missingTrackedFiles: 3, otherChanges: 1 };
+    // Nothing is deleted: the missing files are put back and the thread has its folder.
     await expect(mixed.reclaim()).resolves.toEqual({ status: "refused", reason: "dirty" });
-    await expect(mixed.abandon()).resolves.toEqual({ status: "refused", reason: "dirty" });
-    expect((await mixed.current()).state).toBe("cleanup-pending");
+    expect((await mixed.current()).state).toBe("ready");
     expect(mixed.state.disk.has(target)).toBe(true);
+    expect(mixed.state.calls).toContain("restoreMissingFiles");
+    expect(mixed.state.calls.filter((call) => call === "removeWorktree")).toHaveLength(1);
+
+    const stuck = await world();
+    stuck.state.failures.add("removeWorktree");
+    await stuck.reclaim();
+    stuck.state.damage = { missingTrackedFiles: 3, otherChanges: 1 };
+    stuck.state.restoreFilesFails = true;
+    await expect(stuck.reclaim()).resolves.toEqual({ status: "refused", reason: "git-refused" });
+    expect((await stuck.current()).state).toBe("cleanup-pending");
+  });
+
+  it("finishes a cut-short removal with force only on a fresh proof that nothing but tracked files is missing", async () => {
+    const forced = (w: Awaited<ReturnType<typeof world>>) =>
+      w.state.calls.filter((call) => call === "removeWorktree").length;
+    const cutShort = async () => {
+      const w = await world();
+      w.state.failures.add("removeWorktree");
+      await w.reclaim();
+      w.state.damage = { missingTrackedFiles: 3, otherChanges: 0 };
+      return w;
+    };
+
+    const hidden = await cutShort();
+    hidden.state.hazard = "hidden-edits";
+    await expect(hidden.reclaim()).resolves.toEqual({
+      status: "refused",
+      reason: "unrecoverable-files",
+    });
+    expect(forced(hidden)).toBe(1);
+    expect((await hidden.current()).state).toBe("ready");
+    expect(hidden.state.calls).toContain("restoreMissingFiles");
+
+    const unsupported = await cutShort();
+    unsupported.state.hazard = "unsupported";
+    await expect(unsupported.reclaim()).resolves.toMatchObject({ status: "refused" });
+    expect(forced(unsupported)).toBe(1);
+
+    // The folder moves between the first look and the proof that comes after it.
+    const moves = await cutShort();
+    const startedAt = moves.state.observed;
+    moves.state.onObserve = (count) => {
+      if (count === startedAt + 2) {
+        const listed = moves.state.worktrees.get(target);
+        if (listed !== undefined) listed.head = moved;
+      }
+    };
+    await expect(moves.reclaim()).resolves.toEqual({ status: "refused", reason: "mismatched" });
+    expect(forced(moves)).toBe(1);
+    expect(moves.state.disk.has(target)).toBe(true);
+    expect((await moves.current()).state).toBe("ready");
+
+    const proven = await cutShort();
+    await expect(proven.reclaim()).resolves.toMatchObject({ status: "reclaimed" });
+    expect(forced(proven)).toBe(2);
+  });
+
+  it("never forces a removal when a person gives up a cut-short cleanup", async () => {
+    const w = await world();
+    w.state.failures.add("removeWorktree");
+    await w.reclaim();
+    w.state.damage = { missingTrackedFiles: 3, otherChanges: 0 };
+    await expect(w.abandon()).resolves.toMatchObject({ status: "restored" });
+    expect(w.state.calls.filter((call) => call === "removeWorktree")).toHaveLength(1);
+    expect(w.state.disk.has(target)).toBe(true);
+    expect((await w.current()).state).toBe("ready");
+  });
+
+  it("stops a removal that never ends, frees the receipt, and tells a waiting restore that a cleanup is still running", async () => {
+    const w = await world({ removalTimeLimitMs: 400, restoreWaitMs: 30 });
+    w.state.hang = true;
+    const cleaning = w.reclaim();
+    await vi.waitFor(() => expect(w.state.calls).toContain("removalStarted"));
+    await expect(w.abandon()).resolves.toEqual({ status: "refused", reason: "cleanup-running" });
+    await expect(w.restore()).resolves.toEqual({ status: "refused", reason: "cleanup-running" });
+    await expect(cleaning).resolves.toMatchObject({ status: "interrupted" });
+    w.state.hang = false;
+    await expect(w.abandon()).resolves.toMatchObject({ status: "restored" });
   });
 
   it("refuses a checkout with hidden edits or an unsupported shape, and a port that cannot tell", async () => {
@@ -630,7 +732,7 @@ describe("restoring a cleaned worktree", () => {
   it("goes back to cleaned up when Git cannot make the folder", async () => {
     const w = await reclaimed();
     w.state.restoreRejected = true;
-    await expect(w.restore()).resolves.toMatchObject({ status: "waiting" });
+    await expect(w.restore()).resolves.toEqual({ status: "refused", reason: "git-refused" });
     expect((await w.current()).state).toBe("reclaimed");
     expect(w.state.disk.has(target)).toBe(false);
     w.state.restoreRejected = false;

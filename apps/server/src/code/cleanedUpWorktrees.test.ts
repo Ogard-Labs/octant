@@ -98,6 +98,11 @@ describe("cleaned-up worktrees", () => {
       ["restore-mismatch", "branch-changed"],
       ["path-collision", "folder-in-use"],
       ["branch-collision", "folder-in-use"],
+      ["inventory-ambiguous", "folder-in-use"],
+      ["cleanup-running", "cleanup-running"],
+      // Waiting cannot help with these, so the answer says to look at the folder.
+      ["dirty", "needs-attention"],
+      ["git-refused", "needs-attention"],
       ["unverified", "unverified"],
     ] as const) {
       await expect(

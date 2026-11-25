@@ -40,6 +40,8 @@ export const CleanedUpWorktreeRefusalReason = Schema.Literal(
   "not-cleaned-up",
   "branch-changed",
   "folder-in-use",
+  "cleanup-running",
+  "needs-attention",
   "unverified",
   "busy",
 );

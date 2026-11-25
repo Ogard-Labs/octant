@@ -388,6 +388,7 @@ describe("managed worktree Node ports", () => {
             signal,
           ),
         restore: () => reclaimService.restore({ receiptId: created.receipt.receiptId }, signal),
+        abandon: () => reclaimService.abandon({ receiptId: created.receipt.receiptId }, signal),
         state: async () => (await receipts.load(created.receipt.receiptId))?.state,
       };
     }
@@ -568,16 +569,129 @@ describe("managed worktree Node ports", () => {
       expect(await readFile(join(w.created.targetPath, "tracked.txt"), "utf8")).toBe("one\n");
     });
 
-    it("leaves a half-deleted folder that also holds other changes where it is, blocked", async () => {
-      const w = await readyWorktree();
+    async function begun(w: Awaited<ReturnType<typeof readyWorktree>>) {
       await committedFile(w);
       const head = (await w.git("-C", w.created.targetPath, "rev-parse", "HEAD")).stdout.trim();
       await w.receipts.beginReclaim(w.receiptId, { branch: "feature/restorable", head });
+    }
+
+    async function listed(w: Awaited<ReturnType<typeof readyWorktree>>): Promise<string> {
+      return (await w.git("-C", w.fixture.repository, "worktree", "list", "--porcelain")).stdout;
+    }
+
+    it("gives a half-deleted folder that also holds other changes back to the thread, with nothing deleted", async () => {
+      for (const act of ["reclaim", "abandon"] as const) {
+        const w = await readyWorktree();
+        await begun(w);
+        await rm(join(w.created.targetPath, "tracked.txt"));
+        await writeFile(join(w.created.targetPath, "notes.txt"), "keep me");
+        await expect(w[act]()).resolves.toMatchObject({
+          status: act === "reclaim" ? "refused" : "restored",
+        });
+        expect(await readFile(join(w.created.targetPath, "notes.txt"), "utf8")).toBe("keep me");
+        expect(await readFile(join(w.created.targetPath, "tracked.txt"), "utf8")).toBe("one\n");
+        expect(await w.state()).toBe("ready");
+      }
+    });
+
+    it("puts back a missing file Git was told to skip and leaves an invisible edit alone, without a forced removal", async () => {
+      const w = await readyWorktree();
+      await committedFile(w);
+      await writeFile(join(w.created.targetPath, "edited.txt"), "committed\n");
+      await w.git("-C", w.created.targetPath, "add", "edited.txt");
+      await w.git("-C", w.created.targetPath, "commit", "-m", "second");
+      await w.git("-C", w.created.targetPath, "update-index", "--skip-worktree", "tracked.txt");
+      await w.git("-C", w.created.targetPath, "update-index", "--assume-unchanged", "edited.txt");
+      const head = (await w.git("-C", w.created.targetPath, "rev-parse", "HEAD")).stdout.trim();
+      await w.receipts.beginReclaim(w.receiptId, { branch: "feature/restorable", head });
       await rm(join(w.created.targetPath, "tracked.txt"));
-      await writeFile(join(w.created.targetPath, "notes.txt"), "keep me");
-      await expect(w.reclaim()).resolves.toMatchObject({ status: "refused" });
-      expect(await readFile(join(w.created.targetPath, "notes.txt"), "utf8")).toBe("keep me");
-      expect(await w.state()).toBe("cleanup-pending");
+      await writeFile(join(w.created.targetPath, "edited.txt"), "an edit status cannot see\n");
+      await expect(w.reclaim()).resolves.toEqual({
+        status: "refused",
+        reason: "unrecoverable-files",
+      });
+      expect(await readFile(join(w.created.targetPath, "tracked.txt"), "utf8")).toBe("one\n");
+      expect(await readFile(join(w.created.targetPath, "edited.txt"), "utf8")).toBe(
+        "an edit status cannot see\n",
+      );
+      expect(await w.state()).toBe("ready");
+    });
+
+    it("drops only this receipt's own registration when a removal stopped after the folder went, and not another worktree's", async () => {
+      const w = await readyWorktree();
+      const otherGone = join(w.fixture.root, "other-gone");
+      const otherLocked = join(w.fixture.root, "other-locked");
+      await w.git("-C", w.fixture.repository, "worktree", "add", "-b", "gone", otherGone);
+      await w.git("-C", w.fixture.repository, "worktree", "add", "-b", "locked", otherLocked);
+      await w.git("-C", w.fixture.repository, "worktree", "lock", otherLocked);
+      await rm(otherGone, { recursive: true });
+      await begun(w);
+      await rm(w.created.targetPath, { recursive: true });
+      expect(await listed(w)).toContain(w.created.targetPath);
+      await expect(w.reclaim()).resolves.toMatchObject({ status: "reclaimed" });
+      const after = await listed(w);
+      expect(after).not.toContain(w.created.targetPath);
+      expect(after).toContain("other-gone");
+      expect(after).toContain("other-locked");
+      await expect(w.restore()).resolves.toMatchObject({ status: "restored" });
+      expect(await readFile(join(w.created.targetPath, "tracked.txt"), "utf8")).toBe("one\n");
+    });
+
+    it("restores a checkout whose registration was left behind, from the person's Restore", async () => {
+      const w = await readyWorktree();
+      await begun(w);
+      await rm(w.created.targetPath, { recursive: true });
+      await expect(w.abandon()).resolves.toMatchObject({ status: "reclaimed" });
+      await expect(w.restore()).resolves.toMatchObject({ status: "restored" });
+      expect(await w.state()).toBe("ready");
+      // A cleanup that finished but left the registration is dropped by the restore itself.
+      await w.receipts.beginReclaim(w.receiptId, {
+        branch: "feature/restorable",
+        head: (await w.git("-C", w.created.targetPath, "rev-parse", "HEAD")).stdout.trim(),
+      });
+      await rm(w.created.targetPath, { recursive: true });
+      await w.receipts.transition(w.receiptId, "reclaimed");
+      await expect(w.restore()).resolves.toMatchObject({ status: "restored" });
+      expect(await w.state()).toBe("ready");
+    });
+
+    it("keeps working around unrelated locked and prunable worktrees", async () => {
+      const w = await readyWorktree();
+      const otherGone = join(w.fixture.root, "other-gone");
+      const otherLocked = join(w.fixture.root, "other-locked");
+      await w.git("-C", w.fixture.repository, "worktree", "add", "-b", "gone", otherGone);
+      await w.git("-C", w.fixture.repository, "worktree", "add", "-b", "locked", otherLocked);
+      await w.git("-C", w.fixture.repository, "worktree", "lock", otherLocked);
+      await rm(otherGone, { recursive: true });
+      await expect(w.reclaim()).resolves.toMatchObject({ status: "reclaimed" });
+      await expect(w.restore()).resolves.toMatchObject({ status: "restored" });
+      expect(await listed(w)).toContain("other-gone");
+    });
+
+    it("links a folder that lost its .git file back, finishing the removal only when nothing else is in it", async () => {
+      const bare = await readyWorktree();
+      await begun(bare);
+      await rm(join(bare.created.targetPath, ".git"));
+      await rm(join(bare.created.targetPath, "tracked.txt"));
+      expect(await listed(bare)).toContain("prunable");
+      await expect(bare.reclaim()).resolves.toMatchObject({ status: "reclaimed" });
+      expect(await bare.ports.filesystem.pathExists(bare.created.targetPath, signal)).toBe(false);
+      await expect(bare.restore()).resolves.toMatchObject({ status: "restored" });
+
+      for (const act of ["reclaim", "abandon"] as const) {
+        const extra = await readyWorktree();
+        await begun(extra);
+        await rm(join(extra.created.targetPath, ".git"));
+        await rm(join(extra.created.targetPath, "tracked.txt"));
+        await writeFile(join(extra.created.targetPath, "notes.txt"), "keep me");
+        await expect(extra[act]()).resolves.toMatchObject({
+          status: act === "reclaim" ? "refused" : "restored",
+        });
+        expect(await readFile(join(extra.created.targetPath, "notes.txt"), "utf8")).toBe("keep me");
+        expect(await readFile(join(extra.created.targetPath, "tracked.txt"), "utf8")).toBe("one\n");
+        expect(await extra.state()).toBe("ready");
+        expect(await listed(extra)).not.toContain("prunable");
+      }
     });
   });
 
