@@ -2,6 +2,7 @@ import { ActorId, AggregateId, CorrelationId, EventId, LOCAL_HOST_ID } from "@oc
 import type { CredentialRequestReference } from "@octant/contracts/credential-request";
 import {
   decodeThreadSecretMemoryRecord,
+  MAX_REMEMBERED_THREAD_SECRETS,
   THREAD_SECRET_MEMORY_AGGREGATE_TYPE,
   THREAD_SECRET_MEMORY_EVENT_NAME,
   type RememberedThreadSecret,
@@ -22,8 +23,6 @@ const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 /** One host-wide aggregate: what was remembered and forgotten reads as one history. */
 const MEMORY_AGGREGATE_ID = decodeAggregateId("00000000-0000-4000-8000-0000000000c9");
 const REPLAY_PAGE = 1_000;
-/** A list the person reads in Settings, not a store for programs. */
-const MAX_REMEMBERED = 128;
 
 export interface ThreadSecretMemoryJournal {
   /** Throws when it cannot, so nothing is remembered unrecorded. */
@@ -77,7 +76,10 @@ export class RememberedThreadSecrets {
 
   /** Its id, or undefined when it could not be kept; nothing is left behind then. */
   async remember(secretName: string, value: RememberedValue): Promise<string | undefined> {
-    if (this.#remembered.size >= MAX_REMEMBERED && this.list([secretName]).length === 0)
+    if (
+      this.#remembered.size >= MAX_REMEMBERED_THREAD_SECRETS &&
+      this.list([secretName]).length === 0
+    )
       return undefined;
     const id = this.#uuid();
     const record: Remembered =

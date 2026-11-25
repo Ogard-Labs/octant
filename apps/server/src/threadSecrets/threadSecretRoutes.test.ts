@@ -6,16 +6,23 @@ import { afterEach, describe, expect, it } from "vitest";
 import { classifyProductAction } from "../authenticatedProductRoutes";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { RememberedThreadSecrets } from "./rememberedThreadSecrets";
 import { createThreadSecretRoutes } from "./threadSecretRoutes";
-import { ThreadSecretService } from "./threadSecretService";
+import { ThreadSecretService, type ThreadSecretServiceOptions } from "./threadSecretService";
 
 const THREAD = "00000000-0000-4000-8000-000000000009";
+const REMEMBERED = "00000000-0000-4000-8000-000000000010";
 const services: ThreadSecretService[] = [];
 afterEach(() => {
   for (const service of services.splice(0)) service.close();
 });
 
-function setup() {
+function setup(
+  over: {
+    readonly storeFails?: boolean;
+    readonly browse?: ThreadSecretServiceOptions["browse"];
+  } = {},
+) {
   const store = new WindowAuthorityStore();
   const windowId = decodeWindowId("00000000-0000-4000-8000-000000000001");
   const capability = randomBytes(32).toString("base64url");
@@ -25,6 +32,26 @@ function setup() {
     now: () => 0,
     journal: { record: () => undefined, history: () => ({ open: [], lastLifetimes: new Map() }) },
     hold: () => () => undefined,
+    threadTitle: () => "Publish",
+    ...(over.browse === undefined
+      ? {}
+      : { browse: over.browse, readReference: async () => ({ status: "missing" as const }) }),
+    remembered: new RememberedThreadSecrets({
+      uuid: () => crypto.randomUUID(),
+      journal: {
+        record: () => undefined,
+        history: () => [
+          { name: "thread-secret.remembered", id: REMEMBERED, secretName: "OLD", source: "pasted" },
+        ],
+      },
+      store: {
+        resolve: async () => "old-value",
+        set: async () => undefined,
+        delete: async () => {
+          if (over.storeFails === true) throw new Error("locked");
+        },
+      },
+    }),
   });
   services.push(service);
   const asked = service.request(
@@ -101,6 +128,82 @@ describe("thread secret routes", () => {
     expect(h.service.active(THREAD)).toEqual([]);
   });
 
+  it("lists every thread's active secrets and the remembered ones, with no value", async () => {
+    const h = setup();
+    await h.route(h.call(h.answer()));
+    const response = await h.route(h.call(undefined, { query: "" }));
+    const text = (await response?.text()) ?? "";
+    expect(JSON.parse(text)).toEqual({
+      active: [
+        expect.objectContaining({ threadId: THREAD, threadTitle: "Publish", name: "TOKEN" }),
+      ],
+      remembered: [{ id: REMEMBERED, name: "OLD", source: "pasted" }],
+    });
+    expect(text).not.toMatch(/private-value|old-value/);
+    const other = await h.route(h.call(undefined, { query: "", token: "wrong" }));
+    expect(other?.status).toBe(401);
+  });
+
+  it("forgets a remembered secret, and says when it could not", async () => {
+    const forget = { kind: "forget", id: REMEMBERED };
+    const h = setup();
+    expect(await (await h.route(h.call(forget)))?.json()).toEqual({ status: "accepted" });
+    expect(h.service.hostView().remembered).toEqual([]);
+    expect(await (await h.route(h.call(forget)))?.json()).toEqual({ status: "gone" });
+    const locked = setup({ storeFails: true });
+    expect(await (await locked.route(locked.call(forget)))?.json()).toEqual({
+      status: "refused",
+      failure: "unavailable",
+    });
+    expect(locked.service.hostView().remembered).toHaveLength(1);
+  });
+
+  it("lists a linked store's names for a waiting card, and for nothing else", async () => {
+    const listed = { status: "listed", entries: [], truncated: false } as const;
+    const steps: unknown[] = [];
+    const h = setup({
+      browse: async (step) => {
+        steps.push(step);
+        return listed;
+      },
+    });
+    const { id } = h.answer().answer;
+    const browse = (over: Record<string, unknown> = {}) =>
+      h.call({
+        kind: "browse",
+        threadId: THREAD,
+        requestId: id,
+        step: { kind: "vaults" },
+        ...over,
+      });
+    expect(await (await h.route(browse()))?.json()).toEqual(listed);
+    expect(await (await h.route(browse({ threadId: "other" })))?.json()).toEqual({
+      status: "unavailable",
+    });
+    expect((await h.route(browse({ step: { kind: "items", vaultId: "x" } })))?.status).toBe(400);
+    await h.route(h.call(h.answer()));
+    expect(await (await h.route(browse()))?.json()).toEqual({ status: "unavailable" });
+    expect(steps).toEqual([{ kind: "vaults" }]);
+  });
+
+  it("shows nothing of a store to a card that ended while it was listed", async () => {
+    const reply = Promise.withResolvers<void>();
+    const h = setup({
+      browse: async () => {
+        await reply.promise;
+        return { status: "listed", entries: [{ id: "a", label: "Work" }], truncated: false };
+      },
+    });
+    const { id } = h.answer().answer;
+    const pending = h.route(
+      h.call({ kind: "browse", threadId: THREAD, requestId: id, step: { kind: "vaults" } }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    h.service.withdrawThread(THREAD);
+    reply.resolve();
+    expect(await (await pending)?.json()).toEqual({ status: "unavailable" });
+  });
+
   it("refuses another window, a paired device, a remote name and a forwarded action", async () => {
     const h = setup();
     expect((await h.route(h.call(undefined, { token: "wrong" })))?.status).toBe(401);
@@ -128,6 +231,5 @@ describe("thread secret routes", () => {
     }
     expect((await h.route(h.call("x".repeat(300_000))))?.status).toBe(413);
     expect((await h.route(h.call(undefined, { query: "?threadId=a&other=b" })))?.status).toBe(400);
-    expect((await h.route(h.call(undefined, { query: "" })))?.status).toBe(400);
   });
 });
