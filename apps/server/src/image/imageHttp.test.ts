@@ -1,7 +1,7 @@
 import { MAX_GENERATED_IMAGE_BYTES, MAX_IMAGE_VARIANTS } from "@octant/contracts";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { gzipSync } from "node:zlib";
+import { brotliCompressSync, deflateSync, gzipSync } from "node:zlib";
 import { describe, expect, it, vi } from "vitest";
 import {
   fetchApprovedImageUrl,
@@ -288,6 +288,55 @@ describe("the pinned approved-image transport", () => {
 
       const unsupported = await fetchWith(fetch, `${origin}/unknown.png`);
       expect("failure" in unsupported).toBe(true);
+    } finally {
+      await new Promise<void>((closed) => server.close(() => closed()));
+    }
+  });
+
+  it("fails cleanly without uncaught errors when a deflate or Brotli response disconnects after decoder EOF", async () => {
+    const payloads = {
+      "/deflate-truncated.png": {
+        encoding: "deflate",
+        body: deflateSync(Buffer.from(png)),
+      },
+      "/brotli-truncated.png": {
+        encoding: "br",
+        body: brotliCompressSync(Buffer.from(png)),
+      },
+    } as const;
+    const server = createServer((request, response) => {
+      const entry =
+        request.url === "/deflate-truncated.png" || request.url === "/brotli-truncated.png"
+          ? payloads[request.url]
+          : undefined;
+      if (entry === undefined) {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
+      // Declare more bytes than will ever arrive, write the complete compressed
+      // image plus one trailing byte, then abruptly drop the socket.
+      response.writeHead(200, {
+        "content-type": "image/png",
+        "content-encoding": entry.encoding,
+        "content-length": String(entry.body.byteLength + 16),
+      });
+      response.write(Buffer.concat([entry.body, Buffer.from([0x00])]), () => {
+        setTimeout(() => response.socket?.destroy(), 10);
+      });
+    });
+    await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const origin = `http://images.proxy.test:${port}`;
+      const fetch = makePinnedImageFetch({
+        resolveAll: async () => ["127.0.0.1"],
+        allowedOrigin: origin,
+      });
+      for (const path of ["/deflate-truncated.png", "/brotli-truncated.png"] as const) {
+        const result = await fetchWith(fetch, `${origin}${path}`);
+        expect("failure" in result).toBe(true);
+      }
     } finally {
       await new Promise<void>((closed) => server.close(() => closed()));
     }

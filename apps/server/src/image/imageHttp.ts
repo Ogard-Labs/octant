@@ -14,7 +14,7 @@ import {
   type ImageHttpAuth,
 } from "@octant/provider-sdk/image-generation";
 import { lookup } from "node:dns/promises";
-import { request as httpRequest } from "node:http";
+import { request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import type { Readable } from "node:stream";
@@ -338,7 +338,12 @@ export function makePinnedImageFetch(
           const nullBody = status === 204 || status === 205 || status === 304;
           if (nullBody) incoming.resume();
           const decoded = nullBody
-            ? { ok: true as const, stream: undefined, destroy: () => incoming.destroy() }
+            ? {
+                ok: true as const,
+                stream: undefined,
+                waitForUpstream: async () => undefined,
+                destroy: () => incoming.destroy(),
+              }
             : decodeHttpBodyStream(incoming, headers);
           if (!decoded.ok) {
             incoming.destroy();
@@ -354,6 +359,7 @@ export function makePinnedImageFetch(
                     try {
                       const next: IteratorResult<unknown> = await chunks.next();
                       if (next.done === true) {
+                        await decoded.waitForUpstream();
                         controller.close();
                         return;
                       }
@@ -390,13 +396,21 @@ const MAX_CONTENT_ENCODING_LAYERS = 4;
  * Decodes HTTP `Content-Encoding` layers in reverse order so `makePinnedImageFetch`
  * matches `fetch`'s transparent decompression while streaming decoded bytes
  * through `boundResponse`'s size ceiling. Strips `content-encoding` and the
- * wire `content-length` once decoded so the decoded stream is checked directly.
+ * wire `content-length` once decoded so the decoded stream is checked directly,
+ * and keeps the upstream HTTP response under the same lifecycle so an early
+ * decoder EOF (deflate/Brotli with trailing bytes) still waits for clean HTTP
+ * completion and never leaves an unguarded decoder error listener behind.
  */
 function decodeHttpBodyStream(
-  incoming: Readable,
+  incoming: IncomingMessage,
   headers: Headers,
 ):
-  | { readonly ok: true; readonly stream: Readable; readonly destroy: () => void }
+  | {
+      readonly ok: true;
+      readonly stream: Readable;
+      readonly waitForUpstream: () => Promise<void>;
+      readonly destroy: () => void;
+    }
   | { readonly ok: false; readonly reason: string } {
   const raw = headers.get("content-encoding");
   const encodings =
@@ -406,15 +420,40 @@ function decodeHttpBodyStream(
           .split(",")
           .map((token) => token.trim().toLowerCase())
           .filter((token) => token.length > 0 && token !== "identity");
+  const upstreamCompleted = new Promise<void>((resolve, reject) => {
+    const fail = (error: unknown) =>
+      reject(error instanceof Error ? error : new Error("The image download was truncated."));
+    incoming.once("end", () => {
+      if (incoming.complete) resolve();
+      else fail(new Error("The image download ended before the HTTP response completed."));
+    });
+    incoming.once("aborted", () => fail(new Error("The image download was aborted.")));
+    incoming.once("error", fail);
+    incoming.once("close", () => {
+      if (incoming.complete) resolve();
+      else fail(new Error("The image download closed before the HTTP response completed."));
+    });
+  });
+  // Prevent Node unhandled-rejection warnings when a caller cancels early.
+  upstreamCompleted.catch(() => undefined);
+
   if (encodings.length === 0) {
-    return { ok: true, stream: incoming, destroy: () => incoming.destroy() };
+    return {
+      ok: true,
+      stream: incoming,
+      waitForUpstream: () => upstreamCompleted,
+      destroy: () => incoming.destroy(),
+    };
   }
   if (encodings.length > MAX_CONTENT_ENCODING_LAYERS) {
     return { ok: false, reason: "The image response declared too many content encodings." };
   }
   const streams: Array<Readable> = [incoming];
   let current: Readable = incoming;
+  let closed = false;
   const destroyAll = () => {
+    if (closed) return;
+    closed = true;
     for (let index = streams.length - 1; index >= 0; index -= 1) {
       streams[index]?.destroy();
     }
@@ -434,14 +473,33 @@ function decodeHttpBodyStream(
       return { ok: false, reason: "The image response used an unsupported content encoding." };
     }
     const upstream = current;
-    upstream.on("error", (error) => decoder.destroy(error));
+    // Keep a permanent error listener on every transform so a late upstream
+    // disconnect after decoder EOF can never emit an uncaught `'error'` event.
+    decoder.on("error", () => undefined);
+    upstream.on("error", (error) => {
+      if (!decoder.destroyed && !decoder.readableEnded) decoder.destroy(error);
+    });
     upstream.pipe(decoder);
     streams.push(decoder);
     current = decoder;
   }
   headers.delete("content-encoding");
   headers.delete("content-length");
-  return { ok: true, stream: current, destroy: destroyAll };
+  return {
+    ok: true,
+    stream: current,
+    waitForUpstream: () => {
+      // If the decoder ended before the HTTP response finished (e.g. trailing
+      // bytes after a deflate/Brotli stream), resume the HTTP stream so it
+      // either completes cleanly or surfaces the truncation/disconnect error.
+      if (!incoming.complete && !incoming.destroyed) {
+        incoming.unpipe();
+        incoming.resume();
+      }
+      return upstreamCompleted;
+    },
+    destroy: destroyAll,
+  };
 }
 
 /**
