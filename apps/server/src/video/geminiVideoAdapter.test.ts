@@ -279,6 +279,29 @@ describe("Gemini video driver", () => {
     });
   });
 
+  it.each([null, {}, { total_tokens: "many" }])(
+    "reports no usage when Google states none it can settle from (%j)",
+    async (usage) => {
+      const recorder = ports((request) =>
+        request.url.endsWith("/interactions/v1_abc")
+          ? Response.json(
+              completedInteraction({
+                usage,
+                steps: [
+                  { type: "model_output", content: [{ type: "video", uri: "files/clip-9" }] },
+                ],
+              }),
+            )
+          : new Response(null, { status: 503 }),
+      );
+      const adapter = geminiVideoDriver.create({ profile, ports: recorder.ports });
+      // An empty count would replace one Google reported with an earlier check.
+      expect(await adapter.poll("v1_abc", new AbortController().signal)).toEqual({
+        status: "running",
+      });
+    },
+  );
+
   it("retries a poll body that breaks mid-read, while bad JSON stays a protocol failure", async () => {
     let calls = 0;
     const recorder = ports(() => {

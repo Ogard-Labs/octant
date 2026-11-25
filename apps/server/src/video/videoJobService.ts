@@ -679,6 +679,7 @@ export class VideoJobService {
     // Reads each profile's models in the background so the first turn can offer the tool.
     this.readyProfilesNow();
     await this.#options.clips.recover(this.#recordedClipsOfRunningScopes());
+    await this.#reclaimStrayClips();
     if (this.#closing.signal.aborted) return;
     for (const job of this.#options.projection.listUnfinished()) {
       if (job.status === "queued") {
@@ -735,8 +736,21 @@ export class VideoJobService {
     return recorded;
   }
 
-  /** Tries again to remove each provider copy the host still owes. */
+  async #reclaimStrayClips(): Promise<void> {
+    const reclaimed = await this.#options.clips.reclaimStrays();
+    if (reclaimed.status === "reclaimed") return;
+    console.error(
+      "Could not remove an unrecorded video clip. The host will retry.",
+      reclaimed.error instanceof Error
+        ? redactHostSecrets(reclaimed.error.message)
+        : "Unknown failure.",
+    );
+  }
+
+  /** Tries again to remove each provider copy, and each stray clip file, the host still owes. */
   async retryOwedRemovals(): Promise<void> {
+    if (this.#closing.signal.aborted) return;
+    await this.#reclaimStrayClips();
     if (this.#closing.signal.aborted) return;
     for (const job of this.#options.projection.listOwedRemovals()) {
       await this.#forget(job);

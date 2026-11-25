@@ -123,10 +123,11 @@ function usageOf(payload: unknown): VideoAdapterUsage | undefined {
   const input = jsonField(usage, "total_input_tokens");
   const outputTokens =
     (typeof output === "number" ? output : 0) + (typeof thought === "number" ? thought : 0);
-  return {
+  const reported = {
     ...(typeof output === "number" || typeof thought === "number" ? { outputTokens } : {}),
     ...(typeof input === "number" ? { inputTokens: input } : {}),
   };
+  return Object.keys(reported).length === 0 ? undefined : reported;
 }
 
 /** The clip in the interaction's model output: inline base64, or a Files API download URI. */

@@ -214,13 +214,12 @@ export async function runVideoGenerationConformance(
       () => true,
       () => true,
     );
-  await Promise.race([discovered, asked.promise]);
+  const waitedOut = () =>
+    new Promise<false>((resolve) => setTimeout(() => resolve(false), CANCELLED_DISCOVERY_MS));
+  await Promise.race([discovered, asked.promise, waitedOut()]);
   discovery.abort();
   const asking = stalled.calls();
-  const ended = await Promise.race([
-    discovered,
-    new Promise<false>((resolve) => setTimeout(() => resolve(false), CANCELLED_DISCOVERY_MS)),
-  ]);
+  const ended = await Promise.race([discovered, waitedOut()]);
   assertConformance(ended, "a cancelled discovery did not end");
   assertConformance(
     stalled.calls() === asking,

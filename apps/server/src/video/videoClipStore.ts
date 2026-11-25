@@ -45,6 +45,8 @@ export class VideoClipStore {
    * rather than recreating a directory the delete already removed.
    */
   readonly #purgedScopes = new Set<string>();
+  /** Paths of finished clips no job recorded, until they are removed. */
+  readonly #strays = new Set<string>();
   readonly #openWrites = new Map<string, number>();
   readonly #writeWaiters = new Map<string, Array<() => void>>();
 
@@ -202,8 +204,9 @@ export class VideoClipStore {
 
   /**
    * Removes temporary files a crash left behind and, in the threads `recorded`
-   * names, finished clips the journal does not record. Other threads keep
-   * every clip. Called before any job can write one.
+   * names, finds finished clips the journal does not record for
+   * `reclaimStrays`. Other threads keep every clip. Called before any job can
+   * write one.
    */
   async recover(recorded: ReadonlyMap<string, ReadonlySet<string>>): Promise<void> {
     let scopes: ReadonlyArray<string>;
@@ -222,14 +225,32 @@ export class VideoClipStore {
       }
       const known = recorded.get(scope);
       for (const name of names) {
-        const unrecorded =
+        if (name.endsWith(".partial")) {
+          await rm(join(directory, name), { force: true }).catch(() => undefined);
+        } else if (
           known !== undefined &&
           name.endsWith(CLIP_EXTENSION) &&
-          !known.has(name.slice(0, -CLIP_EXTENSION.length));
-        if (unrecorded || name.endsWith(".partial")) {
-          await rm(join(directory, name), { force: true }).catch(() => undefined);
+          !known.has(name.slice(0, -CLIP_EXTENSION.length))
+        ) {
+          this.#strays.add(join(directory, name));
         }
       }
     }
+  }
+
+  /** Removes the clips `recover` found; one that cannot go yet is kept for the next call. */
+  async reclaimStrays(): Promise<
+    { readonly status: "reclaimed" } | { readonly status: "failed"; readonly error: unknown }
+  > {
+    let failure: { readonly status: "failed"; readonly error: unknown } | undefined;
+    for (const path of this.#strays) {
+      try {
+        await rm(path, { force: true });
+        this.#strays.delete(path);
+      } catch (error) {
+        failure = { status: "failed", error };
+      }
+    }
+    return failure ?? { status: "reclaimed" };
   }
 }

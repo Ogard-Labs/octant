@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -971,6 +971,34 @@ describe("video jobs", () => {
       expect(restarted.service.getById(running.id)?.status).toBe("running");
     } finally {
       restarted.service.close();
+    }
+  });
+
+  it("reports a stray clip it cannot reclaim and tries again with the owed removals", async () => {
+    const first = harness({ poll: () => new Promise(() => undefined) });
+    const queued = await enqueue(first.service);
+    await vi.waitFor(() => expect(first.service.getById(queued.id)?.remoteId).toBe("remote-1"));
+    first.service.close();
+    // A folder under a clip's name cannot be removed as a file.
+    const directory = join(first.root, "generated-video", String(scopeId));
+    const stray = join(directory, "b4000000-0000-4000-8000-00000000000b.mp4");
+    mkdirSync(stray, { recursive: true });
+
+    const second = harness({ poll: () => new Promise(() => undefined) }, first.root);
+    const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await second.service.recover();
+      expect(report).toHaveBeenCalledWith(
+        "Could not remove an unrecorded video clip. The host will retry.",
+        expect.any(String),
+      );
+      rmSync(stray, { recursive: true });
+      writeFileSync(stray, CONFORMANCE_MP4_BYTES);
+      await second.service.retryOwedRemovals();
+      expect(existsSync(stray)).toBe(false);
+    } finally {
+      report.mockRestore();
+      second.service.close();
     }
   });
 
