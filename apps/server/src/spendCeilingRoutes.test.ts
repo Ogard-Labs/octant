@@ -91,7 +91,7 @@ describe("spend ceiling routes", () => {
   });
 
   it("sets a ceiling for a device the host's own person paired, and refuses a hub-introduced and a restricted device", async () => {
-    const execute = vi.fn(() => ({ kind: "refused" }));
+    const execute = vi.fn((..._args: ReadonlyArray<unknown>) => ({ kind: "refused" }));
     const handler = handlerWith(execute);
     const deviceId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
     const send = async (admittedBy: "host-person" | "hub-roster" | undefined) => {
