@@ -176,7 +176,7 @@ describe("runBoundedGit", () => {
           env,
           signal: stop.signal,
           timeoutMs: 60_000,
-          graceMs: 100,
+          graceMs: 400,
           confirmMs: 4_000,
         }),
       );
@@ -202,6 +202,8 @@ describe("runBoundedGit", () => {
         const began = Date.now();
         stop.abort(new Error("stopped"));
         await expect(ended).resolves.toContain("stopped");
+        // Not before SIGKILL, and well before it would count as surviving.
+        expect(Date.now() - began).toBeGreaterThanOrEqual(390);
         expect(Date.now() - began).toBeLessThan(3_000);
         expect(alive(await keeper())).toBe(true);
         await waitForSurvivingGit("zombies");
