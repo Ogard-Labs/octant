@@ -963,9 +963,10 @@ steered state, since its read lists only messages still waiting. While the
 runtime has not yet taken it, that one message shows "Sending into the
 running turn" and cannot be edited, removed or
 moved; the rest of the queue stays usable. A transcript read afresh shows it
-at once, and so does an open desktop Work transcript, which reads the running
-turn again without losing the reply streamed so far; an open desktop Code
-transcript shows it when the turn settles or is read again. A message the runtime does not take stays in the queue for
+at once, and so does an open desktop transcript, without losing the reply
+streamed so far: a Work transcript reads the running turn again, and a Code
+transcript takes in the message alone when it leaves the queue. A paired
+browser and the phone show it on their next read of the running turn. A message the runtime does not take stays in the queue for
 the next turn.
 
 ## Scheduled wake-ups

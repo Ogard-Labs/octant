@@ -7878,9 +7878,21 @@ ls-remote` against the thread's remote and the GitHub reads they already
   frame was lost and a goal-loop round on the same feed still waits for the
   turn to settle; a feed that did lose its place ends as before. A separate
   frame for the message was rejected because an older client cannot decode a
-  frame kind it does not know. An open desktop Code transcript shows the
-  message when the turn settles or the transcript is read again; showing it
-  there at once is a follow-up. When the running turn is
+  frame kind it does not know. An open desktop Code transcript has no such
+  frame and its operation stream carries no steered message either, so it
+  takes the message in when the window hears the `thread-message-queue` change
+  the message leaves the queue with: the open thread, if its turn runs, reads
+  its two newest turns and takes only their `steeredMessages` from that read.
+  Those are held apart from the transcript and only ever grow, so the read
+  cannot roll back the reply, tool steps or tasks the stream is writing, and
+  a slower read of the conversation cannot take a shown message away. Reading
+  on every `code-navigation` notice was rejected because most of those say
+  nothing about the open thread; a new operation event or frame was rejected
+  because an older client cannot decode it. A paired browser's Code surface
+  subscribes to no change feed, so it takes the messages in on the running
+  turn's own poll (within about two seconds) and on its five-second list
+  refresh. The phone holds no stream of a Code turn, so it re-reads the
+  thread on a short cadence while its newest turn runs or a turn waits. When the running turn is
   one the queue admitted itself, that message stays at the head as
   `accepted` until its turn settles, and the message behind it is offered to
   that turn under the same checks, one at a time, in order. A message
@@ -7910,9 +7922,17 @@ ls-remote` against the thread's remote and the GitHub reads they already
   context and a thread export carry each steered message as a user message
   of its turn, after that turn's prompt, with the time it was sent, under the
   same limits and redaction as the turn's other messages. The conversation a
-  Code compaction's handover summary reads carries them too, in the order
-  they were sent, after their turn's prompt, each under a source of its own
-  that names the turn and the message. The message is not marked as dispatching
+  Work or Code thread's compaction summary reads, a Code handover summary's
+  included, and the earlier-turn context a Work turn rebuilds carry them too,
+  in the order they were sent, after their turn's prompt, each under a source
+  of its own that names the turn and the message; every other message keeps
+  its source, so a saved summary still covers what it covered. A `#thread`
+  mention, a Side Chat's source and an agent's read of another thread carry
+  them as user lines of their turn, message search finds them with their
+  turn's prompt, and a Work fork copies those of the turns it carries. A turn
+  a rewind removed takes its messages with it in all of these. Search indexes
+  a message when it is journaled, so one sent before this rule is found after
+  the next index rebuild. The message is not marked as dispatching
   before the steer: a restart while the runtime takes it also ends the turn
   that took it, and the still-queued message then follows the ordinary
   restart rules rather than being lost. Which runtimes steer is the provider
@@ -12462,7 +12482,8 @@ the prompt waits in its composer.
 **Work fork.** `fork-work-thread` creates a Work thread in the source's
 Project on the source's provider and model, with a `forkedFrom` origin naming
 the source thread and a finished Work turn, and copies the source's turns
-through that point as carried turns in one journal unit with its creation.
+through that point as carried turns in one journal unit with its creation,
+each with the messages the person sent into it while it ran.
 The host checks, as for a Code fork, that the source's Project is readable by
 the confirming window and that every carried turn exists and has settled. The
 fork's first own turn on a provider that keeps its own session starts a new
