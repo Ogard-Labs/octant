@@ -2057,6 +2057,108 @@ describe("coordinators in a Project's thread list", () => {
     expect(document.querySelector("[data-thread-id='worker-working']")).toBeNull();
     sessionStorage.clear();
   });
+
+  it("nests a coordinator's and a worker's follow-up children under them, never as top-level rows", () => {
+    sessionStorage.clear();
+    const coordChild = {
+      threadId: "coord-child",
+      title: "Research the parser",
+      checkoutChip: { checkoutKind: "managed-worktree" as const, label: "research-parser" },
+    };
+    const workerChild = { threadId: "worker-child", title: "Check the fixtures" };
+    render(
+      <FollowUpLineageContext
+        value={
+          new Map([
+            ["coord-child", "coordinator"],
+            ["worker-child", "worker-working"],
+            ["coordinator", "ordinary"],
+            ["worker-working", "ordinary"],
+          ])
+        }
+      >
+        <ProjectThreadList
+          groupCoordinators
+          onSelectThread={vi.fn()}
+          threads={[ordinary, working, coordinator, asking, orphan, coordChild, workerChild]}
+        />
+      </FollowUpLineageContext>,
+    );
+    const section = screen.getByRole("group", { name: "Coordinators" });
+    const ids = (root: ParentNode) =>
+      [...root.querySelectorAll<HTMLElement>("[data-thread-id]")].map(
+        (row) => row.dataset.threadId,
+      );
+    // The coordinator's own child sits between its row and its counted
+    // workers; the worker's child rides inside the worker rows. Neither is a
+    // managed worker and neither is repeated at the top level.
+    expect(ids(section)).toEqual([
+      "coordinator",
+      "coord-child",
+      "worker-working",
+      "worker-child",
+      "worker-asking",
+    ]);
+    expect(ids(document)).toEqual([
+      "coordinator",
+      "coord-child",
+      "worker-working",
+      "worker-child",
+      "worker-asking",
+      "ordinary",
+      "orphan",
+    ]);
+    sessionStorage.clear();
+  });
+
+  it("keeps a large coordinator's workers one measured list when one of them started a side task", () => {
+    sessionStorage.clear();
+    const workers = Array.from({ length: 45 }, (_, index) => ({
+      ...working,
+      threadId: `worker-${String(index)}`,
+    }));
+    const viewport = document.createElement("div");
+    viewport.style.overflowY = "auto";
+    document.body.append(viewport);
+    const offsetHeight = vi
+      .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this === viewport ? 160 : this.hasAttribute("data-index") ? 32 : 0;
+      });
+    try {
+      render(
+        <FollowUpLineageContext value={new Map([["worker-child", "worker-0"]])}>
+          <ProjectThreadList
+            groupCoordinators
+            onSelectThread={vi.fn()}
+            threads={[
+              coordinator,
+              ...workers,
+              { threadId: "worker-child", title: "Check the fixtures" },
+            ]}
+          />
+        </FollowUpLineageContext>,
+        { container: viewport },
+      );
+      expect(viewport.querySelectorAll(".project-threads__virtual-list")).toHaveLength(1);
+      const drawn = [...viewport.querySelectorAll<HTMLElement>("[data-index]")];
+      expect(drawn.length).toBeGreaterThan(2);
+      expect(drawn.length).toBeLessThan(workers.length);
+      // The side task rides in that list, right after the worker that started it.
+      const ids = drawn.map(
+        (row) => row.querySelector<HTMLElement>("[data-thread-id]")?.dataset.threadId,
+      );
+      expect(ids.slice(0, 3)).toEqual(["worker-0", "worker-child", "worker-1"]);
+      // Only its row takes the extra step in.
+      expect(
+        drawn.map((row) => row.querySelector("[style*='margin']") !== null).slice(0, 3),
+      ).toEqual([false, true, false]);
+    } finally {
+      offsetHeight.mockRestore();
+      viewport.remove();
+    }
+    sessionStorage.clear();
+  });
 });
 
 describe("A thread row's short age", () => {

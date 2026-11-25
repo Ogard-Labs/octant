@@ -97,12 +97,17 @@ export function ComposerFollowUpSuggestions() {
  * transcript's inline cards, and opens the thread a start creates. It always
  * renders its children, so a pane with none keeps its tree.
  */
-export function PaneSideTasks(props: { readonly children: ReactNode }) {
+export function PaneSideTasks(props: {
+  readonly children: ReactNode;
+  /** The workspace mode's navigation revision, for started side-task receipts. */
+  readonly sideTaskNavigationRevision?: number | undefined;
+}) {
   const context = useContext(FollowUpSuggestionContext);
   return (
     <SideTaskProvider
       client={context?.sideTaskClient}
       threadId={context?.threadId}
+      navigationRevision={props.sideTaskNavigationRevision}
       onStarted={(started, unsentPrompt) =>
         context?.onCreated({
           mode: started.mode,

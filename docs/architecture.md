@@ -12052,7 +12052,8 @@ the model at another size.
   Code's boards file it under Waiting with the awaiting-input reason; Work's
   navigation row carries `awaitingInput` with the `approval` kind, Chat's carries
   it with `executing` false and the `approval` kind, and Code's carries
-  `awaitingInput` with `executing` false, so the sidebar mark and
+  `awaitingInput` with `executing` false and `awaitingKind` naming what a live
+  turn asks, its provider's question (`user-input`) included, so the sidebar mark and
   the pane header say the thread needs the person (**Needs you**, not
   **Running**) and the thread's attention signal reads "Waiting for your
   approval". The pending-requests read lists it as a `lead-approval` row (see
@@ -12407,14 +12408,23 @@ turn that made it (offers without a `turnId` sit after the last reply), as a
 card that asks one question: start this in a new thread, or do it here. The
 card shows the title, the reason, and the exact prompt behind a disclosure,
 and a settled offer shrinks to a one-line receipt (started, with a link to the
-thread; done here; dismissed). Three answers are possible, and each is the
+thread; done here; dismissed). A started receipt also names the child thread's
+live state beside that link — working, needs input, or finished — which the
+`GET` read enriches from the same mode navigation projections the sidebar rows
+read, so receipt and row never disagree; a child the window's navigation does
+not list carries no state rather than a guessed one. The state is passive: it
+never enters the parent agent's context. Three answers are possible, and each is the
 person's confirmation:
 
 - **New thread.** The host creates the thread on the offering model and sends
   the prompt as its first message through the mode's ordinary turn command on
   the confirming window (`send-chat-turn`, `start-work-thread-turn`, or staged
   evidence plus `start-provider-turn`); a Code thread still starts
-  approval-gated. A `fresh` start goes through `createFollowUp`. A `fork`
+  approval-gated. The started thread joins the same parent link a confirmed
+  follow-up carries: the journaled `side-task-started` settlement already
+  names parent and child, and `ThreadFollowUpSuggestionStore` replays it into
+  the lineage the sidebar and Project overview nest by, remembering which
+  origin each link has. A `fresh` start goes through `createFollowUp`. A `fork`
   start goes through the mode's own fork: `branch-chat-thread` through the
   offering Chat turn, `fork-code-thread` through the offering Code operation
   (always its own worktree, carrying the checkout as that turn left it), and

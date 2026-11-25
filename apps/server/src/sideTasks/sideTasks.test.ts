@@ -229,6 +229,35 @@ describe("side tasks", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
+  it("reports the started thread to the lineage projection once the start is settled", async () => {
+    const store = storeOn(openConnection());
+    await toolsFor(store, "chat").execute({
+      name: "octant_offer_side_task",
+      inputJson: JSON.stringify(offer),
+    });
+    const sideTaskId = String(store.read(threadId).tasks[0]?.offer.id);
+    const child = "00000000-0000-4000-8000-000000000093";
+    const noteStarted = vi.fn();
+    const result = await startSideTask(
+      startDependencies(store, {
+        noteStarted,
+        create: async () => ({
+          kind: "created",
+          created: {
+            kind: "new-thread",
+            mode: "chat",
+            title: offer.title,
+            threadId: child,
+          } as never,
+          onSuggestingModel: true,
+        }),
+      }),
+      { threadId, windowId, sideTaskId },
+    );
+    expect(result).toMatchObject({ kind: "side-task-started" });
+    expect(noteStarted).toHaveBeenCalledWith({ parentThreadId: threadId, childThreadId: child });
+  });
+
   it("keeps a created thread started when its first message did not go out, and lets a person dismiss the rest", async () => {
     const store = storeOn(openConnection());
     const tools = toolsFor(store, "chat");
@@ -856,6 +885,128 @@ describe("side tasks", () => {
         kind: "side-task-continued-here",
         delivery: "sent",
       });
+    });
+
+    it("enriches a started task with the child's live state and leaves others untouched", async () => {
+      const store = storeOn(openConnection());
+      const sideTaskId = await offeredHere(store);
+      const child = "00000000-0000-4000-8000-000000000092";
+      await startSideTask(
+        startDependencies(store, {
+          create: async () => ({
+            kind: "created",
+            created: {
+              kind: "new-thread",
+              mode: "chat",
+              title: offer.title,
+              threadId: child,
+            } as never,
+            onSuggestingModel: true,
+          }),
+        }),
+        { threadId, windowId, sideTaskId },
+      );
+      const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId: windowId as WindowId, capability, now: 0 });
+      const childState = vi.fn(async () => "working" as const);
+      const childStates = vi.fn(() => childState);
+      const route = createSideTaskRouteHandler({
+        ...startDependencies(store),
+        store,
+        windowAuthorityStore,
+        authorizeThread: () => true,
+        childStates,
+        now: () => 1,
+      });
+      const response = await route(
+        new Request(`http://127.0.0.1/api/side-tasks/${threadId}`, {
+          headers: { "x-octant-window-capability": capability },
+        }),
+      );
+      expect(response?.status).toBe(200);
+      const body = (await response?.json()) as {
+        sideTasks: { tasks: Array<{ childState?: string; status: string }> };
+      };
+      expect(body.sideTasks.tasks[0]).toMatchObject({ status: "started", childState: "working" });
+      expect(childStates).toHaveBeenCalledWith(windowId);
+      expect(childState).toHaveBeenCalledWith({ mode: "chat", threadId: child });
+
+      // An unreadable child carries no state rather than a guessed one.
+      const quietRoute = createSideTaskRouteHandler({
+        ...startDependencies(store),
+        store,
+        windowAuthorityStore,
+        authorizeThread: () => true,
+        childStates: () => async () => undefined,
+        now: () => 1,
+      });
+      const quietResponse = await quietRoute(
+        new Request(`http://127.0.0.1/api/side-tasks/${threadId}`, {
+          headers: { "x-octant-window-capability": capability },
+        }),
+      );
+      const quietBody = (await quietResponse?.json()) as {
+        sideTasks: { tasks: Array<{ childState?: string }> };
+      };
+      expect(quietBody.sideTasks.tasks[0]?.childState).toBeUndefined();
+    });
+
+    it("shares one reader across the children a single read enriches", async () => {
+      const store = storeOn(openConnection());
+      const tools = toolsFor(store, "chat", uuidFactory());
+      const children = [
+        "00000000-0000-4000-8000-000000000093",
+        "00000000-0000-4000-8000-000000000094",
+      ];
+      for (const child of children) {
+        await tools.execute({ name: "octant_offer_side_task", inputJson: JSON.stringify(offer) });
+        await startSideTask(
+          startDependencies(store, {
+            create: async () => ({
+              kind: "created",
+              created: {
+                kind: "new-thread",
+                mode: "chat",
+                title: offer.title,
+                threadId: child,
+              } as never,
+              onSuggestingModel: true,
+            }),
+          }),
+          {
+            threadId,
+            windowId,
+            sideTaskId: String(store.read(threadId).tasks.at(-1)?.offer.id),
+          },
+        );
+      }
+      const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId: windowId as WindowId, capability, now: 0 });
+      const read: string[] = [];
+      const childStates = vi.fn(() => async (input: { readonly threadId: string }) => {
+        read.push(input.threadId);
+        return "quiet" as const;
+      });
+      const route = createSideTaskRouteHandler({
+        ...startDependencies(store),
+        store,
+        windowAuthorityStore,
+        authorizeThread: () => true,
+        now: () => 1,
+        childStates,
+      });
+
+      const response = await route(
+        new Request(`http://127.0.0.1/api/side-tasks/${threadId}`, {
+          headers: { "x-octant-window-capability": capability },
+        }),
+      );
+
+      expect(response?.status).toBe(200);
+      expect(childStates).toHaveBeenCalledExactlyOnceWith(windowId);
+      expect(read).toEqual(children);
     });
   });
 

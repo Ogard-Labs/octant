@@ -72,6 +72,16 @@ export interface SideTaskStartDependencies {
    * idle, or its message queue behind the turn that is running.
    */
   readonly continueHere: (input: SideTaskTurnInput) => Promise<SideTaskHereOutcome>;
+  /**
+   * Records that the started thread came from the offering thread, so it nests
+   * under it and owes it a report. The journaled fact is the start settlement
+   * itself; this only mirrors it into the lineage projection without waiting
+   * for a restart.
+   */
+  readonly noteStarted?: (input: {
+    readonly parentThreadId: string;
+    readonly childThreadId: string;
+  }) => void;
   readonly clock: () => string;
 }
 
@@ -230,6 +240,12 @@ export async function startSideTask(
         startedAt: decodeUtcTimestamp(dependencies.clock()),
       },
     });
+    if (settled === "settled") {
+      dependencies.noteStarted?.({
+        parentThreadId: input.threadId,
+        childThreadId: created.threadId,
+      });
+    }
     // Sending is only for the model the person saw on the card, and only
     // while the journal agrees the offer is the one being started. Otherwise
     // the thread still opens, with the prompt waiting for the person.

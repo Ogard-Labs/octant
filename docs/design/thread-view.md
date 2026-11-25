@@ -623,10 +623,17 @@ under the thread that suggested it in the sidebar, joined by a thin hairline
 elbow, even when it runs on its own worktree; the host remembers that link
 past later replies and restarts, and answers it to a window only for threads
 its sidebar already lists. A task whose parent is not in the same list stays
-where it is. Side-task offers stack above them as hairline cards: a target icon
+where it is. A thread started from a side task joins the same nesting: the
+host replays the journaled start into the same link a suggested follow-up
+carries. Side-task offers stack above them as hairline cards: a target icon
 (branch for a worktree, new-message otherwise), the title, a dismiss control,
 the one-line reason, a collapsed "Prompt" disclosure, and one primary
-**Start in new worktree** / **Start in new thread** button.
+**Start in new worktree** / **Start in new thread** button. Once started, the
+receipt names where the work went and, beside its Open link, the child
+thread's live state in the sidebar rows' own vocabulary — **Working**,
+**Needs you**, or **Finished** — read from the same navigation facts those
+rows use, so receipt and row never disagree. A child the window cannot read
+shows no state rather than a guessed one.
 
 ## Turn figures and plan usage
 

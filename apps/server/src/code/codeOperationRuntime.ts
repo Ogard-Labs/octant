@@ -1194,6 +1194,8 @@ export interface CodeOperationRuntime {
    * the request gone.
    */
   turnAwaitsPerson?(threadId: string): boolean;
+  /** What that turn asks: an approval stops it before any question it also asked. */
+  turnAwaiting?(threadId: string): "approval" | "user-input" | undefined;
   /** Shows one Octant Shield decision on the thread's running turn. */
   recordShieldReview?(input: {
     readonly threadId: string;
@@ -2432,7 +2434,8 @@ export function createCodeOperationRuntime(
     pendingRequests: (windowId) => service.listPendingForWindow(windowId),
     withdrawThreadAsks: (threadId) => turns.withdrawThreadAsks(threadId),
     admitsTurn: (windowId, thread) => service.admitsTurn(windowId, thread),
-    turnAwaitsPerson: (threadId) => turns.awaitsPerson(threadId),
+    turnAwaitsPerson: (threadId) => turns.awaiting(threadId) !== undefined,
+    turnAwaiting: (threadId) => turns.awaiting(threadId),
     recordShieldReview: (input) => turns.recordShieldReview(input),
     settleCutOffTurns: (threadId) => turns.settleCutOffTurns(threadId),
     settleUnconfirmedSteps: async (
@@ -5194,12 +5197,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     }
   }
 
-  /** Whether this thread's running turn has an approval or a question still unanswered. */
-  awaitsPerson(threadId: string): boolean {
+  /** The approval or question this thread's running turn still waits on, if any. */
+  awaiting(threadId: string): "approval" | "user-input" | undefined {
     const active = this.#active.get(threadId);
     if (active === undefined || (active.state !== "running" && active.state !== "waiting"))
-      return false;
-    return active.approvals.size > 0 || active.toolApprovals.size > 0 || active.questions.size > 0;
+      return undefined;
+    if (active.approvals.size > 0 || active.toolApprovals.size > 0) return "approval";
+    return active.questions.size > 0 ? "user-input" : undefined;
   }
 
   /**

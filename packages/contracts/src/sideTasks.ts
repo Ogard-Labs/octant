@@ -83,6 +83,16 @@ export const SideTaskOffer = Schema.Struct({
 }).annotations(strict);
 export type SideTaskOffer = typeof SideTaskOffer.Type;
 
+/**
+ * What a started child thread is doing, in the sidebar row's vocabulary:
+ * `working` while a turn executes, `attention` while it waits on the person,
+ * `quiet` otherwise. Read-time state only — it is derived from the
+ * navigation projections when the thread's tasks are read, never journaled,
+ * and absent when the child cannot be read.
+ */
+export const SideTaskChildState = Schema.Literal("working", "attention", "quiet");
+export type SideTaskChildState = typeof SideTaskChildState.Type;
+
 export const SideTask = Schema.Struct({
   offer: SideTaskOffer,
   status: SideTaskStatus,
@@ -93,6 +103,8 @@ export const SideTask = Schema.Struct({
   /** Confirmed delivery or a durable claim whose outcome is still unknown. */
   continuedDelivery: Schema.optional(SideTaskHereDelivery),
   settledAt: Schema.optional(UtcTimestamp),
+  /** The child thread's live state at read time; absent when it cannot be read. */
+  childState: Schema.optional(SideTaskChildState),
 }).annotations(strict);
 export type SideTask = typeof SideTask.Type;
 

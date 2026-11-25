@@ -118,6 +118,7 @@ import {
   continueInThread,
   forkThroughOfferingTurn,
   offeringTurnStanding,
+  sideTaskChildState,
 } from "../sideTasks/sideTaskThreads";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import {
@@ -2171,6 +2172,62 @@ export function wireWork(deps: WorkDependencies) {
           { queue: threadMessageQueue, sendTurn: sendSideTaskTurn, uuid: randomUUID },
           input,
         ),
+      // The receipt's live state reads the same navigation projections the
+      // sidebar rows do, so the two never disagree. A child the window's
+      // navigation does not list answers nothing rather than guessing.
+      childStates: (windowId) => {
+        const window = decodeWindowId(windowId);
+        const readChat = async () => chatService.navigation();
+        const readWork = async () => workThreadServiceWithWorkflows.navigation(window);
+        const readCode = async () => routeCodeService.navigation(window);
+        let chat: ReturnType<typeof readChat> | undefined;
+        let work: ReturnType<typeof readWork> | undefined;
+        let code: ReturnType<typeof readCode> | undefined;
+        return async ({ mode, threadId }) => {
+          try {
+            if (mode === "chat") {
+              const navigation = await (chat ??= readChat());
+              const thread = navigation.threads.find((t) => String(t.id) === threadId);
+              if (thread === undefined) return undefined;
+              return sideTaskChildState({
+                executing: thread.executing,
+                awaitingInput: thread.awaitingInput === true,
+                followUp: thread.followUpOpen,
+              });
+            }
+            if (mode === "work") {
+              const navigation = await (work ??= readWork());
+              const thread = navigation.threads.find((t) => String(t.id) === threadId);
+              const runtime = navigation.runtime.find(
+                (entry) => String(entry.threadId) === threadId,
+              );
+              if (thread === undefined || runtime === undefined) return undefined;
+              // The row's due reminder is the Project's, filed under its newest
+              // thread, so it says nothing of what this child asks.
+              return sideTaskChildState({
+                executing: runtime.executing,
+                awaitingInput: runtime.awaitingInput === true,
+              });
+            }
+            const navigation = await (code ??= readCode());
+            const thread = navigation.threads.find((t) => String(t.id) === threadId);
+            const runtime = navigation.runtime.find((entry) => String(entry.threadId) === threadId);
+            if (thread === undefined || runtime === undefined) return undefined;
+            const followUp = await routeCodeService.readFollowUp?.(
+              window,
+              decodeCodeThreadId(threadId),
+            );
+            return sideTaskChildState({
+              executing: runtime.executing,
+              awaitingInput: runtime.awaitingInput === true,
+              followUp: followUp?.followUp?.state === "open",
+              lifecycle: thread.lifecycle,
+            });
+          } catch {
+            return undefined;
+          }
+        };
+      },
     };
     restartContinuation.current = async ({ threadId, windowId, mode }) => {
       if (mode === "chat") chatService.settleCutOffTurns(decodeChatThreadId(threadId));
