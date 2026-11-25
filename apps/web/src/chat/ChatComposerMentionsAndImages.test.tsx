@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { ThreadReferencesContext } from "../threadReferences/ThreadReferences";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -167,7 +167,8 @@ describe("ChatComposer thread mentions", () => {
     await user.type(screen.getByLabelText("Message"), "#rel");
 
     const option = await screen.findByRole("option", { name: /Release notes/ });
-    expect(option).toHaveTextContent("Needs you");
+    // The row's marks load with the list, so the host's words show first.
+    await waitFor(() => expect(option).toHaveTextContent("Needs you"));
     expect(option).toHaveTextContent("Opus 5.5");
     expect(option).toHaveTextContent("Code · octant");
     expect(option.querySelector(".project-mark, .project-icon")).not.toBeNull();
