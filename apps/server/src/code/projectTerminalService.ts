@@ -300,6 +300,8 @@ export class ProjectTerminalService {
    * survives to be offered back.
    */
   readonly #endedByRestart = new Map<string, ProjectId>();
+  /** Starts that have begun and not yet ended, by Project: counted before any folder is resolved. */
+  readonly #launching = new Map<string, number>();
   readonly #startingServerWork = new Map<
     string,
     {
@@ -610,6 +612,7 @@ export class ProjectTerminalService {
    */
   hasRunning(projectId: ProjectId): boolean {
     return (
+      this.#launching.has(String(projectId)) ||
       [...this.#owners.values()].some(
         (owner) => !owner.ended && String(owner.projectId) === String(projectId),
       ) ||
@@ -826,7 +829,54 @@ export class ProjectTerminalService {
     };
   }
 
+  /**
+   * A start is counted from its first line, before it resolves any folder: the
+   * folder is resolved across awaits and the shell is registered later, and a
+   * cleanup that reads "nothing running" in between must still see it.
+   */
   async #startAction(
+    windowId: WindowId,
+    command: Extract<ProjectTerminalCommand, { kind: "start-action" }>,
+    device?: { readonly actor: EventActorValue; readonly binding?: ProjectTerminalDeviceBinding },
+  ): Promise<ProjectTerminalResult> {
+    const done = this.#beginLaunch(command.projectId);
+    try {
+      return await this.#startActionNow(windowId, command, device);
+    } finally {
+      done();
+    }
+  }
+
+  async #start(
+    windowId: WindowId,
+    command: Extract<ProjectTerminalCommand, { readonly kind: "start" }>,
+    action?: ProjectAction,
+    placed?: {
+      readonly checkout: ActionCheckout | undefined;
+      readonly folder: string;
+      readonly receipt: ActionReceipt;
+    },
+    device?: { readonly actor: EventActorValue; readonly binding?: ProjectTerminalDeviceBinding },
+  ): Promise<ProjectTerminalResult> {
+    const done = this.#beginLaunch(command.projectId);
+    try {
+      return await this.#startNow(windowId, command, action, placed, device);
+    } finally {
+      done();
+    }
+  }
+
+  #beginLaunch(projectId: ProjectId): () => void {
+    const key = String(projectId);
+    this.#launching.set(key, (this.#launching.get(key) ?? 0) + 1);
+    return () => {
+      const left = (this.#launching.get(key) ?? 1) - 1;
+      if (left <= 0) this.#launching.delete(key);
+      else this.#launching.set(key, left);
+    };
+  }
+
+  async #startActionNow(
     windowId: WindowId,
     command: Extract<ProjectTerminalCommand, { kind: "start-action" }>,
     device?: { readonly actor: EventActorValue; readonly binding?: ProjectTerminalDeviceBinding },
@@ -852,7 +902,7 @@ export class ProjectTerminalService {
     return this.#start(windowId, { ...command, kind: "start" }, placed.action, placed, device);
   }
 
-  async #start(
+  async #startNow(
     windowId: WindowId,
     command: Extract<ProjectTerminalCommand, { readonly kind: "start" }>,
     action?: ProjectAction,

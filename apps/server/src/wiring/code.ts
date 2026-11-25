@@ -741,9 +741,13 @@ export function wireCode(deps: CodeDependencies) {
         archivedWorktreeTurns?.turnInProgress?.(String(threadId)) === true,
       workGoing: (threadId) => threadHasWork(threadId, { ignoreProjectTerminals: true }),
       // One receipt changes one step at a time: a restore waits for this.
-      cleanup: (input, signal) =>
-        managedWorktreeReclaim.exclusive(input.receiptId, () =>
-          managedWorktreeService.cleanup(input, signal),
+      cleanup: (input, signal, stillIdle) =>
+        managedWorktreeReclaim.exclusive(input.receiptId, async () =>
+          // Asked again here, after the wait: a restore or another cleanup held
+          // the receipt, and work may have started meanwhile.
+          stillIdle?.() === false
+            ? ({ status: "refused", reason: "working" } as const)
+            : managedWorktreeService.cleanup(input, signal),
         ),
       cleanupOnArchive: () =>
         persistence.readCodeSettings()?.settings.worktrees?.cleanup?.onArchive !== false,

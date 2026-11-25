@@ -21,7 +21,17 @@ export interface ArchivedWorktreesDependencies {
   readonly readCodeThread: (threadId: CodeThreadId) => CodeThread | undefined;
   readonly readCodeCheckout: (checkoutId: CodeCheckoutId) => CodeCheckoutIdentity | undefined;
   readonly loadReceipt: (receiptId: string) => Promise<ManagedWorktreeReceipt | undefined>;
-  readonly cleanup: ManagedWorktreeService["cleanup"];
+  /**
+   * The cleanup, run when the receipt is free. `stillIdle` is asked once more
+   * after the wait for the receipt, inside it: a turn, a shell or a debug
+   * session may have started while this waited behind a restore or another
+   * cleanup, and the checks made before the wait do not cover it.
+   */
+  readonly cleanup: (
+    input: Parameters<ManagedWorktreeService["cleanup"]>[0],
+    signal: AbortSignal,
+    stillIdle?: () => boolean,
+  ) => ReturnType<ManagedWorktreeService["cleanup"]>;
   /**
    * Whether a turn on the thread is starting, running, or waiting on the
    * person. Archiving does not stop one, and its commands still use the
@@ -103,6 +113,7 @@ export function createArchivedWorktrees(dependencies: ArchivedWorktreesDependenc
       const result = await dependencies.cleanup(
         { receiptId: receipt.receiptId, confirmedByLocalUser: true },
         new AbortController().signal,
+        () => !dependencies.turnInProgress(threadId),
       );
       if (result.status === "removed") return { kind: "archived-worktree-removed", threadId };
       if (result.status !== "refused") return refused("busy");
@@ -130,6 +141,8 @@ export function createArchivedWorktrees(dependencies: ArchivedWorktreesDependenc
         .cleanup(
           { receiptId: receipt.receiptId, confirmedByLocalUser: false, onArchive: true },
           new AbortController().signal,
+          () =>
+            !dependencies.turnInProgress(threadId) && dependencies.workGoing?.(threadId) !== true,
         )
         .catch(() => undefined);
     },
