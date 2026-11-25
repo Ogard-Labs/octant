@@ -414,6 +414,7 @@ which the person sets, like any turn.
   The phone reads authenticated byte ranges into a disposable app-cache file and
   opens it in the native Expo Video player without autoplay. Closing the clip,
   leaving or deleting its thread, or losing host access discards the cached copy.
+  If the system ends the app first, the next launch discards it.
   A temporary list failure or reconnection leaves the already-downloaded clip playing.
   **Save video** copies the file into a folder the person chooses on the phone.
   A saved copy remains in that folder when the temporary player file is removed.
