@@ -2236,156 +2236,165 @@ export class WorkTurnService {
           : await (
               this.#carryAgentMessages?.(String(command.threadId)) ?? Promise.resolve([])
             ).catch(() => []);
-      const planned = planWorkTurnContext({
-        threadId: command.threadId,
-        providerInstanceId: command.authority.providerInstanceId,
-        modelId: command.authority.modelId,
-        uuid: this.#uuid,
-        createdAt: this.#clock(),
-        safeInputBudget: this.#safeInputBudgetTokens,
-        leading: harnessContext.map(
+      const planCreatedAt = this.#clock();
+      const planLeading = harnessContext.map(
+        (block, index): WorkTurnContextContribution => ({
+          text: block.text,
+          sourceKind: "instruction",
+          referenceId: `native-harness:${index}`,
+          category: "octant-policy",
+          posture: "required",
+          block,
+        }),
+      );
+      const contributionsBeforeMemory: ReadonlyArray<WorkTurnContextContribution> = [
+        ...(preparedFeedback?.context === undefined
+          ? []
+          : [
+              {
+                text: preparedFeedback.context,
+                sourceKind: "message" as const,
+                referenceId: `product-feedback:${command.turnId}`,
+                category: "workspace-context" as const,
+                posture: "required" as const,
+                block: { kind: "user-message" as const, text: preparedFeedback.context },
+              },
+            ]),
+        ...skillContext.map(
           (block, index): WorkTurnContextContribution => ({
             text: block.text,
             sourceKind: "instruction",
-            referenceId: `native-harness:${index}`,
-            category: "octant-policy",
+            referenceId: `selected-skill:${index}`,
+            category: "workspace-context",
             posture: "required",
             block,
           }),
         ),
-        contributions: [
-          ...(preparedFeedback?.context === undefined
-            ? []
-            : [
-                {
-                  text: preparedFeedback.context,
-                  sourceKind: "message" as const,
-                  referenceId: `product-feedback:${command.turnId}`,
-                  category: "workspace-context" as const,
-                  posture: "required" as const,
-                  block: { kind: "user-message" as const, text: preparedFeedback.context },
-                },
-              ]),
-          ...skillContext.map(
-            (block, index): WorkTurnContextContribution => ({
-              text: block.text,
-              sourceKind: "instruction",
-              referenceId: `selected-skill:${index}`,
-              category: "workspace-context",
-              posture: "required",
-              block,
-            }),
-          ),
-          ...octantInstructionsContributions(
-            thread === undefined ? [] : (this.#octantInstructionBlocks?.({ thread }) ?? []),
-          ),
-          ...personMemoryContributions(
-            thread === undefined
-              ? undefined
-              : this.#personMemoryBlock?.({
-                  thread,
-                  windowId: authenticatedWindowId,
-                  startsFreshSession: continuing === undefined,
-                }),
-          ),
-          ...(project === undefined
-            ? []
-            : projectMemoryContributions(this.#persistence.readProjectMemory?.(project.id))),
-          ...(project === undefined ? [] : extraFolderContributions(project)),
-          ...(project === undefined
-            ? []
-            : await this.#projectBriefContributions(
-                project,
-                command.threadId,
-                previous === undefined,
-              )),
-          // A server Project's folder is on another machine; its runtime reads it there.
-          ...(project === undefined ||
-          (thread !== undefined && this.#serverProjects?.holds(thread) === true)
-            ? []
-            : await this.#designSystemContributions(project, command.threadId)),
-          ...priorTranscript,
-          ...(handoff === undefined
-            ? []
-            : handoff.blocks.map(
-                (block, index): WorkTurnContextContribution => ({
-                  text: block.text,
-                  sourceKind: "message",
-                  referenceId: `conversation-handoff:${command.threadId}:${index}`,
-                  category: "conversation",
-                  posture: "required",
-                  block,
-                }),
-              )),
-          ...inputOnlyBlocks.map(
-            (block, index): WorkTurnContextContribution => ({
-              text: block.text,
-              sourceKind: "message",
-              referenceId: `conversation-inputs:${command.threadId}:${index}`,
-              category: "conversation",
-              posture: "required",
-              block,
-            }),
-          ),
-
-          ...(await this.#sideChatReturnContributions(
-            command.threadId,
-            command.sideChatReturns,
-            authenticatedWindowId,
-          )),
-          ...(await this.#threadMentionContributions(
-            command.threadId,
-            command.threadMentionIds,
-            authenticatedWindowId,
-          )),
-          ...(await this.#fileMentionContributions(
-            command.fileMentionPaths,
-            authenticatedWindowId,
-            command.threadId,
-          )),
-          ...this.#issueContextContribution(command.threadId),
-          ...agentMessages.map(
-            (message): WorkTurnContextContribution => ({
-              text: message.text,
-              sourceKind: "message",
-              referenceId: `agent-message:${message.messageId}`,
-              category: "workspace-context",
-              posture: "required",
-              block: { kind: "user-message", text: message.text },
-            }),
-          ),
-          ...(externalData === undefined
-            ? []
-            : [
-                {
-                  text: externalData.content.text,
-                  sourceKind: "message" as const,
-                  referenceId: externalData.referenceId,
-                  category: "workspace-context" as const,
-                  posture: "required" as const,
-                  block: { kind: "user-message" as const, text: externalData.content.text },
-                },
-              ]),
-          ...describedTexts.map(
-            (text, index): WorkTurnContextContribution => ({
-              text,
-              sourceKind: "message",
-              referenceId: `described-image:${command.turnId}:${index}`,
-              category: "workspace-context",
-              posture: "required",
-              block: { kind: "user-message", text },
-            }),
-          ),
-          {
-            text: command.prompt,
+        ...octantInstructionsContributions(
+          thread === undefined ? [] : (this.#octantInstructionBlocks?.({ thread }) ?? []),
+        ),
+      ];
+      const personMemoryFor = (startsFreshSession: boolean) =>
+        personMemoryContributions(
+          thread === undefined
+            ? undefined
+            : this.#personMemoryBlock?.({
+                thread,
+                windowId: authenticatedWindowId,
+                startsFreshSession,
+              }),
+        );
+      const personMemory = personMemoryFor(continuing === undefined);
+      const contributionsAfterMemory: ReadonlyArray<WorkTurnContextContribution> = [
+        ...(project === undefined
+          ? []
+          : projectMemoryContributions(this.#persistence.readProjectMemory?.(project.id))),
+        ...(project === undefined ? [] : extraFolderContributions(project)),
+        ...(project === undefined
+          ? []
+          : await this.#projectBriefContributions(
+              project,
+              command.threadId,
+              previous === undefined,
+            )),
+        // A server Project's folder is on another machine; its runtime reads it there.
+        ...(project === undefined ||
+        (thread !== undefined && this.#serverProjects?.holds(thread) === true)
+          ? []
+          : await this.#designSystemContributions(project, command.threadId)),
+        ...priorTranscript,
+        ...(handoff === undefined
+          ? []
+          : handoff.blocks.map(
+              (block, index): WorkTurnContextContribution => ({
+                text: block.text,
+                sourceKind: "message",
+                referenceId: `conversation-handoff:${command.threadId}:${index}`,
+                category: "conversation",
+                posture: "required",
+                block,
+              }),
+            )),
+        ...inputOnlyBlocks.map(
+          (block, index): WorkTurnContextContribution => ({
+            text: block.text,
             sourceKind: "message",
-            referenceId: `prompt:${command.turnId}`,
-            category: "current-request",
+            referenceId: `conversation-inputs:${command.threadId}:${index}`,
+            category: "conversation",
             posture: "required",
-            block: { kind: "user-message", text: command.prompt },
-          },
-        ],
-      });
+            block,
+          }),
+        ),
+
+        ...(await this.#sideChatReturnContributions(
+          command.threadId,
+          command.sideChatReturns,
+          authenticatedWindowId,
+        )),
+        ...(await this.#threadMentionContributions(
+          command.threadId,
+          command.threadMentionIds,
+          authenticatedWindowId,
+        )),
+        ...(await this.#fileMentionContributions(
+          command.fileMentionPaths,
+          authenticatedWindowId,
+          command.threadId,
+        )),
+        ...this.#issueContextContribution(command.threadId),
+        ...agentMessages.map(
+          (message): WorkTurnContextContribution => ({
+            text: message.text,
+            sourceKind: "message",
+            referenceId: `agent-message:${message.messageId}`,
+            category: "workspace-context",
+            posture: "required",
+            block: { kind: "user-message", text: message.text },
+          }),
+        ),
+        ...(externalData === undefined
+          ? []
+          : [
+              {
+                text: externalData.content.text,
+                sourceKind: "message" as const,
+                referenceId: externalData.referenceId,
+                category: "workspace-context" as const,
+                posture: "required" as const,
+                block: { kind: "user-message" as const, text: externalData.content.text },
+              },
+            ]),
+        ...describedTexts.map(
+          (text, index): WorkTurnContextContribution => ({
+            text,
+            sourceKind: "message",
+            referenceId: `described-image:${command.turnId}:${index}`,
+            category: "workspace-context",
+            posture: "required",
+            block: { kind: "user-message", text },
+          }),
+        ),
+        {
+          text: command.prompt,
+          sourceKind: "message",
+          referenceId: `prompt:${command.turnId}`,
+          category: "current-request",
+          posture: "required",
+          block: { kind: "user-message", text: command.prompt },
+        },
+      ];
+      const planWith = (memory: ReadonlyArray<WorkTurnContextContribution>) =>
+        planWorkTurnContext({
+          threadId: command.threadId,
+          providerInstanceId: command.authority.providerInstanceId,
+          modelId: command.authority.modelId,
+          uuid: this.#uuid,
+          createdAt: planCreatedAt,
+          safeInputBudget: this.#safeInputBudgetTokens,
+          leading: planLeading,
+          contributions: [...contributionsBeforeMemory, ...memory, ...contributionsAfterMemory],
+        });
+      let planned = planWith(personMemory);
       if (planned.kind === "blocked") {
         throw this.#failure("invalid", planned.message);
       }
@@ -2403,6 +2412,13 @@ export class WorkTurnService {
         )
       ) {
         continuing = undefined;
+        // The block was cut for the continuation. The rebuilt session starts
+        // from a cut of its own, so the block is built again, once, and the
+        // plan with it; the next continuation keeps this cut.
+        planned = planWith(personMemoryFor(true));
+        if (planned.kind === "blocked") {
+          throw this.#failure("invalid", planned.message);
+        }
       }
       const resumeCursor = continuing?.resumeCursor;
       // The runtime's own turn opens in the session the last turn left, or

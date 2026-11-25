@@ -39,6 +39,7 @@ import {
   personMemoryThreadAggregateId,
   registerPersonMemoryEvents,
 } from "./personMemoryStore";
+import type { SpendCeilingTurnRequest } from "../spendCeilingService";
 import { chatPersonMessages, personMemorySpend } from "./personMemoryWiring";
 import {
   PersonMemorySweep,
@@ -1064,7 +1065,7 @@ describe("person memory under timing and volume", () => {
   });
 
   it("keeps nothing from a call that was running while the thread left no trace and was allowed again", async () => {
-    const h = harness();
+    const h = harness([]);
     let answer: (value: PersonMemoryModelAnswer) => void = () => undefined;
     const pending = new Promise<PersonMemoryModelAnswer>((resolve) => {
       answer = resolve;
@@ -1497,12 +1498,18 @@ describe("saving what the person asks to be remembered, at once", () => {
     const shapes: ReadonlyArray<readonly [string, string]> = [
       ["Remember my token: Zq81xLmNpQrStUvWxYz0123 for deploys", "Zq81xLmNpQrStUvWxYz0123"],
       ["Remember my api_key=Zq81xLmNpQrStUvWxYz0123 for deploys", "Zq81xLmNpQrStUvWxYz0123"],
-      ["I deploy with sk-abcdefghijklmnopqrstuvwx on Fridays.", "abcdefghijklmnopqrstuvwx on Fridays."],
+      [
+        "I deploy with sk-abcdefghijklmnopqrstuvwx on Fridays.",
+        "abcdefghijklmnopqrstuvwx on Fridays.",
+      ],
       ["I deploy with sk-abcdefghijklmnopqrstuvwx on Fridays.", "I deploy with sk-abcdefghij"],
       ["I deploy with sk-abcdefghijklmnopqrstuvwx on Fridays.", "klmnopqrstuvwx"],
       ["My password: hunter2hunter2 stays", "hunter2hunter2"],
       ["My PASSWORD:   hunter2hunter2 stays", "hunter2hunter2 stays"],
-      ["Authorization: Basic dXNlcjpwYXNzd29yZA==\nI like short answers", "Basic dXNlcjpwYXNzd29yZA=="],
+      [
+        "Authorization: Basic dXNlcjpwYXNzd29yZA==\nI like short answers",
+        "Basic dXNlcjpwYXNzd29yZA==",
+      ],
       ["Keep this: token:\nZq81xLmNpQrStUvWxYz0123", "ZQ81XLMNPQRSTUVWXYZ0123"],
       ["Bearer abcdefghijklmnopqrstuvwxyz0123 is mine", "abcdefghijklmnopqrstuvwxyz0123"],
       [
@@ -2638,7 +2645,7 @@ describe("learning from threads still open", () => {
 describe("what a memory call reserves from a spend ceiling", () => {
   const model = { providerInstanceId: PROVIDER, modelId: "small" as ProviderModelId };
   function reserving(facts: { readonly maxOutputTokens?: number; readonly contextLimit?: number }) {
-    const requests: Array<Record<string, unknown>> = [];
+    const requests: Array<SpendCeilingTurnRequest> = [];
     const admit = personMemorySpend({
       spendCeiling: {
         admit: (request) => {
@@ -2662,14 +2669,14 @@ describe("what a memory call reserves from a spend ceiling", () => {
   it("holds back the model's whole output limit beside what it sends, and cannot price the call", () => {
     const [request] = reserving({ maxOutputTokens: 8_000, contextLimit: 200_000 });
 
-    expect(request?.["turnUpperBoundTokens"]).toBe(9_000);
-    expect(request?.["estimatedCostUsdMicros"]).toBe("unknown");
-    expect(request?.["countsAsTurn"]).toBe(false);
+    expect(request?.turnUpperBoundTokens).toBe(9_000);
+    expect(request?.estimatedCostUsdMicros).toBe("unknown");
+    expect(request?.countsAsTurn).toBe(false);
   });
 
   it("holds back the window when no output limit is known, and a large figure when nothing is", () => {
-    expect(reserving({ contextLimit: 32_000 })[0]?.["turnUpperBoundTokens"]).toBe(32_000);
-    expect(reserving({})[0]?.["turnUpperBoundTokens"]).toBe(65_000);
+    expect(reserving({ contextLimit: 32_000 })[0]?.turnUpperBoundTokens).toBe(32_000);
+    expect(reserving({})[0]?.turnUpperBoundTokens).toBe(65_000);
   });
 });
 

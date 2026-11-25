@@ -2388,7 +2388,11 @@ except where a bullet says otherwise.
   Octant's own harness compacting its session
   (`native-harness-transcript-compacted@1`), or a turn that starts a provider
   session that does not resume an earlier one (also a Chat retry that starts one
-  on its newest attempt). A turn that starts a session cuts its block at the
+  on its newest attempt). A turn whose plan drops or truncates earlier conversation, so that
+  the host rebuilds the history in a fresh session instead of continuing one
+  (Chat and Work), is such a turn: it cuts anew and plans once more with the new
+  block, so its first rebuilt turn and the continuations after it carry the same
+  text. A Code turn decides its session before it builds the block. A turn that starts a session cuts its block at the
   moment the block is built and journals that moment as
   `person-memory.block-cut@1` (the thread, its mode, and the instant; each cut is an
   aggregate of its own and the newest by journal order wins, so the older ones

@@ -5348,6 +5348,29 @@ describe("WorkTurnService", () => {
       expect(third?.resumeCursor).toBeUndefined();
       expect(third?.context?.some((block) => block.kind === "assistant-message")).toBe(true);
     });
+
+    it("gives the session it rebuilds the block cut for a fresh session, not the one it first built for the continuation", async () => {
+      const sent: Array<Parameters<WorkTurnRuntimePort["run"]>[0]> = [];
+      const asked: boolean[] = [];
+      const fixture = serviceFixture({
+        safeInputBudgetTokens: 1_000,
+        turnRuntime: { run: resumableRun(sent) },
+        resolveDriver: resumable,
+        personMemoryBlock: ({ startsFreshSession }) => {
+          asked.push(startsFreshSession);
+          return startsFreshSession ? "Block cut for a new session." : "Block of the old cut.";
+        },
+      });
+      await runTurns(fixture, 3, 100);
+      const [, second, third] = sent;
+
+      // The continued turn keeps its cut (asked once). The turn that the plan
+      // turned into a fresh session asks again for a block cut for a new
+      // session, so its journaled cut is the one the next continuation keeps.
+      expect(second?.resumeCursor).toBeDefined();
+      expect(third?.resumeCursor).toBeUndefined();
+      expect(asked).toEqual([true, false, false, true]);
+    });
   });
 
   it.each([true, false])(

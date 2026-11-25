@@ -6468,10 +6468,16 @@ describe("ChatService", () => {
      * A conversation of `turns` long messages on a model with `contextWindow`
      * tokens, sent one after another, with the size each turn was admitted at.
      */
-    async function longConversation(contextWindow: number, turns: number, words: number) {
+    async function longConversation(
+      contextWindow: number,
+      turns: number,
+      words: number,
+      personMemoryBlock?: ChatServiceOptions["personMemoryBlock"],
+    ) {
       const probe = probeFixture();
       const sent: Array<SentTurn> = [];
       const fixture = openFixture({
+        ...(personMemoryBlock === undefined ? {} : { personMemoryBlock }),
         probe,
         driver: {
           ...compactionDriver(sent, { resumable: true }),
@@ -6537,6 +6543,20 @@ describe("ChatService", () => {
       // reply, all of which the continued session sends with the third turn.
       const first = admittedTokens[0] ?? 0;
       expect(admittedTokens.at(-1)).toBeGreaterThan(first + 2_000);
+    });
+
+    it("cuts the person-memory block anew for the session it rebuilds once the conversation no longer fits", async () => {
+      const { replies } = await longConversation(1_200, 4, 228, ({ startsFreshSession }) => {
+        return startsFreshSession ? "Block cut for a new session." : "Block of the old cut.";
+      });
+      const rebuilt = replies.find(
+        (turn) => turn.context?.some((block) => block.kind === "conversation-summary") === true,
+      );
+
+      expect(rebuilt?.context?.map((block) => block.text)).toContain(
+        "Block cut for a new session.",
+      );
+      expect(rebuilt?.context?.map((block) => block.text)).not.toContain("Block of the old cut.");
     });
 
     it("rebuilds the history on the host, compacted, once the conversation no longer fits", async () => {

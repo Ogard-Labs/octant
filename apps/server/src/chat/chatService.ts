@@ -5514,11 +5514,13 @@ export class ChatService {
       // request by (the session sends its transcript again with every request),
       // what a requested compaction summarizes from, and what decides whether
       // the conversation still fits. Only the send leaves it out.
-      const personMemoryText = this.#personMemoryBlock?.({
-        thread,
-        windowId: executionContext?.windowId,
-        startsFreshSession: sessionDecision.kind !== "continue-session",
-      });
+      const personMemoryFor = (startsFreshSession: boolean) =>
+        this.#personMemoryBlock?.({
+          thread,
+          windowId: executionContext?.windowId,
+          startsFreshSession,
+        });
+      let personMemoryText = personMemoryFor(sessionDecision.kind !== "continue-session");
       const instructionBlocks = this.#octantInstructionBlocks?.({ thread }) ?? [];
       const priorTurnAttachedTexts =
         nativeConversation || excludePriorAttachmentTexts
@@ -5568,12 +5570,15 @@ export class ChatService {
       // session instead and compacts what it drops, as for any host-planned turn.
       if (resumableHost && nativeSession !== undefined && conversationLeftOut(context)) {
         nativeSession = undefined;
-        // The fresh session never saw the sidecar source the continued one held.
-        if (sideChatSource !== undefined && sideChatSourceContext !== sideChatSource) {
-          context = planWith(
-            this.#sideChatSourceForTurn(thread.id, sideChatSource, { reusable: false, previous }),
-          );
-        }
+        // The block was cut for the continuation; the new session is cut anew,
+        // and the plan is built again once with it. The fresh session also
+        // never saw the sidecar source the continued one held.
+        personMemoryText = personMemoryFor(true);
+        context = planWith(
+          sideChatSource !== undefined && sideChatSourceContext !== sideChatSource
+            ? this.#sideChatSourceForTurn(thread.id, sideChatSource, { reusable: false, previous })
+            : sideChatSourceContext,
+        );
       }
       const maintained = nativeConversation
         ? context

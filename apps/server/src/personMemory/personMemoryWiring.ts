@@ -14,7 +14,10 @@ import {
   type ProviderModelId,
 } from "@octant/contracts";
 import { activeChatTurns } from "@octant/domain";
-import { resolveModelContextWindow, type ModelContextWindowFacts } from "@octant/domain/model-context-window";
+import {
+  resolveModelContextWindow,
+  type ModelContextWindowFacts,
+} from "@octant/domain/model-context-window";
 import { isProviderAllowedByProjectPolicy } from "@octant/domain/project-provider-policy";
 import { smallestShieldModel } from "@octant/domain/shield-judge-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";

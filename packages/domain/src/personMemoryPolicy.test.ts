@@ -162,7 +162,10 @@ describe("the person-memory block", () => {
     const own = entry("I prefer tabs.", [source("t1")], "2026-11-01T09:00:00.000Z");
     const shared = entry(
       "Writes in Norwegian.",
-      [source("t1"), { ...source("t2"), endedAt: "2026-11-01T11:00:00.000Z" as PersonMemorySource["endedAt"] }],
+      [
+        source("t1"),
+        { ...source("t2"), endedAt: "2026-11-01T11:00:00.000Z" as PersonMemorySource["endedAt"] },
+      ],
       "2026-11-01T09:00:00.000Z",
     );
     const receiver = { mode: "chat", threadId: "t1" };
