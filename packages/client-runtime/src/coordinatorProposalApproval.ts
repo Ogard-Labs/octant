@@ -13,6 +13,7 @@ import {
   type ProviderExecutionPolicy,
 } from "@octant/contracts";
 import { deriveDeliveryBranch } from "@octant/domain";
+import { takenBranchNames } from "./takenBranchNames";
 
 /** One pending proposal as the planner view returns it, with the version a decision echoes. */
 export type CoordinatorProposalEntry = CodePlannerView["proposals"][number];
@@ -109,6 +110,7 @@ export async function approveCoordinatorProposal(input: {
       ? { providerInstanceId: requested.providerInstanceId, modelId: requested.modelId }
       : { providerInstanceId: coordinator.providerInstanceId, modelId: coordinator.modelId };
   const prefix = await input.port.readBranchPrefix?.().catch(() => undefined);
+  const existingBranches = await takenBranchNames(input.port.execute, proposal.projectId, prefix);
   let creation: CodeCommand;
   try {
     creation = decodeCodeCommand({
@@ -126,6 +128,7 @@ export async function approveCoordinatorProposal(input: {
           baseBranch: deliveryTarget.proposedBaseBranch,
           shortId: threadId.replace(/-/g, "").slice(0, 12),
           prefix,
+          existingBranches,
         }),
         confirmedAt: (input.now ?? (() => new Date()))().toISOString(),
       },

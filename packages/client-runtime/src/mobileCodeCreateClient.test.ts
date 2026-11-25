@@ -327,6 +327,14 @@ describe("mobile Code creation", () => {
               facts: { remotes: ["origin"], defaultRemote: "origin" },
             });
           }
+          if (payload.kind === "list-code-worktree-branch-names") {
+            return Response.json({
+              kind: "worktree-branch-names-listed",
+              projectId,
+              names: ["main", "henrik"],
+              truncated: false,
+            });
+          }
           if (payload.kind === "create-managed-code-thread") {
             expect(payload).toMatchObject({
               projectId,
@@ -416,7 +424,7 @@ describe("mobile Code creation", () => {
         confirmDeliveryTarget: vi.fn(async (proposal) => {
           expect(proposal).toMatchObject({
             // The person's prefix from Settings, not the default one.
-            branchIntent: expect.stringMatching(/^henrik\/mobile-[a-z0-9]+$/),
+            branchIntent: expect.stringMatching(/^henrik-mobile-[a-z0-9]+$/),
             remoteName: "origin",
             proposedBaseRepository: "",
             proposedBaseBranch: "development",
@@ -441,6 +449,7 @@ describe("mobile Code creation", () => {
     expect(calls.map(({ method, path }) => `${method} ${path}`)).toEqual([
       "GET /api/projects/bootstrap",
       "GET /api/code/bootstrap",
+      "POST /api/code/commands",
       "POST /api/code/commands",
       "POST /api/code/commands",
       "POST /api/code/commands",

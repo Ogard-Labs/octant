@@ -1,3 +1,4 @@
+import { decodeProjectId } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -8,7 +9,7 @@ import {
 
 const driver = {} as ProviderDriver;
 const request = {
-  projectId: "project-1" as never,
+  projectId: decodeProjectId("00000000-0000-4000-8000-0000000000a1"),
   providerInstanceId: "00000000-0000-4000-8000-000000000001" as never,
   modelId: "model-a" as never,
   draft: "Fix the login redirect after the session expires",
@@ -61,7 +62,7 @@ describe("suggestWorktreeBranchWords", () => {
     expect(sent.modelId).toBe("model-a");
     expect(sent.prompt).not.toContain("hunter2");
     expect(sent.prompt).not.toContain("sk-abc");
-    expect(sent.prompt).not.toContain("project-1");
+    expect(sent.prompt).not.toContain("0000000000a1");
     expect(settle).toHaveBeenCalledTimes(1);
   });
 
