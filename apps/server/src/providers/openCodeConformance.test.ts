@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-  adaptBetaOpenCodeEvent,
+  adaptOpenCodeEvent,
   makeOpenCodeDriver,
   OpenCodeRouteError,
   type OpenCodeClientPort,
@@ -62,7 +62,7 @@ describe("OpenCode provider conformance", () => {
     let managedUrl: string | undefined;
     let managedSessionId: string | undefined;
     const client: OpenCodeClientPort = {
-      health: async () => ({ healthy: true, version: "1.18.0" }),
+      health: async () => ({ healthy: true, version: "opencode v2.0.22" }),
       providers: async () => ({ all: [provider()], connected: ["anthropic"] }),
       subscribe: async () => source,
       createSession: async () => session,
@@ -70,12 +70,9 @@ describe("OpenCode provider conformance", () => {
         if (id === "stale") throw new Error("not found");
         return session;
       },
-      prompt: async ({ permission }) => {
-        const hasManagedTools = permission.some(
-          (rule) => rule.permission.startsWith("octant-") && rule.action === "allow",
-        );
+      prompt: async () => {
         for (const event of runtimeEvents(session.id)) source.emit(event);
-        if (hasManagedTools && managedUrl !== undefined) {
+        if (managedUrl !== undefined) {
           // Provider prompts return before the model's MCP call completes;
           // keep the fixture's request asynchronous so the conformance
           // harness can observe and answer the app-owned tool request.
@@ -115,6 +112,11 @@ describe("OpenCode provider conformance", () => {
               isolatedConfiguration: true,
               authorization: "Basic redacted",
               pid: process.pid,
+              version: "opencode v2.0.22",
+              // The probe attests a Git work tree inside the launch's scratch.
+              temporaryDirectory: realpathSync(
+                mkdtempSync(join(tmpdir(), "octant-opencode-conformance-")),
+              ),
               url: new URL("http://127.0.0.1:1/"),
             }),
             () =>
@@ -229,9 +231,9 @@ describe("OpenCode provider conformance", () => {
 
   it("completes a Code turn from recorded 2.x session fixtures", async () => {
     const codeSource = new EventSourceFixture();
-    const codeDriver = makeBetaHarnessDriver(codeSource, {
+    const codeDriver = makeHarnessDriver(codeSource, {
       onPrompt: (sessionId) => {
-        for (const event of recordedBetaTurn(sessionId)) codeSource.emit(event);
+        for (const event of recordedTurn(sessionId)) codeSource.emit(event);
       },
       onAbort: (sessionId) => {
         codeSource.emit({
@@ -302,11 +304,11 @@ describe("OpenCode provider conformance", () => {
       const held = new Promise<void>((resolve) => {
         release = resolve;
       });
-      const harness = makeBetaHarnessDriver(
+      const harness = makeHarnessDriver(
         source,
         {
           onPrompt: (nativeId) => {
-            for (const event of recordedBetaTurn(nativeId)) source.emit(event);
+            for (const event of recordedTurn(nativeId)) source.emit(event);
             source.emit(idleEvent(nativeId));
           },
           onAbort: () => undefined,
@@ -367,7 +369,7 @@ describe("OpenCode provider conformance", () => {
       stopFirst = false,
     ) => {
       const source = new EventSourceFixture();
-      const harness = makeBetaHarnessDriver(
+      const harness = makeHarnessDriver(
         source,
         { onPrompt: () => undefined, onAbort: () => undefined },
         {
@@ -479,7 +481,7 @@ describe("OpenCode provider conformance", () => {
   it("folds a recorded 2.2.0 compaction report into the events the driver reads", () => {
     const calls = new Map<string, string>();
     expect(
-      adaptBetaOpenCodeEvent(
+      adaptOpenCodeEvent(
         {
           type: "session.compaction.ended",
           data: { sessionID: "ses_1", reason: "manual", text: "summary" },
@@ -488,7 +490,7 @@ describe("OpenCode provider conformance", () => {
       ),
     ).toMatchObject({ type: "session.next.compaction.ended" });
     expect(
-      adaptBetaOpenCodeEvent(
+      adaptOpenCodeEvent(
         {
           type: "session.compaction.failed",
           data: {
@@ -505,7 +507,7 @@ describe("OpenCode provider conformance", () => {
       ),
     ).toMatchObject({ type: "session.compaction.failed" });
     expect(
-      adaptBetaOpenCodeEvent({
+      adaptOpenCodeEvent({
         type: "session.execution.succeeded",
         data: { sessionID: "ses_1" },
       }),
@@ -514,7 +516,7 @@ describe("OpenCode provider conformance", () => {
 
   it("reports file changes and compaction only from the 2.x release that was read", async () => {
     const claims = async (version: string) => {
-      const harness = makeBetaHarnessDriver(
+      const harness = makeHarnessDriver(
         new EventSourceFixture(),
         { onPrompt: () => undefined, onAbort: () => undefined },
         { version },
@@ -544,7 +546,7 @@ describe("OpenCode provider conformance", () => {
 
   it("offers a 2.x Chat turn once the jail serves a Git work tree", async () => {
     const chatSource = new EventSourceFixture();
-    const chatDriver = makeBetaHarnessDriver(chatSource, {
+    const chatDriver = makeHarnessDriver(chatSource, {
       onPrompt: () => undefined,
       onAbort: () => undefined,
     });
@@ -563,7 +565,7 @@ describe("OpenCode provider conformance", () => {
 
   it("round-trips an app-managed tool on 2.x through the bridge OpenCode connected", async () => {
     const chatSource = new EventSourceFixture();
-    const chatDriver = makeBetaHarnessDriver(chatSource, {
+    const chatDriver = makeHarnessDriver(chatSource, {
       onPrompt: (nativeId, bridge) => {
         if (bridge === undefined) return;
         // 2.0.22 names the calling session in `ai.opencode/sessionID`.
@@ -604,7 +606,7 @@ describe("OpenCode provider conformance", () => {
 
   it("reports app tools unsupported on 2.x when OpenCode refuses the MCP registration", async () => {
     const chatSource = new EventSourceFixture();
-    const chatDriver = makeBetaHarnessDriver(
+    const chatDriver = makeHarnessDriver(
       chatSource,
       { onPrompt: () => undefined, onAbort: () => undefined },
       { mcp: "refused" },
@@ -840,28 +842,26 @@ function runtimeEvents(sourceId: string): ReadonlyArray<Event> {
       },
     },
     {
-      type: "permission.asked",
-      properties: {
-        id: "permission",
-        sessionID: sourceId,
-        permission: "edit",
-        patterns: ["*"],
-        metadata: {},
-        always: [],
-      },
+      type: "permission.v2.asked",
+      properties: { id: "permission", sessionID: sourceId, action: "edit", resources: ["*"] },
     },
     {
-      type: "question.asked",
+      type: "form.created",
       properties: {
-        id: "question",
-        sessionID: sourceId,
-        questions: [
-          {
-            question: "Continue?",
-            header: "Continue",
-            options: [{ label: "Yes", description: "Continue" }],
-          },
-        ],
+        form: {
+          id: "question",
+          sessionID: sourceId,
+          metadata: { kind: "question" },
+          fields: [
+            {
+              key: "q0",
+              type: "string",
+              title: "Continue",
+              description: "Continue?",
+              options: [{ label: "Yes", description: "Continue" }],
+            },
+          ],
+        },
       },
     },
   ] as unknown as ReadonlyArray<Event>;
@@ -885,7 +885,7 @@ function recordedCompaction(sourceId: string): ReadonlyArray<Event> {
   ] as unknown as ReadonlyArray<Event>;
 }
 
-function recordedBetaTurn(sourceId: string): ReadonlyArray<Event> {
+function recordedTurn(sourceId: string): ReadonlyArray<Event> {
   return [
     {
       type: "session.next.text.delta",
@@ -980,7 +980,7 @@ function recordedBetaTurn(sourceId: string): ReadonlyArray<Event> {
   ] as unknown as ReadonlyArray<Event>;
 }
 
-function makeBetaHarnessDriver(
+function makeHarnessDriver(
   source: EventSourceFixture,
   handlers: {
     readonly onPrompt: (
@@ -1017,11 +1017,10 @@ function makeBetaHarnessDriver(
     prompt: async ({ sessionId: nativeId }) => {
       handlers.onPrompt(nativeId, bridge);
     },
-    // A 2.x server connects to the bridge it is given, as 1.x does; a fixture
-    // that never connects leaves the probe waiting out its attestation timeout.
+    // The server connects to the bridge it is given; a fixture that never
+    // connects leaves the probe waiting out its attestation timeout.
     addMcpServer: async ({ url }) => {
-      // A runtime without a supported MCP route refuses the registration, as
-      // 2.0.22 answers the 1.x `POST /mcp` with 405.
+      // A runtime without a supported MCP route refuses the registration.
       if (options.mcp === "refused") {
         throw new Error("OpenCode 2 MCP registration failed with status 405.");
       }
@@ -1048,7 +1047,6 @@ function makeBetaHarnessDriver(
               isolatedConfiguration: true,
               authorization: "Basic redacted",
               pid: process.pid,
-              runtime: "beta" as const,
               version,
               temporaryDirectory: launchScratch,
               url: new URL("http://127.0.0.1:1/"),

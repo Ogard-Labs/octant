@@ -36,10 +36,53 @@ describe("projectOpenCodeOwnSetup", () => {
     expect(setup.mcp).toEqual({});
   });
 
-  it("ignores a catch-all rule, which only the guardrail level may set", () => {
-    expect(projectOpenCodeOwnSetup({ permission: { "*": "allow" } }, environment).rules).toEqual(
-      [],
+  it("ignores a catch-all allow or ask, which only the guardrail level may set", () => {
+    for (const effect of ["allow", "ask"] as const) {
+      const setup = projectOpenCodeOwnSetup({ permission: { "*": effect } }, environment);
+      expect(setup.rules).toEqual([]);
+      expect(setup.outsideFolderRules).toBeUndefined();
+    }
+  });
+
+  it("keeps a catch-all deny where the person wrote it, so the rules after it still open what they open in OpenCode", () => {
+    const setup = projectOpenCodeOwnSetup(
+      { permission: { "*": "deny", read: "allow", bash: { "git status": "allow" } } },
+      environment,
     );
+    expect(setup.rules).toEqual([
+      { action: "*", resource: "*", effect: "deny" },
+      { action: "read", resource: "*", effect: "allow" },
+      { action: "bash", resource: "git status", effect: "allow" },
+      { action: "shell", resource: "git status", effect: "allow" },
+    ]);
+    // Skills follow their own switch, so the refusal is restated for them.
+    expect(setup.skillRules).toEqual([{ action: "skill", resource: "*", effect: "deny" }]);
+    // A catch-all covers folders outside the Project too.
+    expect(setup.outsideFolderRules).toEqual([
+      { action: "external_directory", resource: "*", effect: "deny" },
+    ]);
+  });
+
+  it("keeps the person's own refusal of a folder outside the Project, with the allows that carve out of it", () => {
+    const setup = projectOpenCodeOwnSetup(
+      {
+        permissions: [
+          { action: "external_directory", resource: "*", effect: "deny" },
+          { action: "external_directory", resource: "/work/shared/*", effect: "allow" },
+          { action: "*_*", resource: "*", effect: "deny" },
+        ],
+      },
+      environment,
+    );
+    // An outside-folder rule never joins the person's ordinary rules: the
+    // level owns what such a folder is allowed or asked.
+    expect(setup.rules).toEqual([{ action: "*_*", resource: "*", effect: "deny" }]);
+    expect(setup.outsideFolderRules).toEqual([
+      { action: "external_directory", resource: "*", effect: "deny" },
+      { action: "external_directory", resource: "/work/shared/*", effect: "allow" },
+      // `*_*` covers `external_directory` as well.
+      { action: "external_directory", resource: "*", effect: "deny" },
+    ]);
   });
 
   it("leaves the rules Octant owns to Octant", () => {

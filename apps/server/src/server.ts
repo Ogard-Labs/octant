@@ -1561,6 +1561,7 @@ export function startOctantServer(
       flowRuns,
     } = wireContext({
       hubActScopeSlot,
+      resolveThreadStrict,
       onWindowRevoked,
       browserCredentialUseService,
       browserSessionGrants,

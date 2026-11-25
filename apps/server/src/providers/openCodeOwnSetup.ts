@@ -19,6 +19,16 @@ export interface OpenCodeOwnSetup {
    * on applies them, in place of the level's ask for every skill.
    */
   readonly skillRules?: ReadonlyArray<PermissionV2Rule>;
+  /**
+   * The person's rules that decide a folder outside the Project, in the order
+   * they wrote them: their `external_directory` rules and any rule whose
+   * action is a wildcard that covers it. Present only when one of them
+   * denies. The level owns what an outside folder is allowed or asked, so a
+   * session restates only the denials (`ownOutsideFolderDenials` in the
+   * driver): the person's choice to refuse a folder holds at every level,
+   * and their allow never opens one.
+   */
+  readonly outsideFolderRules?: ReadonlyArray<PermissionV2Rule>;
   readonly mcp: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /**
    * The person's file carries a policy that allows an MCP server. OpenCode 2
@@ -42,17 +52,25 @@ const CREDENTIAL_TEXT =
 const SENSITIVE_KEY =
   /(?:api[_-]?key|access[_-]?token|auth(?:entication)?[_-]?(?:key|token)|token|secret|password|credential|authorization|bearer)/iu;
 /**
- * What the level owns, which the person's rules never reach: folders outside
- * the Project, where the level's own ask or refusal must hold; the question
- * tool, allowed at every level; and every namespaced tool at once, which is a
- * catch-all for tool servers. Skills are read apart (`skillRules`).
+ * What the level owns, which the person's allow and ask rules never reach:
+ * folders outside the Project, where the level's own ask or refusal must
+ * hold; the question tool, allowed at every level; and every namespaced tool
+ * at once, which is a catch-all for tool servers. Skills are read apart
+ * (`skillRules`). A person's deny of an outside folder or of every namespaced
+ * tool is kept, since a deny only narrows; the question tool stays the
+ * level's either way.
  */
 const OCTANT_OWNED_ACTIONS: ReadonlySet<string> = new Set([
   "external_directory",
   "question",
   "*_*",
 ]);
-/** OpenCode 1 and OpenCode 2 name the shell and delegation differently. */
+const OUTSIDE_FOLDER_ACTION = "external_directory";
+/**
+ * The shell and delegation each have two names in a person's rules: the ones
+ * OpenCode's permission events use (`shell`, `subagent`) and the ones its
+ * `permission` configuration key has always used (`bash`, `task`).
+ */
 const ACTION_ALIASES: Readonly<Record<string, ReadonlyArray<string>>> = {
   bash: ["bash", "shell"],
   shell: ["bash", "shell"],
@@ -76,9 +94,14 @@ function effectOf(value: unknown): PermissionV2Rule["effect"] | undefined {
   return value === "allow" || value === "ask" || value === "deny" ? value : undefined;
 }
 
+interface ProjectedRules {
+  readonly rules: PermissionV2Rule[];
+  readonly skillRules: PermissionV2Rule[];
+  readonly outsideFolderRules: PermissionV2Rule[];
+}
+
 function pushRule(
-  rules: PermissionV2Rule[],
-  skillRules: PermissionV2Rule[],
+  { rules, skillRules, outsideFolderRules }: ProjectedRules,
   action: string,
   resource: string,
   effect: PermissionV2Rule["effect"],
@@ -86,25 +109,43 @@ function pushRule(
   // `**` matches what `*` does, so a run of stars is one.
   action = action.replace(/\*+/gu, "*");
   resource = resource.replace(/\*+/gu, "*");
-  // A catch-all rule would lift the whole thread above its guardrail level,
-  // which only the level itself may do.
-  if (action === "*" && resource === "*") return;
+  if (wildcardMatches(action, OUTSIDE_FOLDER_ACTION) && outsideFolderRules.length < MAX_RULES) {
+    outsideFolderRules.push({ action: OUTSIDE_FOLDER_ACTION, resource, effect });
+  }
+  if (action === "*" && resource === "*") {
+    // A catch-all allow or ask would lift the whole thread above its
+    // guardrail level, which only the level itself may do. A catch-all deny
+    // only narrows, and an allowlist-style configuration starts with one: it
+    // is kept where the person wrote it, so the rules after it still open
+    // what they open in OpenCode itself. Dropped, everything the person had
+    // not allowed followed the level instead of being refused.
+    if (effect !== "deny") return;
+    // Among the skill rules it is restated for skills alone: they are applied
+    // after the level's rules, where a catch-all would refuse everything.
+    if (skillRules.length < MAX_RULES) skillRules.push({ action: "skill", resource, effect });
+    if (rules.length < MAX_RULES) rules.push({ action, resource, effect });
+    return;
+  }
   if (action === "skill") {
     if (skillRules.length < MAX_RULES) skillRules.push({ action, resource, effect });
     return;
   }
-  if (OCTANT_OWNED_ACTIONS.has(action)) return;
+  if (OCTANT_OWNED_ACTIONS.has(action)) {
+    // The session restates an outside-folder deny after the level's own
+    // outside-folder rules (`outsideFolderRules`); a deny of every namespaced
+    // tool sits with the person's other rules.
+    if (action === "*_*" && effect === "deny" && rules.length < MAX_RULES) {
+      rules.push({ action, resource, effect });
+    }
+    return;
+  }
   for (const name of ACTION_ALIASES[action] ?? [action]) {
     if (rules.length < MAX_RULES) rules.push({ action: name, resource, effect });
   }
 }
 
-function projectRules(config: JsonRecord): {
-  readonly rules: PermissionV2Rule[];
-  readonly skillRules: PermissionV2Rule[];
-} {
-  const rules: PermissionV2Rule[] = [];
-  const skillRules: PermissionV2Rule[] = [];
+function projectRules(config: JsonRecord): ProjectedRules {
+  const projected: ProjectedRules = { rules: [], skillRules: [], outsideFolderRules: [] };
   const written = config.permission;
   if (isRecord(written)) {
     for (const [tool, setting] of Object.entries(written)) {
@@ -112,13 +153,13 @@ function projectRules(config: JsonRecord): {
       if (action === undefined) continue;
       const whole = effectOf(setting);
       if (whole !== undefined) {
-        pushRule(rules, skillRules, action, "*", whole);
+        pushRule(projected, action, "*", whole);
       } else if (isRecord(setting)) {
         for (const [pattern, effect] of Object.entries(setting)) {
           const resource = boundedText(pattern, 512);
           const next = effectOf(effect);
           if (resource !== undefined && next !== undefined) {
-            pushRule(rules, skillRules, action, resource, next);
+            pushRule(projected, action, resource, next);
           }
         }
       }
@@ -132,11 +173,11 @@ function projectRules(config: JsonRecord): {
       const resource = boundedText(entry.resource, 512);
       const effect = effectOf(entry.effect);
       if (action !== undefined && resource !== undefined && effect !== undefined) {
-        pushRule(rules, skillRules, action, resource, effect);
+        pushRule(projected, action, resource, effect);
       }
     }
   }
-  return { rules, skillRules };
+  return projected;
 }
 
 function projectStringRecord(
@@ -292,10 +333,11 @@ export function projectOpenCodeOwnSetup(
       if (server !== undefined) mcp[name] = server;
     }
   }
-  const { rules, skillRules } = projectRules(config);
+  const { rules, skillRules, outsideFolderRules } = projectRules(config);
   return {
     rules,
     ...(skillRules.length === 0 ? {} : { skillRules }),
+    ...(outsideFolderRules.some((rule) => rule.effect === "deny") ? { outsideFolderRules } : {}),
     mcp,
     ...(policiesAllowToolServer(config) ? { allowsToolServerByPolicy: true as const } : {}),
   };

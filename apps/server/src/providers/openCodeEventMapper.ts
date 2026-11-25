@@ -490,25 +490,9 @@ export function mapOpenCodeEvent(
       events.push(mappedEvent(context, { kind: "task-list", taskIds }, events.length));
       return events;
     }
-    case "permission.asked": {
-      const requestId = normalizeText(event.properties.id);
-      const action = normalizeText(event.properties.permission);
-      const toolCallId =
-        event.properties.tool === undefined
-          ? undefined
-          : normalizeText(event.properties.tool.callID);
-      return requestId === undefined || action === undefined
-        ? []
-        : [
-            mappedEvent(context, {
-              kind: "approval-request",
-              requestId,
-              action,
-              description: "Approval is required for this action.",
-              ...(toolCallId === undefined ? {} : { toolCallId }),
-            }),
-          ];
-    }
+    // The driver renames OpenCode's `permission.asked` to this name before
+    // mapping (`adaptOpenCodeEvent`), since the SDK types give the bare
+    // name the shape OpenCode 1 sent.
     case "permission.v2.asked": {
       const requestId = normalizeText(event.properties.id);
       const action = normalizeText(event.properties.action);
@@ -523,7 +507,8 @@ export function mapOpenCodeEvent(
             }),
           ];
     }
-    case "question.asked":
+    // A question reaches the mapper only as the driver's reading of a
+    // question form (`openCodeQuestionForm`).
     case "question.v2.asked":
       return mapQuestion(context, event.properties.id, event.properties.questions);
     case "session.status":
@@ -587,6 +572,8 @@ export function mapOpenCodeEvent(
     case "installation.update-available":
     case "reference.updated":
     case "permission.v2.replied":
+    case "permission.asked":
+    case "question.asked":
     case "plugin.added":
     case "project.directories.updated":
     case "file.watcher.updated":

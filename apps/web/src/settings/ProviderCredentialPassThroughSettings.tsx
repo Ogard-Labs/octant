@@ -17,12 +17,12 @@ export interface ProviderCredentialPassThroughSettingsProps {
 
 /**
  * The providers whose Strict launch adds the listed names to its fixed
- * environment list, by driver kind. OpenCode is not offered: its Strict
- * launch does not read the list yet.
+ * environment list, by driver kind.
  */
 const PROVIDERS: ReadonlyArray<{ readonly id: string; readonly label: string }> = [
   { id: "claude", label: "Claude Code" },
   { id: "codex", label: "Codex" },
+  { id: "opencode", label: "OpenCode" },
   { id: "pi", label: "Pi" },
   ...ACP_AGENT_KINDS.map((kind) => ({ id: kind, label: acpAgentProfile(kind).name })),
   { id: "acp-agent", label: "Added ACP agents" },

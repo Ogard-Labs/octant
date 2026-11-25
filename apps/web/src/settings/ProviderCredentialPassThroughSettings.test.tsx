@@ -44,6 +44,19 @@ describe("ProviderCredentialPassThroughSettings", () => {
     expect(onChange).toHaveBeenCalledWith({ codex: ["NPM_TOKEN"] });
   });
 
+  it("offers OpenCode among the providers, whose Strict launch reads the list too", () => {
+    render(
+      <ProviderCredentialPassThroughSettings
+        onChange={vi.fn()}
+        value={{ opencode: ["GH_TOKEN"] }}
+      />,
+    );
+    expect(screen.getByText("OpenCode · Let through")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Stop letting GH_TOKEN through to OpenCode" }),
+    ).toBeVisible();
+  });
+
   it("refuses a name that is not an environment variable or is one of Octant's own, and keeps the draft", async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();

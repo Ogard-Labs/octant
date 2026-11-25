@@ -31,6 +31,7 @@ import {
   createPrivateOpenCodeProfile,
   makeOpenCodeProcessLive,
   OPENCODE_CHAT_PLAN_REFUSAL,
+  OPENCODE_UPGRADE_MESSAGE,
   openCodeServerArgs,
   projectOpenCodeRuntimeConfig,
   probeOpenCodeBinary,
@@ -39,6 +40,7 @@ import {
   type OpenCodeProcessDependencies,
   type OpenCodeProcessOptions,
   type OpenCodeProcessPort,
+  type OpenCodeProcessStartInput,
 } from "./openCodeProcess";
 import type { ProcessConfinementPort } from "../process/seatbeltProfile";
 import { applyProtectedFilesChoice } from "../process/secretGuard";
@@ -96,7 +98,7 @@ function environmentRecordingWrapper(): {
   const environmentPath = join(root, ".fake-opencode-environment");
   writeFileSync(
     binaryPath,
-    `#!/bin/sh\nprintf 'broker-url=%s\\nbroker-token=%s\\ndesktop-secret=%s\\nallowed=%s\\nplugins=%s\\nclaude-skills=%s\\nconfig=%s\\n' "\${OCTANT_CREDENTIAL_BROKER_URL-<unset>}" "\${OCTANT_CREDENTIAL_BROKER_TOKEN-<unset>}" "\${OCTANT_DESKTOP_BRIDGE_SECRET-<unset>}" "\${OCTANT_TEST_ALLOWED_ENV-<unset>}" "\${OPENCODE_DISABLE_DEFAULT_PLUGINS-<unset>}" "\${OPENCODE_DISABLE_CLAUDE_CODE_SKILLS-<unset>}" "\${OPENCODE_CONFIG_CONTENT-<unset>}" > '${environmentPath}'\nexec '${fakeCliPath}' "$@"\n`,
+    `#!/bin/sh\nprintf 'broker-url=%s\\nbroker-token=%s\\ndesktop-secret=%s\\nallowed=%s\\nupdater=%s\\nclaude-skills=%s\\nconfig=%s\\n' "\${OCTANT_CREDENTIAL_BROKER_URL-<unset>}" "\${OCTANT_CREDENTIAL_BROKER_TOKEN-<unset>}" "\${OCTANT_DESKTOP_BRIDGE_SECRET-<unset>}" "\${OCTANT_TEST_ALLOWED_ENV-<unset>}" "\${OPENCODE_DISABLE_AUTOUPDATE-<unset>}" "\${OPENCODE_DISABLE_CLAUDE_CODE_SKILLS-<unset>}" "\${OPENCODE_CONFIG_CONTENT-<unset>}" > '${environmentPath}'\nexec '${fakeCliPath}' "$@"\n`,
   );
   chmodSync(binaryPath, 0o755);
   return { binaryPath, environmentPath, root };
@@ -198,13 +200,8 @@ describe("probeOpenCodeBinary", () => {
   });
 
   it("only attests isolation for the verified OpenCode runtime version", () => {
-    expect(supportsOpenCodeIsolation("1.18.21")).toBe(true);
-    expect(supportsOpenCodeIsolation("1.18.22")).toBe(false);
-    expect(supportsOpenCodeIsolation("1.18.20")).toBe(false);
-    expect(supportsOpenCodeIsolation("1.18.21-custom")).toBe(false);
-    expect(supportsOpenCodeIsolation("1.18.21+patched")).toBe(false);
-    expect(supportsOpenCodeIsolation("1.17.19")).toBe(false);
-    expect(supportsOpenCodeIsolation("1.19.0")).toBe(false);
+    expect(supportsOpenCodeIsolation("1.18.21")).toBe(false);
+    expect(supportsOpenCodeIsolation("opencode v2.4.1")).toBe(false);
     expect(supportsOpenCodeIsolation("opencode2 v0.0.0-beta-18721")).toBe(false);
     expect(supportsOpenCodeIsolation("opencode v2.0.22")).toBe(true);
     expect(supportsOpenCodeIsolation("opencode v2.0.21")).toBe(false);
@@ -362,7 +359,6 @@ describe("probeOpenCodeBinary", () => {
         XDG_CONFIG_HOME: "/synthetic/user-config",
         OPENCODE_CONFIG: "/synthetic/opencode.jsonc",
         OPENCODE_CONFIG_CONTENT: '{"plugin":["foreign"]}',
-        OPENCODE_PERMISSION: "allow",
         OCTANT_BROWSER_BROKER_TOKEN: "internal-secret",
       },
       () => root,
@@ -371,7 +367,6 @@ describe("probeOpenCodeBinary", () => {
       const environment = profile.environment;
       expect(environment.XDG_DATA_HOME).toBe("/synthetic/data");
       expect(environment.OPENCODE_CONFIG_CONTENT).toBeUndefined();
-      expect(environment.OPENCODE_PERMISSION).toBeUndefined();
       expect(environment.OCTANT_BROWSER_BROKER_TOKEN).toBeUndefined();
       const configPath = environment.OPENCODE_CONFIG;
       expect(configPath).toBeTypeOf("string");
@@ -399,10 +394,7 @@ describe("probeOpenCodeBinary", () => {
 
   it("keeps OpenCode's own skill discovery only for a launch whose person allowed it, and every other guard", () => {
     const root = fixtureRoot();
-    const skillSwitches = [
-      "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS",
-      "OPENCODE_DISABLE_EXTERNAL_SKILLS",
-    ];
+    const skillSwitches = ["OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"];
     const locked = createPrivateOpenCodeProfile({ content: "{}" }, { HOME: root }, () => root);
     const own = createPrivateOpenCodeProfile(
       { content: "{}" },
@@ -418,11 +410,18 @@ describe("probeOpenCodeBinary", () => {
       }
       for (const name of [
         "OPENCODE_DISABLE_AUTOUPDATE",
-        "OPENCODE_DISABLE_DEFAULT_PLUGINS",
         "OPENCODE_DISABLE_PROJECT_CONFIG",
         "OPENCODE_DISABLE_MODELS_FETCH",
       ]) {
         expect(own.environment[name], name).toBe("1");
+      }
+      // The installed opencode v2.4.1 reads none of these, so no launch sets them.
+      for (const name of [
+        "OPENCODE_DISABLE_DEFAULT_PLUGINS",
+        "OPENCODE_DISABLE_EXTERNAL_SKILLS",
+        "OPENCODE_DISABLE_LSP_DOWNLOAD",
+      ]) {
+        expect(locked.environment, name).not.toHaveProperty(name);
       }
       const config = (profile: typeof own) =>
         JSON.parse(readFileSync(profile.environment.OPENCODE_CONFIG ?? "", "utf8")) as {
@@ -574,8 +573,8 @@ describe("probeOpenCodeBinary", () => {
     ];
     try {
       for (const profile of launches) {
-        // opencode 1.18.21 drops `CLAUDE.md` from its instruction files when
-        // either switch is set; the broad one also turns off `.claude` skills.
+        // Neither switch is set: the skills switch alone keeps `.claude`
+        // skills off, and instruction text grants no authority.
         expect(profile.environment).not.toHaveProperty("OPENCODE_DISABLE_CLAUDE_CODE");
         expect(profile.environment).not.toHaveProperty("OPENCODE_DISABLE_CLAUDE_CODE_PROMPT");
       }
@@ -735,10 +734,18 @@ describe("probeOpenCodeBinary", () => {
     expect(failure.message).toBe("OpenCode binary path must reference an executable file.");
   });
 
-  it("parses the installed OpenCode semantic version", async () => {
+  it("reads the release the installed OpenCode prints", async () => {
     await expect(Effect.runPromise(probeOpenCode(fakeCliPath))).resolves.toEqual({
       binaryPath: fakeCliPath,
-      version: "1.17.19",
+      version: "opencode v2.4.1",
+    });
+  });
+
+  it("reads the bare number an OpenCode 1 install prints, so it can be told to upgrade", async () => {
+    const fixture = probeWrapper("probe-v1");
+    await expect(Effect.runPromise(probeOpenCode(fixture.binaryPath))).resolves.toEqual({
+      binaryPath: fixture.binaryPath,
+      version: "1.18.21",
     });
   });
 
@@ -771,14 +778,6 @@ describe("probeOpenCodeBinary", () => {
     });
   });
 
-  it("preserves the beta runtime label instead of parsing it as a v1 semantic version", async () => {
-    const fixture = probeWrapper("probe-v2");
-    await expect(Effect.runPromise(probeOpenCode(fixture.binaryPath))).resolves.toEqual({
-      binaryPath: fixture.binaryPath,
-      version: "opencode2 v0.0.0-beta-18721",
-    });
-  });
-
   it("preserves a successful fast probe when receipt persistence loses the exit race", async () => {
     await expect(
       Effect.runPromise(
@@ -786,7 +785,7 @@ describe("probeOpenCodeBinary", () => {
           throw new Error("receipt raced process exit");
         }),
       ),
-    ).resolves.toEqual({ binaryPath: fakeCliPath, version: "1.17.19" });
+    ).resolves.toEqual({ binaryPath: fakeCliPath, version: "opencode v2.4.1" });
   });
 
   it("does not expose managed-server authority to the version probe", async () => {
@@ -801,9 +800,9 @@ describe("probeOpenCodeBinary", () => {
     // The brokers are stripped, and so is every other inherited variable the
     // version read has no use for: only a fixed set of names reaches it, so a
     // credential in the server's environment cannot reach a replaced binary.
-    // OpenCode's own static switches (no updater, no default plugins) stay.
+    // OpenCode's own static switches (no updater, no `.claude` skills) stay.
     expect(readFileSync(fixture.environmentPath, "utf8")).toBe(
-      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=<unset>\nplugins=1\nclaude-skills=1\nconfig=<unset>\n",
+      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=<unset>\nupdater=1\nclaude-skills=1\nconfig=<unset>\n",
     );
     expect(process.env.OCTANT_CREDENTIAL_BROKER_URL).toBe("http://127.0.0.1:41000/");
     expect(process.env.OCTANT_CREDENTIAL_BROKER_TOKEN).toBe("broker-secret");
@@ -823,7 +822,7 @@ describe("probeOpenCodeBinary", () => {
     const fixture = probeWrapper("probe-success-descendant");
     await expect(Effect.runPromise(probeOpenCode(fixture.binaryPath))).resolves.toEqual({
       binaryPath: fixture.binaryPath,
-      version: "1.17.19",
+      version: "opencode v2.4.1",
     });
     for (const pid of await waitForPids(fixture.root, 2)) await expectProcessMissing(pid);
   });
@@ -840,22 +839,14 @@ describe("probeOpenCodeBinary", () => {
 });
 
 describe("OpenCodeProcessPort", () => {
-  it("uses the beta serve contract without the removed legacy pure flag", () => {
-    const legacy = openCodeServerArgs("legacy", 0);
-    const beta = openCodeServerArgs("beta", 43123);
-
-    // The meaningful difference between the runtimes is the flag v2 removed.
-    // Asserting the exact arrays here would only restate the function body.
-    expect(legacy).toContain("--pure");
-    expect(beta).not.toContain("--pure");
-    for (const args of [legacy, beta]) {
-      expect(args[0]).toBe("serve");
-      expect(args).toContain("--hostname");
-      expect(args).toContain("127.0.0.1");
-      expect(args).toContain("--port");
-    }
-    expect(beta[beta.indexOf("--port") + 1]).toBe("43123");
-    expect(legacy[legacy.indexOf("--port") + 1]).toBe("0");
+  it("serves on the loopback port the launch reserved", () => {
+    expect(openCodeServerArgs(43123)).toEqual([
+      "serve",
+      "--hostname",
+      "127.0.0.1",
+      "--port",
+      "43123",
+    ]);
   });
 
   const makePort = (
@@ -893,6 +884,9 @@ describe("OpenCodeProcessPort", () => {
       Effect.scoped(
         makeOpenCodeProcessLive({
           confinement,
+          // Named, because Plan's jail differs by host: macOS lets OpenCode
+          // fork to run the always-failing git stand-in and nothing else.
+          platform: "darwin",
           runtimeConfigResolver: async () => undefined,
           startupTimeoutMs: 2_000,
         }).start({
@@ -913,7 +907,7 @@ describe("OpenCodeProcessPort", () => {
       networkEgress: "allow",
       writeBoundRoot: false,
       allowProcessExec: false,
-      allowProcessFork: false,
+      allowProcessFork: true,
     });
     expect(captured?.readRoots).not.toContain(realpathSync(shimDirectory));
     expect(captured?.privateHomeAllowPaths).toContain(realpathSync(shimDirectory));
@@ -923,9 +917,9 @@ describe("OpenCodeProcessPort", () => {
   // OpenCode 2 runs `git rev-parse` at startup to resolve its project. Under
   // the Chat/Plan/Work jail the stand-in puts an always-failing `git` (a
   // symlink to /usr/bin/false) first on PATH, allows fork, and grants exec
-  // of exactly /usr/bin/false. OpenCode 1.x and Code mode stay unchanged.
+  // of exactly /usr/bin/false. Code mode stays unchanged.
   it("allows fork and exec of only /usr/bin/false for a 2.x Chat or Plan launch", async () => {
-    const fixture = probeWrapper("v2-ready");
+    const fixture = probeWrapper("ready");
     let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
     const confinement: ProcessConfinementPort = {
       prepare: (input) => {
@@ -933,7 +927,7 @@ describe("OpenCodeProcessPort", () => {
         return { command: input.executable, args: input.args };
       },
     };
-    const observed = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.scoped(
         makeOpenCodeProcessLive({
           confinement,
@@ -948,7 +942,6 @@ describe("OpenCodeProcessPort", () => {
         }),
       ),
     );
-    expect(observed.runtime).toBe("beta");
     // Fork is allowed so OpenCode can spawn the failing git; exec stays
     // denied except for the single /usr/bin/false literal grant.
     expect(captured?.allowProcessFork).toBe(true);
@@ -962,7 +955,7 @@ describe("OpenCodeProcessPort", () => {
   });
 
   it("refuses a Windows launch that needs Octant's sandbox by name before OpenCode is read or served", async () => {
-    const fixture = probeWrapper("v2-ready");
+    const fixture = probeWrapper("ready");
     for (const [launch, message] of [
       [{ mode: "code", executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
       [
@@ -1024,7 +1017,7 @@ describe("OpenCodeProcessPort", () => {
   });
 
   it("starts OpenCode Chat on Windows outside Strict unconfined with a deny-everything permission ruleset and separates private-config attestation from OS confinement", async () => {
-    const unverified = probeWrapper("v2-ready");
+    const unverified = probeWrapper("ready");
     const verified = probeWrapper("isolation-supported");
     const prepare = vi.fn((input: { executable: string; args: ReadonlyArray<string> }) => ({
       command: input.executable,
@@ -1046,7 +1039,6 @@ describe("OpenCodeProcessPort", () => {
         }),
       ),
     );
-    expect(unverifiedStarted.runtime).toBe("beta");
     expect(unverifiedStarted.isolatedConfiguration).toBeUndefined();
     expect(unverifiedStarted.privateConfiguration).toBeUndefined();
 
@@ -1066,14 +1058,13 @@ describe("OpenCodeProcessPort", () => {
         }),
       ),
     );
-    expect(verifiedStarted.runtime).toBe("legacy");
     expect(verifiedStarted.isolatedConfiguration).toBeUndefined();
     expect(verifiedStarted.privateConfiguration).toBe(true);
     expect(prepare).not.toHaveBeenCalled();
   });
 
   it("refuses a 2.x Chat or Plan launch before anything starts where the jail can start no process", async () => {
-    const fixture = probeWrapper("v2-ready");
+    const fixture = probeWrapper("ready");
     for (const launch of [
       { mode: "chat", executionPolicy: "plan" },
       { mode: "chat", executionPolicy: "full-access" },
@@ -1108,7 +1099,7 @@ describe("OpenCodeProcessPort", () => {
   });
 
   it("starts a 2.x Chat or Plan launch on Linux in a read-only view that admits processes, with the git stand-in first", async () => {
-    const fixture = probeWrapper("v2-ready");
+    const fixture = probeWrapper("ready");
     for (const launch of [
       { mode: "chat", executionPolicy: "approval-gated" },
       { mode: "code", executionPolicy: "plan" },
@@ -1128,7 +1119,7 @@ describe("OpenCodeProcessPort", () => {
           return { command: input.executable, args: input.args };
         },
       };
-      const observed = await Effect.runPromise(
+      await Effect.runPromise(
         Effect.scoped(
           makeOpenCodeProcessLive({
             confinement,
@@ -1138,7 +1129,6 @@ describe("OpenCodeProcessPort", () => {
           }).start({ binaryPath: fixture.binaryPath, cwd: fixture.root, ...launch }),
         ),
       );
-      expect(observed.runtime).toBe("beta");
       expect(captured, `${launch.mode} ${launch.executionPolicy}`).toMatchObject({
         writeBoundRoot: false,
         allowProcessExec: true,
@@ -1151,7 +1141,7 @@ describe("OpenCodeProcessPort", () => {
   });
 
   it("lets a 2.x Work or Code launch outside Plan fork and exec on Linux", async () => {
-    const fixture = probeWrapper("v2-ready");
+    const fixture = probeWrapper("ready");
     for (const launch of [
       { mode: "work", executionPolicy: "approval-gated" },
       { mode: "code", executionPolicy: "auto-accept-edits" },
@@ -1163,7 +1153,7 @@ describe("OpenCodeProcessPort", () => {
           return { command: input.executable, args: input.args };
         },
       };
-      const observed = await Effect.runPromise(
+      await Effect.runPromise(
         Effect.scoped(
           makeOpenCodeProcessLive({
             confinement,
@@ -1173,42 +1163,10 @@ describe("OpenCodeProcessPort", () => {
           }).start({ binaryPath: fixture.binaryPath, cwd: fixture.root, ...launch }),
         ),
       );
-      expect(observed.runtime).toBe("beta");
       expect(captured?.allowProcessFork).toBe(true);
       expect(captured?.allowProcessExec).toBe(true);
       expect(captured?.extraRules).toBeUndefined();
     }
-  });
-
-  it("denies fork and exec for a 1.x Chat or Plan launch without the stand-in", async () => {
-    const fixture = profileRecordingWrapper("isolation-supported");
-    let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
-    const confinement: ProcessConfinementPort = {
-      prepare: (input) => {
-        captured = input;
-        return { command: input.executable, args: input.args };
-      },
-    };
-    const observed = await Effect.runPromise(
-      Effect.scoped(
-        makeOpenCodeProcessLive({
-          confinement,
-          platform: "darwin",
-          runtimeConfigResolver: async () => undefined,
-          startupTimeoutMs: 2_000,
-        }).start({
-          binaryPath: fixture.binaryPath,
-          cwd: fixture.root,
-          mode: "chat",
-          executionPolicy: "plan",
-        }),
-      ),
-    );
-    expect(observed.runtime).toBe("legacy");
-    expect(captured?.allowProcessFork).toBe(false);
-    expect(captured?.allowProcessExec).toBe(false);
-    const rules = captured?.extraRules ?? [];
-    expect(rules.some((rule) => rule.includes("process-exec"))).toBe(false);
   });
 
   it("lifts OpenCode's Project configuration switch only for a trusted Project outside Plan", async () => {
@@ -1247,7 +1205,7 @@ describe("OpenCodeProcessPort", () => {
   });
 
   it("keeps Code mode exec allowed without the stand-in exec grant", async () => {
-    const fixture = probeWrapper("v2-ready");
+    const fixture = probeWrapper("ready");
     let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
     const confinement: ProcessConfinementPort = {
       prepare: (input) => {
@@ -1255,7 +1213,7 @@ describe("OpenCodeProcessPort", () => {
         return { command: input.executable, args: input.args };
       },
     };
-    const observed = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.scoped(
         makeOpenCodeProcessLive({
           confinement,
@@ -1270,7 +1228,6 @@ describe("OpenCodeProcessPort", () => {
         }),
       ),
     );
-    expect(observed.runtime).toBe("beta");
     // Code mode allows exec behind approvals; the stand-in grant is not added.
     expect(captured?.allowProcessExec).toBe(true);
     expect(captured?.allowProcessFork).toBe(true);
@@ -1281,7 +1238,7 @@ describe("OpenCodeProcessPort", () => {
   });
 
   it("starts Full access with no wrapper around the runtime", async () => {
-    const fixture = probeWrapper("v2-ready");
+    const fixture = probeWrapper("ready");
     const prepared: Array<ReadonlyArray<string>> = [];
     const confinement: ProcessConfinementPort = {
       // The version probe is confined as at every level; the runtime launch
@@ -1699,9 +1656,8 @@ describe("OpenCodeProcessPort", () => {
     async function confinedLaunch(
       home: string,
       platform: NodeJS.Platform,
-      mode = "isolation-supported",
     ): Promise<Parameters<ProcessConfinementPort["prepare"]>[0]> {
-      const fixture = profileRecordingWrapper(mode);
+      const fixture = profileRecordingWrapper();
       let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
       await Effect.runPromise(
         Effect.scoped(
@@ -1728,80 +1684,12 @@ describe("OpenCodeProcessPort", () => {
       return captured;
     }
 
-    it("lets an OpenCode 1.x launch read exactly that file on macOS, and nothing else in .claude", async () => {
+    // The wall used to reopen this one file for OpenCode 1, which read it
+    // where it found no global AGENTS.md. No launch opens it now.
+    it("opens no file in .claude for a launch", async () => {
       const { home, file } = claudeHome();
-      const claudeFolder = join(realpathSync(home), ".claude");
-      const input = await confinedLaunch(home, "darwin");
-      // The folder's own node (which the provider listing also resolves) and
-      // the one file; no subtree and no sibling such as `.credentials.json`.
-      const claudeRules = new Set(
-        (input.extraRules ?? []).filter((rule) => rule.includes(claudeFolder)),
-      );
-      expect(claudeRules).toEqual(
-        new Set([
-          `(allow file-read-metadata (literal "${claudeFolder}"))`,
-          `(allow file-read-data (literal "${claudeFolder}"))`,
-          `(allow file-read* (literal "${file}"))`,
-        ]),
-      );
-      // `.claude` stays denied as a whole, so a sign-in written after launch
-      // is denied too: the file is not an allowed path that would split it.
-      expect(input.privateHomeAllowPaths ?? []).not.toContain(file);
-      expect(
-        (input.privateHomeAllowPaths ?? []).some((path) => path.startsWith(claudeFolder)),
-      ).toBe(false);
-      expect((input.readRoots ?? []).some((path) => path.startsWith(claudeFolder))).toBe(false);
-    });
-
-    it("binds exactly that file read-only into an OpenCode 1.x launch on Linux", async () => {
-      const { home, file } = claudeHome();
-      const claudeFolder = join(realpathSync(home), ".claude");
-      const input = await confinedLaunch(home, "linux");
-      const granted = [...(input.privateHomeAllowPaths ?? []), ...(input.readRoots ?? [])];
-      expect(input.privateHomeAllowPaths).toContain(file);
-      expect(granted.filter((path) => path.startsWith(claudeFolder))).toEqual([file]);
-      expect(input.additionalWriteRoots ?? []).not.toContain(file);
-    });
-
-    it("keeps a CLAUDE.md the person protected denied", async () => {
-      const { home, file } = claudeHome();
-      applyProtectedFilesChoice({ added: [file], removed: [] });
-      try {
-        for (const platform of ["darwin", "linux"] as const) {
-          const input = await confinedLaunch(home, platform);
-          expect((input.extraRules ?? []).some((rule) => rule.includes("CLAUDE.md"))).toBe(false);
-          expect(input.privateHomeAllowPaths ?? []).not.toContain(file);
-        }
-      } finally {
-        applyProtectedFilesChoice({ added: [], removed: [] });
-      }
-    });
-
-    it("refuses a CLAUDE.md that is a link to another file", async () => {
-      const { home } = claudeHome();
-      const elsewhere = join(realpathSync(home), "private-notes.md");
-      writeFileSync(elsewhere, "not instructions\n");
-      const link = join(home, ".claude", "CLAUDE.md");
-      rmSync(link);
-      symlinkSync(elsewhere, link);
       for (const platform of ["darwin", "linux"] as const) {
         const input = await confinedLaunch(home, platform);
-        const rules = input.extraRules ?? [];
-        expect(rules.some((rule) => rule.includes("CLAUDE.md"))).toBe(false);
-        expect(rules.some((rule) => rule.includes("private-notes.md"))).toBe(false);
-        expect(
-          (input.privateHomeAllowPaths ?? []).some(
-            (path) => path.endsWith("CLAUDE.md") || path === elsewhere,
-          ),
-        ).toBe(false);
-      }
-    });
-
-    // OpenCode 2.x reads only AGENTS.md, so its wall gains nothing.
-    it("opens nothing in .claude for an OpenCode 2.x launch", async () => {
-      const { home, file } = claudeHome();
-      for (const platform of ["darwin", "linux"] as const) {
-        const input = await confinedLaunch(home, platform, "v2-0-1-ready");
         expect((input.extraRules ?? []).some((rule) => rule.includes("CLAUDE.md"))).toBe(false);
         expect(input.privateHomeAllowPaths ?? []).not.toContain(file);
       }
@@ -1826,6 +1714,9 @@ describe("OpenCodeProcessPort", () => {
     /**
      * Starts OpenCode with a stand-in that records what it finds at its own
      * global lookup, `$OPENCODE_CONFIG_DIR/AGENTS.md`, and the wall it got.
+     * The launch is outside Strict and in Plan unless a test says otherwise:
+     * only a launch outside Strict links the file, and Plan keeps the wall
+     * whose rules these tests read.
      */
     async function launch(
       home: string,
@@ -1835,13 +1726,13 @@ describe("OpenCodeProcessPort", () => {
         readonly runsAsItself?: boolean;
         readonly mode?: string;
         readonly environment?: NodeJS.ProcessEnv;
-        readonly strict?: false;
+        readonly strict?: true;
       },
     ): Promise<{
       readonly seen: string;
       readonly input: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
     }> {
-      const root = fixtureRoot(options.mode ?? "isolation-supported");
+      const root = fixtureRoot(options.mode ?? "v2-2-ready");
       const binaryPath = join(root, "opencode-agents-fixture");
       const seenPath = join(root, ".seen-global-agents");
       writeFileSync(
@@ -1873,44 +1764,14 @@ describe("OpenCodeProcessPort", () => {
             binaryPath,
             cwd: root,
             mode: "work",
-            executionPolicy: options.executionPolicy ?? "approval-gated",
+            executionPolicy: options.executionPolicy ?? "plan",
             ...(options.runsAsItself === false ? {} : { runsAsItself: true as const }),
-            ...(options.strict === false ? { strict: false } : {}),
+            ...(options.strict === true ? {} : { strict: false }),
           }),
         ),
       );
       return { seen: readFileSync(seenPath, "utf8"), input: captured };
     }
-
-    it("is what an OpenCode 1.x launch running as itself finds where it looks, at Full access too", async () => {
-      const { home } = agentsHome();
-      for (const executionPolicy of ["approval-gated", "full-access"] as const) {
-        const { seen } = await launch(home, { platform: "linux", executionPolicy });
-        expect(seen).toBe("Answer in British English.\n");
-      }
-    });
-
-    it("opens exactly that file for reading on macOS, and nothing else in the folder", async () => {
-      const { home, file, folder } = agentsHome();
-      const { input } = await launch(home, { platform: "darwin" });
-      expect(new Set((input?.extraRules ?? []).filter((rule) => rule.includes(folder)))).toEqual(
-        new Set([
-          `(allow file-read-metadata (literal "${folder}"))`,
-          `(allow file-read* (literal "${file}"))`,
-        ]),
-      );
-      expect((input?.privateHomeAllowPaths ?? []).some((path) => path.startsWith(folder))).toBe(
-        false,
-      );
-    });
-
-    it("binds exactly that file read-only on Linux", async () => {
-      const { home, file, folder } = agentsHome();
-      const { input } = await launch(home, { platform: "linux" });
-      const granted = [...(input?.privateHomeAllowPaths ?? []), ...(input?.readRoots ?? [])];
-      expect(granted.filter((path) => path.startsWith(folder))).toEqual([file]);
-      expect(input?.additionalWriteRoots ?? []).not.toContain(file);
-    });
 
     it("is not found or opened when OpenCode does not run as itself", async () => {
       const { home, folder } = agentsHome();
@@ -2011,34 +1872,23 @@ describe("OpenCodeProcessPort", () => {
       }
     });
 
-    it("is what an OpenCode 2.x launch running as itself finds outside Strict, opened as for 1.x where it is confined", async () => {
+    it("is what a launch running as itself finds outside Strict, opened by the wall where it is confined", async () => {
       const { home, file, folder } = agentsHome();
-      // Work below Full access outside Strict runs with no Octant sandbox;
-      // Plan keeps it, so the file is opened by the wall's rules there.
-      const unconfined = await launch(home, {
-        platform: "linux",
-        mode: "v2-0-1-ready",
-        strict: false,
-      });
-      expect(unconfined.seen).toBe("Answer in British English.\n");
-      const onLinux = await launch(home, {
-        platform: "linux",
-        mode: "v2-0-1-ready",
-        executionPolicy: "plan",
-        strict: false,
-      });
+      // Work below Full access outside Strict runs with no Octant sandbox, as
+      // Full access does; Plan keeps the wall, whose rules open the file.
+      for (const executionPolicy of ["approval-gated", "full-access"] as const) {
+        const unconfined = await launch(home, { platform: "linux", executionPolicy });
+        expect(unconfined.seen).toBe("Answer in British English.\n");
+      }
+      const onLinux = await launch(home, { platform: "linux" });
       expect(onLinux.seen).toBe("Answer in British English.\n");
       const granted = [
         ...(onLinux.input?.privateHomeAllowPaths ?? []),
         ...(onLinux.input?.readRoots ?? []),
       ];
       expect(granted.filter((path) => path.startsWith(folder))).toEqual([file]);
-      const onMac = await launch(home, {
-        platform: "darwin",
-        mode: "v2-0-1-ready",
-        executionPolicy: "plan",
-        strict: false,
-      });
+      expect(onLinux.input?.additionalWriteRoots ?? []).not.toContain(file);
+      const onMac = await launch(home, { platform: "darwin" });
       expect(onMac.seen).toBe("Answer in British English.\n");
       expect(
         new Set((onMac.input?.extraRules ?? []).filter((rule) => rule.includes(folder))),
@@ -2048,17 +1898,16 @@ describe("OpenCodeProcessPort", () => {
           `(allow file-read* (literal "${file}"))`,
         ]),
       );
+      expect(
+        (onMac.input?.privateHomeAllowPaths ?? []).some((path) => path.startsWith(folder)),
+      ).toBe(false);
     });
 
-    it("opens nothing for an OpenCode 2.x launch under Strict, or one not running as itself", async () => {
+    it("opens nothing for a launch under Strict, or one not running as itself", async () => {
       const { home, folder } = agentsHome();
       for (const platform of ["darwin", "linux"] as const) {
-        for (const options of [{}, { strict: false, runsAsItself: false }] as const) {
-          const { seen, input } = await launch(home, {
-            platform,
-            mode: "v2-0-1-ready",
-            ...options,
-          });
+        for (const options of [{ strict: true }, { runsAsItself: false }] as const) {
+          const { seen, input } = await launch(home, { platform, ...options });
           expect(seen).toBe("");
           expect((input?.extraRules ?? []).some((rule) => rule.includes(folder))).toBe(false);
         }
@@ -2149,7 +1998,7 @@ describe("OpenCodeProcessPort", () => {
           ).toString("utf8");
           expect(server.url.hostname).toBe("127.0.0.1");
           expect(server.url.port).not.toBe("0");
-          expect(decoded).toMatch(/^octant:[A-Za-z0-9_-]{40,}$/);
+          expect(decoded).toMatch(/^opencode:[A-Za-z0-9_-]{40,}$/);
           const unauthorized = yield* Effect.promise(() => fetch(server.url));
           const authorized = yield* Effect.promise(() =>
             fetch(server.url, { headers: { authorization: server.authorization } }),
@@ -2173,25 +2022,24 @@ describe("OpenCodeProcessPort", () => {
     expect(second).not.toBe(observed.authorization);
   });
 
-  it("starts the beta runtime with its own readiness line and auth identity", async () => {
-    const fixture = probeWrapper("v2-ready");
+  it("reports the release it read and serves under OpenCode's own auth identity", async () => {
+    const fixture = probeWrapper("ready");
     const observed = await Effect.runPromise(
       Effect.scoped(makePort().start({ binaryPath: fixture.binaryPath, cwd: fixture.root })),
     );
 
     expect(observed.url.hostname).toBe("127.0.0.1");
-    expect(observed.runtime).toBe("beta");
-    expect(observed.version).toBe("opencode2 v0.0.0-beta-18721");
+    expect(observed.version).toBe("opencode v2.4.1");
     expect(observed.authorization).toMatch(/^Basic b3BlbmNvZGU6/);
   });
 
-  it("writes a 2.x launch's permission posture into its private configuration and reports its readable scratch directory", async () => {
+  it("writes a launch's permission posture into its private configuration and reports its readable scratch directory", async () => {
     const root = fixtureRoot();
     const binaryPath = join(root, "opencode-config-fixture");
     const configCopy = join(root, ".fake-opencode-config");
     writeFileSync(
       binaryPath,
-      `#!/bin/sh\ncd '${root}'\nif [ "$1" = "serve" ]; then cp "$OPENCODE_CONFIG" '${configCopy}'; fi\nOCTANT_FAKE_OPENCODE_MODE=v2-ready exec '${fakeCliPath}' "$@"\n`,
+      `#!/bin/sh\ncd '${root}'\nif [ "$1" = "serve" ]; then cp "$OPENCODE_CONFIG" '${configCopy}'; fi\nOCTANT_FAKE_OPENCODE_MODE=ready exec '${fakeCliPath}' "$@"\n`,
     );
     chmodSync(binaryPath, 0o755);
     const posture = [
@@ -2202,7 +2050,7 @@ describe("OpenCodeProcessPort", () => {
     const scratch = await Effect.runPromise(
       Effect.scoped(
         makePort()
-          .start({ binaryPath, cwd: root, betaPermissions: posture })
+          .start({ binaryPath, cwd: root, permissions: posture })
           .pipe(
             Effect.map((server) => {
               expect(server.temporaryDirectory).toBeDefined();
@@ -2221,24 +2069,51 @@ describe("OpenCodeProcessPort", () => {
     ]);
   });
 
-  // The 2.0.x CLI declares both executable names and prints the bare one; the
-  // runtime contract behind it is the beta one, not the legacy v1 one.
-  it("accepts the bare banner the 2.0.x CLI prints and keeps the beta runtime contract", async () => {
-    const probe = probeWrapper("probe-v2-0-1");
+  it("starts a supported release older than the newest one read", async () => {
+    const probe = probeWrapper("probe-v2-2");
     await expect(Effect.runPromise(probeOpenCode(probe.binaryPath))).resolves.toEqual({
       binaryPath: probe.binaryPath,
-      version: "opencode v2.0.1",
+      version: "opencode v2.2.0",
     });
 
-    const server = probeWrapper("v2-0-1-ready");
+    const server = probeWrapper("v2-2-ready");
     const observed = await Effect.runPromise(
       Effect.scoped(makePort().start({ binaryPath: server.binaryPath, cwd: server.root })),
     );
-    expect(observed.runtime).toBe("beta");
-    expect(observed.version).toBe("opencode v2.0.1");
+    expect(observed.version).toBe("opencode v2.2.0");
   });
 
-  it("retries the beta server on a fresh port when the first launch exits before readiness", async () => {
+  it.each([
+    ["an OpenCode 1 install", "v1-ready", "1.18.21"],
+    ["an OpenCode 2 release older than the oldest one supported", "too-old-ready", "2.0.1"],
+  ] as const)(
+    "reports %s incompatible with the upgrade sentence and starts no server",
+    async (_name, mode, detectedVersion) => {
+      const fixture = probeWrapper(mode);
+      const failure = await failureOf(
+        Effect.scoped(makePort().start({ binaryPath: fixture.binaryPath, cwd: fixture.root })),
+      );
+      expect(failure).toEqual({
+        category: "incompatible",
+        reason: "runtime-incompatible",
+        message: OPENCODE_UPGRADE_MESSAGE,
+        diagnostic: {
+          stage: "version-check",
+          kind: "version-mismatch",
+          detectedVersion,
+          supportedVersion: "2.0.22",
+        },
+      });
+      expect(failure.message).toBe(
+        "This OpenCode is too old for Octant. Upgrade to OpenCode 2 (2.0.22 or later), then check the provider again.",
+      );
+      // The fixture records each server process it starts; only the version
+      // read ran, and that mode records none.
+      expect(pids(fixture.root)).toEqual([]);
+    },
+  );
+
+  it("retries the server on a fresh port when the first launch exits before readiness", async () => {
     const root = fixtureRoot("early-exit");
     const binaryPath = join(root, "opencode-retry-fixture");
     const invocationPath = join(root, ".fake-opencode-invocations");
@@ -2249,15 +2124,15 @@ cd '${root}'
 n=$(cat '${invocationPath}' 2>/dev/null || echo 0)
 n=$((n+1))
 echo "$n" > '${invocationPath}'
-if [ "$1" = "--version" ]; then exec env OCTANT_FAKE_OPENCODE_MODE=probe-v2 '${fakeCliPath}' "$@"; fi
+if [ "$1" = "--version" ]; then exec env OCTANT_FAKE_OPENCODE_MODE=ready '${fakeCliPath}' "$@"; fi
 if [ "$n" -le 2 ]; then exec env OCTANT_FAKE_OPENCODE_MODE=early-exit '${fakeCliPath}' "$@"; fi
-exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
+exec env OCTANT_FAKE_OPENCODE_MODE=ready '${fakeCliPath}' "$@"
 `,
     );
     chmodSync(binaryPath, 0o755);
 
     const reservedPorts: number[] = [];
-    const observed = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.scoped(
         makePort(
           {},
@@ -2275,10 +2150,9 @@ exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
     // The first launch lost its reserved port and exited; the second got a
     // fresh reservation instead of reporting the provider unavailable.
     expect(reservedPorts).toEqual([44_100, 44_101]);
-    expect(observed.runtime).toBe("beta");
   });
 
-  describe("a 2.x Work or Code launch outside Plan", () => {
+  describe("a Work or Code launch outside Plan", () => {
     const posture = [
       { action: "*", resource: "*", effect: "ask" },
       { action: "octant-bridge_*", resource: "*", effect: "allow" },
@@ -2300,7 +2174,7 @@ exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
       const recordPath = join(root, ".fake-opencode-own-config");
       writeFileSync(
         binaryPath,
-        `#!/bin/sh\ncd '${root}'\nif [ "$1" = "--version" ]; then echo '${release}'; exit 0; fi\nif [ "$1" = "serve" ]; then printf 'config=%s\\nconfig-home=%s\\ntmp=%s\\nplugins=%s\\nlsp=%s\\nupdate=%s\\nmodels=%s\\nhost-switch=%s\\ncontent=%s\\n' "\${OPENCODE_CONFIG-<unset>}" "\${XDG_CONFIG_HOME-<unset>}" "\${TMPDIR-<unset>}" "\${OPENCODE_DISABLE_DEFAULT_PLUGINS-<unset>}" "\${OPENCODE_DISABLE_LSP_DOWNLOAD-<unset>}" "\${OPENCODE_DISABLE_AUTOUPDATE-<unset>}" "\${OPENCODE_DISABLE_MODELS_FETCH-<unset>}" "\${OCTANT_TEST_HOST_SWITCH-<unset>}" "\${OPENCODE_CONFIG_CONTENT-<unset>}" > '${recordPath}'; fi\nOCTANT_FAKE_OPENCODE_MODE=v2-ready exec '${fakeCliPath}' "$@"\n`,
+        `#!/bin/sh\ncd '${root}'\nif [ "$1" = "--version" ]; then echo '${release}'; exit 0; fi\nif [ "$1" = "serve" ]; then printf 'config=%s\\nconfig-home=%s\\ntmp=%s\\nplugins=%s\\nlsp=%s\\nupdate=%s\\nmodels=%s\\nhost-switch=%s\\ncontent=%s\\n' "\${OPENCODE_CONFIG-<unset>}" "\${XDG_CONFIG_HOME-<unset>}" "\${TMPDIR-<unset>}" "\${OPENCODE_DISABLE_DEFAULT_PLUGINS-<unset>}" "\${OPENCODE_DISABLE_LSP_DOWNLOAD-<unset>}" "\${OPENCODE_DISABLE_AUTOUPDATE-<unset>}" "\${OPENCODE_DISABLE_MODELS_FETCH-<unset>}" "\${OCTANT_TEST_HOST_SWITCH-<unset>}" "\${OPENCODE_CONFIG_CONTENT-<unset>}" > '${recordPath}'; fi\nOCTANT_FAKE_OPENCODE_MODE=ready exec '${fakeCliPath}' "$@"\n`,
       );
       chmodSync(binaryPath, 0o755);
       const server = await Effect.runPromise(
@@ -2317,7 +2191,7 @@ exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
             cwd: root,
             mode: "code",
             executionPolicy: "approval-gated",
-            betaPermissions: posture,
+            permissions: posture,
             ...start,
           }),
         ),
@@ -2337,6 +2211,7 @@ exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
     it("reads the person's own configuration outside Strict when the session carries their setup", async () => {
       const { server, recorded } = await launch({ strict: false, ...ownSetup });
       expect(server.ownConfiguration).toBe(true);
+      expect(server.unsandboxed).toBe(true);
       expect(server.privateConfiguration).toBeUndefined();
       expect(server.isolatedConfiguration).toBeUndefined();
       expect(recorded).toMatchObject({
@@ -2379,38 +2254,150 @@ exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
       expect(recorded.models).toBe("1");
     });
 
+    // The last column: whether the launch still runs with no Octant sandbox
+    // outside Strict, which is what admits Octant's tools beside the rest.
     it.each([
-      ["under Strict", { ...ownSetup }],
-      ["outside Strict when the session's own setup is off", { strict: false }],
+      ["under Strict", { ...ownSetup }, undefined],
+      ["outside Strict when the session's own setup is off", { strict: false }, true],
       [
         "outside Strict when the person's tool servers are off and cannot be held off there",
         { strict: false, runsAsItself: true },
+        true,
       ],
       [
         "under Strict when the person's tool servers are off",
         { runsAsItself: true, ownToolServersOff: true },
+        undefined,
       ],
-      ["in Plan", { strict: false, ...ownSetup, executionPolicy: "plan" }],
+      ["in Plan", { strict: false, ...ownSetup, executionPolicy: "plan" }, undefined],
       [
-        "on a 2.x release older than the one read for it",
+        "on a release older than the one read for it",
         { strict: false, ...ownSetup, release: "opencode v2.2.0" },
+        true,
       ],
-    ] as const)("keeps Octant's private configuration %s", async (_name, input) => {
+    ] as const)("keeps Octant's private configuration %s", async (_name, input, unsandboxed) => {
       const { server, recorded } = await launch(input);
       expect(server.ownConfiguration).toBeUndefined();
+      expect(server.unsandboxed).toBe(unsandboxed);
       expect(recorded.config).toMatch(/octant-config-home-.*\/opencode\.json$/);
       expect(recorded["config-home"]).toMatch(/octant-config-home-/);
       expect(recorded.tmp).toMatch(/octant-tmp-/);
       expect(recorded.content).toBe("<unset>");
-      expect(recorded.plugins).toBe("1");
-      expect(recorded.lsp).toBe("1");
+      expect(recorded.plugins).toBe("<unset>");
+      expect(recorded.lsp).toBe("<unset>");
       expect(recorded.update).toBe("1");
       expect(recorded.models).toBe("1");
     });
 
-    it("keeps every variable of Octant's own out of a launch outside Strict, and the host's under Strict as before", async () => {
+    it("keeps every variable of Octant's own out of a launch, under Strict and outside it", async () => {
       expect((await launch({ strict: false })).recorded["host-switch"]).toBe("<unset>");
-      expect((await launch({})).recorded["host-switch"]).toBe("host-only");
+      expect((await launch({})).recorded["host-switch"]).toBe("<unset>");
+    });
+  });
+
+  describe("the environment a launch receives", () => {
+    const names = [
+      "HOME",
+      "PATH",
+      "LC_ALL",
+      "XDG_DATA_HOME",
+      "OPENAI_API_KEY",
+      "GH_TOKEN",
+      "NPM_TOKEN",
+      "HTTPS_PROXY",
+      "OCTANT_TEST_HOST_SWITCH",
+    ] as const;
+    const launch = async (start: Partial<OpenCodeProcessStartInput>) => {
+      const root = fixtureRoot();
+      const binaryPath = join(root, "opencode-environment-list-fixture");
+      const recordPath = join(root, ".fake-opencode-environment-list");
+      writeFileSync(
+        binaryPath,
+        `#!/bin/sh\ncd '${root}'\nif [ "$1" = "serve" ]; then { ${names
+          .map((name) => `printf '${name}=%s\\n' "\${${name}-<unset>}"`)
+          .join("; ")}; } > '${recordPath}'; fi\nexec '${fakeCliPath}' "$@"\n`,
+      );
+      chmodSync(binaryPath, 0o755);
+      await Effect.runPromise(
+        Effect.scoped(
+          makePort({
+            inheritedEnvironment: {
+              HOME: "/home/person",
+              PATH: process.env.PATH,
+              LC_ALL: "en_GB.UTF-8",
+              XDG_DATA_HOME: "/home/person/.local/share",
+              OPENAI_API_KEY: "model-key",
+              GH_TOKEN: "github-token",
+              NPM_TOKEN: "npm-token",
+              HTTPS_PROXY: "http://proxy.invalid:8080",
+              OCTANT_TEST_HOST_SWITCH: "host-only",
+            },
+          }).start({ binaryPath, cwd: root, mode: "code", executionPolicy: "plan", ...start }),
+        ),
+      );
+      return Object.fromEntries(
+        readFileSync(recordPath, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => {
+            const at = line.indexOf("=");
+            return [line.slice(0, at), line.slice(at + 1)];
+          }),
+      );
+    };
+
+    it("gives a Strict thread a short fixed list, every model provider's key, and the names the person let through", async () => {
+      const strict = await launch({
+        ownChannels: {
+          telemetry: false,
+          selfUpdate: false,
+          // A model provider's key and a variable of Octant's own never join
+          // the list, whatever a stored list holds.
+          credentialPassThrough: ["NPM_TOKEN", "OCTANT_TEST_HOST_SWITCH"],
+        },
+      });
+      expect(strict).toEqual({
+        HOME: "/home/person",
+        PATH: expect.stringContaining(process.env.PATH ?? ""),
+        LC_ALL: "en_GB.UTF-8",
+        XDG_DATA_HOME: "/home/person/.local/share",
+        OPENAI_API_KEY: "model-key",
+        GH_TOKEN: "<unset>",
+        NPM_TOKEN: "npm-token",
+        HTTPS_PROXY: "<unset>",
+        OCTANT_TEST_HOST_SWITCH: "<unset>",
+      });
+      // With no list, nothing beyond the fixed names crosses.
+      expect((await launch({})).NPM_TOKEN).toBe("<unset>");
+    });
+
+    it("leaves the person's environment as it was outside Strict, whatever the list holds", async () => {
+      const open = await launch({
+        strict: false,
+        ownChannels: { telemetry: false, selfUpdate: false, credentialPassThrough: [] },
+      });
+      expect(open).toMatchObject({
+        GH_TOKEN: "github-token",
+        NPM_TOKEN: "npm-token",
+        HTTPS_PROXY: "http://proxy.invalid:8080",
+        OPENAI_API_KEY: "model-key",
+        OCTANT_TEST_HOST_SWITCH: "<unset>",
+      });
+    });
+
+    it("keeps the host environment for the readiness check and for a thread outside Strict that keeps its sandbox", async () => {
+      for (const start of [
+        { purpose: "probe" },
+        { strict: false, executionPolicy: "full-access", fullAccessSandbox: true },
+      ] as const) {
+        expect(await launch(start)).toMatchObject({
+          GH_TOKEN: "github-token",
+          HTTPS_PROXY: "http://proxy.invalid:8080",
+          // The broker variables are stripped; any other variable of
+          // Octant's own reached these launches before and still does.
+          OCTANT_TEST_HOST_SWITCH: "host-only",
+        });
+      }
     });
   });
 
@@ -2434,7 +2421,7 @@ exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
     );
 
     expect(readFileSync(fixture.environmentPath, "utf8")).toBe(
-      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=allowed-value\nplugins=1\nclaude-skills=1\nconfig=<unset>\n",
+      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=<unset>\nupdater=1\nclaude-skills=1\nconfig=<unset>\n",
     );
     expect(inheritedEnvironment.OCTANT_CREDENTIAL_BROKER_URL).toBe("http://127.0.0.1:41000/");
     expect(inheritedEnvironment.OCTANT_CREDENTIAL_BROKER_TOKEN).toBe("broker-secret");

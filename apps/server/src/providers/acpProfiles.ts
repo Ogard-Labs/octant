@@ -658,10 +658,7 @@ const opencodeProfile: AcpProviderProfile = {
     guards: {
       NO_COLOR: "1",
       OPENCODE_DISABLE_AUTOUPDATE: "1",
-      OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
-      OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
       OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
-      OPENCODE_DISABLE_LSP_DOWNLOAD: "1",
       // OPENCODE_PURE does not cover the Project: `opencode acp` 2.0.27 still
       // started an `mcp` server from <project>/opencode.json and imported a
       // plugin from <project>/.opencode/plugin. With this switch it did

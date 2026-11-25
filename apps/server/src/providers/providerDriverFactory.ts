@@ -220,9 +220,9 @@ export function makeProviderDriver(
   const readPlanMcpServers = options.planMcpServers;
   switch (instance.driverKind) {
     case "opencode":
-      // Route selection follows the version the process attests, not the
-      // binary's file name. A released 2.x install and a 1.x install can
-      // share the name `opencode`.
+      // Compatibility follows the version the process reads, not the
+      // binary's file name: an OpenCode 1 install shares the name `opencode`
+      // and is reported incompatible by the launch.
       return {
         ...makeOpenCodeDriver({
           ...(readPlanMcpServers === undefined
@@ -241,7 +241,7 @@ export function makeProviderDriver(
             : { sessionOwnership: options.sessionOwnership }),
         }),
         // Plan windows come from the account behind the CLI's own sign-in,
-        // not from the runtime, so both OpenCode lines report them alike.
+        // not from the runtime.
         contextFacts: makeOpenCodeGoUsageFacts({
           instanceId: instance.id,
           dataDirectory: join(

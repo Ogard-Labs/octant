@@ -107,7 +107,7 @@ describe("real OpenCode integration", () => {
           permissionPersistence: () => "current-session",
         });
         const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
-        // A 1.x binary reports a bare semantic version; only 2.x needs the stand-in.
+        // OpenCode names itself in its version line; anything else is not it.
         if (probe.detectedVersion?.startsWith("opencode") !== true) {
           await registry.closeAll();
           context.skip("the installed OpenCode is not a 2.x runtime");

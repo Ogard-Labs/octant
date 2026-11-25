@@ -852,6 +852,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     if (
       browserToolTransport(observed, String(target.modelId), {
         executionPolicy: authority.executionPolicy,
+        // A child's session launches with its parent thread's Strict value.
+        strict: resolveThreadStrict(String(run.parentThreadId)),
       }) !== true
     ) {
       return undefined;

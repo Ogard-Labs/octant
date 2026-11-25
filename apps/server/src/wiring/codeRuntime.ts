@@ -1312,7 +1312,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               ...(destination === undefined ? {} : { leaseId: destination.leaseId }),
             }),
             ask,
-            appToolThreadLevel(thread),
+            appToolThreadLevel(thread, resolveThreadStrict(String(thread.id))),
           ),
         spendCeiling,
         terminalProcessPort,
@@ -1624,8 +1624,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         supportsAppManagedTools: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
           return (
-            browserToolTransport(observed, String(thread.modelId), appToolThreadLevel(thread)) ===
-            true
+            browserToolTransport(
+              observed,
+              String(thread.modelId),
+              appToolThreadLevel(thread, resolveThreadStrict(String(thread.id))),
+            ) === true
           );
         },
         supportsAcpClientCapabilities: (thread) =>
@@ -1723,7 +1726,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         routineBrowserTools: ({ thread, readThread, routineRun }) =>
           routineBrowserTools({
             routineRun,
-            turnLevel: appToolThreadLevel(thread),
+            turnLevel: appToolThreadLevel(thread, resolveThreadStrict(String(thread.id))),
             threadId: decodeBrowserThreadId(String(thread.id)),
             currentAuthority: () =>
               readThread() === undefined

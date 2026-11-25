@@ -329,7 +329,7 @@ runs your shell's startup files, which may set credentials again." Outside
 Strict the list is not read. The empty state reads "Nothing is added. Under
 Strict, each provider gets only its fixed list." The list is empty by
 default, holds names only, never values, at most 64 per provider, and offers
-Claude Code, Codex, Pi, each ACP agent and the added ACP agents together. Each
+Claude Code, Codex, OpenCode, Pi, each ACP agent and the added ACP agents together. Each
 row reads "`NAME` · Provider · Let through" with **Remove**; the add row is a
 provider picker, a name field and **Let through**. A name that can never be
 added is refused under the field with its reason, the field marked
@@ -338,8 +338,7 @@ of Octant's own (`OCTANT_*`), a model provider's key (a provider already gets
 its own and never another's), or a 65th name. A search result for the list
 lands on its first row, or on the add row while the list is empty. The section
 says that a provider terminal also runs the person's shell startup files,
-which may set credentials again. Not built yet: OpenCode has no row,
-because its Strict launch does not read the list. The rule is in
+which may set credentials again. The rule is in
 [Architecture: Security and authority](../architecture.md#security-and-authority)
 and [Decisions and requirements](decisions.md#octant-adds-no-restrictions-of-its-own-unless-strict-is-on).
 

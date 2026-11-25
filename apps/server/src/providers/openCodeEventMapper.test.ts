@@ -8,7 +8,7 @@ import {
 import type { Event } from "@opencode-ai/sdk/v2/types";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { adaptBetaOpenCodeEvent } from "./openCodeDriver";
+import { adaptOpenCodeEvent } from "./openCodeDriver";
 import {
   mapOpenCodeEvent,
   openCodeApprovalCall,
@@ -195,51 +195,7 @@ describe("mapOpenCodeEvent", () => {
       expected: { kind: "diff", diff: "src/main.ts\n@@ -1 +1 @@\n-old\n+new" },
     },
     {
-      name: "legacy permission question",
-      event: official({
-        id: "event-permission",
-        type: "permission.asked",
-        properties: {
-          id: "permission-1",
-          sessionID: "provider-session",
-          permission: "write",
-          patterns: ["private-pattern-must-not-cross"],
-          metadata: { privateMetadata: "must-not-cross" },
-          always: [],
-        },
-      }),
-      expected: {
-        kind: "approval-request",
-        requestId: "permission-1",
-        action: "write",
-        description: "Approval is required for this action.",
-      },
-    },
-    {
-      name: "permission question carries its tool call's identity",
-      event: official({
-        id: "event-permission-tool",
-        type: "permission.asked",
-        properties: {
-          id: "permission-3",
-          sessionID: "provider-session",
-          permission: "bash",
-          patterns: [],
-          metadata: {},
-          always: [],
-          tool: { messageID: "message-1", callID: "call-42" },
-        },
-      }),
-      expected: {
-        kind: "approval-request",
-        requestId: "permission-3",
-        action: "bash",
-        description: "Approval is required for this action.",
-        toolCallId: "call-42",
-      },
-    },
-    {
-      name: "v2 permission question",
+      name: "permission question",
       event: official({
         id: "event-permission-v2",
         type: "permission.v2.asked",
@@ -259,31 +215,7 @@ describe("mapOpenCodeEvent", () => {
       },
     },
     {
-      name: "legacy user question",
-      event: official({
-        id: "event-question",
-        type: "question.asked",
-        properties: {
-          id: "question-1",
-          sessionID: "provider-session",
-          questions: [
-            {
-              header: "Choose",
-              question: "Which option?",
-              options: [{ label: "Option 1", description: "The plain text one" }],
-            },
-          ],
-        },
-      }),
-      expected: {
-        kind: "user-input-request",
-        requestId: "question-1",
-        prompt: "Which option?",
-        options: [{ label: "Option 1", description: "The plain text one" }],
-      },
-    },
-    {
-      name: "v2 user question",
+      name: "user question",
       event: official({
         id: "event-question-v2",
         type: "question.v2.asked",
@@ -423,7 +355,7 @@ describe("mapOpenCodeEvent", () => {
       name: "a multi-select question",
       event: official({
         id: "event-question-multiple",
-        type: "question.asked",
+        type: "question.v2.asked",
         properties: {
           id: "question-multiple",
           sessionID: "provider-session",
@@ -905,7 +837,7 @@ describe("OpenCode 2.0.22 events", () => {
     data: Record<string, unknown>,
     calls = new Map<string, string>(),
   ): ReturnType<typeof mapped> | "ignored" {
-    const adapted = adaptBetaOpenCodeEvent({ type, data: { sessionID, ...data } }, calls);
+    const adapted = adaptOpenCodeEvent({ type, data: { sessionID, ...data } }, calls);
     return adapted === undefined ? "ignored" : mapped(adapted);
   }
 
@@ -1021,7 +953,7 @@ describe("OpenCode 2.0.22 events", () => {
     const calls = new Map<string, string>();
     const outsideContentCalls: NonNullable<OpenCodeEventContext["outsideContentCalls"]> = new Map();
     const run = (type: string, data: Record<string, unknown>) => {
-      const adapted = adaptBetaOpenCodeEvent({ type, data: { sessionID, ...data } }, calls);
+      const adapted = adaptOpenCodeEvent({ type, data: { sessionID, ...data } }, calls);
       if (adapted === undefined) return [];
       return mapOpenCodeEvent({ ...context(), outsideContentCalls }, adapted).map((event) =>
         decodeProviderRuntimeEvent(event),

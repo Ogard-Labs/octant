@@ -40,29 +40,33 @@ if (process.argv.slice(2).join(" ") === "--version") {
     console.error("probe failed");
     process.exit(17);
   }
+  // The default is a current release; the named modes print one a test needs:
+  // the release attested for isolation, one older than the person's own
+  // configuration is read on, one older than the oldest supported release,
+  // and the bare number OpenCode 1 printed.
   console.log(
     selectedMode === "probe-misleading-version"
-      ? "OpenCode build 1.17.19"
-      : selectedMode === "probe-v2" || selectedMode === "v2-ready"
-        ? "opencode2 v0.0.0-beta-18721"
-        : selectedMode === "probe-v2-0-1" || selectedMode === "v2-0-1-ready"
-          ? "opencode v2.0.1"
-          : selectedMode === "isolation-supported"
-            ? "1.18.21"
-            : "1.17.19",
+      ? "OpenCode build 2.4.1"
+      : selectedMode === "isolation-supported"
+        ? "opencode v2.0.22"
+        : selectedMode === "probe-v2-2" || selectedMode === "v2-2-ready"
+          ? "opencode v2.2.0"
+          : selectedMode === "probe-too-old" || selectedMode === "too-old-ready"
+            ? "opencode v2.0.1"
+            : selectedMode === "probe-v1" || selectedMode === "v1-ready"
+              ? "1.18.21"
+              : "opencode v2.4.1",
   );
   process.exit(0);
 }
 
 const selectedMode = mode();
-const v2 = selectedMode === "v2-ready" || selectedMode === "v2-0-1-ready";
 const requestedPort = Number(process.argv.at(-1));
 if (
-  process.argv.slice(2, -1).join(" ") !==
-    (v2 ? "serve --hostname 127.0.0.1 --port" : "serve --pure --hostname 127.0.0.1 --port") ||
+  process.argv.slice(2, -1).join(" ") !== "serve --hostname 127.0.0.1 --port" ||
   !Number.isInteger(requestedPort) ||
-  (v2 ? requestedPort < 1 : requestedPort !== 0) ||
-  process.env.OPENCODE_SERVER_USERNAME !== (v2 ? "opencode" : "octant") ||
+  requestedPort < 1 ||
+  process.env.OPENCODE_SERVER_USERNAME !== "opencode" ||
   !process.env.OPENCODE_SERVER_PASSWORD
 ) {
   console.error("invalid invocation");
@@ -95,14 +99,13 @@ if (selectedMode === "non-loopback") {
   const expectedAuthorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
   const server = Bun.serve({
     hostname: "127.0.0.1",
-    // Bun's listener rejects port 0 in this fixture runtime just as the
-    // OpenCode 2 server does, so exercise the explicit reserved-port argv.
-    port: v2 ? requestedPort : 0,
+    // OpenCode rejects port 0, so the launch passes the port it reserved.
+    port: requestedPort,
     fetch(request) {
       return request.headers.get("authorization") === expectedAuthorization
         ? new Response("ok")
         : new Response("unauthorized", { status: 401 });
     },
   });
-  console.log(`${v2 ? "" : "opencode "}server listening on http://127.0.0.1:${server.port}`);
+  console.log(`server listening on http://127.0.0.1:${server.port}`);
 }

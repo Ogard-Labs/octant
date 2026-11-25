@@ -791,7 +791,7 @@ export function wireWork(deps: WorkDependencies) {
           browserToolTransport(
             observed,
             String(input.thread.modelId),
-            appToolThreadLevel(input.thread),
+            appToolThreadLevel(input.thread, resolveThreadStrict(String(input.thread.id))),
           ) === true;
         const native = nativeHarnessComposition?.forWork(input);
         const routineBrowser =
@@ -799,7 +799,10 @@ export function wireWork(deps: WorkDependencies) {
             ? undefined
             : routineBrowserTools({
                 routineRun: input.routineRun,
-                turnLevel: appToolThreadLevel(input.thread),
+                turnLevel: appToolThreadLevel(
+                  input.thread,
+                  resolveThreadStrict(String(input.thread.id)),
+                ),
                 threadId: decodeBrowserThreadId(String(input.thread.id)),
                 currentAuthority: () =>
                   browserAuthority.resolve(decodeBrowserThreadId(String(input.thread.id)), "work"),
@@ -1170,7 +1173,7 @@ export function wireWork(deps: WorkDependencies) {
         const computer = computerToolsFor(
           computerOwner,
           undefined,
-          appToolThreadLevel(input.thread),
+          appToolThreadLevel(input.thread, resolveThreadStrict(String(input.thread.id))),
         );
         const pastThreads = !browserSupported
           ? undefined

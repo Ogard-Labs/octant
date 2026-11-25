@@ -905,8 +905,6 @@ describe("ACP child-server profiles", () => {
       OPENCODE_CONFIG: expectedConfig,
       OPENCODE_CONFIG_DIR: "/tmp/managed/config",
       OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
-      OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
-      OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
       OPENCODE_DISABLE_PROJECT_CONFIG: "1",
       OPENCODE_PURE: "1",
     });
