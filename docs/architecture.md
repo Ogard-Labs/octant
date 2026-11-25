@@ -2569,12 +2569,17 @@ so is every word with `=`, every URL, path, email and host, every word that
 mixes letters and digits beyond an ordinary shape (`v2`, `utf8`, `h264`,
 `oauth2`, issue numbers such as `#123` stay), long digit runs and protected
 names (`.env`, `.ssh`, `id_rsa`). A clause ends at a sentence stop or a line end.
+When a line ends inside a clause that named a secret, the lines after it are left
+out too, up to a blank line, since the value is often pasted there.
 The text is redacted first, so a token shaped like a key never gets this far.
 At most 40 characters are kept, and with fewer than two words left the id name
 is used. Windows reserved names (`con`, `prn`, `aux`, `nul`, `com1` to `com9`,
 `lpt1` to `lpt9`, with or without an extension) are never produced and are
 refused when typed or used as a prefix segment. A name is always a valid Git ref
-and never the base branch (a prefix that is not one is ignored).
+and never the base branch (a prefix that is not one is ignored). A branch or tag
+named like the prefix, or like a part of it, blocks every name below it, so the
+prefix's slashes then become dashes (`feature/` with a `feature` branch gives
+`feature-abc123`).
 
 A name is numbered (`-2`, `-3`) when a branch of that name, or one above or below
 it, exists, compared without case, against every name the host lists with

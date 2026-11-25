@@ -7,7 +7,7 @@ import {
 
 const driver = {} as ProviderDriver;
 const request = {
-  projectId: "project-1",
+  projectId: "project-1" as never,
   providerInstanceId: "00000000-0000-4000-8000-000000000001" as never,
   modelId: "model-a" as never,
   draft: "Fix the login redirect after the session expires",

@@ -79,6 +79,17 @@ describe("CodeSettingsView", () => {
     );
   });
 
+  it("goes to the worktree naming choice a settings search picked", () => {
+    const { container } = render(
+      <CodeSettingsView
+        focusedSetting="code-worktree-branch-prefix"
+        onUpdate={vi.fn(async () => true)}
+        settings={settings as never}
+      />,
+    );
+    expect(container.querySelector('[data-focused="true"]')).toHaveTextContent("Branch prefix");
+  });
+
   it("refuses a branch prefix Git would reject without saving it", async () => {
     const update = vi.fn(async (_input: CodeSettingsUpdate) => true);
     render(<CodeSettingsView onUpdate={update} settings={settings as never} />);

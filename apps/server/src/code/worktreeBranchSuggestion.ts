@@ -1,5 +1,6 @@
 import {
   decodeProviderSessionId,
+  type ProjectId,
   type ProviderInstanceId,
   type ProviderModelId,
   type TurnUsage,
@@ -24,7 +25,7 @@ export interface WorktreeBranchSuggestionPorts {
   /** Whether the Project's provider rules and sign-in allow this model, and its driver. */
   readonly open: (
     input: Readonly<{
-      projectId: string;
+      projectId: ProjectId;
       providerInstanceId: ProviderInstanceId;
       modelId: ProviderModelId;
     }>,
@@ -34,7 +35,7 @@ export interface WorktreeBranchSuggestionPorts {
   /** Spend ceilings for one request that is not a turn. */
   readonly admit: (
     input: Readonly<{
-      projectId: string;
+      projectId: ProjectId;
       providerInstanceId: ProviderInstanceId;
       modelId: ProviderModelId;
     }>,
@@ -66,7 +67,7 @@ export type WorktreeBranchSuggestion =
 export async function suggestWorktreeBranchWords(
   ports: WorktreeBranchSuggestionPorts,
   input: Readonly<{
-    projectId: string;
+    projectId: ProjectId;
     providerInstanceId: ProviderInstanceId;
     modelId: ProviderModelId;
     draft: string;
