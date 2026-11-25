@@ -928,7 +928,9 @@ composer itself is the drop target, not the pane behind it. The row menu's
 or the only composer when one is open. Dropping the composer's own thread,
 a thread already attached, something that is not a thread, or a thread this
 window cannot Open leaves the draft unchanged and says so without reading
-the thread. Showing several Projects adds no reach here: a Code thread's
+the thread. The attached thread shows as an
+[inline chip](thread-view.md#mentioning-a-thread-in-a-prompt) in the prompt.
+Showing several Projects adds no reach here: a Code thread's
 composer attaches Code threads of its own Project only, and any other
 composer the Code threads of the window's lead Project, exactly as in a
 window that shows only that Project. Image and file drops, and dropping a thread on a pane rather
@@ -2879,9 +2881,13 @@ request names the first in the order below and counts the rest after it in the
 meta ink (#327 open +15); its name says "and 15 more pull requests".
 
 Pointing at a row, or focusing it, opens its details card after a short delay,
-beside the sidebar: the title and age, the states in words, then the Project,
-branch, provider and model ("Claude · Opus 5.5", the model read from its id),
-and fork lineage, one fact per line. Below a rule come the pull requests the
+beside the sidebar: the title and age, the states in words, then, while the
+thread works or waits on the person, its live state with the running step or
+what it waits on ("Working 14m · Running tests"), the Project under its own
+mark, the branch, the provider under its own glyph with the model ("Claude ·
+Opus 5.5", the model read from its id), and fork lineage, one fact per line. A
+mentioned thread's chip opens the same card
+([Mentioning a thread in a prompt](thread-view.md#mentioning-a-thread-in-a-prompt)). Below a rule come the pull requests the
 thread worked on, up to 50, in flight first (open and draft), then merged, then
 closed, each group newest first, with any past 50 counted as "+N more". Each is
 one line: the state glyph in the state colour, a checks dot while it can still

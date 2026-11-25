@@ -4877,7 +4877,14 @@ time. Dragging a sidebar thread onto a composer, or choosing Attach as context
 from that thread's row menu, uses this same path: the mention search, given
 the thread's id, returns that thread only when this window can Open it, so
 where its title would rank does not matter, and the renderer does not read the
-transcript to attach the chip. In Chat, an explicit mention of a Chat thread also grants the source
+transcript to attach the chip. A turn records the ids its message mentioned
+(`threadMentionIds` on the Chat turn, on Work's `work.turn-accepted@1` and on
+Code's `conversation-turn-started`; absent when it mentioned none), so a reader
+can show which thread a `#[Title]` in the message names (maintainer decision,
+2026-11-25). They are presentation alone: no title, transcript or authority of
+the mentioned thread is stored, a later turn never reads them as context, and a
+retry or resume resolves nothing from them. A Chat branch's and a Work fork's
+copies of the message keep them. In Chat, an explicit mention of a Chat thread also grants the source
 provider the bounded `octant_ask_thread` tool for that turn: it may send one of
 the user's instructions to the mentioned Chat thread and receive its completed
 reply, at most three times a turn by default, a count the person can change

@@ -433,6 +433,50 @@ field, and a label names it. Rejected: a chip row above a text field with the
 tag kept as text (not inline), and a styled highlight behind the tag text (no
 logo or names).
 
+## Mentioning a thread in a prompt
+
+A thread chosen from the `#` list, dropped on the composer, or attached from
+its row menu sits in the prompt as one inline chip: its Project's mark (a `#`
+where it has none), its title, and a dot while it works or waits on the person
+(maintainer decision, 2026-11-25). There is no chip row above the prompt. The
+prompt's text stays `#[Title]`, so a copy, a queued message and the provider
+read what they always did. The caret and deletion treat a chip as one unit, and
+a cut and paste or an undo that brings the text back brings its thread back.
+Chips whose threads share a title keep their own places through an edit, so
+deleting one removes that thread and not the other; deleting the chip stops the
+mention, and Remove takes the chip and its text together.
+
+Hovering a chip opens the thread's card; pressing it, by pointer, touch or key,
+opens the same card with focus in it. The card is the
+[sidebar row's](workspace.md#sidebar): title, age, live state,
+Project, checkout, provider and model. Below a rule it says what the turn gets:
+"This turn reads up to its last 12 messages, read-only.", or that a mentioned
+Chat can receive a message. Its actions are **Open thread**, **Side Chat** where
+the composer offers it, and **Remove**. Pull requests and issues read there as
+facts, not links. Hovering never moves focus from the prompt.
+
+The card's facts are the window's own sidebar rows, read by thread id: drawing
+it asks the host for nothing, and it says nothing the sidebar could not. A
+thread the window does not list shows what the host's search said of it (title,
+mode and Project) and no Open thread. A thread the host refused is outlined and
+shows its reason and no other fact, even where the window lists it.
+
+Each hit of the `#` list shows the same facts in a row: the Project's mark, the
+title, the live state or the age, the provider and model, and the mode and
+Project. A phone's row leaves out the model.
+
+A sent message keeps its chips. The turn stores the mentioned ids and nothing
+else of their threads ([Architecture](../architecture.md#modes-chat-work-and-code)),
+and each id is matched to the chip text its thread's title reads as now; a
+thread renamed since is matched by order when exactly one place is left for each
+id that is left. A mention of a thread the window does not list, text no id
+claims, and a message sent before ids were stored stay the text they were. A
+side task's receipt opens the same card from the title of the thread it
+started, while the window lists that thread.
+
+Rejected: opening the thread on a press, which would leave a half-written prompt
+by accident and leave touch with no way to the card.
+
 ## Subagents in a thread
 
 A thread's subagents sit in a card attached above the composer's message
