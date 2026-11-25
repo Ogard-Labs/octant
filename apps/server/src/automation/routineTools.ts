@@ -38,7 +38,7 @@ const MAX_REASON_LENGTH = 500;
 /** A run's version moves while it runs; a report retries a racing append this many times. */
 const REPORT_ATTEMPTS = 3;
 
-const definition: ProviderToolDefinition = {
+export const routinesDefinition: ProviderToolDefinition = {
   name: ROUTINES_TOOL_NAME,
   description: [
     "See this Project's routines and their recent runs, ask the person to pause or archive one this thread started, or report how a routine's run went.",
@@ -155,7 +155,7 @@ export function createRoutineTools(input: {
   };
 
   const set: AppManagedToolSet = {
-    definitions: [definition],
+    definitions: [routinesDefinition],
     execute: async ({ inputJson, signal }) => {
       if (signal?.aborted) return refused("tool-interrupted", "The turn was cancelled.");
       const fields = parseFields(inputJson);

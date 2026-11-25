@@ -1,0 +1,507 @@
+import {
+  CODE_DEBUG_TOOL_DEFINITION,
+  CODE_LANGUAGE_TOOL_DEFINITION,
+  lookupClosedToolCatalogEntry,
+  NATIVE_HARNESS_TOOL_DEFINITIONS,
+  nativeHarnessToolCapabilityId,
+  NativeHarnessToolName,
+  WEB_SEARCH_TOOL_DEFINITION,
+  type OctantMode,
+  type ProviderContextBlock,
+  type ProviderToolDefinition,
+} from "@octant/contracts";
+import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
+import {
+  PAST_THREADS_TOOL_DEFINITION,
+  REMEMBER_PERSON_TOOL_DEFINITION,
+} from "@octant/contracts/person-memory";
+import type { MediaToolHostPort } from "@octant/plugin-api/media-tools";
+import {
+  CREATE_IMAGE_MEDIA_TOOL_PLUGIN,
+  CREATE_VIDEO_MEDIA_TOOL_PLUGIN,
+  LOOK_MEDIA_TOOL_PLUGIN,
+  NARRATE_MEDIA_TOOL_PLUGIN,
+  TRANSCRIBE_MEDIA_TOOL_PLUGIN,
+} from "@octant/plugin-host/media-tools";
+import {
+  providerTurnContextDelta,
+  renderContextBesideRequest,
+  renderOctantInstructions,
+  renderProviderTurnPrompt,
+} from "@octant/provider-sdk/chat-conformance";
+import { Schema } from "effect";
+import { AGENTS_TOOL_DEFINITION } from "../agentRun/agentRunManagedTools";
+import {
+  chatRoutineProposalDefinition,
+  routineProposalDefinition,
+} from "../automation/routineProposalTools";
+import { routinesDefinition } from "../automation/routineTools";
+import { BROWSER_TOOL_DEFINITION } from "../browser/browserToolDefinition";
+import {
+  CANVAS_TOOL_NAME,
+  canvasDefinitionSchema,
+  canvasToolDescription,
+} from "../canvas/canvasAgentTools";
+import {
+  documentDeliveryInstructions,
+  offersCanvasTool,
+} from "../canvas/canvasDeliveryInstructions";
+import { THREAD_DIALOGUE_TOOL_DEFINITION } from "../chat/threadDialogueService";
+import {
+  androidDefinition,
+  appleDefinition,
+  pullRequestDefinition,
+  terminalDefinition,
+} from "../code/codeAppManagedTools";
+import { REPORT_FINISHED_TOOL_DEFINITION } from "../finishedReceipts/finishedReceiptTools";
+import { followUpSuggestionInstructionsFor } from "../followUps/followUpSuggestionInstructions";
+import { githubReadDefinition } from "../github/githubReadToolService";
+import { nativeHarnessInstructions } from "../harness/nativeHarnessInstructions";
+import { composeSystem } from "../harness/nativeHarnessLoop";
+import { octantOrientation } from "../orientation/octantOrientation";
+import { MAC_TOOL } from "../plugins/computerUse/computerUsePlugin";
+import { linearReadDefinition } from "../plugins/linear/linearReadToolService";
+import { projectMemoryDefinition } from "../projectMemory/projectMemoryTools";
+import { appToolHostLines } from "../providers/appToolHostLines";
+import { codexDynamicTools } from "../providers/codexDriver";
+import { encodeChatCompletionsTools } from "../providers/openAiToolEncoding";
+import { threadsToolDefinition } from "../siblingThreads/siblingThreadTools";
+import { sideTaskDefinition } from "../sideTasks/sideTaskTools";
+import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
+
+/**
+ * How much Octant itself puts in front of a model: the widest tool list and
+ * instructions each runtime can be given, encoded the way that runtime's
+ * adapter sends them. It is built from the same definitions and renderers a
+ * turn uses, with no server, so a change that makes every prompt larger shows
+ * as a number before it ships. What the person adds (skills, memory, files,
+ * plugins, MCP servers) and a runtime's own prompt are not Octant's and are
+ * not counted.
+ */
+
+export const AGENT_PROMPT_BUDGET_PATH = "scripts/agent-prompt-size-budget.json";
+
+/** The runtimes that carry Octant's tools; `harness` is Octant Harness on a model endpoint. */
+export const AGENT_PROMPT_RUNTIMES = [
+  "claude",
+  "codex",
+  "opencode",
+  "acp",
+  "pi",
+  "harness",
+] as const;
+export type AgentPromptRuntime = (typeof AGENT_PROMPT_RUNTIMES)[number];
+
+/** A thread's lead in each mode, and a child run in each mode. */
+export const AGENT_PROMPT_CONTEXTS = [
+  "chat",
+  "work",
+  "code",
+  "chat-child",
+  "work-child",
+  "code-child",
+] as const;
+export type AgentPromptContext = (typeof AGENT_PROMPT_CONTEXTS)[number];
+
+/** Guided tools the widest turn of no measured context carries, each with why. */
+export const NOT_MEASURED_TOOLS: Readonly<Record<string, string>> = {
+  octant_zen: "only the assistant of an active Zen space carries it",
+  octant_side_chat_list_files: "a Side Chat's only tools, beside no other",
+  octant_side_chat_read_file: "a Side Chat's only tools, beside no other",
+  octant_side_chat_search_files: "a Side Chat's only tools, beside no other",
+};
+
+export interface AgentPromptPart {
+  readonly instructionBytes: number;
+  readonly toolBytes: number;
+  readonly estimatedTokens: number;
+}
+
+export interface AgentPromptSize {
+  readonly firstPrompt: AgentPromptPart;
+  /** What Octant sends again on every later turn of the same session. */
+  readonly laterTurn: AgentPromptPart;
+}
+
+export type AgentPromptReport = Readonly<
+  Record<AgentPromptRuntime, Readonly<Record<AgentPromptContext, AgentPromptSize>>>
+>;
+
+export interface AgentPromptBudgetEntry {
+  readonly firstPromptBytes: number;
+  readonly laterTurnBytes: number;
+}
+
+export type AgentPromptBudget = Readonly<
+  Record<AgentPromptRuntime, Readonly<Record<AgentPromptContext, AgentPromptBudgetEntry>>>
+>;
+
+export interface AgentPromptOverrun {
+  readonly runtime: AgentPromptRuntime;
+  readonly context: AgentPromptContext;
+  readonly measure: keyof AgentPromptBudgetEntry;
+  readonly measured: number;
+  readonly budget: number;
+}
+
+const refused = async () => ({ status: "refused" as const, reason: "measured only" });
+const refusedWith = async () => ({ status: "refused" as const, error: "measured only" });
+
+/** A port that answers yes to every capability, so each media tool gives its widest definition. */
+function widestMediaPort(mode: OctantMode): MediaToolHostPort {
+  const isAvailable = () => true;
+  return {
+    turn: {
+      mode,
+      hasFolder: mode !== "chat",
+      unattended: false,
+      inPlan: () => false,
+      allowed: () => true,
+    },
+    transcription: { isAvailable, transcribe: refused },
+    narration: { isAvailable, narrate: refused },
+    imageDescription: {
+      isAvailable,
+      describeAttachment: refused,
+      describeFolderImage: refused,
+    },
+    imageGeneration: {
+      isAvailable,
+      generate: refusedWith,
+      ...(mode === "chat" ? {} : { save: refusedWith, iconSet: refusedWith }),
+    },
+    videoGeneration: {
+      isAvailable,
+      describeModels: () => "",
+      generate: refusedWith,
+      ...(mode === "chat" ? {} : { save: refusedWith }),
+    },
+  };
+}
+
+function mediaTools(
+  mode: OctantMode,
+  plugins: ReadonlyArray<typeof LOOK_MEDIA_TOOL_PLUGIN>,
+): ReadonlyArray<ProviderToolDefinition> {
+  const port = widestMediaPort(mode);
+  return plugins.flatMap((plugin) => plugin.createTools(port)?.definitions ?? []);
+}
+
+function canvasTool(mode: OctantMode, scope: "thread" | "run"): ProviderToolDefinition {
+  return {
+    name: CANVAS_TOOL_NAME,
+    description: canvasToolDescription(mode, scope),
+    inputSchema: canvasDefinitionSchema,
+  };
+}
+
+const isHarnessToolName = Schema.is(NativeHarnessToolName);
+
+/** What a child run's session is composed of: the workspace tools and the web, never a lead's thread tools. */
+const CHILD_HARNESS_TOOLS: ReadonlySet<string> = new Set([
+  "read",
+  "grep",
+  "glob",
+  "edit",
+  "write",
+  "bash",
+  "web-fetch",
+  "web-search",
+  "ask-user",
+]);
+
+function harnessTools(mode: OctantMode, child: boolean): ReadonlyArray<ProviderToolDefinition> {
+  return NATIVE_HARNESS_TOOL_DEFINITIONS.filter((definition) => {
+    if (!isHarnessToolName(definition.name)) return false;
+    const entry = lookupClosedToolCatalogEntry({
+      id: nativeHarnessToolCapabilityId(definition.name) as never,
+      version: 1,
+    });
+    if (entry?.modes.includes(mode) !== true) return false;
+    return (
+      !child ||
+      (CHILD_HARNESS_TOOLS.has(definition.name) && (definition.name !== "bash" || mode === "code"))
+    );
+  });
+}
+
+const EVERYWHERE: ReadonlyArray<ProviderToolDefinition> = [
+  AGENTS_TOOL_DEFINITION,
+  MAC_TOOL,
+  projectMemoryDefinition,
+  PAST_THREADS_TOOL_DEFINITION,
+  REMEMBER_PERSON_TOOL_DEFINITION,
+];
+
+const ALL_MEDIA = [
+  CREATE_IMAGE_MEDIA_TOOL_PLUGIN,
+  CREATE_VIDEO_MEDIA_TOOL_PLUGIN,
+  LOOK_MEDIA_TOOL_PLUGIN,
+  NARRATE_MEDIA_TOOL_PLUGIN,
+  TRANSCRIBE_MEDIA_TOOL_PLUGIN,
+];
+
+/** The `octant_*` tools (and Chat's search) the widest turn of a context carries. */
+function octantTools(context: AgentPromptContext): ReadonlyArray<ProviderToolDefinition> {
+  switch (context) {
+    case "chat":
+      return [
+        ...EVERYWHERE,
+        ...mediaTools("chat", ALL_MEDIA),
+        canvasTool("chat", "thread"),
+        sideTaskDefinition(false, false),
+        chatRoutineProposalDefinition,
+        THREAD_DIALOGUE_TOOL_DEFINITION,
+      ];
+    case "work":
+      return [
+        ...EVERYWHERE,
+        ...mediaTools("work", ALL_MEDIA),
+        canvasTool("work", "thread"),
+        BROWSER_TOOL_DEFINITION,
+        OCTANT_CREDENTIAL_TOOL,
+        threadsToolDefinition(["list", "read", "wait", "send", "acknowledge", "receipts", "help"]),
+        sideTaskDefinition(false, false),
+        routineProposalDefinition,
+        routinesDefinition,
+        REPORT_FINISHED_TOOL_DEFINITION,
+      ];
+    case "code":
+      return [
+        ...EVERYWHERE,
+        ...mediaTools("code", ALL_MEDIA),
+        canvasTool("code", "thread"),
+        BROWSER_TOOL_DEFINITION,
+        OCTANT_CREDENTIAL_TOOL,
+        terminalDefinition,
+        CODE_DEBUG_TOOL_DEFINITION,
+        appleDefinition,
+        androidDefinition,
+        pullRequestDefinition,
+        githubReadDefinition,
+        linearReadDefinition,
+        CODE_LANGUAGE_TOOL_DEFINITION,
+        threadsToolDefinition([
+          "list",
+          "read",
+          "wait",
+          "send",
+          "acknowledge",
+          "receipts",
+          "board",
+          "start",
+          "help",
+        ]),
+        sideTaskDefinition(true, true),
+        routineProposalDefinition,
+        routinesDefinition,
+        REPORT_FINISHED_TOOL_DEFINITION,
+      ];
+    case "chat-child":
+      return [PAST_THREADS_TOOL_DEFINITION];
+    case "work-child":
+      return [PAST_THREADS_TOOL_DEFINITION, canvasTool("work", "run"), BROWSER_TOOL_DEFINITION];
+    case "code-child":
+      return [PAST_THREADS_TOOL_DEFINITION, canvasTool("code", "run"), BROWSER_TOOL_DEFINITION];
+  }
+}
+
+function modeOf(context: AgentPromptContext): OctantMode {
+  return context === "chat" || context === "chat-child"
+    ? "chat"
+    : context === "work" || context === "work-child"
+      ? "work"
+      : "code";
+}
+
+function isChild(context: AgentPromptContext): boolean {
+  return context.endsWith("-child");
+}
+
+/** The first-party tools the widest turn of a context carries on every runtime. */
+export function promptTools(context: AgentPromptContext): ReadonlyArray<ProviderToolDefinition> {
+  const own = octantTools(context);
+  // A child's workspace tools are Octant's own on every runtime.
+  if (isChild(context)) return [...harnessTools(modeOf(context), true), ...own];
+  return context === "chat" ? [...own, WEB_SEARCH_TOOL_DEFINITION] : own;
+}
+
+function runtimeTools(
+  runtime: AgentPromptRuntime,
+  context: AgentPromptContext,
+): ReadonlyArray<ProviderToolDefinition> {
+  if (runtime !== "harness" || isChild(context)) return promptTools(context);
+  const harness = harnessTools(modeOf(context), false);
+  const named = new Set(harness.map((tool) => tool.name));
+  return [...harness, ...promptTools(context).filter((tool) => !named.has(tool.name))];
+}
+
+/** Octant's own instruction blocks for a context, in the order a turn sends them. */
+function promptInstructions(
+  runtime: AgentPromptRuntime,
+  context: AgentPromptContext,
+  tools: ReadonlyArray<ProviderToolDefinition>,
+): ReadonlyArray<ProviderContextBlock> {
+  const mode = modeOf(context);
+  const lines = appToolHostLines(tools).map(
+    (line): ProviderContextBlock => ({ kind: "instructions", text: line.text, tool: line.tool }),
+  );
+  if (isChild(context)) return lines;
+  const delivery = documentDeliveryInstructions({
+    artifactToolName: undefined,
+    canvasOffered: offersCanvasTool(tools),
+  });
+  return [
+    octantOrientation(mode),
+    ...(runtime === "harness" ? nativeHarnessInstructions(mode, { platform: "darwin" }) : []),
+    ...turnDecisionInstructions(mode),
+    followUpSuggestionInstructionsFor(true),
+    ...(delivery === undefined ? [] : [{ kind: "instructions" as const, text: delivery }]),
+    ...lines,
+  ];
+}
+
+const bytes = (text: string): number => Buffer.byteLength(text, "utf8");
+
+function renderedInstructions(
+  runtime: AgentPromptRuntime,
+  blocks: ReadonlyArray<ProviderContextBlock>,
+  tools: ReadonlyArray<ProviderToolDefinition>,
+): number {
+  if (runtime === "harness")
+    return bytes(
+      composeSystem(
+        blocks.map((block) => block.text),
+        tools,
+      ) ?? "",
+    );
+  if (blocks.length === 0) return 0;
+  if (runtime === "claude") return bytes(renderContextBesideRequest(blocks));
+  if (runtime === "codex") return bytes(renderOctantInstructions(blocks));
+  return bytes(renderProviderTurnPrompt({ context: blocks, prompt: "" }));
+}
+
+/** The tool list as the runtime's adapter hands it over: MCP's list, Codex's dynamic tools, or the request's own. */
+function renderedTools(
+  runtime: AgentPromptRuntime,
+  tools: ReadonlyArray<ProviderToolDefinition>,
+): number {
+  if (runtime === "codex") return bytes(JSON.stringify(codexDynamicTools(tools) ?? []));
+  if (runtime === "harness") return bytes(JSON.stringify(encodeChatCompletionsTools(tools)));
+  return bytes(JSON.stringify(tools));
+}
+
+function part(instructionBytes: number, toolBytes: number): AgentPromptPart {
+  return {
+    instructionBytes,
+    toolBytes,
+    estimatedTokens: Math.ceil((instructionBytes + toolBytes) / 4),
+  };
+}
+
+/** ACP reports no prompt retention and an endpoint keeps none, so both are told again. */
+const KEEPS_STANDING_CONTEXT: ReadonlySet<AgentPromptRuntime> = new Set([
+  "claude",
+  "codex",
+  "opencode",
+  "pi",
+]);
+
+function measure(runtime: AgentPromptRuntime, context: AgentPromptContext): AgentPromptSize {
+  const tools = runtimeTools(runtime, context);
+  const blocks = promptInstructions(runtime, context, tools);
+  // A child's follow-up carries no context of its own: its session has it.
+  const later = isChild(context)
+    ? []
+    : providerTurnContextDelta({
+        context: blocks,
+        holds: () => KEEPS_STANDING_CONTEXT.has(runtime),
+        heldIdentities: new Set(),
+        identify: (block) => block.text,
+      }).context;
+  const toolBytes = renderedTools(runtime, tools);
+  return {
+    firstPrompt: part(renderedInstructions(runtime, blocks, tools), toolBytes),
+    laterTurn: part(
+      renderedInstructions(runtime, later, tools),
+      runtime === "harness" ? toolBytes : 0,
+    ),
+  };
+}
+
+function byRuntimeAndContext<T>(
+  read: (runtime: AgentPromptRuntime, context: AgentPromptContext) => T,
+): Readonly<Record<AgentPromptRuntime, Readonly<Record<AgentPromptContext, T>>>> {
+  const forRuntime = (runtime: AgentPromptRuntime) => ({
+    chat: read(runtime, "chat"),
+    work: read(runtime, "work"),
+    code: read(runtime, "code"),
+    "chat-child": read(runtime, "chat-child"),
+    "work-child": read(runtime, "work-child"),
+    "code-child": read(runtime, "code-child"),
+  });
+  return {
+    claude: forRuntime("claude"),
+    codex: forRuntime("codex"),
+    opencode: forRuntime("opencode"),
+    acp: forRuntime("acp"),
+    pi: forRuntime("pi"),
+    harness: forRuntime("harness"),
+  };
+}
+
+export function measureAgentPrompts(): AgentPromptReport {
+  return byRuntimeAndContext(measure);
+}
+
+const total = (size: AgentPromptPart): number => size.instructionBytes + size.toolBytes;
+
+export function budgetFor(report: AgentPromptReport): AgentPromptBudget {
+  return byRuntimeAndContext((runtime, context) => ({
+    firstPromptBytes: total(report[runtime][context].firstPrompt),
+    laterTurnBytes: total(report[runtime][context].laterTurn),
+  }));
+}
+
+/** A missing or malformed number would silently drop that limit from the check. */
+export function readAgentPromptBudget(
+  value: unknown,
+):
+  | { readonly status: "read"; readonly budget: AgentPromptBudget }
+  | { readonly status: "refused"; readonly message: string } {
+  let missing: string | undefined;
+  const field = (from: unknown, key: string): unknown =>
+    typeof from === "object" && from !== null ? Reflect.get(from, key) : undefined;
+  const budget = byRuntimeAndContext((runtime, context): AgentPromptBudgetEntry => {
+    const entry = field(field(value, runtime), context);
+    const whole = (measure: keyof AgentPromptBudgetEntry): number => {
+      const size = field(entry, measure);
+      if (typeof size === "number" && Number.isInteger(size) && size >= 0) return size;
+      missing ??= `${AGENT_PROMPT_BUDGET_PATH} has no whole-byte ${measure} for ${runtime} ${context}.`;
+      return 0;
+    };
+    return {
+      firstPromptBytes: whole("firstPromptBytes"),
+      laterTurnBytes: whole("laterTurnBytes"),
+    };
+  });
+  return missing === undefined
+    ? { status: "read", budget }
+    : { status: "refused", message: missing };
+}
+
+export function overBudget(
+  report: AgentPromptReport,
+  budget: AgentPromptBudget,
+): ReadonlyArray<AgentPromptOverrun> {
+  const measured = budgetFor(report);
+  return AGENT_PROMPT_RUNTIMES.flatMap((runtime) =>
+    AGENT_PROMPT_CONTEXTS.flatMap((context) =>
+      (["firstPromptBytes", "laterTurnBytes"] as const).flatMap((measure) => {
+        const size = measured[runtime][context][measure];
+        const limit = budget[runtime][context][measure];
+        return size > limit ? [{ runtime, context, measure, measured: size, budget: limit }] : [];
+      }),
+    ),
+  );
+}

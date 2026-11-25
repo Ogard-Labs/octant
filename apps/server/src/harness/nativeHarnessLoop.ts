@@ -1809,7 +1809,7 @@ function splitInstructions(context: ReadonlyArray<ProviderContextBlock> | undefi
   };
 }
 
-function composeSystem(
+export function composeSystem(
   instructions: ReadonlyArray<string>,
   tools: ReadonlyArray<ProviderToolDefinition>,
 ): string | undefined {

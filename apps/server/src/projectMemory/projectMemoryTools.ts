@@ -25,7 +25,7 @@ export const PROJECT_MEMORY_TOOL_NAME = "octant_memory";
 const MAX_LISTED_ENTRIES = 100;
 const MAX_TOOL_INPUT_BYTES = 8 * 1024;
 
-const definition: ProviderToolDefinition = {
+export const projectMemoryDefinition: ProviderToolDefinition = {
   name: PROJECT_MEMORY_TOOL_NAME,
   description: [
     "Read and change this Project's memory: the short decisions, facts, preferences, summaries, and outcomes every thread in the Project starts with.",
@@ -116,7 +116,7 @@ export function createProjectMemoryTools(input: {
 }): AppManagedToolSet {
   return withToolFamilyHelp(
     {
-      definitions: [definition],
+      definitions: [projectMemoryDefinition],
       execute: async ({ name, inputJson, signal }) => {
         if (name !== PROJECT_MEMORY_TOOL_NAME) {
           return { result: { error: "tool-unavailable" }, isError: true };
