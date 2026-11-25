@@ -474,6 +474,14 @@ line; a paired device uses the section as a local window does (maintainer
 decision, 2026-11-12; server policy admits a person-paired device and refuses
 hub-introduced devices; paired UI follow-up remains)
 ([rules](../architecture.md#modes-chat-work-and-code)).
+The same section starts with the choices for new worktrees: **Branch prefix** (a
+text field, `octant/` unless changed, checked as a branch prefix when it loses
+focus; a segment Windows reserves is refused) and **Branch name** (a select:
+prefix and short id, or prefix and words from the prompt, which leave out secrets
+and paths; the host's start screen uses the words only when it could read every
+taken name). Each saves as it changes. A person-paired device may change these
+choices; a hub-introduced device may not
+([rules](../architecture.md#modes-chat-work-and-code)).
 **Worktrees on this computer** follows it: a first row says when the host last
 scanned ("Not scanned since Octant started" until then) and how many it found,
 with **Scan** and, when any qualify, **Remove N merged or gone**, which asks
