@@ -5,7 +5,9 @@
  * ended: a turn the person stopped is not a failure. Chat records that as
  * `cancelled`; Code's `interrupted` is the person's only after the Stop marker
  * it journals first, and a provider that exits mid-turn is a failure. A turn a
- * restart cut off is left to restart recovery, which may still continue it.
+ * restart cut off is left to restart recovery, which may still continue it:
+ * recovery journals its `interrupted` after this listens, so an `interrupted`
+ * counts only for a turn this host saw start.
  */
 import {
   decodeChatAttemptUpdated,
@@ -36,7 +38,15 @@ export interface SideTaskReportFailureWakePorts {
 // The fields that tell a failed turn apart, read before a whole event is
 // decoded: most events a turn journals are its progress.
 interface ChatAttemptPeek {
-  readonly attempt?: { readonly outcome?: string; readonly failure?: { readonly code?: string } };
+  readonly attempt?: {
+    readonly id?: string;
+    readonly outcome?: string;
+    readonly failure?: { readonly code?: string };
+  };
+}
+
+interface ChatTurnPeek {
+  readonly turn?: { readonly attempts?: ReadonlyArray<{ readonly id?: string }> };
 }
 
 interface WorkTurnPeek {
@@ -44,6 +54,7 @@ interface WorkTurnPeek {
 }
 
 interface CodeFramePeek {
+  readonly operationId?: unknown;
   readonly event?: {
     readonly kind?: string;
     readonly state?: string;
@@ -76,6 +87,8 @@ export class SideTaskReportFailureWake {
   readonly #ports: SideTaskReportFailureWakePorts;
   /** Code turns a person asked to stop, until their end is journaled. */
   readonly #codeStops = new Set<string>();
+  /** Chat attempts and Code turns that started in this host, until they end. */
+  readonly #startedHere = new Set<string>();
 
   constructor(ports: SideTaskReportFailureWakePorts) {
     this.#ports = ports;
@@ -105,13 +118,25 @@ export class SideTaskReportFailureWake {
   #wakeFor(event: EventEnvelope): (() => void) | undefined {
     const ports = this.#ports;
     const isReport = (mark: ReadMark): boolean => mark?.kind === "side-task-report";
+    if (event.eventName === "chat.turn-created@1") {
+      for (const attempt of (event.payload as ChatTurnPeek | undefined)?.turn?.attempts ?? [])
+        if (attempt.id !== undefined) this.#startedHere.add(`chat:${attempt.id}`);
+      return undefined;
+    }
     if (event.eventName === "chat.attempt-updated@1") {
       // A stopped Chat answer is `cancelled`; `interrupted` is the host's or
       // the provider's doing, which is a failure to the person.
-      // A Stop the provider never confirmed is still the person's Stop.
       const peek = (event.payload as ChatAttemptPeek | undefined)?.attempt;
+      const key = `chat:${peek?.id ?? ""}`;
+      if (peek?.outcome === "queued" || peek?.outcome === "streaming") {
+        this.#startedHere.add(key);
+        return undefined;
+      }
+      const startedHere = this.#startedHere.delete(key);
       if (peek?.outcome !== "failed" && peek?.outcome !== "interrupted") return undefined;
+      // A Stop the provider never confirmed is still the person's Stop.
       if (peek.failure?.code === "stop-unconfirmed") return undefined;
+      if (peek.outcome === "interrupted" && !startedHere) return undefined;
       const { attempt } = decodeChatAttemptUpdated(event.payload);
       return isReport(ports.chatTurnMark(attempt.threadId, String(attempt.turnId)))
         ? () => ports.wakeChat(attempt.threadId)
@@ -131,11 +156,18 @@ export class SideTaskReportFailureWake {
         this.#codeStops.add(String(decodeCodeOperationEventFrame(event.payload).operationId));
         return undefined;
       }
+      // Only the operation is read: the start is the turn's largest frame.
+      const peek = event.payload as CodeFramePeek | undefined;
+      if (peek?.event?.kind === "conversation-turn-started") {
+        if (typeof peek.operationId === "string") this.#startedHere.add(`code:${peek.operationId}`);
+        return undefined;
+      }
       const end = codeFrameEnd(event.payload);
       if (end === undefined) return undefined;
       const frame = decodeCodeOperationEventFrame(event.payload);
       const stopped = this.#codeStops.delete(String(frame.operationId));
-      if (end === "other" || (end === "interrupted" && stopped)) return undefined;
+      const startedHere = this.#startedHere.delete(`code:${String(frame.operationId)}`);
+      if (end === "other" || (end === "interrupted" && (stopped || !startedHere))) return undefined;
       return isReport(ports.codeTurnMark(frame.threadId, frame.operationId))
         ? () => ports.wakeCode(frame.threadId)
         : undefined;
