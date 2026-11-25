@@ -360,7 +360,7 @@ import { PlanUsageProvider } from "./usage/PlanUsageContext";
 import { FollowUpLineageProvider } from "./followUps/followUpLineage";
 import {
   ThreadReferencesContext,
-  useThreadReferenceDirectory,
+  useThreadReferenceLists,
 } from "./threadReferences/ThreadReferences";
 import { SubagentProvidersProvider } from "./agents/subagentProviders";
 import { AppBackdrop } from "./theme/AppBackdrop";
@@ -5883,7 +5883,7 @@ function LaunchedShell(
     workNavigation.navigation,
   ]);
 
-  const threadReferences = useThreadReferenceDirectory({
+  const threadReferences = useThreadReferenceLists({
     chat: navigationModel.markedChatNavigation,
     work: navigationModel.workProjectThreads,
     code: navigationModel.codeProjectThreads,

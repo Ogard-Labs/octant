@@ -26,7 +26,6 @@ import {
 import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { LazyThreadReferenceChip } from "../threadReferences/LazyThreadReferenceChip";
-import { useThreadReferences } from "../threadReferences/ThreadReferences";
 import "./follow-up-suggestions.css";
 
 type StartedResult = Extract<SideTaskResult, { readonly kind: "side-task-started" }>;
@@ -264,19 +263,6 @@ function wantsWorktree(task: SideTask, context: SideTaskContext): boolean {
   return task.offer.mode === "code" && (task.offer.target === "new-worktree" || context === "fork");
 }
 
-/**
- * The thread a side task started, by the task's name: its card while this
- * window lists the thread, and otherwise the name alone, beside Open.
- */
-function SideTaskThreadName(props: { readonly threadId: string; readonly title: string }) {
-  const listed = useThreadReferences().find(props.threadId) !== undefined;
-  return listed ? (
-    <LazyThreadReferenceChip look="link" threadId={props.threadId} title={props.title} />
-  ) : (
-    props.title
-  );
-}
-
 function SideTaskCard(props: { readonly task: SideTask; readonly running: boolean }) {
   const { task } = props;
   const value = useContext(SideTasksContext);
@@ -305,7 +291,8 @@ function SideTaskCard(props: { readonly task: SideTask; readonly running: boolea
             {task.startedThreadId === undefined ? (
               task.offer.title
             ) : (
-              <SideTaskThreadName
+              <LazyThreadReferenceChip
+                look="link"
                 threadId={String(task.startedThreadId)}
                 title={task.offer.title}
               />

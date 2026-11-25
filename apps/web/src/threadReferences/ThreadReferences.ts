@@ -1,89 +1,31 @@
-import { createContext, useContext, useMemo, useRef } from "react";
-import type { OctantMode } from "@octant/contracts/modes";
+import { createContext, useMemo, useRef } from "react";
 import type { CommandThread } from "../palette/buildOctantCommands";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 
-/** A thread this window lists, as any surface that names it can show it. */
-export interface ThreadReference {
-  readonly mode: OctantMode;
-  readonly thread: ChatThreadNavigationItem;
-  readonly projectName?: string;
-  /** The listed thread this one was forked from. */
-  readonly lineageParentTitle?: string;
-}
+type Rows = ReadonlyArray<ChatThreadNavigationItem>;
 
 /**
- * The threads the host already lists to this window, by id, a worker the
- * sidebar leaves out included, as Needs you and search include it. A name in a
- * prompt, a message or a receipt reads its facts here, so showing a thread's
- * card asks the host for nothing.
+ * The window's full thread lists, and how it opens one. Only the context and
+ * this hook load with the window; looking a thread up in the lists is
+ * `useThreadReferences`, which loads with the first surface that names one.
  */
-export interface ThreadReferences {
-  readonly find: (threadId: string) => ThreadReference | undefined;
-  readonly open?: (reference: ThreadReference) => void;
-}
-
-const NONE: ThreadReferences = { find: () => undefined };
-
-export const ThreadReferencesContext = createContext<ThreadReferences>(NONE);
-
-export function useThreadReferences(): ThreadReferences {
-  return useContext(ThreadReferencesContext);
-}
-
-/** Builds the window's directory from its full thread lists. */
-export function useThreadReferenceDirectory(input: {
-  readonly chat: ReadonlyArray<ChatThreadNavigationItem>;
-  readonly work: ReadonlyArray<ChatThreadNavigationItem>;
-  readonly code: ReadonlyArray<ChatThreadNavigationItem>;
+export interface ThreadReferenceLists {
+  readonly chat: Rows;
+  readonly work: Rows;
+  readonly code: Rows;
   readonly withProviderMark: (thread: ChatThreadNavigationItem) => ChatThreadNavigationItem;
   readonly projects: ReadonlyArray<{ readonly id: unknown; readonly name: string }>;
   readonly onOpen: (thread: CommandThread) => void;
-}): ThreadReferences {
-  const { chat, work, code, withProviderMark, projects } = input;
-  // The shell makes a new open handler on every render; the directory changes
-  // only with the rows it lists.
-  const openRef = useRef(input.onOpen);
-  openRef.current = input.onOpen;
-  return useMemo(() => {
-    const projectNames = new Map(projects.map((project) => [String(project.id), project.name]));
-    const rows = new Map<
-      string,
-      { readonly mode: OctantMode; readonly thread: ChatThreadNavigationItem }
-    >();
-    for (const [mode, threads] of [
-      ["chat", chat],
-      ["work", work],
-      ["code", code],
-    ] as const) {
-      for (const thread of threads) rows.set(thread.threadId, { mode, thread });
-    }
-    return {
-      find: (threadId) => {
-        const row = rows.get(threadId);
-        if (row === undefined) return undefined;
-        const { projectId, lineageParentThreadId } = row.thread;
-        const projectName = projectId === undefined ? undefined : projectNames.get(projectId);
-        const parentTitle =
-          lineageParentThreadId === undefined
-            ? undefined
-            : rows.get(lineageParentThreadId)?.thread.title;
-        return {
-          mode: row.mode,
-          thread: withProviderMark(row.thread),
-          ...(projectName === undefined ? {} : { projectName }),
-          ...(parentTitle === undefined ? {} : { lineageParentTitle: parentTitle }),
-        };
-      },
-      open: (reference) =>
-        openRef.current({
-          threadId: reference.thread.threadId,
-          title: reference.thread.title,
-          mode: reference.mode,
-          ...(reference.thread.projectId === undefined
-            ? {}
-            : { projectId: reference.thread.projectId }),
-        }),
-    };
-  }, [chat, code, projects, withProviderMark, work]);
+}
+
+export const ThreadReferencesContext = createContext<ThreadReferenceLists | undefined>(undefined);
+
+/** Holds the lists steady between changes: the shell makes a new open handler on every render. */
+export function useThreadReferenceLists(input: ThreadReferenceLists): ThreadReferenceLists {
+  const open = useRef(input.onOpen);
+  open.current = input.onOpen;
+  return useMemo(
+    () => ({ ...input, onOpen: (thread) => open.current(thread) }),
+    [input.chat, input.work, input.code, input.withProviderMark, input.projects],
+  );
 }

@@ -7,7 +7,7 @@ import { threadRowActivity } from "../shell/navigationModel";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { Hash } from "../ui/icons";
-import { useThreadReferences, type ThreadReference } from "./ThreadReferences";
+import { useThreadReferences, type ThreadReference } from "./useThreadReferences";
 import { threadModeLabel } from "./threadModeLabel";
 import "../composer/composer-chip.css";
 import "./thread-reference.css";
@@ -36,7 +36,10 @@ export interface ThreadReferenceChipProps {
   /** The host refused the thread: the reason shows and no fact about it does. */
   readonly unavailableReason?: string;
   readonly actions?: ReadonlyArray<ThreadReferenceAction>;
-  /** `chip` stands in text as one unit; `link` is the bare name in a sentence. */
+  /**
+   * `chip` stands in text as one unit; `link` is the bare name in a sentence,
+   * and the name alone for a thread this window does not list.
+   */
   readonly look?: "chip" | "link";
 }
 
@@ -62,6 +65,7 @@ export function ThreadReferenceChip(props: ThreadReferenceChipProps) {
   const [open, setOpen] = useState(false);
   const unavailable = props.unavailableReason;
   const reference = unavailable === undefined ? references.find(props.threadId) : undefined;
+  if (props.look === "link" && reference === undefined) return <>{props.title}</>;
   const state = liveState(reference);
   const place =
     unavailable !== undefined

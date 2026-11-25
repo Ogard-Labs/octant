@@ -1,8 +1,4 @@
-import {
-  MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES,
-  type MentionableThreadId,
-  type ThreadMentionCandidate,
-} from "@octant/contracts";
+import type { MentionableThreadId, ThreadMentionCandidate } from "@octant/contracts";
 import {
   applyThreadMentionChip,
   findThreadMentionTags,
@@ -12,8 +8,14 @@ import {
 import { useState, type KeyboardEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { ComposerInlineChips, ComposerInputElement } from "../composer/ComposerInput";
+import { lazyOr } from "../lib/lazyOr";
+import type { ThreadMentionChipProps } from "./ThreadMentionInlineChip";
 import { LazyThreadMentionOption } from "./LazyThreadMentionOption";
-import { LazyThreadReferenceChip } from "../threadReferences/LazyThreadReferenceChip";
+
+const LazyThreadMentionChip = lazyOr<ThreadMentionChipProps>(
+  async () => (await import("./ThreadMentionInlineChip")).ThreadMentionInlineChip,
+  ({ chip }) => <span>{chip.title}</span>,
+);
 
 /**
  * A `#thread` chip a composer is currently carrying. The chip is a structured
@@ -145,31 +147,6 @@ export function useThreadMentionTypeahead(input: {
     return false;
   }
 
-  // The mention and the text that shows it leave together: text left behind
-  // would read as a mention the turn no longer carries.
-  function remove(chip: ThreadMentionChip) {
-    if (mentions === undefined) return;
-    let draft = input.draft;
-    let caretIndex = draft.length;
-    for (const tag of findThreadMentionTags(draft, mentions.chips).toReversed()) {
-      if (String(tag.chip.threadId) !== String(chip.threadId)) continue;
-      // A chip is written with one space after it; taking the chip takes that
-      // space where it would leave two, or one at the start of the draft.
-      const opensWithSpace = tag.start === 0 || /\s/.test(draft[tag.start - 1] ?? "");
-      const end = opensWithSpace && draft[tag.end] === " " ? tag.end + 1 : tag.end;
-      draft = `${draft.slice(0, tag.start)}${draft.slice(end)}`;
-      caretIndex = tag.start;
-    }
-    mentions.onRemoveChip(chip.threadId);
-    input.onDraftChange(draft, caretIndex);
-    queueMicrotask(() => {
-      const element = input.textarea();
-      if (element === null) return;
-      element.focus();
-      element.setSelectionRange(caretIndex, caretIndex);
-    });
-  }
-
   const inlineChips: ComposerInlineChips | undefined =
     mentions === undefined
       ? undefined
@@ -183,33 +160,13 @@ export function useThreadMentionTypeahead(input: {
             })),
           render: (id) => {
             const chip = mentions.chips.find((each) => String(each.threadId) === id);
-            if (chip === undefined) return null;
-            const canReceive = mentions.dialogueEnabled === true && chip.mode === "chat";
-            const openSideChat = mentions.onOpenSideChat;
-            return (
-              <LazyThreadReferenceChip
-                access={canReceive ? "Can receive a message" : "Read-only"}
-                actions={[
-                  ...(openSideChat === undefined
-                    ? []
-                    : [
-                        {
-                          label: chip.hasSideChat === true ? "Reopen Side Chat" : "Side Chat",
-                          onSelect: () => openSideChat(chip.threadId),
-                          disabled: chip.unavailableReason !== undefined,
-                        },
-                      ]),
-                  { label: "Remove", onSelect: () => remove(chip) },
-                ]}
-                fallback={{ mode: chip.mode, placement: chip.placementLabel }}
-                receipt={`This turn reads up to its last ${String(
-                  MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES,
-                )} messages${canReceive ? ", and it can receive a message." : ", read-only."}`}
-                threadId={id}
-                title={chip.title}
-                {...(chip.unavailableReason === undefined
-                  ? {}
-                  : { unavailableReason: chip.unavailableReason })}
+            return chip === undefined ? null : (
+              <LazyThreadMentionChip
+                chip={chip}
+                draft={input.draft}
+                mentions={mentions}
+                onDraftChange={input.onDraftChange}
+                textarea={input.textarea}
               />
             );
           },

@@ -7,6 +7,7 @@ import {
   type ThreadMentionCandidate,
   type ThreadMentionTranscriptEntry,
 } from "@octant/contracts";
+import { collapseChipTitle, formatThreadMentionChip } from "./threadMentionChipText";
 
 /**
  * The active `#` token under the caret. `start`/`end` are draft offsets so the
@@ -17,17 +18,6 @@ export interface ThreadMentionToken {
   readonly query: string;
   readonly start: number;
   readonly end: number;
-}
-
-/**
- * A chip is written into the draft as `#[Title]`. Bracket delimiters exist
- * because thread titles contain spaces: a bare `#Title` chip could not be
- * told apart from ordinary prose that follows it, so deleting part of the
- * title would silently leave a chip pointing at text the user no longer sees.
- * Brackets make chip presence a decidable substring check.
- */
-export function formatThreadMentionChip(title: string): string {
-  return `#[${collapseChipTitle(title)}]`;
 }
 
 /**
@@ -68,221 +58,6 @@ export function applyThreadMentionChip(
   const chip = `${formatThreadMentionChip(title)} `;
   const next = `${draft.slice(0, token.start)}${chip}${draft.slice(token.end)}`;
   return { draft: next, caretIndex: token.start + chip.length };
-}
-
-/** One place a mentioned thread's chip stands in a text. */
-export interface ThreadMentionTag<T> {
-  readonly start: number;
-  readonly end: number;
-  readonly text: string;
-  readonly chip: T;
-}
-
-interface TitledSpan {
-  readonly start: number;
-  readonly end: number;
-  readonly text: string;
-}
-
-/**
- * Every `#[…]` in a text, in text order. A chip's title holds no bracket and no
- * line break, so one pass over the text finds them whatever the text holds.
- */
-function bracketSpans(text: string): ReadonlyArray<TitledSpan> {
-  const spans: TitledSpan[] = [];
-  let open: number | undefined;
-  for (let at = 0; at < text.length; at += 1) {
-    const character = text[at];
-    if (character === "[") open = text[at - 1] === "#" ? at - 1 : undefined;
-    else if (character === "\n") open = undefined;
-    else if (character === "]" && open !== undefined) {
-      spans.push({ start: open, end: at + 1, text: text.slice(open, at + 1) });
-      open = undefined;
-    }
-  }
-  return spans;
-}
-
-/** Every place one of these chip texts stands, in text order. */
-function chipTextSpans(text: string, chipTexts: ReadonlySet<string>): ReadonlyArray<TitledSpan> {
-  return bracketSpans(text).filter((span) => chipTexts.has(span.text));
-}
-
-/**
- * Where each chip stands in a text. Two mentioned threads can share a title,
- * and then read alike in the text, so the chips' own order decides which place
- * is whose. Text that repeats a mentioned thread's chip stands for that thread
- * again; text no chip claims stays ordinary text.
- */
-export function findThreadMentionTags<T extends { readonly title: string }>(
-  text: string,
-  chips: ReadonlyArray<T>,
-): ReadonlyArray<ThreadMentionTag<T>> {
-  if (chips.length === 0) return [];
-  const claims = new Map<string, T[]>();
-  for (const chip of chips) {
-    const chipText = formatThreadMentionChip(chip.title);
-    claims.set(chipText, [...(claims.get(chipText) ?? []), chip]);
-  }
-  const seen = new Map<string, number>();
-  return chipTextSpans(text, new Set(claims.keys())).flatMap((span) => {
-    const claimants = claims.get(span.text) ?? [];
-    const count = seen.get(span.text) ?? 0;
-    seen.set(span.text, count + 1);
-    const chip = claimants[count] ?? claimants.at(-1);
-    return chip === undefined ? [] : [{ ...span, chip }];
-  });
-}
-
-/**
- * Drop chips whose text the user has since edited out of the draft, and cap the
- * survivors at the per-turn bound. Chips are structured selections, so a chip
- * that no longer appears in the draft must not keep contributing context the
- * user believes they deleted. The survivors come back in draft order.
- *
- * Given the draft before the edit, a chip outside the edited part keeps its
- * own place, so deleting the first of two chips that share a title removes
- * that thread and not the other. Two such chips side by side read alike
- * whichever of them went, so the caret the edit left says where it was made.
- * Given the chips this draft dropped earlier, text that brings one back (an
- * undo, a cut and paste) brings its thread back.
- */
-export function reconcileThreadMentionChips<T extends { readonly title: string }>(
-  draft: string,
-  chips: ReadonlyArray<T>,
-  earlier: {
-    readonly draft?: string;
-    readonly caret?: number;
-    readonly dropped?: ReadonlyArray<T>;
-  } = {},
-): ReadonlyArray<T> {
-  const dropped = earlier.dropped ?? [];
-  const spans = chipTextSpans(
-    draft,
-    new Set([...chips, ...dropped].map((chip) => formatThreadMentionChip(chip.title))),
-  );
-  const placed = new Map<number, T>();
-  const used = new Set<T>();
-  if (earlier.draft !== undefined && earlier.draft !== draft) {
-    const before = earlier.draft;
-    const unchanged = unchangedEnds(before, draft, earlier.caret ?? draft.length);
-    const placedBefore = new Set<T>();
-    for (const tag of findThreadMentionTags(before, chips)) {
-      if (placedBefore.has(tag.chip)) continue;
-      placedBefore.add(tag.chip);
-      const start =
-        tag.end <= unchanged.start
-          ? tag.start
-          : tag.start >= before.length - unchanged.end
-            ? tag.start + draft.length - before.length
-            : undefined;
-      if (start === undefined) continue;
-      const span = spans.find((candidate) => candidate.start === start);
-      if (span?.text !== tag.text) continue;
-      placed.set(start, tag.chip);
-      used.add(tag.chip);
-    }
-  }
-  for (const span of spans) {
-    if (placed.has(span.start)) continue;
-    const chip = [...chips, ...dropped.toReversed()].find(
-      (candidate) => !used.has(candidate) && formatThreadMentionChip(candidate.title) === span.text,
-    );
-    if (chip === undefined) continue;
-    placed.set(span.start, chip);
-    used.add(chip);
-  }
-  return spans
-    .flatMap((span) => {
-      const chip = placed.get(span.start);
-      return chip === undefined ? [] : [chip];
-    })
-    .slice(0, MAX_THREAD_MENTIONS_PER_TURN);
-}
-
-/**
- * How many characters an edit left unchanged at the start and at the end of a
- * text. Where the two overlap, what stands after the caret counts as the end.
- */
-function unchangedEnds(
-  before: string,
-  after: string,
-  caret: number,
-): { readonly start: number; readonly end: number } {
-  const limit = Math.min(before.length, after.length);
-  const sharedEnd = (from: number, most: number): number => {
-    let end = from;
-    while (end < most && before[before.length - 1 - end] === after[after.length - 1 - end]) {
-      end += 1;
-    }
-    return end;
-  };
-  const afterCaret = sharedEnd(0, Math.min(limit, Math.max(0, after.length - caret)));
-  let start = 0;
-  while (start < limit - afterCaret && before[start] === after[start]) start += 1;
-  return { start, end: sharedEnd(afterCaret, limit - start) };
-}
-
-/** One chip a sent message shows: the thread it names, and where its text stands. */
-export interface SentThreadMention {
-  readonly start: number;
-  readonly end: number;
-  readonly text: string;
-  readonly threadId: string;
-}
-
-/**
- * Where the threads a sent message mentioned stand in its text. The message
- * records the mentioned ids in the order its text shows them, and no title, so
- * a message that holds exactly one chip text for each id pairs them in order,
- * a thread renamed since included. Otherwise (chip text typed by hand, or one
- * thread named twice) an id takes the text its thread's title reads as now,
- * unless another of the ids, unlisted or renamed, could stand there instead.
- * An id this window does not list, and text whose thread cannot be told, stay
- * ordinary text: a chip never opens a thread the message did not name there.
- */
-export function findSentThreadMentions(
-  text: string,
-  threadIds: ReadonlyArray<string>,
-  titleOf: (threadId: string) => string | undefined,
-): ReadonlyArray<SentThreadMention> {
-  if (threadIds.length === 0) return [];
-  const spans = bracketSpans(text);
-  const spanTexts = new Set(spans.map((span) => span.text));
-  const mentions = threadIds.map((threadId) => {
-    const title = titleOf(threadId);
-    const chipText = title === undefined ? undefined : formatThreadMentionChip(title);
-    return {
-      threadId,
-      title,
-      /** The text this thread's title reads as now, when the message holds it. */
-      ownText: chipText !== undefined && spanTexts.has(chipText) ? chipText : undefined,
-    };
-  });
-  const inOrder =
-    spans.length === mentions.length &&
-    mentions.every(
-      (mention, index) => mention.ownText === undefined || mention.ownText === spans[index]?.text,
-    );
-  if (inOrder) {
-    return spans.flatMap((span, index) => {
-      const mention = mentions[index];
-      return mention === undefined || mention.title === undefined
-        ? []
-        : [{ ...span, threadId: mention.threadId }];
-    });
-  }
-  const unplaced = mentions.some((mention) => mention.ownText === undefined);
-  const named = mentions.flatMap(({ threadId, title, ownText }) => {
-    if (title === undefined || ownText === undefined) return [];
-    const places = spans.filter((span) => span.text === ownText).length;
-    const claims = mentions.filter((mention) => mention.ownText === ownText).length;
-    return unplaced && places > claims ? [] : [{ threadId, title }];
-  });
-  return findThreadMentionTags(text, named).map(({ chip, ...place }) => ({
-    ...place,
-    threadId: chip.threadId,
-  }));
 }
 
 /**
@@ -525,19 +300,6 @@ export function sideChatTitle(sourceTitle: string): string {
   const trimmed = collapseChipTitle(sourceTitle);
   const title = `Side Chat about ${trimmed.length === 0 ? "this thread" : trimmed}`;
   return title.length <= 400 ? title : `${title.slice(0, 399)}…`;
-}
-
-/**
- * Chip titles are single-line and length-capped: a chip is an inline token in a
- * textarea, so an embedded newline would break the draft it lives in.
- */
-function collapseChipTitle(title: string): string {
-  const collapsed = title
-    .replace(/[\r\n\t]+/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/[[\]]/g, "")
-    .trim();
-  return collapsed.length <= 120 ? collapsed : `${collapsed.slice(0, 119)}…`;
 }
 
 export type ThreadDialogueAskDecision =

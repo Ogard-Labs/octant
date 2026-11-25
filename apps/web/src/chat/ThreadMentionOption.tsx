@@ -6,7 +6,7 @@ import { threadRowState } from "../projects/threadRowState";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { threadRowActivity } from "../shell/navigationModel";
 import { threadModeLabel } from "../threadReferences/threadModeLabel";
-import { useThreadReferences } from "../threadReferences/ThreadReferences";
+import { useThreadReferences } from "../threadReferences/useThreadReferences";
 import { Hash } from "../ui/icons";
 import { threadPlacementLabel } from "./threadPlacementLabel";
 import "./thread-mention-option.css";

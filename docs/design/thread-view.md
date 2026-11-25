@@ -471,7 +471,7 @@ else of their threads ([Architecture](../architecture.md#modes-chat-work-and-cod
 in the order the text shows them. A message with exactly one chip text per id
 pairs them in that order, renamed threads included; otherwise an id takes the
 text its thread's title reads as now, unless an unlisted or renamed thread could
-stand there instead. A chip never opens a thread the message did not name there.
+stand there instead. A chip only ever opens a thread the message mentioned.
 A mention of a thread the window does not list, text no id
 claims, and a message sent before ids were stored stay the text they were. A
 side task's receipt opens the same card from the title of the thread it

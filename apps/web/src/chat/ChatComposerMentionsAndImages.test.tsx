@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComposerInputElement } from "../composer/ComposerInput";
 import { useThreadMentions } from "./useThreadMentions";
+import { listsOf } from "../threadReferences/threadReferenceLists.test-support";
 import { ThreadReferencesContext } from "../threadReferences/ThreadReferences";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -127,11 +128,9 @@ describe("ChatComposer thread mentions", () => {
     const user = userEvent.setup();
     render(
       <ThreadReferencesContext.Provider
-        value={{
-          find: () => ({
-            mode: "code",
-            projectName: "octant",
-            thread: {
+        value={listsOf({
+          code: [
+            {
               threadId: "thread-release-notes",
               title: "Release notes",
               projectId: "project-1",
@@ -140,8 +139,8 @@ describe("ChatComposer thread mentions", () => {
               provider: { displayName: "Claude", driverKind: "claude" },
               modelId: "claude-opus-5-5",
             },
-          }),
-        }}
+          ],
+        })}
       >
         <ControlledComposer
           isSending={false}

@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { SideTask } from "@octant/contracts";
+import { listsOf } from "../threadReferences/threadReferenceLists.test-support";
 import { ThreadReferencesContext } from "../threadReferences/ThreadReferences";
 import { SideTaskInline, SideTaskProvider } from "./SideTaskCards";
 
@@ -288,20 +289,16 @@ describe("SideTaskInline", () => {
     };
     render(
       <ThreadReferencesContext.Provider
-        value={{
-          find: (id) =>
-            id === started.threadId
-              ? {
-                  mode: "code",
-                  thread: {
-                    threadId: id,
-                    title: "Fix stale install docs",
-                    checkoutChip: { checkoutKind: "managed-worktree", label: "fix/install-docs" },
-                  },
-                  projectName: "octant",
-                }
-              : undefined,
-        }}
+        value={listsOf({
+          code: [
+            {
+              threadId: started.threadId,
+              title: "Fix stale install docs",
+              projectId: "project-1",
+              checkoutChip: { checkoutKind: "managed-worktree", label: "fix/install-docs" },
+            },
+          ],
+        })}
       >
         <SideTaskProvider client={full as never} onStarted={vi.fn()} threadId={threadId}>
           <SideTaskInline last loadedTurnIds={new Set([turnId])} running={false} turnId={turnId} />

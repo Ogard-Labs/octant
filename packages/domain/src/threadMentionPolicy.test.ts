@@ -5,6 +5,7 @@ import {
   type ThreadMentionCandidate,
   type ThreadMentionTranscriptEntry,
 } from "@octant/contracts";
+import { formatThreadMentionChip } from "./threadMentionChipText";
 import {
   appendThreadMentionChip,
   applyThreadMentionChip,
@@ -13,13 +14,9 @@ import {
   composerThreadDropLocalRefusal,
   composerThreadDropMessage,
   decideThreadDialogueAsk,
-  formatThreadMentionChip,
   formatThreadMentionContext,
   parseThreadMentionToken,
   rankThreadMentionCandidates,
-  findSentThreadMentions,
-  findThreadMentionTags,
-  reconcileThreadMentionChips,
   sideChatTitle,
 } from "./threadMentionPolicy";
 
@@ -87,151 +84,6 @@ describe("applyThreadMentionChip", () => {
   it("strips brackets and newlines from a title so the chip stays decidable", () => {
     const result = applyThreadMentionChip("#x", { query: "x", start: 0, end: 2 }, "a\n[b]");
     expect(result.draft).toBe("#[a b] ");
-  });
-});
-
-describe("reconcileThreadMentionChips", () => {
-  it("drops a chip the user edited out of the draft", () => {
-    const chips = [{ title: "Release notes" }, { title: "Roadmap" }];
-    const draft = `${formatThreadMentionChip("Roadmap")} only`;
-    expect(reconcileThreadMentionChips(draft, chips)).toEqual([{ title: "Roadmap" }]);
-  });
-
-  it("keeps one same-title chip per surviving token", () => {
-    const chips = [{ title: "Roadmap" }, { title: "Roadmap" }];
-    const draft = `${formatThreadMentionChip("Roadmap")} only`;
-    expect(reconcileThreadMentionChips(draft, chips)).toEqual([{ title: "Roadmap" }]);
-    expect(
-      reconcileThreadMentionChips(
-        `${formatThreadMentionChip("Roadmap")} and ${formatThreadMentionChip("Roadmap")}`,
-        chips,
-      ),
-    ).toEqual(chips);
-  });
-
-  it("caps surviving chips at the per-turn bound", () => {
-    const titles = ["One", "Two", "Three", "Four", "Five"];
-    const draft = titles.map((title) => formatThreadMentionChip(title)).join(" ");
-    expect(
-      reconcileThreadMentionChips(
-        draft,
-        titles.map((title) => ({ title })),
-      ),
-    ).toHaveLength(4);
-  });
-});
-
-describe("following chips through an edit", () => {
-  const first = { id: "a", title: "Roadmap" };
-  const second = { id: "b", title: "Roadmap" };
-  const before = "Use #[Roadmap] and #[Roadmap] today";
-
-  it("removes the deleted thread of two that share a title and keeps the other", () => {
-    const after = "Use  and #[Roadmap] today";
-    expect(reconcileThreadMentionChips(after, [first, second], { draft: before })).toEqual([
-      second,
-    ]);
-    expect(
-      reconcileThreadMentionChips("Use #[Roadmap] and  today", [first, second], { draft: before }),
-    ).toEqual([first]);
-  });
-
-  it("keeps the thread that was not cut when the two stand side by side", () => {
-    const beside = "#[Roadmap] #[Roadmap]";
-    // Both cuts leave the same text; only where the caret ended tells them apart.
-    expect(
-      reconcileThreadMentionChips("#[Roadmap]", [first, second], { draft: beside, caret: 0 }),
-    ).toEqual([second]);
-    expect(
-      reconcileThreadMentionChips("#[Roadmap]", [first, second], { draft: beside, caret: 10 }),
-    ).toEqual([first]);
-  });
-
-  it("reports the chips in the order the draft shows them", () => {
-    const launch = { id: "c", title: "Launch" };
-    expect(
-      reconcileThreadMentionChips("#[Launch] then #[Roadmap]", [first, launch], {
-        draft: "then #[Roadmap]",
-      }),
-    ).toEqual([launch, first]);
-  });
-
-  it("places a same-title thread chosen before another one first", () => {
-    const after = "#[Roadmap] #[Roadmap]";
-    expect(reconcileThreadMentionChips(after, [first, second], { draft: " #[Roadmap]" })).toEqual([
-      second,
-      first,
-    ]);
-  });
-
-  it("brings a dropped thread back when an undo or a paste brings its text back", () => {
-    const dropped = [first];
-    expect(reconcileThreadMentionChips("Use #[Roadmap]", [], { dropped })).toEqual([first]);
-    expect(reconcileThreadMentionChips("Use Roadmap", [], { dropped })).toEqual([]);
-  });
-});
-
-describe("findThreadMentionTags", () => {
-  it("finds each chip's place and leaves unclaimed bracket text alone", () => {
-    const chip = { title: "Plan [v2]" };
-    const text = "#[Other] #[Plan v2] #[";
-    expect(findThreadMentionTags(text, [chip])).toEqual([
-      { start: 9, end: 19, text: "#[Plan v2]", chip },
-    ]);
-  });
-
-  it("finds a chip behind brackets left open before it", () => {
-    const chip = { title: "Plan" };
-    expect(findThreadMentionTags("#[#[ [#[Plan]", [chip]).map((tag) => tag.start)).toEqual([6]);
-  });
-
-  it("lets repeated text stand for the same thread", () => {
-    const chip = { title: "Plan" };
-    expect(findThreadMentionTags("#[Plan] #[Plan]", [chip]).map((tag) => tag.chip)).toEqual([
-      chip,
-      chip,
-    ]);
-  });
-});
-
-describe("findSentThreadMentions", () => {
-  const titles = new Map([
-    ["a", "Roadmap"],
-    ["b", "Renamed since"],
-  ]);
-  const titleOf = (threadId: string) => titles.get(threadId);
-
-  it("matches each stored id to its thread's title in the text", () => {
-    expect(findSentThreadMentions("See #[Roadmap] and #[typed by hand]", ["a"], titleOf)).toEqual([
-      { start: 4, end: 14, text: "#[Roadmap]", threadId: "a" },
-    ]);
-  });
-
-  it("still finds a thread renamed since when only one place is left for it", () => {
-    expect(
-      findSentThreadMentions("#[Old name] #[Roadmap]", ["b", "a"], titleOf).map(
-        (mention) => mention.threadId,
-      ),
-    ).toEqual(["b", "a"]);
-    expect(findSentThreadMentions("#[Old name] #[another]", ["b"], titleOf)).toEqual([]);
-  });
-
-  it("never gives an unlisted or renamed thread's place to another of the same title", () => {
-    const text = "#[Roadmap] and #[Roadmap]";
-    const start = text.lastIndexOf("#");
-    expect(findSentThreadMentions(text, ["gone", "a"], titleOf)).toEqual([
-      { start, end: text.length, text: "#[Roadmap]", threadId: "a" },
-    ]);
-    expect(
-      findSentThreadMentions(text, ["b", "a"], titleOf).map((mention) => mention.threadId),
-    ).toEqual(["b", "a"]);
-    // With text typed by hand beside them, whose place is whose cannot be told.
-    expect(findSentThreadMentions(`${text} #[typed]`, ["gone", "a"], titleOf)).toEqual([]);
-  });
-
-  it("leaves a message with no stored ids, and an unlisted thread, as text", () => {
-    expect(findSentThreadMentions("#[Roadmap]", [], titleOf)).toEqual([]);
-    expect(findSentThreadMentions("#[Gone]", ["missing"], titleOf)).toEqual([]);
   });
 });
 
