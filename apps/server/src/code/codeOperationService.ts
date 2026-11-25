@@ -1220,6 +1220,12 @@ export interface CodeOperationTurnPort {
      */
     readonly rememberedForProjectBy?: CodeProjectAnswerApprover;
     /**
+     * The host's own person answered. Only their allow is kept for the
+     * thread's session; an allow from anyone else, a device held below Full or
+     * one the hub introduced, covers the one call.
+     */
+    readonly answeredByPerson?: true;
+    /**
      * Who the answer's receipt on the asking turn names: the request's own
      * actor, which may differ from whoever started the turn.
      */
@@ -5098,6 +5104,7 @@ export class CodeOperationService {
                       : { kind: "window" as const, windowId },
                 }
               : {}),
+            ...(initiator === "user" ? { answeredByPerson: true as const } : {}),
             answeredAs: requestedAs,
           }),
         );

@@ -645,6 +645,8 @@ describe("CodeOperationService", () => {
     expect(turns.answerApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: "50505050-5050-4050-8050-505050505050" }),
     );
+    // A request the host did not resolve to its own person has no answer kept.
+    expect(turns.answerApproval.mock.lastCall?.[0]).not.toHaveProperty("answeredByPerson");
 
     const approvalOperation = decodeCodeOperationId("47474747-4747-4474-8474-474747474747");
     const approvalTerminal = "59595959-5959-4595-8595-595959595959" as CodeTerminalId;
