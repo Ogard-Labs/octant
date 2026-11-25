@@ -742,7 +742,8 @@ export function useCodeController(options: CodeControllerOptions) {
   const noteRestoreUndo = useCallback((checkpoint: CodeCheckpoint | undefined) => {
     setRestoreUndo(checkpoint);
   }, []);
-  const usageByOperation = useRef(new Map<string, CodeTurnUsage>(kept?.usageByOperation));
+  const [keptUsage] = useState(() => new Map<string, CodeTurnUsage>(kept?.usageByOperation));
+  const usageByOperation = useRef(keptUsage);
   // The host's fold of every own turn older than the oldest loaded one.
   const earlierUsage = useRef<CodeConversationUsageTotals | undefined>(kept?.earlierUsage);
   const noteUsage = useCallback((operationId: CodeOperationId, event: CodeOperationEvent) => {
@@ -1312,9 +1313,14 @@ export function useCodeController(options: CodeControllerOptions) {
       );
       setRestoreUndo(window.restoreUndo);
       showConversation(threadId, joined.messages);
-      if (projected.activity.size > 0) {
-        setTurnActivity((current) => new Map([...current, ...projected.activity]));
-      }
+      // A turn the journal no longer holds (another window rewound it away)
+      // takes its tool activity with it, so nothing keeps watching its tools.
+      const held = new Set(joined.messages.map((message) => String(message.operationId)));
+      setTurnActivity((current) => {
+        const kept = [...current].filter(([operation]) => held.has(operation));
+        if (kept.length === current.size && projected.activity.size === 0) return current;
+        return new Map([...kept, ...projected.activity]);
+      });
       return settleLatestTurn(threadId, window.turns.at(-1));
     },
     [client, hydrateWholeConversation, setEarlierConversation, settleLatestTurn, showConversation],

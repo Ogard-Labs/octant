@@ -4242,6 +4242,45 @@ describe("useCodeController", () => {
 });
 
 describe("useCodeController conversation window", () => {
+  it("forgets the activity of turns the journal no longer holds when a kept thread opens again", async () => {
+    const turns = turnsOf("own", 3);
+    const host = windowedHost({ [ids.thread]: { turns } });
+    const client = fakeClient(host.client);
+    const first = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(first.result.current.conversationHistory).toBe("loaded"));
+    const left = first.result.current.keepThread();
+    first.unmount();
+    expect(left).toBeDefined();
+    if (left === undefined) return;
+    // The last turn was running an Apple tool when the window left the thread,
+    // and another window rewound it away before this one came back.
+    const rewound = String(turns[2]?.operationId);
+    const kept = {
+      ...left,
+      turnActivity: new Map([
+        [
+          rewound,
+          {
+            rows: [{ kind: "tool", id: "call-1", toolName: "octant_apple", state: "running" }],
+            reasoning: "",
+          } as never,
+        ],
+      ]),
+    };
+    host.threads[String(ids.thread)] = { turns: turns.slice(0, 2) };
+
+    const back = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, kept, reconnectDelayMs: 60_000 }),
+    );
+    expect(back.result.current.turnActivity.has(rewound)).toBe(true);
+    await waitFor(() => expect(back.result.current.conversationHistory).toBe("loaded"));
+    expect(back.result.current.conversation).toHaveLength(4);
+    expect(back.result.current.turnActivity.has(rewound)).toBe(false);
+    back.unmount();
+  });
+
   it("opens a long Code thread on its newest turns with one conversation read", async () => {
     const host = windowedHost({ [ids.thread]: { turns: turnsOf("own", 60) } });
     const client = fakeClient(host.client);
