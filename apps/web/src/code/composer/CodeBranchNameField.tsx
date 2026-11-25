@@ -41,13 +41,10 @@ export function CodeBranchNameField(props: CodeBranchNameFieldProps) {
       ? undefined
       : STATUS_COPY[props.suggestion];
   return (
-    <div className="code-branch-name">
-      <label className="code-branch-name__label" htmlFor="code-branch-name-input">
-        Branch name
-      </label>
+    <div>
+      <label htmlFor="code-branch-name-input">Branch name</label>
       <OctantInput
         aria-invalid={error === undefined ? undefined : true}
-        className="code-branch-name__input"
         disabled={props.disabled === true}
         id="code-branch-name-input"
         onBlur={() => {
@@ -66,7 +63,7 @@ export function CodeBranchNameField(props: CodeBranchNameFieldProps) {
       />
       {error === undefined ? null : <OctantFieldError>{error}</OctantFieldError>}
       {props.onSuggest === undefined ? null : (
-        <div className="code-branch-name__suggest">
+        <div>
           <OctantButton
             disabled={
               props.suggestDisabled || props.suggestion === "asking" || props.disabled === true
@@ -76,7 +73,7 @@ export function CodeBranchNameField(props: CodeBranchNameFieldProps) {
           >
             {props.suggestion === "asking" ? "Asking…" : "Suggest name"}
           </OctantButton>
-          <p className="code-branch-name__note">
+          <p className="code-where-dialog__lead">
             {props.modelLabel === undefined
               ? "Asks the selected model for words from your message."
               : `Sends your message to ${props.modelLabel} for words to name the branch.`}{" "}
@@ -85,12 +82,12 @@ export function CodeBranchNameField(props: CodeBranchNameFieldProps) {
         </div>
       )}
       {status === undefined ? null : (
-        <p aria-live="polite" className="code-branch-name__note">
+        <p aria-live="polite" className="code-where-dialog__lead">
           {status}
         </p>
       )}
       {props.chosen ? (
-        <p className="code-branch-name__note">Clear the field to return to the derived name.</p>
+        <p className="code-where-dialog__lead">Clear the field to return to the derived name.</p>
       ) : null}
     </div>
   );
