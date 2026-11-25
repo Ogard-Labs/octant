@@ -108,11 +108,8 @@ export class WorktreeReclaimSweep {
     const abandoned: CodeThreadId[] = [];
     const skipped: Array<{ threadId: CodeThreadId; reason: WorktreeReclaimSkipReason }> = [];
     if (this.#stopped) return { reclaimed, abandoned, skipped };
-    const choices = this.#options.cleanup();
-    const chosen = choices?.whenMerged === true || (choices?.inactivityDays ?? 0) >= 1;
-    if (!chosen && !this.#mayHavePending) return { reclaimed, abandoned, skipped };
+    if (!this.#chosen() && !this.#mayHavePending) return { reclaimed, abandoned, skipped };
     let unsettled = false;
-    const now = this.#clock();
     let looked = 0;
     for (const thread of this.#options.threads()) {
       if (this.#stopped) break;
@@ -126,14 +123,9 @@ export class WorktreeReclaimSweep {
         readable = true;
         const resuming = receipt?.state === "cleanup-pending" && receipt.reclaim !== undefined;
         if (receipt === undefined || (receipt.state !== "ready" && !resuming)) continue;
-        // With no choice on, no thread's activity is worth reading.
-        const trigger = chosen
-          ? worktreeReclaimTrigger({
-              choices,
-              lastActivityAt: this.#lastActivityAt(thread, receipt),
-              now,
-            })
-          : undefined;
+        // The choices are read for each thread, not once for the pass: one turned
+        // off while an earlier folder was being removed stops the rest.
+        const trigger = this.#triggerNow(thread, receipt);
         if (trigger === undefined) {
           if (!resuming) continue;
           // A cleanup was under way, and the person has since turned it off or
@@ -156,7 +148,11 @@ export class WorktreeReclaimSweep {
           {
             receiptId: receipt.receiptId,
             trigger,
-            isIdle: () => !this.#options.threadHasWork(thread.id),
+            // Asked again right before the removal begins: quiet, and the
+            // choice that qualified the folder still on.
+            isIdle: () =>
+              !this.#options.threadHasWork(thread.id) &&
+              this.#triggerNow(thread, receipt) === trigger,
           },
           this.#abort.signal,
         );
@@ -186,6 +182,26 @@ export class WorktreeReclaimSweep {
     // A pass cut short by a stop has not looked at everything.
     this.#mayHavePending = unsettled || this.#stopped;
     return { reclaimed, abandoned, skipped };
+  }
+
+  /** Whether any cleanup choice is on, read now. */
+  #chosen(): boolean {
+    const choices = this.#options.cleanup();
+    return choices?.whenMerged === true || (choices?.inactivityDays ?? 0) >= 1;
+  }
+
+  /** What qualifies the thread's folder under the choices as they stand now, if anything. */
+  #triggerNow(
+    thread: CodeThread,
+    receipt: ManagedWorktreeReceipt,
+  ): WorktreeReclaimTrigger | undefined {
+    // With no choice on, no thread's activity is worth reading.
+    if (!this.#chosen()) return undefined;
+    return worktreeReclaimTrigger({
+      choices: this.#options.cleanup(),
+      lastActivityAt: this.#lastActivityAt(thread, receipt),
+      now: this.#clock(),
+    });
   }
 
   /**

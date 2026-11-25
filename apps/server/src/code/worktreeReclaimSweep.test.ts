@@ -48,7 +48,10 @@ function setup(
     readonly activity?: Partial<Record<keyof typeof ids, number>>;
     readonly receipts?: Partial<Record<keyof typeof ids, ManagedWorktreeReceipt>>;
     readonly working?: ReadonlyArray<keyof typeof ids>;
-    readonly reclaim?: (threadId: string) => Promise<ManagedWorktreeReclaimResult>;
+    readonly reclaim?: (
+      threadId: string,
+      input: { readonly isIdle: () => boolean },
+    ) => Promise<ManagedWorktreeReclaimResult>;
   } = {},
 ) {
   const names = Object.keys(ids) as Array<keyof typeof ids>;
@@ -67,7 +70,7 @@ function setup(
       isIdle: () => boolean;
     }): Promise<ManagedWorktreeReclaimResult> => {
       const threadId = input.receiptId.replace("receipt-", "");
-      if (options.reclaim !== undefined) return options.reclaim(threadId);
+      if (options.reclaim !== undefined) return options.reclaim(threadId, input);
       return { status: "reclaimed", receipt: receipt(threadId, "reclaimed", true) };
     },
   );
@@ -160,6 +163,40 @@ describe("worktree reclaim sweep", () => {
       await sweep.pass();
       expect(abandon, held).toHaveBeenCalledWith(`receipt-${ids.idle}`, expect.any(AbortSignal));
     }
+  });
+
+  it("reads the person's choices again for each thread, so one turned off during a pass removes nothing more", async () => {
+    const choices: { current: { inactivityDays: number } | undefined } = {
+      current: { inactivityDays: 14 },
+    };
+    const { sweep, reclaim } = setup({
+      choicesNow: () => choices.current,
+      reclaim: async (threadId) => {
+        choices.current = undefined;
+        return { status: "reclaimed", receipt: receipt(threadId, "reclaimed", true) };
+      },
+    });
+    const summary = await sweep.pass();
+    expect(reclaim).toHaveBeenCalledTimes(1);
+    expect(summary.reclaimed).toEqual([ids.idle]);
+  });
+
+  it("asks again, right before a removal starts, whether the choice still stands", async () => {
+    const choices: { current: { inactivityDays: number } | undefined } = {
+      current: { inactivityDays: 14 },
+    };
+    const answers: boolean[] = [];
+    const { sweep } = setup({
+      choicesNow: () => choices.current,
+      reclaim: async (_threadId, input) => {
+        answers.push(input.isIdle());
+        choices.current = undefined;
+        answers.push(input.isIdle());
+        return { status: "refused", reason: "working" };
+      },
+    });
+    await sweep.pass();
+    expect(answers.slice(0, 2)).toEqual([true, false]);
   });
 
   it("cleans up open and archived threads idle for the chosen days, and leaves a recently used one", async () => {
