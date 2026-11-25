@@ -1382,6 +1382,22 @@ describe("App", () => {
     expect(screen.getByRole("complementary", { name: "Octant sidebar" })).toBeVisible();
     expect(globalThis.localStorage.getItem("octant.shell.sidebar-collapsed.v1")).toBeNull();
     expect(screen.getByRole("button", { name: "Hide sidebar" })).toHaveFocus();
+
+    // Dragging the sidebar's edge shut is the same hidden state as the button's.
+    const separator = screen.getByRole("separator", { name: "Resize navigation sidebar" });
+    Object.assign(separator, {
+      hasPointerCapture: vi.fn(() => true),
+      releasePointerCapture: vi.fn(),
+      setPointerCapture: vi.fn(),
+    });
+    fireEvent.pointerDown(separator, { button: 0, clientX: 300, pointerId: 1 });
+    fireEvent.pointerMove(separator, { clientX: 10, pointerId: 1 });
+    fireEvent.pointerUp(separator, { clientX: 10, pointerId: 1 });
+    expect(screen.getByRole("complementary", { name: "Octant sidebar, collapsed" })).toBeVisible();
+    expect(globalThis.localStorage.getItem("octant.shell.sidebar-collapsed.v1")).toBe("true");
+    await user.click(screen.getByRole("button", { name: "Show sidebar" }));
+    expect(screen.getByRole("complementary", { name: "Octant sidebar" })).toBeVisible();
+    expect(globalThis.localStorage.getItem("octant.shell.sidebar-collapsed.v1")).toBeNull();
   });
 
   it("lets the narrow sidebar overlay be dismissed and restored", async () => {

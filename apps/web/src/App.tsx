@@ -9244,6 +9244,14 @@ function LaunchedShell(
             void controller.updateSettings({ sidebarWidth: width });
           }}
           onPreviewSidebarWidth={setPreviewSidebarWidth}
+          // The phone drawer opens and shuts on its own terms, so it offers no
+          // edge to drag. A drag leaves focus where it was.
+          {...(sidebarIsDrawer
+            ? {}
+            : {
+                onSidebarCollapsedChange: (collapsed: boolean) =>
+                  setSidebarCollapsedPersistent(collapsed, { keepFocus: true }),
+              })}
           sidebarCollapsed={presentedSidebarCollapsed}
           sidebarRail={sidebarRail}
           sidebarRailBeside={sidebarRailBeside}

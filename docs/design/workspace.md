@@ -2851,6 +2851,20 @@ left corners and clip follow without a notch (they leave at the start of an
 opening and arrive after the slide has landed when it shuts). The title band's
 drag strip and the traffic-light reserve do not move. The slide is for opening and shutting only: dragging the sidebar's edge or resizing the window follows the pointer exactly. The sidebar keeps its full width through the slide and its column clips it, so its contents travel with the edge. There is no motion under
 the system's reduced-motion setting or the app's own.
+Dragging the sidebar's edge also hides and shows it, with the same one hidden
+state as **Hide sidebar** and **Show sidebar**, in whichever collapsed form the
+Icon rail setting names. A drag past the minimum width stops at the minimum;
+64px further it hides the sidebar while the pointer is still down. Hiding this
+way keeps the width from before the drag. While the sidebar is hidden, its edge
+(the window's left edge, or the icon rail's right edge) stays grabbable: pulling
+it 64px out shows the sidebar, no narrower than the minimum, and the width on
+release is saved; a click or a shorter pull does nothing. Escape, losing the
+window's focus, or a cancelled pointer puts back the state and width the drag
+started with. The edge stays one separator in both states. While hidden it
+reports 0 and "Hidden"; the arrow that widens it shows the sidebar at its saved
+width, and Home and End show it at the minimum and maximum. No key hides it from
+the separator. At 960px and narrower, the phone drawer included, there is no
+edge to drag.
 The directory provides search and All, Chat, Work, and Code filters. Project
 detail is thread-first, with memory, provider access, and canvases in compact
 expandable rows below the primary work; its layout is in

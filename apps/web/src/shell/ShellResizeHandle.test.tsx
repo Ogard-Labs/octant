@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ShellResizeHandle } from "./ShellResizeHandle";
 
@@ -139,5 +140,186 @@ describe("ShellResizeHandle", () => {
     fireEvent.pointerDown(separator, { clientY: 500, pointerId: 13 });
     fireEvent.pointerMove(separator, { clientY: 450, pointerId: 13 });
     expect(onPreview).toHaveBeenLastCalledWith(310);
+  });
+});
+
+function renderCollapsible(startCollapsed: boolean) {
+  const onCommit = vi.fn();
+  const onPreview = vi.fn();
+  const onCollapsedChange = vi.fn();
+  function Harness() {
+    const [collapsed, setCollapsed] = useState(startCollapsed);
+    const [value, setValue] = useState(300);
+    return (
+      <ShellResizeHandle
+        accessibleName="Resize navigation sidebar"
+        collapse={{
+          collapsed,
+          onCollapsedChange: (next) => {
+            onCollapsedChange(next);
+            setCollapsed(next);
+          },
+        }}
+        edge="trailing"
+        maximum={420}
+        minimum={220}
+        onCommit={onCommit}
+        onPreview={(next) => {
+          onPreview(next);
+          setValue(next);
+        }}
+        value={value}
+      />
+    );
+  }
+  render(<Harness />);
+  const separator = screen.getByRole("separator", { name: "Resize navigation sidebar" });
+  const releasePointerCapture = vi.fn();
+  Object.assign(separator, {
+    hasPointerCapture: vi.fn(() => true),
+    releasePointerCapture,
+    setPointerCapture: vi.fn(),
+  });
+  return { onCommit, onPreview, onCollapsedChange, releasePointerCapture, separator };
+}
+
+describe("a resize handle whose panel can be dragged shut", () => {
+  it("hides the panel once dragged well past the minimum, keeping the width from before", () => {
+    const { onCommit, onPreview, onCollapsedChange, separator } = renderCollapsible(false);
+
+    fireEvent.pointerDown(separator, { clientX: 300, pointerId: 1 });
+    fireEvent.pointerMove(separator, { clientX: 100, pointerId: 1 });
+    expect(onCollapsedChange).toHaveBeenLastCalledWith(true);
+    expect(onPreview).toHaveBeenLastCalledWith(300);
+
+    fireEvent.pointerUp(separator, { clientX: 100, pointerId: 1 });
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCollapsedChange).toHaveBeenCalledOnce();
+  });
+
+  it("stays shown at the minimum after a small overshoot", () => {
+    const { onCommit, onCollapsedChange, separator } = renderCollapsible(false);
+
+    fireEvent.pointerDown(separator, { clientX: 300, pointerId: 2 });
+    fireEvent.pointerMove(separator, { clientX: 219, pointerId: 2 });
+    fireEvent.pointerMove(separator, { clientX: 156, pointerId: 2 });
+    fireEvent.pointerUp(separator, { clientX: 156, pointerId: 2 });
+
+    expect(onCollapsedChange).not.toHaveBeenCalled();
+    expect(onCommit).toHaveBeenCalledWith(220);
+  });
+
+  it("shows the panel again when the same drag comes back", () => {
+    const { onCommit, onCollapsedChange, separator } = renderCollapsible(false);
+
+    fireEvent.pointerDown(separator, { clientX: 300, pointerId: 3 });
+    fireEvent.pointerMove(separator, { clientX: 20, pointerId: 3 });
+    fireEvent.pointerMove(separator, { clientX: 330, pointerId: 3 });
+    fireEvent.pointerUp(separator, { clientX: 330, pointerId: 3 });
+
+    expect(onCollapsedChange.mock.calls).toEqual([[true], [false]]);
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(330);
+  });
+
+  it.each([
+    [40, 120, 220],
+    [0, 350, 350],
+    [0, 900, 420],
+  ])("shows a hidden panel pulled from x=%i to x=%i at a width of %i", (from, to, width) => {
+    const { onCommit, onCollapsedChange, separator } = renderCollapsible(true);
+
+    fireEvent.pointerDown(separator, { clientX: from, pointerId: 4 });
+    fireEvent.pointerMove(separator, { clientX: to, pointerId: 4 });
+    expect(onCollapsedChange).toHaveBeenLastCalledWith(false);
+    fireEvent.pointerUp(separator, { clientX: to, pointerId: 4 });
+
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(width);
+  });
+
+  it("does nothing for a click or a short pull on a hidden panel's edge", () => {
+    const { onCommit, onPreview, onCollapsedChange, separator } = renderCollapsible(true);
+
+    fireEvent.pointerDown(separator, { clientX: 0, pointerId: 5 });
+    fireEvent.pointerUp(separator, { clientX: 0, pointerId: 5 });
+    fireEvent.pointerDown(separator, { clientX: 0, pointerId: 6 });
+    fireEvent.pointerMove(separator, { clientX: 20, pointerId: 6 });
+    fireEvent.pointerUp(separator, { clientX: 20, pointerId: 6 });
+
+    expect(onCollapsedChange).not.toHaveBeenCalled();
+    expect(onPreview).not.toHaveBeenCalled();
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it.each(["escape", "blur", "pointerCancel", "lostPointerCapture"] as const)(
+    "restores a shown panel and its width when the drag ends in %s",
+    (ending) => {
+      const { onCommit, onPreview, onCollapsedChange, separator } = renderCollapsible(false);
+      fireEvent.pointerDown(separator, { clientX: 300, pointerId: 7 });
+      fireEvent.pointerMove(separator, { clientX: 20, pointerId: 7 });
+
+      if (ending === "escape") fireEvent.keyDown(window, { key: "Escape" });
+      else if (ending === "blur") fireEvent.blur(window);
+      else fireEvent[ending](separator, { pointerId: 7 });
+
+      expect(onCollapsedChange).toHaveBeenLastCalledWith(false);
+      expect(onPreview).toHaveBeenLastCalledWith(300);
+      expect(onCommit).not.toHaveBeenCalled();
+    },
+  );
+
+  it("hides the panel again when Escape ends a drag that had pulled it out", () => {
+    const { onCommit, onPreview, onCollapsedChange, separator } = renderCollapsible(true);
+    fireEvent.pointerDown(separator, { clientX: 0, pointerId: 8 });
+    fireEvent.pointerMove(separator, { clientX: 360, pointerId: 8 });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(onCollapsedChange).toHaveBeenLastCalledWith(true);
+    expect(onPreview).toHaveBeenLastCalledWith(300);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(separator).toHaveAttribute("aria-valuenow", "0");
+  });
+
+  it("says a hidden panel is hidden, and shows it from the keyboard without losing focus", () => {
+    const { onCommit, onCollapsedChange, separator } = renderCollapsible(true);
+    expect(separator).toHaveAttribute("aria-valuemin", "0");
+    expect(separator).toHaveAttribute("aria-valuenow", "0");
+    expect(separator).toHaveAttribute("aria-valuemax", "420");
+    expect(separator).toHaveAttribute("aria-valuetext", "Hidden");
+    separator.focus();
+
+    fireEvent.keyDown(separator, { key: "ArrowLeft" });
+    expect(onCollapsedChange).not.toHaveBeenCalled();
+    fireEvent.keyDown(separator, { key: "ArrowRight" });
+
+    expect(onCollapsedChange).toHaveBeenCalledExactlyOnceWith(false);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(separator).toHaveFocus();
+    expect(separator).toHaveAttribute("aria-valuemin", "220");
+    expect(separator).toHaveAttribute("aria-valuenow", "300");
+  });
+
+  it.each([
+    ["Home", 220],
+    ["End", 420],
+  ])("shows a hidden panel on %s at a width of %i", (key, width) => {
+    const { onCommit, onCollapsedChange, separator } = renderCollapsible(true);
+
+    fireEvent.keyDown(separator, { key });
+
+    expect(onCollapsedChange).toHaveBeenCalledExactlyOnceWith(false);
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(width);
+  });
+
+  it("never hides a panel whose handle did not opt in", () => {
+    const { onCommit, onPreview, separator } = renderHandle();
+
+    fireEvent.pointerDown(separator, { clientX: 260, pointerId: 9 });
+    fireEvent.pointerMove(separator, { clientX: -900, pointerId: 9 });
+    fireEvent.pointerUp(separator, { clientX: -900, pointerId: 9 });
+
+    expect(onPreview).toHaveBeenLastCalledWith(220);
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(220);
+    expect(separator).toHaveAttribute("aria-valuemin", "220");
   });
 });
