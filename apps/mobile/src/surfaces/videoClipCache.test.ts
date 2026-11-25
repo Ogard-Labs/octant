@@ -19,7 +19,7 @@ vi.mock("expo-file-system", () => ({
     }
     open() {
       return {
-        writeBytes: (bytes: Uint8Array) => calls.push(`write ${bytes.length}`),
+        writeBytesSync: (bytes: Uint8Array) => calls.push(`write ${bytes.length}`),
         close: () => calls.push("close"),
       };
     }
