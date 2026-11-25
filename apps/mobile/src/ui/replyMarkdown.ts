@@ -97,6 +97,8 @@ function withoutOtherSchemes(markdown: string): string {
         `]${APART}`,
       )
       .replace(/<(?=[a-z][a-z0-9+.-]*:)(?!https?:\/\/)/gi, `<${APART}`)
-      .replace(/<(?=[^\s<>@]{1,100}@)/g, `<${APART}`)
+      .replace(/<(?=[^\s<>@]{1,300}@)/g, `<${APART}`)
+      // Written bare, these become links too.
+      .replace(/\b(mailto|ftp):(?=\S)/gi, `$1${APART}:`)
   );
 }

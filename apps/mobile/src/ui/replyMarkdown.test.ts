@@ -67,11 +67,13 @@ describe("a reply's Markdown", () => {
     `<octant://${"x".repeat(3_000)}>`,
     "[a](< tel:1>)",
     "<a@example.com>",
+    "mailto:a@example.com",
+    "ftp://example.com",
   ])("makes no link of %s", (written) => {
     for (const segment of replySegments(written))
       if (segment.kind === "prose")
         expect(segment.markdown).not.toMatch(
-          /\][(:][\s>]*<?\s*(?:tel:|&|t&|octant:|javascript:)|<(?:tel:|octant:|a@)/i,
+          /\][(:][\s>]*<?\s*(?:tel:|&|t&|octant:|javascript:)|<(?:tel:|octant:|a@)|(?:mailto|ftp):/i,
         );
   });
 

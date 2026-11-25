@@ -49,6 +49,8 @@ export function addWaiting(
 ): { readonly status: "added" | "full" | "too-long" | "empty"; readonly outbox: Outbox } {
   if (message.text.trim().length === 0) return { status: "empty", outbox };
   if (message.text.length > MAX_CHARACTERS) return { status: "too-long", outbox };
+  // Held already: a send and its lost answer can both bring it here.
+  if (outbox.messages.some((held) => held.id === message.id)) return { status: "added", outbox };
   if (outbox.messages.length >= MAX_MESSAGES) return { status: "full", outbox };
   return { status: "added", outbox: { messages: [...outbox.messages, message] } };
 }

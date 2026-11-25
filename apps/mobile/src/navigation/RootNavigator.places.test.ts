@@ -275,6 +275,14 @@ describe("the phone's navigation", () => {
     await render();
     expect(seen("mobile-home-thread-row-code-code")).toBeDefined();
     expect(seen("mobile-home-thread-row-chat-chat")).toBeUndefined();
+    context.session = {
+      ...session,
+      health: [{ hostId: studio, kind: "unauthorized" }],
+      transports: [],
+      transport: undefined,
+    };
+    await render();
+    expect(seen("mobile-home-thread-row-code-code")).toBeUndefined();
   });
 
   it("keeps each place where the person left it", async () => {

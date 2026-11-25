@@ -369,14 +369,16 @@ export function ThreadScreen(props: ThreadScreenProps) {
   };
   // Files stay with the draft: they go through the computer as they are added.
   const sendLater = () => {
+    const keepIt = () => {
+      if (keepForLater(prompt.trim(), isUnanswered ? unanswered?.id : undefined)) {
+        drafts.noteUnanswered(draftKey, undefined);
+        drafts.noteMayBeSent(draftKey, undefined);
+        sentPrompt("");
+      }
+    };
     if (pendingAttachments.length > 0) ui.setError(MOBILE_COPY.outboxNoFiles);
-    else
-      unlessMayBeSent(() => {
-        if (keepForLater(prompt.trim(), isUnanswered ? unanswered?.id : undefined)) {
-          drafts.noteUnanswered(draftKey, undefined);
-          sentPrompt("");
-        }
-      });
+    else if (isUnanswered) keepIt();
+    else unlessMayBeSent(keepIt);
   };
   // Words that a failed send may have delivered are not queued as new ones
   // without the person: the queue would deliver them a second time.
@@ -452,7 +454,12 @@ export function ThreadScreen(props: ThreadScreenProps) {
     onQueued: () => threadAttachments.attachmentsSent(),
     onStopped: () => void refresh({ quiet: true }),
     unanswered: drafts.unanswered(draftKey),
-    noteUnanswered: (message) => drafts.noteUnanswered(draftKey, message),
+    // The words too: without the queue, or with the files a reopened screen no
+    // longer has, they would otherwise go another way as a new message.
+    noteUnanswered: (message) => {
+      drafts.noteUnanswered(draftKey, message);
+      drafts.noteMayBeSent(draftKey, message === undefined ? undefined : prompt);
+    },
     onUnanswered: ({ id, text }) => keepForLater(text, id),
   });
   // Where the queue cannot be read, a running turn still closes the composer.

@@ -85,6 +85,10 @@ describe("messages waiting for a computer", () => {
     expect(ids(dropHostsNotIn(outbox, new Set(["laptop"])).messages)).toEqual(["2"]);
   });
 
+  it("holds one message once, however often it is brought", () => {
+    expect(ids(added(message("1"), message("1")).messages)).toEqual(["1"]);
+  });
+
   it("takes no more than it can hold, and says so", () => {
     let outbox = EMPTY_OUTBOX;
     for (let index = 0; index < 50; index += 1)

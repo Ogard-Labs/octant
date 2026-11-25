@@ -89,7 +89,7 @@ export function useMobileThreads(): MobileThreads {
 }
 
 export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
-  const { transports, hosts, hostsLoaded, hostsError, environment } = useMobileSession();
+  const { transports, hosts, hostsLoaded, hostsError, health, environment } = useMobileSession();
   // Sample threads are read and forgotten with the demo.
   const keeps = environment.kind === "live";
   const [held, setRows] = useState<ReadonlyArray<MobileInboxRow>>(() => (keeps ? lastRows : []));
@@ -109,7 +109,14 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
     if (keeps && hostsLoaded && hostsError === undefined)
       setCursors((current) => forgetHosts(current, new Set(hosts.map((host) => host.hostId))));
     if (!hostsLoaded || hostsError !== undefined) return;
-    const paired = new Set(hosts.map((host) => host.hostId));
+    // One that rejected this phone shows it nothing more than one taken off it.
+    const paired = new Set(
+      hosts
+        .map((host) => host.hostId)
+        .filter(
+          (hostId) => health.find((entry) => entry.hostId === hostId)?.kind !== "unauthorized",
+        ),
+    );
     setRows((current) =>
       current.every((row) => paired.has(row.hostId))
         ? current
@@ -118,7 +125,7 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
     const written = hosts.map((host) => `${host.hostKeyFingerprint}:${host.hostId}:`);
     if (keeps)
       liveThreadDrafts.keepOnly((thread) => written.some((prefix) => thread.startsWith(prefix)));
-  }, [hosts, hostsError, hostsLoaded, keeps]);
+  }, [health, hosts, hostsError, hostsLoaded, keeps]);
   // The thread on screen. What it did while it was read is read as well, which
   // the first list after it is left still has to know.
   const open = useRef<MobileInboxRow | undefined>(undefined);
