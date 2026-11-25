@@ -211,7 +211,7 @@ it("starts no attempt when its wait for the first window ends after the deadline
   const client = createNightlyClientRecovery({ open, exhausted: vi.fn() });
   const started = client.start();
   await vi.advanceTimersByTimeAsync(0);
-  // A Mac that slept through the backoff wakes with the deadline already gone.
+  // A busy main process can run the backoff timer after the deadline has passed.
   const late = vi.spyOn(performance, "now").mockReturnValue(Number.MAX_SAFE_INTEGER);
   try {
     await vi.advanceTimersByTimeAsync(250);
