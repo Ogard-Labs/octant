@@ -128,7 +128,8 @@ describe("ServiceOfferPrompt when a card cannot load", () => {
     loads.narration.failing = 1;
     const client: ServiceOfferClient = {
       offers: vi.fn(async ({ scopeId: scope }) => ({
-        offers: scope === scopeId ? [narration(scope), image(scope)] : [narration(scope)],
+        offers:
+          String(scope) === String(scopeId) ? [narration(scope), image(scope)] : [narration(scope)],
       })),
       decide: vi.fn(async () => ({ kind: "offer-answered" as const })),
     };
