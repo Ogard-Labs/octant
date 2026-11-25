@@ -155,7 +155,8 @@
     "./command-credential-policy": "./src/commandCredentialPolicy.ts",
     "./thread-wakeup-policy": "./src/threadWakeupPolicy.ts",
     "./strict-policy": "./src/strictPolicy.ts",
-    "./pull-request-review-policy": "./src/pullRequestReviewPolicy.ts"
+    "./pull-request-review-policy": "./src/pullRequestReviewPolicy.ts",
+    "./repository-bootstrap-policy": "./src/repositoryBootstrapPolicy.ts"
   },
   "scripts": {
     "fmt": "oxfmt",

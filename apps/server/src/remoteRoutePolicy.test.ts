@@ -1035,6 +1035,27 @@ describe("remote route policy", () => {
         undefined,
       );
     }
+    for (const path of [
+      "/api/projects/repository-bootstrap/clone",
+      "/api/projects/repository-bootstrap/clone/status",
+      "/api/projects/repository-bootstrap/clone/cancel",
+      "/api/projects/repository-bootstrap/land-files",
+    ]) {
+      expect(inspect(path, "POST")).toMatchObject({
+        kind: "allow",
+        surface: "authenticated-product",
+      });
+      expect(inspect(path, "GET")).toMatchObject({ kind: "reject" });
+      expect(classifyProductAction(new Request(`${origin}${path}`, { method: "POST" }))).toBe(
+        undefined,
+      );
+    }
+    for (const path of [
+      "/api/projects/repository-bootstrap/inspect",
+      "/api/projects/repository-bootstrap/read-ignored-file",
+    ]) {
+      expect(inspect(path, "POST")).toMatchObject({ kind: "reject" });
+    }
   });
 
   it("forwards a provider key on its way to the credential broker, and keeps the desktop bridge's own key routes on the host", () => {

@@ -547,6 +547,11 @@ export interface RemoteCodeSurfaceProps extends Omit<RemoteSurfaceProps, "client
     thread: CodeThread,
     checkout: CodeCheckoutIdentity | undefined,
   ) => ReactNode;
+  readonly onCloneFromThisComputer?: () => void;
+  readonly selectProjectRequest?: Readonly<{
+    readonly projectId: string;
+    readonly sequence: number;
+  }>;
 }
 
 /**
@@ -607,6 +612,12 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
             {...(props.actsAsHostPerson && props.clients.folderBrowse !== undefined
               ? { folderBrowse: props.clients.folderBrowse }
               : {})}
+            {...(props.actsAsHostPerson && props.onCloneFromThisComputer !== undefined
+              ? { onCloneFromThisComputer: props.onCloneFromThisComputer }
+              : {})}
+            {...(props.selectProjectRequest === undefined
+              ? {}
+              : { selectProjectRequest: props.selectProjectRequest })}
             onCreated={(thread) => {
               props.onNavigate();
               setActiveThreadId(thread.id);

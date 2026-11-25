@@ -17,7 +17,7 @@ import {
   threadAccessOf,
   type PickerGroup,
 } from "@octant/domain";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { planCodeThreadCreate } from "../code/codeThreadCreate";
 import type { useCodeController } from "../code/useCodeController";
 import { ComposerStashControls } from "../composer/ComposerStashControls";
@@ -178,6 +178,13 @@ export interface RemoteCodeThreadStartProps {
    * default starts at Ask first instead.
    */
   readonly actsAsHostPerson?: boolean;
+  /** Opens the modal to clone a local Code Project onto this paired computer. */
+  readonly onCloneFromThisComputer?: () => void;
+  /** Refreshes Projects and selects the newly cloned Project on this computer. */
+  readonly selectProjectRequest?: Readonly<{
+    readonly projectId: string;
+    readonly sequence: number;
+  }>;
 }
 
 /**
@@ -213,25 +220,44 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
     textarea: firstMessage,
     busy,
   });
-  const { folderBrowse } = props;
-  if (projects.length === 0 && folderBrowse === undefined) return null;
+  const { folderBrowse, onCloneFromThisComputer, selectProjectRequest } = props;
+  useEffect(() => {
+    if (selectProjectRequest === undefined) return;
+    void projectActions.refreshAvailability().then(() => choose(selectProjectRequest.projectId));
+  }, [selectProjectRequest?.sequence]);
+  const canCloneHere = props.actsAsHostPerson !== false && onCloneFromThisComputer !== undefined;
+  if (projects.length === 0 && folderBrowse === undefined && !canCloneHere) return null;
 
   // A folder on that computer becomes a Code Project there: the receipt is
   // that host's own, so the Project is its local one.
   const newProject =
-    folderBrowse === undefined ? null : (
-      <>
-        <OctantButton
-          aria-label="New Project from a folder on this computer"
-          disabled={!props.connected || busy}
-          onClick={() => setPickingFolder(true)}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          New Project from a folder…
-        </OctantButton>
-        {pickingFolder ? (
+    folderBrowse === undefined && !canCloneHere ? null : (
+      <div className="flex flex-wrap items-center gap-1">
+        {folderBrowse === undefined ? null : (
+          <OctantButton
+            aria-label="New Project from a folder on this computer"
+            disabled={!props.connected || busy}
+            onClick={() => setPickingFolder(true)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            New Project from a folder…
+          </OctantButton>
+        )}
+        {canCloneHere ? (
+          <OctantButton
+            aria-label="Clone a repository from this computer"
+            disabled={!props.connected || busy}
+            onClick={onCloneFromThisComputer}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Clone from this computer…
+          </OctantButton>
+        ) : null}
+        {pickingFolder && folderBrowse !== undefined ? (
           <FolderPicker
             client={folderBrowse}
             hostId={LOCAL_HOST_ID}
@@ -253,7 +279,7 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
             title="Choose a folder on this computer"
           />
         ) : null}
-      </>
+      </div>
     );
   if (projects.length === 0) {
     return (

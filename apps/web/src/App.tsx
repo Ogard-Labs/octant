@@ -631,9 +631,12 @@ import {
   HostFederationStackContext,
   useHostFederationLifecycle,
 } from "./host/useHostFederationLifecycle";
-import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
 import { createPairedComputerFetch } from "./host/pairedComputerFetch";
 import { usePairedComputerReads } from "./host/usePairedComputerReads";
+import {
+  AddRepositoryToComputerContext,
+  type OpenRepositoryBootstrap,
+} from "./projects/addRepositoryToComputerContext";
 import {
   isPairedComputerAsk,
   isPairedComputerThread,
@@ -737,6 +740,16 @@ const PairedComputerCodeSurface = lazy(() =>
   import("./host/PairedComputerCodeSurface").then(({ PairedComputerCodeSurface }) => ({
     default: PairedComputerCodeSurface,
   })),
+);
+const FederatedHostsLifecycleStrip = lazy(() =>
+  import("./host/FederatedHostsLifecyclePanel")
+    .then(({ FederatedHostsLifecycleStrip }) => ({
+      default: FederatedHostsLifecycleStrip,
+    }))
+    .catch(() => ({ default: () => null })),
+);
+const RepositoryBootstrapHost = lazy(() =>
+  import("./projects/RepositoryBootstrapHost").catch(() => ({ default: () => null })),
 );
 const MoveThreadToProjectDialog = lazy(() =>
   import("./projects/MoveThreadToProjectDialog").then(({ MoveThreadToProjectDialog }) => ({
@@ -2724,6 +2737,12 @@ function LaunchedShell(
     | { readonly hostId: string; readonly threadId: CodeThreadId; readonly request: number }
     | undefined
   >(undefined);
+  const [pairedProject, setPairedProject] = useState<
+    { readonly hostId: HostId; readonly projectId: string; readonly sequence: number } | undefined
+  >(undefined);
+  const [openBootstrap, setOpenBootstrap] = useState<OpenRepositoryBootstrap | undefined>(
+    undefined,
+  );
   const pairedThreadToOpenHere =
     pairedThreadToOpen !== undefined && pairedThreadToOpen.hostId === String(createHostId)
       ? pairedThreadToOpen
@@ -2773,6 +2792,10 @@ function LaunchedShell(
                 {...(pairedComputerServerOpener === undefined
                   ? {}
                   : { openServer: pairedComputerServerOpener })}
+                {...(pairedProject !== undefined &&
+                String(pairedProject.hostId) === String(createHostId)
+                  ? { selectProjectRequest: pairedProject }
+                  : {})}
               />
             </Suspense>
           </DockModuleBoundary>
@@ -9139,676 +9162,687 @@ function LaunchedShell(
         ? {}
         : { workProviderTerminal: zenWorkProviderTerminal })}
     >
-      {hostFederationLifecycle === undefined ? null : (
-        <FederatedHostsLifecycleStrip lifecycle={hostFederationLifecycle} />
+      {hostFederationLifecycle === undefined ||
+      !computerSnapshots.some(
+        (entry) => String(entry.hostId) !== String(LOCAL_HOST_ID) && entry.state !== "ready",
+      ) ? null : (
+        <Suspense fallback={null}>
+          <FederatedHostsLifecycleStrip lifecycle={hostFederationLifecycle} />
+        </Suspense>
       )}
-      <ShellFrame
-        standaloneSurface={
-          controller.settingsOpen && !settingsAsSheet
-            ? settingsContainer("settings", "page")
-            : usageOpen
-              ? settingsContainer("usage", "page")
-              : undefined
-        }
-        sheet={
-          // The sheet stays in the tree and is told when it is open, so it can
-          // leave the way it arrived. Rendered only while Settings was open, it
-          // was gone the moment Settings closed, with nothing to fade.
-          <OctantSheet
-            {...(material === "translucent" ? { className: "octant-sheet--over-glass" } : {})}
-            label="Settings"
-            onClose={controller.closeSettings}
-            open={settingsAsSheet}
-          >
-            {settingsContainer("settings", "sheet")}
-          </OctantSheet>
-        }
-        {...(shellBackdrop === undefined
-          ? {}
-          : { backdrop: shellBackdrop, backdropCoversSidebar: shellBackdropCoversSidebar })}
-        {...(welcomeBackdrop === undefined ? {} : { welcomeGround: welcomeBackdrop })}
-        {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
-        {...(themeController.draft?.typography === undefined && props.typography === undefined
-          ? {}
-          : { typography: themeController.draft?.typography ?? props.typography })}
-        {...(themeController.draft === undefined ? {} : { theme: themeController.draft })}
-        chrome={
-          <WindowChromeContainer
-            windowHistory={windowHistory}
-            actions={actions}
-            activeMode={activeMode}
-            activeSurface={activeSurface}
-            dockAvailable={dockAvailable}
-            dockPresentedOpen={dockPresentedOpen}
-            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-            hostReservesTitlebarInset={hostReservesTitlebarInset}
-            isNarrow={isNarrow}
-            material={material}
-            presentedSidebarCollapsed={presentedSidebarCollapsed}
-            setSidebarCollapsed={setSidebarCollapsedPersistent}
-            sidebarRail={sidebarRail}
-            zenRecoveryNeeded={zen.recoveryNeeded}
-          />
-        }
-        contextSidebarWidth={dockPresentationWidth}
-        bottomPanelHeight={bottomPanelHeight}
-        bottomPanelOpen={bottomPanelPresentedOpen}
-        material={material}
-        onCommitSidebarWidth={(width) => {
-          setPreviewSidebarWidth(width);
-          void controller.updateSettings({ sidebarWidth: width });
-        }}
-        onPreviewSidebarWidth={setPreviewSidebarWidth}
-        sidebarCollapsed={presentedSidebarCollapsed}
-        sidebarRail={sidebarRail}
-        sidebarRailBeside={sidebarRailBeside}
-        sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
-        showThreadProviderIcons={controller.settings.showThreadProviderIcons}
-        transcriptTextSize={controller.settings.transcriptTextSize}
-        transcriptWidth={controller.settings.transcriptWidth}
-        sidebar={
-          <FollowUpLineageProvider client={launchedClients.followUpSuggestionClient}>
-            <SidebarContainer
-              zenEnabled={zen.enabled}
+      <AddRepositoryToComputerContext.Provider value={openBootstrap}>
+        <ShellFrame
+          standaloneSurface={
+            controller.settingsOpen && !settingsAsSheet
+              ? settingsContainer("settings", "page")
+              : usageOpen
+                ? settingsContainer("usage", "page")
+                : undefined
+          }
+          sheet={
+            // The sheet stays in the tree and is told when it is open, so it can
+            // leave the way it arrived. Rendered only while Settings was open, it
+            // was gone the moment Settings closed, with nothing to fade.
+            <OctantSheet
+              {...(material === "translucent" ? { className: "octant-sheet--over-glass" } : {})}
+              label="Settings"
+              onClose={controller.closeSettings}
+              open={settingsAsSheet}
+            >
+              {settingsContainer("settings", "sheet")}
+            </OctantSheet>
+          }
+          {...(shellBackdrop === undefined
+            ? {}
+            : { backdrop: shellBackdrop, backdropCoversSidebar: shellBackdropCoversSidebar })}
+          {...(welcomeBackdrop === undefined ? {} : { welcomeGround: welcomeBackdrop })}
+          {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
+          {...(themeController.draft?.typography === undefined && props.typography === undefined
+            ? {}
+            : { typography: themeController.draft?.typography ?? props.typography })}
+          {...(themeController.draft === undefined ? {} : { theme: themeController.draft })}
+          chrome={
+            <WindowChromeContainer
               windowHistory={windowHistory}
               actions={actions}
-              {...(activeChatThreadId === undefined ? {} : { activeChatThreadId })}
-              {...(activeCodeThreadId === undefined ? {} : { activeCodeThreadId })}
               activeMode={activeMode}
-              {...(activeProjectId === undefined ? {} : { activeProjectId })}
-              {...(activeSidebarDestination === undefined ? {} : { activeSidebarDestination })}
-              homeActive={homeActive}
-              {...(activeWorkThreadId === undefined ? {} : { activeWorkThreadId })}
-              allProjects={projectController.allProjects}
-              archivedProjects={projectController.archivedProjects}
-              availabilityByProject={projectController.availabilityByProject}
-              {...(chatController.errorMessage === undefined
-                ? {}
-                : { chatErrorMessage: chatController.errorMessage })}
-              {...(chatProjectThreadListRequest === undefined
-                ? {}
-                : { chatProjectThreadListRequest })}
-              chatReadCursorStore={chatReadCursorStore}
-              chatStatus={chatController.status}
-              codeReadCursorStore={codeReadCursorStore}
-              codeStatus={codeController.status}
-              contextHealthByProject={contextHealthByProject}
-              environmentSelection={environmentSelection}
-              {...(hostFederationTransports === undefined
-                ? {}
-                : {
-                    pairedComputerThreads,
-                    onOpenPairedComputerThread: openPairedComputerThreadLatest,
-                  })}
-              federatedHostStates={federatedHostStates}
-              githubIssuesReadAvailable={githubIssuesReadAvailable}
+              activeSurface={activeSurface}
+              dockAvailable={dockAvailable}
+              dockPresentedOpen={dockPresentedOpen}
               {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
               hostReservesTitlebarInset={hostReservesTitlebarInset}
-              hosts={hosts}
-              imageLibraryAvailable={imageGenerationClient !== undefined}
-              inboxCount={inboxCount}
-              todosCount={todosCount}
-              linearIssuesRead={linearIssuesRead}
-              navigation={navigationModel}
-              navigatorAvailable={navigatorAssistant.state.kind === "ready"}
-              {...(openSidebarThreadIds === undefined ? {} : { openSidebarThreadIds })}
-              {...(projectController.errorMessage === undefined
-                ? {}
-                : { projectErrorMessage: projectController.errorMessage })}
-              projectStatus={projectController.status}
-              projects={projectController.projects}
-              resolvedSidebarBackground={resolvedSidebarBackground}
-              setEnvironmentSelection={setEnvironmentSelection}
+              isNarrow={isNarrow}
+              material={material}
+              presentedSidebarCollapsed={presentedSidebarCollapsed}
               setSidebarCollapsed={setSidebarCollapsedPersistent}
-              setSidebarFilterQuery={setSidebarFilterQuery}
-              settings={presentedShellSettings ?? controller.settings}
-              shellBackdropCoversSidebar={shellBackdropCoversSidebar}
-              sidebarBackgroundFetcher={sidebarBackgroundFetcher}
-              sidebarFilterQuery={sidebarFilterQuery}
-              {...(sidebarListRequest === undefined ? {} : { sidebarListRequest })}
               sidebarRail={sidebarRail}
-              sidebarRailBeside={sidebarRailBeside}
-              whatsNew={whatsNew}
-              sidebarTileCounts={sidebarTileCounts}
-              {...(projectThreadsAccess.errorMessage === undefined
-                ? {}
-                : { threadErrorMessage: projectThreadsAccess.errorMessage })}
-              threadExportClient={threadExportClient}
-              threadHandOffClient={threadHandOffClient}
-              personMemoryClient={launchedClients.personMemoryClient}
-              threadStatus={projectThreadsAccess.status}
-              workStatus={workNavigation.status}
-              workspace={controller.workspace}
+              zenRecoveryNeeded={zen.recoveryNeeded}
             />
-          </FollowUpLineageProvider>
-        }
-        sidebarResizable={!isNarrow}
-        sidebarWidth={sidebarWidth}
-        onWorkspaceWidth={noteWorkspaceWidth}
-        splitPrimaryMinimum={dockSplitPrimaryMinimum}
-        wideContextOpen={!isNarrow && dockPresentedOpen}
-        dockTileColumns={dockPresentedOpen ? dockToolColumns : 1}
-        {...(dockPresentedOpen && dockTwoColumnWidth !== undefined
-          ? { contextSidebarTwoColumnWidth: dockTwoColumnWidth }
-          : {})}
-        {...(dockPresentedOpen && dockEnvironmentOpen
-          ? {
-              dockEnvironmentWidth: ENVIRONMENT_STRIP_WIDTH,
-              dockToolsShown: dockSplit.toolTabIds.length > 0,
-            }
-          : {})}
-        workspace={
-          <ThreadNativeSetupProvider services={threadNativeSetupServices}>
-            <ThreadNotesProvider services={launchedClients.threadNotesClient}>
-              <div className="primary-workspace-layer">
-                {readerOpen ? (
-                  <DockModuleBoundary resetKey={readerKey}>
-                    <Suspense fallback={<SurfaceLoading label="Opening page" />}>
-                      <ReaderPagesContainer
-                        actions={actions}
-                        activeMode={activeMode}
-                        {...(activeProjectId === undefined ? {} : { activeProjectId })}
-                        agentsCenterVisible={agentsCenterVisible}
-                        allProjects={projectController.allProjects}
-                        archiveOpen={archiveOpen}
-                        artifactLibraryOpen={artifactLibraryOpen}
-                        automationCenterVisible={automationCenterVisible}
-                        {...(automationCenterFocusId === undefined
-                          ? {}
-                          : { automationCenterFocusId })}
-                        automationEditorCatalog={automationEditorCatalog}
-                        availabilityByProject={projectController.availabilityByProject}
-                        boundCodeProjectId={controller.boundCodeProjectId}
-                        clients={launchedClients}
-                        codeBoardOpen={codeBoardOpen}
-                        threadBoardAvailable={threadBoardAvailable}
-                        codeBoardProjects={codeBoardProjects}
-                        codeNavigationRows={codeController.navigation}
-                        {...(codeController.bootstrap?.settings === undefined
-                          ? {}
-                          : { codeWorkerListingSettings: codeController.bootstrap.settings })}
-                        codePullRequestsOpen={codePullRequestsOpen}
-                        codeProviderGroups={codeProviderGroups}
-                        codeThreads={codeController.bootstrap?.threads}
-                        environmentNames={environmentNames}
-                        githubClient={githubClient}
-                        githubIssuesOpen={githubIssuesOpen}
-                        githubIssuesReadAvailable={githubIssuesReadAvailable}
-                        {...(githubPullRequestCapability.login === undefined
-                          ? {}
-                          : { githubViewerLogin: githubPullRequestCapability.login })}
-                        {...(props.hostBridge === undefined
-                          ? {}
-                          : { hostBridge: props.hostBridge })}
-                        imageLibraryOpen={imageLibraryOpen}
-                        imageProfiles={imageGenerationProfiles ?? NO_IMAGE_PROFILES}
-                        inboxAttentionItems={inboxAttentionItems}
-                        inboxOpen={inboxOpen}
-                        {...(todosOpen ? { todosPage } : {})}
-                        isNarrow={isNarrow}
-                        linearClient={linearClient}
-                        linearIssuesOpen={linearIssuesOpen}
-                        linearIssuesRead={linearIssuesRead}
-                        loadAssignedGithubWork={loadAssignedGithubWork}
-                        loadAssignedLinearIssues={loadAssignedLinearIssues}
-                        navigationRevision={pendingRequestFeedRevision}
-                        needsYouAskClients={needsYouAskClients}
-                        projectNames={workingNowProjectNames}
-                        projects={projectController.projects}
-                        projectsListOpen={projectsListOpen}
-                        {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
-                        reviewEntries={reviewEntries}
-                        reviewOpen={reviewOpen}
-                        reviewSource={reviewSource}
-                        {...(selectedProjectPullRequestKey === undefined
-                          ? {}
-                          : { selectedProjectPullRequestKey })}
-                        serverUrl={props.launch.serverUrl}
-                        settings={controller.settings}
-                        windowCapability={props.projectWindowCapability}
-                        workBoardOpen={workBoardOpen}
-                        workBoardProjects={workBoardProjects}
-                        workNavigationRows={workNavigation.navigation}
-                        workProviderGroups={workProviderGroups}
-                        workThreads={workNavigation.bootstrap?.threads}
-                        workspace={controller.workspace}
-                      />
-                    </Suspense>
-                  </DockModuleBoundary>
-                ) : null}
-                <WorktreeLaunchContext.Provider value={worktreeLaunchContext}>
-                  <ThreadPaneContainer
+          }
+          contextSidebarWidth={dockPresentationWidth}
+          bottomPanelHeight={bottomPanelHeight}
+          bottomPanelOpen={bottomPanelPresentedOpen}
+          material={material}
+          onCommitSidebarWidth={(width) => {
+            setPreviewSidebarWidth(width);
+            void controller.updateSettings({ sidebarWidth: width });
+          }}
+          onPreviewSidebarWidth={setPreviewSidebarWidth}
+          sidebarCollapsed={presentedSidebarCollapsed}
+          sidebarRail={sidebarRail}
+          sidebarRailBeside={sidebarRailBeside}
+          sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
+          showThreadProviderIcons={controller.settings.showThreadProviderIcons}
+          transcriptTextSize={controller.settings.transcriptTextSize}
+          transcriptWidth={controller.settings.transcriptWidth}
+          sidebar={
+            <FollowUpLineageProvider client={launchedClients.followUpSuggestionClient}>
+              <SidebarContainer
+                zenEnabled={zen.enabled}
+                windowHistory={windowHistory}
+                actions={actions}
+                {...(activeChatThreadId === undefined ? {} : { activeChatThreadId })}
+                {...(activeCodeThreadId === undefined ? {} : { activeCodeThreadId })}
+                activeMode={activeMode}
+                {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                {...(activeSidebarDestination === undefined ? {} : { activeSidebarDestination })}
+                homeActive={homeActive}
+                {...(activeWorkThreadId === undefined ? {} : { activeWorkThreadId })}
+                allProjects={projectController.allProjects}
+                archivedProjects={projectController.archivedProjects}
+                availabilityByProject={projectController.availabilityByProject}
+                {...(chatController.errorMessage === undefined
+                  ? {}
+                  : { chatErrorMessage: chatController.errorMessage })}
+                {...(chatProjectThreadListRequest === undefined
+                  ? {}
+                  : { chatProjectThreadListRequest })}
+                chatReadCursorStore={chatReadCursorStore}
+                chatStatus={chatController.status}
+                codeReadCursorStore={codeReadCursorStore}
+                codeStatus={codeController.status}
+                contextHealthByProject={contextHealthByProject}
+                environmentSelection={environmentSelection}
+                {...(hostFederationTransports === undefined
+                  ? {}
+                  : {
+                      pairedComputerThreads,
+                      onOpenPairedComputerThread: openPairedComputerThreadLatest,
+                    })}
+                federatedHostStates={federatedHostStates}
+                githubIssuesReadAvailable={githubIssuesReadAvailable}
+                {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                hostReservesTitlebarInset={hostReservesTitlebarInset}
+                hosts={hosts}
+                imageLibraryAvailable={imageGenerationClient !== undefined}
+                inboxCount={inboxCount}
+                todosCount={todosCount}
+                linearIssuesRead={linearIssuesRead}
+                navigation={navigationModel}
+                navigatorAvailable={navigatorAssistant.state.kind === "ready"}
+                {...(openSidebarThreadIds === undefined ? {} : { openSidebarThreadIds })}
+                {...(projectController.errorMessage === undefined
+                  ? {}
+                  : { projectErrorMessage: projectController.errorMessage })}
+                projectStatus={projectController.status}
+                projects={projectController.projects}
+                resolvedSidebarBackground={resolvedSidebarBackground}
+                setEnvironmentSelection={setEnvironmentSelection}
+                setSidebarCollapsed={setSidebarCollapsedPersistent}
+                setSidebarFilterQuery={setSidebarFilterQuery}
+                settings={presentedShellSettings ?? controller.settings}
+                shellBackdropCoversSidebar={shellBackdropCoversSidebar}
+                sidebarBackgroundFetcher={sidebarBackgroundFetcher}
+                sidebarFilterQuery={sidebarFilterQuery}
+                {...(sidebarListRequest === undefined ? {} : { sidebarListRequest })}
+                sidebarRail={sidebarRail}
+                sidebarRailBeside={sidebarRailBeside}
+                whatsNew={whatsNew}
+                sidebarTileCounts={sidebarTileCounts}
+                {...(projectThreadsAccess.errorMessage === undefined
+                  ? {}
+                  : { threadErrorMessage: projectThreadsAccess.errorMessage })}
+                threadExportClient={threadExportClient}
+                threadHandOffClient={threadHandOffClient}
+                personMemoryClient={launchedClients.personMemoryClient}
+                threadStatus={projectThreadsAccess.status}
+                workStatus={workNavigation.status}
+                workspace={controller.workspace}
+              />
+            </FollowUpLineageProvider>
+          }
+          sidebarResizable={!isNarrow}
+          sidebarWidth={sidebarWidth}
+          onWorkspaceWidth={noteWorkspaceWidth}
+          splitPrimaryMinimum={dockSplitPrimaryMinimum}
+          wideContextOpen={!isNarrow && dockPresentedOpen}
+          dockTileColumns={dockPresentedOpen ? dockToolColumns : 1}
+          {...(dockPresentedOpen && dockTwoColumnWidth !== undefined
+            ? { contextSidebarTwoColumnWidth: dockTwoColumnWidth }
+            : {})}
+          {...(dockPresentedOpen && dockEnvironmentOpen
+            ? {
+                dockEnvironmentWidth: ENVIRONMENT_STRIP_WIDTH,
+                dockToolsShown: dockSplit.toolTabIds.length > 0,
+              }
+            : {})}
+          workspace={
+            <ThreadNativeSetupProvider services={threadNativeSetupServices}>
+              <ThreadNotesProvider services={launchedClients.threadNotesClient}>
+                <div className="primary-workspace-layer">
+                  {readerOpen ? (
+                    <DockModuleBoundary resetKey={readerKey}>
+                      <Suspense fallback={<SurfaceLoading label="Opening page" />}>
+                        <ReaderPagesContainer
+                          actions={actions}
+                          activeMode={activeMode}
+                          {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                          agentsCenterVisible={agentsCenterVisible}
+                          allProjects={projectController.allProjects}
+                          archiveOpen={archiveOpen}
+                          artifactLibraryOpen={artifactLibraryOpen}
+                          automationCenterVisible={automationCenterVisible}
+                          {...(automationCenterFocusId === undefined
+                            ? {}
+                            : { automationCenterFocusId })}
+                          automationEditorCatalog={automationEditorCatalog}
+                          availabilityByProject={projectController.availabilityByProject}
+                          boundCodeProjectId={controller.boundCodeProjectId}
+                          clients={launchedClients}
+                          codeBoardOpen={codeBoardOpen}
+                          threadBoardAvailable={threadBoardAvailable}
+                          codeBoardProjects={codeBoardProjects}
+                          codeNavigationRows={codeController.navigation}
+                          {...(codeController.bootstrap?.settings === undefined
+                            ? {}
+                            : { codeWorkerListingSettings: codeController.bootstrap.settings })}
+                          codePullRequestsOpen={codePullRequestsOpen}
+                          codeProviderGroups={codeProviderGroups}
+                          codeThreads={codeController.bootstrap?.threads}
+                          environmentNames={environmentNames}
+                          githubClient={githubClient}
+                          githubIssuesOpen={githubIssuesOpen}
+                          githubIssuesReadAvailable={githubIssuesReadAvailable}
+                          {...(githubPullRequestCapability.login === undefined
+                            ? {}
+                            : { githubViewerLogin: githubPullRequestCapability.login })}
+                          {...(props.hostBridge === undefined
+                            ? {}
+                            : { hostBridge: props.hostBridge })}
+                          imageLibraryOpen={imageLibraryOpen}
+                          imageProfiles={imageGenerationProfiles ?? NO_IMAGE_PROFILES}
+                          inboxAttentionItems={inboxAttentionItems}
+                          inboxOpen={inboxOpen}
+                          {...(todosOpen ? { todosPage } : {})}
+                          isNarrow={isNarrow}
+                          linearClient={linearClient}
+                          linearIssuesOpen={linearIssuesOpen}
+                          linearIssuesRead={linearIssuesRead}
+                          loadAssignedGithubWork={loadAssignedGithubWork}
+                          loadAssignedLinearIssues={loadAssignedLinearIssues}
+                          navigationRevision={pendingRequestFeedRevision}
+                          needsYouAskClients={needsYouAskClients}
+                          projectNames={workingNowProjectNames}
+                          projects={projectController.projects}
+                          projectsListOpen={projectsListOpen}
+                          {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
+                          reviewEntries={reviewEntries}
+                          reviewOpen={reviewOpen}
+                          reviewSource={reviewSource}
+                          {...(selectedProjectPullRequestKey === undefined
+                            ? {}
+                            : { selectedProjectPullRequestKey })}
+                          serverUrl={props.launch.serverUrl}
+                          settings={controller.settings}
+                          windowCapability={props.projectWindowCapability}
+                          workBoardOpen={workBoardOpen}
+                          workBoardProjects={workBoardProjects}
+                          workNavigationRows={workNavigation.navigation}
+                          workProviderGroups={workProviderGroups}
+                          workThreads={workNavigation.bootstrap?.threads}
+                          workspace={controller.workspace}
+                        />
+                      </Suspense>
+                    </DockModuleBoundary>
+                  ) : null}
+                  <WorktreeLaunchContext.Provider value={worktreeLaunchContext}>
+                    <ThreadPaneContainer
+                      actions={actions}
+                      onOpenWorktrees={setPreparationTarget}
+                      activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
+                      activeMode={activeMode}
+                      {...(activeThreadUsageReporting === undefined
+                        ? {}
+                        : { activeThreadUsageReporting })}
+                      agentProfiles={agentProfiles}
+                      {...(browserToolThreadId === undefined ? {} : { browserToolThreadId })}
+                      chatController={chatController}
+                      chatReadCursorStore={chatReadCursorStore}
+                      clients={launchedClients}
+                      codeBoardProjects={codeBoardProjects}
+                      {...(workSettings.settings?.defaultStrict === true
+                        ? { workDefaultStrict: true }
+                        : {})}
+                      codeController={codeController}
+                      codeDefaultPermissionMode={codeDefaultPermissionMode}
+                      codeProviderChoices={codeProviderChoices}
+                      codeProviderGroups={codeProviderGroups}
+                      codeThreadControllers={codeThreadControllers}
+                      composerCompaction={composerCompaction}
+                      contextController={contextController}
+                      contextSubject={contextSubject}
+                      continueCards={continueCards}
+                      canOpenCrossContextInNewWindow={controller.canOpenCrossContextInNewWindow}
+                      contentTabs={controller.contentTabs}
+                      crossContextOffer={controller.crossContextOffer}
+                      createHostId={createHostId}
+                      createHostViewScope={createHostViewScope}
+                      {...(renderPairedComputerCodeStart === undefined
+                        ? {}
+                        : { renderPairedComputerCodeStart })}
+                      dockOpen={dockOpen}
+                      {...(dockSurface === undefined
+                        ? {}
+                        : {
+                            // Environment is open in the dock while any tile shows it.
+                            dockSurface: dockShownTabs.some((tab) => tab.surface === "environment")
+                              ? "environment"
+                              : dockSurface,
+                          })}
+                      draftCreating={draftCreating}
+                      {...(draftError === undefined ? {} : { draftError })}
+                      {...(draftPermissionMode === undefined ? {} : { draftPermissionMode })}
+                      {...(draftPendingMessage === undefined ? {} : { draftPendingMessage })}
+                      {...(draftPermissionPersistence === undefined
+                        ? {}
+                        : { draftPermissionPersistence })}
+                      draftProjectBinding={draftProjectBinding}
+                      draftProjectSelection={draftProjectSelection}
+                      draftProviderGroups={draftProviderGroups}
+                      draftResetRevisions={draftResetRevisions}
+                      {...(effectiveDraftModelId === undefined ? {} : { effectiveDraftModelId })}
+                      {...(effectiveDraftProviderInstanceId === undefined
+                        ? {}
+                        : { effectiveDraftProviderInstanceId })}
+                      environmentNames={environmentNames}
+                      githubClient={githubClient}
+                      hidden={workspaceHidden}
+                      {...(homeStart === undefined ? {} : { homeStart })}
+                      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                      hosts={hosts}
+                      {...(imageGenerationProfiles === undefined
+                        ? {}
+                        : { imageGenerationProfiles })}
+                      isNarrow={isNarrow}
+                      {...(lastSelectedHealthyHostId === undefined
+                        ? {}
+                        : { lastSelectedHealthyHostId })}
+                      linearClient={linearClient}
+                      loadAssignedLinearIssues={loadAssignedLinearIssues}
+                      loadOpenLinearIssues={loadOpenLinearIssues}
+                      machineChanges={machineChanges}
+                      navigation={navigationModel}
+                      {...(pendingDraftBranch === undefined ? {} : { pendingDraftBranch })}
+                      {...(draftStartFrom === undefined ? {} : { draftStartFrom })}
+                      {...(pendingDraftCoordinator === undefined
+                        ? {}
+                        : { pendingDraftCoordinator })}
+                      pendingDraftCoordinatorChoices={pendingDraftCoordinatorChoices}
+                      {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
+                      {...(frontDraft === undefined
+                        ? {}
+                        : {
+                            draftTodoSource: {
+                              draft: frontDraft,
+                              seed: todoStart?.draft === frontDraft ? todoStart.seed : undefined,
+                              current:
+                                todoStart?.draft === frontDraft
+                                  ? {
+                                      todoId: todoStart.todoId,
+                                      title: todoStart.title,
+                                      listHostId: todoStart.listHostId,
+                                    }
+                                  : undefined,
+                              canRestore: canRestoreTodoSource,
+                              change: (source) =>
+                                setTodoStart(
+                                  source === undefined
+                                    ? undefined
+                                    : {
+                                        ...source,
+                                        mode: activeMode,
+                                        draft: frontDraft,
+                                        ...(frontDraftProjectId === undefined
+                                          ? {}
+                                          : { projectId: frontDraftProjectId }),
+                                      },
+                                ),
+                            },
+                          })}
+                      {...(pendingIssue === undefined ? {} : { pendingIssue })}
+                      presentedLayout={controller.presentedLayout}
+                      activeProject={projectController.activeProject}
+                      allProjects={projectController.allProjects}
+                      availabilityByProject={projectController.availabilityByProject}
+                      memoryRevision={projectController.memoryRevision}
+                      projectClient={projectController.client}
+                      tabActivation={controller.tabActivation}
+                      workspaceVersion={controller.workspaceVersion}
+                      providerController={providerController}
+                      {...(revealTurn === undefined ? {} : { revealTurn })}
+                      serverUrl={props.launch.serverUrl}
+                      settings={controller.settings}
+                      threadStatsSummary={threadStatsSummary}
+                      {...(welcomeBackdrop === undefined ? {} : { welcomeGround: true })}
+                      windowCapability={props.projectWindowCapability}
+                      workCreateThreadAvailable={workCreateThreadAvailable}
+                      workNavigation={workNavigation}
+                      workPromotionController={workPromotionController}
+                      workProviderGroups={workProviderGroups}
+                      workspace={controller.workspace}
+                      workspaceDrag={workspaceDrag}
+                      zen={zen}
+                    />
+                  </WorktreeLaunchContext.Provider>
+                </div>
+                <NavigatorPopover
+                  controller={navigatorAssistant}
+                  onClose={() => setNavigatorOpen(false)}
+                  onOpenSettings={(target) => {
+                    setNavigatorOpen(false);
+                    void controller.openSettings(target);
+                  }}
+                  open={navigatorOpen}
+                  restoreFocus={navigatorOpener}
+                />
+                <TabActivationProvider registry={dockTabActivation}>
+                  <DockContainer
+                    focusedTool={focusedDockTool}
                     actions={actions}
-                    onOpenWorktrees={setPreparationTarget}
+                    splitPrimaryMinimum={dockSplitPrimaryMinimum}
+                    {...(activeBottomSurface === undefined ? {} : { activeBottomSurface })}
                     activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
                     activeMode={activeMode}
-                    {...(activeThreadUsageReporting === undefined
+                    {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                    {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
+                    {...(activeProjectExtraFolders.length === 0
                       ? {}
-                      : { activeThreadUsageReporting })}
-                    agentProfiles={agentProfiles}
-                    {...(browserToolThreadId === undefined ? {} : { browserToolThreadId })}
-                    chatController={chatController}
+                      : { projectExtraFolders: activeProjectExtraFolders })}
+                    bottomPanelHeight={bottomPanelHeight}
+                    bottomPanelOpen={bottomPanelOpen}
+                    bottomPanelPresentation={bottomPanelPresentation}
+                    bottomPanelPresentedOpen={bottomPanelPresentedOpen}
+                    bottomPanelSurfaces={bottomPanelSurfaces}
+                    bottomPanelTabs={bottomPanelTabs}
+                    canvasRevisionsByThread={canvasRevisionsByThread}
                     chatReadCursorStore={chatReadCursorStore}
                     clients={launchedClients}
-                    codeBoardProjects={codeBoardProjects}
-                    {...(workSettings.settings?.defaultStrict === true
-                      ? { workDefaultStrict: true }
-                      : {})}
-                    codeController={codeController}
-                    codeDefaultPermissionMode={codeDefaultPermissionMode}
-                    codeProviderChoices={codeProviderChoices}
+                    codeNavigationRevision={machineChanges.codeNavigation}
                     codeProviderGroups={codeProviderGroups}
-                    codeThreadControllers={codeThreadControllers}
-                    composerCompaction={composerCompaction}
-                    contextController={contextController}
-                    contextSubject={contextSubject}
-                    continueCards={continueCards}
-                    canOpenCrossContextInNewWindow={controller.canOpenCrossContextInNewWindow}
-                    contentTabs={controller.contentTabs}
-                    crossContextOffer={controller.crossContextOffer}
-                    createHostId={createHostId}
-                    createHostViewScope={createHostViewScope}
-                    {...(renderPairedComputerCodeStart === undefined
+                    {...(toolsReadCodeController && activeCodeThreadController !== undefined
+                      ? { codeThreadController: activeCodeThreadController }
+                      : {})}
+                    {...(toolsReadCodeThreadView && activeCodeThreadView !== undefined
+                      ? { codeThreadView: activeCodeThreadView }
+                      : {})}
+                    {...(codeDiffLayout === undefined ? {} : { codeDiffLayout })}
+                    {...(contextController.snapshot === undefined
                       ? {}
-                      : { renderPairedComputerCodeStart })}
-                    dockOpen={dockOpen}
-                    {...(dockSurface === undefined
-                      ? {}
-                      : {
-                          // Environment is open in the dock while any tile shows it.
-                          dockSurface: dockShownTabs.some((tab) => tab.surface === "environment")
-                            ? "environment"
-                            : dockSurface,
-                        })}
-                    draftCreating={draftCreating}
-                    {...(draftError === undefined ? {} : { draftError })}
-                    {...(draftPermissionMode === undefined ? {} : { draftPermissionMode })}
-                    {...(draftPendingMessage === undefined ? {} : { draftPendingMessage })}
-                    {...(draftPermissionPersistence === undefined
-                      ? {}
-                      : { draftPermissionPersistence })}
-                    draftProjectBinding={draftProjectBinding}
-                    draftProjectSelection={draftProjectSelection}
-                    draftProviderGroups={draftProviderGroups}
-                    draftResetRevisions={draftResetRevisions}
-                    {...(effectiveDraftModelId === undefined ? {} : { effectiveDraftModelId })}
-                    {...(effectiveDraftProviderInstanceId === undefined
-                      ? {}
-                      : { effectiveDraftProviderInstanceId })}
-                    environmentNames={environmentNames}
-                    githubClient={githubClient}
-                    hidden={workspaceHidden}
-                    {...(homeStart === undefined ? {} : { homeStart })}
+                      : { contextSnapshot: contextController.snapshot })}
+                    displayedDockState={displayedDockState}
+                    {...(storedDockTabs === undefined ? {} : { storedDockTabs })}
+                    dockPresentationWidth={dockPresentationWidth}
+                    dockPresentedOpen={dockPresentedOpen}
+                    dockReferences={dockReferences}
+                    dockToolButtons={dockToolButtons}
+                    dockResolution={dockResolution}
+                    dockResolveSurface={dockResolveSurface}
+                    dockSidecarsByThread={dockSidecarsByThread}
+                    dockTabs={dockTabs}
+                    {...(dockThread === undefined ? {} : { dockThread })}
+                    {...(dockThreadHost === undefined ? {} : { dockThreadHost })}
+                    {...(dockThreadHostId === undefined ? {} : { dockThreadHostId })}
+                    dockThreadOnThisComputer={dockThreadHostId === String(LOCAL_HOST_ID)}
+                    {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
                     {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                    hosts={hosts}
-                    {...(imageGenerationProfiles === undefined ? {} : { imageGenerationProfiles })}
                     isNarrow={isNarrow}
-                    {...(lastSelectedHealthyHostId === undefined
-                      ? {}
-                      : { lastSelectedHealthyHostId })}
-                    linearClient={linearClient}
-                    loadAssignedLinearIssues={loadAssignedLinearIssues}
-                    loadOpenLinearIssues={loadOpenLinearIssues}
-                    machineChanges={machineChanges}
                     navigation={navigationModel}
-                    {...(pendingDraftBranch === undefined ? {} : { pendingDraftBranch })}
-                    {...(draftStartFrom === undefined ? {} : { draftStartFrom })}
-                    {...(pendingDraftCoordinator === undefined ? {} : { pendingDraftCoordinator })}
-                    pendingDraftCoordinatorChoices={pendingDraftCoordinatorChoices}
-                    {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
-                    {...(frontDraft === undefined
+                    {...(dockOverviewThread === undefined
                       ? {}
-                      : {
-                          draftTodoSource: {
-                            draft: frontDraft,
-                            seed: todoStart?.draft === frontDraft ? todoStart.seed : undefined,
-                            current:
-                              todoStart?.draft === frontDraft
-                                ? {
-                                    todoId: todoStart.todoId,
-                                    title: todoStart.title,
-                                    listHostId: todoStart.listHostId,
-                                  }
-                                : undefined,
-                            canRestore: canRestoreTodoSource,
-                            change: (source) =>
-                              setTodoStart(
-                                source === undefined
-                                  ? undefined
-                                  : {
-                                      ...source,
-                                      mode: activeMode,
-                                      draft: frontDraft,
-                                      ...(frontDraftProjectId === undefined
-                                        ? {}
-                                        : { projectId: frontDraftProjectId }),
-                                    },
-                              ),
-                          },
-                        })}
-                    {...(pendingIssue === undefined ? {} : { pendingIssue })}
-                    presentedLayout={controller.presentedLayout}
-                    activeProject={projectController.activeProject}
-                    allProjects={projectController.allProjects}
-                    availabilityByProject={projectController.availabilityByProject}
-                    memoryRevision={projectController.memoryRevision}
+                      : { overviewThread: dockOverviewThread })}
+                    projectNames={workingNowProjectNames}
                     projectClient={projectController.client}
-                    tabActivation={controller.tabActivation}
-                    workspaceVersion={controller.workspaceVersion}
-                    providerController={providerController}
-                    {...(revealTurn === undefined ? {} : { revealTurn })}
+                    projects={projectController.allProjects}
+                    projectPullRequestReviewOpen={projectPullRequestReviewOpen}
+                    {...(toolsPresented ? { providerController } : {})}
+                    {...(requestedAgentReview === undefined ? {} : { requestedAgentReview })}
+                    {...(requestedCodeReviewFile === undefined ? {} : { requestedCodeReviewFile })}
+                    {...(requestedAgentView === undefined ? {} : { requestedAgentView })}
+                    {...(selectedProjectPullRequest === undefined
+                      ? {}
+                      : { selectedProjectPullRequest })}
+                    {...(selectedProjectPullRequestKey === undefined
+                      ? {}
+                      : { selectedProjectPullRequestKey })}
                     serverUrl={props.launch.serverUrl}
-                    settings={controller.settings}
-                    threadStatsSummary={threadStatsSummary}
-                    {...(welcomeBackdrop === undefined ? {} : { welcomeGround: true })}
                     windowCapability={props.projectWindowCapability}
-                    workCreateThreadAvailable={workCreateThreadAvailable}
-                    workNavigation={workNavigation}
-                    workPromotionController={workPromotionController}
-                    workProviderGroups={workProviderGroups}
-                    workspace={controller.workspace}
-                    workspaceDrag={workspaceDrag}
-                    zen={zen}
+                    writtenDocumentsByThread={writtenDocumentsByThread}
                   />
-                </WorktreeLaunchContext.Provider>
-              </div>
-              <NavigatorPopover
-                controller={navigatorAssistant}
-                onClose={() => setNavigatorOpen(false)}
-                onOpenSettings={(target) => {
-                  setNavigatorOpen(false);
-                  void controller.openSettings(target);
-                }}
-                open={navigatorOpen}
-                restoreFocus={navigatorOpener}
-              />
-              <TabActivationProvider registry={dockTabActivation}>
-                <DockContainer
-                  focusedTool={focusedDockTool}
-                  actions={actions}
-                  splitPrimaryMinimum={dockSplitPrimaryMinimum}
-                  {...(activeBottomSurface === undefined ? {} : { activeBottomSurface })}
-                  activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
-                  activeMode={activeMode}
-                  {...(activeProjectId === undefined ? {} : { activeProjectId })}
-                  {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
-                  {...(activeProjectExtraFolders.length === 0
-                    ? {}
-                    : { projectExtraFolders: activeProjectExtraFolders })}
-                  bottomPanelHeight={bottomPanelHeight}
-                  bottomPanelOpen={bottomPanelOpen}
-                  bottomPanelPresentation={bottomPanelPresentation}
-                  bottomPanelPresentedOpen={bottomPanelPresentedOpen}
-                  bottomPanelSurfaces={bottomPanelSurfaces}
-                  bottomPanelTabs={bottomPanelTabs}
-                  canvasRevisionsByThread={canvasRevisionsByThread}
-                  chatReadCursorStore={chatReadCursorStore}
-                  clients={launchedClients}
-                  codeNavigationRevision={machineChanges.codeNavigation}
-                  codeProviderGroups={codeProviderGroups}
-                  {...(toolsReadCodeController && activeCodeThreadController !== undefined
-                    ? { codeThreadController: activeCodeThreadController }
-                    : {})}
-                  {...(toolsReadCodeThreadView && activeCodeThreadView !== undefined
-                    ? { codeThreadView: activeCodeThreadView }
-                    : {})}
-                  {...(codeDiffLayout === undefined ? {} : { codeDiffLayout })}
-                  {...(contextController.snapshot === undefined
-                    ? {}
-                    : { contextSnapshot: contextController.snapshot })}
-                  displayedDockState={displayedDockState}
-                  {...(storedDockTabs === undefined ? {} : { storedDockTabs })}
-                  dockPresentationWidth={dockPresentationWidth}
-                  dockPresentedOpen={dockPresentedOpen}
-                  dockReferences={dockReferences}
-                  dockToolButtons={dockToolButtons}
-                  dockResolution={dockResolution}
-                  dockResolveSurface={dockResolveSurface}
-                  dockSidecarsByThread={dockSidecarsByThread}
-                  dockTabs={dockTabs}
-                  {...(dockThread === undefined ? {} : { dockThread })}
-                  {...(dockThreadHost === undefined ? {} : { dockThreadHost })}
-                  {...(dockThreadHostId === undefined ? {} : { dockThreadHostId })}
-                  dockThreadOnThisComputer={dockThreadHostId === String(LOCAL_HOST_ID)}
-                  {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
-                  {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                  isNarrow={isNarrow}
-                  navigation={navigationModel}
-                  {...(dockOverviewThread === undefined
-                    ? {}
-                    : { overviewThread: dockOverviewThread })}
-                  projectNames={workingNowProjectNames}
-                  projectClient={projectController.client}
-                  projects={projectController.allProjects}
-                  projectPullRequestReviewOpen={projectPullRequestReviewOpen}
-                  {...(toolsPresented ? { providerController } : {})}
-                  {...(requestedAgentReview === undefined ? {} : { requestedAgentReview })}
-                  {...(requestedCodeReviewFile === undefined ? {} : { requestedCodeReviewFile })}
-                  {...(requestedAgentView === undefined ? {} : { requestedAgentView })}
-                  {...(selectedProjectPullRequest === undefined
-                    ? {}
-                    : { selectedProjectPullRequest })}
-                  {...(selectedProjectPullRequestKey === undefined
-                    ? {}
-                    : { selectedProjectPullRequestKey })}
-                  serverUrl={props.launch.serverUrl}
-                  windowCapability={props.projectWindowCapability}
-                  writtenDocumentsByThread={writtenDocumentsByThread}
-                />
-              </TabActivationProvider>
-            </ThreadNotesProvider>
-          </ThreadNativeSetupProvider>
-        }
-      >
-        <ShellDialogHost
-          createOpen={createOpen}
-          folderBrowseClient={folderBrowseClient}
-          {...(projectCreateGithub === undefined ? {} : { github: projectCreateGithub })}
-          hostId={createHostId}
-          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-          whatsNew={whatsNew}
-          firstRunStatus={controller.settings?.firstRunOnboarding}
-          tourBlocked={controller.settingsOpen || inboxCount > 0}
-          mode={projectCreateMode ?? controller.workspace.activeMode}
-          onCloseCreate={() => {
-            setCreateOpen(false);
-            setProjectCreateMode(undefined);
-          }}
-          onCreateProject={(mode, name, receiptId, initializeGit) => {
-            const destinationHostId = refuseUnlessCreatableDestination({
-              action: "create-project",
-              requiredCapability: mode,
-              onlyThisHost: true,
-              onRefuse: (reason) => setDraftError(reason),
-            });
-            if (destinationHostId === undefined) {
-              return Promise.resolve(undefined);
-            }
-            return projectController.create(
-              mode,
-              name,
-              receiptId,
-              destinationHostId,
-              initializeGit,
-            );
-          }}
-          onCreatedProject={(projectId, mode, name) => {
-            // First run is still asking; creating a Project is a prerequisite
-            // round-trip, not the thread handoff.
-            if (controller.settings?.firstRunOnboarding === "pending") return;
-            void openDraftInKnownProject(projectId, mode, name);
-          }}
-          searchOpen={searchOpen}
-          searchQuery={searchQuery}
-          searchThreads={threadSearchThreads}
-          searchProjects={threadSearchProjects}
-          searchListing={threadSearchListing}
-          searchArchivedListing={threadSearchArchivedListing}
-          searchContentHits={transcriptSearch.hits}
-          searchContentListing={threadSearchContentListing}
-          searchContentTruncated={transcriptSearch.truncated}
-          searchScope={searchScope}
-          onSearchScopeChange={setSearchScope}
-          onSearchQueryChange={setSearchQuery}
-          onCloseSearch={closeThreadSearch}
-          onNewSearchThread={() => {
-            closeThreadSearch();
-            startNewThreadDraft(activeMode);
-          }}
-          onNewSearchProject={() => {
-            closeThreadSearch();
-            openProjectCreate(activeMode);
-          }}
-          onOpenSearchSettings={() => {
-            closeThreadSearch();
-            void controller.openSettings();
-          }}
-          onOpenSearchHit={(hit) => {
-            closeThreadSearch();
-            // The hit keeps its source thread's Project so a cross-Project
-            // open dispatches the Project switch, exactly like the sidebar's
-            // own open handlers, instead of a plain open-tab the
-            // server-authoritative workspace policy rejects.
-            const hitProjectId =
-              hit.projectId === undefined ? undefined : decodeProjectId(hit.projectId);
-            // A Canvas hit opens the Canvas, in its thread's mode and Project
-            // (none for a Chat Canvas owned by a thread outside a Project),
-            // through the same open every Canvas card uses.
-            if (hit.field === "canvas" && hit.canvasId !== undefined) {
-              setRevealTurn(undefined);
-              void controller.openCanvas({
-                mode: hit.mode,
-                title: hit.canvasTitle ?? hit.title,
-                canvasId: decodeCanvasId(hit.canvasId),
-                projectId: hitProjectId ?? null,
+                </TabActivationProvider>
+              </ThreadNotesProvider>
+            </ThreadNativeSetupProvider>
+          }
+        >
+          <ShellDialogHost
+            createOpen={createOpen}
+            folderBrowseClient={folderBrowseClient}
+            {...(projectCreateGithub === undefined ? {} : { github: projectCreateGithub })}
+            hostId={createHostId}
+            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+            whatsNew={whatsNew}
+            firstRunStatus={controller.settings?.firstRunOnboarding}
+            tourBlocked={controller.settingsOpen || inboxCount > 0}
+            mode={projectCreateMode ?? controller.workspace.activeMode}
+            onCloseCreate={() => {
+              setCreateOpen(false);
+              setProjectCreateMode(undefined);
+            }}
+            onCreateProject={(mode, name, receiptId, initializeGit) => {
+              const destinationHostId = refuseUnlessCreatableDestination({
+                action: "create-project",
+                requiredCapability: mode,
+                onlyThisHost: true,
+                onRefuse: (reason) => setDraftError(reason),
               });
-              return;
-            }
-            if (hit.mode === "chat") {
-              const threadId = decodeChatThreadId(hit.threadId);
+              if (destinationHostId === undefined) {
+                return Promise.resolve(undefined);
+              }
+              return projectController.create(
+                mode,
+                name,
+                receiptId,
+                destinationHostId,
+                initializeGit,
+              );
+            }}
+            onCreatedProject={(projectId, mode, name) => {
+              // First run is still asking; creating a Project is a prerequisite
+              // round-trip, not the thread handoff.
+              if (controller.settings?.firstRunOnboarding === "pending") return;
+              void openDraftInKnownProject(projectId, mode, name);
+            }}
+            searchOpen={searchOpen}
+            searchQuery={searchQuery}
+            searchThreads={threadSearchThreads}
+            searchProjects={threadSearchProjects}
+            searchListing={threadSearchListing}
+            searchArchivedListing={threadSearchArchivedListing}
+            searchContentHits={transcriptSearch.hits}
+            searchContentListing={threadSearchContentListing}
+            searchContentTruncated={transcriptSearch.truncated}
+            searchScope={searchScope}
+            onSearchScopeChange={setSearchScope}
+            onSearchQueryChange={setSearchQuery}
+            onCloseSearch={closeThreadSearch}
+            onNewSearchThread={() => {
+              closeThreadSearch();
+              startNewThreadDraft(activeMode);
+            }}
+            onNewSearchProject={() => {
+              closeThreadSearch();
+              openProjectCreate(activeMode);
+            }}
+            onOpenSearchSettings={() => {
+              closeThreadSearch();
+              void controller.openSettings();
+            }}
+            onOpenSearchHit={(hit) => {
+              closeThreadSearch();
+              // The hit keeps its source thread's Project so a cross-Project
+              // open dispatches the Project switch, exactly like the sidebar's
+              // own open handlers, instead of a plain open-tab the
+              // server-authoritative workspace policy rejects.
+              const hitProjectId =
+                hit.projectId === undefined ? undefined : decodeProjectId(hit.projectId);
+              // A Canvas hit opens the Canvas, in its thread's mode and Project
+              // (none for a Chat Canvas owned by a thread outside a Project),
+              // through the same open every Canvas card uses.
+              if (hit.field === "canvas" && hit.canvasId !== undefined) {
+                setRevealTurn(undefined);
+                void controller.openCanvas({
+                  mode: hit.mode,
+                  title: hit.canvasTitle ?? hit.title,
+                  canvasId: decodeCanvasId(hit.canvasId),
+                  projectId: hitProjectId ?? null,
+                });
+                return;
+              }
+              if (hit.mode === "chat") {
+                const threadId = decodeChatThreadId(hit.threadId);
+                setRevealTurn(
+                  hit.turnId === undefined
+                    ? undefined
+                    : { mode: "chat", threadId, turnId: decodeChatTurnId(hit.turnId) },
+                );
+                void controller.openChatThread(threadId, hit.title, hitProjectId);
+                return;
+              }
+              if (hit.mode === "work") {
+                const threadId = decodeWorkThreadId(hit.threadId);
+                setRevealTurn(
+                  hit.turnId === undefined
+                    ? undefined
+                    : { mode: "work", threadId, turnId: decodeWorkTurnId(hit.turnId) },
+                );
+                void controller.openWorkThread(threadId, hit.title, undefined, hitProjectId);
+                return;
+              }
+              const threadId = decodeCodeThreadId(hit.threadId);
               setRevealTurn(
                 hit.turnId === undefined
                   ? undefined
-                  : { mode: "chat", threadId, turnId: decodeChatTurnId(hit.turnId) },
+                  : { mode: "code", threadId, operationId: decodeCodeOperationId(hit.turnId) },
               );
-              void controller.openChatThread(threadId, hit.title, hitProjectId);
-              return;
-            }
-            if (hit.mode === "work") {
-              const threadId = decodeWorkThreadId(hit.threadId);
-              setRevealTurn(
-                hit.turnId === undefined
-                  ? undefined
-                  : { mode: "work", threadId, turnId: decodeWorkTurnId(hit.turnId) },
-              );
-              void controller.openWorkThread(threadId, hit.title, undefined, hitProjectId);
-              return;
-            }
-            const threadId = decodeCodeThreadId(hit.threadId);
-            setRevealTurn(
-              hit.turnId === undefined
-                ? undefined
-                : { mode: "code", threadId, operationId: decodeCodeOperationId(hit.turnId) },
-            );
-            void controller.openCodeThread(threadId, hit.title, undefined, hitProjectId);
-          }}
-          zenActive={zen.active}
-          {...(activeCodeThreadView === undefined ? {} : { activeCodeThreadView })}
-          onOpenCodeSearchFile={(relativePath) => {
-            if (activeCodeThreadView === undefined) return;
-            void controller.openCodeSurface({
-              kind: "code-file",
-              threadId: activeCodeThreadView.thread.id,
-              title: relativePath,
-              relativePath,
-            });
-          }}
-          {...(props.launch.serverUrl === undefined ? {} : { serverUrl: props.launch.serverUrl })}
-          {...(props.projectWindowCapability === undefined
-            ? {}
-            : { windowCapability: props.projectWindowCapability })}
-          firstRun={{
-            capabilities: {
-              helpers: launchedClients.agentRunSettingsClient,
-              memory: launchedClients.personMemoryClient,
-              computerUse: controller.settings?.computerUse,
-              onSettingsChange: controller.updateSettings,
-              ...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge }),
-              onOpenSettings: (target) => void controller.openSettings(target),
-            },
-            workModelGroups: workProviderGroups,
-            codeModelGroups: codeProviderGroups,
-            controller: firstRunController,
-            onSelectModel: selectFirstRunModel,
-            autoSupportedFor: (providerInstanceId) =>
-              autoReviewFor({
-                providerInstanceId,
-                instances: providerController.instances,
-                observedByInstance: providerController.observedByInstance,
-                chosen: codeController.bootstrap?.settings.autoReviewer,
-                shieldModel: codeController.bootstrap?.settings.shieldModel,
-              })?.status === "reviewer",
-            onSetDefaultMode: (mode) => {
-              const settings = codeController.bootstrap?.settings;
-              if (settings === undefined) return Promise.resolve(false);
-              return recordFirstRunMode(mode, {
-                saveCode: (access) =>
-                  codeController.updateSettings({
-                    defaultExecutionPolicy: access.executionPolicy,
-                    defaultPermissionPersistence: settings.defaultPermissionPersistence,
-                    defaultAutoApprove: access.autoApprove,
-                  }),
-                saveWork:
-                  workSettings.status === "ready"
-                    ? (defaultAccess) => workSettings.update({ defaultAccess })
-                    : undefined,
+              void controller.openCodeThread(threadId, hit.title, undefined, hitProjectId);
+            }}
+            zenActive={zen.active}
+            {...(activeCodeThreadView === undefined ? {} : { activeCodeThreadView })}
+            onOpenCodeSearchFile={(relativePath) => {
+              if (activeCodeThreadView === undefined) return;
+              void controller.openCodeSurface({
+                kind: "code-file",
+                threadId: activeCodeThreadView.thread.id,
+                title: relativePath,
+                relativePath,
               });
-            },
-            // Only the desktop app can check for its own updates. Where it
-            // keeps the preference itself the answer goes straight to it;
-            // otherwise the shell setting carries it and the sync above tells
-            // the host.
-            onSetUpdateChecks:
-              props.hostBridge?.setAutomaticAppUpdateChecks === undefined
-                ? undefined
-                : (allowed) =>
-                    props.hostBridge?.appUpdatePreferenceScope === "local"
-                      ? (props.hostBridge.setAutomaticAppUpdateChecks?.(allowed).then(
-                          () => true,
-                          () => false,
-                        ) ?? Promise.resolve(false))
-                      : controller.updateSettings({ automaticUpdateChecks: allowed }),
-            workEnabled: controller.settings?.workEnabled ?? true,
-            workModel:
-              workSettings.status === "unsupported" ? rawDraftSelection : firstRunWorkModel,
-            codeModel: rawDraftSelection,
-            projects: firstRunProjects,
-            ...(firstRunProviderFolderScan === undefined
+            }}
+            {...(props.launch.serverUrl === undefined ? {} : { serverUrl: props.launch.serverUrl })}
+            {...(props.projectWindowCapability === undefined
               ? {}
-              : { providerFolderScan: firstRunProviderFolderScan }),
-            onCreateProject: (mode) => openProjectCreate(mode),
-            onStartThread: ({ mode, projectId }) => {
-              const project = firstRunProjects.find(
-                (candidate) => String(candidate.id) === String(projectId),
-              );
-              void openDraftInKnownProject(projectId, mode, project?.name ?? "");
-            },
-            readiness: firstRunReadiness,
-            ...(firstRunDiscoveryNotice === undefined
-              ? {}
-              : { discoveryNotice: firstRunDiscoveryNotice }),
-            onOpenProviderSettings: () => void controller.openSettings({ section: "providers" }),
-            onRescan: () => void discoveryController.scan(),
-            onSetProviderEnabled: (instanceId, enabled) =>
-              providerController.setEnabled(instanceId, enabled),
-            scanning: discoveryController.scanning,
-          }}
-          announcement={controller.announcement}
-          announcementSequence={controller.announcementSequence}
-          projectAnnouncement={projectController.announcement}
-          projectAnnouncementSequence={projectController.announcementSequence}
-        />
-      </ShellFrame>
+              : { windowCapability: props.projectWindowCapability })}
+            firstRun={{
+              capabilities: {
+                helpers: launchedClients.agentRunSettingsClient,
+                memory: launchedClients.personMemoryClient,
+                computerUse: controller.settings?.computerUse,
+                onSettingsChange: controller.updateSettings,
+                ...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge }),
+                onOpenSettings: (target) => void controller.openSettings(target),
+              },
+              workModelGroups: workProviderGroups,
+              codeModelGroups: codeProviderGroups,
+              controller: firstRunController,
+              onSelectModel: selectFirstRunModel,
+              autoSupportedFor: (providerInstanceId) =>
+                autoReviewFor({
+                  providerInstanceId,
+                  instances: providerController.instances,
+                  observedByInstance: providerController.observedByInstance,
+                  chosen: codeController.bootstrap?.settings.autoReviewer,
+                  shieldModel: codeController.bootstrap?.settings.shieldModel,
+                })?.status === "reviewer",
+              onSetDefaultMode: (mode) => {
+                const settings = codeController.bootstrap?.settings;
+                if (settings === undefined) return Promise.resolve(false);
+                return recordFirstRunMode(mode, {
+                  saveCode: (access) =>
+                    codeController.updateSettings({
+                      defaultExecutionPolicy: access.executionPolicy,
+                      defaultPermissionPersistence: settings.defaultPermissionPersistence,
+                      defaultAutoApprove: access.autoApprove,
+                    }),
+                  saveWork:
+                    workSettings.status === "ready"
+                      ? (defaultAccess) => workSettings.update({ defaultAccess })
+                      : undefined,
+                });
+              },
+              // Only the desktop app can check for its own updates. Where it
+              // keeps the preference itself the answer goes straight to it;
+              // otherwise the shell setting carries it and the sync above tells
+              // the host.
+              onSetUpdateChecks:
+                props.hostBridge?.setAutomaticAppUpdateChecks === undefined
+                  ? undefined
+                  : (allowed) =>
+                      props.hostBridge?.appUpdatePreferenceScope === "local"
+                        ? (props.hostBridge.setAutomaticAppUpdateChecks?.(allowed).then(
+                            () => true,
+                            () => false,
+                          ) ?? Promise.resolve(false))
+                        : controller.updateSettings({ automaticUpdateChecks: allowed }),
+              workEnabled: controller.settings?.workEnabled ?? true,
+              workModel:
+                workSettings.status === "unsupported" ? rawDraftSelection : firstRunWorkModel,
+              codeModel: rawDraftSelection,
+              projects: firstRunProjects,
+              ...(firstRunProviderFolderScan === undefined
+                ? {}
+                : { providerFolderScan: firstRunProviderFolderScan }),
+              onCreateProject: (mode) => openProjectCreate(mode),
+              onStartThread: ({ mode, projectId }) => {
+                const project = firstRunProjects.find(
+                  (candidate) => String(candidate.id) === String(projectId),
+                );
+                void openDraftInKnownProject(projectId, mode, project?.name ?? "");
+              },
+              readiness: firstRunReadiness,
+              ...(firstRunDiscoveryNotice === undefined
+                ? {}
+                : { discoveryNotice: firstRunDiscoveryNotice }),
+              onOpenProviderSettings: () => void controller.openSettings({ section: "providers" }),
+              onRescan: () => void discoveryController.scan(),
+              onSetProviderEnabled: (instanceId, enabled) =>
+                providerController.setEnabled(instanceId, enabled),
+              scanning: discoveryController.scanning,
+            }}
+            announcement={controller.announcement}
+            announcementSequence={controller.announcementSequence}
+            projectAnnouncement={projectController.announcement}
+            projectAnnouncementSequence={projectController.announcementSequence}
+          />
+        </ShellFrame>
+      </AddRepositoryToComputerContext.Provider>
       <Suspense fallback={null}>
         <PrepareToShutDownHost
           hostBridge={props.hostBridge}
@@ -9818,6 +9852,24 @@ function LaunchedShell(
       <OctantDialogPresence>
         <FilesClosePrompt />
       </OctantDialogPresence>
+      {hostFederationTransports === undefined ||
+      !computerSnapshots.some((entry) => String(entry.hostId) !== String(LOCAL_HOST_ID)) ? null : (
+        <Suspense fallback={null}>
+          <RepositoryBootstrapHost
+            allProjects={projectController.allProjects}
+            hosts={hosts}
+            onCompleted={(selection) => {
+              handleSelectCreateHost(selection.hostId);
+              setPairedProject(selection);
+              closeWorkspaceReaders();
+              void controller.openDraftThread("code");
+            }}
+            onReady={setOpenBootstrap}
+            sourceBootstrapPort={launchedClients.accessActivityPort}
+            transports={hostFederationTransports}
+          />
+        </Suspense>
+      )}
       <Suspense fallback={null}>
         <OctantDialogPresence>
           {moveRequest === undefined ? null : (

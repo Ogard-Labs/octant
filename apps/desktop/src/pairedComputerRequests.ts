@@ -134,6 +134,10 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   // its own person; the host refuses any other device.
   { method: "POST", path: "/api/folders/browse" },
   { method: "POST", path: "/api/folders/select" },
+  { method: "POST", path: "/api/projects/repository-bootstrap/clone" },
+  { method: "POST", path: "/api/projects/repository-bootstrap/clone/status" },
+  { method: "POST", path: "/api/projects/repository-bootstrap/clone/cancel" },
+  { method: "POST", path: "/api/projects/repository-bootstrap/land-files" },
   { method: "POST", path: "/api/projects/commands" },
   { method: "GET", path: "/api/providers/bootstrap" },
   { method: "GET", path: "/api/pending-requests" },

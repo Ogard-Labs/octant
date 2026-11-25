@@ -804,6 +804,8 @@ export function startOctantServer(
       environmentService,
       folderBrowseRoutes,
       folderBrowseService,
+      repositoryBootstrapRoutes,
+      repositoryBootstrapService,
       isCodeProviderModelAllowed,
       listActivityRepositories,
       onPullRequestSnapshotRefreshed,
@@ -2051,6 +2053,7 @@ export function startOctantServer(
       fileMentionRoutes,
       fleetActivityRoutes,
       folderBrowseRoutes,
+      repositoryBootstrapRoutes,
       followUpSuggestionRoutes,
       githubCloneRoutes,
       githubRoutes,
@@ -2539,6 +2542,11 @@ export function startOctantServer(
           }
           try {
             managedCloneProcessPort.close();
+          } catch (error) {
+            shutdownFailure = error;
+          }
+          try {
+            repositoryBootstrapService.close();
           } catch (error) {
             shutdownFailure = error;
           }

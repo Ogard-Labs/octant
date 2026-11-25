@@ -10,7 +10,8 @@ import {
 import type { CodeCheckoutIdentity, CodeThread, CodeThreadId } from "@octant/contracts/code";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import { buildModelPickerGroups, type CreateHostViewScope } from "@octant/domain";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { AddRepositoryToComputerContext } from "../projects/addRepositoryToComputerContext";
 import { useProviderController } from "../providers/useProviderController";
 import { createRemoteExtensionClient } from "../remote/remoteProductClients";
 import { RemoteCodeSurface } from "../remote/RemoteWorkspace";
@@ -42,6 +43,10 @@ export interface PairedComputerCodeSurfaceProps {
     source: RemoteServerGrantSource,
     mode: RemoteOpenMode,
   ) => Promise<RemoteOpenOutcome>;
+  readonly selectProjectRequest?: Readonly<{
+    readonly projectId: string;
+    readonly sequence: number;
+  }>;
 }
 
 /**
@@ -68,6 +73,7 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
     props.hosts.find((host) => String(host.hostId) === String(props.selectedHostId))?.displayName ??
     "that computer";
   const { openServer } = props;
+  const openBootstrap = useContext(AddRepositoryToComputerContext);
   const state = useSyncExternalStore(
     (onChange) => bridge.subscribe(onChange),
     () => bridge.getState(),
@@ -155,6 +161,15 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
             {...(props.initialThreadRequest === undefined
               ? {}
               : { initialThreadRequest: props.initialThreadRequest })}
+            {...(standing.actsAsHostPerson && openBootstrap !== undefined
+              ? {
+                  onCloneFromThisComputer: () =>
+                    openBootstrap({ destinationHostId: props.selectedHostId }),
+                }
+              : {})}
+            {...(props.selectProjectRequest === undefined
+              ? {}
+              : { selectProjectRequest: props.selectProjectRequest })}
             {...(openServer === undefined
               ? {}
               : {
