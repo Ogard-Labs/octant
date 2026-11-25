@@ -2904,7 +2904,7 @@ function makeConnection(
               return Effect.fail(
                 failure(
                   "unsupported",
-                  `${name} only offers Always allow here. Approve it for this session from the computer or a Full device, or deny it.`,
+                  `${name} only offers Always allow here. Approve it from a thread that keeps approvals for the session, at the computer or a Full device, or deny it.`,
                 ),
               );
             }

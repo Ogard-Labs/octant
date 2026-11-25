@@ -647,6 +647,33 @@ describe("CodeOperationService", () => {
     );
     // A request the host did not resolve to its own person has no answer kept.
     expect(turns.answerApproval.mock.lastCall?.[0]).not.toHaveProperty("answeredByPerson");
+    // The person's answer is kept only while the request still speaks for them:
+    // a device lowered after its request arrived answers for this one call.
+    for (const [current, kept] of [
+      [false, false],
+      [true, true],
+    ] as const) {
+      await service.execute(
+        ids.window,
+        {
+          kind: "answer-provider-approval",
+          operationId: decodeCodeOperationId(
+            current
+              ? "4a4a4a4a-4a4a-44a4-84a4-4a4a4a4a4a4a"
+              : "4b4b4b4b-4b4b-44b4-84b4-4b4b4b4b4b4b",
+          ),
+          threadId: ids.thread,
+          checkoutId: ids.checkout,
+          approvalId: "50505050-5050-4050-8050-505050505050",
+          decision: "approved",
+          rememberForProject: true,
+        },
+        { initiator: "user", admissionCurrent: () => current },
+      );
+      const answer = turns.answerApproval.mock.lastCall?.[0];
+      expect(answer?.answeredByPerson === true).toBe(kept);
+      expect(answer?.rememberedForProjectBy !== undefined).toBe(kept);
+    }
 
     const approvalOperation = decodeCodeOperationId("47474747-4747-4474-8474-474747474747");
     const approvalTerminal = "59595959-5959-4595-8595-595959595959" as CodeTerminalId;
