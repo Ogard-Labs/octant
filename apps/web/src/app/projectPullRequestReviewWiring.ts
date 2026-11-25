@@ -45,6 +45,10 @@ export function projectPullRequestReviewActions(input: {
     ...(codeClient.setProjectPullRequestAutoFix === undefined
       ? {}
       : { setAutoFix: codeClient.setProjectPullRequestAutoFix.bind(codeClient) }),
+    loadPullRequests: codeClient.queryProjectPullRequests.bind(codeClient),
+    ...(codeClient.mergeProjectPullRequestStack === undefined
+      ? {}
+      : { mergeStack: codeClient.mergeProjectPullRequestStack.bind(codeClient) }),
     onSendLineNotes: input.onSendLineNotes,
     ...(input.pullRequestReviewClient === undefined
       ? {}

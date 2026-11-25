@@ -1,4 +1,11 @@
-import { ActorId, AggregateId, CorrelationId, EventId, LOCAL_HOST_ID } from "@octant/contracts";
+import {
+  ActorId,
+  AggregateId,
+  CorrelationId,
+  EventId,
+  LOCAL_HOST_ID,
+  type EventActor,
+} from "@octant/contracts";
 import {
   decodeThreadSecretJournalRecord,
   THREAD_SECRET_AGGREGATE_TYPE,
@@ -18,10 +25,18 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const REPLAY_PAGE = 1_000;
+const LOCAL_PERSON: EventActor = {
+  kind: "local-user",
+  actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID),
+};
 
 export interface ThreadSecretsJournal {
   /** Appends every record or none; throws when it cannot, so nothing is granted unrecorded. */
-  readonly record: (threadId: string, records: ReadonlyArray<ThreadSecretJournalRecord>) => void;
+  readonly record: (
+    threadId: string,
+    records: ReadonlyArray<ThreadSecretJournalRecord>,
+    actor?: EventActor,
+  ) => void;
   /** What an earlier host left: the secrets it never ended, and the last lifetime per name. */
   readonly history: () => ThreadSecretsHistory;
 }
@@ -48,7 +63,7 @@ export function threadSecretsJournal(options: {
   readonly now: () => string;
 }): ThreadSecretsJournal {
   return {
-    record: (threadId, records) => {
+    record: (threadId, records, actor = LOCAL_PERSON) => {
       const payloads = records.map((record) => decodeThreadSecretJournalRecord(record));
       options.journal.append({
         aggregate: {
@@ -66,7 +81,7 @@ export function threadSecretsJournal(options: {
           eventVersion: 1,
           hostId: LOCAL_HOST_ID,
           correlationId: decodeCorrelationId(options.uuid()),
-          actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          actor,
           occurredAt: options.now(),
           payload,
         })),

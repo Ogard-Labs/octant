@@ -754,6 +754,18 @@ describe("GhPullRequestPort.mergeByIdentity", () => {
     expect(command.run).toHaveBeenCalledOnce();
   });
 
+  it("refuses a merge whose unchanged head was pointed at a branch the person did not confirm", async () => {
+    const { command, port } = fixture([{ exitCode: 0, stdout: detailJson }]);
+
+    await expect(
+      port.mergeByIdentity(
+        { ...mergeRequest, expectedBaseBranch: "another-branch" },
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual({ status: "refused", reason: "stale" });
+    expect(command.run).toHaveBeenCalledOnce();
+  });
+
   it("turns a changed head reported by GitHub into a stale refusal", async () => {
     const { port } = fixture([
       { exitCode: 0, stdout: detailJson },

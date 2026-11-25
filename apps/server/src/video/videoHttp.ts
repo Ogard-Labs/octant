@@ -7,6 +7,7 @@ import {
 } from "@octant/provider-sdk/video-generation";
 import {
   fetchApprovedImageUrl,
+  makePinnedImageFetch,
   performImageHttpRequest,
   type ImageHttpFetch,
   type ImageHttpLimits,
@@ -89,4 +90,43 @@ export function makeVideoGenerationPorts(options: {
       }),
     sniffMediaType: sniffVideoClipMediaType,
   };
+}
+
+/**
+ * What an outside video driver's clips are collected with: the host's own
+ * download, connected only to the address it just checked, and the host's own
+ * check of the bytes. A driver names the address, so the download may reach a
+ * private one only on the origin the person configured.
+ */
+export function makeOutsideVideoClipPorts(options: {
+  readonly baseUrl: string;
+  readonly fetch?: ImageHttpFetch;
+  readonly resolveAll?: (hostname: string) => Promise<ReadonlyArray<string>>;
+}): Pick<VideoGenerationPorts, "fetchApprovedVideoUrl" | "sniffMediaType"> {
+  const allowedOrigin = originOf(options.baseUrl);
+  const fetch =
+    options.fetch ??
+    makePinnedImageFetch({
+      ...(allowedOrigin === undefined ? {} : { allowedOrigin }),
+      ...(options.resolveAll === undefined ? {} : { resolveAll: options.resolveAll }),
+    });
+  return {
+    fetchApprovedVideoUrl: async (input) =>
+      fetchApprovedImageUrl({
+        url: input.url,
+        fetch,
+        maxBytes: MAX_VIDEO_CLIP_BYTES,
+        timeoutMs: VIDEO_HTTP_LIMITS.connectionTimeoutMs,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      }),
+    sniffMediaType: sniffVideoClipMediaType,
+  };
+}
+
+function originOf(baseUrl: string): string | undefined {
+  try {
+    return new URL(baseUrl).origin;
+  } catch {
+    return undefined;
+  }
 }

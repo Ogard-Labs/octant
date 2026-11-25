@@ -34,6 +34,7 @@
     "./shield-watcher-policy": "./src/shieldWatcherPolicy.ts",
     "./thread-board-policy": "./src/threadBoardPolicy.ts",
     "./turn-decision-policy": "./src/turnDecisionPolicy.ts",
+    "./pull-request-stack-policy": "./src/pullRequestStackPolicy.ts",
     "./thread-board-pull-request-policy": "./src/threadBoardPullRequestPolicy.ts",
     "./code-follow-up-policy": "./src/codeFollowUpPolicy.ts",
     "./code-planner-policy": "./src/codePlannerPolicy.ts",

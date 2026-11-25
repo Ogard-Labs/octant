@@ -1,6 +1,7 @@
 import "../styles/thread-row-info-card.css";
 import type { ThreadBoardPullRequestSummaries, ThreadTouchedIssues } from "@octant/contracts";
 import { pullRequestStateMark } from "../code/pullRequestState";
+import { stackJoin, stackPlaceWords } from "../code/stackPlace";
 import {
   touchedIssueIsFinished,
   touchedIssueKey,
@@ -199,7 +200,7 @@ function ThreadRowPullRequests(props: {
   return (
     <span aria-label="Linked pull requests" className="thread-row-info-card__prs" role="group">
       <span className="thread-row-info-card__pr-list">
-        {props.summaries.items.map((summary) => {
+        {props.summaries.items.map((summary, index) => {
           const number = String(summary.identity.number);
           const repo = `${summary.identity.repositoryOwner}/${summary.identity.repositoryName}`;
           const meta = [repo, ...describePullRequestSummary(summary)].join(" · ");
@@ -221,6 +222,11 @@ function ThreadRowPullRequests(props: {
               />
               <span className="thread-row-info-card__pr-number">#{number}</span>
               <span className="thread-row-info-card__pr-title">{summary.title}</span>
+              {summary.stack === undefined ? null : (
+                <span className="thread-row-info-card__pr-stack">
+                  {stackPlaceWords(summary.stack)}
+                </span>
+              )}
               {namesRepository ? (
                 <span className="thread-row-info-card__pr-repository">
                   {summary.identity.repositoryName}
@@ -240,7 +246,11 @@ function ThreadRowPullRequests(props: {
                 ]),
           ].join("\n");
           return (
-            <span className="thread-row-info-card__pr" key={pullRequestKey(summary.identity)}>
+            <span
+              className="thread-row-info-card__pr"
+              data-stack-join={stackJoin(props.summaries.items, index)}
+              key={pullRequestKey(summary.identity)}
+            >
               {openInReview === undefined ? (
                 <span
                   aria-label={`Pull request #${number}: ${summary.title} · ${meta}`}

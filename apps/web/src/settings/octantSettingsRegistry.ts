@@ -1875,6 +1875,18 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "google gcloud oauth scopes permissions access iam cloud platform readonly",
         },
+        {
+          id: settingId("thread-secrets-active"),
+          label: "Active secrets",
+          scope: "host",
+          keywords: "active thread secrets revoke token password agent time left end",
+        },
+        {
+          id: settingId("thread-secrets-remembered"),
+          label: "Remembered secrets",
+          scope: "host",
+          keywords: "remembered thread secrets forget delete token saved keychain",
+        },
       ],
     },
     {
