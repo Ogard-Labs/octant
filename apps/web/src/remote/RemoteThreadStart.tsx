@@ -9,7 +9,7 @@ import type { ProjectSummary } from "@octant/contracts/projects";
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
 import { decodeWorkThreadId, type WorkThread } from "@octant/contracts/work-threads";
 import {
-  defaultDeliveryBranchIntent,
+  deriveDeliveryBranch,
   defaultPermissionModeFor,
   resolveDraftProviderSelection,
   selectWorktreeRemote,
@@ -394,7 +394,11 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
           remoteName: remote.status === "selected" ? remote.remoteName : "",
         },
         deliveryTarget: {
-          branchIntent: defaultDeliveryBranchIntent(baseBranch, threadId.slice(0, 8)),
+          branchIntent: deriveDeliveryBranch({
+            baseBranch,
+            shortId: threadId.slice(0, 8),
+            prefix: currentSettings.worktrees?.branchPrefix,
+          }),
           // A repository with no remote still needs a name here; Git's own
           // default is the one the host's own thread starts use, and a draft
           // diff falls back to the local base branch when no such remote exists.

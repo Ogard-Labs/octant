@@ -17,7 +17,11 @@ import {
   ProjectBootstrap,
   decodeHostAnswer,
 } from "@octant/contracts";
-import { resolveCodeNewThreadWorkspace, suggestCodeDeliveryOutcome } from "@octant/domain";
+import {
+  deriveDeliveryBranch,
+  resolveCodeNewThreadWorkspace,
+  suggestCodeDeliveryOutcome,
+} from "@octant/domain";
 import {
   MobileInboxFailure,
   type MobileInboxRow,
@@ -312,7 +316,7 @@ export async function createMobileCodeFromPrompt(input: {
   const threadId = input.retry?.threadId ?? input.threadId ?? uuid();
   const operationId = input.retry?.operationId ?? uuid();
   const sessionId = input.retry?.sessionId ?? uuid();
-  await requireJson(
+  const bootstrap = await requireJson(
     await input.transport.authenticatedFetch({ method: "GET", path: "/api/code/bootstrap" }),
     decodeHostAnswer(CodeBootstrap),
     "Could not load Code settings from the host.",
@@ -360,9 +364,14 @@ export async function createMobileCodeFromPrompt(input: {
         );
       }
       const proposal: MobileCodeDeliveryTargetProposal = {
+        // The prefix is the person's choice on the host; the phone's own words stay in the id.
         branchIntent:
           workspace === "managed-worktree"
-            ? `octant/mobile-${threadId.slice(0, 8)}`
+            ? deriveDeliveryBranch({
+                baseBranch: checkoutBranch,
+                shortId: `mobile-${threadId.slice(0, 8)}`,
+                prefix: bootstrap.settings.worktrees?.branchPrefix,
+              })
             : checkoutBranch,
         remoteName: remoteName ?? "origin",
         proposedBaseRepository: "",

@@ -306,6 +306,7 @@ describe("mobile Code creation", () => {
             settings: {
               defaultExecutionPolicy: "full-access",
               defaultPermissionPersistence: "project-default",
+              worktrees: { branchPrefix: "henrik/" },
               version: 1,
               updatedAt: now,
             },
@@ -414,7 +415,8 @@ describe("mobile Code creation", () => {
         threadId,
         confirmDeliveryTarget: vi.fn(async (proposal) => {
           expect(proposal).toMatchObject({
-            branchIntent: expect.any(String),
+            // The person's prefix from Settings, not the default one.
+            branchIntent: expect.stringMatching(/^henrik\/mobile-[a-z0-9]+$/),
             remoteName: "origin",
             proposedBaseRepository: "",
             proposedBaseBranch: "development",

@@ -31,6 +31,7 @@ const providerGroups = [refusedProvider, allowedProvider].map((id) => ({
 const settings = {
   defaultExecutionPolicy: "approval-gated",
   defaultPermissionPersistence: "current-session",
+  worktrees: { branchPrefix: "henrik/" },
   version: 5,
   updatedAt: "2026-11-12T10:00:00.000Z",
 } as const;
@@ -213,6 +214,8 @@ describe("starting a Code thread from a browser the host's own person paired", (
       decodeProjectSummary({ ...project, newThreadWorkspace: "managed-worktree" }),
     );
     expect(sent[0]?.kind).toBe("create-managed-code-thread");
+    // The prefix the person chose in Settings, as on the host's own start screen.
+    expect(JSON.stringify(sent[0])).toMatch(/"branchIntent":"henrik\/[a-z0-9-]+"/);
   });
 
   it("sends the first message to the new worktree's checkout once the host makes it", async () => {

@@ -483,8 +483,17 @@ describe("CodeComposerAdapter", () => {
   it("shows the branch a prompt-named worktree gets before Send, numbers a taken name, and sends exactly that", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn();
-    const execute = vi.fn(async (command: { kind: string; projectId?: string }) =>
-      command.kind === "list-code-worktree-refs"
+    const execute = vi.fn(async (command: { kind: string; projectId?: string }) => {
+      if (command.kind === "list-code-worktree-branch-names") {
+        // One local, one that exists only on a remote and one tag: all are taken.
+        return {
+          kind: "worktree-branch-names-listed",
+          projectId: command.projectId,
+          names: ["development", "henrik/fix-the-login-bug", "henrik/fix-the-login-bug-2"],
+          truncated: false,
+        };
+      }
+      return command.kind === "list-code-worktree-refs"
         ? {
             kind: "worktree-refs-listed",
             projectId: command.projectId,
@@ -492,6 +501,40 @@ describe("CodeComposerAdapter", () => {
               { name: "development", kind: "local", isCurrent: true },
               { name: "henrik/fix-the-login-bug", kind: "local" },
             ],
+          }
+        : undefined;
+    });
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        newThreadWorkspace="managed-worktree"
+        execute={execute as never}
+        onCreateThread={onCreateThread}
+        worktreeSettings={{ branchPrefix: "henrik/", branchNaming: "prompt" }}
+      />,
+    );
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the login bug");
+    await user.click(whereChip());
+    await user.click(screen.getByRole("button", { name: /Worktree options/ }));
+    expect(await screen.findByText("henrik/fix-the-login-bug-3")).toBeVisible();
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    expect(onCreateThread.mock.calls[0]?.[0].deliveryTarget.branchIntent).toBe(
+      "henrik/fix-the-login-bug-3",
+    );
+  });
+
+  it("uses the id name, not words from the prompt, when the host could not list every taken name", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    const execute = vi.fn(async (command: { kind: string; projectId?: string }) =>
+      command.kind === "list-code-worktree-branch-names"
+        ? {
+            kind: "worktree-branch-names-listed",
+            projectId: command.projectId,
+            names: [],
+            truncated: true,
           }
         : undefined,
     );
@@ -505,32 +548,78 @@ describe("CodeComposerAdapter", () => {
       />,
     );
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the login bug");
-    await user.click(whereChip());
-    await user.click(screen.getByRole("button", { name: /Worktree options/ }));
-    expect(await screen.findByText("henrik/fix-the-login-bug-2")).toBeVisible();
-    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith({
+        kind: "list-code-worktree-branch-names",
+        projectId: defaultProps.projectId,
+      }),
+    );
     await user.click(screen.getByRole("button", { name: "Create thread" }));
     await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
-    expect(onCreateThread.mock.calls[0]?.[0].deliveryTarget.branchIntent).toBe(
-      "henrik/fix-the-login-bug-2",
+    expect(onCreateThread.mock.calls[0]?.[0].deliveryTarget.branchIntent).toMatch(
+      /^henrik\/[a-z0-9]+$/,
     );
+    expect(onCreateThread.mock.calls[0]?.[0].deliveryTarget.branchIntent).not.toContain("fix");
+  });
+
+  it("reads the taken names again when a creation was refused, so the name shown is the one tried next", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn(async () => false as const);
+    const execute = vi.fn(async (command: { kind: string; projectId?: string }) =>
+      command.kind === "list-code-worktree-branch-names"
+        ? {
+            kind: "worktree-branch-names-listed",
+            projectId: command.projectId,
+            names: [],
+            truncated: false,
+          }
+        : undefined,
+    );
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        newThreadWorkspace="managed-worktree"
+        execute={execute as never}
+        onCreateThread={onCreateThread}
+      />,
+    );
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the login bug");
+    const reads = () =>
+      execute.mock.calls.filter(([command]) => command.kind === "list-code-worktree-branch-names")
+        .length;
+    await waitFor(() => expect(reads()).toBe(1));
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() => expect(reads()).toBe(2));
   });
 
   describe("Suggest name", () => {
     const provider = "00000000-0000-4000-8000-0000000000b1" as never;
     const model = "model-a" as never;
     function executeWith(reply: (command: { kind: string }) => unknown | Promise<unknown>) {
-      return vi.fn(async (command: { kind: string; projectId?: string }) =>
-        command.kind === "list-code-worktree-refs"
-          ? {
-              kind: "worktree-refs-listed",
+      return vi.fn(
+        async (
+          command: { kind: string; projectId?: string; draft?: string },
+          _signal?: AbortSignal,
+        ) => {
+          if (command.kind === "list-code-worktree-branch-names") {
+            return {
+              kind: "worktree-branch-names-listed",
               projectId: command.projectId,
-              refs: [
-                { name: "development", kind: "local", isCurrent: true },
-                { name: "octant/fix-login", kind: "local" },
-              ],
-            }
-          : reply(command),
+              names: ["development", "octant/fix-login", "v1"],
+              truncated: false,
+            };
+          }
+          return command.kind === "list-code-worktree-refs"
+            ? {
+                kind: "worktree-refs-listed",
+                projectId: command.projectId,
+                refs: [
+                  { name: "development", kind: "local", isCurrent: true },
+                  { name: "octant/fix-login", kind: "local" },
+                ],
+              }
+            : reply(command);
+        },
       );
     }
     async function openOptions(user: ReturnType<typeof userEvent.setup>) {
@@ -592,8 +681,9 @@ describe("CodeComposerAdapter", () => {
             projectId: defaultProps.projectId,
             providerInstanceId: provider,
             modelId: model,
-            draft: "Fix the login bug",
+            draft: "fix the login bug",
           },
+          expect.any(AbortSignal),
         ],
       ]);
       await user.clear(field);
@@ -651,6 +741,107 @@ describe("CodeComposerAdapter", () => {
       expect(screen.getByRole("textbox", { name: "Branch name" })).not.toHaveValue(
         "octant/stale-words",
       );
+    });
+
+    it("sends at most the first 2,000 characters of a long draft, after redaction and without a dropped clause", async () => {
+      const user = userEvent.setup();
+      const execute = executeWith((command) =>
+        command.kind === "suggest-code-worktree-branch"
+          ? { kind: "worktree-branch-suggested", projectId: defaultProps.projectId, words: "a-b" }
+          : undefined,
+      );
+      renderComposer(execute);
+      const draft = `Fix the login bug. The password is hunter2 for staging. ${"more words ".repeat(900)}`;
+      fireEvent.change(screen.getByRole("textbox", { name: "First message" }), {
+        target: { value: draft },
+      });
+      await openOptions(user);
+      await user.click(screen.getByRole("button", { name: "Suggest name" }));
+      await waitFor(() => expect(suggestCalls(execute)).toHaveLength(1));
+      const sent = suggestCalls(execute)[0]?.[0].draft ?? "";
+      expect(sent.length).toBeLessThanOrEqual(2_000);
+      expect(sent.startsWith("fix the login bug the")).toBe(true);
+      expect(sent).not.toContain("hunter2");
+    });
+
+    it("stops a suggestion in flight when the composer goes away or the Project changes", async () => {
+      const user = userEvent.setup();
+      const signals: AbortSignal[] = [];
+      const execute = executeWith((command) =>
+        command.kind === "suggest-code-worktree-branch" ? new Promise(() => undefined) : undefined,
+      );
+      const recording = vi.fn(async (command: { kind: string }, signal?: AbortSignal) => {
+        if (command.kind === "suggest-code-worktree-branch" && signal !== undefined) {
+          signals.push(signal);
+        }
+        return execute(command);
+      });
+      const props = {
+        ...defaultProps,
+        execute: recording as never,
+        newThreadWorkspace: "managed-worktree" as const,
+        selectedModelId: model,
+        selectedProviderInstanceId: provider,
+      };
+      const view = render(<CodeComposerAdapter {...props} />);
+      await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the login bug");
+      await openOptions(user);
+      await user.click(screen.getByRole("button", { name: "Suggest name" }));
+      await waitFor(() => expect(signals).toHaveLength(1));
+      expect(signals[0]?.aborted).toBe(false);
+      view.rerender(
+        <CodeComposerAdapter
+          {...props}
+          projectId={"00000000-0000-0000-0000-000000000002" as ProjectId}
+        />,
+      );
+      await waitFor(() => expect(signals[0]?.aborted).toBe(true));
+
+      await user.keyboard("{Escape}");
+      await openOptions(user);
+      await user.click(screen.getByRole("button", { name: "Suggest name" }));
+      await waitFor(() => expect(signals).toHaveLength(2));
+      expect(signals[1]?.aborted).toBe(false);
+      view.unmount();
+      expect(signals[1]?.aborted).toBe(true);
+    });
+
+    it("forgets a name chosen for another Project, and shows the name Send will use when a typed one is refused", async () => {
+      const user = userEvent.setup();
+      const execute = executeWith(() => undefined);
+      const props = {
+        ...defaultProps,
+        execute: execute as never,
+        newThreadWorkspace: "managed-worktree" as const,
+      };
+      const view = render(<CodeComposerAdapter {...props} />);
+      await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix it");
+      await openOptions(user);
+      const field = screen.getByRole("textbox", { name: "Branch name" });
+      const derived = (field as HTMLInputElement).value;
+      await user.clear(field);
+      await user.type(field, "octant/mine");
+      await user.tab();
+      expect(field).toHaveValue("octant/mine");
+
+      view.rerender(
+        <CodeComposerAdapter
+          {...props}
+          projectId={"00000000-0000-0000-0000-000000000002" as ProjectId}
+        />,
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("textbox", { name: "Branch name" })).toHaveValue(derived),
+      );
+
+      const again = screen.getByRole("textbox", { name: "Branch name" });
+      await user.clear(again);
+      await user.type(again, "v1");
+      await user.tab();
+      // A tag of that name exists: the field is back on the name that will be sent.
+      expect(again).toHaveValue(derived);
+      expect(screen.getByText(/"v1" was not used/)).toBeVisible();
+      expect(again).toHaveAccessibleDescription(/"v1" was not used/);
     });
 
     it("refuses a typed name Git would reject or a branch that exists, and returns to the derived name when cleared", async () => {

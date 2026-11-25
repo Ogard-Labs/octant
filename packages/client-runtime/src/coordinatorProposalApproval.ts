@@ -12,7 +12,7 @@ import {
   type CodeThread,
   type ProviderExecutionPolicy,
 } from "@octant/contracts";
-import { defaultDeliveryBranchIntent } from "@octant/domain";
+import { deriveDeliveryBranch } from "@octant/domain";
 
 /** One pending proposal as the planner view returns it, with the version a decision echoes. */
 export type CoordinatorProposalEntry = CodePlannerView["proposals"][number];
@@ -34,6 +34,11 @@ export interface CoordinatorProposalDecisionPort {
     text: string,
   ) => Promise<CodeEvidenceReference>;
   readonly executeOperation: (command: CodeOperationCommand) => Promise<CodeOperationResult>;
+  /**
+   * The branch prefix the person chose in Settings › Code › Worktrees. Without
+   * it, or when it cannot be read, the worker's branch gets the default prefix.
+   */
+  readonly readBranchPrefix?: () => Promise<string | undefined>;
 }
 
 /**
@@ -103,6 +108,7 @@ export async function approveCoordinatorProposal(input: {
     requested?.providerInstanceId !== undefined && requested.modelId !== undefined
       ? { providerInstanceId: requested.providerInstanceId, modelId: requested.modelId }
       : { providerInstanceId: coordinator.providerInstanceId, modelId: coordinator.modelId };
+  const prefix = await input.port.readBranchPrefix?.().catch(() => undefined);
   let creation: CodeCommand;
   try {
     creation = decodeCodeCommand({
@@ -116,10 +122,11 @@ export async function approveCoordinatorProposal(input: {
       permissionPersistence: "current-session",
       deliveryTarget: {
         ...deliveryTarget,
-        branchIntent: defaultDeliveryBranchIntent(
-          deliveryTarget.proposedBaseBranch,
-          threadId.replace(/-/g, "").slice(0, 12),
-        ),
+        branchIntent: deriveDeliveryBranch({
+          baseBranch: deliveryTarget.proposedBaseBranch,
+          shortId: threadId.replace(/-/g, "").slice(0, 12),
+          prefix,
+        }),
         confirmedAt: (input.now ?? (() => new Date()))().toISOString(),
       },
       sourceBranch: deliveryTarget.proposedBaseBranch,
