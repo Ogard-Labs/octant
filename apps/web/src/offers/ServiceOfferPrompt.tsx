@@ -35,15 +35,24 @@ type ListedOfferCard = LazyExoticComponent<ComponentType<ListedOfferCardProps>>;
  * Each kind's card brings its payload schema with it, when the first such
  * offer shows. A card that cannot load is set aside as an offer this build
  * cannot read is, rather than taking the thread's pane down with it; the
- * offer stays listed and waiting, and the thread's next offer is asked.
+ * offer stays listed and waiting, and the thread's next offer is asked. The
+ * next offer of that kind tries the card again, in this thread or another:
+ * `lazy` alone would hold one failed load for the life of the window.
  */
-const card = (load: () => Promise<ComponentType<ListedOfferCardProps>>): ListedOfferCard =>
-  lazy(() =>
-    load().then(
-      (Card) => ({ default: Card }),
-      () => ({ default: UnloadedCard }),
-    ),
-  );
+function offerCard(load: () => Promise<ComponentType<ListedOfferCardProps>>) {
+  const attempt = (): ListedOfferCard =>
+    lazy(() =>
+      load().then(
+        (Card) => ({ default: Card }),
+        () => {
+          current = attempt();
+          return { default: UnloadedCard };
+        },
+      ),
+    );
+  let current = attempt();
+  return () => current;
+}
 
 /** Set aside like a refused offer, so the thread's next offer is asked. */
 function UnloadedCard({ offer, refuse }: ListedOfferCardProps) {
@@ -51,18 +60,24 @@ function UnloadedCard({ offer, refuse }: ListedOfferCardProps) {
   return null;
 }
 
-const CARDS: Record<ServiceOffer["kind"], ListedOfferCard> = {
-  generate: card(async () => (await import("../image/imageOfferCards")).ImageGenerateOfferCard),
-  save: card(async () => (await import("../image/imageOfferCards")).ImageSaveOfferCard),
-  transcribe: card(async () => (await import("./TranscriptionOfferCard")).TranscriptionOfferCard),
-  narrate: card(async () => (await import("./NarrationOfferCard")).NarrationOfferCard),
-  "video-generate": card(
+const CARDS: Record<ServiceOffer["kind"], () => ListedOfferCard> = {
+  generate: offerCard(
+    async () => (await import("../image/imageOfferCards")).ImageGenerateOfferCard,
+  ),
+  save: offerCard(async () => (await import("../image/imageOfferCards")).ImageSaveOfferCard),
+  transcribe: offerCard(
+    async () => (await import("./TranscriptionOfferCard")).TranscriptionOfferCard,
+  ),
+  narrate: offerCard(async () => (await import("./NarrationOfferCard")).NarrationOfferCard),
+  "video-generate": offerCard(
     async () => (await import("../video/videoOfferCards")).VideoGenerateOfferCard,
   ),
-  "video-save": card(async () => (await import("../video/videoOfferCards")).VideoSaveOfferCard),
+  "video-save": offerCard(
+    async () => (await import("../video/videoOfferCards")).VideoSaveOfferCard,
+  ),
 };
 
-const CARD_KINDS: ReadonlyMap<string, ListedOfferCard> = new Map(Object.entries(CARDS));
+const CARD_KINDS: ReadonlyMap<string, () => ListedOfferCard> = new Map(Object.entries(CARDS));
 
 export function ServiceOfferPrompt(props: {
   readonly client: ServiceOfferClient | undefined;
@@ -124,7 +139,7 @@ export function ServiceOfferPrompt(props: {
   const pending = listed?.offers.find(
     (offer) => CARD_KINDS.has(offer.kind) && !refused.has(String(offer.offerId)),
   );
-  const Card = pending === undefined ? undefined : CARD_KINDS.get(pending.kind);
+  const Card = pending === undefined ? undefined : CARD_KINDS.get(pending.kind)?.();
   if (
     pending === undefined ||
     Card === undefined ||

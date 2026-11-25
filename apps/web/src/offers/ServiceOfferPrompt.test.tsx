@@ -607,4 +607,53 @@ describe("ServiceOfferPrompt when a card cannot load", () => {
     expect(screen.getAllByRole("article")).toHaveLength(1);
     vi.doUnmock("./NarrationOfferCard");
   });
+
+  it("tries a card that failed to load again in the next thread the person opens", async () => {
+    vi.resetModules();
+    let attempts = 0;
+    vi.doMock("./NarrationOfferCard", async (actual) => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("chunk is gone");
+      return actual();
+    });
+    const { ServiceOfferPrompt: Prompt } = await import("./ServiceOfferPrompt");
+    const otherScope = "cc000000-0000-4000-8000-000000000002" as ImageGenerationScopeId;
+    const narration = (scope: ImageGenerationScopeId) =>
+      decodeNarrationOffer({
+        kind: "narrate",
+        threadKind: "code-thread",
+        scopeId: scope,
+        offerId,
+        requestedAt: "2026-11-07T10:00:00.000Z",
+        excerpt: "Welcome",
+        characters: 7,
+        relativePath: "narration/intro.mp3",
+        voice: "nova",
+        endpointName: "Studio",
+        modelId: "tts-1",
+        format: "mp3",
+      });
+    const fake: ServiceOfferClient = {
+      offers: vi.fn(async ({ scopeId: scope }) => ({ offers: [narration(scope)] })),
+      decide: vi.fn(async () => ({ kind: "offer-answered" as const })),
+    };
+    const prompt = (scope: ImageGenerationScopeId) => (
+      <Prompt
+        client={fake}
+        keptIn="project"
+        profiles={profiles}
+        scopeId={scope}
+        threadKind="code-thread"
+        turnActive={false}
+      />
+    );
+    const view = render(prompt(scopeId));
+    await waitFor(() => expect(attempts).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByRole("article")).toBeNull();
+
+    view.rerender(prompt(otherScope));
+    expect(await screen.findByRole("article", { name: "Narration request" })).toBeVisible();
+    vi.doUnmock("./NarrationOfferCard");
+  });
 });
