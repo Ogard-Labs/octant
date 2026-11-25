@@ -78,7 +78,7 @@ export function repositoryFilterCommands(configList: string): ReadonlyArray<stri
     const newline = entry.indexOf("\n");
     const key = (newline === -1 ? entry : entry.slice(0, newline)).toLowerCase();
     const value = newline === -1 ? "" : entry.slice(newline + 1);
-    const match = /^filter\.(.+)\.(clean|process)$/.exec(key);
+    const match = /^filter\.(.+)\.(clean|process|smudge)$/.exec(key);
     if (match?.[1] !== undefined && value.trim() !== "") drivers.add(match[1]);
   }
   return [...drivers];
@@ -289,6 +289,70 @@ export async function readRemovalDamage(
     missingTrackedFiles: missing,
     otherChanges: entries.length - missing + untracked,
   };
+}
+
+export type MissingFilesRestoration =
+  | Readonly<{ status: "restored"; files: number }>
+  | Readonly<{ status: "runs-filters" | "failed" }>;
+
+/** Paths per Git command, so a large folder stays under the argument limit. */
+const RESTORE_BATCH = 200;
+
+/**
+ * Puts back the tracked files a removal that stopped part way took, from the
+ * folder's own index, which holds the recorded commit's content for each of
+ * them. Only a path that is missing on disk is named, and `checkout-index`
+ * without `--force` refuses to replace a file that exists, so an edit or a new
+ * file is never overwritten. A file marked skip-worktree is put back too,
+ * except in a sparse checkout, where its absence is the checkout's own choice.
+ * Like the other reads, it runs nothing the repository configured.
+ */
+export async function restoreMissingTrackedFiles(
+  worktreePath: string,
+  signal: AbortSignal,
+): Promise<MissingFilesRestoration> {
+  const config = await runHostGit(
+    ["-C", worktreePath, "config", "--list", "--show-scope", "-z"],
+    signal,
+  );
+  if (config.exitCode !== 0) return { status: "failed" };
+  if (repositoryFilterCommands(config.stdout).length > 0) return { status: "runs-filters" };
+  const sparse = await runHostGit(
+    ["-C", worktreePath, "config", "--type=bool", "--get", "core.sparseCheckout"],
+    signal,
+  );
+  if (sparse.exitCode !== 0 && sparse.exitCode !== 1) return { status: "failed" };
+  const isSparse = sparse.exitCode === 0 && sparse.stdout.trim() === "true";
+  const tracked = await runHostGit(["-C", worktreePath, "ls-files", "-v", "-z"], signal);
+  if (tracked.exitCode !== 0) return { status: "failed" };
+  const missing: string[] = [];
+  for (const entry of tracked.stdout.split("\0")) {
+    if (entry.length < 3) continue;
+    if (isSparse && entry.charAt(0).toLowerCase() === "s") continue;
+    const path = entry.slice(2);
+    try {
+      await lstat(join(worktreePath, path));
+    } catch (error) {
+      if ((error as { code?: unknown }).code !== "ENOENT") return { status: "failed" };
+      missing.push(path);
+    }
+  }
+  for (let start = 0; start < missing.length; start += RESTORE_BATCH) {
+    const restored = await runHostGit(
+      [
+        "-C",
+        worktreePath,
+        "checkout-index",
+        "--ignore-skip-worktree-bits",
+        "--",
+        ...missing.slice(start, start + RESTORE_BATCH),
+      ],
+      signal,
+      60_000,
+    );
+    if (restored.exitCode !== 0) return { status: "failed" };
+  }
+  return { status: "restored", files: missing.length };
 }
 
 export interface ListedWorktree {

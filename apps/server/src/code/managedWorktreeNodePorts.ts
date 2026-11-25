@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { lstat, open, readFile, readdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { checkpointRefNamespace } from "./gitMutationPort";
@@ -19,6 +19,7 @@ import {
   readCleanupHazard,
   readRemovalDamage,
   readUntrackedAndIgnored,
+  restoreMissingTrackedFiles,
   readWorktreeStatus,
 } from "./hostGitReads";
 
@@ -260,6 +261,36 @@ export function createManagedWorktreeNodePorts(): {
           otherChanges: reading.otherChanges,
         };
       }
+      return reading.status === "runs-filters" ? { status: "unavailable" } : { status: "failed" };
+    },
+    relinkWorktree: async (input) => {
+      const pointer = join(input.targetPath, ".git");
+      const admin = join(input.commonDirectory, "worktrees");
+      try {
+        const folder = await lstat(input.targetPath);
+        if (!folder.isDirectory() || folder.isSymbolicLink()) return { status: "rejected" };
+        const homes: string[] = [];
+        for (const name of await readdir(admin)) {
+          const recorded = await readFile(join(admin, name, "gitdir"), "utf8").catch(() => "");
+          if (recorded.trim() === pointer) homes.push(join(admin, name));
+        }
+        const [home] = homes;
+        if (homes.length !== 1 || home === undefined) return { status: "rejected" };
+        // `wx` fails when the folder already has a `.git`, so nothing is replaced.
+        const handle = await open(pointer, "wx", 0o644);
+        try {
+          await handle.writeFile(`gitdir: ${home}\n`, "utf8");
+        } finally {
+          await handle.close();
+        }
+        return { status: "linked" };
+      } catch {
+        return { status: "rejected" };
+      }
+    },
+    restoreMissingFiles: async (targetPath, signal) => {
+      const reading = await restoreMissingTrackedFiles(targetPath, signal);
+      if (reading.status === "restored") return { status: "observed", files: reading.files };
       return reading.status === "runs-filters" ? { status: "unavailable" } : { status: "failed" };
     },
     resolveBranchHead: async (input, signal) => {

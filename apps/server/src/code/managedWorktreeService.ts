@@ -145,6 +145,28 @@ export interface ManagedWorktreeGitPort {
     | Readonly<{ status: "observed"; missingTrackedFiles: number; otherChanges: number }>
     | Readonly<{ status: "unavailable" | "failed" }>
   >;
+  /**
+   * Writes the `.git` file back into a folder a removal took it from, pointing
+   * at the worktree's own admin directory in the repository, so Git lists the
+   * folder as the worktree it was and its other contents show as ordinary
+   * changes. It creates the file and nothing else; it rejects a folder that
+   * has one, a link, or an admin directory it cannot name exactly.
+   */
+  relinkWorktree?(
+    input: Readonly<{ commonDirectory: string; targetPath: string }>,
+    signal: AbortSignal,
+  ): Promise<Readonly<{ status: "linked" | "rejected" }>>;
+  /**
+   * Puts back the tracked files a removal that stopped part way took, from the
+   * folder's own index, without replacing any file that exists. It deletes and
+   * overwrites nothing.
+   */
+  restoreMissingFiles?(
+    targetPath: string,
+    signal: AbortSignal,
+  ): Promise<
+    Readonly<{ status: "observed"; files: number }> | Readonly<{ status: "unavailable" | "failed" }>
+  >;
   /** The commit one local branch points at, or none when it does not exist. */
   resolveBranchHead?(
     input: Readonly<{ repositoryRoot: string; branch: string }>,
@@ -206,8 +228,10 @@ export const BENCHMARK_DISCARD_BRANCH = /^benchmark\/[a-f0-9]{8}\/[a-f0-9]{12}$/
 export type ManagedWorktreeRefusalReason =
   | "active-thread"
   | "branch-collision"
+  | "cleanup-running"
   | "confirmation-required"
   | "dirty"
+  | "git-refused"
   | "invalid-grant"
   | "invalid-intent"
   | "inventory-ambiguous"

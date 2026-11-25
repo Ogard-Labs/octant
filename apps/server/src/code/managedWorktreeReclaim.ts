@@ -2,7 +2,6 @@ import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
 import type { ManagedWorktreeReceipt, ManagedWorktreeReclaim } from "./managedWorktreeReceiptStore";
 import {
   branchRef,
-  hasAmbiguousInventory,
   managedTargetPath,
   type ManagedWorktreeAuthorityPort,
   type ManagedWorktreeFileSystemPort,
@@ -31,15 +30,46 @@ export type ManagedWorktreeReclaimResult =
 /** Why the host removes a folder it can bring back. */
 export type ManagedWorktreeReclaimTrigger = "inactivity" | "delivered";
 
+/**
+ * How long one Git removal may run before it is stopped. A removal may take a
+ * while on a large folder; one that never ends would hold the receipt, and so
+ * every restore and purge of it, for ever. A stopped removal is only
+ * interrupted: the receipt stays pending and the next pass settles it.
+ */
+export const REMOVAL_TIME_LIMIT_MS = 15 * 60 * 1_000;
+
+/** How long a person's restore waits for a cleanup that holds the receipt before it says so. */
+export const RESTORE_WAIT_MS = 10_000;
+
 export interface ManagedWorktreeReclaimOptions {
   readonly receipts: ManagedWorktreeReclaimReceiptPort;
   readonly repository: ManagedWorktreeRepositoryPort;
   readonly filesystem: ManagedWorktreeFileSystemPort;
   readonly git: ManagedWorktreeGitPort;
   readonly authority: ManagedWorktreeAuthorityPort;
+  readonly removalTimeLimitMs?: number;
+  readonly restoreWaitMs?: number;
 }
 
 type PresentWorktree = Extract<ObservedGitWorktree, { status: "present" }>;
+type AvailableObservation = Extract<RepositoryIdentityObservation, { status: "available" }>;
+
+/**
+ * What a settled receipt's own worktrees look like. Only entries about this
+ * receipt count: its own folder, or any worktree holding one of its branches.
+ * A locked, prunable or missing worktree that belongs to something else in the
+ * repository is not this receipt's to refuse over. `leftover` is this
+ * receipt's own entry after a removal stopped before Git finished it: the
+ * recorded branch and commit at the receipt's folder, listed as prunable
+ * because the folder, or its `.git` file, is gone.
+ */
+type Inventory =
+  | Readonly<{ kind: "ambiguous" }>
+  | Readonly<{ kind: "clear"; leftover?: ObservedGitWorktree }>;
+
+function pathOf(worktree: ObservedGitWorktree): string {
+  return worktree.status === "present" ? worktree.canonicalPath : worktree.reportedPath;
+}
 
 /**
  * Removes a managed worktree folder in a way a restore can undo, and brings it
@@ -56,8 +86,12 @@ export class ManagedWorktreeReclaimService {
   readonly #git: ManagedWorktreeGitPort;
   readonly #authority: ManagedWorktreeAuthorityPort;
   readonly #locks = new Map<string, Promise<void>>();
+  readonly #removalTimeLimitMs: number;
+  readonly #restoreWaitMs: number;
 
   constructor(options: ManagedWorktreeReclaimOptions) {
+    this.#removalTimeLimitMs = options.removalTimeLimitMs ?? REMOVAL_TIME_LIMIT_MS;
+    this.#restoreWaitMs = options.restoreWaitMs ?? RESTORE_WAIT_MS;
     this.#receipts = options.receipts;
     this.#repository = options.repository;
     this.#filesystem = options.filesystem;
@@ -85,6 +119,29 @@ export class ManagedWorktreeReclaimService {
     } finally {
       if (this.#locks.get(receiptId) === settled) this.#locks.delete(receiptId);
     }
+  }
+
+  /**
+   * The person's own operations wait for the receipt only a little: a cleanup
+   * that still runs is said so, not waited on until it ends.
+   */
+  async #whenFree(
+    receiptId: string,
+    run: () => Promise<ManagedWorktreeReclaimResult>,
+  ): Promise<ManagedWorktreeReclaimResult> {
+    const previous = this.#locks.get(receiptId);
+    if (previous !== undefined) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const free = await Promise.race([
+        previous.then(() => true),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), this.#restoreWaitMs);
+        }),
+      ]);
+      clearTimeout(timer);
+      if (!free) return { status: "refused", reason: "cleanup-running" };
+    }
+    return this.exclusive(receiptId, run);
   }
 
   reclaim(
@@ -120,7 +177,7 @@ export class ManagedWorktreeReclaimService {
 
     const known = await this.#checkAuthority(receipt, signal);
     if (known !== undefined) return known;
-    const observed = await this.#observe(receipt, signal);
+    const observed = await this.#observe(receipt, signal, resuming ? "relink" : "refuse");
     if (observed.status !== "available") return observed.result;
     const { observation, targets } = observed;
 
@@ -145,8 +202,7 @@ export class ManagedWorktreeReclaimService {
     ) {
       // The folder changed after an interrupted cleanup began: it is a working
       // checkout again, so the cleanup gives up and the thread takes turns.
-      await this.#receipts.abortReclaim(receipt.receiptId).catch(() => undefined);
-      return { status: "refused", reason: "mismatched" };
+      return this.#giveUp(receipt, "mismatched", signal);
     }
 
     if (resuming) {
@@ -160,9 +216,9 @@ export class ManagedWorktreeReclaimService {
       );
       if (finished !== undefined) return finished;
     }
-    if (!input.isIdle()) return this.#giveUp(receipt, "working");
+    if (!input.isIdle()) return this.#giveUp(receipt, "working", signal);
     const checked = await this.#checkFolder(receipt, input.trigger, branch, signal);
-    if (checked !== undefined) return resuming ? this.#giveUpOn(receipt, checked) : checked;
+    if (checked !== undefined) return resuming ? this.#giveUpOn(receipt, checked, signal) : checked;
 
     try {
       receipt = await this.#receipts.beginReclaim(receipt.receiptId, { branch, head });
@@ -171,7 +227,7 @@ export class ManagedWorktreeReclaimService {
     }
     // A turn may have started between the first look and the receipt leaving
     // `ready`; from here none can, so one more look settles it.
-    if (!input.isIdle()) return this.#giveUp(receipt, "working");
+    if (!input.isIdle()) return this.#giveUp(receipt, "working", signal);
 
     try {
       const removed = await this.#removeFolder(observation.repositoryRoot, receipt, false);
@@ -187,7 +243,9 @@ export class ManagedWorktreeReclaimService {
   /**
    * Git has started deleting files, so the host stopping must not cut it
    * short: a half-deleted folder is worse than either end. A stop signal is
-   * therefore not passed on; a crash is settled by the next pass.
+   * therefore not passed on; only the time limit is, so a removal that never
+   * ends is interrupted instead of holding the receipt for ever. A crash or a
+   * timeout is settled by the next pass.
    */
   #removeFolder(repositoryRoot: string, receipt: ManagedWorktreeReceipt, force: boolean) {
     return this.#git.removeWorktree(
@@ -196,7 +254,7 @@ export class ManagedWorktreeReclaimService {
         targetPath: receipt.canonicalWorktreePath,
         ...(force ? { force: true } : {}),
       },
-      new AbortController().signal,
+      AbortSignal.timeout(this.#removalTimeLimitMs),
     );
   }
 
@@ -236,7 +294,7 @@ export class ManagedWorktreeReclaimService {
     const reclaim = receipt.reclaim;
     if (reclaim === undefined) return false;
     const seen = await this.#repository.observe(repositoryRoot, signal);
-    if (seen.status !== "available" || hasAmbiguousInventory(seen)) return false;
+    if (seen.status !== "available" || !this.#settled(seen, receipt)) return false;
     const present = seen.worktrees.filter(
       (worktree): worktree is PresentWorktree =>
         worktree.status === "present" && worktree.canonicalPath === receipt.canonicalWorktreePath,
@@ -253,11 +311,15 @@ export class ManagedWorktreeReclaimService {
 
   /**
    * Looks at a folder an interrupted cleanup left. Tracked files gone and
-   * nothing else changed means Git was deleting it: the removal is finished
-   * with force, which loses nothing the recorded branch and commit do not hold.
-   * Files gone beside other changes is not something to guess about, so the
-   * folder stays as it is and the cleanup stays pending. Whole folders, or ones
-   * with only other changes, are not touched here.
+   * nothing else changed means Git was deleting it, and the removal is finished
+   * with force: that is the one forced removal here, and it runs only on proof
+   * that it loses nothing the recorded branch and commit do not hold. The proof
+   * is read fresh, here, for every path that reaches it: the folder is still
+   * the one registered on the recorded branch and commit, no hidden flag, sparse
+   * checkout, submodule or operation under way is present, nothing but tracked
+   * files is missing, and the thread is idle. A folder that fails any of it is
+   * given back to the thread whole and the cleanup is dropped. Whole folders are
+   * not touched here.
    */
   async #finishCutShortRemoval(
     receipt: ManagedWorktreeReceipt,
@@ -265,14 +327,20 @@ export class ManagedWorktreeReclaimService {
     isIdle: () => boolean,
     signal: AbortSignal,
   ): Promise<ManagedWorktreeReclaimResult | undefined> {
+    const reclaim = receipt.reclaim;
     try {
-      if (this.#git.readRemovalDamage === undefined) {
+      if (reclaim === undefined || this.#git.readRemovalDamage === undefined) {
         return { status: "refused", reason: "unverified" };
       }
       const damage = await this.#git.readRemovalDamage(receipt.canonicalWorktreePath, signal);
+      if (damage.status === "unavailable") return { status: "refused", reason: "unverified" };
       if (damage.status !== "observed") return { status: "waiting", receipt };
       if (damage.missingTrackedFiles === 0) return undefined;
-      if (damage.otherChanges > 0) return { status: "refused", reason: "dirty" };
+      // Other changes beside the missing files are the person's. Nothing is
+      // deleted: the missing files are put back and the thread has its folder.
+      if (damage.otherChanges > 0) return this.#giveUp(receipt, "dirty", signal);
+      const refused = await this.#removalRefusal(receipt, reclaim, repositoryRoot, signal);
+      if (refused !== undefined) return refused;
       if (!isIdle()) return { status: "refused", reason: "working" };
       const removed = await this.#removeFolder(repositoryRoot, receipt, true);
       if (removed.status !== "removed") return { status: "waiting", receipt };
@@ -282,17 +350,61 @@ export class ManagedWorktreeReclaimService {
     return this.#finishReclaim(receipt, repositoryRoot, signal);
   }
 
+  /** What stands in the way of a forced removal, or undefined when the proof holds. */
+  async #removalRefusal(
+    receipt: ManagedWorktreeReceipt,
+    reclaim: ManagedWorktreeReclaim,
+    repositoryRoot: string,
+    signal: AbortSignal,
+  ): Promise<ManagedWorktreeReclaimResult | undefined> {
+    const seen = await this.#repository.observe(repositoryRoot, signal);
+    if (seen.status === "failed") return { status: "waiting", receipt };
+    if (
+      seen.status !== "available" ||
+      seen.repositoryId !== receipt.repositoryId ||
+      seen.repositoryRoot !== receipt.canonicalRepositoryPath ||
+      !this.#settled(seen, receipt)
+    ) {
+      return this.#giveUp(receipt, "mismatched", signal);
+    }
+    const present = seen.worktrees.filter(
+      (worktree): worktree is PresentWorktree =>
+        worktree.status === "present" && worktree.canonicalPath === receipt.canonicalWorktreePath,
+    );
+    const [only] = present;
+    if (
+      present.length !== 1 ||
+      only === undefined ||
+      only.detached ||
+      only.branch !== branchRef(reclaim.branch) ||
+      only.head !== reclaim.head
+    ) {
+      return this.#giveUp(receipt, "mismatched", signal);
+    }
+    if (this.#git.findCleanupHazard === undefined)
+      return { status: "refused", reason: "unverified" };
+    const hazard = await this.#git.findCleanupHazard(receipt.canonicalWorktreePath, signal);
+    if (hazard.status === "unavailable") return { status: "refused", reason: "unverified" };
+    if (hazard.status !== "observed") return { status: "waiting", receipt };
+    if (hazard.hazard === "hidden-edits")
+      return this.#giveUp(receipt, "unrecoverable-files", signal);
+    if (hazard.hazard === "unsupported")
+      return this.#giveUp(receipt, "unsupported-checkout", signal);
+    return undefined;
+  }
+
   /**
-   * Gives up an interrupted cleanup the person no longer wants: a folder still
-   * there goes back to being the thread's working checkout, and one Git already
-   * removed becomes a cleaned-up checkout that can be restored, since nothing
-   * can put the files back.
+   * Gives up an interrupted cleanup the person no longer wants. A folder still
+   * there is given back to the thread whole: whatever the removal took is put
+   * back from the folder's own index, and nothing is deleted, so no check of
+   * its other contents is needed. One Git already removed becomes a cleaned-up
+   * checkout that can be restored.
    */
   abandon(
     input: Readonly<{ receiptId: string }>,
     signal: AbortSignal,
   ): Promise<ManagedWorktreeReclaimResult> {
-    return this.exclusive(input.receiptId, () => this.#abandon(input, signal));
+    return this.#whenFree(input.receiptId, () => this.#abandon(input, signal));
   }
 
   async #abandon(
@@ -316,32 +428,21 @@ export class ManagedWorktreeReclaimService {
     }
     const known = await this.#checkAuthority(receipt, signal);
     if (known !== undefined) return known;
-    const observed = await this.#observe(receipt, signal);
+    const observed = await this.#observe(receipt, signal, "relink");
     if (observed.status !== "available") return observed.result;
     if (observed.targets.length === 0) {
       return this.#finishReclaim(receipt, observed.observation.repositoryRoot, signal);
     }
     if (observed.targets.length !== 1) return { status: "refused", reason: "inventory-ambiguous" };
-    // A folder Git had begun to delete is never handed back as a checkout.
-    const finished = await this.#finishCutShortRemoval(
-      receipt,
-      observed.observation.repositoryRoot,
-      () => true,
-      signal,
-    );
-    if (finished !== undefined) return finished;
-    try {
-      return { status: "restored", receipt: await this.#receipts.abortReclaim(receipt.receiptId) };
-    } catch {
-      return { status: "interrupted", receipt };
-    }
+    const back = await this.#returnToThread(receipt, signal);
+    return back.status === "back" ? { status: "restored", receipt: back.receipt } : back.result;
   }
 
   restore(
     input: Readonly<{ receiptId: string }>,
     signal: AbortSignal,
   ): Promise<ManagedWorktreeReclaimResult> {
-    return this.exclusive(input.receiptId, () => this.#restore(input, signal));
+    return this.#whenFree(input.receiptId, () => this.#restore(input, signal));
   }
 
   async #restore(
@@ -363,7 +464,9 @@ export class ManagedWorktreeReclaimService {
 
     const known = await this.#checkAuthority(receipt, signal);
     if (known !== undefined) return known;
-    const observed = await this.#observe(receipt, signal);
+    // A registration left for a folder that is gone is dropped first, or Git
+    // would refuse to put a worktree at the same path.
+    const observed = await this.#observe(receipt, signal, "drop");
     if (observed.status !== "available") return observed.result;
     const { observation, targets } = observed;
     const [placed, ...others] = targets;
@@ -425,6 +528,7 @@ export class ManagedWorktreeReclaimService {
       try {
         if (!(await this.#filesystem.pathExists(receipt.canonicalWorktreePath, signal))) {
           await this.#receipts.transition(receipt.receiptId, "reclaimed");
+          return { status: "refused", reason: "git-refused" };
         }
       } catch {
         return { status: "interrupted", receipt };
@@ -448,7 +552,7 @@ export class ManagedWorktreeReclaimService {
     observation: RepositoryIdentityObservation,
     receipt: ManagedWorktreeReceipt,
   ): ReadonlyArray<PresentWorktree> {
-    return observation.status === "available" && !hasAmbiguousInventory(observation)
+    return observation.status === "available" && this.#settled(observation, receipt)
       ? observation.worktrees.filter(
           (worktree): worktree is PresentWorktree =>
             worktree.status === "present" &&
@@ -490,13 +594,20 @@ export class ManagedWorktreeReclaimService {
     return undefined;
   }
 
+  /**
+   * Reads the repository and finds the receipt's own worktree. `settle` says
+   * what to do with a registration a removal left behind for this receipt: no
+   * more than refuse it, drop it when its folder is gone, or also link a folder
+   * that lost its `.git` file back to the repository.
+   */
   async #observe(
     receipt: ManagedWorktreeReceipt,
     signal: AbortSignal,
+    settle: "refuse" | "drop" | "relink" = "refuse",
   ): Promise<
     | Readonly<{
         status: "available";
-        observation: Extract<RepositoryIdentityObservation, { status: "available" }>;
+        observation: AvailableObservation;
         targets: ReadonlyArray<PresentWorktree>;
       }>
     | Readonly<{ status: "stopped"; result: ManagedWorktreeReclaimResult }>
@@ -517,15 +628,31 @@ export class ManagedWorktreeReclaimService {
     ) {
       return { status: "stopped", result: { status: "refused", reason: "mismatched" } };
     }
-    if (hasAmbiguousInventory(observation)) {
-      return { status: "stopped", result: { status: "refused", reason: "inventory-ambiguous" } };
-    }
     // The folder is only ever the one the service derives for this thread.
     if (
       managedTargetPath(observation.repositoryRoot, receipt.repositoryId, receipt.threadId) !==
       receipt.canonicalWorktreePath
     ) {
       return { status: "stopped", result: { status: "refused", reason: "mismatched" } };
+    }
+    const inventory = this.#inventory(observation, receipt);
+    if (inventory.kind === "ambiguous") {
+      return { status: "stopped", result: { status: "refused", reason: "inventory-ambiguous" } };
+    }
+    if (inventory.leftover !== undefined) {
+      if (settle === "refuse") {
+        return { status: "stopped", result: { status: "refused", reason: "inventory-ambiguous" } };
+      }
+      const stopped = await this.#settleLeftover(
+        receipt,
+        observation,
+        inventory.leftover,
+        settle === "relink",
+        signal,
+      );
+      if (stopped !== undefined) return { status: "stopped", result: stopped };
+      // One more look, which must find it settled.
+      return this.#observe(receipt, signal, "refuse");
     }
     return {
       status: "available",
@@ -535,6 +662,89 @@ export class ManagedWorktreeReclaimService {
           worktree.status === "present" && worktree.canonicalPath === receipt.canonicalWorktreePath,
       ),
     };
+  }
+
+  /**
+   * Only worktrees about this receipt can make its inventory ambiguous: a lock
+   * on, or a registration gone stale for, its own folder or a branch it holds.
+   * What other worktrees of the repository look like is not its business.
+   */
+  #inventory(observation: AvailableObservation, receipt: ManagedWorktreeReceipt): Inventory {
+    const branches = new Set([branchRef(receipt.branchIntent)]);
+    if (receipt.currentBranch !== undefined) branches.add(branchRef(receipt.currentBranch));
+    if (receipt.reclaim !== undefined) branches.add(branchRef(receipt.reclaim.branch));
+    let leftover: ObservedGitWorktree | undefined;
+    for (const worktree of observation.worktrees) {
+      const here = pathOf(worktree) === receipt.canonicalWorktreePath;
+      if (!here && (worktree.branch === undefined || !branches.has(worktree.branch))) continue;
+      if (worktree.locked !== undefined) return { kind: "ambiguous" };
+      if (worktree.prunable === undefined) continue;
+      const reclaim = receipt.reclaim;
+      const own =
+        here &&
+        reclaim !== undefined &&
+        !worktree.detached &&
+        worktree.branch === branchRef(reclaim.branch) &&
+        worktree.head === reclaim.head;
+      if (leftover !== undefined || !own) return { kind: "ambiguous" };
+      leftover = worktree;
+    }
+    return leftover === undefined ? { kind: "clear" } : { kind: "clear", leftover };
+  }
+
+  /** The receipt's own worktrees are all in order, with no leftover registration. */
+  #settled(observation: AvailableObservation, receipt: ManagedWorktreeReceipt): boolean {
+    const inventory = this.#inventory(observation, receipt);
+    return inventory.kind === "clear" && inventory.leftover === undefined;
+  }
+
+  /**
+   * A removal stopped after Git deleted the folder's `.git` file, or the folder
+   * itself, and left this receipt's registration behind. It is this receipt's
+   * own when the path, branch and commit match the record, and Git lists it as
+   * prunable.
+   *
+   * A folder that is gone needs only its registration dropped: `git worktree
+   * remove` on that path deletes that one admin entry and nothing else, never
+   * the repository-wide `prune` that would also drop other worktrees' entries.
+   * A folder that remains is linked back by writing its `.git` file again, so
+   * the worktree is whole to Git and any file in it that the commit does not
+   * hold is an ordinary change. Nothing in the folder is moved or deleted.
+   */
+  async #settleLeftover(
+    receipt: ManagedWorktreeReceipt,
+    observation: AvailableObservation,
+    leftover: ObservedGitWorktree,
+    relink: boolean,
+    signal: AbortSignal,
+  ): Promise<ManagedWorktreeReclaimResult | undefined> {
+    try {
+      const path = receipt.canonicalWorktreePath;
+      if (
+        leftover.status === "missing-prunable" ||
+        !(await this.#filesystem.pathExists(path, signal))
+      ) {
+        const dropped = await this.#git.removeWorktree(
+          { repositoryRoot: observation.repositoryRoot, targetPath: path },
+          signal,
+        );
+        return dropped.status === "removed"
+          ? undefined
+          : { status: "refused", reason: "git-refused" };
+      }
+      if (!relink || this.#git.relinkWorktree === undefined) {
+        return { status: "refused", reason: "path-collision" };
+      }
+      const linked = await this.#git.relinkWorktree(
+        { commonDirectory: observation.commonDirectory, targetPath: path },
+        signal,
+      );
+      return linked.status === "linked"
+        ? undefined
+        : { status: "refused", reason: "path-collision" };
+    } catch {
+      return { status: "interrupted", receipt };
+    }
   }
 
   /** Clean, nothing a branch cannot give back, and delivered when the trigger asks. */
@@ -601,7 +811,7 @@ export class ManagedWorktreeReclaimService {
       confirmation.status !== "available" ||
       confirmation.repositoryId !== receipt.repositoryId ||
       confirmation.repositoryRoot !== receipt.canonicalRepositoryPath ||
-      hasAmbiguousInventory(confirmation) ||
+      !this.#settled(confirmation, receipt) ||
       confirmation.worktrees.some(
         (worktree) =>
           worktree.status === "present" && worktree.canonicalPath === receipt.canonicalWorktreePath,
@@ -624,7 +834,7 @@ export class ManagedWorktreeReclaimService {
   async #branchMatches(
     receipt: ManagedWorktreeReceipt,
     reclaim: ManagedWorktreeReclaim,
-    observation: Extract<RepositoryIdentityObservation, { status: "available" }>,
+    observation: AvailableObservation,
     signal: AbortSignal,
   ): Promise<ManagedWorktreeReclaimResult | undefined> {
     if (this.#git.resolveBranchHead === undefined)
@@ -692,12 +902,38 @@ export class ManagedWorktreeReclaimService {
     return { status: "waiting", receipt };
   }
 
+  /**
+   * Hands the folder back to the thread and drops the cleanup. Whatever a
+   * removal that stopped part way took is put back from the folder's own
+   * index first, so the thread resumes on a whole checkout; nothing is deleted
+   * or overwritten, and the folder's other contents stay as they are.
+   */
+  async #returnToThread(
+    receipt: ManagedWorktreeReceipt,
+    signal: AbortSignal,
+  ): Promise<
+    | Readonly<{ status: "back"; receipt: ManagedWorktreeReceipt }>
+    | Readonly<{ status: "stuck"; result: ManagedWorktreeReclaimResult }>
+  > {
+    try {
+      const restored = await this.#git.restoreMissingFiles?.(receipt.canonicalWorktreePath, signal);
+      if (restored !== undefined && restored.status !== "observed") {
+        return { status: "stuck", result: { status: "refused", reason: "git-refused" } };
+      }
+      return { status: "back", receipt: await this.#receipts.abortReclaim(receipt.receiptId) };
+    } catch {
+      return { status: "stuck", result: { status: "interrupted", receipt } };
+    }
+  }
+
   async #giveUp(
     receipt: ManagedWorktreeReceipt,
     reason: ManagedWorktreeRefusalReason,
+    signal: AbortSignal,
   ): Promise<ManagedWorktreeReclaimResult> {
     if (receipt.state === "cleanup-pending") {
-      await this.#receipts.abortReclaim(receipt.receiptId).catch(() => undefined);
+      const back = await this.#returnToThread(receipt, signal);
+      if (back.status === "stuck") return back.result;
     }
     return { status: "refused", reason };
   }
@@ -706,10 +942,8 @@ export class ManagedWorktreeReclaimService {
   async #giveUpOn(
     receipt: ManagedWorktreeReceipt,
     result: ManagedWorktreeReclaimResult,
+    signal: AbortSignal,
   ): Promise<ManagedWorktreeReclaimResult> {
-    if (result.status === "refused") {
-      await this.#receipts.abortReclaim(receipt.receiptId).catch(() => undefined);
-    }
-    return result;
+    return result.status === "refused" ? this.#giveUp(receipt, result.reason, signal) : result;
   }
 }

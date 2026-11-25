@@ -34,7 +34,11 @@ const REFUSALS: Record<CleanedUpWorktreeRefusalReason, string> = {
   "branch-changed":
     "The branch no longer points where the worktree left it, so it was not restored. Check the branch in the repository, or start a new thread from it.",
   "folder-in-use":
-    "Something else is using the worktree's folder or branch. Move it away, then restore again.",
+    "Something else is using the worktree's folder or branch, or Git has it locked. Unlock or move it away, then restore again.",
+  "cleanup-running":
+    "A cleanup of this worktree is still running. Wait for it to finish, then restore again.",
+  "needs-attention":
+    "Git could not put the worktree's folder back. Check the folder and the repository's worktrees, then restore again.",
   unverified: "The worktree could not be checked, so it was not restored.",
   busy: "The worktree could not be restored right now. Try again in a moment.",
 };
@@ -151,17 +155,20 @@ function mapRefusal(
         return cleanedUpRefusal("branch-changed");
       case "path-collision":
       case "branch-collision":
+      case "inventory-ambiguous":
         return cleanedUpRefusal("folder-in-use");
+      case "cleanup-running":
+        return cleanedUpRefusal("cleanup-running");
       case "not-reclaimed":
         return cleanedUpRefusal("not-cleaned-up");
       case "unowned":
         return cleanedUpRefusal("not-found");
       case "unverified":
       case "mismatched":
-      case "inventory-ambiguous":
         return cleanedUpRefusal("unverified");
       default:
-        return cleanedUpRefusal("busy");
+        // Waiting would not help: the person has to look at the folder.
+        return cleanedUpRefusal("needs-attention");
     }
   }
   return cleanedUpRefusal("busy");
