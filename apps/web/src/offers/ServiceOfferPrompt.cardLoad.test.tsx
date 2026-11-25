@@ -2,44 +2,75 @@ import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-cl
 import {
   decodeImageGenerationOffer,
   decodeNarrationOffer,
+  decodeTranscriptionOffer,
   type ImageGenerationScopeId,
 } from "@octant/contracts";
-import { render, screen, waitFor } from "@testing-library/react";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ServiceOfferPrompt } from "./ServiceOfferPrompt";
 
 /**
- * How many of the next narration card loads fail, as a chunk missing after a
- * host update would. Its own file, so the card's module and the cards loaded
- * beside it stay cached for the window instead of being rebuilt per test.
+ * How many of a card's next loads fail, as a chunk missing after a host
+ * update would, and how many were tried. Each test fails a different kind's
+ * card, so each starts from a card the window has never loaded, whatever ran
+ * before it, and no module is rebuilt between tests.
  */
-const narrationLoads = vi.hoisted(() => ({ failing: 0, attempts: 0 }));
+const loads = vi.hoisted(() => ({
+  transcription: { failing: 0, attempts: 0 },
+  narration: { failing: 0, attempts: 0 },
+}));
+vi.mock("./TranscriptionOfferCard", async (actual) => {
+  loads.transcription.attempts += 1;
+  if (loads.transcription.failing > 0) {
+    loads.transcription.failing -= 1;
+    throw new Error("chunk is gone");
+  }
+  return actual();
+});
 vi.mock("./NarrationOfferCard", async (actual) => {
-  narrationLoads.attempts += 1;
-  if (narrationLoads.failing > 0) {
-    narrationLoads.failing -= 1;
+  loads.narration.attempts += 1;
+  if (loads.narration.failing > 0) {
+    loads.narration.failing -= 1;
     throw new Error("chunk is gone");
   }
   return actual();
 });
 
-// The cards that do load are in memory, so a test waits on the offer alone.
+// The card that does load is in memory, so a test waits on the offer alone.
 beforeAll(async () => {
   await import("../image/imageOfferCards");
 }, 60_000);
 
+beforeEach(() => {
+  for (const card of [loads.transcription, loads.narration]) {
+    card.failing = 0;
+    card.attempts = 0;
+  }
+});
+
 const scopeId = "cc000000-0000-4000-8000-000000000001" as ImageGenerationScopeId;
 const otherScope = "cc000000-0000-4000-8000-000000000002" as ImageGenerationScopeId;
-const offerId = "cc000000-0000-4000-8000-000000000020";
-const profileId = "cc000000-0000-4000-8000-000000000010";
+const requestedAt = "2026-11-07T10:00:00.000Z";
+
+const transcription = decodeTranscriptionOffer({
+  kind: "transcribe",
+  threadKind: "code-thread",
+  scopeId,
+  offerId: "cc000000-0000-4000-8000-000000000021",
+  requestedAt,
+  relativePath: "meetings/notes.m4a",
+  sizeBytes: 2048,
+  endpointName: "Studio",
+  modelId: "speech-model",
+});
 
 function narration(scope: ImageGenerationScopeId) {
   return decodeNarrationOffer({
     kind: "narrate",
     threadKind: "code-thread",
     scopeId: scope,
-    offerId,
-    requestedAt: "2026-11-07T10:00:00.000Z",
+    offerId: "cc000000-0000-4000-8000-000000000023",
+    requestedAt,
     excerpt: "Welcome",
     characters: 7,
     relativePath: "narration/intro.mp3",
@@ -50,17 +81,22 @@ function narration(scope: ImageGenerationScopeId) {
   });
 }
 
-const image = decodeImageGenerationOffer({
-  offerId: "cc000000-0000-4000-8000-000000000022",
-  kind: "generate",
-  threadKind: "code-thread",
-  scopeId,
-  prompt: "A lighthouse at dusk",
-  variantCount: 1,
-  revision: false,
-  suggested: { profileInstanceId: profileId, modelId: "gpt-image-2" },
-  requestedAt: "2026-11-07T10:00:00.000Z",
-});
+function image(scope: ImageGenerationScopeId) {
+  return decodeImageGenerationOffer({
+    offerId: "cc000000-0000-4000-8000-000000000022",
+    kind: "generate",
+    threadKind: "code-thread",
+    scopeId: scope,
+    prompt: "A lighthouse at dusk",
+    variantCount: 1,
+    revision: false,
+    suggested: {
+      profileInstanceId: "cc000000-0000-4000-8000-000000000010",
+      modelId: "gpt-image-2",
+    },
+    requestedAt,
+  });
+}
 
 function prompt(client: ServiceOfferClient, scope: ImageGenerationScopeId) {
   return (
@@ -77,32 +113,32 @@ function prompt(client: ServiceOfferClient, scope: ImageGenerationScopeId) {
 
 describe("ServiceOfferPrompt when a card cannot load", () => {
   it("sets the offer aside on that one load and asks the thread's next one", async () => {
-    narrationLoads.failing = 1;
-    const before = narrationLoads.attempts;
+    loads.transcription.failing = 1;
     const client: ServiceOfferClient = {
-      offers: vi.fn(async () => ({ offers: [narration(scopeId), image] })),
+      offers: vi.fn(async () => ({ offers: [transcription, image(scopeId)] })),
       decide: vi.fn(async () => ({ kind: "offer-answered" as const })),
     };
     render(prompt(client, scopeId));
     expect(await screen.findByRole("article", { name: "Image generation request" })).toBeVisible();
     expect(screen.getAllByRole("article")).toHaveLength(1);
-    expect(narrationLoads.attempts - before).toBe(1);
+    expect(loads.transcription.attempts).toBe(1);
   });
 
   it("tries a card that failed to load again in the next thread the person opens", async () => {
-    narrationLoads.failing = 1;
-    const before = narrationLoads.attempts;
+    loads.narration.failing = 1;
     const client: ServiceOfferClient = {
-      offers: vi.fn(async ({ scopeId: scope }) => ({ offers: [narration(scope)] })),
+      offers: vi.fn(async ({ scopeId: scope }) => ({
+        offers: scope === scopeId ? [narration(scope), image(scope)] : [narration(scope)],
+      })),
       decide: vi.fn(async () => ({ kind: "offer-answered" as const })),
     };
     const view = render(prompt(client, scopeId));
-    await waitFor(() => expect(narrationLoads.attempts - before).toBe(1));
-    await waitFor(() => expect(client.offers).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole("article")).toBeNull();
+    // Settled: the narration offer was set aside and the thread's next one asked.
+    expect(await screen.findByRole("article", { name: "Image generation request" })).toBeVisible();
+    expect(loads.narration.attempts).toBe(1);
 
     view.rerender(prompt(client, otherScope));
     expect(await screen.findByRole("article", { name: "Narration request" })).toBeVisible();
-    expect(narrationLoads.attempts - before).toBe(2);
+    expect(loads.narration.attempts).toBe(2);
   });
 });
