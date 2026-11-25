@@ -62,7 +62,10 @@ describe("NavigatorPopover", () => {
       "id",
       "navigator-popover",
     );
-    expect(screen.getByText("Running on model-a")).toBeVisible();
+    expect(await screen.findByText("Running on model-a")).toBeVisible();
+    const dialog = screen.getByRole("dialog", { name: "Navigator" });
+    await waitFor(() => expect(dialog).toContainElement(document.activeElement as HTMLElement));
+    expect(dialog).not.toHaveFocus();
     expect(screen.getByLabelText("Message Navigator")).toBeVisible();
 
     await user.keyboard("{Escape}");
