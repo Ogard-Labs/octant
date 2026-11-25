@@ -82,7 +82,7 @@ export function useTurnControl(
   const change = async (
     run: (snapshot: ThreadMessageQueueSnapshot) => Promise<MobileSendResult>,
     failure: string,
-    onDone: (status: "queued" | "unreachable") => void,
+    onDone: (status: "queued" | "refused" | "unreachable") => void,
   ) => {
     if (identity === undefined || queue === undefined || changing.current) return;
     changing.current = true;
@@ -98,6 +98,7 @@ export function useTurnControl(
         if (result.status === "refused") {
           hapticFailure();
           ui.setError(result.message);
+          onDone("refused");
           return;
         }
         if (result.status === "withdrawn") return;
@@ -120,6 +121,9 @@ export function useTurnControl(
       const words = JSON.stringify([prompt, input.attachmentIds]);
       const messageId =
         input.unanswered?.words === words ? input.unanswered.id : globalThis.crypto.randomUUID();
+      // Noted before it leaves: the screen may be gone when the answer comes, and
+      // the same words are this message until one does.
+      input.noteUnanswered({ words, id: messageId });
       await change(
         ({ scope }) =>
           queueMobileMessage({
@@ -131,13 +135,16 @@ export function useTurnControl(
           }),
         "The message could not be queued.",
         (status) => {
+          if (status === "refused") {
+            input.noteUnanswered(undefined);
+            return;
+          }
           if (status === "unreachable") {
             // Files do not wait on the phone, so a message with them stays here.
             const held =
               input.attachmentIds.length === 0 &&
               input.onUnanswered({ id: messageId, text: prompt });
             if (!held) {
-              input.noteUnanswered({ words, id: messageId });
               ui.setError("No answer came. Your draft stays here; send it again.");
               return;
             }

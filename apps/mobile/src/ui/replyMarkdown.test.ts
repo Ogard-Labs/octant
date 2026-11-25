@@ -56,12 +56,23 @@ describe("a reply's Markdown", () => {
     "[call][ref]\n\n[ref]: tel:123",
     "<tel:123>",
     "<octant://pair>",
+    `[a](${" ".repeat(11)}tel:1)`,
+    `[a][r]\n\n[r]:${" ".repeat(40)}tel:1`,
+    "> [a](\n> tel:1)",
+    "> [r]:\n> tel:1\n\n[r]",
+    "[a](x[b](tel:2)",
+    "[a](https://x[b](tel:2)",
+    "`](`[a](tel:1)",
+    "]:[a](tel:1)",
+    `<octant://${"x".repeat(3_000)}>`,
+    "[a](< tel:1>)",
+    "<a@example.com>",
   ])("makes no link of %s", (written) => {
     for (const segment of replySegments(written))
-      if (segment.kind === "prose") {
-        expect(segment.markdown).toContain("\u200B");
-        expect(segment.markdown).not.toMatch(/\]\(\s*<?(?:tel|&|t&|octant|javascript)/i);
-      }
+      if (segment.kind === "prose")
+        expect(segment.markdown).not.toMatch(
+          /\][(:][\s>]*<?\s*(?:tel:|&|t&|octant:|javascript:)|<(?:tel:|octant:|a@)/i,
+        );
   });
 
   it("keeps a link to a web page, however it is written", () => {
@@ -71,7 +82,7 @@ describe("a reply's Markdown", () => {
       "<https://example.com>",
       "[page][ref]\n\n[ref]: https://example.com",
       "[file](src/a.ts)",
-      "See [1]: it works",
+      "See [1] it works",
     ])
       expect(replySegments(written)).toEqual([{ kind: "prose", markdown: written }]);
   });
@@ -86,6 +97,9 @@ describe("a reply's Markdown", () => {
   it("reads a long reply quickly, however it is written", () => {
     const started = performance.now();
     replySegments("![a](".repeat(20_000) + "x".repeat(200_000));
+    replySegments("](".repeat(100_000));
+    replySegments(`](${" ".repeat(200_000)}`);
+    replySegments("<a".repeat(100_000));
     expect(performance.now() - started).toBeLessThan(1_000);
   });
 });

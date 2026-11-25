@@ -15,6 +15,15 @@ describe("what is being written in a thread", () => {
     expect(cleared).toEqual(["a one", "a one"]);
   });
 
+  it("leaves with the computer it was written to", () => {
+    const drafts = createThreadDrafts();
+    drafts.keep("a:1", "one");
+    drafts.keep("b:1", "two");
+    drafts.keepOnly((thread) => thread.startsWith("b:"));
+    expect(drafts.read("a:1")).toBe("");
+    expect(drafts.read("b:1")).toBe("two");
+  });
+
   it("remembers words whose send had no clear answer until they are sent", () => {
     const drafts = createThreadDrafts();
     drafts.noteMayBeSent("a", " one ");

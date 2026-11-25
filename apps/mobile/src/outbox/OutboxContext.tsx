@@ -130,14 +130,20 @@ export function OutboxProvider(props: {
       unsaved: unsaved && outbox.messages.length > 0,
       keep: (message) => {
         const pairing = pairings.get(message.hostId);
-        if (pairing === undefined) return MOBILE_COPY.outboxOtherComputer;
+        if (pairing === undefined) return MOBILE_COPY.outboxNoComputer;
         const status = store.keep({ ...message, pairing });
         return status === "added" ? undefined : MOBILE_COPY.outboxRefusal[status];
       },
       remove: (id) => store.remove(id),
       tryAgain: (message) => store.tryAgain(message.id, pairings.get(message.hostId)),
-      lastStanding: (hostId) => store.lastStanding(hostId),
-      noteStanding: (hostId, standing) => store.noteStanding(hostId, standing),
+      lastStanding: (hostId) => {
+        const pairing = pairings.get(hostId);
+        return pairing === undefined ? undefined : store.lastStanding(pairing);
+      },
+      noteStanding: (hostId, standing) => {
+        const pairing = pairings.get(hostId);
+        if (pairing !== undefined) store.noteStanding(pairing, standing);
+      },
     }),
     [outbox, pairings, store, unsaved],
   );

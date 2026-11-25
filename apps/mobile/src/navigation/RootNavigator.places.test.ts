@@ -259,6 +259,24 @@ describe("the phone's navigation", () => {
     expect(seen("mobile-tile-review")?.textContent).toBe("0");
   });
 
+  it("keeps the threads it read when no computer can be reached, and drops a removed computer's", async () => {
+    await render();
+    await press("mobile-tab-threads");
+    context.session = { ...session, transports: [], transport: undefined };
+    await render();
+    expect(seen("mobile-home-thread-row-code-code")).toBeDefined();
+    expect(seen("mobile-home-thread-row-chat-chat")).toBeDefined();
+    context.session = {
+      ...session,
+      hosts: session.hosts.filter((host) => host.hostId === studio),
+      transports: [],
+      transport: undefined,
+    };
+    await render();
+    expect(seen("mobile-home-thread-row-code-code")).toBeDefined();
+    expect(seen("mobile-home-thread-row-chat-chat")).toBeUndefined();
+  });
+
   it("keeps each place where the person left it", async () => {
     await render();
     await press("mobile-tile-attention");

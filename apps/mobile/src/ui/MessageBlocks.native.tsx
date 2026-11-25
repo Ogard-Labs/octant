@@ -6,12 +6,13 @@ import { EnrichedMarkdownText, type MarkdownStyle } from "react-native-enriched-
 import { fonts, radii, space, typography, useTheme } from "../../design-system";
 import { PlainBlocks, ReplyCode, type MessageBlocksProps } from "./PlainBlocks";
 import { replySegments } from "./replyMarkdown";
+import { useWhileHere } from "./useWhileHere";
 
 /**
  * Asks first, with the address written out: a reply can name one place and
  * lead to another, and opening it tells that place whatever the address holds.
  */
-function offerLink(url: string): void {
+function offerLink(url: string, whileHere: (act: () => void) => () => void): void {
   if (!/^https?:\/\//i.test(url)) return;
   let host = url;
   try {
@@ -21,8 +22,8 @@ function offerLink(url: string): void {
   }
   Alert.alert(MOBILE_COPY.linkOpen(host), url, [
     { text: "Cancel", style: "cancel" },
-    { text: MOBILE_COPY.linkCopy, onPress: () => void Clipboard.setStringAsync(url) },
-    { text: MOBILE_COPY.linkOpenAction, onPress: () => void Linking.openURL(url) },
+    { text: MOBILE_COPY.linkCopy, onPress: whileHere(() => void Clipboard.setStringAsync(url)) },
+    { text: MOBILE_COPY.linkOpenAction, onPress: whileHere(() => void Linking.openURL(url)) },
   ]);
 }
 
@@ -33,6 +34,7 @@ export function MessageBlocks(props: MessageBlocksProps) {
 
 function Reply(props: MessageBlocksProps) {
   const { colors } = useTheme();
+  const whileHere = useWhileHere();
   const segments = useMemo(() => replySegments(props.text), [props.text]);
   const markdownStyle = useMemo<MarkdownStyle>(() => {
     const body = { color: colors.textPrimary, fontSize: typography.body.fontSize };
@@ -113,8 +115,8 @@ function Reply(props: MessageBlocksProps) {
             key={index}
             markdown={segment.markdown}
             markdownStyle={markdownStyle}
-            onLinkLongPress={({ url }) => offerLink(url)}
-            onLinkPress={({ url }) => offerLink(url)}
+            onLinkLongPress={({ url }) => offerLink(url, whileHere)}
+            onLinkPress={({ url }) => offerLink(url, whileHere)}
             // The parser is given no picture; this is what it would be answered.
             resolveImageSource={() => ({ uri: "" })}
             selectable

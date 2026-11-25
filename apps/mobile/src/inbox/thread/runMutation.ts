@@ -6,7 +6,8 @@ export function failureMessage(cause: unknown, fallback: string): string {
   return cause instanceof MobileInboxFailure ? cause.message : fallback;
 }
 
-export type MutationOutcome = "refused" | "stale" | "done" | "failed";
+/** "rejected" is the host's own clear no; "failed" may have reached it. */
+export type MutationOutcome = "refused" | "stale" | "done" | "failed" | "rejected";
 
 /**
  * One path for every phone mutation: honour the stale-host gate, show busy,
@@ -37,7 +38,9 @@ export async function runMutation<T>(input: {
     const message = failureMessage(result.cause, input.failure);
     input.ui.setError(message);
     input.onFailed?.(message);
-    return "failed";
+    return result.cause instanceof MobileInboxFailure && result.cause.category === "rejected"
+      ? "rejected"
+      : "failed";
   }
   input.onDone(result.value);
   return "done";

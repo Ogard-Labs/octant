@@ -15,6 +15,7 @@ import {
   listAllHostsMobileInbox,
   MobileInboxFailure,
   normalizeMobileProviderDirectory,
+  sortMobileInboxRows,
   type MobileInboxHostFailure,
   type MobileInboxRow,
   type MobileProviderDirectoryEntry,
@@ -59,6 +60,26 @@ export interface MobileThreads {
   }>;
 }
 
+// In memory alone, through the app's lock: the rows each computer last answered.
+let lastRows: ReadonlyArray<MobileInboxRow> = [];
+
+/** What was read now, and the rows of the computers that did not answer. */
+function withUnreached(
+  read: ReadonlyArray<MobileInboxRow>,
+  earlier: ReadonlyArray<MobileInboxRow>,
+  answered: ReadonlySet<string>,
+): ReadonlyArray<MobileInboxRow> {
+  const missing = earlier.filter(
+    (row) =>
+      !answered.has(row.hostId) &&
+      !read.some(
+        (entry) =>
+          entry.hostId === row.hostId && entry.mode === row.mode && entry.threadId === row.threadId,
+      ),
+  );
+  return missing.length === 0 ? read : sortMobileInboxRows([...read, ...missing]);
+}
+
 const Context = createContext<MobileThreads | undefined>(undefined);
 
 export function useMobileThreads(): MobileThreads {
@@ -69,14 +90,17 @@ export function useMobileThreads(): MobileThreads {
 
 export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
   const { transports, hosts, hostsLoaded, hostsError, environment } = useMobileSession();
-  const [held, setRows] = useState<ReadonlyArray<MobileInboxRow>>([]);
+  // Sample threads are read and forgotten with the demo.
+  const keeps = environment.kind === "live";
+  const [held, setRows] = useState<ReadonlyArray<MobileInboxRow>>(() => (keeps ? lastRows : []));
+  useEffect(() => {
+    if (keeps) lastRows = held;
+  }, [held, keeps]);
   const [failures, setFailures] = useState<ReadonlyArray<MobileInboxHostFailure>>([]);
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const requestGuard = useRef(createRequestGuard()).current;
 
-  // Sample threads are read and forgotten with the demo.
-  const keeps = environment.kind === "live";
   const [cursors, setCursors] = useState(() => parseReadCursors(keeps ? loadReadCursors() : null));
   useEffect(() => {
     if (keeps) keepReadCursors(JSON.stringify(cursors));
@@ -84,6 +108,16 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
   useEffect(() => {
     if (keeps && hostsLoaded && hostsError === undefined)
       setCursors((current) => forgetHosts(current, new Set(hosts.map((host) => host.hostId))));
+    if (!hostsLoaded || hostsError !== undefined) return;
+    const paired = new Set(hosts.map((host) => host.hostId));
+    setRows((current) =>
+      current.every((row) => paired.has(row.hostId))
+        ? current
+        : current.filter((row) => paired.has(row.hostId)),
+    );
+    const written = hosts.map((host) => `${host.hostKeyFingerprint}:${host.hostId}:`);
+    if (keeps)
+      liveThreadDrafts.keepOnly((thread) => written.some((prefix) => thread.startsWith(prefix)));
   }, [hosts, hostsError, hostsLoaded, keeps]);
   // The thread on screen. What it did while it was read is read as well, which
   // the first list after it is left still has to know.
@@ -115,7 +149,8 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
     // A slower, older fetch must not overwrite what a newer one already showed.
     const request = requestGuard.begin();
     if (transports.length === 0) {
-      setRows([]);
+      // Computers that cannot be reached still have their threads: the rows last
+      // read stay, so a message can be written to one.
       setFailures([]);
       setError(undefined);
       setLoading(false);
@@ -126,7 +161,17 @@ export function MobileThreadsProvider(props: { readonly children: ReactNode }) {
     try {
       const result = await listAllHostsMobileInbox(transports);
       if (!requestGuard.isCurrent(request)) return;
-      setRows(result.rows);
+      const answered = new Set(
+        transports
+          .map((transport) => transport.hostId)
+          .filter(
+            (hostId) =>
+              !result.failures.some(
+                (failure) => failure.hostId === hostId && failure.category !== "rejected",
+              ),
+          ),
+      );
+      setRows((current) => withUnreached(result.rows, current, answered));
       setFailures(result.failures);
       readThrough(result.rows);
     } catch (cause) {

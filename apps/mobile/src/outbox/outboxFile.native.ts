@@ -6,8 +6,10 @@ export function outboxFile(): SealedFile {
   const next = () => new File(Paths.document, "outbox.v1.sealed.next");
   return {
     read: () => {
-      const kept = file();
-      return kept.exists ? kept.textSync() : null;
+      // Moving over a file removes it first, so after a crash in between only
+      // the new one is there, whole.
+      const kept = [file(), next()].find((entry) => entry.exists);
+      return kept === undefined ? null : kept.textSync();
     },
     // Beside the last one and then over it: a crash in between leaves one whole.
     write: (sealed) => {
@@ -17,8 +19,7 @@ export function outboxFile(): SealedFile {
       written.moveSync(file(), { overwrite: true });
     },
     remove: () => {
-      const kept = file();
-      if (kept.exists) kept.delete();
+      for (const kept of [file(), next()]) if (kept.exists) kept.delete();
     },
   };
 }

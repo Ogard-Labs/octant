@@ -14,7 +14,9 @@ export interface ThreadDrafts {
   readonly noteUnanswered: (thread: string, message: UnansweredMessage | undefined) => void;
   /** Words whose last send failed without a clear answer. */
   readonly mayBeSent: (thread: string) => string | undefined;
-  readonly noteMayBeSent: (thread: string, text: string) => void;
+  readonly noteMayBeSent: (thread: string, text: string | undefined) => void;
+  /** Drops what was written to a computer that is no longer on the phone. */
+  readonly keepOnly: (held: (thread: string) => boolean) => void;
 }
 
 /** In memory alone: an unsent message is not written to the phone's storage. */
@@ -45,7 +47,12 @@ export function createThreadDrafts(): ThreadDrafts {
     },
     mayBeSent: (thread) => unclear.get(thread),
     noteMayBeSent: (thread, text) => {
-      unclear.set(thread, text.trim());
+      if (text === undefined) unclear.delete(thread);
+      else unclear.set(thread, text.trim());
+    },
+    keepOnly: (kept) => {
+      for (const map of [held, unanswered, unclear])
+        for (const thread of map.keys()) if (!kept(thread)) map.delete(thread);
     },
   };
 }

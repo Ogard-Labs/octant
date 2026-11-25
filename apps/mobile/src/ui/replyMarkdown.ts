@@ -77,22 +77,26 @@ function withoutRemoteMedia(markdown: string): string {
     );
 }
 
+// What is not the start of a web address and has, near its start, what a scheme
+// needs: its colon, or a character Markdown reads as another one.
+const OTHER_SCHEME = /(?!https?:\/\/)[^\s)]{0,100}?[:&\\%]/.source;
+
 /**
  * A link in a reply leads to a web page or nowhere. The system opens some
  * schemes by itself, a call or another app, so any other is no link at all. A
  * destination is read as it is written, before Markdown's own escapes, so one
- * that uses them to spell a scheme is not a link either.
+ * that uses them to spell a scheme is not a link either. Nothing is consumed
+ * past the mark that makes a link, so one cannot hide behind another.
  */
 function withoutOtherSchemes(markdown: string): string {
-  const leadsNowhere = (destination: string) =>
-    !/^<?https?:\/\//i.test(destination) && /[:&\\%]/.test(destination);
-  return markdown
-    .replace(
-      /\](\(|:)(\s{0,10})([^\s)]{1,2000})/g,
-      (whole, mark: string, gap: string, destination: string) =>
-        leadsNowhere(destination) ? `]${APART}${mark}${gap}${destination}` : whole,
-    )
-    .replace(/<([a-z][a-z0-9+.-]{0,30}:[^\s<>]{0,2000})>/gi, (whole, destination: string) =>
-      leadsNowhere(destination) ? `<${APART}${destination}>` : whole,
-    );
+  return (
+    markdown
+      // Markdown skips white space, and a quote's own mark on the next line.
+      .replace(
+        new RegExp(`\\](?=[(:][\\s>]*(?![\\s>])(?:<\\s*(?!\\s)|(?!<))${OTHER_SCHEME})`, "gi"),
+        `]${APART}`,
+      )
+      .replace(/<(?=[a-z][a-z0-9+.-]*:)(?!https?:\/\/)/gi, `<${APART}`)
+      .replace(/<(?=[^\s<>@]{1,100}@)/g, `<${APART}`)
+  );
 }

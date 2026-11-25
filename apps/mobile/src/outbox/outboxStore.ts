@@ -65,8 +65,10 @@ export class OutboxStore {
   #generation = 0;
   #attached = false;
   #pumping: number | undefined;
+  #again = false;
   #timer: ReturnType<typeof setTimeout> | undefined;
   readonly #listeners = new Set<() => void>();
+  // By pairing: what was said of an earlier one says nothing of this one.
   readonly #standings = new Map<string, RemoteSessionStanding>();
 
   constructor(ports: OutboxPorts) {
@@ -121,19 +123,17 @@ export class OutboxStore {
   /** Only a list of computers that was read whole; it says which are left. */
   keepHosts(hostIds: ReadonlySet<string>): void {
     if (!this.#loaded) return;
-    for (const hostId of this.#standings.keys())
-      if (!hostIds.has(hostId)) this.#standings.delete(hostId);
     if (dropHostsNotIn(this.#snapshot.outbox, hostIds) !== this.#snapshot.outbox)
       void this.#change((outbox) => dropHostsNotIn(outbox, hostIds));
   }
 
   /** What a computer last said of this phone's session, while the app runs. */
-  lastStanding(hostId: string): RemoteSessionStanding | undefined {
-    return this.#standings.get(hostId);
+  lastStanding(pairing: Pairing): RemoteSessionStanding | undefined {
+    return this.#standings.get(`${pairing.hostKeyFingerprint}:${pairing.keyId}`);
   }
 
-  noteStanding(hostId: string, standing: RemoteSessionStanding): void {
-    this.#standings.set(hostId, standing);
+  noteStanding(pairing: Pairing, standing: RemoteSessionStanding): void {
+    this.#standings.set(`${pairing.hostKeyFingerprint}:${pairing.keyId}`, standing);
   }
 
   #publish(snapshot: OutboxSnapshot): void {
@@ -185,8 +185,14 @@ export class OutboxStore {
 
   async #pump(): Promise<void> {
     const generation = this.#generation;
-    if (!this.#attached || !this.#loaded || this.#pumping === generation) return;
+    if (!this.#attached || !this.#loaded) return;
+    if (this.#pumping === generation) {
+      // Something changed while it ran, which it may already have passed.
+      this.#again = true;
+      return;
+    }
     this.#pumping = generation;
+    this.#again = false;
     let unreached = false;
     const tried = new Set<string>();
     try {
@@ -221,9 +227,11 @@ export class OutboxStore {
         if (this.#generation !== generation) return;
       }
     } finally {
-      if (this.#pumping === generation) this.#pumping = undefined;
-      if (unreached && this.#generation === generation)
-        this.#later(() => void this.#pump(), ASK_AGAIN_MS);
+      if (this.#pumping === generation) {
+        this.#pumping = undefined;
+        if (this.#again) void this.#pump();
+        else if (unreached) this.#later(() => void this.#pump(), ASK_AGAIN_MS);
+      }
     }
   }
 

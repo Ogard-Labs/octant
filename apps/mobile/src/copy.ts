@@ -73,6 +73,7 @@ export const MOBILE_COPY = {
   outboxTryAgain: "Send again",
   outboxTooOld: "Written more than a day ago, so it was not sent on its own.",
   outboxOtherComputer: "This is not the computer it was written for, so it is not sent there.",
+  outboxNoComputer: "Your computers could not be read just now. Try again.",
   outboxPairedAgain: "This phone was paired again. Send it again if it still applies.",
   outboxUnsaved: "Not saved on this phone yet. Keep the app open.",
   outboxMayBeSentTitle: "Send this again?",

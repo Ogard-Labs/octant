@@ -52,6 +52,7 @@ import { usePlacementHostModels } from "../session/usePlacementHostModels";
 import { mobileSpacing } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 import { ListRow, ListSection } from "../ui/NativeChrome";
+import { useWhileHere } from "../ui/useWhileHere";
 import { KeyboardRoom } from "../ui/KeyboardRoom";
 import { AttachSourceSheet } from "../ui/AttachSourceSheet";
 import { FloatingComposer } from "../ui/FloatingComposer";
@@ -129,7 +130,10 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const insets = useSafeAreaInsets();
   const { drafts, projectName } = useMobileThreads();
   const draftKey =
-    selected === undefined ? "" : `${selected.hostId}:${selected.mode}:${selected.threadId}`;
+    // With the computer's own key: another under its id starts from nothing.
+    selected === undefined
+      ? ""
+      : `${selectedHost?.hostKeyFingerprint ?? ""}:${selected.hostId}:${selected.mode}:${selected.threadId}`;
   const [prompt, setPrompt] = useState(() => drafts.read(draftKey));
   // A send can land after this screen is gone, on the draft or on a later screen
   // of the same thread, so the words are cleared by what was sent.
@@ -163,6 +167,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
   // would refuse one never has it shown here.
   const outbox = useOutbox();
   const { noteStanding } = outbox;
+  const whileHere = useWhileHere();
   const noteAnswered = useCallback(
     (answered: RemoteSessionStanding) => {
       if (hostId !== undefined) noteStanding(hostId, answered);
@@ -367,7 +372,10 @@ export function ThreadScreen(props: ThreadScreenProps) {
     if (pendingAttachments.length > 0) ui.setError(MOBILE_COPY.outboxNoFiles);
     else
       unlessMayBeSent(() => {
-        if (keepForLater(prompt.trim())) sentPrompt("");
+        if (keepForLater(prompt.trim(), isUnanswered ? unanswered?.id : undefined)) {
+          drafts.noteUnanswered(draftKey, undefined);
+          sentPrompt("");
+        }
       });
   };
   // Words that a failed send may have delivered are not queued as new ones
@@ -379,13 +387,28 @@ export function ThreadScreen(props: ThreadScreenProps) {
     }
     Alert.alert(MOBILE_COPY.outboxMayBeSentTitle, MOBILE_COPY.outboxMayBeSentBody, [
       { text: "Cancel", style: "cancel" },
-      { text: MOBILE_COPY.outboxSendAnyway, onPress: send },
+      { text: MOBILE_COPY.outboxSendAnyway, onPress: whileHere(send) },
     ]);
   };
-  const sendNow = async (send: () => Promise<unknown>) => {
-    if ((await send()) === "failed") drafts.noteMayBeSent(draftKey, prompt);
-  };
-  const queueNow = () => unlessMayBeSent(() => void turnControl.queueMessage());
+  const sendNow = (send: () => Promise<unknown>) =>
+    unlessMayBeSent(() => {
+      const text = prompt;
+      // Noted before it leaves, for a screen that is gone when the answer comes.
+      drafts.noteMayBeSent(draftKey, text);
+      void send().then((outcome) => {
+        if (outcome !== "failed" && outcome !== "stale") drafts.noteMayBeSent(draftKey, undefined);
+      });
+    });
+  // Words whose answer is still out are the same message, so they go the same
+  // way, under the same id, whether or not a turn runs now.
+  const unanswered = drafts.unanswered(draftKey);
+  const isUnanswered =
+    unanswered?.words ===
+    JSON.stringify([prompt.trim(), pendingAttachments.map((attachment) => attachment.id)]);
+  const queueNow = () =>
+    isUnanswered
+      ? void turnControl.queueMessage()
+      : unlessMayBeSent(() => void turnControl.queueMessage());
   const runningWorkTurn = workTurnLive
     ? work.turns?.findLast((turn) => isLiveWorkTurn(turn))
     : undefined;
@@ -434,6 +457,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
   });
   // Where the queue cannot be read, a running turn still closes the composer.
   const queues = mayAct && turnLive && turnControl.queue !== undefined;
+  const mayQueue = queues || (isUnanswered && turnControl.queue !== undefined);
   const subagents = runningWorkTurn === undefined ? [] : turnSubagents(runningWorkTurn);
   const subagentsWorking = subagents.filter((agent) => agent.working).length;
   const threadHint = mode === "code" || mode === "work" ? mobileThreadHint(mode) : undefined;
@@ -814,7 +838,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
                         {
                           text: MOBILE_COPY.outboxDelete,
                           style: "destructive",
-                          onPress: () => outbox.remove(message.id),
+                          onPress: whileHere(() => outbox.remove(message.id)),
                         },
                       ])
                     : outbox.remove(message.id)
@@ -984,7 +1008,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
             onChangeText={setPrompt}
             onPressModel={() => setModelOpen(true)}
             onSubmit={() =>
-              unreached ? sendLater() : void (queues ? queueNow() : sendNow(chat.send))
+              unreached ? sendLater() : void (mayQueue ? queueNow() : sendNow(chat.send))
             }
             queues={queues}
             sending={turnControl.pending}
@@ -1015,7 +1039,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
             ? {}
             : { modelLabel: levelLabel, onPressModel: () => setDetailsOpen(true) })}
           onChangeText={setPrompt}
-          onSubmit={unreached ? sendLater : queues ? queueNow : sendFollowUp}
+          onSubmit={unreached ? sendLater : mayQueue ? queueNow : sendFollowUp}
           queues={queues}
           sending={turnControl.pending}
           {...(turnControl.stop === undefined ? {} : { onStop: () => void turnControl.stop?.() })}

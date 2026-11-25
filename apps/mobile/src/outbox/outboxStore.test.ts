@@ -159,11 +159,30 @@ describe("the messages that wait", () => {
     expect(store.read().outbox.messages[0]?.refused).toBe("other");
   });
 
+  it("sends a message the person sent again while another was on its way", async () => {
+    const at = phone();
+    const store = new OutboxStore(at.ports);
+    store.attach();
+    await settle();
+    store.keep(message("A"));
+    store.keep(message("B"));
+    store.setTargets([target], () => undefined);
+    await settle();
+    at.waiting[0]?.({ status: "refused", message: "No." });
+    await settle();
+    store.tryAgain("A", pairing);
+    await settle();
+    at.waiting[1]?.(queued);
+    await settle();
+    expect(at.sent).toEqual(["A", "B", "A"]);
+  });
+
   it("remembers what a computer last said of the phone through a lock", () => {
     const store = new OutboxStore(phone().ports);
     store.attach()();
-    store.noteStanding("studio", { actsAsHostPerson: true });
+    store.noteStanding(pairing, { actsAsHostPerson: true });
     store.attach();
-    expect(store.lastStanding("studio")).toEqual({ actsAsHostPerson: true });
+    expect(store.lastStanding(pairing)).toEqual({ actsAsHostPerson: true });
+    expect(store.lastStanding({ ...pairing, keyId: "phone-2" })).toBeUndefined();
   });
 });
