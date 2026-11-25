@@ -58,7 +58,7 @@ import type { ImageAdapterReference } from "@octant/provider-sdk/image-generatio
 import type { ImageHttpFetch } from "../image/imageHttp";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
-import { ConcurrencyConflict } from "../persistence/journalErrors";
+import { ConcurrencyConflict, persistenceFailureMessage } from "../persistence/journalErrors";
 import { redactHostSecrets } from "../process/secretRedaction";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
 import type { SpendCeilingService } from "../spendCeilingService";
@@ -244,7 +244,11 @@ function sanitizedFailure(failure: ProviderFailure): ProviderFailure {
 function reportVideoRemovalFailure(error: unknown): void {
   console.error(
     "Could not finish a video provider copy removal. The host will retry.",
-    error instanceof Error ? redactHostSecrets(error.message) : "Unknown failure.",
+    // A journal write failure carries its reason in a field, not its message.
+    persistenceFailureMessage(
+      error,
+      error instanceof Error ? redactHostSecrets(error.message) : "Unknown failure.",
+    ),
   );
 }
 
@@ -674,7 +678,7 @@ export class VideoJobService {
   async recover(): Promise<void> {
     // Reads each profile's models in the background so the first turn can offer the tool.
     this.readyProfilesNow();
-    await this.#options.clips.recover();
+    await this.#options.clips.recover(this.#recordedClipsOfRunningScopes());
     if (this.#closing.signal.aborted) return;
     for (const job of this.#options.projection.listUnfinished()) {
       if (job.status === "queued") {
@@ -712,6 +716,23 @@ export class VideoJobService {
       this.#removalTimer = setInterval(retryRemovals, VIDEO_REMOVAL_RETRY_MS);
       this.#removalTimer.unref?.();
     }
+  }
+
+  /**
+   * The clips the journal records in each thread whose job was running when
+   * the host stopped. Only such a job can have written a clip it never
+   * recorded, because a shutdown's own removal of that file can fail.
+   */
+  #recordedClipsOfRunningScopes(): ReadonlyMap<string, ReadonlySet<string>> {
+    const recorded = new Map<string, ReadonlySet<string>>();
+    for (const { scopeId, status } of this.#options.projection.listUnfinished()) {
+      if (status !== "running" || recorded.has(String(scopeId))) continue;
+      const clipIds = this.listByScope(scopeId).flatMap((job) =>
+        job.clip === undefined ? [] : [String(job.clip.clipId)],
+      );
+      recorded.set(String(scopeId), new Set(clipIds));
+    }
+    return recorded;
   }
 
   /** Tries again to remove each provider copy the host still owes. */

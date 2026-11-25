@@ -9,6 +9,7 @@ import {
   type ProviderModelId,
 } from "@octant/contracts";
 import {
+  decodeVideoClipId,
   decodeVideoJobId,
   decodeVideoJobQueued,
   decodeVideoJobStatusChanged,
@@ -29,6 +30,7 @@ import {
 import { CONFORMANCE_MP4_BYTES } from "@octant/provider-sdk/video-generation-conformance";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Journal } from "../persistence/journal";
+import { DISK_FULL_MESSAGE, JournalWriteFailed } from "../persistence/journalErrors";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { catchUpProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -929,6 +931,49 @@ describe("video jobs", () => {
     }
   });
 
+  it("reclaims a clip the journal never recorded when removing it at shutdown failed", async () => {
+    const first = harness({});
+    const kept = await first.service.whenTerminal((await enqueue(first.service)).id);
+    const entered = Promise.withResolvers<string>();
+    const resume = Promise.withResolvers<void>();
+    const write = first.clips.write.bind(first.clips);
+    vi.spyOn(first.clips, "write").mockImplementation(async (scope, clipId, bytes) => {
+      entered.resolve(String(clipId));
+      await resume.promise;
+      return write(scope, clipId, bytes);
+    });
+    vi.spyOn(first.clips, "remove").mockRejectedValue(new Error("The volume is busy."));
+    const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const running = await enqueue(first.service);
+    const strayId = await entered.promise;
+    first.service.close();
+    first.connection.close();
+    resume.resolve();
+    await vi.waitFor(() =>
+      expect(report).toHaveBeenCalledWith(expect.any(String), "The volume is busy."),
+    );
+    report.mockRestore();
+    const clipFile = (scope: string, clipId: string) =>
+      join(first.root, "generated-video", scope, `${clipId}.mp4`);
+    const stray = clipFile(String(scopeId), strayId);
+    expect(existsSync(stray)).toBe(true);
+    // A thread with no unfinished job is not searched: nothing there can be owed a cleanup.
+    const otherScope = decodeImageGenerationScopeId("b4000000-0000-4000-8000-000000000009");
+    const otherClip = decodeVideoClipId("b4000000-0000-4000-8000-00000000000a");
+    await first.clips.write(otherScope, otherClip, CONFORMANCE_MP4_BYTES);
+
+    const restarted = harness({ poll: async () => ({ status: "running" }) }, first.root);
+    try {
+      await restarted.service.recover();
+      expect(existsSync(stray)).toBe(false);
+      expect(existsSync(clipFile(String(scopeId), String(kept?.clip?.clipId)))).toBe(true);
+      expect(existsSync(clipFile(String(otherScope), String(otherClip)))).toBe(true);
+      expect(restarted.service.getById(running.id)?.status).toBe("running");
+    } finally {
+      restarted.service.close();
+    }
+  });
+
   it("ends the wait at its estimate when the model cannot stop a running job", async () => {
     const model = capabilities({
       cancel: "none",
@@ -1385,6 +1430,28 @@ describe("video jobs", () => {
       second.service.close();
       append.mockRestore();
       report.mockRestore();
+    }
+  });
+
+  it("says the disk is full when a removal cannot be recorded, and keeps the copy owed", async () => {
+    const release = Promise.withResolvers<"removed">();
+    const { service, journal } = harness({ forget: () => release.promise });
+    const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const job = await enqueue(service);
+    await service.whenTerminal(job.id);
+    const append = vi.spyOn(journal, "append").mockImplementationOnce(() => {
+      throw new JournalWriteFailed({ operation: "append", reason: "disk-full" });
+    });
+    release.resolve("removed");
+    try {
+      await vi.waitFor(() =>
+        expect(report).toHaveBeenCalledWith(expect.any(String), DISK_FULL_MESSAGE),
+      );
+      expect(service.getById(job.id)?.providerCopy).toBe("held");
+    } finally {
+      append.mockRestore();
+      report.mockRestore();
+      service.close();
     }
   });
 

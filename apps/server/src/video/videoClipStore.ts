@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { type ImageGenerationScopeId } from "@octant/contracts";
 import { MAX_VIDEO_CLIP_BYTES, type VideoClipId } from "@octant/contracts/video-generation";
 
+const CLIP_EXTENSION = ".mp4";
+
 /** `"video/mp4"` when the bytes start with an MP4 `ftyp` box, else `undefined`. */
 export function sniffVideoClipMediaType(bytes: Uint8Array): "video/mp4" | undefined {
   return bytes.length >= 12 &&
@@ -55,7 +57,7 @@ export class VideoClipStore {
   }
 
   #clipPath(scopeId: ImageGenerationScopeId, clipId: VideoClipId): string {
-    return join(this.#scopeDirectory(scopeId), `${String(clipId)}.mp4`);
+    return join(this.#scopeDirectory(scopeId), `${String(clipId)}${CLIP_EXTENSION}`);
   }
 
   async write(
@@ -198,8 +200,12 @@ export class VideoClipStore {
     await rm(this.#scopeDirectory(scopeId), { recursive: true, force: true });
   }
 
-  /** Removes temporary files a crash left behind. */
-  async recover(): Promise<void> {
+  /**
+   * Removes temporary files a crash left behind and, in the threads `recorded`
+   * names, finished clips the journal does not record. Other threads keep
+   * every clip. Called before any job can write one.
+   */
+  async recover(recorded: ReadonlyMap<string, ReadonlySet<string>>): Promise<void> {
     let scopes: ReadonlyArray<string>;
     try {
       scopes = await readdir(this.#root);
@@ -214,8 +220,13 @@ export class VideoClipStore {
       } catch {
         continue;
       }
+      const known = recorded.get(scope);
       for (const name of names) {
-        if (name.endsWith(".partial")) {
+        const unrecorded =
+          known !== undefined &&
+          name.endsWith(CLIP_EXTENSION) &&
+          !known.has(name.slice(0, -CLIP_EXTENSION.length));
+        if (unrecorded || name.endsWith(".partial")) {
           await rm(join(directory, name), { force: true }).catch(() => undefined);
         }
       }

@@ -436,7 +436,11 @@ still cannot confirm the outcome at the deadline.
 
 Shutdown stops handing out slots and leaves waiting jobs in the journal.
 If a clip write finishes after shutdown starts, the host discards that file
-and leaves the running job for recovery.
+and leaves the running job for recovery. If the discard fails, the next start
+removes every clip file the journal does not record from that running job's
+thread. Threads without a running job are not searched.
+A full disk that stops the host recording a finished removal is logged as a
+full disk, and the removal stays owed.
 At startup the host reconciles every video job the journal left unfinished:
 
 - A job that was **queued**, so nothing was sent, is marked failed as
