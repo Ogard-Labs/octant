@@ -1,3 +1,4 @@
+import "../styles/surface-table.css";
 import { useId } from "react";
 import { artifactEditedAgo } from "@octant/domain";
 import { Link2, Lock } from "../ui/icons";

@@ -1,3 +1,4 @@
+import "../styles/surface-table.css";
 import { Inbox, Play, Settings as SettingsIcon, SquareTerminal } from "../ui/icons";
 import { useState } from "react";
 import { SettingGroup, SettingRow, SettingsPageScope } from "../settings/primitives";
@@ -97,7 +98,7 @@ function SettingsGroup() {
 /**
  * The page table as Agents, Artifacts and Automations draw it: the page names
  * its columns, and the head, the rail, the hover and the open button are the
- * table's (styles/surface.css).
+ * table's (styles/surface-table.css).
  */
 function PageTable() {
   const rows = [

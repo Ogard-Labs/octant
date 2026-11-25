@@ -1826,7 +1826,8 @@ suggestion card (see Start screen).
 
 **Page table.** A page that lists things with several facts each (Agents,
 Artifacts, Automations) draws them as one table, `surface-table` in
-`styles/surface.css`. A 32px head in the Meta role names the columns once, and
+`styles/surface-table.css`, which those pages import so the window's first
+paint does not carry it. A 32px head in the Meta role names the columns once, and
 each row is a hairline rail on the head's own columns. The page sets
 `--surface-table-columns`: the name column takes the room and the trailing
 columns have fixed widths, so a status changing or a figure ticking changes a

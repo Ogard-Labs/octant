@@ -91,7 +91,7 @@
   container-type: inline-size;
 }
 
-/* The list is the page table (surface.css): the agent (its task, where it
+/* The list is the page table (surface-table.css): the agent (its task, where it
    ran and on what), its status, when it started, how long it ran, and what
    it used. This sheet names the columns and draws the cells. */
 .agents-table {

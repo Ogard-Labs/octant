@@ -78,10 +78,12 @@ describe("surface language", () => {
   });
 
   it("draws the Agents, Artifacts and Automations lists as the one page table", () => {
-    const surface = read("styles/surface.css");
-    expect(surface).toMatch(
+    const table = read("styles/surface-table.css");
+    expect(table).toMatch(
       /\.surface-table__head,\s*\.surface-table__row \{[^}]*grid-template-columns: var\(--surface-table-columns\)/,
     );
+    // The table loads with the pages that draw it, not with the window.
+    expect(read("styles/surface.css")).not.toContain(".surface-table");
     // Each page names its columns and draws its cells; the head, the rows'
     // rail and hover, and the open button's reset are the table's. Three
     // hand-drawn copies had three row heights and two label sizes, so a page's
