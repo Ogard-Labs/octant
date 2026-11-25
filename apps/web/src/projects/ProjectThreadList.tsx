@@ -1282,7 +1282,9 @@ function CoordinatorThreadSection(props: {
             {open && hasRows ? (
               <div className="project-coordinator__workers" id={listId}>
                 {childRows.length === 0 ? null : rows(childRows)}
-                {workerRows.length === 0 ? null : rows(workerRows)}
+                {workerRows.length === 0 ? null : (
+                  <div className="project-coordinator__worker-rows">{rows(workerRows)}</div>
+                )}
               </div>
             ) : null}
           </div>
