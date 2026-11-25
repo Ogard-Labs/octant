@@ -44,8 +44,11 @@ export function shouldBuildSpeechHelper(platform: NodeJS.Platform = process.plat
 }
 
 /**
- * Release Xcodes in /Applications that may carry the SDK, newest first. A beta
- * is never chosen: what ships is built with a released compiler.
+ * Release Xcodes in /Applications that may carry the SDK: the numbered
+ * installs newest first (as CI images name them), then the unnumbered
+ * `Xcode.app` a person installs from the App Store. A beta is never chosen:
+ * what ships is built with a released compiler, and the SDK check still
+ * decides whether any of them will do.
  */
 export function speechToolchainCandidates(
   applications: ReadonlyArray<string>,
@@ -64,7 +67,10 @@ export function speechToolchainCandidates(
       }
       return a.name.localeCompare(b.name);
     })
-    .map(({ name }) => join("/Applications", name, "Contents/Developer"));
+    .map(({ name }) => join("/Applications", name, "Contents/Developer"))
+    .concat(
+      applications.includes("Xcode.app") ? ["/Applications/Xcode.app/Contents/Developer"] : [],
+    );
 }
 
 export interface SpeechToolchainProbes {

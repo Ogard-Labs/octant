@@ -1,4 +1,5 @@
 import type { SpeechStatusResponse } from "@octant/contracts";
+import { LOCAL_SPEECH_DOWNLOADING_REASON } from "@octant/domain";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SpeechCapabilityProvider, useSpeechCapability } from "./SpeechCapabilityContext";
@@ -102,6 +103,43 @@ describe("speech capability", () => {
     window.dispatchEvent(new Event("focus"));
     await waitFor(() => expect(status.mock.calls.length).toBeGreaterThan(2));
     expect(screen.getByRole("status")).toHaveTextContent("ready");
+  });
+
+  it("turns the microphone on when a download finishes with Voice settings closed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const status = hostStatus({
+        ...unavailable,
+        reason: LOCAL_SPEECH_DOWNLOADING_REASON,
+      });
+      show(status, true);
+      await waitFor(() => expect(status).toHaveBeenCalledOnce());
+      status.mockResolvedValue({
+        ...(await status()),
+        transcription: { status: "ready", engine: "apple-speech" },
+      } as never);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("ready"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not keep asking while the model is simply missing", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const status = hostStatus({
+        ...unavailable,
+        reason:
+          "Apple's speech model for this language is not on this Mac. Download it in Voice settings.",
+      });
+      show(status, true);
+      await waitFor(() => expect(status).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(status).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("asks the host again when the model may have arrived", async () => {

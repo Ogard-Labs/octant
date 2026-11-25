@@ -136,6 +136,12 @@ export function resolveTranscriptionEndpoint(
   return resolveSpeechEndpoint(settings.transcription, instances);
 }
 
+/**
+ * Said while the model is on its way. A window that reads it keeps asking, so
+ * the microphone appears when the download ends wherever it was started.
+ */
+export const LOCAL_SPEECH_DOWNLOADING_REASON = "Apple's speech model is still downloading.";
+
 /** What stands between the on-device engine and a transcript, in a sentence; none when ready. */
 export function localSpeechProblem(status: SpeechLocalEngineStatus): string | undefined {
   switch (status.status) {
@@ -148,7 +154,7 @@ export function localSpeechProblem(status: SpeechLocalEngineStatus): string | un
     case "not-downloaded":
       return "Apple's speech model for this language is not on this Mac. Download it in Voice settings.";
     case "downloading":
-      return "Apple's speech model is still downloading.";
+      return LOCAL_SPEECH_DOWNLOADING_REASON;
     case "download-failed":
       return "Apple's speech model could not be downloaded. Try again in Voice settings.";
     case "failed":

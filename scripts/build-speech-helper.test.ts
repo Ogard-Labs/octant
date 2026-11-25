@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { release, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -29,25 +30,58 @@ afterAll(async () => {
   if (fixtureRoot !== "") await rm(fixtureRoot, { recursive: true, force: true });
 });
 
+/**
+ * Sends `bytes` and, with `leaveAfterMs`, closes the helper's input that long
+ * after, as a host does when the person cancels or the host stops.
+ */
 function exchange(
   bytes: Uint8Array,
-  options: { readonly hold: boolean },
+  options: { readonly hold: boolean; readonly leaveAfterMs?: number },
 ): Promise<{
   readonly code: number | null;
   readonly stdout: string;
   readonly stderr: string;
+  readonly elapsedMs: number;
 }> {
   return new Promise((settle) => {
+    const started = Date.now();
     const child = spawn(helperPath, [], { stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    // Whatever the helper does, the test does not leave it running.
+    const guard = setTimeout(() => child.kill("SIGKILL"), 60_000);
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
     child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
     child.stdin.on("error", () => undefined);
-    child.on("exit", (code) => settle({ code, stdout, stderr }));
-    if (options.hold) child.stdin.write(bytes);
-    else child.stdin.end(bytes);
+    child.on("exit", (code) => {
+      clearTimeout(guard);
+      settle({ code, stdout, stderr, elapsedMs: Date.now() - started });
+    });
+    if (!options.hold) {
+      child.stdin.end(bytes);
+      return;
+    }
+    child.stdin.write(bytes);
+    if (options.leaveAfterMs !== undefined)
+      setTimeout(() => child.stdin.end(), options.leaveAfterMs);
   });
+}
+
+/** About forty seconds of spoken English as 16 kHz mono 16-bit PCM, made on this Mac. */
+function spokenClip(): Buffer {
+  const path = join(fixtureRoot, "spoken.wav");
+  const said = spawnSync(
+    "/usr/bin/say",
+    [
+      "-o",
+      path,
+      "--data-format=LEI16@16000",
+      "Open the report and send it to the team. ".repeat(16),
+    ],
+    { timeout: 60_000 },
+  );
+  if (said.status !== 0) throw new Error("say could not write the clip.");
+  return readFileSync(path).subarray(44);
 }
 
 function frame(value: Record<string, unknown>, audio = Buffer.alloc(0)): Buffer {
@@ -114,6 +148,19 @@ describe("speech helper build", () => {
     expect(asked).toEqual([undefined, "/Applications/Xcode_26.3.app/Contents/Developer"]);
   });
 
+  it("finds the macOS 26 SDK in the unversioned Xcode when an older one is selected", async () => {
+    expect(
+      await findSpeechToolchain({
+        listApplications: async () => ["Xcode.app", "Xcode_16.4.app", "Xcode-beta.app"],
+        sdkVersion: async (directory) =>
+          directory === "/Applications/Xcode.app/Contents/Developer" ? "26.2" : "15.5",
+      }),
+    ).toEqual({
+      kind: "installed",
+      developerDirectory: "/Applications/Xcode.app/Contents/Developer",
+    });
+  });
+
   it("reports no toolchain rather than building against an SDK without the API", async () => {
     expect(
       await findSpeechToolchain({
@@ -163,7 +210,7 @@ describe("speech helper process", () => {
     expect(JSON.parse(stdout)).toEqual({ event: "refused", code: "unsupported-language" });
   });
 
-  it("exits without an answer when the host leaves before the clip is transcribed", async (context) => {
+  it("refuses a clip cut short before all its audio arrived", async (context) => {
     if (!runnable) return context.skip();
     const { stdout, stderr } = await exchange(
       frame(
@@ -172,7 +219,32 @@ describe("speech helper process", () => {
       ),
       { hold: false },
     );
-    expect(stdout === "" || JSON.parse(stdout).code === "malformed").toBe(true);
+    expect(JSON.parse(stdout)).toEqual({ event: "refused", code: "malformed" });
     expect(stderr).toBe("");
   });
+
+  it("stops transcribing and answers nothing when the host leaves mid-clip", async (context) => {
+    if (!runnable) return context.skip();
+    const status = await exchange(
+      frame({ protocolVersion: 1, operation: "status", language: "en" }),
+      { hold: true },
+    );
+    // Without Apple's English model on this Mac the helper refuses at once,
+    // and the clip never reaches the analyzer this test is about.
+    if (JSON.parse(status.stdout).state !== "installed") return context.skip();
+    const pcm = spokenClip();
+    const request = frame(
+      { protocolVersion: 1, operation: "transcribe", language: "en", audioBytes: pcm.byteLength },
+      pcm,
+    );
+
+    const answered = await exchange(request, { hold: true });
+    expect(JSON.parse(answered.stdout)).toMatchObject({ event: "transcript" });
+    expect(answered.elapsedMs).toBeGreaterThan(1_500);
+
+    const left = await exchange(request, { hold: true, leaveAfterMs: 300 });
+    expect(left.stdout).toBe("");
+    expect(left.stderr).toBe("");
+    expect(left.elapsedMs).toBeLessThan(1_500);
+  }, 90_000);
 });

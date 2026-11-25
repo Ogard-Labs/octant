@@ -5,7 +5,7 @@ import type {
   SpeechStatusResponse,
   VoiceSettings,
 } from "@octant/contracts";
-import { speechStatusOf } from "@octant/domain";
+import { LOCAL_SPEECH_DOWNLOADING_REASON, speechStatusOf } from "@octant/domain";
 import {
   createContext,
   useCallback,
@@ -89,6 +89,18 @@ export function SpeechCapabilityProvider(props: SpeechCapabilityProviderProps) {
       window.removeEventListener("focus", onFocus);
     };
   }, [client, local, props.settings.language, asked]);
+
+  // A download outlives the Settings page that started it. While the host says
+  // one is under way, ask again now and then, so the microphone appears when
+  // it ends; a model that is simply missing is not asked about again.
+  const downloading =
+    hostTranscription?.status === "unavailable" &&
+    hostTranscription.reason === LOCAL_SPEECH_DOWNLOADING_REASON;
+  useEffect(() => {
+    if (!downloading) return undefined;
+    const timer = window.setInterval(refresh, 2_000);
+    return () => window.clearInterval(timer);
+  }, [downloading, refresh]);
 
   const value = useMemo<SpeechCapability>(() => {
     const status = speechStatusOf(props.settings, props.instances);
